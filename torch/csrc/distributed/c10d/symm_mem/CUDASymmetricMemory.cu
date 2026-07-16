@@ -367,8 +367,16 @@ void* CUDASymmetricMemoryAllocator::alloc(
     prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
   }
 
-  size_t granularity;
   auto driver_api = c10::cuda::DriverAPI::get();
+  int rdma_flag = 0;
+  C10_CUDA_DRIVER_CHECK(driver_api->cuDeviceGetAttribute_(
+      &rdma_flag,
+      CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED,
+      device_idx));
+  if (rdma_flag)
+    prop.allocFlags.gpuDirectRDMACapable = 1;
+
+  size_t granularity;
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemGetAllocationGranularity_(
       &granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
   block_size = at::round_up(block_size, granularity);
@@ -459,7 +467,7 @@ static std::string import_err_msg(
       << " (host: " << reqs[peer].hostname
       << ", device: " << reqs[peer].device_idx << ", NCCL_MNNVL_CLIQUE_ID: "
       << c10::utils::get_env("NCCL_MNNVL_CLIQUE_ID").value_or("unset") << ").";
-  return oss.str();
+  return std::move(oss).str();
 }
 
 void validate_rendezvous_requests(
@@ -516,7 +524,7 @@ static void validate_nvlink_fabric_support(
           << ", device: " << reqs[r].device_idx
           << ", clique_id: " << reqs[r].clique_id << ')';
     }
-    TORCH_CHECK(false, oss.str());
+    TORCH_CHECK(false, std::move(oss).str());
   }
 }
 

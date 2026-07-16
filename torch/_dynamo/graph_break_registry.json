@@ -406,6 +406,16 @@
   "GB0031": [
     {
       "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
+      "Context": "getattro_impl {self} {name}",
+      "Explanation": "Dynamo could not trace through the custom `__getattribute__` method on this `nn.Module`.",
+      "Hints": [
+        "Simplify your `__getattribute__` implementation, ",
+        "or replace it with a targeted `@property`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
       "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo could not trace through the custom `__getattribute__` method on this `nn.Module`.",
       "Hints": [
@@ -882,17 +892,6 @@
       ]
     }
   ],
-  "GB0060": [
-    {
-      "Gb_type": "Failed to trace unittest method",
-      "Context": "function: unittest.TestCase.{name}",
-      "Explanation": "Dynamo does not know how to trace unittest method `{name}` ",
-      "Hints": [
-        "Avoid calling `TestCase.{name}`. ",
-        "Please report an issue to PyTorch."
-      ]
-    }
-  ],
   "GB8656": [
     {
       "Gb_type": "Opaque object with custom __getattr__ not supported",
@@ -1093,6 +1092,14 @@
       "Gb_type": "Invoking an nn.Module inside a higher order operator",
       "Context": "Higher order op name: {self.source_target}",
       "Explanation": "This is not supported.",
+      "Hints": []
+    }
+  ],
+  "GB2069": [
+    {
+      "Gb_type": "Comprehension analysis failed: ambiguous result store",
+      "Context": "store_targets={store_targets}, iterator_vars={iterator_vars}",
+      "Explanation": "Expected exactly one comprehension result assignment.",
       "Hints": []
     }
   ],
@@ -1461,6 +1468,15 @@
   "GB0102": [
     {
       "Gb_type": "Strict mode banned op",
+      "Context": "getattro_impl {self} {name}",
+      "Explanation": "Getattr invocation '{name}' in strict mode is not supported.",
+      "Hints": [
+        "Remove `{name}` from the list of banned ops by ",
+        "setting `torch._dynamo.config._autograd_backward_strict_mode_banned_ops`."
+      ]
+    },
+    {
+      "Gb_type": "Strict mode banned op",
       "Context": "var_getattr {self} {name}",
       "Explanation": "Getattr invocation '{name}' in strict mode is not supported.",
       "Hints": [
@@ -1482,6 +1498,12 @@
     }
   ],
   "GB0104": [
+    {
+      "Gb_type": "Tensor with grad_fn()",
+      "Context": "getattro_impl {self} grad_fn",
+      "Explanation": "Dynamo does not support tracing tensors with a grad_fn directly.",
+      "Hints": []
+    },
     {
       "Gb_type": "Tensor with grad_fn()",
       "Context": "var_getattr {self} grad_fn",
@@ -1522,6 +1544,12 @@
     }
   ],
   "GB0108": [
+    {
+      "Gb_type": "Tensor.retain_grad() with AOTDispatcher",
+      "Context": "getattro_impl {self} retain_grad",
+      "Explanation": "`Tensor.retain_grad()` does not work with AOTDispatcher.",
+      "Hints": []
+    },
     {
       "Gb_type": "Tensor.retain_grad() with AOTDispatcher",
       "Context": "var_getattr {self} retain_grad",
@@ -1672,6 +1700,17 @@
       "Explanation": "This abstract method must be implemented",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB1576": [
+    {
+      "Gb_type": "COW tensor check on Python tensor subclass",
+      "Context": "torch._C._is_cow_tensor on Python tensor subclass",
+      "Explanation": "Dynamo cannot safely evaluate COW state for Python tensor subclasses because their storage semantics are controlled by __torch_dispatch__.",
+      "Hints": [
+        "Avoid checking COW state on tensor subclasses inside ",
+        "torch.compile regions."
       ]
     }
   ],
@@ -1938,6 +1977,14 @@
   "GB0137": [
     {
       "Gb_type": "Unsupported attribute for slice() object",
+      "Context": "getattro_impl {self} {name}",
+      "Explanation": "Expected attribute to be one of {','.join(fields)} but got {name}",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
+    {
+      "Gb_type": "Unsupported attribute for slice() object",
       "Context": "var_getattr {self} {name}",
       "Explanation": "Expected attribute to be one of {','.join(fields)} but got {name}",
       "Hints": [
@@ -2042,6 +2089,17 @@
       ]
     }
   ],
+  "GB0998": [
+    {
+      "Gb_type": "source-less COW tensor check",
+      "Context": "torch._C._is_cow_tensor on source-less tensor",
+      "Explanation": "Dynamo cannot safely guard COW state for an intermediate tensor without a source.",
+      "Hints": [
+        "Avoid checking COW state on intermediate tensors inside ",
+        "torch.compile regions."
+      ]
+    }
+  ],
   "GB0143": [
     {
       "Gb_type": "Unsupported conversion for slice assignment",
@@ -2143,6 +2201,17 @@
       ]
     }
   ],
+  "GB8587": [
+    {
+      "Gb_type": "COW tensor check after COW-state-changing op",
+      "Context": "torch._C._is_cow_tensor after _lazy_clone",
+      "Explanation": "Dynamo cannot safely fold a COW state check after an op in the current graph may have changed that tensor's COW state.",
+      "Hints": [
+        "Move the COW state check before _lazy_clone or outside ",
+        "the torch.compile region."
+      ]
+    }
+  ],
   "GB0151": [
     {
       "Gb_type": "Unsupported inspect call",
@@ -2234,6 +2303,12 @@
   "GB0157": [
     {
       "Gb_type": "Unsupported ndarray attribute access",
+      "Context": "getattro_impl {self} {name}",
+      "Explanation": "Dynamo currently does not support tracing `ndarray.{name}`.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "Unsupported ndarray attribute access",
       "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo currently does not support tracing `ndarray.{name}`.",
       "Hints": []
@@ -2248,6 +2323,12 @@
     }
   ],
   "GB0159": [
+    {
+      "Gb_type": "Unsupported ndarray.__version__ access",
+      "Context": "getattro_impl {self} {name}",
+      "Explanation": "Dynamo currently does not support tracing `ndarray.{name}`.",
+      "Hints": []
+    },
     {
       "Gb_type": "Unsupported ndarray.__version__ access",
       "Context": "var_getattr {self} {name}",
@@ -2431,6 +2512,12 @@
     }
   ],
   "GB9898": [
+    {
+      "Gb_type": "Comprehension analysis failed: No matches",
+      "Context": "pre_store_ops={pre_store_ops}, store_targets={store_targets}, iterator_vars={iterator_vars}",
+      "Explanation": "Comprehension does not match any known bytecode pattern.",
+      "Hints": []
+    },
     {
       "Gb_type": "Comprehension analysis failed: No matches",
       "Context": "pre_store_ops={pre_store_ops}, post_store_op={post_store_op}",
@@ -2769,6 +2856,14 @@
   "GB0188": [
     {
       "Gb_type": "getattr with no source",
+      "Context": "getattro_impl {self} {name}",
+      "Explanation": "Dynamo does not know how to access an attribute on an `nn.Module` instance that lacks a source. This is usually an internal error in Dynamo.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    },
+    {
+      "Gb_type": "getattr with no source",
       "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo does not know how to access an attribute on an `nn.Module` instance that lacks a source. This is usually an internal error in Dynamo.",
       "Hints": [
@@ -2777,6 +2872,12 @@
     }
   ],
   "GB0189": [
+    {
+      "Gb_type": "getattr() on nn.Module with pending mutation",
+      "Context": "getattr({self}, {name})",
+      "Explanation": "Intentionally graph breaking on getattr() on a nn.Module with a pending mutation",
+      "Hints": []
+    },
     {
       "Gb_type": "getattr() on nn.Module with pending mutation",
       "Context": "getattr({obj}, {name}, {default})",
@@ -2941,7 +3042,7 @@
       "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
       "Hints": [
         "Register member '{name}' with MemberType.INLINED in ",
-        "register_opaque_type({real_obj_type}, members=...)."
+        "register_custom_class({real_obj_type}, members=...)."
       ]
     },
     {
@@ -2950,7 +3051,7 @@
       "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
       "Hints": [
         "Register member '{name}' with MemberType.INLINED in ",
-        "register_opaque_type({value_type}, members=...)."
+        "register_custom_class({value_type}, members=...)."
       ]
     }
   ],
@@ -3122,6 +3223,17 @@
   "GB0211": [
     {
       "Gb_type": "torch.nn.Module with a non-function custom __getattr__",
+      "Context": "getattro_impl {self} {name}",
+      "Explanation": "Dynamo detected a nn.Module object with a custom `__getattr__` method, but this method is not a standard Python function (e.g., it might be implemented in C/C++). Dynamo cannot currently trace into such non-standard `__getattr__` methods.",
+      "Hints": [
+        "Avoid using objects with non-standard __getattr__ methods ",
+        "within the compiled region. If possible, implement ",
+        "__getattr__ as a standard Python function.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "torch.nn.Module with a non-function custom __getattr__",
       "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo detected a nn.Module object with a custom `__getattr__` method, but this method is not a standard Python function (e.g., it might be implemented in C/C++). Dynamo cannot currently trace into such non-standard `__getattr__` methods.",
       "Hints": [
@@ -3205,7 +3317,7 @@
   "GB0217": [
     {
       "Gb_type": "unsupported hasattr operation",
-      "Context": "Class {self.user_cls}",
+      "Context": "Class {cls}",
       "Explanation": "msg",
       "Hints": [
         "Consider using a regular dictionary instead",
@@ -3753,6 +3865,14 @@
       "Context": "object={self.value}, method={name}, args={args}, kwargs={kwargs}",
       "Explanation": "Detected a method call to a user-defined generator object. This is not fully supported.",
       "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "call_method on generator",
+      "Context": "object={self.value}, method={name}, args={args}, kwargs={kwargs}",
+      "Explanation": "Detected a method call to a user-defined generator object. This is not fully supported.",
+      "Hints": [
         "Set `torch._dynamo.config.enable_faithful_generator_behavior = False`. Note that this ",
         "may cause silent incorrectness, since we will eagerly unpack generators instead of lazily ",
         "evaluating them."
@@ -4214,6 +4334,16 @@
       ]
     }
   ],
+  "GB5017": [
+    {
+      "Gb_type": "missing tp_init",
+      "Context": "tp_init_impl not implemented for {self.python_type_name()}",
+      "Explanation": "Dynamo does not know how to trace __init__ on `{self.debug_repr()}`.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB0279": [
     {
       "Gb_type": "torch.fx.traceback.annotate escaped from compiled region",
@@ -4553,6 +4683,17 @@
       ]
     }
   ],
+  "GB5282": [
+    {
+      "Gb_type": "COW tensor check after mutation",
+      "Context": "torch._C._is_cow_tensor after tensor mutation",
+      "Explanation": "Dynamo cannot safely fold a COW state check after the tensor's state may have changed inside the compiled frame.",
+      "Hints": [
+        "Move the COW state check before tensor mutations or ",
+        "outside the torch.compile region."
+      ]
+    }
+  ],
   "GB2696": [
     {
       "Gb_type": "P2P compilation disabled for isend/irecv",
@@ -4737,7 +4878,7 @@
       "Context": "value={real_obj}, attr={name}",
       "Explanation": "Member '{name}' is not registered for this opaque object type.",
       "Hints": [
-        "Register '{name}' with a MemberType in register_opaque_type(members=...)."
+        "Register '{name}' with a MemberType in register_custom_class(members=...)."
       ]
     },
     {
@@ -4745,7 +4886,7 @@
       "Context": "value={self.value}, attr={name}",
       "Explanation": "Member '{name}' is not registered for this opaque object type.",
       "Hints": [
-        "Register '{name}' with a MemberType in register_opaque_type(members=...)."
+        "Register '{name}' with a MemberType in register_custom_class(members=...)."
       ]
     }
   ],
@@ -4914,6 +5055,26 @@
       "Explanation": "Expected xs to be a list/tuple but got {xs.python_type()}",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB6815": [
+    {
+      "Gb_type": "ContextVar mutation not supported",
+      "Context": "ContextVar('{self.cv_obj.name}').{name}()",
+      "Explanation": "ContextVar.{name}() is not yet supported inside torch.compile. Move the .{name}() call outside the compiled region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6066": [
+    {
+      "Gb_type": "ContextVar.get() with non-constant default",
+      "Context": "ContextVar('{self.cv_obj.name}').get(...)",
+      "Explanation": "ContextVar.get() default argument must be a compile-time constant inside torch.compile.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -5172,6 +5333,35 @@
       "Explanation": "Expected at least one branch.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB7020": [
+    {
+      "Gb_type": "COW tensor check during export",
+      "Context": "torch._C._is_cow_tensor during export",
+      "Explanation": "Dynamo cannot safely export COW-state-dependent control flow because COW state is not represented in the exported graph.",
+      "Hints": [
+        "Avoid checking COW state inside torch.export regions."
+      ]
+    }
+  ],
+  "GB7905": [
+    {
+      "Gb_type": "COW tensor check on FakeTensor",
+      "Context": "torch._C._is_cow_tensor on FakeTensor",
+      "Explanation": "Dynamo cannot safely evaluate COW state from a FakeTensor because COW state is not represented in FakeTensor metadata.",
+      "Hints": [
+        "Avoid checking COW state on FakeTensors inside ",
+        "torch.compile regions."
+      ]
+    },
+    {
+      "Gb_type": "COW tensor check on FakeTensor",
+      "Context": "torch._C._is_cow_tensor on FakeTensor",
+      "Explanation": "Dynamo cannot safely evaluate COW state from a FakeTensor because COW state is not represented in FakeTensor metadata.",
+      "Hints": [
+        "Avoid checking COW state inside torch.export regions."
       ]
     }
   ],

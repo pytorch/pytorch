@@ -151,7 +151,7 @@ try:
 
         # pyrefly: ignore [implicit-any]
         NP_TO_TNP_MODULE = {}
-    from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
+    from torch._subclasses.fake_tensor import is_fake
 except ImportError:
     pass
 
@@ -2547,8 +2547,17 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
         # this func fails on fake tensors in __torch_dispatch__
         return x
 
+    def is_pinned_cpu_tensor(x: torch.Tensor) -> bool:
+        return (
+            x.device.type == "cpu"
+            and not is_traceable_wrapper_subclass(x)
+            and x.is_pinned()
+        )
+
     def torch_clone(x: torch.Tensor) -> torch.Tensor:
         y = torch.clone(x)
+        if is_pinned_cpu_tensor(x):
+            y = y.pin_memory()
         if x.is_leaf:
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
@@ -2595,7 +2604,10 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
             result = torch.empty_quantized((needed_size + 32,), x)
         else:
             result = torch.empty(
-                needed_size + 32, dtype=dtype or x.dtype, device=x.device
+                needed_size + 32,
+                dtype=dtype or x.dtype,
+                device=x.device,
+                pin_memory=is_pinned_cpu_tensor(x),
             )
         cache_line_offset = (
             (x.data_ptr() - result.data_ptr()) % 32
@@ -3050,6 +3062,8 @@ tuple_iterator: type[Iterator[Any]] = type(iter(()))
 # pyrefly: ignore [bad-assignment]
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
+deque_iterator = type(iter(collections.deque()))
+deque_rev_iterator = type(reversed(collections.deque()))
 object_new = object.__new__
 dict_new = dict.__new__
 dict_methods = {
@@ -3273,7 +3287,7 @@ def raise_args_mismatch(
     name: str,
     expect: str = "",
     actual: str = "",
-) -> None:
+) -> NoReturn:
     from torch._dynamo.exc import raise_observed_exception
 
     msg_str = (
@@ -3563,9 +3577,9 @@ def same(
             raise AssertionError(f"elements mismatch {set(ref)} == {set(res)}")
         return True
     elif isinstance(ref, (torch.Tensor, float)):
-        if isinstance(ref, torch._subclasses.FakeTensor):
+        if torch._subclasses.fake_tensor.is_fake_tensor(ref):
             raise AssertionError("ref should not be a FakeTensor")
-        if isinstance(res, torch._subclasses.FakeTensor):
+        if torch._subclasses.fake_tensor.is_fake_tensor(res):
             raise AssertionError("res should not be a FakeTensor")
 
         def to_tensor(t: Any) -> torch.Tensor:
@@ -3882,6 +3896,8 @@ def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> An
 
 
 def ensure_graph_fake(e: Any, tx: InstructionTranslatorBase) -> Any:
+    from torch._subclasses.fake_tensor import maybe_get_fake_mode
+
     if maybe_get_fake_mode(e) is not tx.fake_mode:
         raise AssertionError(
             f"Expected fake mode of e to be tx.fake_mode, got {maybe_get_fake_mode(e)} vs {tx.fake_mode}"
@@ -4785,7 +4801,9 @@ def numpy_wrapper_cache_key(obj: Any) -> tuple[str, str] | None:
 
 
 def defake(x: Any) -> Any:
-    if not isinstance(x, FakeTensor):
+    from torch._subclasses.fake_tensor import is_fake_tensor
+
+    if not is_fake_tensor(x):
         return x
     size: torch._prims_common.ShapeType
     stride: torch._prims_common.StrideType
@@ -5605,6 +5623,21 @@ def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
     return torch._C.Event(*args, **kwargs)
 
 
+class FrameState(enum.Enum):
+    FRAME_CREATED = -3
+    FRAME_SUSPENDED = -2
+    FRAME_SUSPENDED_YIELD_FROM = -1
+    FRAME_EXECUTING = 0
+    FRAME_COMPLETED = 1
+    FRAME_CLEARED = 4
+
+
+class PySendResult(enum.Enum):
+    PYGEN_RETURN = 0
+    PYGEN_ERROR = -1
+    PYGEN_NEXT = 1
+
+
 class CompileTimeInstructionCounter:
     _counter: int = 0
     _id: int = -1
@@ -5765,6 +5798,28 @@ def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
 @torch._disable_dynamo
 def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
     cm.__exit__(None, None, None)
+
+
+# Active `torch._dynamo.override_cudagraphs` override, set/restored at RUNTIME by
+# CudagraphOverrideContextManager.__enter__/__exit__ (mirrors _error_on_graph_break
+# above). This lets the override follow the dynamic call stack: a callee that
+# cannot be inlined (e.g. it contains a graph break) is compiled as a separate
+# frame and would otherwise not inherit the override, which lives lexically in a
+# caller's `with` block / decorator. OutputGraph seeds its cudagraph_annotation
+# from this value. None means no override is active; otherwise it is the
+# (fwd, bwd) pair. NOTE: we intentionally do not guard on this, so the override
+# is sticky per code object (first compile wins) for functions reached both
+# inside and outside it.
+_cudagraph_override: tuple[bool | None, bool | None] | None = None
+
+
+def _get_cudagraph_override() -> tuple[bool | None, bool | None] | None:
+    return _cudagraph_override
+
+
+def _set_cudagraph_override(value: tuple[bool | None, bool | None] | None) -> None:
+    global _cudagraph_override
+    _cudagraph_override = value
 
 
 # Returns a set of code objects present traced in the current TracingContext, or None

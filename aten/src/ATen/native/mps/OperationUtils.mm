@@ -413,7 +413,7 @@ static void check_mps_shape(MPSShape* shape) {
 }
 
 bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI) {
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
   if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI && is_macOS_15_0_or_newer) {
     auto storage_numel = tensor.storage().nbytes() / tensor.element_size() - tensor.storage_offset();
     if (storage_numel > std::numeric_limits<int32_t>::max()) {
@@ -508,7 +508,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   // extract the pointer to MTLBuffer from the Tensor's storage
   id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
 
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
   // Use gather kernel to solve strides for macOS < 15.0
   // Starting with macOS 15.0, MPS supports native strides directly in the kernels
   if (!is_macOS_15_0_or_newer || !useMPSStridedAPI) {
@@ -628,38 +628,43 @@ MPSGraphTensorData* getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStre
 }
 
 MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
+  // All integral (and bool) types share the union's `i` member; the tag selects the C++ type to narrow to.
+  auto intScalar = [&](auto tag) -> MPSScalar {
+    using T = decltype(tag);
+    return {.size = sizeof(T), .type = type, .value = {.i = scalar.to<T>()}};
+  };
   switch (type) {
     case ScalarType::Double:
     case ScalarType::Float:
-      return {.size = sizeof(float), .type = type, .value.f = scalar.to<float>()};
+      return {.size = sizeof(float), .type = type, .value = {.f = scalar.to<float>()}};
     case ScalarType::Half:
-      return {.size = sizeof(short), .type = type, .value.h = scalar.to<Half>()};
+      return {.size = sizeof(short), .type = type, .value = {.h = scalar.to<Half>()}};
     case ScalarType::BFloat16:
-      return {.size = sizeof(short), .type = type, .value.bf16 = scalar.to<BFloat16>()};
-    case ScalarType::Long:
-      return {.size = sizeof(int64_t), .type = type, .value.i = scalar.to<int64_t>()};
-    case ScalarType::Int:
-      return {.size = sizeof(int32_t), .type = type, .value.i = scalar.to<int32_t>()};
-    case ScalarType::Short:
-      return {.size = sizeof(int16_t), .type = type, .value.i = scalar.to<int16_t>()};
-    case ScalarType::Char:
-      return {.size = sizeof(int8_t), .type = type, .value.i = scalar.to<int8_t>()};
-    case ScalarType::Byte:
-      return {.size = sizeof(uint8_t), .type = type, .value.i = scalar.to<uint8_t>()};
-    case ScalarType::Bool:
-      return {.size = sizeof(bool), .type = type, .value.b = scalar.to<bool>()};
+      return {.size = sizeof(short), .type = type, .value = {.bf16 = scalar.to<BFloat16>()}};
     case ScalarType::ComplexHalf:
-      return {.size = sizeof(int32_t), .type = type, .value.ch = scalar.to<c10::complex<Half>>()};
+      return {.size = sizeof(int32_t), .type = type, .value = {.ch = scalar.to<c10::complex<Half>>()}};
     case ScalarType::ComplexFloat:
     case ScalarType::ComplexDouble:
-      return {.size = sizeof(int64_t), .type = type, .value.cf = scalar.to<c10::complex<float>>()};
-    // Unsigned types
+      return {.size = sizeof(int64_t), .type = type, .value = {.cf = scalar.to<c10::complex<float>>()}};
+    // UInt64 is the only integral type wide enough to need the unsigned union member.
     case ScalarType::UInt64:
-      return {.size = sizeof(uint64_t), .type = type, .value.u = scalar.to<uint64_t>()};
+      return {.size = sizeof(uint64_t), .type = type, .value = {.u = scalar.to<uint64_t>()}};
+    case ScalarType::Long:
+      return intScalar(int64_t{});
+    case ScalarType::Int:
+      return intScalar(int32_t{});
     case ScalarType::UInt32:
-      return {.size = sizeof(uint32_t), .type = type, .value.i = scalar.to<uint32_t>()};
+      return intScalar(uint32_t{});
+    case ScalarType::Short:
+      return intScalar(int16_t{});
     case ScalarType::UInt16:
-      return {.size = sizeof(uint16_t), .type = type, .value.i = scalar.to<uint16_t>()};
+      return intScalar(uint16_t{});
+    case ScalarType::Char:
+      return intScalar(int8_t{});
+    case ScalarType::Byte:
+      return intScalar(uint8_t{});
+    case ScalarType::Bool:
+      return intScalar(bool{});
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported scalar type '", type, "' on MPS backend.");
   }
@@ -845,16 +850,16 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   MTLCompileOptions* options = compile_options;
   if (!options) {
     options = [[MTLCompileOptions new] autorelease];
-    if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS)) {
+    if (is_macos_at_least(MacOSVersion::MACOS_26_0)) {
       // Metal-4.0 allows tensor template arguments
       [options setLanguageVersion:MTLLanguageVersion4_0];
-    } else if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+    } else if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
       // Metal-3.2 allows lambdas in shader code
       [options setLanguageVersion:MTLLanguageVersion3_2];
     } else {
       [options setLanguageVersion:MTLLanguageVersion3_1];
     }
-    if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+    if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
       options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
       options.mathFloatingPointFunctions =
           fast_math ? MTLMathFloatingPointFunctionsFast : MTLMathFloatingPointFunctionsPrecise;
@@ -950,7 +955,7 @@ class BundledShaderLibrary : public MetalShaderLibrary {
       auto device = MPSDevice::getInstance()->device();
       NSError* error = nil;
 #ifdef CAN_BUILD_METAL_4
-      const auto section_name = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS) ? "metal_40" : "metal_basic";
+      const auto section_name = is_macos_at_least(MacOSVersion::MACOS_26_0) ? "metal_40" : "metal_basic";
 #else
       const auto section_name = "metal_basic";
 #endif
@@ -1208,7 +1213,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   }
 }
 
-void MetalShaderLibrary::exec_unary_kernel_raw(const std::string& name,
+void MetalShaderLibrary::exec_unary_kernel_raw(std::string_view name,
                                                MTLBuffer_t src_buf,
                                                uint32_t src_offs_bytes,
                                                c10::ScalarType src_dtype,
@@ -1228,7 +1233,7 @@ void MetalShaderLibrary::exec_unary_kernel_raw(const std::string& name,
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(cplState, name, /*isGraph=*/false);
+      getMPSProfiler().beginProfileKernel(cplState, kernel_name, /*isGraph=*/false);
       [computeEncoder setComputePipelineState:cplState];
       [computeEncoder setBuffer:dst_buf offset:dst_offs_bytes atIndex:0];
       [computeEncoder setBuffer:src_buf offset:src_offs_bytes atIndex:1];
@@ -1588,10 +1593,12 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
     return;
   }
 
-  // Decompose 64-bit tensor into 32-bit ones
+  // Decompose 64-bit tensor into 32-bit ones. Must recurse into the ternary
+  // exec: a binary dispatch here would look up nonexistent 2-input kernel
+  // names for the 3-input op and fail at pipeline creation.
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_binary_kernel(sub_iter, name);
+      exec_ternary_kernel(sub_iter, name);
     }
     return;
   }
@@ -1617,8 +1624,11 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
   convert_double_scalar(other2);
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  const auto cast_needed =
-      (input.scalar_type() != other1.scalar_type()) || (input.scalar_type() != other2.scalar_type());
+  // An out= dtype differing from the (matching) inputs also needs the cast
+  // kernel: non-cast names are only registered for matching in/out pairs, and
+  // the _cast_{out} instantiations read the runtime input types anyway.
+  const auto cast_needed = (input.scalar_type() != other1.scalar_type()) ||
+      (input.scalar_type() != other2.scalar_type()) || (input.scalar_type() != out.scalar_type());
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   // TODO: Implicitly pass both input and output types to non-cast kernels
   const auto kernel_name = cast_needed
