@@ -588,6 +588,25 @@ def test(self):
             ],
         )
 
+    def test_splitlines_patch_supports_original_without_maxlines(self):
+        calls = []
+
+        def one_arg_splitlines(source):
+            calls.append(source)
+            return source.splitlines()
+
+        source = "first\nsecond\nthird"
+        with mock.patch.object(
+            gb_registry_linter.ast, "_splitlines_no_ff", one_arg_splitlines
+        ):
+            gb_registry_linter._patch_ast_splitlines_no_ff()
+            patched_splitlines = gb_registry_linter.ast._splitlines_no_ff
+
+            self.assertEqual(patched_splitlines(source, 2), ["first", "second"])
+            self.assertEqual(patched_splitlines(source), ["first", "second", "third"])
+
+        self.assertEqual(calls, [source])
+
 
 if __name__ == "__main__":
     unittest.main()

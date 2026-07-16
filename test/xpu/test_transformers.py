@@ -66,7 +66,7 @@ class TestSDPAXpuOnly(NNTestCase):
             self.assertNotEqual(
                 t.data_ptr() % 64,
                 0,
-                msg=f"{name} is unexpectedly 64-byte aligned; "
+                msg=lambda msg: f"{msg}\n{name} is unexpectedly 64-byte aligned; "
                 "the misalignment premise of this test is invalid",
             )
 

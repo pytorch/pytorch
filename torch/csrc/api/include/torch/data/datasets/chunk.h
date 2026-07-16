@@ -306,7 +306,7 @@ struct ChunkDatasetOptions {
 /// while the `ExampleSampler` determines the order of Examples that are
 /// returned in each `get_batch` call. The hierarchical sampling approach used
 /// here is inspired by this paper
-/// http://martin.zinkevich.org/publications/nips2010.pdf
+/// https://proceedings.neurips.cc/paper_files/paper/2010/file/abea47ba24142ed16b7d8fbf2c740e0d-Paper.pdf
 template <
     typename ChunkReader,
     typename ChunkSampler = samplers::RandomSampler,

@@ -26,7 +26,7 @@ def _patch_ast_splitlines_no_ff() -> None:
 
     @functools.lru_cache(maxsize=128)
     def cached_full_splitlines(source: str) -> tuple[str, ...]:
-        return tuple(original_splitlines_no_ff(source, None))
+        return tuple(original_splitlines_no_ff(source))
 
     def splitlines_no_ff(source: str, maxlines: int | None = None) -> list[str]:
         lines = cached_full_splitlines(source)

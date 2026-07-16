@@ -161,12 +161,12 @@ class TestAsStrided(TestCase):
                 # Check that prev_states is a strict subset of current_states
                 self.assertTrue(
                     prev_states.issubset(current_states),
-                    f"States from size {size - 1} are not a subset of size {size}",
+                    lambda msg: f"{msg}\nStates from size {size - 1} are not a subset of size {size}",
                 )
                 # Check that it's a strict subset (not equal)
                 self.assertTrue(
                     len(prev_states) < len(current_states),
-                    f"States from size {size - 1} should be strictly fewer than size {size}",
+                    lambda msg: f"{msg}\nStates from size {size - 1} should be strictly fewer than size {size}",
                 )
 
             prev_states = current_states
