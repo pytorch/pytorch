@@ -1143,7 +1143,12 @@ def get_cpp_options(
     if config.aot_inductor.cross_target_platform == "windows":
         passthrough_args.extend(["-static-libstdc++", "-static-libgcc"])
         if check_mingw_win32_flavor(MINGW_GXX) == "posix":
-            passthrough_args.append("-Wl,-Bstatic -lwinpthread -Wl,-Bdynamic")
+            # winpthread provides clock_gettime, referenced by static libstdc++'s
+            # chrono. The driver places libstdc++ after these args, so force the
+            # symbol undefined up front to pull winpthread in regardless of order.
+            passthrough_args.append(
+                "-Wl,-u,clock_gettime -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic"
+            )
 
     return (
         definitions,
@@ -1327,20 +1332,27 @@ def _get_torch_related_args(
         if config.aot_inductor.cross_target_platform == "windows":
             aoti_shim_library = config.aot_inductor.aoti_shim_library
 
-            assert aoti_shim_library, (
-                "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
-            )
+            if not aoti_shim_library:
+                raise AssertionError(
+                    "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
+                )
             if isinstance(aoti_shim_library, str):
                 libraries.append(aoti_shim_library)
             else:
-                assert isinstance(aoti_shim_library, list)
+                if not isinstance(aoti_shim_library, list):
+                    raise AssertionError(
+                        f"expected aoti_shim_library to be a list, got {type(aoti_shim_library)}"
+                    )
                 libraries.extend(aoti_shim_library)
 
     if config.aot_inductor.cross_target_platform == "windows":
-        assert config.aot_inductor.aoti_shim_library_path, (
-            "'config.aot_inductor.aoti_shim_library_path' must be set to the path of the AOTI shim library",
-            " when 'cross_target_platform' is 'windows'.",
-        )
+        if not config.aot_inductor.aoti_shim_library_path:
+            raise AssertionError(
+                (
+                    "'config.aot_inductor.aoti_shim_library_path' must be set to the path of the AOTI shim library",
+                    " when 'cross_target_platform' is 'windows'.",
+                )
+            )
         libraries_dirs.append(config.aot_inductor.aoti_shim_library_path)
 
     if _IS_WINDOWS:
@@ -1986,9 +1998,15 @@ def _transform_cuda_paths(lpaths: list[str]) -> None:
 
     # Internal path needs special care, using the SDK lib path directly.
     if config.is_fbcode():
-        stub_dir = Path(build_paths.sdk_lib) / "stubs"
-        if stub_dir.is_dir() and str(stub_dir) not in lpaths:
-            lpaths.append(str(stub_dir))
+        # Add sdk_lib and its stubs/ (which hold the CUDA libs) unconditionally:
+        # an existence gate fails on the not-yet-materialized EdenFS path, and a
+        # nonexistent -L is harmless to the linker.
+        for cuda_lib_dir in (
+            build_paths.sdk_lib,
+            os.path.join(build_paths.sdk_lib, "stubs"),
+        ):
+            if cuda_lib_dir not in lpaths:
+                lpaths.append(cuda_lib_dir)
 
 
 def _transform_rocm_paths(lpaths: list[str]) -> None:
@@ -2188,7 +2206,8 @@ class CppTorchDeviceOptions(CppTorchOptions):
             # Re-order library search paths in case there are lib conflicts
             # that also live in the FBCode python lib dir.
             _, python_lib_dirs = _get_python_related_args()
-            assert len(python_lib_dirs) == 1, f"Python lib dirs: {python_lib_dirs}"
+            if len(python_lib_dirs) != 1:
+                raise AssertionError(f"Python lib dirs: {python_lib_dirs}")
             if python_lib_dirs[0] in self._libraries_dirs:
                 self._libraries_dirs.remove(python_lib_dirs[0])
                 self._libraries_dirs.append(python_lib_dirs[0])
@@ -2300,7 +2319,10 @@ class CppBuilder:
         self._precompiling = BuildOption.get_precompiling()
         self._preprocessing = BuildOption.get_preprocessing()
         # Only one of these options (if any) should be true at any given time.
-        assert sum((self._compile_only, self._precompiling, self._preprocessing)) <= 1
+        if sum((self._compile_only, self._precompiling, self._preprocessing)) > 1:
+            raise AssertionError(
+                "at most one of compile_only, precompiling, preprocessing may be set"
+            )
         self._do_link = not (
             self._compile_only or self._precompiling or self._preprocessing
         )
@@ -2308,9 +2330,8 @@ class CppBuilder:
         # MSVC produces two files when precompiling: the actual .pch file, as well as an
         # object file which must be linked into the final library.  This class assumes
         # only one output file of note, so for now we'll error out here.
-        assert not _IS_WINDOWS or not self._precompiling, (
-            "Cannot currently precompile headers on Windows!"
-        )
+        if _IS_WINDOWS and self._precompiling:
+            raise AssertionError("Cannot currently precompile headers on Windows!")
 
         if self._compile_only:
             file_ext, output_flags = self.__get_object_flags()
@@ -2347,7 +2368,10 @@ class CppBuilder:
             sources = [os.path.basename(i) for i in sources]
 
         if self._precompiling:
-            assert len(sources) == 1
+            if len(sources) != 1:
+                raise AssertionError(
+                    f"expected exactly one source when precompiling, got {len(sources)}"
+                )
             # See above; we can currently assume this is not on MSVC.
             self._sources_args = f"-x c++-header {sources[0]}"
             if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
@@ -2638,11 +2662,13 @@ class CppBuilder:
             )
 
         if device_type == "cuda" and torch.version.hip is None:
-            from torch._inductor.codegen.cuda.compile_utils import (
-                _nvcc_arch_as_compile_option,
-            )
+            from torch._inductor.codegen.cuda import compile_utils
 
-            current_arch = _nvcc_arch_as_compile_option()
+            cuda_arch = compile_utils._aoti_cuda_target_arch()
+            cuda_gencode_flags = "\n                                ".join(
+                f"-gencode {option}"
+                for option in compile_utils._cuda_multi_arch_gencode_options(cuda_arch)
+            )
             contents += textwrap.dedent(
                 f"""
                 enable_language(CUDA)
@@ -2679,8 +2705,7 @@ class CppBuilder:
                     add_custom_command(
                         OUTPUT ${{FATBIN_FILE}}
                         COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
-                                -gencode arch=compute_{current_arch},code=compute_{current_arch}
-                                -gencode arch=compute_{current_arch},code=sm_{current_arch}
+                                {cuda_gencode_flags}
                         DEPENDS ${{PTX_FILE}}
                     )
 
@@ -2793,9 +2818,10 @@ class CppBuilder:
          """
         )
 
-        assert os.path.exists(cmake_path), (
-            f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
-        )
+        if not os.path.exists(cmake_path):
+            raise AssertionError(
+                f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
+            )
         with open(cmake_path, "a") as f:
             f.write(contents)
 

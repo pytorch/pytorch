@@ -220,7 +220,7 @@ static std::string get_name(Backend backend, ScalarType scalarType) {
   std::ostringstream ss;
   ss << torch::utils::backend_to_string(backend) << '.' << toString(scalarType)
      << "Tensor";
-  return ss.str();
+  return std::move(ss).str();
 }
 
 static THPObjectPtr get_storage_obj(Backend backend, ScalarType dtype) {

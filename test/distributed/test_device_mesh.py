@@ -1708,7 +1708,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         fake_pg_name = mesh._dim_group_names[0]
         self.assertFalse(
             fake_pg_name.isdigit(),
-            f"Fake-backend PG name '{fake_pg_name}' is a sequential integer; "
+            lambda msg: f"{msg}\nFake-backend PG name '{fake_pg_name}' is a sequential integer; "
             f"expected a hash-based name for torchcomms compatibility.",
         )
 
@@ -2036,7 +2036,7 @@ class ProcessGroupOpaqueTypeTest(TestCase):
     def test_registered_members_exist_on_process_group(self):
         from torch._library.opaque_object import get_member_type
 
-        # Every member registered in _register_distributed_opaque_types()
+        # Every member registered in _register_process_group_opaque_type()
         # must actually exist on ProcessGroup. This catches renames or
         # removals of C++ attributes that would cause torch.compile
         # (fullgraph=True) to silently register a stale name while the
@@ -2052,13 +2052,13 @@ class ProcessGroupOpaqueTypeTest(TestCase):
         for member_name in registered_members:
             self.assertIsNotNone(
                 get_member_type(ProcessGroup, member_name),
-                f"'{member_name}' is not registered as a ProcessGroup opaque "
-                f"type member. Add it to _register_distributed_opaque_types() "
-                f"in torch/distributed/device_mesh.py",
+                lambda msg: f"{msg}\n'{member_name}' is not registered as a ProcessGroup opaque "
+                f"type member. Add it to _register_process_group_opaque_type() "
+                f"in torch/distributed/distributed_c10d.py",
             )
             self.assertTrue(
                 hasattr(ProcessGroup, member_name),
-                f"'{member_name}' is registered as a ProcessGroup opaque type "
+                lambda msg: f"{msg}\n'{member_name}' is registered as a ProcessGroup opaque type "
                 f"member but does not exist on the ProcessGroup class. "
                 f"Was it renamed or removed?",
             )

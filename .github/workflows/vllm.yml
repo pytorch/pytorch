@@ -21,7 +21,9 @@ permissions:
 jobs:
   build:
     name: vllm-x-pytorch-build
-    if: github.repository_owner == 'pytorch'
+    # Disabled: vLLM CI is being migrated to OSDC. Re-enable by restoring the
+    # `github.repository_owner == 'pytorch'` guard.
+    if: false
     uses: ./.github/workflows/_linux-build.yml
     with:
       # When building vLLM, uv doesn't like that we rename wheel without changing the wheel metadata
@@ -56,6 +58,7 @@ jobs:
 
   test:
     name: vllm-x-pytorch-test
+    if: false
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     with:
