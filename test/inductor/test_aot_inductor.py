@@ -6831,8 +6831,11 @@ class AOTInductorTestsTemplate:
 
             def grid(meta):
                 num_blocks = triton.cdiv(n_elements, meta["BLOCK_SIZE"])
-                grid0 = min(num_blocks, 65535)
-                grid1 = triton.cdiv(num_blocks, grid0)
+                # 2D split to respect the 65535 grid-x limit. Use cdiv-by-constant
+                # rather than min(num_blocks, 65535): a symbolic min introduces an
+                # inequality guard that AOTInductor dynamic-shape export rejects.
+                grid1 = triton.cdiv(num_blocks, 65535)
+                grid0 = triton.cdiv(num_blocks, grid1)
                 return (grid0, grid1)
 
             capture_triton(add_kernel)[grid](x, y, output, n_elements, 256)
