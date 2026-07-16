@@ -103,6 +103,23 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_cuda_graph(self) -> None:
+        warmup = torch.ones(1, device=self.device)
+        dist.all_reduce(warmup)
+        torch.cuda.synchronize()
+
+        t = torch.full((4,), float(self.rank + 1), device=self.device)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            dist.all_reduce(t)
+        graph.replay()
+        torch.cuda.synchronize()
+
+        expected = float(sum(range(1, self.world_size + 1)))
+        self.assertEqual(t, torch.full((4,), expected, device=self.device))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_send_recv(self) -> None:
         # Ring: rank r sends to r+1, receives from r-1.
         send_t = torch.full((8,), float(self.rank), device=self.device)

@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -14,7 +15,9 @@
 #include <vector>
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAEvent.h>
 #include <ATen/record_function.h>
+#include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime.h>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
@@ -50,7 +53,7 @@ class WorkNCCL : public c10d::Work {
       ProcessGroupNCCL* comm,
       cudaStream_t stream,
       std::chrono::milliseconds timeout_ms,
-      const at::Tensor& inputTensor);
+      at::Tensor inputTensor);
   ~WorkNCCL() override;
 
   WorkNCCL(const WorkNCCL&) = delete;
@@ -103,9 +106,9 @@ class WorkNCCL : public c10d::Work {
   std::vector<at::Tensor> outputs_;
 
   ProcessGroupNCCL* comm_; // non-owning; see class comment
-  cudaEvent_t start_event_;
-  cudaEvent_t end_event_;
-  cudaStream_t stream_; // not owned by this class
+  std::unique_ptr<at::cuda::CUDAEvent> start_event_;
+  std::unique_ptr<at::cuda::CUDAEvent> end_event_;
+  at::cuda::CUDAStream stream_;
 
   std::chrono::milliseconds timeout_ms_;
 
