@@ -1952,6 +1952,8 @@ class TestFP8Matmul(TestCase):
         (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
     def test_blockwise_nvfp4_with_global_scale(self, mkn, device) -> None:
+        if "xpu" in device and not Xe2_Or_Later:
+            raise unittest.SkipTest("NVFP4 numerics require Xe2+ on XPU")
         M, K, N = mkn
         BLOCK_SIZE = 16
         # Note: SQNR target from `test_blockwise_mxfp8_nvfp4_mxfp4_numerics` test
