@@ -508,40 +508,11 @@ ROCM_XFAIL_DICTS = {
 # fbcode ships a different Triton fork (triton+fb) and cuBLAS/CUDA/GPU stack than
 # OSS CI (e.g. A100 vs L4), which changes compiled-path numerics. These combos pass
 # in OSS but not in fbcode, so they are merged in only when IS_FBCODE (CUDA).
-FBCODE_BATCH_INVARIANCE_XFAILS = {
-    "aot_eager_decomp_partition": {
-        "bmm": {fp32},
-    },
-    "inductor_default": {
-        "bmm": {fp32},
-    },
-    "inductor_numerics": {
-        "bmm": {fp32},
-    },
-}
+FBCODE_BATCH_INVARIANCE_XFAILS = {}
 
-FBCODE_UNARY_NUMERICAL_XFAILS = {
-    "inductor_default": {
-        "sqrt": {bf16, fp32},
-    },
-    "inductor_numerics": {
-        "exp2": {bf16, fp32},
-        "expm1": {bf16, fp32},
-        "log1p": {fp32},
-        "reciprocal": {bf16, fp32},
-        "rsqrt": {bf16, fp32},
-        "sin": {fp32},
-        "sqrt": {bf16, fp32},
-        "tan": {bf16, fp32},
-        "tanh": {fp32},
-    },
-}
+FBCODE_UNARY_NUMERICAL_XFAILS = {}
 
-FBCODE_BINARY_NUMERICAL_XFAILS = {
-    "inductor_numerics": {
-        "fmod": {bf16, fp32},
-    },
-}
+FBCODE_BINARY_NUMERICAL_XFAILS = {}
 
 FBCODE_XFAIL_DICTS = {
     "batch_invariance": FBCODE_BATCH_INVARIANCE_XFAILS,
