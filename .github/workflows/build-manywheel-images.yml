@@ -22,7 +22,6 @@ on:
       - .github/actions/binary-docker-build/**
 
 env:
-  DOCKER_REGISTRY: "docker.io"
   DOCKER_BUILDKIT: 1
   WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) }}
 concurrency:
@@ -30,26 +29,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  select-runner:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-24.04
+    outputs:
+      x86: ${{ steps.pick.outputs.x86 }}
+      arm64: ${{ steps.pick.outputs.arm64 }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/heads/main || "${GITHUB_REF}" == refs/heads/nightly || "${GITHUB_REF}" == refs/heads/release/* || "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "x86=mt-rel-l-x86iavx512-44-340" >> "${GITHUB_OUTPUT}"
+            echo "arm64=mt-rel-l-arm64g3-44-340" >> "${GITHUB_OUTPUT}"
+          else
+            echo "x86=mt-l-x86iavx512-48-384" >> "${GITHUB_OUTPUT}"
+            echo "arm64=mt-l-arm64g3-61-463" >> "${GITHUB_OUTPUT}"
+          fi
+
   build:
     if: github.repository_owner == 'pytorch'
+    needs: select-runner
     environment: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) && 'docker-build') || '' }}
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ghcr.io/actions/actions-runner:latest
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
         include: [
-          { name: "manylinux2_28-builder",          tag: "cuda13.2",          runner: "linux.9xlarge.ephemeral" },
-          { name: "manylinux2_28-builder",          tag: "cuda13.0",          runner: "linux.9xlarge.ephemeral" },
-          { name: "manylinux2_28-builder",          tag: "cuda12.6",          runner: "linux.9xlarge.ephemeral" },
-          { name: "manylinuxaarch64-builder",       tag: "cuda13.2",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
-          { name: "manylinuxaarch64-builder",       tag: "cuda13.0",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
-          { name: "manylinuxaarch64-builder",       tag: "cuda12.6",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
-          { name: "manylinux2_28-builder",          tag: "rocm7.1",           runner: "linux.9xlarge.ephemeral" },
-          { name: "manylinux2_28-builder",          tag: "rocm7.2",           runner: "linux.9xlarge.ephemeral" },
-          { name: "manylinux2_28-builder",          tag: "cpu",               runner: "linux.9xlarge.ephemeral" },
-          { name: "manylinux2_28_aarch64-builder",  tag: "cpu-aarch64",       runner: "linux.arm64.2xlarge.ephemeral" },
-          { name: "manylinux2_28-builder",          tag: "xpu",               runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "cuda13.2",          runner: "${{ needs.select-runner.outputs.x86 }}" },
+          { name: "manylinux2_28-builder",          tag: "cuda13.0",          runner: "${{ needs.select-runner.outputs.x86 }}" },
+          { name: "manylinux2_28-builder",          tag: "cuda12.6",          runner: "${{ needs.select-runner.outputs.x86 }}" },
+          { name: "manylinuxaarch64-builder",       tag: "cuda13.2",          runner: "${{ needs.select-runner.outputs.arm64 }}" },
+          { name: "manylinuxaarch64-builder",       tag: "cuda13.0",          runner: "${{ needs.select-runner.outputs.arm64 }}" },
+          { name: "manylinuxaarch64-builder",       tag: "cuda12.6",          runner: "${{ needs.select-runner.outputs.arm64 }}" },
+          { name: "manylinux2_28-builder",          tag: "rocm7.1",           runner: "${{ needs.select-runner.outputs.x86 }}" },
+          { name: "manylinux2_28-builder",          tag: "rocm7.2",           runner: "${{ needs.select-runner.outputs.x86 }}" },
+          { name: "manylinux2_28-builder",          tag: "cpu",               runner: "${{ needs.select-runner.outputs.x86 }}" },
+          { name: "manylinux2_28_aarch64-builder",  tag: "cpu-aarch64",       runner: "${{ needs.select-runner.outputs.arm64 }}" },
+          { name: "manylinux2_28-builder",          tag: "xpu",               runner: "${{ needs.select-runner.outputs.x86 }}" },
         ]
-    runs-on: ${{ matrix.runner }}
     name: ${{ matrix.name }}:${{ matrix.tag }}
     steps:
       - name: Build docker image
