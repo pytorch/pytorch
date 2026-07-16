@@ -27,6 +27,19 @@ struct QrParams {
   uint32_t n;
 };
 
+enum class GemmEpilogue : int { None = 0, Bias = 1 };
+
+// n - output length
+// ld - matrix row stride
+// ms - matrix stride along the reduction/output dimension
+// xs - vector stride
+// bias_r/bias_c - row/col strides of the bias (for addmm)
+// 64-bit so huge operands fit; kernels narrow to their IDX template width.
+struct GemvDims {
+  int64_t n, K, ld, ms, xs;
+  int64_t bias_r, bias_c;
+};
+
 struct SvdParams {
   uint32_t m; // staged rows = max(orig m,n) >= n
   uint32_t n; // staged cols = k = min(orig m,n)
