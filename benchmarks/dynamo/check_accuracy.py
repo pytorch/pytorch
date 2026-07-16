@@ -76,6 +76,9 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 # Discovered on gfx950 CI after ROCm 7.2 upgrade, eager mode non determinism
                 "alexnet",
                 "demucs",
+                # Flip-flops pass <-> fail_accuracy on gfx950; tolerate both
+                # rather than pinning a status. See #190086 discussion / #189904.
+                "convnextv2_nano.fcmae_ft_in22k_in1k",
             }
         )
 
