@@ -873,6 +873,43 @@ class TestTransformers(NNTestCase):
 
         self.assertEqual(eager_out, compiled_out)
 
+    def test_transformer_encoder_layer_fwd_unbacked(self, device):
+        # Regression for a data-dependent error in the meta rule for
+        # _transformer_encoder_layer_fwd. The rule used to test
+        # `src.numel() == 0` directly, which raises GuardOnDataDependentSymNode
+        # when src has an unbacked (data-dependent) size during fake-tensor
+        # tracing. Routing that check through guard_or_false lets an undecidable
+        # size trace instead of erroring. Drive the fused op's meta with an
+        # unbacked leading dim and assert it traces.
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(n_t):
+            n = n_t.item()
+            torch._check(n >= 0)
+            embed_dim, num_heads = 16, 2
+            src = torch.randn(n, 10, embed_dim, device=device)
+            qkv_weight = torch.randn(3 * embed_dim, embed_dim, device=device)
+            qkv_bias = torch.randn(3 * embed_dim, device=device)
+            proj_weight = torch.randn(embed_dim, embed_dim, device=device)
+            proj_bias = torch.randn(embed_dim, device=device)
+            norm_weight_1 = torch.randn(embed_dim, device=device)
+            norm_bias_1 = torch.randn(embed_dim, device=device)
+            norm_weight_2 = torch.randn(embed_dim, device=device)
+            norm_bias_2 = torch.randn(embed_dim, device=device)
+            ffn_weight_1 = torch.randn(4 * embed_dim, embed_dim, device=device)
+            ffn_bias_1 = torch.randn(4 * embed_dim, device=device)
+            ffn_weight_2 = torch.randn(embed_dim, 4 * embed_dim, device=device)
+            ffn_bias_2 = torch.randn(embed_dim, device=device)
+            return torch.ops.aten._transformer_encoder_layer_fwd(
+                src, embed_dim, num_heads, qkv_weight, qkv_bias,
+                proj_weight, proj_bias, False, False, 1e-5,
+                norm_weight_1, norm_bias_1, norm_weight_2, norm_bias_2,
+                ffn_weight_1, ffn_bias_1, ffn_weight_2, ffn_bias_2, None, None,
+            )
+
+        # Without the fix this raises GuardOnDataDependentSymNode while tracing.
+        make_fx(fn, tracing_mode="symbolic")(torch.tensor(3, device=device))
+
     @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/101787")
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
     def test_decoder_padding_and_src_mask_bool(self):
