@@ -612,6 +612,15 @@ class TestStatelessRNGCompile(TestCase):
 
         self.assertEqual(f(key), random.uniform(key, (100,)))
 
+    def test_bits_fullgraph(self, device):
+        key = random.key(42, device=device)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(key):
+            return random.bits(key, (100,), dtype=torch.uint64)
+
+        self.assertEqual(f(key), random.bits(key, (100,), dtype=torch.uint64))
+
     def test_normal_fullgraph(self, device):
         key = random.key(42, device=device)
 
@@ -700,12 +709,87 @@ class TestStatelessRNGCompile(TestCase):
         self.assertEqual(torch.compile(f, dynamic=False)(key, x), f(key, x))
 
 
+class TestStatelessRNGBits(TestCase):
+    @parametrize("dtype", [torch.uint32, torch.uint64])
+    def test_basic_shape_and_dtype(self, device, dtype):
+        key = random.key(42, device=device)
+        result = random.bits(key, (100,), dtype=dtype)
+        self.assertEqual(result.shape, (100,))
+        self.assertEqual(result.dtype, dtype)
+        self.assertEqual(result.device, torch.device(device))
+
+    def test_default_dtype_is_uint32(self, device):
+        key = random.key(42, device=device)
+        self.assertEqual(random.bits(key, (10,)).dtype, torch.uint32)
+
+    @parametrize("dtype", [torch.uint32, torch.uint64])
+    def test_determinism(self, device, dtype):
+        key = random.key(42, device=device)
+        a = random.bits(key, (1000,), dtype=dtype)
+        b = random.bits(key, (1000,), dtype=dtype)
+        self.assertEqual(a, b)
+
+    @parametrize("dtype", [torch.uint32, torch.uint64])
+    def test_different_keys_produce_different_bits(self, device, dtype):
+        a = random.bits(random.key(1, device=device), (1000,), dtype=dtype)
+        b = random.bits(random.key(2, device=device), (1000,), dtype=dtype)
+        self.assertNotEqual(a, b)
+
+    @parametrize("dtype", [torch.uint32, torch.uint64])
+    def test_batched_keys(self, device, dtype):
+        key = random.key(42, device=device)
+        keys = random.split(key, 4).unsqueeze(-2)  # (4, 1, 2)
+        result = random.bits(keys, (4, 100), dtype=dtype)
+        self.assertEqual(result.shape, (4, 100))
+        for i in range(4):
+            self.assertEqual(result[i], random.bits(keys[i], (100,), dtype=dtype))
+
+    @parametrize("dtype", [torch.uint32, torch.uint64])
+    def test_inplace(self, device, dtype):
+        key = random.key(42, device=device)
+        result = torch.empty(1000, dtype=dtype, device=device)
+        out = random.bits_(key, result)
+        self.assertIs(out, result)
+        self.assertEqual(result, random.bits(key, (1000,), dtype=dtype))
+
+    def test_uint64_packs_two_uint32(self, device):
+        # Each uint64 packs a consecutive pair of uint32 outputs:
+        # uint64[i] == (uint32[2i] << 32) | uint32[2i + 1]. In little-endian
+        # memory that reads back as the uint32 pairs swapped.
+        key = random.key(42, device=device)
+        n = 128
+        b32 = random.bits(key, (2 * n,), dtype=torch.uint32)
+        b64 = random.bits(key, (n,), dtype=torch.uint64)
+        self.assertEqual(b64.view(torch.uint32), b32.reshape(-1, 2).flip(-1).reshape(-1))
+
+    @parametrize("dtype", [torch.uint32, torch.uint64])
+    def test_statistically_uniform(self, device, dtype):
+        key = random.key(42, device=device)
+        result = random.bits(key, (100000,), dtype=dtype)
+        width = 32 if dtype == torch.uint32 else 64
+        normalized = result.double() / float(2**width)
+        self.assertTrue(abs(normalized.mean().item() - 0.5) < 0.01)
+
+    def test_error_wrong_self_dtype(self, device):
+        key = random.key(42, device=device)
+        result = torch.empty(100, dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "must have dtype uint32 or uint64"):
+            random.bits_(key, result)
+
+    def test_error_wrong_key_dtype(self, device):
+        key = torch.tensor([42, 0], dtype=torch.float32, device=device)
+        result = torch.empty(100, dtype=torch.uint32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "key must have dtype uint64"):
+            random.bits_(key, result)
+
+
 instantiate_device_type_tests(TestStatelessRNGKey, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestStatelessRNGKeySplit, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestStatelessRNGKeyFoldIn, globals(), only_for=("cuda",))
 instantiate_device_type_tests(
     TestStatelessRNGDistribution, globals(), only_for=("cuda",)
 )
+instantiate_device_type_tests(TestStatelessRNGBits, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestStatelessRNGCompile, globals(), only_for=("cuda",))
 
 
