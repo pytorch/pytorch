@@ -141,9 +141,9 @@ class StageTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ accelerators"
     )
     @parametrize("ModelClass", [ExampleCode, MultiMLP])
     def test_tracer(self, ModelClass):
@@ -190,9 +190,9 @@ class StageTest(MultiProcContinuousTest):
                 f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
             )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ accelerators"
     )
     @parametrize("ModelClass", [ModelWithKwargs])
     def test_tracer_kwargs(self, ModelClass):
@@ -244,9 +244,9 @@ class StageTest(MultiProcContinuousTest):
                 f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
             )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ accelerators"
     )
     def test_manual(self):
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
@@ -278,9 +278,9 @@ class StageTest(MultiProcContinuousTest):
             ref_out = full_mod(x)
             torch.testing.assert_close(out, ref_out)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ accelerators"
     )
     def test_custom_dw_with_fb_schedule(self):
         """Tests that separate weight grad function 'dw_runner' gets run under a schedule that's only aware of F/B."""
@@ -340,9 +340,9 @@ class StageTest(MultiProcContinuousTest):
             ref_out = full_mod(x)
             torch.testing.assert_close(out, ref_out)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ accelerators"
     )
     def test_output_chunks_memory_usage(self):
         """Test that output_chunks doesn't store memory for non-first stages."""
@@ -417,9 +417,9 @@ class StageNegativeTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ accelerators"
     )
     def test_shape_prop_mismatch(self):
         """Tests shape prop errors are raised"""
@@ -466,9 +466,9 @@ class StageNegativeTest(MultiProcContinuousTest):
             with self.assertRaisesRegex(PipeliningMetadataError, "dtype mismatch"):
                 _run_step(x)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ accelerators"
     )
     def test_custom_dw_errors(self):
         """Tests expected errors are raised"""
