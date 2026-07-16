@@ -3298,6 +3298,13 @@ def gradcheck_wrapper_masked_pointwise_operation(op, input, *args, **kwargs):
     return output
 
 
+def gradcheck_wrapper_native_norms(op, input, *args, **kwargs):
+    """Gradcheck wrapper for the various native_*_norm operations.  All of them return
+    (norm, mean, rstd), but checking gradients against mean and rstd is pointless."""
+    norm, mean, rstd = op(input, *args, **kwargs)
+    return norm
+
+
 def clone_sample(sample, **kwargs):
     """
     Given a SampleInput, this function analyzes its input, args and kwargs,
