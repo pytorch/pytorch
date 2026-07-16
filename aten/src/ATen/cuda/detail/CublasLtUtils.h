@@ -184,6 +184,11 @@ inline int cublasLtMatmulScaleMode(
           "scaled_gemm with `torch.float8_e8m0fnu` scales of 1x32 blocks "
           "is only supported for CUDA 12.8 and above");
 #endif
+#if defined(USE_ROCM) && ROCM_VERSION >= 71300
+    case at::blas::ScalingType::BlockWiseBlk32Ue8m0_32_8_EXT:
+      TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
+      return CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+#endif
     case at::blas::ScalingType::BlockWise1x16:
       TORCH_CHECK(scale_dtype == kFloat8_e4m3fn);
 #if CUDA_VERSION >= 12080
