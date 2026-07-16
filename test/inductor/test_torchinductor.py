@@ -7850,10 +7850,6 @@ for dtype in (torch.int32, torch.int64):
             reference_in_float=False,
         )
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM and not torch.cuda.has_magma,
-        "ROCm hipsolver backend does not currently support eig",
-    )
     @xfail_if_mps_unimplemented  # aten::linalg_eig not implemented for MPS
     @skipIfNoLapack
     def test_linalg_eig_stride_consistency(self):
