@@ -511,6 +511,9 @@ aten::_pdist_backward
 aten::_pdist_backward.out
 aten::_pdist_forward
 aten::_pdist_forward.out
+aten::_philox_bits
+aten::_philox_bits.out
+aten::_philox_bits_
 aten::_philox_key_fold_in
 aten::_philox_key_fold_in.Tensor
 aten::_philox_key_split
