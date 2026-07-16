@@ -1932,28 +1932,26 @@ void convert_indices_from_csr_to_coo_cpu(
           auto b = i_ / nrows;
           auto i = i_ % nrows;
 
-          _offset = crow_indices_data_in[b * (nrows + 1) + i];
+          auto start_offset = crow_indices_data_in[b * (nrows + 1) + i];
           auto end_offset = crow_indices_data_in[b * (nrows + 1) + i + 1];
 
           TORCH_CHECK(
               start_offset <= end_offset,
               "compressed_indices must be monotonically increasing, but got start_offset ",
-              start_offset, " > end_o
-              fset ", end_offse
-              , " at inde
-               ", i);
+              start_offset,
+              " > end_offset ",
+              end_offset,
+              " at index ",
+              i);
 
-    
-                   TORCH_CHECK(
+          TORCH_CHECK(
               end_offset <= nnz,
-              "compressed_indices end_offset ", end_offse
-              ,
-         
-              otal number of non-zero elements (nnz) ", nnz);
+              "compressed_indices end_offset ",
+              end_offset,
+              " exceeds total number of non-zero elements (nnz) ",
+              nnz);
 
-   
-                   
-
+          std::fill(
               &data_out[b * nnz + start_offset],
               &data_out[b * nnz + end_offset],
               static_cast<output_t>(i));
