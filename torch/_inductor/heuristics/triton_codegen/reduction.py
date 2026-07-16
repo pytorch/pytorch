@@ -614,6 +614,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
             else:
                 MAX_NUM_STAGES = 1
+            # TODO: Remove this guard once triton-lang/triton#10474 is fixed.
+            # TMA descriptor loads with num_stages >= 3 currently trigger
+            # CUDA_ERROR_MISALIGNED_ADDRESS, so cap NUM_STAGES at 2 when TMA is used.
             if inductor_meta.get("tma_min_block_sizes"):
                 MAX_NUM_STAGES = min(MAX_NUM_STAGES, 2)
             c.kwargs["NUM_STAGES"] = min(  # type: ignore[union-attr]
