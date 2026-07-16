@@ -493,7 +493,7 @@ def autotune_custom_op(
                            and return real tensors for performance measurement.
 
     Returns:
-        Tuple of (IR node representing the optimized operation result, winning ChoiceCaller)
+        Tuple of (IR node representing the optimized operation result, winning choice)
 
     Raises:
         TypeError: If decompositions is not a list/tuple
