@@ -489,10 +489,10 @@ class _V:
         """The kernel currently being generated"""
         return _kernel._get_handler()
 
-    # debug and interpreter intentionally keep an inferred (dynamic) return
-    # type: DebugContext dispatches via __getattr__ and InterpreterShim carries
-    # an Optional current_node, so pinning the concrete class here surfaces
-    # spurious callable/None errors at unrelated call sites.
+    # debug and interpreter intentionally keep an inferred (dynamic) return type.
+    # DebugContext dispatches via __getattr__ and InterpreterShim carries an
+    # Optional current_node, so pinning the concrete class here surfaces spurious
+    # callable/None errors at unrelated call sites.
     @property
     def debug(self):
         return _debug._get_handler()
