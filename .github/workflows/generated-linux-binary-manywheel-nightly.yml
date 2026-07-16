@@ -1591,7 +1591,9 @@ jobs:
     name: ${{ matrix.build_name }}-extract
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: [manywheel-build]
-    runs-on: "linux.4xlarge"
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: python:3.11
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -1643,6 +1645,8 @@ jobs:
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
       LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
     steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -1657,10 +1661,10 @@ jobs:
       - name: Extract libtorch from wheel
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          mkdir -p "${RUNNER_TEMP}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
+            --output-dir "${RUNNER_TEMP}/libtorch_output" \
             --platform linux \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT"
