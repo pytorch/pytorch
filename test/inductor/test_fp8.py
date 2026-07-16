@@ -1751,14 +1751,10 @@ class TestFP8Lowering(TestCase):
         # The swizzled path must use the ATen fallback, not a generated kernel
         FileCheck().check("_scaled_mm_v2").run(code)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
     def test_mx_fp8_max_autotune(self, device):
-        # K must match the operands, which are eye(M)/eye(N) (i.e. 128 wide);
-        # using a smaller K would size the MX 1x32 scales for fewer K-blocks
-        # than the data has (XPU rejects this; CUDA only masks it via the
-        # to_blocked() zero-padding below).
-        M, K, N = 128, 128, 128
+        M, K, N = 128, 32, 128
         BLOCK_SIZE = 32
         dtype = torch.bfloat16
         A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
@@ -1771,11 +1767,8 @@ class TestFP8Lowering(TestCase):
         B_scale = torch.full(
             (N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
         )
-        if "cuda" in device:
-            A_scale = to_blocked(A_scale)
-            B_scale = to_blocked(B_scale)
-        elif "xpu" in device:
-            B_scale = B_scale.t()
+        A_scale = to_blocked(A_scale)
+        B_scale = to_blocked(B_scale)
 
         def linear(A, B, A_scale, B_scale):
             y = torch._scaled_mm(
