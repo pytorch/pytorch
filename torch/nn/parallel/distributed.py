@@ -691,11 +691,17 @@ class DistributedDataParallel(Module, Joinable):
                       CPU modules, it must be ``None``, and the module itself
                       dictates the output location. (default: ``device_ids[0]``
                       for single-device modules)
-        broadcast_buffers (bool): Flag that enables syncing (broadcasting)
+        broadcast_buffers (bool or None): Flag that enables syncing (broadcasting)
                           buffers of the module at beginning of the ``forward``
-                          function. (default: ``True``)
+                          function. (default: ``None``)
+
+                          .. deprecated:: 2.13
+                              Use ``forward_sync_buffers`` instead.
         init_sync (bool): Whether to sync during initialization to verify param
                           shapes and broadcast parameters and buffers.
+                          Note: the deprecated ``broadcast_buffers=False``
+                          excludes buffers from this init sync. The replacement
+                          ``forward_sync_buffers`` does not affect init sync.
                           WARNING: if this is set to False the user is required
                           to ensure themselves that the weights are the same on
                           all ranks.
@@ -784,6 +790,14 @@ class DistributedDataParallel(Module, Joinable):
                     ``gradient_as_bucket_view`` alone cannot avoid copies because
                     the bucket view alias is destroyed every iteration.
                     (default: ``False``)
+        forward_sync_buffers (bool or None): Flag that enables syncing
+                    (broadcasting) buffers of the module at runtime, including
+                    at the beginning of ``forward`` and after uneven-input
+                    joins. Does not affect initialization sync (see
+                    ``init_sync``); buffers are always synced at init
+                    regardless of this flag. Replaces the deprecated
+                    ``broadcast_buffers`` argument. When ``None``, defaults
+                    to ``True``. (default: ``None``)
 
 
     Attributes:
@@ -805,7 +819,7 @@ class DistributedDataParallel(Module, Joinable):
         device_ids=None,
         output_device=None,
         dim=0,
-        broadcast_buffers=True,
+        broadcast_buffers=None,
         init_sync=True,
         process_group=None,
         bucket_cap_mb=None,
@@ -820,6 +834,7 @@ class DistributedDataParallel(Module, Joinable):
         skip_all_reduce_unused_params=False,
         bucket_cap_mb_list: list[int] | None = None,
         batched_grad_copy=False,
+        forward_sync_buffers: bool | None = None,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -943,7 +958,36 @@ class DistributedDataParallel(Module, Joinable):
         self.dim = dim
         self.module = module
         self.device = next(iter(self._module_parameters)).device
-        self.broadcast_buffers = broadcast_buffers
+        if broadcast_buffers is not None:
+            if forward_sync_buffers is not None:
+                warnings.warn(
+                    "Both `broadcast_buffers` and `forward_sync_buffers` were "
+                    "specified. `broadcast_buffers` is deprecated and its value "
+                    "is ignored when `forward_sync_buffers` is provided.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+            else:
+                warnings.warn(
+                    "`broadcast_buffers` is deprecated. Use `forward_sync_buffers` "
+                    "instead. IMPORTANT: unlike `broadcast_buffers=False`, "
+                    "`forward_sync_buffers=False` still syncs buffers at "
+                    "init. If you rely on buffers NOT being synced at "
+                    "init (e.g. rank-local buffers), keep using "
+                    "`broadcast_buffers=False` until `init_sync_buffers` "
+                    "is available.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+        if forward_sync_buffers is not None:
+            self.forward_sync_buffers = forward_sync_buffers
+            init_sync_buffers = True
+        else:
+            effective_broadcast = (
+                broadcast_buffers if broadcast_buffers is not None else True
+            )
+            self.forward_sync_buffers = effective_broadcast
+            init_sync_buffers = effective_broadcast
         self.find_unused_parameters = find_unused_parameters
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
@@ -1025,7 +1069,7 @@ class DistributedDataParallel(Module, Joinable):
                 broadcast_bucket_size=self.broadcast_bucket_size,
                 src=0,
                 params_and_buffers_to_ignore=self.parameters_to_ignore,
-                broadcast_buffers=self.broadcast_buffers,
+                broadcast_buffers=init_sync_buffers,
             )
 
         # In debug mode, build a mapping of parameter index -> parameter.
@@ -1109,6 +1153,14 @@ class DistributedDataParallel(Module, Joinable):
 
         # Whether or not DDPSink performs a clone.
         self._ddp_sink_clone = True
+
+    @property
+    def broadcast_buffers(self) -> bool:
+        return self.forward_sync_buffers
+
+    @broadcast_buffers.setter
+    def broadcast_buffers(self, value: bool) -> None:
+        self.forward_sync_buffers = value
 
     def _register_accum_grad_hook(self):
         import torch.distributed._functional_collectives as fcol
@@ -1422,7 +1474,7 @@ class DistributedDataParallel(Module, Joinable):
             self.module.__class__.__name__,
             [] if self.device_ids is None else self.device_ids,
             -1 if self.output_device is None else self.output_device,
-            self.broadcast_buffers,
+            self.forward_sync_buffers,
             has_sync_bn,
             static_graph,
         )
@@ -1436,6 +1488,8 @@ class DistributedDataParallel(Module, Joinable):
         del attrs["process_group"]
         del attrs["reducer"]
         del attrs["logger"]
+        # broadcast_buffers is a property; include it for backward compat.
+        attrs["broadcast_buffers"] = self.forward_sync_buffers
         return attrs
 
     def __setstate__(self, state):
@@ -1444,6 +1498,10 @@ class DistributedDataParallel(Module, Joinable):
         super().__setstate__(state)
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
+        # broadcast_buffers is now a property; pop it so it doesn't shadow.
+        # Old pickles may only have broadcast_buffers; use it to seed forward_sync_buffers.
+        old_broadcast = self.__dict__.pop("broadcast_buffers", True)
+        self.__dict__.setdefault("forward_sync_buffers", old_broadcast)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # In debug mode, build a mapping of parameter index -> parameter.
         param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
@@ -1513,7 +1571,7 @@ class DistributedDataParallel(Module, Joinable):
         Assign self.module.named_buffers to self.modules_buffers.
 
         Assigns module buffers to self.modules_buffers which are then used to
-        broadcast across ranks when broadcast_buffers=True. Note that this
+        broadcast across ranks when forward_sync_buffers=True. Note that this
         must be called every time buffers need to be synced because buffers can
         be reassigned by user module,
         see https://github.com/pytorch/pytorch/issues/63916.
@@ -1898,7 +1956,7 @@ class DistributedDataParallel(Module, Joinable):
             broadcast_bucket_size=self.broadcast_bucket_size,
             src=self._authoritative_rank,
             params_and_buffers_to_ignore=self.parameters_to_ignore,
-            broadcast_buffers=self.broadcast_buffers,
+            broadcast_buffers=self.forward_sync_buffers,
         )
 
     # Schedule comm ops to match those scheduled in the reducer's backward
@@ -2324,7 +2382,7 @@ class DistributedDataParallel(Module, Joinable):
     def will_sync_module_buffers(self):
         return (
             self.require_forward_param_sync
-            and self.broadcast_buffers
+            and self.forward_sync_buffers
             and len(self.modules_buffers) > 0
         )
 

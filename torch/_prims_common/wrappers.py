@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 import types
+import typing
 import warnings
 from collections.abc import Callable, Sequence
 from functools import wraps
@@ -83,12 +84,9 @@ def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
 
 
 def _annotation_has_type(*, typ, annotation):
-    if hasattr(annotation, "__args__"):
-        for a in annotation.__args__:
-            if _annotation_has_type(typ=typ, annotation=a):
-                return True
-        return False
-
+    args = typing.get_args(annotation)
+    if args:
+        return any(_annotation_has_type(typ=typ, annotation=a) for a in args)
     return typ is annotation
 
 

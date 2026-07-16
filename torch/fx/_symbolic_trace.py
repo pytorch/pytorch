@@ -17,7 +17,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_reference_type, is_opaque_type
+from torch._library.opaque_object import is_custom_class, is_opaque_symbolic_type
 
 from ._compatibility import compatibility
 from ._lazy_graph_module import _make_graph_module
@@ -428,7 +428,7 @@ class Tracer(TracerBase):
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
         if isinstance(a, _constant_attribute_types) or (
-            is_opaque_reference_type(type(a))
+            is_opaque_symbolic_type(type(a))
         ):
             qualname: str | None = self.tensor_attrs.get(a)
 
@@ -441,7 +441,7 @@ class Tracer(TracerBase):
                     base_name = "_torchbind_obj"
                 elif isinstance(a, pytree.TreeSpec):
                     base_name = "_tree_spec_constant"
-                elif is_opaque_type(type(a)):
+                elif is_custom_class(type(a)):
                     base_name = "_opaque_obj"
                 else:
                     raise RuntimeError(
@@ -746,7 +746,9 @@ class Tracer(TracerBase):
 
             # TODO: annotate return type. inspect.get_annotations(flatten_fn)
             # leaks the return annotation into the generated forward() code.
-            def flatten_fn(*args: Any):  # pyrefly: ignore[unannotated-parameter]
+            def flatten_fn(  # pyrefly: ignore[unannotated-parameter, unannotated-return]
+                *args: Any,
+            ):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
@@ -1057,7 +1059,7 @@ def _create_wrapped_func(orig_fn: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(orig_fn)
     def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> Any:
         """
-        Given an closed-over ``orig_function`` to invoke, search the args and kwargs for
+        Given a closed-over ``orig_function`` to invoke, search the args and kwargs for
         a Proxy object. If there is one, emit a ``call_function`` node to preserve the
         call to this leaf function directly. Otherwise, just return the results of
         this function call, as this function is not being traced.

@@ -53,6 +53,10 @@
 #include <thread>
 #include <unordered_map>
 
+namespace at::native {
+void* getCurrentCUDASolverDnHandleLazy();
+}
+
 using namespace torch;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -372,6 +376,9 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   Py_ssize_t num_tensors = PyTuple_GET_SIZE(tensors_o);
 
   c10::SmallVector<at::Tensor> tensors;
+  if (num_tensors > 0) {
+    tensors.reserve(static_cast<size_t>(num_tensors));
+  }
   for (const auto i : c10::irange(num_tensors)) {
     PyObject* _tensor = PyTuple_GET_ITEM(tensors_o, i);
     TORCH_CHECK(
@@ -383,6 +390,10 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   }
 
   c10::SmallVector<at::Scalar> extra_args;
+  const Py_ssize_t num_extra_args = kwargs_o ? PyDict_Size(kwargs_o) : 0;
+  if (num_extra_args > 0) {
+    extra_args.reserve(static_cast<size_t>(num_extra_args));
+  }
   PyObject* key = nullptr;
   PyObject* value = nullptr;
   Py_ssize_t pos = 0;
@@ -594,6 +605,14 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
     }
     return dict;
   };
+  const auto statArrayMapToDict = [&](const auto& stat_array_map) {
+    py::dict dict;
+    for (const auto& [mempool_id, stat_array] : stat_array_map) {
+      dict[py::make_tuple(mempool_id.first, mempool_id.second)] =
+          statArrayToDict(stat_array);
+    }
+    return dict;
+  };
 
   const DeviceStats stats =
       c10::cuda::CUDACachingAllocator::getDeviceStats(device_index);
@@ -612,6 +631,8 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   result["inactive_split"] = statArrayToDict(stats.inactive_split);
   result["allocated_bytes"] = statArrayToDict(stats.allocated_bytes);
   result["reserved_bytes"] = statArrayToDict(stats.reserved_bytes);
+  result["reserved_bytes_by_private_pools"] =
+      statArrayMapToDict(stats.reserved_bytes_by_private_pools);
   result["active_bytes"] = statArrayToDict(stats.active_bytes);
   result["inactive_split_bytes"] = statArrayToDict(stats.inactive_split_bytes);
   result["requested_bytes"] = statArrayToDict(stats.requested_bytes);
@@ -714,7 +735,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   c10::cuda::MempoolId_t mempool_id = {0, 0};
   bool include_traces = true;
 
-  if (arg && arg != Py_None) {
+  if (arg && !Py_IsNone(arg)) {
     TORCH_CHECK(PyTuple_Check(arg), "Expected tuple or None");
     Py_ssize_t size = PyTuple_Size(arg);
 
@@ -739,7 +760,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
           PyBool_Check(traces.get()), "include_traces must be a boolean");
       mempool_id = c10::cuda::MempoolId_t(
           THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
-      include_traces = (traces.get() == Py_True);
+      include_traces = (Py_IsTrue(traces.get()));
     } else {
       TORCH_CHECK(false, "Expected tuple of size 2 or 3");
     }
@@ -874,26 +895,29 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
     TORCH_CHECK(false, "unreachable");
   };
 
+  auto traceEntryToDict = [&](const TraceEntry& te) {
+    py::dict trace_entry;
+    if (te.context_) {
+      auto sc = getCapturedTracebackFromContext(te.context_);
+      to_gather_frames.emplace_back(sc);
+      to_gather_dest.emplace_back(trace_entry);
+    }
+    trace_entry[action_s] = action_to_str(te.action_);
+    trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
+        te.addr_;
+    trace_entry[size_s] = te.size_;
+    trace_entry[stream_s] = int64_t(te.stream_);
+    trace_entry[time_us_s] = te.time_.t_;
+    trace_entry[compile_context_s] = te.compile_context_;
+    trace_entry[user_metadata_s] = te.user_metadata_;
+    trace_entry[pool_id_s] = te.mempool_;
+    return trace_entry;
+  };
+
   for (const auto& traceInfo : snapshot.device_traces) {
     py::list trace;
     for (const auto& te : traceInfo) {
-      py::dict trace_entry;
-      if (te.context_) {
-        // without further compression frames can get really large on dump
-        auto sc = getCapturedTracebackFromContext(te.context_);
-        to_gather_frames.emplace_back(sc);
-        to_gather_dest.emplace_back(trace_entry);
-      }
-      trace_entry[action_s] = action_to_str(te.action_);
-      trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
-          te.addr_;
-      trace_entry[size_s] = te.size_;
-      trace_entry[stream_s] = int64_t(te.stream_);
-      trace_entry[time_us_s] = te.time_.t_;
-      trace_entry[compile_context_s] = te.compile_context_;
-      trace_entry[user_metadata_s] = te.user_metadata_;
-      trace_entry[pool_id_s] = te.mempool_;
-      trace.append(trace_entry);
+      trace.append(traceEntryToDict(te));
     }
     traces.append(trace);
   }
@@ -920,6 +944,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str roundup_power2_divisions_s = "roundup_power2_divisions";
   py::str graph_capture_record_stream_reuse_s =
       "graph_capture_record_stream_reuse";
+  py::str max_round_threshold_s = "max_round_threshold";
+  py::str max_cached_size_s = "max_cached_size";
 
   allocator_settings[last_allocator_settings_s] =
       snapshot.config_metadata.last_allocator_settings;
@@ -937,6 +963,10 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       snapshot.config_metadata.pinned_use_host_register;
   allocator_settings[graph_capture_record_stream_reuse_s] =
       snapshot.config_metadata.graph_capture_record_stream_reuse;
+  allocator_settings[max_round_threshold_s] =
+      int64_t(snapshot.config_metadata.max_round_threshold);
+  allocator_settings[max_cached_size_s] =
+      int64_t(snapshot.config_metadata.max_cached_size);
   unsigned int roundup_key = 1;
   py::dict roundup_settings;
   for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {
@@ -946,11 +976,56 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   }
   allocator_settings[roundup_power2_divisions_s] = roundup_settings;
 
+  // Collect host allocator data
+  auto* host_alloc = at::getHostAllocator(at::kCUDA);
+  py::list host_segments_list;
+  py::list host_traces_list;
+  if (host_alloc && host_alloc->is_history_enabled()) {
+    auto host_segs = host_alloc->get_segments();
+    for (const auto& seg : host_segs) {
+      py::dict segmentDict;
+      segmentDict[device_s] = -1;
+      segmentDict[address_s] = seg.address;
+      segmentDict[total_size_s] = seg.size;
+      segmentDict[allocated_size_s] = seg.allocated ? seg.size : 0;
+      segmentDict[active_size_s] = seg.active ? seg.size : 0;
+      segmentDict[requested_size_s] = seg.size;
+      segmentDict[stream_s] = int64_t(0);
+      segmentDict[segment_type_s] = small_s;
+      segmentDict[segment_pool_id] = seg.owner_private_pool_id;
+      segmentDict[is_expandable_s] = false;
+      add_frame_key(segmentDict, seg.context_when_allocated);
+
+      py::dict blockDict;
+      blockDict[address_s] = seg.address;
+      blockDict[size_s] = seg.size;
+      blockDict[requested_size_s] = seg.size;
+      blockDict[state_s] =
+          (seg.allocated ? active_allocated_s
+                         : (seg.active ? active_pending_free_s : inactive_s));
+      add_frame_key(blockDict, seg.context_when_allocated);
+
+      py::list blocks;
+      blocks.append(blockDict);
+      segmentDict[blocks_s] = blocks;
+      host_segments_list.append(segmentDict);
+    }
+
+    if (include_traces) {
+      auto host_trace_entries = host_alloc->get_traces();
+      for (const auto& te : host_trace_entries) {
+        host_traces_list.append(traceEntryToDict(te));
+      }
+    }
+  }
+
   py::dict result;
   result["segments"] = segments;
   result["device_traces"] = traces;
   result["allocator_settings"] = allocator_settings;
   result["external_annotations"] = external_annotations;
+  result["host_segments"] = host_segments_list;
+  result["host_traces"] = host_traces_list;
 
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
@@ -1138,7 +1213,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
                << ", pci_domain_id=" << prop.pciDomainID
                << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
                << "MB)";
-        return stream.str();
+        return std::move(stream).str();
       });
 
   m.def(
@@ -1152,8 +1227,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
           bool,
           bool,
           bool,
-          const std::vector<std::string>&)>(
-          torch::cuda::_record_memory_history));
+          const std::vector<std::string>&,
+          bool,
+          bool)>(torch::cuda::_record_memory_history));
 
   m.def(
       "_cuda_record_memory_history",
@@ -1165,11 +1241,16 @@ static void registerCudaDeviceProperties(PyObject* module) {
           bool,
           bool,
           bool,
-          const std::vector<std::string>&)>(
-          torch::cuda::_record_memory_history));
+          const std::vector<std::string>&,
+          bool,
+          bool)>(torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
+  });
+
+  m.def("_cuda_memoryMetadataSupported", []() {
+    return c10::cuda::CUDACachingAllocator::supportsUserMetadata();
   });
 
   m.def("_cuda_setMemoryMetadata", [](const std::string& metadata) {
@@ -1603,6 +1684,15 @@ PyObject* THCPModule_getCurrentBlasHandle_wrap(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_getCurrentSolverHandle_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  void* handle = at::native::getCurrentCUDASolverDnHandleLazy();
+  return PyLong_FromVoidPtr(handle);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THCPModule_clearBlasWorkspaces_wrap(
     PyObject* self,
     PyObject* noargs) {
@@ -1812,6 +1902,29 @@ PyObject* THCPModule_cuda_tunableop_get_max_tuning_iterations(
   HANDLE_TH_ERRORS
   return THPUtils_packInt32(
       at::cuda::tunable::getTuningContext()->GetMaxTuningIterations());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_tunableop_set_cublaslt_requested_algo_count(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(arg),
+      "cuda_tunableop_set_cublaslt_requested_algo_count expects an int, but got ",
+      THPUtils_typename(arg));
+  auto count = static_cast<int>(THPUtils_unpackLong(arg));
+  at::cuda::tunable::getTuningContext()->SetCublasLtRequestedAlgoCount(count);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_tunableop_get_cublaslt_requested_algo_count(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt32(
+      at::cuda::tunable::getTuningContext()->GetCublasLtRequestedAlgoCount());
   END_HANDLE_TH_ERRORS
 }
 
@@ -2117,6 +2230,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_getCurrentBlasHandle_wrap,
      METH_NOARGS,
      nullptr},
+    {"_cuda_getCurrentSolverHandle",
+     THCPModule_getCurrentSolverHandle_wrap,
+     METH_NOARGS,
+     nullptr},
     {"_cuda_clearCublasWorkspaces",
      THCPModule_clearBlasWorkspaces_wrap,
      METH_NOARGS,
@@ -2305,6 +2422,14 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_tunableop_get_max_tuning_iterations",
      THCPModule_cuda_tunableop_get_max_tuning_iterations,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_tunableop_set_cublaslt_requested_algo_count",
+     THCPModule_cuda_tunableop_set_cublaslt_requested_algo_count,
+     METH_O,
+     nullptr},
+    {"_cuda_tunableop_get_cublaslt_requested_algo_count",
+     THCPModule_cuda_tunableop_get_cublaslt_requested_algo_count,
      METH_NOARGS,
      nullptr},
     {"_cuda_tunableop_set_filename",

@@ -29,7 +29,7 @@ static constexpr char NoneType = 'n';
 namespace {
 
 inline bool PyNone_Check(PyObject* o) {
-  return o == Py_None;
+  return Py_IsNone(o);
 }
 
 template <typename T>

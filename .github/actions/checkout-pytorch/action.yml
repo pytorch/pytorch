@@ -17,6 +17,18 @@ inputs:
   checkout-mode:
     description: 'Mode of checkout; one of "normal", "blobless", "treeless".'
     default: "normal"
+  sparse-checkout:
+    description: >
+      Newline-separated list of patterns to sparse-checkout. When set, only the
+      matching paths are materialized in the working tree. Ignored if the
+      partial-clone filter (from checkout-mode) is also honored by the underlying
+      action; passed through to actions/checkout's sparse-checkout input.
+    required: false
+    default: ""
+  sparse-checkout-cone-mode:
+    description: Whether to use cone-mode when doing a sparse checkout.
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -38,6 +50,13 @@ runs:
         cd "${GITHUB_WORKSPACE}"
         git config --global fetch.parallel 0
         git config --global submodule.fetchJobs 0
+
+        # Retry throttled fetches instead of failing hard. Native in git >= 2.54
+        # (retries HTTP 429, honoring Retry-After); maxRetries defaults to 0 so
+        # it must be set explicitly. Inert no-op on older git, so set uncondi-
+        # tionally. retryAfter is the fallback delay when no Retry-After header.
+        git config --global http.maxRetries 3
+        git config --global http.retryAfter 2
 
         # Clean workspace. The default checkout action should also do this, but
         # do it here as well just in case
@@ -65,6 +84,8 @@ runs:
         show-progress: false
         filter: ${{ env.filter }}
         submodules-filter: ${{ env.filter }}
+        sparse-checkout: ${{ inputs.sparse-checkout }}
+        sparse-checkout-cone-mode: ${{ inputs.sparse-checkout-cone-mode }}
 
     - name: Clean submodules post checkout
       id: clean-submodules
@@ -92,12 +113,14 @@ runs:
           $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
         }
         echo "${GITHUB_WORKSPACE}"
+        # Clear the contents, not the dir itself, which can't be unlinked when
+        # its parent is root-owned (sudo-less containers). find (not a glob) so
+        # .git is removed too, letting the retry checkout clone in cleanly.
         if [ -z "${NO_SUDO}" ]; then
-          retry sudo rm -rf "${GITHUB_WORKSPACE}"
+          retry sudo find "${GITHUB_WORKSPACE}" -mindepth 1 -delete
         else
-          retry rm -rf "${GITHUB_WORKSPACE}"
+          retry find "${GITHUB_WORKSPACE}" -mindepth 1 -delete
         fi
-        mkdir "${GITHUB_WORKSPACE}"
 
     - name: Checkout PyTorch (try again)
       uses: pytorch/test-infra/.github/actions/checkout@main
@@ -113,3 +136,5 @@ runs:
         show-progress: false
         filter: ${{ env.filter }}
         submodules-filter: ${{ env.filter }}
+        sparse-checkout: ${{ inputs.sparse-checkout }}
+        sparse-checkout-cone-mode: ${{ inputs.sparse-checkout-cone-mode }}

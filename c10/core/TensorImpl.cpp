@@ -4,6 +4,7 @@
 #include <c10/core/CopyBytes.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -99,7 +100,6 @@ TensorImpl::TensorImpl(
 // the Python and PythonTLSSnapshot dispatch keys will be set and all is well.
 // The point is to delay the dispatch key setting until that point.
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     ImplType /*type*/,
     Storage&& storage,
@@ -110,7 +110,6 @@ TensorImpl::TensorImpl(
       data_type_(data_type),
       device_opt_(storage_.device()),
       key_set_(key_set - c10::python_ks) { // See [Note: Python key removal]
-  init_bitfields();
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
     version_counter_ = VariableVersion(/*version=*/0);
@@ -123,7 +122,6 @@ TensorImpl::TensorImpl(
     std::optional<c10::Device> device_opt)
     : TensorImpl({}, key_set, data_type, device_opt) {}
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
@@ -133,8 +131,6 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {
-  init_bitfields();
-
   if (!key_set.empty()) {
     TORCH_INTERNAL_ASSERT(
         data_type == ScalarType::Undefined || device_opt_.has_value());
@@ -193,6 +189,44 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
   // Keys]
   key_set = key_set.remove_backend(old_backend);
   key_set_ = key_set | DispatchKeySet(new_backend);
+}
+
+void TensorImpl::set_fake_device(c10::Device fake_device) {
+  TORCH_CHECK(
+      fake_device.type() != c10::DeviceType::Meta,
+      "FakeTensor does not support meta device");
+
+  // in python FakeTensor, it checks whether or not
+  // we are in in_kernel_invocation manager to determine
+  // which device we return
+
+  // but since we have an extra field for fake_device_,
+  // we can just set it upon FakeTensor creation
+  // and determine in device_custom() which device to return
+  // (based on if DispatchKey::Fake is excluded or not)
+  get_extra_meta().fake_device_ = fake_device;
+  key_set_ = key_set_.add(DispatchKey::Fake);
+
+  // we need this so that device() calls device_custom()
+  // where the fake device logic is instead of just calling device_default()
+  set_custom_device(true);
+
+  // change backend key from Meta to the fake device
+  _change_backend_component_keys(fake_device);
+}
+
+void TensorImpl::set_and_normalize_fake_device(c10::Device fake_device) {
+  // normalize device index for indexed device types (not CPU)
+  if (fake_device.index() == -1 && fake_device.type() != c10::DeviceType::CPU) {
+    const auto* guard_impl = c10::impl::getDeviceGuardImpl(fake_device.type());
+    if (guard_impl) {
+      fake_device = guard_impl->getDevice();
+    }
+    if (fake_device.index() == -1) {
+      fake_device = c10::Device(fake_device.type(), 0);
+    }
+  }
+  set_fake_device(fake_device);
 }
 
 void TensorImpl::HandleResize() {
@@ -326,11 +360,11 @@ c10::SymBool TensorImpl::sym_is_contiguous_custom(
     // TO reduce BC breaking and reduce having to introduce
     // sym_is_contiguous. call is_contiguous when tensor does not
     if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
-      return pyobj_slot_.load_pyobj_interpreter()->sym_is_contiguous(
-          this, memory_format);
+      return (*c10::impl::getGlobalPyInterpreter())
+          ->sym_is_contiguous(this, memory_format);
     } else {
-      return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
-          this, memory_format);
+      return (*c10::impl::getGlobalPyInterpreter())
+          ->is_contiguous(this, memory_format);
     }
   }
 
@@ -339,16 +373,16 @@ c10::SymBool TensorImpl::sym_is_contiguous_custom(
 
 bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    return pyobj_slot_.load_pyobj_interpreter()->is_strides_like(
-        this, memory_format);
+    return (*c10::impl::getGlobalPyInterpreter())
+        ->is_strides_like(this, memory_format);
   }
   return is_strides_like_default(memory_format);
 }
 
 c10::SymBool TensorImpl::sym_is_non_overlapping_and_dense_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    return pyobj_slot_.load_pyobj_interpreter()->is_non_overlapping_and_dense(
-        this);
+    return (*c10::impl::getGlobalPyInterpreter())
+        ->is_non_overlapping_and_dense(this);
   }
   return sym_is_non_overlapping_and_dense_default();
 }
@@ -357,35 +391,43 @@ IntArrayRef TensorImpl::sizes_custom() const {
   if (C10_UNLIKELY(
           matches_python_custom(SizesStridesPolicy::CustomSizes) ||
           has_symbolic_sizes_strides_)) {
-    return pyobj_slot_.load_pyobj_interpreter()->sizes(this);
+    return (*c10::impl::getGlobalPyInterpreter())->sizes(this);
   }
   return sizes_default();
 }
 
 c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    return pyobj_slot_.load_pyobj_interpreter()->sym_sizes(this);
+    return (*c10::impl::getGlobalPyInterpreter())->sym_sizes(this);
   }
   return sym_sizes_default();
 }
 
 c10::SymInt TensorImpl::sym_numel_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    return pyobj_slot_.load_pyobj_interpreter()->sym_numel(this);
+    return (*c10::impl::getGlobalPyInterpreter())->sym_numel(this);
   }
   return sym_numel_default();
 }
 
 c10::SymIntArrayRef TensorImpl::sym_strides_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    return pyobj_slot_.load_pyobj_interpreter()->sym_strides(this);
+    return (*c10::impl::getGlobalPyInterpreter())->sym_strides(this);
   }
   return sym_strides_default();
 }
 
 c10::Device TensorImpl::device_custom() const {
   if (C10_UNLIKELY(python_custom_device_)) {
-    return pyobj_slot_.load_pyobj_interpreter()->device(this);
+    return (*c10::impl::getGlobalPyInterpreter())->device(this);
+  }
+  if (C10_UNLIKELY(extra_meta_ && extra_meta_->fake_device_.has_value())) {
+    if (c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
+      return device_default();
+    }
+    // has_value() is checked above; the dataflow check misses it here.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return *extra_meta_->fake_device_;
   }
   return device_default();
 }
@@ -394,28 +436,28 @@ IntArrayRef TensorImpl::strides_custom() const {
   if (C10_UNLIKELY(
           matches_python_custom(SizesStridesPolicy::CustomStrides) ||
           has_symbolic_sizes_strides_)) {
-    return pyobj_slot_.load_pyobj_interpreter()->strides(this);
+    return (*c10::impl::getGlobalPyInterpreter())->strides(this);
   }
   return strides_default();
 }
 
 int64_t TensorImpl::dim_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    return pyobj_slot_.load_pyobj_interpreter()->dim(this);
+    return (*c10::impl::getGlobalPyInterpreter())->dim(this);
   }
   return dim_default();
 }
 
 int64_t TensorImpl::numel_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    return pyobj_slot_.load_pyobj_interpreter()->numel(this);
+    return (*c10::impl::getGlobalPyInterpreter())->numel(this);
   }
   return numel_default();
 }
 
 c10::Layout TensorImpl::layout_custom() const {
   if (C10_UNLIKELY(python_custom_layout_)) {
-    return pyobj_slot_.load_pyobj_interpreter()->layout(this);
+    return (*c10::impl::getGlobalPyInterpreter())->layout(this);
   }
   // TODO: fix this
   TORCH_CHECK(
@@ -426,7 +468,7 @@ c10::Layout TensorImpl::layout_custom() const {
 int64_t TensorImpl::storage_offset_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
     // TODO: fix this
-    return pyobj_slot_.load_pyobj_interpreter()
+    return (*c10::impl::getGlobalPyInterpreter())
         ->sym_storage_offset(this)
         .guard_int(__FILE__, __LINE__);
   }
@@ -435,7 +477,7 @@ int64_t TensorImpl::storage_offset_custom() const {
 
 c10::SymInt TensorImpl::sym_storage_offset_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    return pyobj_slot_.load_pyobj_interpreter()->sym_storage_offset(this);
+    return (*c10::impl::getGlobalPyInterpreter())->sym_storage_offset(this);
   }
   return sym_storage_offset_default();
 }
@@ -518,7 +560,7 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
   } else if (
       key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    r = (pyobj_slot_.load_pyobj_interpreter())->detach(this);
+    r = (*c10::impl::getGlobalPyInterpreter())->detach(this);
   }
   if (r) {
     if (!r->is_inference()) {

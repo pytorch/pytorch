@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -10,9 +11,81 @@
 #include <ATen/ops/real.h>
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros_like.h>
+#include <fmt/format.h>
 
 namespace at::native {
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Copy_metallib.h>
+#endif
+
 namespace mps {
+
+// MPS->MPS dtype-and/or-conj/neg-bit copy via the unary-kernel cast path. One kernel per output dtype handles every
+// input dtype the runtime switch covers; the (needs_conj, needs_neg) pair selects the functor. Conj+neg uses a fused
+// copy_conj_neg functor for complex (the only case where it differs from neg); real types route through copy_neg.
+// Strided iterators get the `_strided_castout_<in>` template; contiguous get `_dense_castout_*`.
+static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
+  const bool needs_conj = src.is_conj() != dst.is_conj();
+  const bool needs_neg = src.is_neg() != dst.is_neg();
+
+  // Strip conj/neg bits via aliases so TensorIterator reads/writes raw storage; the functor materializes the requested
+  // bit flips. alias() gives a fresh TensorImpl over the same storage so we don't mutate the caller's tensors.
+  Tensor src_view = src.alias();
+  src_view._set_conj(false);
+  src_view._set_neg(false);
+  Tensor dst_view = dst.alias();
+  dst_view._set_conj(false);
+  dst_view._set_neg(false);
+
+  auto build_iter = [&](at::Tensor& out) {
+    return at::TensorIteratorConfig()
+        .check_all_same_dtype(false)
+        .set_check_mem_overlap(false)
+        .resize_outputs(false)
+        .add_output(out)
+        .add_input(src_view)
+        .build();
+  };
+
+  // conj is identity on real types, so conj+neg degenerates to plain neg; only complex needs the fused functor.
+  const bool fused_conj_neg = needs_conj && needs_neg && c10::isComplexType(src_view.scalar_type());
+  const std::string_view name = fused_conj_neg ? "copy_conj_neg"
+      : needs_neg                              ? "copy_neg"
+      : needs_conj                             ? "copy_conj"
+                                               : "copy_identity";
+  auto iter = build_iter(dst_view);
+  // ILP castout only wins past ~128K elements; smaller copies underfill the GPU and
+  // run faster through the plain (non-ILP) castout kernel.
+  lib.exec_unary_kernel(iter, std::string(name), std::nullopt, std::nullopt, /*ilp_threshold=*/131072u);
+}
+
+// Byte-erased compute copy, not a blit: faster at small sizes and avoids the encoder switch.
+// One dispatch per <=2GB chunk keeps chunk_bytes in uint. Callers must pass contiguous src and
+// dst with equal nbytes (both are treated as flat byte runs).
+static void contiguous_copy_kernel_mps(at::Tensor& dst, const at::Tensor& src, bool non_blocking) {
+  uint64_t profile_id = getMPSProfiler().beginProfileCopy(
+      getMTLBufferStorage(src), getMTLBufferStorage(dst), src, dst, src.nbytes(), non_blocking, /*usesBlitter=*/false);
+  auto* kernel = lib.getCachedKernelFunctionPtr("contiguous_byte_copy");
+  constexpr size_t max_chunk = 0x80000000; // 2GB
+  const size_t total = src.nbytes();
+  kernel->runCommandBlock([&] {
+    kernel->startEncoding();
+    kernel->setArg(0, dst);
+    kernel->setArg(1, src);
+    for (size_t base = 0; base < total;) {
+      const uint32_t chunk = static_cast<uint32_t>(std::min(max_chunk, total - base));
+      kernel->setArg(2, chunk);
+      kernel->setArg(3, static_cast<uint64_t>(base));
+      kernel->dispatch((chunk + 15) / 16);
+      base += chunk;
+    }
+  });
+  if (profile_id) {
+    getMPSProfiler().endProfileCopy(profile_id, SyncType::NONE);
+  }
+}
 
 static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
   uintptr_t address = (uintptr_t)ptr;
@@ -27,62 +100,35 @@ static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* a
   return (void*)alignedAddress;
 }
 
-// Copy sourceBuffer into destBuffer, casting sourceBuffer to dst.scalar_type().
-// The shapes and dtypes are taken from dst and src, but their storage pointers are not used.
-static void copy_cast_mps(at::Tensor& dst,
-                          const at::Tensor& src,
-                          id<MTLBuffer> destBuffer,
-                          id<MTLBuffer> sourceBuffer,
-                          bool non_blocking = true) {
-  using namespace mps;
-
-  using CachedGraph = MPSUnaryCachedGraph;
-
-  MPSStream* stream = getCurrentMPSStream();
-
-  MPSDataType dstDType = getMPSDataType(dst);
-  MPSDataType srcDType = getMPSDataType(src);
-  MPSShape* dstShape = getMPSShape(dst);
-  MPSShape* srcShape = getMPSShape(src);
-
-  @autoreleasepool {
-    const bool needs_conj = src.is_conj() != dst.is_conj();
-    std::string key = "copy_cast_mps" + getTensorsStringKey({src, dst}, true, /*exclude_shape*/ true) + ":" +
-        std::to_string(needs_conj);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, srcDType);
-      auto outputTensor = inputTensor;
-      if (isFloatingType(src.scalar_type()) && dstDType == MPSDataTypeUInt8) {
-        outputTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
-      }
-      if (srcDType != dstDType) {
-        outputTensor = [mpsGraph castTensor:outputTensor toType:dstDType name:@"cast"];
-      }
-      if (needs_conj) {
-        outputTensor = [mpsGraph conjugateWithTensor:outputTensor name:nil];
-      }
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-    MPSGraphTensorData* srcData = [[[MPSGraphTensorData alloc] initWithMTLBuffer:sourceBuffer
-                                                                           shape:srcShape
-                                                                        dataType:srcDType] autorelease];
-    MPSGraphTensorData* dstData = [[[MPSGraphTensorData alloc] initWithMTLBuffer:destBuffer
-                                                                           shape:dstShape
-                                                                        dataType:dstDType] autorelease];
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{cachedGraph->inputTensor_ : srcData};
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{cachedGraph->outputTensor_ : dstData};
-    stream->executeMPSGraph(
-        cachedGraph->graph(), feeds, results, !non_blocking ? SyncType::COMMIT_AND_WAIT : SyncType::COMMIT_ADAPTIVE);
-  }
+// Returns an autoreleased MTLBuffer and byte offset for the host side of a
+// CPU<->MPS copy; it stays valid for the caller's enclosing @autoreleasepool. The
+// host pages are wrapped with newBufferWithBytesNoCopy, retaining the storage
+// across an async copy so the pages outlive the in-flight blit.
+static std::pair<id<MTLBuffer>, NSUInteger> buffer_with_offset_from_tensor(const at::Tensor& cpu_tensor,
+                                                                           size_t nbytes,
+                                                                           bool non_blocking) {
+  const auto byte_offset = cpu_tensor.storage_offset() * cpu_tensor.itemsize();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  const void* host = static_cast<const char*>(cpu_tensor.storage().data()) + byte_offset;
+  NSUInteger alignedLength = 0;
+  void* alignedPtr = pageAlignedBlockPtr(host, (NSUInteger)nbytes, &alignedLength);
+  // Only capture on non_blocking - capturing across waitUntilCompleted would
+  // deadlock Metal's completion thread on the GIL.
+  auto* storage = non_blocking ? new c10::Storage(cpu_tensor.storage()) : nullptr;
+  MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
+  id<MTLBuffer> buffer = [[device newBufferWithBytesNoCopy:alignedPtr
+                                                    length:alignedLength
+                                                   options:options
+                                               deallocator:^(void*, NSUInteger) {
+                                                 delete storage;
+                                               }] autorelease];
+  return {buffer, static_cast<NSUInteger>(uintptr_t(host) - uintptr_t(alignedPtr))};
 }
 
 static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
   auto sameMemFormat =
       src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
 
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* stream = getCurrentMPSStream();
   Tensor dst = dst_;
   Tensor src = src_;
@@ -107,48 +153,54 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
   size_t dst_tensor_nbytes = dst.nbytes();
 
   @autoreleasepool {
-    MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
-    NSUInteger alignedLength = 0;
-
-    const void* host_dst = static_cast<const char*>(dst.storage().data()) + dst.storage_offset() * dst.itemsize();
-    void* alignedPtr = pageAlignedBlockPtr(host_dst, (NSUInteger)dst_tensor_nbytes, &alignedLength);
-    NSUInteger destOffset = (uintptr_t(host_dst) - uintptr_t(alignedPtr));
+    auto [destBuffer, destOffset] = buffer_with_offset_from_tensor(dst, dst_tensor_nbytes, non_blocking);
     // 4 bytes alignment required on macos for blits.
     TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned blit request");
 
-    id<MTLBuffer> destBuffer = [device newBufferWithBytesNoCopy:alignedPtr
-                                                         length:alignedLength
-                                                        options:options
-                                                    deallocator:nil];
-    id<MTLBuffer> maybeCastedSourceBuffer = sourceBuffer;
-    Tensor maybeCastedSource;
+    id<MTLBuffer> blitSourceBuffer = sourceBuffer;
+    Tensor blitSource = src;
+    NSUInteger blitSourceOffset = storage_byte_offset;
     bool needsBlit = true;
     if (src_.dtype() != dst.dtype()) {
-      if (destOffset == 0 && storage_byte_offset == 0) {
-        // Return the casted tensor directly if there's no destination offset
-        needsBlit = false;
-        maybeCastedSourceBuffer = destBuffer;
-      } else if (src.element_size() < dst.element_size()) {
-        maybeCastedSource = at::empty(dst.sizes(), dst.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-        maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
+      // Unified memory: cast straight from the MPS source into the CPU-wrapped
+      // destination buffer at the requested offsets. This avoids the temporary
+      // that used to alias the live source buffer and blitting from it (see
+      // #189563). src and dst are dense with identical strides here, so a linear
+      // castout of numel elements from the source offset to the dest offset is a
+      // faithful conversion.
+      needsBlit = false;
+      const bool needs_conj = src.is_conj() != dst.is_conj();
+      const bool needs_neg = src.is_neg() != dst.is_neg();
+      const bool fused_conj_neg = needs_conj && needs_neg && c10::isComplexType(src.scalar_type());
+      const std::string_view name = fused_conj_neg ? "copy_conj_neg"
+          : needs_neg                              ? "copy_neg"
+          : needs_conj                             ? "copy_conj"
+                                                   : "copy_identity";
+      lib.exec_unary_kernel_raw(name,
+                                sourceBuffer,
+                                static_cast<uint32_t>(storage_byte_offset),
+                                src.scalar_type(),
+                                destBuffer,
+                                static_cast<uint32_t>(destOffset),
+                                dst.scalar_type(),
+                                static_cast<uint32_t>(src.numel()),
+                                /*ilp_threshold=*/0u);
+      if (!non_blocking) {
+        stream->synchronize(SyncType::COMMIT_AND_WAIT);
       }
-
-      // In case of dtype change, first convert src inplace
-      copy_cast_mps(dst, src, maybeCastedSourceBuffer, sourceBuffer, non_blocking);
     }
 
     if (needsBlit) {
       const size_t size_to_copy = (src.nbytes() / src.element_size()) * dst.element_size();
 
       // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
-      TORCH_INTERNAL_ASSERT(sourceBuffer && dst_tensor_nbytes > 0);
+      TORCH_INTERNAL_ASSERT(blitSourceBuffer && dst_tensor_nbytes > 0);
       uint64_t profile_id =
-          getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
+          getMPSProfiler().beginProfileCopy(blitSourceBuffer, destBuffer, blitSource, dst, size_to_copy, non_blocking);
 
       stream->copy_and_sync(
-          maybeCastedSourceBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
+          blitSourceBuffer, destBuffer, size_to_copy, blitSourceOffset, destOffset, non_blocking, profile_id);
     }
-    [destBuffer release];
   }
   if (!dst.is_same(dst_)) {
     dst_.copy_(dst, non_blocking);
@@ -160,33 +212,19 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 // Copies tensor from cpu to mps backed by identical strided-contiguous data
 static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bool non_blocking) {
   MPSStream* stream = getCurrentMPSStream();
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
   auto dst_byte_offset = dst.storage_offset() * dst.itemsize();
-  auto src_byte_offset = src.storage_offset() * src.itemsize();
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst);
   const size_t size_to_copy = src.nbytes();
-  const void* host_src = static_cast<const char*>(src.storage().data()) + src_byte_offset;
 
   TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_dense_in_storage(src));
 
   @autoreleasepool {
-    MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
-    NSUInteger alignedLength = 0;
-    NSUInteger sourceOffset = 0;
-
-    void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)size_to_copy, &alignedLength);
-    sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
-    id<MTLBuffer> sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
-                                                           length:alignedLength
-                                                          options:options
-                                                      deallocator:nil];
-
+    auto [sourceBuffer, sourceOffset] = buffer_with_offset_from_tensor(src, size_to_copy, non_blocking);
     uint64_t profile_id =
         getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
 
     stream->copy_and_sync(
         sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking, profile_id);
-    [sourceBuffer release];
   }
 }
 
@@ -225,16 +263,16 @@ void copy_blit_mps(void* dst, const void* src, size_t size) {
 }
 
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
-  auto src_byte_offset = src_.storage_offset() * src_.itemsize();
   auto dst_byte_offset = dst_.storage_offset() * dst_.itemsize();
 
   // If dst is contiguous and there is no byte offset, we can save directly the result of
-  // gather into dst. This reduces the overhead of doing an additional blit for most cases
+  // gather into dst. This reduces the overhead of doing an additional copy for most cases.
   bool returnGatherOutput = dst_.is_contiguous();
   Tensor src;
   auto sameMemFormat =
       src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
-  const bool sameDataType = src_.dtype() == dst_.dtype() && src_.is_conj() == dst_.is_conj();
+  const bool sameDataType =
+      src_.dtype() == dst_.dtype() && src_.is_conj() == dst_.is_conj() && src_.is_neg() == dst_.is_neg();
 
   if ((!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) ||
       // the copy_cast path requires storage_offset to be applied before casting
@@ -246,21 +284,15 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
       if (returnGatherOutput) {
         return dst_;
       }
-
-      src_byte_offset = 0;
     } else {
       src = src_.expand_as(dst_).contiguous();
-      src_byte_offset = src.storage_offset() * src.itemsize();
     }
   } else {
     src = src_;
   }
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst_);
-  id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
 
-  // Scatter to `dst` if the memory is not contiguous
-  // If the memory is not contiguous, it means that the tensor has strides and we would not be
-  // able to do the copy using a single blit
+  // Strided dst can't be written as one contiguous run: route it through the scatter kernel.
   if (!dst_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
     return scatterViewTensor(src, dst_);
   }
@@ -269,21 +301,19 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
 
   MPSStream* stream = getCurrentMPSStream();
   if (sameDataType) {
-    uint64_t profile_id = getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst_, src.nbytes(), true);
-    // for GPU to GPU copies we only encode to stream's command buffer (no flushing)
-    stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset, profile_id);
+    contiguous_copy_kernel_mps(dst_, src, non_blocking);
   } else {
     if (dst_byte_offset) {
       auto maybeCastedSource =
           at::empty(dst_.sizes(), dst_.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
       auto maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
-      copy_cast_mps(maybeCastedSource, src, maybeCastedSourceBuffer, sourceBuffer);
+      copy_cast_kernel_mps(maybeCastedSource, src);
 
       uint64_t profile_id = getMPSProfiler().beginProfileCopy(
           maybeCastedSourceBuffer, destBuffer, maybeCastedSource, dst_, dst_.nbytes(), true);
       stream->copy(maybeCastedSourceBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset, profile_id);
     } else {
-      copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
+      copy_cast_kernel_mps(dst_, src);
     }
   }
   return dst_;
@@ -330,6 +360,32 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
   TORCH_INTERNAL_ASSERT(src.device().type() == DeviceType::MPS, "mps_copy_ is implemented only for *->MPS; MPS->*");
   return dst;
 }
+
+// Materialize a strided view into a contiguous tensor (or into the provided dst). conj/neg bits on src
+// and dst are honored via copy_cast_kernel_mps's functor dispatch. Replaces the JIT scatter/gather
+// shader machinery that previously lived in View.mm; the strided castout templates handle the same
+// cross-dtype and bit-flip combinations.
+Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
+  Tensor output = dst.has_storage()
+      ? dst
+      : at::empty(src.sizes(), src.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
+  if (src.numel() == 0 || output.numel() == 0) {
+    return dst.has_storage() ? dst : output;
+  }
+  copy_cast_kernel_mps(output, src);
+  return dst.has_storage() ? dst : output;
+}
+
+// Scatter a contiguous tensor into a strided view. Symmetrical to gatherViewTensor; the strided side is
+// the destination here so the iterator's strided dimensions live on the output.
+Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
+  if (src.numel() == 0 || output.numel() == 0) {
+    return output;
+  }
+  copy_cast_kernel_mps(output, src);
+  return output;
+}
+
 } // namespace mps
 
 Tensor _copy_from_and_resize_mps(const at::Tensor& self, const at::Tensor& dst) {

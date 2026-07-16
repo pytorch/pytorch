@@ -7,6 +7,7 @@
 #include <c10/core/Device.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch::inductor {
 
@@ -71,12 +72,22 @@ void initAOTIPackageBindings(PyObject* module) {
       .def(
           "get_constant_fqns", &AOTIModelPackageLoaderPybind::get_constant_fqns)
       .def(
+          "get_custom_objs",
+          [](AOTIModelPackageLoaderPybind& self) {
+            py::dict result;
+            for (auto& [name, ivalue] : self.get_custom_objs()) {
+              result[py::str(name)] = torch::jit::toPyObject(ivalue);
+            }
+            return result;
+          })
+      .def(
           "load_constants",
           &AOTIModelPackageLoaderPybind::load_constants,
           py::arg("constants_map"),
           py::arg("use_inactive"),
           py::arg("check_full_update"),
-          py::arg("user_managed") = false)
+          py::arg("user_managed") = false,
+          py::arg("allow_h2d_copy") = false)
       .def(
           "update_constant_buffer",
           &AOTIModelPackageLoaderPybind::update_constant_buffer,

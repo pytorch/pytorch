@@ -317,20 +317,20 @@ def generate_binconstraint_t(
         if constraint.lhs == Dyn:
             return T(), counter
         elif isinstance(constraint.lhs, TensorType):
-            is_fully_static = all(d != Dyn for d in constraint.lhs.__args__)
+            is_fully_static = all(d != Dyn for d in constraint.lhs.dims)
             if is_fully_static:
                 return BinConstraintT(constraint.lhs, constraint.rhs, op_eq), counter
             else:
                 new_dims = []
 
-                for _ in range(len(constraint.lhs.__args__)):
+                for _ in range(len(constraint.lhs.dims)):
                     dim, counter = gen_dvar(counter)
                     new_dims.append(dim)
 
                 new_dim_constraints = (
                     [
                         BinConstraintD(old_dim, new_dim, op_precision)
-                        for new_dim, old_dim in zip(new_dims, constraint.lhs.__args__)
+                        for new_dim, old_dim in zip(new_dims, constraint.lhs.dims)
                     ]
                     + [BinConstraintT(constraint.rhs, TensorType(new_dims), op_eq)]
                     + [BinConstraintD(1, new_dim, op_leq) for new_dim in new_dims]
@@ -343,10 +343,10 @@ def generate_binconstraint_t(
     elif constraint.op == op_matching:
         if not isinstance(constraint.rhs, TensorType):
             raise AssertionError(f"Expected TensorType, got {type(constraint.rhs)}")
-        d1 = constraint.rhs.__args__[0]
-        d2 = constraint.rhs.__args__[1]
-        d3 = constraint.rhs.__args__[2]
-        d4 = constraint.rhs.__args__[3]
+        d1 = constraint.rhs.dims[0]
+        d2 = constraint.rhs.dims[1]
+        d3 = constraint.rhs.dims[2]
+        d4 = constraint.rhs.dims[3]
 
         conj = [
             BinConstraintT(constraint.lhs, Dyn, op_eq),
@@ -670,7 +670,7 @@ def generate_reshape(constraint: Constraint, counter: int) -> tuple[Constraint, 
     d3 = d[2]
     d4 = d[3]
 
-    target = constraint.target.__args__
+    target = constraint.target.dims
 
     is_fully_static = all(d != Dyn for d in target)
 
@@ -1345,14 +1345,12 @@ def gen_greatest_upper_bound(
             BinConstraintT(constraint.res, c3tensor, op_eq),
         ] + gen_nat_constraints(dims1 + dims2 + dims3)
 
-        if not (
-            len(c3tensor.__args__) == len(c1tensor.__args__) == len(c2tensor.__args__)
-        ):
+        if not (len(c3tensor.dims) == len(c1tensor.dims) == len(c2tensor.dims)):
             raise AssertionError("Tensor args lengths must be equal")
-        for i in range(len(c3tensor.__args__)):
+        for i in range(len(c3tensor.dims)):
             c.append(
                 DGreatestUpperBound(
-                    c3tensor.__args__[i], c1tensor.__args__[i], c2tensor.__args__[i]
+                    c3tensor.dims[i], c1tensor.dims[i], c2tensor.dims[i]
                 )
             )
 
