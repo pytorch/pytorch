@@ -895,6 +895,33 @@ class ComprehensionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(len(backend.graphs), 1)
 
+    def test_comprehension_lambda_captures_outer_cellvar(self):
+        def fn(x):
+            i = 100
+
+            def g():
+                return i  # makes `i` a cellvar of fn, not a freevar
+
+            fns = [lambda: i for i in range(3)]
+            return [h() for h in fns], g(), i, x + 1
+
+        x = torch.randn(3, 3)
+        self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
+
+    def test_locals_snapshot_with_cell(self):
+        def fn(x):
+            i = 100
+
+            def g():
+                return i
+
+            fns = [lambda: i for i in range(3)]
+            snap = dict(locals())
+            return snap["i"], g(), [h() for h in fns], x + 1
+
+        x = torch.randn(3, 3)
+        self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
+
 
 @skipIfNotPy312
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
