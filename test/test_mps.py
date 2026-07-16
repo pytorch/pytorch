@@ -16627,7 +16627,7 @@ class TestExecutableCache(TestCaseMPS):
                 self.assertEqual(result.float().cpu(), ref, atol=1e-2, rtol=1e-2)
 
 class TestGraphCapture(TestCaseMPS):
-    """Tests for torch.mps.metal_graph_capture / graph_replay and torch.mps.MetalGraph.
+    """Tests for torch.mps.metal_graph_capture / metal_graph_replay.
 
     Capture records all MPS ops: both MPSGraph-routed ops (matmul, linear, etc.)
     and raw Metal kernel dispatches (elementwise +, *, sigmoid, etc.) via the
@@ -16738,26 +16738,6 @@ class TestGraphCapture(TestCaseMPS):
         # After updating input to 2s the output must change (2× the original).
         self.assertAlmostEqual(replayed_val, captured_val * 2.0, places=4)
 
-    def test_metalgraph_class_api(self):
-        # MetalGraph class + graph() context manager must match the functional API.
-        x = torch.ones(8, 8, device="mps")
-        x2 = torch.full((8, 8), 2.0, device="mps")
-
-        g = torch.mps.MetalGraph()
-        with torch.mps.metal_graph(g):
-            out = self._simple_model(x)
-        torch.mps.synchronize()
-        self.assertEqual(out[0, 0].item(), 8.0)
-
-        x.copy_(x2)
-        g.replay()
-        torch.mps.synchronize()
-        self.assertEqual(out[0, 0].item(), 32.0)
-
-        g.reset()
-        # After reset, replay should be a no-op (C++ TORCH_WARN to stderr, no exception).
-        g.replay()  # must not raise
-
     def test_capture_produces_valid_output_on_first_pass(self):
         # The capture pass itself must produce valid (non-garbage) output.
         x = torch.randn(8, 8, device="mps")
@@ -16861,20 +16841,19 @@ class TestGraphCapture(TestCaseMPS):
         )
 
     def test_capture_reset_and_recapture(self):
-        # reset() must allow a fresh capture with a different model.
+        # reset must allow a fresh capture with a different computation.
         x = torch.ones(4, 4, device="mps")
         x2 = torch.full((4, 4), 3.0, device="mps")
 
-        g = torch.mps.MetalGraph()
-        with torch.mps.metal_graph(g):
+        with torch.mps.metal_graph_capture():
             out1 = x @ x
         torch.mps.synchronize()
         first_val = out1[0, 0].item()  # 4.0
 
-        g.reset()
+        torch._C._mps_metalGraphCaptureReset()
 
         # Recapture a different computation.
-        with torch.mps.metal_graph(g):
+        with torch.mps.metal_graph_capture():
             out2 = x2 @ x2
         torch.mps.synchronize()
         second_val = out2[0, 0].item()  # 36.0
@@ -16883,9 +16862,10 @@ class TestGraphCapture(TestCaseMPS):
         self.assertAlmostEqual(second_val, 36.0, places=4)
 
         # Replaying the new capture must produce the second result, not the first.
-        g.replay()
+        torch.mps.metal_graph_replay()
         torch.mps.synchronize()
         self.assertAlmostEqual(out2[0, 0].item(), 36.0, places=4)
+        torch._C._mps_metalGraphCaptureReset()
 
     def test_nested_capture_raises(self):
         # captureBegin() while already capturing must raise, not silently corrupt state.

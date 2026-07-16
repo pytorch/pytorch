@@ -234,76 +234,6 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
 from contextlib import contextmanager
 
 
-class MetalGraph:
-    r"""Wraps a captured Metal graph for repeated replay.
-
-    Records all MPS dispatches (MPSGraph ops, raw Metal kernels) into a
-    replayable sequence. Named MetalGraph because it captures across all
-    Metal dispatch paths, not just MPSGraph.
-
-    Mirrors the interface of :class:`torch.cuda.CUDAGraph`.
-
-    Usage::
-
-        g = torch.mps.MetalGraph()
-
-        with torch.mps.metal_graph(g):
-            out = model(x)  # capture pass - ops recorded, outputs valid
-
-        for batch_data in loader:
-            x.copy_(batch_data)  # update input in-place
-            g.replay()  # re-run captured ops in a single dispatch
-            results.append(out.cpu())
-
-    Constraints (identical to :class:`torch.cuda.CUDAGraph`):
-
-    * Tensor shapes must not change between capture and replays.
-    * Input data must be updated **in-place** via ``.copy_()`` before each replay.
-    * MPS profiling must be disabled during capture.
-    """
-
-    def capture_begin(self) -> None:
-        """Begin recording MPS ops into this graph."""
-        torch._C._mps_metalGraphCaptureBegin()
-
-    def capture_end(self) -> None:
-        """Stop recording and finalise the captured graph."""
-        torch._C._mps_metalGraphCaptureEnd()
-
-    def replay(self) -> None:
-        """Re-encode all captured ops in a single ``dispatch_sync``.
-
-        Input tensors must have been updated in-place before calling this.
-        If no ops were captured (e.g. the model uses only non-capturable paths)
-        a warning is issued and the call is a no-op.
-        """
-        torch._C._mps_metalGraphReplay()
-
-    def reset(self) -> None:
-        """Discard the captured graph so a new capture can be recorded."""
-        torch._C._mps_metalGraphCaptureReset()
-
-
-@contextmanager
-def metal_graph(metalgraph: MetalGraph):
-    r"""Context manager that captures MPS ops into *metalgraph* for later replay.
-
-    Usage::
-
-        g = torch.mps.MetalGraph()
-        with torch.mps.metal_graph(g):
-            out = model(x)
-        g.replay()
-
-    See :class:`MetalGraph` for constraints.
-    """
-    metalgraph.capture_begin()
-    try:
-        yield
-    finally:
-        metalgraph.capture_end()
-
-
 @contextmanager
 def metal_graph_capture():
     r"""Context manager that records a sequence of MPS operations
@@ -321,8 +251,15 @@ def metal_graph_capture():
 
     * Tensor shapes must not change between the capture pass and replays.
     * Input data must be updated **in-place** via ``.copy_()`` before each
-      replay - do **not** create new tensors or reassign variables.
+      replay - do **not** create new tensors or reassign variables. This only
+      propagates for buffer-backed inputs; scalar / 0-dim tensor inputs are
+      encoded via ``setBytes`` at capture time and are **frozen** on replay.
+      Materialize scalars as 1-element tensors to make them buffer-backed if
+      you need to vary them across replays.
     * MPS profiling must be disabled during capture.
+    * Only one capture may be active on the stream at a time; the state is
+      stream-scoped rather than per-object, so :func:`metal_graph_replay`
+      always replays whatever was captured most recently.
 
     Example::
 
@@ -363,11 +300,9 @@ __all__ = [
     "load_metallib",
     "device_count",
     "get_rng_state",
-    "metal_graph",
     "metal_graph_capture",
     "metal_graph_replay",
     "manual_seed",
-    "MetalGraph",
     "seed",
     "set_rng_state",
     "synchronize",
