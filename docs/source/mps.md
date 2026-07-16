@@ -27,6 +27,7 @@
     recommended_max_memory
     compile_shader
     load_metallib
+    is_initialized
 ```
 
 ## MPS Profiler

@@ -1,6 +1,9 @@
 # Owner(s): ["module: dynamo"]
 import gc
+import os
 import re
+import subprocess
+import sys
 import unittest
 import weakref
 from unittest.mock import patch
@@ -41,6 +44,12 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
+
+    def test_device_module_without_is_initialized_is_initialized(self):
+        from torch._dynamo.variables.streams import _device_module_is_initialized
+
+        with patch.object(torch, "get_device_module", return_value=object()):
+            self.assertTrue(_device_module_is_initialized(torch.device("mps")))
 
     @requires_cuda
     def test_stream_weakref(self):
@@ -267,6 +276,107 @@ class <lambda>(torch.nn.Module):
         compiled = torch.compile(fn_cuda_stream, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x), fn_cuda_stream(x))
 
+    @requires_cuda
+    def test_cuda_current_stream_explicit_device(self):
+        if torch.cuda.device_count() < 2:
+            raise unittest.SkipTest("requires 2+ GPUs")
+
+        def fn_cuda_streams():
+            stream0 = torch.cuda.current_stream(torch.device("cuda:0"))
+            stream1 = torch.cuda.current_stream(torch.device("cuda:1"))
+            stream0_after_explicit_device_query = torch.cuda.current_stream()
+            return (
+                stream0.device.index,
+                stream1.device.index,
+                stream0_after_explicit_device_query.device.index,
+            )
+
+        torch.cuda.set_device(0)
+        compiled = torch.compile(fn_cuda_streams, backend="eager", fullgraph=True)
+        actual = compiled()
+        expected = fn_cuda_streams()
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual[0], actual[2])
+        self.assertNotEqual(actual[1], actual[2])
+
+        def fn_record_on_explicit_device_stream():
+            event = torch.cuda.Event()
+            stream1 = torch.cuda.current_stream(torch.device("cuda:1"))
+            stream1.record_event(event)
+            return stream1.device.index
+
+        _, _, graphs, _ = extract_graph(fn_record_on_explicit_device_stream)
+        record_event_nodes = [
+            node
+            for node in graphs[0].graph.nodes
+            if node.target is torch.ops.streams.record_event.default
+        ]
+        self.assertEqual(len(record_event_nodes), 1)
+        self.assertNotEqual(record_event_nodes[0].args[1], CURRENT_STREAM_INDEX)
+
+    @requires_cuda
+    def test_cuda_current_stream_explicit_device_first_registration(self):
+        if torch.cuda.device_count() < 2:
+            raise unittest.SkipTest("requires 2+ GPUs")
+
+        script = """\
+import torch
+from torch._dynamo.graph_bytecode_inputs import CURRENT_STREAM_INDEX
+from torch._dynamo.testing import extract_graph
+
+assert torch.cuda.is_available()
+assert torch.cuda.device_count() >= 2
+assert not torch.cuda.is_initialized()
+
+def fn_record_on_explicit_device_stream():
+    stream1 = torch.cuda.current_stream(torch.device("cuda:1"))
+    event = torch.cuda.Event()
+    stream1.record_event(event)
+    return stream1.device.index
+
+_, _, graphs, _ = extract_graph(fn_record_on_explicit_device_stream)
+record_event_nodes = [
+    node
+    for node in graphs[0].graph.nodes
+    if node.target is torch.ops.streams.record_event.default
+]
+assert len(record_event_nodes) == 1
+assert record_event_nodes[0].args[1] != CURRENT_STREAM_INDEX
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env={**os.environ, "MKL_SERVICE_FORCE_INTEL": "1"},
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=(
+                f"subprocess failed:\nstdout:\n{result.stdout.decode()}\n"
+                f"stderr:\n{result.stderr.decode()}"
+            ),
+        )
+
+    @requires_cuda
+    def test_lazy_current_stream_preserves_existing_registry_entries(self):
+        def fn():
+            event = torch.cuda.Event()
+            stream = torch.cuda.current_stream()
+            stream.record_event(event)
+            return stream.cuda_stream
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
+    @requires_cuda
+    def test_lazy_current_stream_query(self):
+        def fn():
+            return torch.cuda.current_stream().query()
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
     @unittest.skipIf(not TEST_XPU, "XPU is not available")
     def test_xpu_current_stream_attrs(self):
         """Verify that torch.xpu.current_stream() attributes are accessible
@@ -287,6 +397,17 @@ class <lambda>(torch.nn.Module):
         def fn(x, s):
             with s:
                 return torch.cuda.current_stream().cuda_stream
+
+        s = torch.cuda.Stream()
+        x = torch.zeros(1, device="cuda")
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, s), fn(x, s))
+
+    @requires_cuda
+    def test_cuda_current_stream_unindexed_device_with_entered_stream(self):
+        def fn(x, s):
+            with s:
+                return torch.cuda.current_stream(torch.device("cuda")).cuda_stream
 
         s = torch.cuda.Stream()
         x = torch.zeros(1, device="cuda")
