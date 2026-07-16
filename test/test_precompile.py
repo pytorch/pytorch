@@ -107,8 +107,9 @@ class TestPrecompile(TestCase):
 
     def test_self_contained_exec_needs_no_cache(self):
         # python_code runs standalone with NO cache: exec it and call forward().
-        # The kernels JIT-compile from the inlined source (the cache is only an
-        # acceleration consumed by load()).
+        # The default eager backend has no kernels; the captured graph is
+        # interpreted directly from the inlined source and the cache is always
+        # empty (artifact=None), so python_code is fully self-contained.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
         code, _cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
@@ -120,7 +121,8 @@ class TestPrecompile(TestCase):
     def test_wrong_param_count_model_rejected(self):
         # Invariant 2: a runtime model whose param/buffer count differs from the
         # traced model is rejected with a clear error rather than an opaque inner
-        # failure. This exercises the cached (default) load path.
+        # failure. This exercises the default eager load path, which execs
+        # python_code (the eager cache carries no artifact).
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
         code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
@@ -145,8 +147,9 @@ class TestPrecompile(TestCase):
 
     def test_unserializable_in_spec_still_compiles(self):
         # A runtime input whose pytree TreeSpec is not JSON-serializable (an unregistered
-        # collections.namedtuple) must still compile/run on the inductor backend: IN_SPEC
-        # degrades to None and the structure check is skipped rather than hard-failing.
+        # collections.namedtuple) must still compile/run on the default eager backend:
+        # IN_SPEC degrades to None and the structure check is skipped rather than
+        # hard-failing.
         import collections
 
         P = collections.namedtuple("P", ["x", "y"])
@@ -171,6 +174,19 @@ class TestPrecompile(TestCase):
         self.assertIn("IN_SPEC = None", code)
         f_c = torch.compiler.precompile.load(code, cache)
         self.assertEqual(f_c(m, inp), m(inp.a + inp.b))
+
+    def test_unserializable_out_spec_hard_fails(self):
+        # OUT_SPEC is load-bearing (the driver rebuilds fn's output via tree_unflatten),
+        # so unlike IN_SPEC it CANNOT degrade to None. An fn that RETURNS an unregistered
+        # collections.namedtuple has a non-JSON-serializable output TreeSpec and must
+        # raise a clear PrecompileError rather than leaking a raw pytree error.
+        import collections
+
+        Out = collections.namedtuple("Out", ["a", "b"])
+        with self.assertRaisesRegex(
+            PrecompileError, "cannot serialize the output structure"
+        ):
+            torch.compiler.precompile(lambda x: Out(x + 1, x + 2), torch.randn(4))
 
     def test_non_module_at_module_position_rejected(self):
         # Passing a non-nn.Module where the traced fn took a module yields a clear
@@ -198,6 +214,14 @@ class TestPrecompile(TestCase):
         x = torch.randn(4)
         with self.assertRaisesRegex(PrecompileError, "buffer received a gradient"):
             torch.compiler.precompile(lambda model, x: model(x).backward(), m, x)
+
+    def test_user_input_requiring_grad_rejected(self):
+        # Sibling of the buffer guard: a requires_grad USER INPUT (not a param) that
+        # receives a gradient during the traced backward is not harvested (only params
+        # are), so precompile rejects it rather than silently dropping the grad.
+        x = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(PrecompileError, "user input received a gradient"):
+            torch.compiler.precompile(lambda t: (t * t).sum().backward(), x)
 
     def test_control_flow_subgraph_rejected(self):
         # torch.cond captures as a HOP with get_attr subgraph submodules, which the
@@ -229,11 +253,11 @@ class TestPrecompile(TestCase):
             torch.compiler.precompile.load("def (:::", buf.getvalue())
 
     def test_same_count_different_structure_rejected_eager(self):
-        # The eager backend has its OWN _check_structure / _extract_param_buffers copy
-        # (in _EAGER_DRIVER_SOURCE), distinct from the cached/inlined inductor paths the
-        # test above covers. Lock in that the eager driver also REJECTS a same-param-COUNT
-        # but different-NAME model (here differently-named submodules) rather than silently
-        # running the traced graph with the wrong weights (invariant 2).
+        # The eager driver's _check_structure rejects a same-param-COUNT but
+        # different-NAME model (here differently-named submodules) rather than
+        # silently running the traced graph with the wrong weights (invariant 2).
+        # What's distinct from test_wrong_param_count_model_rejected above is the
+        # INPUT -- same count / different name, not a count mismatch.
         a = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 4)).eval()
         x = torch.randn(2, 4)
         code, cache = torch.compiler.precompile(
@@ -258,8 +282,9 @@ class TestPrecompile(TestCase):
             f_c(b, x)
 
     def test_effectful_op_unsupported(self):
-        # Effectful custom ops make the Inductor artifact non-saveable, so the inner
-        # code cannot be lowered to standalone source -- rejected up front.
+        # Effectful custom ops are rejected up front by _assert_supported, which
+        # detects the with_effects HOP in the captured graph -- the effect cannot
+        # be lowered to standalone source, so capture fails cleanly.
         from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
         from torch.library import _scoped_library
 
@@ -374,7 +399,7 @@ class TestPrecompile(TestCase):
 
     def test_eager_backend_wrong_static_shape_rejected(self):
         # The eager driver now checks USER_INPUT_SHAPES too: a wrong static shape is
-        # rejected (invariant 3), like the inductor backend.
+        # rejected (invariant 3).
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
         code, cache = torch.compiler.precompile(
@@ -386,7 +411,7 @@ class TestPrecompile(TestCase):
 
     def test_eager_backend_dtype_mismatch_rejected(self):
         # The eager driver checks USER_INPUT_DTYPES too: a dtype mismatch is rejected
-        # (invariant 6), like the inductor backend.
+        # (invariant 6).
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
         code, cache = torch.compiler.precompile(
