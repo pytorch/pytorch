@@ -86,8 +86,9 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
     def setUp(self):
         super().setUp()
         onnxruntime.set_seed(0)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(0)
+        device_type = getattr(torch.accelerator.current_accelerator(), "type", None)
+        if device_type:
+            torch.get_device_module(device_type).manual_seed_all(0)
         os.environ["ALLOW_RELEASED_ONNX_OPSET_ONLY"] = "0"
         self.is_script_test_enabled = True
 
