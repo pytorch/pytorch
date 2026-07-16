@@ -283,10 +283,10 @@ jobs:
         shell: bash
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          mkdir -p "${RUNNER_TEMP}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
+            --output-dir "${RUNNER_TEMP}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
