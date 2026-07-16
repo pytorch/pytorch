@@ -18,10 +18,6 @@ from torch.distributed.tensor.placement_types import Placement
 aten = torch.ops.aten
 
 
-def _elems_per_philox_call(dtype: torch.dtype) -> int:
-    return 2 if dtype == torch.float64 else 4
-
-
 def _contiguous_stride(shape: torch.Size) -> tuple[int, ...]:
     stride: list[int] = []
     running = 1
@@ -56,74 +52,6 @@ def _flat_start_for_dtensor(tensor: DTensor) -> int:
         offset * stride
         for offset, stride in zip(global_offset, _contiguous_stride(tensor.shape))
     )
-
-
-def _offset_key(key: torch.Tensor, offset: int) -> torch.Tensor:
-    local_key = key.view(torch.int64).clone()
-    if offset:
-        local_key[1] = local_key[1] + offset
-    return local_key.view(torch.uint64)
-
-
-def _philox_normal_dtensor_handler(
-    op_call: torch._ops.OpOverload,
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-) -> DTensor:
-    args, kwargs = fill_defaults(op_call._schema, args, kwargs)
-    if kwargs:
-        raise AssertionError
-    tensor, key, mean, std = args
-    if not isinstance(tensor, DTensor):
-        raise AssertionError
-    if isinstance(key, DTensor):
-        raise NotImplementedError(
-            "DTensor stateless normal does not support DTensor keys"
-        )
-    if not isinstance(key, torch.Tensor):
-        raise AssertionError
-    if key.dtype != torch.uint64:
-        raise RuntimeError(
-            f"_philox_normal_: key must have dtype uint64, got {key.dtype}"
-        )
-    if key.dim() != 1 or key.numel() != 2:
-        raise NotImplementedError(
-            "DTensor stateless normal only supports an unbatched key with shape (2,)"
-        )
-    if tensor.device_mesh.get_coordinate() is None:
-        return tensor
-
-    local_tensor = tensor._local_tensor
-    if local_tensor.numel() == 0:
-        return tensor
-    if not local_tensor.is_contiguous():
-        raise RuntimeError(
-            f"Expected a contiguous local shard, got stride {local_tensor.stride()}"
-        )
-
-    elems_per_call = _elems_per_philox_call(local_tensor.dtype)
-    shard_offset, intra_call_offset = divmod(
-        _flat_start_for_dtensor(tensor), elems_per_call
-    )
-    local_key = _offset_key(key, shard_offset)
-    flat_local = local_tensor.view(-1)
-    if intra_call_offset == 0:
-        op_call(flat_local, local_key, mean, std)
-        return tensor
-
-    padded = torch.empty(
-        intra_call_offset + flat_local.numel(),
-        device=local_tensor.device,
-        dtype=local_tensor.dtype,
-    )
-    op_call(padded, local_key, mean, std)
-    flat_local.copy_(padded[intra_call_offset:])
-    return tensor
-
-
-DTensor._op_dispatcher._custom_op_handlers[aten._philox_normal_.default] = (
-    _philox_normal_dtensor_handler
-)
 
 
 def _dense_distribution_offset_increment(
