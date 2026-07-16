@@ -974,8 +974,9 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
 
 struct UnpackedInput {
   THPObjectPtr input_tuple;
-  // Borrowed from Tensor arguments kept alive by input_tuple. Avoids copying
-  // at::Tensor handles on the common apply path.
+  // Borrowed from Tensor arguments kept alive by input_tuple. This may be the
+  // original argument tuple; avoid copying at::Tensor handles on the common
+  // apply path.
   c10::SmallVector<const Variable*, 24> input_vars;
   // record_function_inputs is for RECORD_FUNCTION only
   std::vector<c10::IValue> record_function_inputs;
@@ -1005,7 +1006,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(
   InputFlags flags;
 
   auto num_args = PyTuple_GET_SIZE(args);
-  unpacked.input_tuple = PyTuple_New(num_args);
+  unpacked.input_tuple = Py_NewRef(args);
   flags.needs_input_grad.reserve(num_args);
   unpacked.input_vars.reserve(num_args);
   flags.is_variable_input.reserve(num_args);
@@ -1042,8 +1043,6 @@ std::pair<UnpackedInput, InputFlags> unpack_input(
         unpacked.record_function_inputs.emplace_back(tensor);
       }
     }
-    Py_INCREF(arg);
-    PyTuple_SET_ITEM(unpacked.input_tuple.get(), i, arg);
   }
 
   flags.is_executable = GradMode::is_enabled() && any_requires_grad;
