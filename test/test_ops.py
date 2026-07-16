@@ -1984,7 +1984,7 @@ class TestCompositeCompliance(TestCase):
                 args,
                 kwargs,
                 sample.output_process_fn_grad,
-                op.gradcheck_wrapper,
+                op.get_gradcheck_wrapper(),
                 self.assertEqual,
             )
 
@@ -2020,7 +2020,7 @@ class TestCompositeCompliance(TestCase):
             # We pass assertEqual so that decorators like `toleranceOverride`
             # actually work (otherwise they silently do nothing!)
             composite_compliance.check_forward_ad_formula(
-                op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual
+                op.get_op(), args, kwargs, op.get_gradcheck_wrapper(), self.assertEqual
             )
 
     @skipOps(
@@ -3066,7 +3066,7 @@ class TestFakeTensor(TestCase):
                             args,
                             kwargs,
                             sample.output_process_fn_grad,
-                            op.gradcheck_wrapper,
+                            op.get_gradcheck_wrapper(),
                         )
             except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 pass
