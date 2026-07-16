@@ -362,6 +362,27 @@ def is_mkldnn_conv(node: Node) -> bool:
     return False
 
 
+def _realize_efficient_zerotensor_output(r: ir.IRNode, fx_node: object) -> ir.IRNode:
+    if (
+        isinstance(fx_node, torch.fx.Node)
+        and fx_node.target is torch.ops.aten._efficientzerotensor.default
+        and isinstance(r, (ir.TensorBox, ir.BaseView))
+    ):
+        return ir.ExternKernel.realize_input(
+            fallback_handler(
+                torch.ops.aten._efficientzerotensor.default,
+                add_to_fallback_set=False,
+            )(
+                list(r.get_size()),
+                dtype=r.get_dtype(),
+                layout=torch.strided,
+                device=r.get_device(),
+                pin_memory=False,
+            )
+        )
+    return r
+
+
 class GraphLowering(torch.fx.Interpreter):
     """Lowers an FX graph to Inductor IR and drives backend code generation.
 
@@ -1670,6 +1691,7 @@ class GraphLowering(torch.fx.Interpreter):
                 f"Mismatch between fx_node_args length ({len(fx_node_args)}) and result length ({len(result)})"
             )
         for r, fx_node in zip(result, fx_node_args):
+            r = _realize_efficient_zerotensor_output(r, fx_node)
             if not isinstance(r, (ir.TensorBox, ir.BaseView)):
                 result_correct_strides.append(r)
             elif isinstance(r.get_output_spec(), ir.CommBufferLayout):
