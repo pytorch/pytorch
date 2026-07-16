@@ -92,7 +92,7 @@ def _sync_rng_state_from_mesh_root(tensor: DTensor, state: torch.Tensor) -> None
 def _run_dtensor_local_rng_op(
     tensor: DTensor,
     generator: torch.Generator | None,
-    dense_equivalent_op_call: torch._ops.OpOverload,
+    dense_slice_op_call: torch._ops.OpOverload,
     fallback_op_call: torch._ops.OpOverload,
     *op_args: object,
 ) -> DTensor:
@@ -107,7 +107,7 @@ def _run_dtensor_local_rng_op(
         return tensor
     if not local_tensor.is_contiguous():
         raise RuntimeError(
-            f"{dense_equivalent_op_call}: expected a contiguous local shard, "
+            f"{dense_slice_op_call}: expected a contiguous local shard, "
             f"got stride {local_tensor.stride()}"
         )
 
@@ -124,11 +124,11 @@ def _run_dtensor_local_rng_op(
         state = random._PhiloxState(generator.get_state())
 
     key = _rng_key_from_state(state, local_tensor.device)
-    global_numel = tensor.numel()
-    shard_offset = _flat_start_for_dtensor(tensor)
-    dense_equivalent_op_call(local_tensor, key, global_numel, shard_offset, *op_args)
+    dense_numel = tensor.numel()
+    slice_start = _flat_start_for_dtensor(tensor)
+    dense_slice_op_call(local_tensor, key, dense_numel, slice_start, *op_args)
     state.offset = state.offset + _dense_distribution_offset_increment(
-        global_numel, local_tensor.dtype, local_tensor.device
+        dense_numel, local_tensor.dtype, local_tensor.device
     )
 
     if generator is None:
@@ -158,7 +158,7 @@ def _normal_dtensor_handler(
     return _run_dtensor_local_rng_op(
         tensor,
         generator,
-        aten._dtensor_local_normal_.default,
+        aten._philox_normal_dense_slice_.default,
         op_call,
         mean,
         std,
@@ -182,7 +182,7 @@ def _uniform_dtensor_handler(
     return _run_dtensor_local_rng_op(
         tensor,
         generator,
-        aten._dtensor_local_uniform_.default,
+        aten._philox_uniform_dense_slice_.default,
         op_call,
         low,
         high,

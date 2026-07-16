@@ -19,9 +19,9 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_dtensor_local_normal_native.h>
-#include <ATen/ops/_dtensor_local_uniform_native.h>
+#include <ATen/ops/_philox_normal_dense_slice_native.h>
 #include <ATen/ops/_philox_normal_native.h>
+#include <ATen/ops/_philox_uniform_dense_slice_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #endif
 
@@ -87,12 +87,12 @@ __device__ __forceinline__ double2 box_muller_double(uint4 r) {
 }
 
 template <typename scalar_t, typename sample_t, typename param_t>
-__global__ void dtensor_distribution_slice_kernel(
+__global__ void dense_distribution_slice_kernel(
     scalar_t* __restrict__ output,
     const uint64_t* __restrict__ key,
     int64_t local_numel,
-    int64_t global_numel,
-    int64_t shard_offset,
+    int64_t dense_numel,
+    int64_t slice_start,
     int64_t dense_grid,
     sample_t sample_func,
     param_t param_func) {
@@ -103,14 +103,14 @@ __global__ void dtensor_distribution_slice_kernel(
     return;
   }
 
-  const int64_t global_idx = shard_offset + local_idx;
-  if (global_idx >= global_numel) {
+  const int64_t dense_idx = slice_start + local_idx;
+  if (dense_idx >= dense_numel) {
     return;
   }
 
   const int64_t dense_stride = dense_block_size * dense_grid;
-  const int64_t dense_thread_idx = global_idx % dense_stride;
-  const int64_t dense_thread_iter_and_lane = global_idx / dense_stride;
+  const int64_t dense_thread_idx = dense_idx % dense_stride;
+  const int64_t dense_thread_iter_and_lane = dense_idx / dense_stride;
   const int64_t lane = dense_thread_iter_and_lane % unroll_factor;
   const uint64_t dense_thread_iter =
       static_cast<uint64_t>(dense_thread_iter_and_lane / unroll_factor);
@@ -128,12 +128,12 @@ __global__ void dtensor_distribution_slice_kernel(
 }
 
 template <typename scalar_t, typename sample_t, typename param_t>
-void dtensor_distribution_slice(
+void dense_distribution_slice(
     const char* op_name,
     Tensor& self,
     const Tensor& key,
-    int64_t global_numel,
-    int64_t shard_offset,
+    int64_t dense_numel,
+    int64_t slice_start,
     const sample_t& sample_func,
     const param_t& param_func) {
   TORCH_CHECK(
@@ -158,37 +158,37 @@ void dtensor_distribution_slice(
       self.device(),
       " and ",
       key.device());
-  TORCH_CHECK(global_numel >= 0, op_name, ": global_numel must be non-negative");
-  TORCH_CHECK(shard_offset >= 0, op_name, ": shard_offset must be non-negative");
+  TORCH_CHECK(dense_numel >= 0, op_name, ": dense_numel must be non-negative");
+  TORCH_CHECK(slice_start >= 0, op_name, ": slice_start must be non-negative");
   TORCH_CHECK(
-      shard_offset + self.numel() <= global_numel,
+      slice_start + self.numel() <= dense_numel,
       op_name,
-      ": local shard [",
-      shard_offset,
+      ": output slice [",
+      slice_start,
       ", ",
-      shard_offset + self.numel(),
-      ") exceeds global_numel ",
-      global_numel);
+      slice_start + self.numel(),
+      ") exceeds dense_numel ",
+      dense_numel);
   TORCH_CHECK(
-      global_numel <= std::numeric_limits<int32_t>::max(),
+      dense_numel <= std::numeric_limits<int32_t>::max(),
       op_name,
-      ": global_numel > INT_MAX is not supported yet");
+      ": dense_numel > INT_MAX is not supported yet");
   if (self.numel() == 0) {
     return;
   }
 
   auto output = self.contiguous();
-  const uint32_t dense_grid = dense_distribution_grid(global_numel);
+  const uint32_t dense_grid = dense_distribution_grid(dense_numel);
   const int num_blocks =
       static_cast<int>((self.numel() + dense_block_size - 1) / dense_block_size);
   auto key_contig = key.contiguous();
-  dtensor_distribution_slice_kernel<scalar_t>
+  dense_distribution_slice_kernel<scalar_t>
       <<<num_blocks, dense_block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
       output.mutable_data_ptr<scalar_t>(),
       key_contig.const_data_ptr<uint64_t>(),
       self.numel(),
-      global_numel,
-      shard_offset,
+      dense_numel,
+      slice_start,
       dense_grid,
       sample_func,
       param_func);
@@ -455,82 +455,90 @@ Tensor& _philox_normal_cuda_(
   return self;
 }
 
-Tensor& _dtensor_local_uniform_cuda_(
+Tensor& _philox_uniform_dense_slice_cuda_(
     Tensor& self,
     const Tensor& key,
-    int64_t global_numel,
-    int64_t shard_offset,
+    int64_t dense_numel,
+    int64_t slice_start,
     double low,
     double high) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
-      kHalf, kBFloat16, self.scalar_type(), "_dtensor_local_uniform_", [&] {
-    using opmath_t = at::opmath_type<scalar_t>;
-    auto lo = static_cast<scalar_t>(low);
-    auto hi = static_cast<scalar_t>(high);
-    auto range = static_cast<opmath_t>(hi - lo);
-    auto sample_func = []() {
-      if constexpr (std::is_same_v<scalar_t, double>) {
-        return [] __device__ (curandStatePhilox4_32_10_t* state) {
-          return curand_uniform2_double(state);
+      kHalf,
+      kBFloat16,
+      self.scalar_type(),
+      "_philox_uniform_dense_slice_",
+      [&] {
+        using opmath_t = at::opmath_type<scalar_t>;
+        auto lo = static_cast<scalar_t>(low);
+        auto hi = static_cast<scalar_t>(high);
+        auto range = static_cast<opmath_t>(hi - lo);
+        auto sample_func = []() {
+          if constexpr (std::is_same_v<scalar_t, double>) {
+            return [] __device__ (curandStatePhilox4_32_10_t* state) {
+              return curand_uniform2_double(state);
+            };
+          } else {
+            return [] __device__ (curandStatePhilox4_32_10_t* state) {
+              return curand_uniform4(state);
+            };
+          }
+        }();
+        auto param_func = [range, lo, hi] __device__ (opmath_t rand) {
+          auto value = static_cast<scalar_t>(rand * range + lo);
+          return value == hi ? lo : value;
         };
-      } else {
-        return [] __device__ (curandStatePhilox4_32_10_t* state) {
-          return curand_uniform4(state);
-        };
-      }
-    }();
-    auto param_func = [range, lo, hi] __device__ (opmath_t rand) {
-      auto value = static_cast<scalar_t>(rand * range + lo);
-      return value == hi ? lo : value;
-    };
-    dtensor_distribution_slice<scalar_t>(
-        "_dtensor_local_uniform_",
-        self,
-        key,
-        global_numel,
-        shard_offset,
-        sample_func,
-        param_func);
-  });
+        dense_distribution_slice<scalar_t>(
+            "_philox_uniform_dense_slice_",
+            self,
+            key,
+            dense_numel,
+            slice_start,
+            sample_func,
+            param_func);
+      });
   return self;
 }
 
-Tensor& _dtensor_local_normal_cuda_(
+Tensor& _philox_normal_dense_slice_cuda_(
     Tensor& self,
     const Tensor& key,
-    int64_t global_numel,
-    int64_t shard_offset,
+    int64_t dense_numel,
+    int64_t slice_start,
     double mean,
     double stddev) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
-      kHalf, kBFloat16, self.scalar_type(), "_dtensor_local_normal_", [&] {
-    using accscalar_t = at::acc_type<scalar_t, true>;
-    auto mu = static_cast<accscalar_t>(mean);
-    auto sigma = static_cast<accscalar_t>(stddev);
-    auto sample_func = []() {
-      if constexpr (std::is_same_v<scalar_t, double>) {
-        return [] __device__ (curandStatePhilox4_32_10_t* state) {
-          return curand_normal2_double(state);
+      kHalf,
+      kBFloat16,
+      self.scalar_type(),
+      "_philox_normal_dense_slice_",
+      [&] {
+        using accscalar_t = at::acc_type<scalar_t, true>;
+        auto mu = static_cast<accscalar_t>(mean);
+        auto sigma = static_cast<accscalar_t>(stddev);
+        auto sample_func = []() {
+          if constexpr (std::is_same_v<scalar_t, double>) {
+            return [] __device__ (curandStatePhilox4_32_10_t* state) {
+              return curand_normal2_double(state);
+            };
+          } else {
+            return [] __device__ (curandStatePhilox4_32_10_t* state) {
+              return curand_normal4(state);
+            };
+          }
+        }();
+        auto param_func = [mu, sigma] __device__ (accscalar_t rand) {
+          return static_cast<scalar_t>(
+              at::transformation::normal<accscalar_t>(rand, mu, sigma));
         };
-      } else {
-        return [] __device__ (curandStatePhilox4_32_10_t* state) {
-          return curand_normal4(state);
-        };
-      }
-    }();
-    auto param_func = [mu, sigma] __device__ (accscalar_t rand) {
-      return static_cast<scalar_t>(
-          at::transformation::normal<accscalar_t>(rand, mu, sigma));
-    };
-    dtensor_distribution_slice<scalar_t>(
-        "_dtensor_local_normal_",
-        self,
-        key,
-        global_numel,
-        shard_offset,
-        sample_func,
-        param_func);
-  });
+        dense_distribution_slice<scalar_t>(
+            "_philox_normal_dense_slice_",
+            self,
+            key,
+            dense_numel,
+            slice_start,
+            sample_func,
+            param_func);
+      });
   return self;
 }
 

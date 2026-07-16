@@ -2,6 +2,8 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+import unittest
+from functools import partial
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -370,6 +372,76 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertEqual(len(captured_specs), 1)
         self.assertEqual(captured_specs[0].shape, torch.Size([8, 8]))
         self.assertEqual(captured_specs[0].stride, (8, 1))
+
+
+@unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+class DistTensorStatefulRNGInitTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _assert_init_matches_dense(self, device_mesh, shape, init_fn):
+        device = torch.device("cuda", torch.cuda.current_device())
+
+        torch.manual_seed(123)
+        expected = torch.empty(shape, device=device)
+        init_fn(expected)
+        expected_state = torch.cuda.get_rng_state(device)
+        expected_next = torch.rand(17, device=device)
+
+        torch.manual_seed(123)
+        actual = torch.distributed.tensor.empty(
+            shape,
+            device_mesh=device_mesh,
+            placements=[Shard(0)],
+        )
+        init_fn(actual)
+        actual_state = torch.cuda.get_rng_state(device)
+        actual_next = torch.rand(17, device=device)
+
+        self.assertEqual(actual.full_tensor(), expected, rtol=0, atol=0)
+        self.assertEqual(actual_state, expected_state)
+        self.assertEqual(actual_next, expected_next, rtol=0, atol=0)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_stateful_init_matches_dense(self):
+        device_mesh = self.build_device_mesh()
+        init_fns = {
+            "normal": partial(torch.nn.init.normal_, mean=0.1, std=0.02),
+            "uniform": partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
+            "trunc_normal": partial(
+                torch.nn.init.trunc_normal_,
+                mean=0.0,
+                std=0.02,
+                a=-0.06,
+                b=0.06,
+            ),
+        }
+        for name, init_fn in init_fns.items():
+            with self.subTest(name=name):
+                # The dense launch uses three blocks while each local shard uses two.
+                self._assert_init_matches_dense(device_mesh, (37, 19), init_fn)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_stateful_init_uses_dense_generator_increment(self):
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        block_size = 256
+        unroll_factor = 4
+        max_grid = props.multi_processor_count * (
+            props.max_threads_per_multi_processor // block_size
+        )
+        single_increment_capacity = block_size * max_grid * unroll_factor
+        shape = (
+            self.world_size,
+            single_increment_capacity // self.world_size + 1,
+        )
+        self._assert_init_matches_dense(
+            self.build_device_mesh(),
+            shape,
+            partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
+        )
 
 
 class DistTensorRandomOpTest(DTensorTestBase):
