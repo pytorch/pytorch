@@ -10486,7 +10486,6 @@ class TestLinalgCudaOnly(TestCase):
                 # BLAS PARAMS
                 self.assertTrue("{ function:" in first_row[4])
 
-    # Fails with triton 3.7
     @dtypes(torch.float)
     def test_mm_submatrix_offline_tunableop(self, device, dtype):
         import os
@@ -10632,7 +10631,6 @@ class TestLinalgCudaOnly(TestCase):
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
-    # Fails with triton 3.7
     @dtypes(torch.float)
     def test_mm_submatrix_leading_dim_alias_offline_tunableop(self, device, dtype):
         # Regression test for https://github.com/ROCm/TheRock/issues/5553
