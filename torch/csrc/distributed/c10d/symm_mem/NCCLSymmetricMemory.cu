@@ -22,10 +22,6 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-#include <c10/cuda/driver_api.h>
-#endif
-
 namespace c10d {
 namespace symmetric_memory {
 
@@ -117,34 +113,15 @@ NCCLAllocMap::iterator find_allocation_covering(
   if (alloc_it != allocations.end()) {
     return alloc_it;
   }
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  // Recover the CUDA allocation base for interior pointers before falling back
-  // to the linear scan: a MemPool hands out interior (non-base) pointers, so
-  // `ptr` may not be a map key. cuMemGetAddressRange gives the allocation base
-  // in O(1); base + buffer_offset is the data buffer ptr we keyed on.
-  auto driver_api = c10::cuda::DriverAPI::get();
-  CUdeviceptr base_ptr = 0;
-  if (driver_api->cuMemGetAddressRange_(
-          &base_ptr, nullptr, reinterpret_cast<CUdeviceptr>(ptr)) ==
-      CUDA_SUCCESS) {
-    // buffer_offset here is recomputed from the *current* global pad size. It
-    // matches the allocation's stored buffer_offset only if the pad size has
-    // not changed since alloc(). If set_signal_pad_size() was called in
-    // between, this O(1) key won't match and we fall through to the linear
-    // scan, which uses each allocation's own stored buffer_offset -- so the
-    // fallback is load-bearing for correctness when the pad size changes.
-    const size_t buffer_offset =
-        at::round_up(get_signal_pad_size(), signal_pad_alignment);
-    auto buffer_ptr = reinterpret_cast<void*>(
-        static_cast<uintptr_t>(base_ptr) + buffer_offset);
-    alloc_it = allocations.find(buffer_ptr);
-    if (alloc_it != allocations.end()) {
-      return alloc_it;
-    }
-  }
-#else
-  // No driver API support here, so fall through to the linear scan below.
-#endif
+  // `ptr` is not an allocation key (a MemPool hands out interior pointers), so
+  // scan for the allocation whose [buffer, buffer + size) range covers it. We
+  // deliberately do not reconstruct the key from the process-global pad size:
+  // get_signal_pad_size() may have changed via set_signal_pad_size() since
+  // this allocation was created, whereas the scan uses each allocation's own
+  // stored buffer_offset.
+  // TODO: this linear std::find_if is O(n) in the number of live allocations.
+  // Make it O(log n) by switching NCCLAllocMap to an ordered map and using
+  // upper_bound to find the covering allocation.
   return find_allocation_covering_linear(ptr, allocations);
 }
 

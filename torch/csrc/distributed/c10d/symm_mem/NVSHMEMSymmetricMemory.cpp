@@ -14,6 +14,7 @@
 #include <c10/util/flat_hash_map.h>
 
 #include <mutex>
+#include <utility>
 
 // Starting from NVSHMEM 3.3.9, nvshmem_host.h exists so that we can cleanly
 // include only the nvshmem host library headers:
@@ -451,11 +452,12 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value());
     std::lock_guard<std::mutex> lock(mutex_);
-    {
-      auto it = symm_mems_.find(SymmMemKey{ptr, *group_name});
-      if (it != symm_mems_.end()) {
-        return it->second;
-      }
+    // Build the (ptr, group) key once and reuse it below: the fast-path lookup
+    // here and the base-allocation lookup differ only in the pointer, so we
+    // retarget key.first instead of copying the group name string again.
+    SymmMemKey key{ptr, *group_name};
+    if (auto it = symm_mems_.find(key); it != symm_mems_.end()) {
+      return it->second;
     }
     // In case of MemPool, tensor.storage().data_ptr() may not match
     // exactly an allocation's base address. Thus we perform the search by
@@ -481,11 +483,11 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // this allocation's base rendezvous.
     void* buffer_ptr = alloc_it->first;
 
-    // The data buffer base + group name is the caching key; build it once.
-    SymmMemKey key{buffer_ptr, *group_name};
-    auto it = symm_mems_.find(key);
+    // Retarget the key at the data buffer base (reusing the group name string)
+    // to look up and cache the base rendezvous.
+    key.first = buffer_ptr;
     c10::intrusive_ptr<NVSHMEMSymmetricMemory> symm_mem;
-    if (it != symm_mems_.end()) {
+    if (auto it = symm_mems_.find(key); it != symm_mems_.end()) {
       // Base allocation has been rendezvoused
       symm_mem = it->second;
     } else {
@@ -495,7 +497,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     }
 
     // Cache rendezvous using the data buffer base address as key
-    symm_mems_[key] = symm_mem;
+    symm_mems_[std::move(key)] = symm_mem;
 
     // TODO: change the `ptr` below to `tensor.data_ptr()` when adding support
     // for user slice/view operations. For MemPool support,

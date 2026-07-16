@@ -78,6 +78,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
+    IS_X86,
     MACOS_VERSION,
     NAVI_ARCH,
     parametrize,
@@ -3372,9 +3373,7 @@ class AOTInductorTestsTemplate:
                 )
 
             def forward(self, x):
-                return x + self._tensor_constant0.to(
-                    torch.device(type=GPU_TYPE, index=0)
-                )
+                return x + self._tensor_constant0.to(x.device)
 
         example_inputs = (
             torch.randint(1, size=[38], dtype=torch.int64, device=GPU_TYPE),
@@ -3382,7 +3381,7 @@ class AOTInductorTestsTemplate:
         torch._export.aot_compile(Model(), example_inputs)
 
     @skipCUDAIf(True, "Test for x86 backend")
-    @skipIfXpu(msg="Test for x86 backend")
+    @unittest.skipUnless(IS_X86, "Test for x86 backend")
     @unittest.skipIf(sys.platform == "darwin", "Skip MacOS")
     @unittest.skipIf(IS_FBCODE, "Need newer ideep")
     def test_buffer_mutation_and_force_mmap_weights(self):
@@ -8119,7 +8118,7 @@ class AOTInductorTestsTemplate:
             self.assertIn(
                 actual_grid,
                 expected_grids,
-                f"grid_0={actual_grid} not in expected {expected_grids} from kernel configs",
+                lambda msg: f"{msg}\ngrid_0={actual_grid} not in expected {expected_grids} from kernel configs",
             )
 
     @requires_autotune_at_compile_time
@@ -8178,7 +8177,7 @@ class AOTInductorTestsTemplate:
             self.assertIn(
                 actual_grid,
                 expected_grids,
-                f"grid_0={actual_grid} not in expected {expected_grids} from kernel configs",
+                lambda msg: f"{msg}\ngrid_0={actual_grid} not in expected {expected_grids} from kernel configs",
             )
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
