@@ -35,7 +35,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -87,7 +87,7 @@ def _build_empty_output_for_length_zero(
     with fake_mode:
         fake_init = pytree.tree_map(
             lambda t: fake_mode.from_tensor(t)
-            if isinstance(t, torch.Tensor) and not isinstance(t, FakeTensor)
+            if isinstance(t, torch.Tensor) and not is_fake_tensor(t)
             else t,
             init,
         )
