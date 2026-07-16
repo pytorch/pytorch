@@ -7,14 +7,14 @@ the repo small; the build extracts them into the build tree at configure time.
 ## Archive contents
 
 One YAML profile per library, named `lib<target>.yaml`. Each call to
-`target_optimize_if_llvm_bolt_enabled(<target>)` looks up `lib<target>.yaml`
+`torch_optimize_layout_if_enabled(<target>)` looks up `lib<target>.yaml`
 (e.g. target `torch_cuda` -> `libtorch_cuda.yaml`). The optimized libraries
 are: `libtorch_cuda`, `libtorch_cpu`, `libtorch`, `libtorch_python`, `libc10`,
 `libc10_cuda`.
 
 ## How profiles are consumed
 
-Optimization happens at build time, in `target_optimize_if_llvm_bolt_enabled`
+Optimization happens at build time, in `torch_optimize_layout_if_enabled`
 (`cmake/public/utils.cmake`), as a `POST_BUILD` step on each optimized target.
 Right after a library is linked, its freshly-linked `lib<name>.so` is moved
 into a `prebolt/` subdirectory and `llvm-bolt` writes the optimized library
@@ -25,7 +25,7 @@ canonical path, so `install(TARGETS)` mirrors it (and applies the usual
 
 ## Profile collection
 
-Profiles must be collected on binaries built with the prioritized-text linker
-script enabled (`USE_PRIORITIZED_TEXT_FOR_LD=ON`) and the BOLT-compatible
+Profiles must be collected on binaries built the BOLT-compatible
 compile flags (`-fno-plt -fno-reorder-blocks-and-partition`,
-`-Wl,--emit-relocs`), matching the layout BOLT optimizes here.
+`-Wl,--emit-relocs`). For best results, the same binaries should be
+used for profile collection and optimization.

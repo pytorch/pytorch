@@ -565,10 +565,23 @@ function(target_link_options_if_supported tgt flag)
 endfunction()
 
 ##############################################################################
-# Optimize ${tgt} with LLVM BOLT at build time when USE_LLVM_BOLT is ON. The
-# freshly-linked library is moved into a prebolt/ subdirectory and the bolted
-# library is written in its place.
-function(target_optimize_if_llvm_bolt_enabled tgt)
+# Apply binary layout optimization to ${tgt}. This includes using an
+# optimized symbol order (USE_PRIORITIZED_TEXT_FOR_LD) and post-link
+# optimization using LLVM BOLT (USE_LLVM_BOLT).
+#
+# When USE_LLVM_BOLT is enabled, original libraries are moved to the
+# prebolt/ subdirectory and bolted libraries are written in their place.
+function(torch_optimize_layout_if_enabled tgt)
+  if(USE_PRIORITIZED_TEXT_FOR_LD)
+    if(CMAKE_LINKER_TYPE STREQUAL "LLD")
+      target_link_options("${tgt}" PRIVATE "LINKER:--no-warn-symbol-ordering")
+      target_link_options("${tgt}" PRIVATE "LINKER:--symbol-ordering-file=${LINKER_SCRIPT_FILE_IN}")
+    else()
+      add_dependencies("${tgt}" generate_linker_script)
+      target_link_options("${tgt}" PRIVATE "LINKER:-T${LINKER_SCRIPT_FILE_OUT}")
+    endif()
+  endif()
+
   if(NOT USE_LLVM_BOLT)
     return()
   endif()
