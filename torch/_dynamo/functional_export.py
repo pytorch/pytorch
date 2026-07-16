@@ -16,7 +16,11 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
 from torch._dynamo.decorators import disable as dynamo_disable
-from torch._dynamo.eval_frame import argument_names, check_user_input_output
+from torch._dynamo.eval_frame import (
+    _disable_distribution_validation,
+    argument_names,
+    check_user_input_output,
+)
 from torch._dynamo.exc import UserErrorType
 from torch._dynamo.source import GetItemSource
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
@@ -892,12 +896,16 @@ def op_overload_wrapper({", ".join(arg_list)}):
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
         ):
-            out = fullgraph_capture(
-                fn,
-                args,
-                kwargs,
-                constraints=constraints,
-            )
+            cleanup = _disable_distribution_validation()
+            try:
+                out = fullgraph_capture(
+                    fn,
+                    args,
+                    kwargs,
+                    constraints=constraints,
+                )
+            finally:
+                cleanup()
         graph_module = create_fx_graph_from_captured_output(out, fn, args, kwargs)
         return graph_module
 
@@ -1002,12 +1010,16 @@ def _dynamo_graph_capture_for_export(
                 dynamo_config_ctx,
                 shapes_spec_ctx,
             ):
-                out = fullgraph_capture(
-                    module_to_trace,
-                    tuple(flat_inputs),
-                    constraints=_constraints,
-                    _is_export_deprecated_do_not_use=True,
-                )
+                cleanup = _disable_distribution_validation()
+                try:
+                    out = fullgraph_capture(
+                        module_to_trace,
+                        tuple(flat_inputs),
+                        constraints=_constraints,
+                        _is_export_deprecated_do_not_use=True,
+                    )
+                finally:
+                    cleanup()
 
                 if out.graph_capture_output.output_graph is None:
                     raise AssertionError(
