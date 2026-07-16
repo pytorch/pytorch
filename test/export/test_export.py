@@ -16780,6 +16780,38 @@ graph():
                 Block(torch.randn(4, 4), torch.randn(4, 4))
             )
 
+    def test_strict_export_scopes_distribution_validation(self):
+        prior = torch.distributions.Distribution._validate_args
+        self.addCleanup(
+            torch.distributions.Distribution.set_default_validate_args, prior
+        )
+        torch.distributions.Distribution.set_default_validate_args(True)
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                distribution = torch.distributions.Gamma(
+                    concentration=torch.tensor(2.0),
+                    rate=torch.tensor(1.0),
+                )
+                return distribution.log_prob(x)
+
+        inputs = (torch.ones(3),)
+        exported = export(Foo(), inputs, strict=True)
+        exported_dynamic = export(
+            Foo(),
+            inputs,
+            dynamic_shapes={"x": {0: Dim("batch")}},
+            strict=True,
+        )
+
+        self.assertTrue(torch.distributions.Distribution._validate_args)
+        self.assertEqual(exported.module()(*inputs), Foo()(*inputs))
+        self.assertEqual(exported_dynamic.module()(*inputs), Foo()(*inputs))
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
+            torch.distributions.Normal(0.0, -1.0)
+
     @testing.expectedFailureStrictV2
     def test_enum_str(self):
         class TensorDim(str, enum.Enum):
