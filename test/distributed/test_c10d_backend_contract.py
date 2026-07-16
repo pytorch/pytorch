@@ -209,9 +209,7 @@ class AbstractBackendContractTest:
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
 
-def _make_backend_contract_test_class(
-    backend_name, device_type, supports_coalescing
-):
+def _make_backend_contract_test_class(backend_name, device_type, supports_coalescing):
     class BackendContractTest(AbstractBackendContractTest, MultiProcessTestCase):
         pass
 
