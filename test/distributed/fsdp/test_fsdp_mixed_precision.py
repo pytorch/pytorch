@@ -330,7 +330,7 @@ class TestFSDPMixedPrecision(FSDPTest):
             self.assertEqual(
                 expected_dtype,
                 t.dtype,
-                f"Expected to reduce in {expected_dtype} but got tensors in {t.dtype}",
+                lambda msg: f"{msg}\nExpected to reduce in {expected_dtype} but got tensors in {t.dtype}",
             )
 
         return orig_reduce_scatter(*args, **kwargs)
@@ -507,7 +507,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                             self.assertEqual(
                                 tensor.dtype,
                                 full_precision_param_dtype,
-                                f"{name}: {tensor.dtype} vs {full_precision_param_dtype}",
+                                lambda msg: f"{msg}\n{name}: {tensor.dtype} vs {full_precision_param_dtype}",
                             )
 
                     # After state_dict, buffer's dtype should have been restored

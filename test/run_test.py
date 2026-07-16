@@ -70,6 +70,7 @@ from tools.testing.target_determination.heuristics.utils import get_pr_number
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
+    get_job_base_name,
     get_test_case_configs,
     NUM_PROCS,
     ShardedTest,
@@ -95,6 +96,16 @@ except ImportError:
 
     def upload_adhoc_failure_json(*args, **kwargs):
         pass
+
+
+try:
+    from torch.testing._internal.common_utils import HardwareClassification
+
+    _HC_CHOICES = [e.name for e in HardwareClassification]
+except ImportError:
+    # Temporary fallback for CI jobs that run the PR's test/run_test.py against a
+    # previous nightly torch package that doesn't have HardwareClassification yet.
+    _HC_CHOICES = ["GENERIC", "ACCELERATOR", "CPU", "CUDA", "MPS", "XPU"]
 
 
 # Make sure to remove REPO_ROOT after import is done
@@ -365,6 +376,10 @@ CORE_TEST_LIST = [
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
 
+DYNAMO_WRAPPED_TIMEOUT_MULTIPLIER_OVERRIDE: dict[str, int] = {
+    "test_nn": 6,
+}
+
 DISTRIBUTED_TESTS_CONFIG = {}
 
 
@@ -557,6 +572,10 @@ def run_test(
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
+    if options.hw_classification:
+        # forward hw classification filter to test subprocess
+        unittest_args += ["--hw-classification"] + options.hw_classification
+
     if options.showlocals:
         if options.pytest:
             unittest_args.extend(["--showlocals", "--tb=long", "--color=yes"])
@@ -625,12 +644,17 @@ def run_test(
         and not is_cpp_test
         and "-n" not in command
     )
+    timeout_multiplier = (
+        DYNAMO_WRAPPED_TIMEOUT_MULTIPLIER_OVERRIDE.get(test_file, 3)
+        if options.dynamo
+        else 3
+    )
     timeout = (
         None
         if not options.enable_timeout
         else THRESHOLD * 6
         if IS_SLOW
-        else THRESHOLD * 3
+        else THRESHOLD * timeout_multiplier
         if should_retry
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
@@ -1378,6 +1402,16 @@ def parse_args():
         help="Run all distributed tests",
     )
     parser.add_argument(
+        "--multigpu-filter",
+        choices=["multigpu", "not-multigpu"],
+        default=None,
+        help="Restrict distributed tests by the auto-applied `multigpu` marker "
+        "(see test/conftest.py). `multigpu` runs only tests that need multiple "
+        "GPUs; `not-multigpu` runs only single-GPU "
+        "tests, which can run on a single-GPU runner. Combined (AND) with the "
+        "existing serial/not-serial split.",
+    )
+    parser.add_argument(
         "--include-cpython-tests",
         "--include-cpython-tests",
         action="store_true",
@@ -1487,6 +1521,15 @@ def parse_args():
         metavar="TESTS",
         help="select a set of tests to include (defaults to ALL tests)."
         " tests must be a part of the TESTS list defined in run_test.py",
+    )
+    parser.add_argument(
+        "--hw-classification",
+        nargs="+",
+        choices=_HC_CHOICES,
+        type=str.upper,
+        default=None,
+        metavar="SCOPE",
+        help="filter tests by hardware classification categories (e.g., GENERIC ACCELERATOR CPU CUDA MPS XPU)",
     )
     parser.add_argument(
         "-x",
@@ -1923,7 +1966,7 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
         # If job name isn't available, use build environment as a backup
         job_name = build_env
     else:
-        job_name = job_name.split(" / test (")[0]
+        job_name = get_job_base_name(job_name)
     test_config = os.environ.get("TEST_CONFIG")
     print_to_stderr(f"JOB_NAME={raw_job_name}")
     print_to_stderr(f"BUILD_ENVIRONMENT={build_env}")
@@ -2050,6 +2093,22 @@ def run_tests(
         x for x in selected_tests if x not in selected_tests_parallel
     ]
 
+    # The multigpu marker (see test/conftest.py) is orthogonal to serial: it
+    # partitions distributed tests by whether they spawn multiple processes /
+    # need multiple GPUs. AND it into whatever serial expression a pass uses so
+    # a single-GPU config can select `not multigpu` without dropping the
+    # serial/not-serial split (a bare second `-m` would clobber the first).
+    multigpu_marker = {
+        "multigpu": "multigpu",
+        "not-multigpu": "not multigpu",
+    }.get(getattr(options, "multigpu_filter", None))
+
+    def marker_args(serial_expr: str | None) -> list[str]:
+        exprs = [e for e in (serial_expr, multigpu_marker) if e]
+        if not exprs:
+            return []
+        return ["-m", " and ".join(f"({e})" for e in exprs)]
+
     # NB: This is a hack to make conftest.py and files it depends on available
     # on CPP_TESTS_DIR. We should see if the file could be turned into a
     # full-fledge ptest plugin instead
@@ -2089,6 +2148,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
+            options_clone.additional_args.extend(marker_args(None))
             failure = run_test_module(test, test_directory, options_clone)
             test_failed = handle_complete(failure)
             if (
@@ -2103,7 +2163,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
-            options_clone.additional_args.extend(["-m", "serial"])
+            options_clone.additional_args.extend(marker_args("serial"))
             failure = run_test_module(test, test_directory, options_clone)
             test_failed = handle_complete(failure)
             if (
@@ -2135,7 +2195,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
-            options_clone.additional_args.extend(["-m", "not serial"])
+            options_clone.additional_args.extend(marker_args("not serial"))
             pool.apply_async(
                 run_test_module,
                 args=(test, test_directory, options_clone),

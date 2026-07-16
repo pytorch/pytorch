@@ -75,14 +75,6 @@ std::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
 }
 
 std::optional<BackendDevice> GetBackendDevice(
-    const std::optional<at::Tensor>& tensor) {
-  if (tensor) {
-    return GetBackendDevice(*tensor);
-  }
-  return std::nullopt;
-}
-
-std::optional<BackendDevice> GetBackendDevice(
     const std::optional<c10::Device>& device) {
   if (device) {
     return atenDeviceToBackendDevice(*device);
