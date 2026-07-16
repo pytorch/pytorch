@@ -3,6 +3,10 @@ import torch
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch._ops import OpOverload
+from torch.distributed._local_tensor import (
+    enabled_local_tensor_mode,
+    maybe_run_for_local_tensor,
+)
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._op_schema import ArgsType, KwargsType
@@ -27,7 +31,7 @@ def _contiguous_stride(shape: torch.Size) -> tuple[int, ...]:
     return tuple(reversed(stride))
 
 
-def _flat_start_for_dtensor(tensor: DTensor) -> int:
+def _flat_start_for_dtensor(tensor: DTensor) -> int | None:
     local_shape, global_offset = compute_local_shape_and_global_offset(
         tensor.shape,
         tensor.device_mesh,
@@ -44,39 +48,10 @@ def _flat_start_for_dtensor(tensor: DTensor) -> int:
             local_shape[dim] != tensor.shape[dim] for dim in range(1, len(tensor.shape))
         )
     ):
-        raise NotImplementedError(
-            "DTensor dense-equivalent RNG initialization only supports local shards "
-            "that are contiguous in the dense flattened tensor"
-        )
+        return None
     return sum(
         offset * stride
         for offset, stride in zip(global_offset, _contiguous_stride(tensor.shape))
-    )
-
-
-def _dense_distribution_offset_increment(
-    numel: int, dtype: torch.dtype, device: torch.device
-) -> int:
-    if numel == 0:
-        return 0
-    block_size = 256
-    unroll_factor = 2 if dtype == torch.float64 else 4
-    props = torch.cuda.get_device_properties(device)
-    blocks_per_sm = props.max_threads_per_multi_processor // block_size
-    grid = min(
-        (numel + block_size - 1) // block_size,
-        props.multi_processor_count * blocks_per_sm,
-    )
-    return ((numel - 1) // (block_size * grid * unroll_factor) + 1) * 4
-
-
-def _rng_key_from_state(
-    state: random._PhiloxState, device: torch.device
-) -> torch.Tensor:
-    return torch.tensor(
-        [state.seed.item(), state.offset.item()],
-        dtype=torch.uint64,
-        device=device,
     )
 
 
@@ -86,6 +61,26 @@ def _sync_rng_state_from_mesh_root(tensor: DTensor, state: torch.Tensor) -> None
     src_rank = int(tensor.device_mesh.mesh.flatten()[0].item())
     torch.distributed.broadcast(
         state, src=src_rank, group=tensor.device_mesh.get_group()
+    )
+
+
+@maybe_run_for_local_tensor
+def _run_dense_slice_with_generator(
+    local_tensor: torch.Tensor,
+    dense_numel: int,
+    slice_start: int,
+    dense_slice_op_call: torch._ops.OpOverload,
+    generator: torch.Generator,
+    generator_state: torch.Tensor,
+    op_args: tuple[object, ...],
+) -> torch.Tensor:
+    generator.set_state(generator_state)
+    return dense_slice_op_call(
+        local_tensor,
+        dense_numel,
+        slice_start,
+        *op_args,
+        generator=generator,
     )
 
 
@@ -111,6 +106,18 @@ def _run_dtensor_local_rng_op(
             f"got stride {local_tensor.stride()}"
         )
 
+    dense_numel = tensor.numel()
+    slice_start = _flat_start_for_dtensor(tensor)
+    if slice_start is None:
+        if not random._rng_tracker and is_rng_supported_mesh(tensor.device_mesh):
+            random._rng_tracker = random.OffsetBasedRNGTracker(tensor.device_mesh)
+        tracker = random._rng_tracker
+        if tracker is None:
+            raise AssertionError
+        with tracker._distribute_region(tensor._spec, generator=generator):
+            fallback_op_call(local_tensor, *op_args)
+        return tensor
+
     if generator is None:
         if not random._rng_tracker and is_rng_supported_mesh(tensor.device_mesh):
             random._rng_tracker = random.OffsetBasedRNGTracker(tensor.device_mesh)
@@ -119,25 +126,33 @@ def _run_dtensor_local_rng_op(
             raise AssertionError
         device_state = tracker._get_device_state()
         _sync_rng_state_from_mesh_root(tensor, device_state)
-        state = random._PhiloxState(device_state)
-    else:
-        state = random._PhiloxState(generator.get_state())
-
-    key = _rng_key_from_state(state, local_tensor.device)
-    dense_numel = tensor.numel()
-    slice_start = _flat_start_for_dtensor(tensor)
-    dense_slice_op_call(local_tensor, key, dense_numel, slice_start, *op_args)
-    state.offset = state.offset + _dense_distribution_offset_increment(
-        dense_numel, local_tensor.dtype, local_tensor.device
-    )
+        tracker._set_device_state(device_state)
 
     if generator is None:
-        tracker = random._rng_tracker
-        if not isinstance(tracker, random.OffsetBasedRNGTracker):
-            raise AssertionError
-        tracker._set_device_state(state.state)
+        dense_slice_op_call(
+            local_tensor,
+            dense_numel,
+            slice_start,
+            *op_args,
+        )
+    elif enabled_local_tensor_mode():
+        _run_dense_slice_with_generator(
+            local_tensor,
+            dense_numel,
+            slice_start,
+            dense_slice_op_call,
+            generator,
+            generator.get_state(),
+            op_args,
+        )
     else:
-        generator.set_state(state.state)
+        dense_slice_op_call(
+            local_tensor,
+            dense_numel,
+            slice_start,
+            *op_args,
+            generator=generator,
+        )
     return tensor
 
 

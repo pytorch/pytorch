@@ -423,6 +423,13 @@ class DistTensorStatefulRNGInitTest(DTensorTestBase):
                 # The dense launch uses three blocks while each local shard uses two.
                 self._assert_init_matches_dense(device_mesh, (37, 19), init_fn)
 
+        with self.subTest(name="empty_local_shard"):
+            self._assert_init_matches_dense(
+                device_mesh,
+                (1, 19),
+                partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
+            )
+
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_stateful_init_uses_dense_generator_increment(self):
