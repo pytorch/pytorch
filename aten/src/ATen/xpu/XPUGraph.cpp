@@ -101,9 +101,14 @@ void XPUGraphImpl::capture_begin(
         return filter(XPUStream(XPUStream::UNCHECKED, stream));
       });
 
+#if SYCL_COMPILER_VERSION >= 20260100
+  auto sycl_property = sycl::property_list{property::graph::enable_native_recording{}};
+#else
+  auto sycl_property = sycl::property_list{};
+#endif
+
   auto graph_impl = xpuGraph_t(
-      capture_stream_.queue(),
-      sycl::property_list{property::graph::enable_native_recording{}});
+      capture_stream_.queue(), sycl_property);
   graph_ = std::make_unique<xpuGraph_t>(std::move(graph_impl));
   graph_->begin_recording(capture_stream_.queue());
 
@@ -132,7 +137,11 @@ void XPUGraphImpl::capture_end() {
     wholegraph_increments = generator_state->capture_epilogue();
   }
 
+#if SYCL_COMPILER_VERSION >= 20260100
   const bool graph_is_empty = graph_->empty();
+#else
+  const bool graph_is_empty = (graph_->get_nodes().size() == 0);
+#endif
   if (graph_is_empty) {
     TORCH_WARN(
         "The XPU Graph is empty. This usually means that the graph was ",
