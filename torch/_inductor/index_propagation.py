@@ -21,6 +21,7 @@ printers.
 """
 
 import itertools
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, overload, TypeAlias
@@ -45,6 +46,12 @@ def _is_constant(val: _ExprType):
     if isinstance(val, sympy.Basic):
         return val.is_number
     return isinstance(val, (int, float, bool))
+
+
+def _is_nan(val: _ExprType) -> bool:
+    if isinstance(val, sympy.Basic):
+        return bool(val.has(sympy.nan))
+    return isinstance(val, float) and math.isnan(val)
 
 
 def upper_bound(val: _ExprType):
@@ -177,7 +184,7 @@ class SymPyOps:
         result_type = torch.promote_types(x.dtype, y.dtype)
         if result_type == torch.bool:
             return NotImplemented
-        if x.expr.has(sympy.nan) or y.expr.has(sympy.nan):
+        if _is_nan(x.expr) or _is_nan(y.expr):
             return NotImplemented
         return TypedExpr(Min(x.expr, y.expr), result_type)
 
@@ -186,7 +193,7 @@ class SymPyOps:
         result_type = torch.promote_types(x.dtype, y.dtype)
         if result_type == torch.bool:
             return NotImplemented
-        if x.expr.has(sympy.nan) or y.expr.has(sympy.nan):
+        if _is_nan(x.expr) or _is_nan(y.expr):
             return NotImplemented
         return TypedExpr(Max(x.expr, y.expr), result_type)
 
