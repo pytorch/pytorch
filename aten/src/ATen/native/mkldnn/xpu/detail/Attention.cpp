@@ -995,7 +995,7 @@ void sdpa_backward(
 
 #define ADD_INPUT(variable) \
   inputs.emplace_back(      \
-          l_inputs[i++], eng, const_cast<void*>(variable.const_data_ptr()))
+      l_inputs[i++], eng, const_cast<void*>(variable.const_data_ptr()))
 
   ADD_INPUT(grad_out_aligned);
   ADD_INPUT(query_aligned);
