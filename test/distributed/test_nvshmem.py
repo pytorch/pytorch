@@ -4,7 +4,9 @@
 # python test/distributed/test_nvshmem.py
 
 
+import gc
 import os
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -101,6 +103,53 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         out = symm_mem.empty(numel, dtype=dtype, device=self.device)
         self.assertEqual(out.device, self.device)
         symm_mem.rendezvous(out, group=group_name)
+
+    # Bypass the implicit mempool: with it, deletions only return blocks to
+    # the caching allocator's pool and allocations are served from its cache,
+    # so the NVSHMEM allocator's free()/alloc() (and thus the drain under
+    # test) would never run.
+    @mock.patch.object(symm_mem, "_use_implicit_mempool", False)
+    def test_out_of_order_free(self) -> None:
+        # nvshmem_free is collective but tensor storage destruction is not. The
+        # allocator queues frees and drains them at the next collective alloc,
+        # freeing only allocations that every rank has released. Exercise ranks
+        # releasing different subsets in different orders: the drain must
+        # converge (a rank-count mismatch in the drain all-gather would hang)
+        # and later symmetric collectives must still be correct.
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+
+        def alloc():
+            return symm_mem.empty(numel, dtype=dtype, device=self.device)
+
+        # Collective, lockstep allocations => identical alloc_ids across ranks.
+        tensors = {i: alloc() for i in range(4)}
+
+        # Each rank queues a different subset, in a different order. free() is
+        # not collective, so the subsets need not agree here.
+        for i in [(0, 2), (3, 1)][self.rank % 2]:
+            del tensors[i]
+        gc.collect()
+
+        # Triggers a drain whose per-rank pending sets differ, so the
+        # intersection is empty and nothing is collectively freed -- but the
+        # protocol must still terminate in lockstep across ranks.
+        extra = alloc()
+
+        # Now every rank releases everything, so the next drain sees a full
+        # intersection and collectively frees the queued allocations.
+        tensors.clear()
+        del extra
+        gc.collect()
+
+        out = alloc()
+        symm_mem.rendezvous(out, group=group_name)
+        out.fill_(self.rank)
+        torch.ops.symm_mem.nvshmem_broadcast(out, 0, group_name)
+        self.assertEqual(out, torch.zeros(numel, dtype=dtype, device=self.device))
 
     def test_mempool_tensor_factory(self) -> None:
         """
