@@ -34,7 +34,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc,lf
+      check_experiments: lf
 
   link-check:
     name: Link checks
@@ -94,7 +94,9 @@ jobs:
         run: pip install pyyaml==6.0.2
       - name: Update metamates rule
         env:
-          GH_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
+          # Reading the closed pytorch/metamates team needs an org-member token;
+          # pytorchupdatebot is not an org member, so use pytorchbot here.
+          GH_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
         run: |
           python .github/scripts/update_metamates_rule.py
       - name: Create or update PR

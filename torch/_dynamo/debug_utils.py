@@ -82,7 +82,18 @@ if use_buck:
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops",
     ]
     cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")  # type: ignore[possibly-undefined]
-    extra_imports = "\n".join([f'torch.ops.load_library("{x}")' for x in extra_deps])
+    # Preload common fbcode custom-op libraries so repros that use those ops
+    # work out of the box. Best-effort: a repro whose graph doesn't use these
+    # ops (or that is run outside a buck target linking them) must not fail
+    # just because the library isn't present.
+    _extra_deps_list = "\n".join(f'    "{x}",' for x in extra_deps)
+    extra_imports = (
+        f"for _extra_dep in [\n{_extra_deps_list}\n]:\n"
+        "    try:\n"
+        "        torch.ops.load_library(_extra_dep)\n"
+        "    except OSError:\n"
+        "        pass\n"
+    )
 
 
 BUCK_CMD_PREFIX = ["buck2", "run", "@mode/dev-nosan"]
