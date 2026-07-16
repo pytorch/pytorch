@@ -4988,7 +4988,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         c.bmreq.kernel, c.bmreq.input_tensor_meta[0].device
                     )
                     future = async_compile.nvgemm_precompile(
-                        kernel_name=c.bmreq.kernel.metadata.kernel_name,
+                        kernel_name=c.bmreq.kernel.metadata.operator_name,
                         variant_name=c.bmreq.variant.name,
                         accumulator_type=c.bmreq.accumulator_type,
                         input_tensor_meta=c.bmreq.input_tensor_meta,
