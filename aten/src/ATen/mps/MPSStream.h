@@ -196,10 +196,6 @@ class TORCH_API MPSStream {
   bool _enableCommitAndContinue = true;
   // Buffer that contains last raised error
   MTLBuffer_t _errorBuffer = nil;
-  // Cache of compiled MPSGraphExecutable objects keyed by MPSGraph pointer.
-  // Populated lazily on first executeMPSGraph call per graph; never invalidated
-  // because each MPSGraph* in MPSGraphCache is shape-specific.
-  std::unordered_map<uintptr_t, void*> _graphExecutableCache;
 
   // Graph capture state.
   // _capturedSteps stores one entry per executeMPSGraph call OR raw Metal
@@ -211,7 +207,7 @@ class TORCH_API MPSStream {
     enum class Kind { MPSGraph, MetalKernel, BlitCopy };
     Kind kind = Kind::MPSGraph;
     // MPSGraph fields
-    void* exe = nullptr; // MPSGraphExecutable*, borrowed from _graphExecutableCache
+    void* exe = nullptr; // MPSGraphExecutable*, owned by this step (released in releaseCapturedStep)
 #ifdef __OBJC__
     NSArray<MPSGraphTensorData*>* inputsArray = nil;
     NSArray<MPSGraphTensorData*>* resultsArray = nil;

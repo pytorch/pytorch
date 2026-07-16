@@ -38,9 +38,6 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
 }
 
 MPSStream::~MPSStream() {
-  for (auto& [key, val] : _graphExecutableCache) {
-    [(__bridge MPSGraphExecutable*)val release];
-  }
   for (auto& step : _capturedSteps) {
     MPSStream::releaseCapturedStep(step);
   }
@@ -255,30 +252,25 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
       profiler.beginProfileGPUInterval(mpsGraph);
     }
 
-    if (!isGraphProfilingEnabled) {
-      // Warm path: use a compiled MPSGraphExecutable to skip per-call graph re-validation.
-      // _graphExecutableCache is only accessed inside _serialQueue, so no extra locking needed.
-      uintptr_t graphKey = reinterpret_cast<uintptr_t>(mpsGraph);
-      auto it = _graphExecutableCache.find(graphKey);
-      MPSGraphExecutable* exe = nil;
-      if (it != _graphExecutableCache.end()) {
-        exe = (__bridge MPSGraphExecutable*)it->second;
-      } else {
-        // First call for this graph: compile the executable.
-        NSMutableDictionary<MPSGraphTensor*, MPSGraphShapedType*>* feedShapes =
-            [[NSMutableDictionary alloc] initWithCapacity:[feeds count]];
-        for (MPSGraphTensor* t in feeds) {
-          MPSGraphTensorData* tdata = (MPSGraphTensorData*)feeds[t];
-          feedShapes[t] = [[[MPSGraphShapedType alloc] initWithShape:tdata.shape dataType:tdata.dataType] autorelease];
-        }
-        exe = [[mpsGraph compileWithDevice:[MPSGraphDevice deviceWithMTLDevice:device()]
-                                     feeds:feedShapes
-                             targetTensors:[results allKeys]
-                          targetOperations:nil
-                     compilationDescriptor:_compilationDescriptor] retain];
-        [feedShapes release];
-        _graphExecutableCache[graphKey] = (__bridge void*)exe;
+    if (_captureMode) {
+      // Capture: compile the graph into an MPSGraphExecutable, encode it, and
+      // record the step so replay() can re-encode it in a single dispatch. The
+      // executable is owned by the CapturedStep and released on
+      // captureReset()/~MPSStream() -- it is scoped to the capture, not cached
+      // persistently. (Capture rejects profiling in captureBegin(), so the
+      // profiler branch never overlaps this path.)
+      NSMutableDictionary<MPSGraphTensor*, MPSGraphShapedType*>* feedShapes =
+          [[NSMutableDictionary alloc] initWithCapacity:[feeds count]];
+      for (MPSGraphTensor* t in feeds) {
+        MPSGraphTensorData* tdata = (MPSGraphTensorData*)feeds[t];
+        feedShapes[t] = [[[MPSGraphShapedType alloc] initWithShape:tdata.shape dataType:tdata.dataType] autorelease];
       }
+      MPSGraphExecutable* exe = [[mpsGraph compileWithDevice:[MPSGraphDevice deviceWithMTLDevice:device()]
+                                                       feeds:feedShapes
+                                               targetTensors:[results allKeys]
+                                            targetOperations:nil
+                                       compilationDescriptor:_compilationDescriptor] retain];
+      [feedShapes release];
 
       // Build ordered input/output arrays using the stable ordering from the executable.
       NSArray<MPSGraphTensor*>* feedTensors = exe.feedTensors;
@@ -297,22 +289,18 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
                     resultsArray:resultsArray
              executionDescriptor:nil];
 
-      // If capture mode is active, record this step so replay() can re-encode
-      // everything in one dispatch_sync.  We retain the arrays here; capture
-      // owns one reference that is released in captureBegin() / ~MPSStream().
-      if (_captureMode) {
-        CapturedStep step;
-        step.kind = CapturedStep::Kind::MPSGraph;
-        step.exe = (__bridge void*)exe;
-        step.inputsArray = [inputsArray retain];
-        step.resultsArray = [resultsArray retain];
-        _capturedSteps.push_back(std::move(step));
-      }
+      CapturedStep step;
+      step.kind = CapturedStep::Kind::MPSGraph;
+      step.exe = (__bridge void*)exe; // owned by the step
+      step.inputsArray = [inputsArray retain];
+      step.resultsArray = [resultsArray retain];
+      _capturedSteps.push_back(std::move(step));
 
       [inputsArray release];
       [resultsArray release];
     } else {
-      // Profiling path: use MPSGraph directly so profiler hooks work correctly.
+      // Normal path: encode the graph directly. No persistent executable cache;
+      // the compiled-executable path is used only during capture (above).
       // note: CommitAndContinue feature is enabled/disabled via "_executionDescriptor"
       [mpsGraph encodeToCommandBuffer:commandBuffer()
                                 feeds:feeds
@@ -378,6 +366,7 @@ void MPSStream::captureReset() {
 
 void MPSStream::releaseCapturedStep(CapturedStep& step) {
   if (step.kind == CapturedStep::Kind::MPSGraph) {
+    [(__bridge MPSGraphExecutable*)step.exe release];
     [(__bridge NSArray*)step.inputsArray release];
     [(__bridge NSArray*)step.resultsArray release];
   } else if (step.kind == CapturedStep::Kind::BlitCopy) {
