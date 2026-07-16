@@ -157,6 +157,14 @@ class EpiSmemBytes(NamedTuple):
         return self.__add__(other)
 
 
+LOCAL_REDUCE_FRAGMENT_WIDTH = 32
+
+
+def grouped_local_reduce_uses_smem(axis: int, group: int) -> bool:
+    """Return whether a grouped-M reduction crosses lane fragments."""
+    return axis == 0 and group > LOCAL_REDUCE_FRAGMENT_WIDTH
+
+
 class EpiOp:
     """Base class for composable epilogue operations."""
 
@@ -1100,6 +1108,9 @@ class VecReduce(EpiOp):
         warps = warp_shape_mnk[self._reduce_dim()] if warp_shape_mnk is not None else 1
         return max(warps - 1, 0)
 
+    def _uses_smem(self, gemm):
+        return True
+
     def smem_bytes(self, arg_tensor, cta_tile_shape_mnk, epi_tile, warp_shape_mnk=None):
         smem_warps = self._smem_warps(warp_shape_mnk)
         if smem_warps == 0:
@@ -1110,14 +1121,14 @@ class VecReduce(EpiOp):
 
     def smem_struct_field(self, gemm, params):
         smem_warps = self._smem_warps(gemm.epi_smem_warp_shape_mnk())
-        if smem_warps == 0:
+        if smem_warps == 0 or not self._uses_smem(gemm):
             return None
         size = self._tile_size(gemm.cta_tile_shape_mnk) * smem_warps
         return (f"s_{self.name}", cute.struct.Align[cute.struct.MemRange[Float32, size], 16])
 
     def get_smem_tensor(self, gemm, params, storage_epi):
         smem_warps = self._smem_warps(gemm.epi_smem_warp_shape_mnk())
-        if smem_warps == 0:
+        if smem_warps == 0 or not self._uses_smem(gemm):
             return None
         return getattr(storage_epi, f"s_{self.name}").get_tensor(
             cute.make_layout((self._tile_size(gemm.cta_tile_shape_mnk), smem_warps))
@@ -1194,30 +1205,16 @@ def grouped_rowvec_reduce_value(gemm, tRS_rInput, row_state, combine_fn, finaliz
 class GroupedLocalReduce(VecReduce):
     """Store or broadcast generated grouped local-reduce values."""
 
-    dim = 0
+    dim = 1
     epi_m_major_preference = -1
+
+    def _uses_smem(self, gemm):
+        return grouped_local_reduce_uses_smem(
+            gemm.local_reduce_axis, gemm.local_reduce_group
+        )
 
     def smem_bytes(self, arg_tensor, cta_tile_shape_mnk, epi_tile, warp_shape_mnk=None):
         return EpiSmemBytes()
-
-    def smem_struct_field(self, gemm, params):
-        group = gemm.local_reduce_group
-        axis = gemm.local_reduce_axis
-        smem_warps = max(gemm.epi_smem_warp_shape_mnk()[0] - 1, 0)
-        if axis == 0 and group > 32 and smem_warps > 0:
-            size = gemm.cta_tile_shape_mnk[1] * smem_warps
-            return (f"s_{self.name}", cute.struct.Align[cute.struct.MemRange[Float32, size], 16])
-        return None
-
-    def get_smem_tensor(self, gemm, params, storage_epi):
-        group = gemm.local_reduce_group
-        axis = gemm.local_reduce_axis
-        smem_warps = max(gemm.epi_smem_warp_shape_mnk()[0] - 1, 0)
-        if axis == 0 and group > 32 and smem_warps > 0:
-            return getattr(storage_epi, f"s_{self.name}").get_tensor(
-                cute.make_layout((gemm.cta_tile_shape_mnk[1], smem_warps))
-            )
-        return None
 
     def to_params(self, gemm, args):
         return {
@@ -1389,6 +1386,7 @@ class GroupedLocalReduce(VecReduce):
                 )
                 lanes_in_M = cute.size(lane_layout_MN, mode=[0])
                 lanes_in_N = cute.size(lane_layout_MN, mode=[1])
+                assert lanes_in_M == LOCAL_REDUCE_FRAGMENT_WIDTH
                 assert group <= tile_M
                 if const_expr(group <= lanes_in_M):
                     assert lanes_in_M % group == 0
@@ -1410,7 +1408,7 @@ class GroupedLocalReduce(VecReduce):
                                 ),
                             )
                             reduction_rows = reduction_rows // 2
-                if const_expr(group > lanes_in_M):
+                if const_expr(grouped_local_reduce_uses_smem(axis, group)):
                     sReduce = state[1]
                     assert sReduce is not None
                     warp_M = warp_layout_MN[0]
