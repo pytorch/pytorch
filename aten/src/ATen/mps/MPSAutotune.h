@@ -48,8 +48,7 @@ struct MPSAutotuneSnapshot {
 
 TORCH_API bool isMPSAutotuneTraceEnabled();
 TORCH_API void startMPSAutotuneTrace(size_t max_entries);
-TORCH_API MPSAutotuneSnapshot stopMPSAutotuneTrace(
-    bool wait_for_callbacks);
+TORCH_API MPSAutotuneSnapshot stopMPSAutotuneTrace(bool wait_for_callbacks);
 TORCH_API void recordMPSAutotuneEvent(
     MPSAutotuneRecord record,
     bool retained = false);

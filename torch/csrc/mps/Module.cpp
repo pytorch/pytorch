@@ -630,9 +630,8 @@ void initModule(PyObject* module) {
                 ? std::nullopt
                 : std::optional<std::string>(config.cast<std::string>()));
       });
-  m.def("_mps_clear_autotune_cache", []() {
-    at::mps::clearMPSAutotuneCaches();
-  });
+  m.def(
+      "_mps_clear_autotune_cache", []() { at::mps::clearMPSAutotuneCaches(); });
   m.def("_mps_host_alias_storage", [](py::object py_storage) -> py::object {
     PyObject* obj = py_storage.ptr();
     TORCH_CHECK_TYPE(

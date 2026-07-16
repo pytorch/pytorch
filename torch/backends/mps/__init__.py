@@ -58,9 +58,7 @@ class AutotuneTrace:
             if self.wait_until_completed and exc_type is None:
                 torch.mps.synchronize()
         finally:
-            snapshot = torch._C._mps_stop_autotune_trace(
-                self.wait_until_completed
-            )
+            snapshot = torch._C._mps_stop_autotune_trace(self.wait_until_completed)
             self.records = snapshot["records"]
             self.dropped = snapshot["dropped"]
             self.schema_version = snapshot["schema_version"]
@@ -186,9 +184,7 @@ def get_core_count() -> int:
 
 
 class MPSModule(PropModule):
-    benchmark = ContextProp(
-        torch._C._get_mps_benchmark, torch._C._set_mps_benchmark
-    )
+    benchmark = ContextProp(torch._C._get_mps_benchmark, torch._C._set_mps_benchmark)
 
 
 sys.modules[__name__] = MPSModule(sys.modules[__name__], __name__)
