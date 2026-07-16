@@ -4788,19 +4788,6 @@ def _round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
 
-def _rocm_release_ge(major: int, minor: int, patch: int = 0) -> bool:
-    r = getattr(torch.version, "rocm", None)
-    if r is None:
-        return False
-    try:
-        parts = [int(x) for x in str(r).split(".")[:3]]
-    except ValueError:
-        return False
-    while len(parts) < 3:
-        parts.append(0)
-    return (parts[0], parts[1], parts[2]) >= (major, minor, patch)
-
-
 def _infer_scale_swizzle_impl(
     mat_size: tuple[Any, Any],
     scale_size: tuple[Any, ...],
@@ -4884,7 +4871,10 @@ def _infer_scale_swizzle_impl(
         else:
             # AMD: MXFP8 uses plain BlockWise1x32 below 7.14. MXFP4 EXT at runtime ROCm >= 7.13.0;
             # MXFP8 EXT at runtime ROCm >= 7.14.0. XPU uses plain BlockWise1x32 with no swizzle.
-            if mat_dtype == torch.float4_e2m1fn_x2 and _rocm_release_ge(7, 13, 0):
+            from torch.testing._internal.common_cuda import _get_torch_rocm_version
+
+            rocm_version = _get_torch_rocm_version()
+            if mat_dtype == torch.float4_e2m1fn_x2 and rocm_version >= (7, 13):
                 k_blocks_a = ceildiv(K_multiplier * mat_size[1], 32)
                 ext_numel_a = _round_up(mat_size[0], 32) * _round_up(k_blocks_a, 8)
                 k_blocks_b = ceildiv(K_multiplier * mat_size[0], 32)
@@ -4897,7 +4887,7 @@ def _infer_scale_swizzle_impl(
                         SwizzleType.SWIZZLE_32_4_4,
                     )
 
-            if mat_dtype == torch.float8_e4m3fn and _rocm_release_ge(7, 14, 0):
+            if mat_dtype == torch.float8_e4m3fn and rocm_version >= (7, 14):
                 k_blocks_a = ceildiv(K_multiplier * mat_size[1], 32)
                 ext_numel_a = _round_up(mat_size[0], 32) * _round_up(k_blocks_a, 8)
                 k_blocks_b = ceildiv(K_multiplier * mat_size[0], 32)
