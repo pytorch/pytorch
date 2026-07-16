@@ -8,6 +8,9 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FLEX_GEMM_GROUPED_N_MAIN_COMPOSITION_ERROR,
+    FLEX_GEMM_GROUPED_N_MAIN_SHAPE_ERROR,
+    FlexGemmGroupedNMainOutputTransform,
     FlexGemmLocalReduceCallbacks,
     FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR,
@@ -231,6 +234,37 @@ class FlexGemmRuntimeLocalReducePlan:
         return self.geometry.axis
 
 
+@dataclasses.dataclass(frozen=True)
+class FlexGemmRuntimeMainOutputPlan:
+    """Describe the logical main-output transform selected by lowering."""
+
+    transform: FlexGemmGroupedNMainOutputTransform | None = None
+
+    def output_shape(self, physical_shape: tuple[int, ...]) -> tuple[int, ...]:
+        if self.transform is None:
+            return physical_shape
+        if physical_shape[-1] % self.transform.group != 0:
+            raise RuntimeError(FLEX_GEMM_GROUPED_N_MAIN_SHAPE_ERROR)
+        return (*physical_shape[:-1], physical_shape[-1] // self.transform.group)
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmRuntimeOutputPlan:
+    """Bundle all user-visible output consumers into one generated ABI value."""
+
+    aux_outs: tuple[torch.Tensor, ...] = ()
+    local_reduce: FlexGemmRuntimeLocalReducePlan | None = None
+    main: FlexGemmRuntimeMainOutputPlan = dataclasses.field(
+        default_factory=FlexGemmRuntimeMainOutputPlan
+    )
+
+    def __post_init__(self) -> None:
+        if self.main.transform is not None and (
+            self.aux_outs or self.local_reduce is not None
+        ):
+            raise NotImplementedError(FLEX_GEMM_GROUPED_N_MAIN_COMPOSITION_ERROR)
+
+
 def validate_runtime_local_reduce(
     plan: FlexGemmRuntimeLocalReducePlan | None,
     a: torch.Tensor,
@@ -317,8 +351,7 @@ def dispatch_gemm_act(
     b: torch.Tensor,
     C: torch.Tensor | None,
     out: torch.Tensor,
-    aux_outs: tuple[torch.Tensor, ...],
-    local_reduce: FlexGemmRuntimeLocalReducePlan | None,
+    output_plan: FlexGemmRuntimeOutputPlan,
     local_reduce_callback_keys: tuple[str | None, str | None],
     epilogue_key: str,
     epilogue_arg_kinds: tuple[str, ...],
@@ -344,6 +377,9 @@ def dispatch_gemm_act(
 
     # QuACK consumes A as (l, m, k) and B as (l, n, k); b is (k, n) so b.mT is (n, k).
     quack_a, quack_b = a, b.mT
+    main_transform = output_plan.main.transform
+    aux_outs = output_plan.aux_outs
+    local_reduce = output_plan.local_reduce
     quack_out, quack_aux_outs, quack_local_reduce_out, quack_c = (
         out,
         aux_outs,
@@ -351,6 +387,8 @@ def dispatch_gemm_act(
         C,
     )
     if config.swap_ab:
+        if main_transform is not None:
+            raise NotImplementedError(LOCAL_REDUCE_SWAP_AB_ERROR)
         quack_a, quack_b = quack_b, quack_a
         quack_out = out.mT
         if local_reduce is not None:
@@ -408,6 +446,10 @@ def dispatch_gemm_act(
         tensor_epilogue_colvec_biases=col_args,
         tensor_epilogue_tile_biases=tile_args,
         tensor_epilogue_scalar_biases=scalar_args,
+        main_output_transform_group=(
+            None if main_transform is None else main_transform.group
+        ),
+        concat_layout=(() if main_transform is None else main_transform.concat_layout),
         alpha=alpha,
         beta=beta,
         use_tma_gather=config.use_tma_gather,
@@ -428,6 +470,7 @@ def gemm_epilogue(
     out: torch.Tensor | None = None,
     aux_outs: tuple[torch.Tensor, ...] = (),
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
+    output_plan: FlexGemmRuntimeOutputPlan | None = None,
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
     config_key: GemmConfigKey | None = None,
@@ -473,17 +516,32 @@ def gemm_epilogue(
         raise RuntimeError(
             f"mat1 and mat2 shapes cannot be multiplied ({a.shape} and {b.shape})"
         )
-    expected_shape = (*a.shape[:-2], a.shape[-2], b.shape[-1])
+    physical_output_shape = (*a.shape[:-2], a.shape[-2], b.shape[-1])
+    if output_plan is None:
+        output_plan = FlexGemmRuntimeOutputPlan(
+            aux_outs=aux_outs, local_reduce=local_reduce
+        )
+    elif aux_outs or local_reduce is not None:
+        raise RuntimeError(
+            "output_plan cannot be combined with legacy aux_outs/local_reduce kwargs"
+        )
+    aux_outs = output_plan.aux_outs
+    local_reduce = output_plan.local_reduce
+    logical_output_shape = output_plan.main.output_shape(physical_output_shape)
+    if output_plan.main.transform is not None and (
+        a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0 or epilogue_args
+    ):
+        raise NotImplementedError(FLEX_GEMM_GROUPED_N_MAIN_COMPOSITION_ERROR)
     expected_dtype = out_dtype
     if expected_dtype is None:
         expected_dtype = out.dtype if out is not None else a.dtype
-    effective_C = normalize_c(C, expected_shape, beta)
+    effective_C = normalize_c(C, physical_output_shape, beta)
     if out is not None:
         check_matrix("out", out)
         check_matrix_major_layout("out", out)
-        if tuple(out.shape) != expected_shape:
+        if tuple(out.shape) != logical_output_shape:
             raise RuntimeError(
-                f"out shape must be {expected_shape}, got {tuple(out.shape)}"
+                f"out shape must be {logical_output_shape}, got {tuple(out.shape)}"
             )
         if out.dtype != expected_dtype:
             raise RuntimeError(f"out dtype must be {expected_dtype}, got {out.dtype}")
@@ -499,14 +557,15 @@ def gemm_epilogue(
         for index, aux_out in enumerate(aux_outs):
             check_matrix(f"aux_outs[{index}]", aux_out)
             check_matrix_major_layout(f"aux_outs[{index}]", aux_out)
-            if tuple(aux_out.shape) != expected_shape:
+            if tuple(aux_out.shape) != physical_output_shape:
                 raise RuntimeError(
-                    f"aux_outs[{index}] shape must be {expected_shape}, got {tuple(aux_out.shape)}"
+                    f"aux_outs[{index}] shape must be {physical_output_shape}, "
+                    f"got {tuple(aux_out.shape)}"
                 )
     validate_runtime_local_reduce(
         local_reduce,
         a,
-        expected_shape,
+        physical_output_shape,
         effective_C,
         alpha,
         beta,
@@ -546,7 +605,7 @@ def gemm_epilogue(
         epilogue_key,
     )
     out = (
-        torch.empty(expected_shape, device=a.device, dtype=expected_dtype)
+        torch.empty(logical_output_shape, device=a.device, dtype=expected_dtype)
         if out is None
         else out
     )
@@ -567,8 +626,7 @@ def gemm_epilogue(
             b,
             effective_C,
             out,
-            aux_outs,
-            local_reduce,
+            output_plan,
             local_reduce_callback_keys,
             epilogue_key,
             inferred_arg_kinds,

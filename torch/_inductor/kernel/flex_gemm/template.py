@@ -15,6 +15,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
 )
 from torch._inductor.heuristics.template.flex_gemm import GemmConfigKey
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FlexGemmGroupedNMainOutputTransform,
     FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
@@ -60,6 +61,24 @@ class FlexGemmEpilogueLocalReduceConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class FlexGemmEpilogueMainOutputConfig:
+    """Template-time logical main-output transform."""
+
+    transform: FlexGemmGroupedNMainOutputTransform | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmEpilogueOutputConfig:
+    """Template input indices and plans for all user-visible outputs."""
+
+    aux_out_indices: tuple[int, ...] = ()
+    local_reduce: FlexGemmEpilogueLocalReduceConfig | None = None
+    main: FlexGemmEpilogueMainOutputConfig = dataclasses.field(
+        default_factory=FlexGemmEpilogueMainOutputConfig
+    )
+
+
+@dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueConfig:
     """Metadata needed to render one Inductor-owned QuACK GEMM epilogue choice.
 
@@ -84,8 +103,9 @@ class FlexGemmEpilogueConfig:
     quack_config_key: GemmConfigKey
     epilogue_arg_indices: tuple[int, ...] = ()
     epilogue_arg_kinds: tuple[str, ...] = ()
-    aux_out_indices: tuple[int, ...] = ()
-    local_reduce: FlexGemmEpilogueLocalReduceConfig | None = None
+    outputs: FlexGemmEpilogueOutputConfig = dataclasses.field(
+        default_factory=FlexGemmEpilogueOutputConfig
+    )
 
 
 class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
@@ -140,11 +160,14 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             """
             import torch
             from torch._inductor.kernel.flex_gemm.constraints import (
+                FlexGemmGroupedNMainOutputTransform,
                 FlexGemmLocalReduceCallbacks,
                 FlexGemmLocalReduceGeometry,
             )
             from torch._inductor.kernel.flex_gemm.runtime import (
                 FlexGemmRuntimeLocalReducePlan,
+                FlexGemmRuntimeMainOutputPlan,
+                FlexGemmRuntimeOutputPlan,
                 gemm_epilogue as flex_gemm_epilogue,
             )
             """
@@ -228,13 +251,15 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             f"group={local_reduce.group!r}, axis={local_reduce.axis!r})"
         )
 
-    def _local_reduce_kwargs(
+    def _local_reduce_expr(
         self,
         input_args: list[str],
-        local_reduce: FlexGemmEpilogueLocalReduceConfig,
+        local_reduce: FlexGemmEpilogueLocalReduceConfig | None,
         epilogue_name: str,
     ) -> str:
         """Render one structural local-reduce plan for runtime dispatch."""
+        if local_reduce is None:
+            return "None"
         geometry = self._local_reduce_geometry(local_reduce)
         plan = f"FlexGemmRuntimeLocalReducePlan({geometry}"
         if local_reduce.out_index is not None:
@@ -243,12 +268,36 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             plan += ", feeds_main=True"
         if local_reduce.feeds_main or local_reduce.needs_physical_callbacks:
             plan += f", callbacks={self._local_reduce_callbacks(epilogue_name)}"
-        return f", local_reduce={plan})"
+        return f"{plan})"
+
+    def _output_plan_expr(
+        self, input_args: list[str], config: FlexGemmEpilogueConfig
+    ) -> str:
+        """Render all output consumers into one runtime ABI value."""
+        outputs = config.outputs
+        aux_outs = tuple(input_args[index] for index in outputs.aux_out_indices)
+        aux_expr = f"({', '.join(aux_outs)},)" if aux_outs else "()"
+        local_reduce_expr = self._local_reduce_expr(
+            input_args, outputs.local_reduce, config.epilogue_name
+        )
+        transform = outputs.main.transform
+        transform_expr = (
+            "None"
+            if transform is None
+            else "FlexGemmGroupedNMainOutputTransform("
+            f"group={transform.group!r}, concat_layout={transform.concat_layout!r})"
+        )
+        return (
+            "FlexGemmRuntimeOutputPlan("
+            f"aux_outs={aux_expr}, local_reduce={local_reduce_expr}, "
+            "main=FlexGemmRuntimeMainOutputPlan("
+            f"transform={transform_expr}))"
+        )
 
     def _epilogue_kwargs(
         self, input_args: list[str], config: FlexGemmEpilogueConfig
     ) -> str:
-        """Render captured tensor and aux-output kwargs for runtime dispatch."""
+        """Render captured tensors and structural output plans."""
         epilogue_args = [input_args[index] for index in config.epilogue_arg_indices]
         kwargs: list[str] = []
         if epilogue_args:
@@ -256,15 +305,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                 f", epilogue_args=({', '.join(epilogue_args)},), "
                 f"epilogue_arg_kinds={config.epilogue_arg_kinds!r}"
             )
-        if config.aux_out_indices:
-            aux_outs = ", ".join(input_args[index] for index in config.aux_out_indices)
-            kwargs.append(f", aux_outs=({aux_outs},)")
-        if config.local_reduce is not None:
-            kwargs.append(
-                self._local_reduce_kwargs(
-                    input_args, config.local_reduce, config.epilogue_name
-                )
-            )
+        kwargs.append(f", output_plan={self._output_plan_expr(input_args, config)}")
         return "".join(kwargs)
 
 

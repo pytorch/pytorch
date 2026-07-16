@@ -127,6 +127,17 @@ LOCAL_REDUCE_OUT_SHAPE_ERROR = "local_reduce_out shape must be {expected}, got {
 LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
     "physical local reductions require generated local-reduce callbacks"
 )
+FLEX_GEMM_GROUPED_N_MAIN_GROUP_ERROR = (
+    "FlexGEMM grouped-N main outputs currently support only group 2"
+)
+FLEX_GEMM_GROUPED_N_MAIN_COMPOSITION_ERROR = (
+    "FlexGEMM grouped-N main outputs do not compose with aux outputs, local "
+    "reductions, captured tensors, C, alpha/beta, or batched GEMMs yet"
+)
+FLEX_GEMM_GROUPED_N_MAIN_SHAPE_ERROR = (
+    "unsupported FlexGEMM epilogue: grouped-N main output shape must equal the "
+    "physical GEMM output shape with N divided by the transform group"
+)
 
 
 def statically_known(expr: Any) -> bool:
@@ -392,8 +403,27 @@ def flex_gemm_local_reduce_config_error(
 
 
 @dataclasses.dataclass(frozen=True)
+class FlexGemmGroupedNMainOutputTransform:
+    """Describe a logical main output that contracts contiguous N groups."""
+
+    group: int
+    concat_layout: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.group != 2:
+            raise NotImplementedError(FLEX_GEMM_GROUPED_N_MAIN_GROUP_ERROR)
+        if self.concat_layout not in ((), ("B",)):
+            raise NotImplementedError(
+                f"unsupported FlexGEMM grouped-N concat layout: {self.concat_layout}"
+            )
+
+
+@dataclasses.dataclass(frozen=True)
 class FlexGemmLocalReduceGeometry:
-    """Describe the grouped output axis shared by local-reduce consumers.
+    """Describe the canonical grouped M/N layout used by FlexGEMM epilogues.
+
+    The legacy name remains in the generated ABI, but this type also owns the
+    TensorSSA shape contract used by grouped main outputs.
 
     Attributes:
         group: Number of contiguous M or N elements in each local group.
@@ -406,6 +436,49 @@ class FlexGemmLocalReduceGeometry:
     def __post_init__(self) -> None:
         """Reject geometry outside the GEMM tile's M/N grouping model."""
         validate_local_reduce_group_axis(self.group, self.axis)
+
+    @property
+    def reduce_dims(self) -> tuple[int, ...]:
+        return (-1, 2) if self.axis == 1 else (-2, 1)
+
+    def matches_reduction_dim(self, dim: Any) -> bool:
+        """Return whether an FX reduction selects this layout's grouped dimension."""
+        dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
+        return len(dims) == 1 and dims[0] in self.reduce_dims
+
+    def fragment_group_size_expr(self, source: Any) -> str:
+        """Return the local group size available in this epilogue fragment."""
+        return (
+            f"cutlass.const_expr(min({self.group}, "
+            f"cute.size({source}.shape, mode=[0])))"
+        )
+
+    def fragment_repeat_expr(self, source: Any) -> str:
+        """Return the repeat count needed to cover the current epilogue fragment."""
+        return (
+            f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
+            f"// min({self.group}, cute.size({source}.shape, mode=[0])))"
+        )
+
+    def tensorssa_shape(self, source: Any) -> str:
+        fragment_group_size = self.fragment_group_size_expr(source)
+        repeats = self.fragment_repeat_expr(source)
+        if self.axis == 1:
+            return f"((1, {fragment_group_size}, {repeats}), 1, 1)"
+        return f"(({fragment_group_size}, 1, {repeats}), 1, 1)"
+
+    def keepdim_shape(self, source: Any) -> str:
+        return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
+
+    @property
+    def needs_physical_combine(self) -> bool:
+        return self.needs_physical_callbacks
+
+    @property
+    def reduction_profile(self) -> str:
+        if self.axis == 1:
+            return "((None, 1, None), 1, 1)"
+        return "((1, None, None), 1, 1)"
 
     @property
     def needs_physical_callbacks(self) -> bool:
