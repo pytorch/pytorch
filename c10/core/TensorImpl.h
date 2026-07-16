@@ -38,8 +38,11 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -234,12 +237,35 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
+  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
+
+  bool allow_meta_ = true;
+
+  std::optional<std::string> prefer_device_type = std::nullopt;
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter)
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)) {}
+
+  void set_constant(
+      const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
+      std::shared_ptr<at::Tensor> constant,
+      c10::StorageImpl* constant_storage);
+
+  std::shared_ptr<at::Tensor> get_constant(c10::TensorImpl* fake_impl) const;
+  void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
+
+  // key = faketensor, value = real constant
+  std::unordered_map<c10::TensorImpl*, std::shared_ptr<at::Tensor>>
+      tensor_to_constant_;
+  // key = constant storage, values = all fake tensors that share this storage (aliases)
+  std::unordered_map<
+      c10::StorageImpl*,
+      std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>>>
+      constant_storage_mapping_;
+  mutable std::mutex constant_mutex_;
 };
 
 struct C10_API ExtraMeta {
@@ -1449,6 +1475,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // use when the device might lack an index ("cuda" vs "cuda:0").
   void set_and_normalize_fake_device(c10::Device fake_device);
 
+  std::optional<c10::Device> fake_device() const {
+    if (!extra_meta_)
+      return std::nullopt;
+    return extra_meta_->fake_device_;
+  }
+
   void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
     get_extra_meta().fake_tensor_mode_ = std::move(mode);
   }
@@ -2522,6 +2554,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       typename T,
       typename = typename std::enable_if_t< // NOLINT(modernize-use-constraints)
           std::is_integral_v<T>>>
+
   bool SetDimsTemplate(ArrayRef<T> src) {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,

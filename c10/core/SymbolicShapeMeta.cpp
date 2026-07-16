@@ -403,4 +403,36 @@ void SymbolicShapeMeta::init_is_non_overlapping_and_dense() const {
   }());
 }
 
+void SymbolicShapeMeta::set_materialized_sizes() const {
+  std::scoped_lock lock(mutables_);
+  if (has_materialized_sizes()) {
+    return;
+  }
+  materialized_sizes_.resize(sizes_.size());
+  for (size_t i = 0; i < sizes_.size(); i++) {
+    materialized_sizes_[i] = sizes_[i].guard_int(__FILE__, __LINE__);
+  }
+  available_.fetch_or(sizes_materialized_avail);
+}
+
+void SymbolicShapeMeta::set_materialized_strides() const {
+  std::scoped_lock lock(mutables_);
+  if (has_materialized_strides()) {
+    return;
+  }
+  materialized_strides_.resize(strides_.size());
+  for (size_t i = 0; i < strides_.size(); i++) {
+    materialized_strides_[i] = strides_[i].guard_int(__FILE__, __LINE__);
+  }
+  available_.fetch_or(strides_materialized_avail);
+}
+
+void SymbolicShapeMeta::init_materialized_sizes() const {
+  set_materialized_sizes();
+}
+
+void SymbolicShapeMeta::init_materialized_strides() const {
+  set_materialized_strides();
+}
+
 } // namespace c10
