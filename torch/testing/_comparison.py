@@ -1255,8 +1255,11 @@ def originate_pairs(
     # raise on Python 3.13+ (no same-object shortcut), or return a Tensor when that
     # field is the sole compare=True field. Only then recurse field-by-field so
     # tensors use the normal tensor comparison path.
+    # Skip Tensors: is_dataclass(tensor) can crash under dynamo_wrapped (sparse PGO).
     elif (
-        dataclasses.is_dataclass(actual)
+        not isinstance(actual, torch.Tensor)
+        and not isinstance(expected, torch.Tensor)
+        and dataclasses.is_dataclass(actual)
         and not isinstance(actual, type)
         and dataclasses.is_dataclass(expected)
         and not isinstance(expected, type)
