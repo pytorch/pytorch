@@ -47,6 +47,7 @@ from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -101,7 +102,7 @@ from .functions import (
 )
 from .lists import ListVariable, TupleVariable
 from .object_protocol import vt_is_iterable
-from .script_object import TorchScriptObjectVariable
+from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -436,7 +437,7 @@ def _collect_tensors_with_sources(
             raise AssertionError(
                 f"Expected fake_tensor to be a torch.Tensor, got {type(fake_tensor)}"
             )
-        if isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor):
+        if is_fake_tensor(fake_tensor):
             pass
         elif is_traceable_wrapper_subclass(fake_tensor):
             # For tensor subclasses (e.g. DTensor), verify the inner tensors
@@ -447,11 +448,7 @@ def _collect_tensors_with_sources(
                 fake_tensor,  # pyrefly: ignore[bad-argument-type]
                 out=plain,  # pyrefly: ignore[bad-argument-type]
             )
-            if not all(
-                isinstance(t, torch._subclasses.fake_tensor.FakeTensor)
-                for t in plain
-                if isinstance(t, torch.Tensor)
-            ):
+            if not all(is_fake_tensor(t) for t in plain if isinstance(t, torch.Tensor)):
                 raise AssertionError(
                     f"Expected all plain tensors to be FakeTensors, got {[type(t) for t in plain]}"
                 )
@@ -1011,7 +1008,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # This should only be done if the example_value is a FakeTensor.
                 # However, if tensor subclasses are present,
                 # it is reasonable for Python to remain in the dispatch key set.
-                if isinstance(example_value, torch._subclasses.FakeTensor):
+                if torch._subclasses.fake_tensor.is_fake_tensor(example_value):
                     dks = (
                         dks
                         - torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
@@ -1331,6 +1328,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch.set_autocast_enabled(dev_py_const, enabled.as_python_constant())
             tx.output.add_cleanup_hook(
                 lambda: torch.set_autocast_enabled(dev_py_const, prev)
+            )
+            return ConstantVariable.create(None)
+
+        @register(torch.set_autocast_dtype)
+        def handle_set_autocast_dtype(
+            self,
+            tx: "InstructionTranslatorBase",
+            device_type: VariableTracker,
+            dtype: VariableTracker,
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function",
+                torch.set_autocast_dtype,
+                (device_type.as_proxy(), dtype.as_proxy()),
+            )
+            dev_py_const = device_type.as_python_constant()
+            prev = torch.get_autocast_dtype(dev_py_const)
+            torch.set_autocast_dtype(dev_py_const, dtype.as_python_constant())
+            tx.output.add_cleanup_hook(
+                lambda: torch.set_autocast_dtype(dev_py_const, prev)
             )
             return ConstantVariable.create(None)
 
@@ -1864,7 +1881,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     if not (
                         args[0].is_python_constant()
                         or (
-                            isinstance(args[0], TorchScriptObjectVariable)
+                            isinstance(args[0], CustomClassObjectVariable)
                             and args[  # pyrefly: ignore[missing-attribute]
                                 0
                             ].value.script_class_name  # pyrefly: ignore[missing-attribute]
@@ -1894,9 +1911,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
 
                 def get_arg_value(arg: VariableTracker) -> Any:
-                    # TorchScriptObjectVariable for ProcessGroup doesn't support
+                    # CustomClassObjectVariable for ProcessGroup doesn't support
                     # as_python_constant(), so extract real_obj directly
-                    if isinstance(arg, TorchScriptObjectVariable):
+                    if isinstance(arg, CustomClassObjectVariable):
                         return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
                     return arg.as_python_constant()
 
@@ -3100,7 +3117,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         strict=True,
                     )
                 )
-                return ConstDictVariable(items, dict)
+                return ConstDictVariable(items)
             return result
 
         @register(torch._functorch.eager_transforms._autograd_grad)

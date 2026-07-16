@@ -3197,7 +3197,7 @@ if HAS_CUDA_AND_TRITON:
             msgs = [str(x.message) for x in w]
             self.assertTrue(
                 any("require backward" in m for m in msgs),
-                f"expected CUDAGraph pending-backward warning; got: {msgs}",
+                lambda msg: f"{msg}\nexpected CUDAGraph pending-backward warning; got: {msgs}",
             )
             self.assertTrue(self.get_manager().new_graph_id().id == 0)
 
@@ -3304,7 +3304,7 @@ if HAS_CUDA_AND_TRITON:
             foo(torch.tensor([1, 0, 0], device="cuda"))
 
             if config.graph_partition:
-                self.assertEqual(counters["inductor"]["cudagraph_partitions"], 9)
+                self.assertEqual(counters["inductor"]["cudagraph_partitions"], 0)
             else:
                 # Without graph partitioning, cudagraphs are skipped entirely
                 self.assertEqual(counters["inductor"]["cudagraph_skips"], 3)
@@ -3333,7 +3333,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
-        @torch._inductor.config.patch("cpp_wrapper", True)
+        @torch._inductor.config.patch({"cpp_wrapper": True, "graph_partition": True})
         def test_skip_cpp_wrapper(self):
             def foo(x):
                 return x + 1
@@ -4076,7 +4076,7 @@ if HAS_CUDA_AND_TRITON:
 
             # Set threshold high enough to skip this simple function
             with torch._inductor.config.patch(
-                {"triton.cudagraph_min_partition_size": 10}
+                {"triton.cudagraph_min_partition_size": 10, "graph_partition": True}
             ):
                 fn_compiled = torch.compile(fn, mode="reduce-overhead")
                 for _ in range(3):
@@ -4330,6 +4330,40 @@ if HAS_CUDA_AND_TRITON:
                 eager_out = f(x)
                 compiled_out = compiled_f(x)
                 self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @skipIfRocm
+        def test_graph_partition_max_autotune_skips_linalg_eigh(self):
+            from torch._inductor.utils import is_cudagraph_unsafe_fx_node
+
+            def f(x):
+                affinity = torch.matmul(x, x.transpose(-2, -1))
+                return torch.linalg.eigh(affinity)
+
+            gen = torch.Generator(device="cuda").manual_seed(0)
+            x = torch.randn(2, 6, 4, device="cuda", generator=gen)
+            affinity = torch.matmul(x, x.transpose(-2, -1))
+            gm = make_fx(lambda a: torch.ops.aten._linalg_eigh.default(a))(affinity)
+            eigh_node = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is torch.ops.aten._linalg_eigh.default
+            )
+            self.assertTrue(is_cudagraph_unsafe_fx_node(eigh_node))
+
+            expected = f(x)
+            compiled_f = torch.compile(f, mode="max-autotune")
+
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx():
+                for _ in range(3):
+                    actual = compiled_f(x)
+
+            self.assertEqual(actual[0], expected[0], atol=1e-4, rtol=1e-4)
+            self.assertEqual(actual[1].shape, expected[1].shape)
+            FileCheck().check(
+                "Created 2 graph partitions: 1 cudagraphable, 1 non-cudagraphable"
+            ).run(log_stream.getvalue())
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_log_message(self):
@@ -5282,11 +5316,11 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_reorder_cpu_and_gpu_interleave(self):
-            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+            def f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu):
                 # partition 1 on cuda, no dependency
                 x_cuda0 = x_cuda + 1
                 x_cuda1 = x_cuda0 @ weight_cuda
-                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+                x_cuda2 = 2 * (x_cuda1 + bias_cuda)
 
                 # partition 2 on cpu w/ dependency on partition 1
                 y_cpu0 = y_cpu + 1
@@ -5296,7 +5330,7 @@ if HAS_CUDA_AND_TRITON:
                 # partition 3 on cuda w/o dependency
                 z_cuda0 = z_cuda + 1
                 z_cuda1 = z_cuda0 @ weight_cuda
-                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+                z_cuda2 = 2 * (z_cuda1 + bias_cuda)
 
                 # partition 4 on cpu w/o dependency
                 y_cpu2 = y_cpu + 5
@@ -5305,22 +5339,25 @@ if HAS_CUDA_AND_TRITON:
                 # partition 5 on cuda w/o dependency
                 u_cuda0 = z_cuda + 3
                 u_cuda1 = u_cuda0 @ weight_cuda
-                u_cuda2 = 2 * (u_cuda0 + u_cuda1)
+                u_cuda2 = 2 * (u_cuda1 + bias_cuda)
 
                 return x_cuda2, y_cpu1, z_cuda2, y_cpu3, u_cuda2
 
             x_cuda = torch.randn(3, 3, device="cuda")
             y_cpu = torch.randn(3, 3, device="cpu")
             z_cuda = torch.randn(3, 3, device="cuda")
+            # Keep the CUDA adds pointwise so this test continues to exercise
+            # graph partition reordering instead of addmm fusion.
+            bias_cuda = torch.randn(1, 3, device="cuda")
             weight_cuda = torch.randn(3, 3, device="cuda")
             weight_cpu = torch.randn(3, 3, device="cpu")
 
-            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+            eager_out = f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu)
 
             compiled_f = torch.compile(f, mode="reduce-overhead")
             for _ in range(3):
                 compiled_out = compiled_f(
-                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                    x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu
                 )
                 self.assertEqual(eager_out, compiled_out)
 

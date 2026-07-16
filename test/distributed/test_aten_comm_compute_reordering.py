@@ -1462,22 +1462,26 @@ def apply_manual_reordering_and_get_graph(
     )
 
     for node in list(gm.graph.nodes):
-        # Handle both all-gather and reduce-scatter nodes for module_1
+        # Handle all-gather, reduce-scatter, and all-reduce nodes for module_1
         if node.name in (
             "all_gather_into_tensor",
             "all_gather_into_tensor_1",
             "reduce_scatter_tensor",
             "reduce_scatter_tensor_1",
+            "all_reduce",
+            "all_reduce_1",
             "wait_tensor",
             "wait_tensor_1",
         ):
             node.meta["nn_module_stack"] = {"test": ["module_1", ""]}
-        # Handle both all-gather and reduce-scatter nodes for module_2
+        # Handle all-gather, reduce-scatter, and all-reduce nodes for module_2
         if node.name in (
             "all_gather_into_tensor_2",
             "all_gather_into_tensor_3",
             "reduce_scatter_tensor_2",
             "reduce_scatter_tensor_3",
+            "all_reduce_2",
+            "all_reduce_3",
             "wait_tensor_2",
             "wait_tensor_3",
         ):
@@ -1567,6 +1571,63 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             return rs1, rs2, rs3, rs4
 
         return func
+
+    def _get_all_reduce_test_func(self):
+        """Return the all-reduce test function used by bucketing tests.
+
+        All-reduce is the HSDP replicate-axis / DDP gradient sync. As with the
+        reduce-scatter case the waits are returned directly as outputs so the
+        manual bucketer can pair each launch with its wait.
+        """
+
+        def func(a, b, c, d):
+            # All 4 all-reduces are independent - COULD be bucketed together
+            ar1 = _functional_collectives.all_reduce(a, "sum", "0")
+            ar2 = _functional_collectives.all_reduce(b, "sum", "0")
+            ar3 = _functional_collectives.all_reduce(c, "sum", "0")
+            ar4 = _functional_collectives.all_reduce(d, "sum", "0")
+
+            # Return all-reduce results directly as outputs (DDP gradient pattern)
+            return ar1, ar2, ar3, ar4
+
+        return func
+
+    def _run_all_reduce_bucketing_test(
+        self, module_bucket_plans, expected_num_all_reduce
+    ):
+        """Bucket independent all-reduces per ``module_bucket_plans`` and assert
+        the surviving all-reduce count plus numerical equivalence."""
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
+            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
+            c = torch.ones(8, 8, dtype=torch.float, device=device_type) * 3
+            d = torch.ones(8, 8, dtype=torch.float, device=device_type) * 4
+
+            func = self._get_all_reduce_test_func()
+            compiled = torch.compile(func)
+            out, aten_graph = run_and_get_manual_aten_graph(
+                compiled, module_bucket_plans, a, b, c, d
+            )
+
+            # Bucketed all-reduces are emitted as the in-place
+            # ``all_reduce_`` op (operating on the cat buffer); unbucketed
+            # ones stay as the functional ``all_reduce``. Count both forms.
+            all_reduce_targets = (
+                torch.ops._c10d_functional.all_reduce.default,
+                torch.ops._c10d_functional.all_reduce_.default,
+            )
+            num_all_reduce = sum(
+                1
+                for node in aten_graph.nodes
+                if node.op == "call_function" and node.target in all_reduce_targets
+            )
+            self.assertEqual(num_all_reduce, expected_num_all_reduce)
+            self.assertTrue(same(out, func(a, b, c, d)))
 
     def _run_manual_bucketing_test(
         self,
@@ -1937,6 +1998,30 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
                 "wait_tensor_2",
                 "wait_tensor_3",
             ],
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_manual_bucketing_reordering_pass_all_reduce_separate_buckets(self):
+        # One bucket per module: 4 all-reduces collapse to 2 (one per module).
+        self._run_all_reduce_bucketing_test(
+            module_bucket_plans=["module_1", "module_2"],
+            expected_num_all_reduce=2,
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_manual_bucketing_reordering_pass_all_reduce_single_bucket(self):
+        # Both modules in one bucket: 4 all-reduces collapse to 1.
+        self._run_all_reduce_bucketing_test(
+            module_bucket_plans=[["module_1", "module_2"]],
+            expected_num_all_reduce=1,
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_manual_bucketing_reordering_pass_all_reduce_no_bucket(self):
+        # Empty plan: all 4 all-reduces remain unbucketed.
+        self._run_all_reduce_bucketing_test(
+            module_bucket_plans=[],
+            expected_num_all_reduce=4,
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
