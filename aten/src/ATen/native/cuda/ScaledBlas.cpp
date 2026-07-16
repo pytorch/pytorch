@@ -1303,20 +1303,16 @@ _scaled_mxfp4_mxfp4(
 #ifdef USE_ROCM
   // AMD
 #if ROCM_VERSION >= 71300
-  if (scale_mode_a == ScalingType::BlockWiseBlk32Ue8m0_32_8_EXT &&
-      scale_mode_b == ScalingType::BlockWiseBlk32Ue8m0_32_8_EXT) {
-    TORCH_CHECK_VALUE(
-        swizzle_a == SwizzleType::SWIZZLE_32_4_4,
-        "scale_a must use SWIZZLE_32_4_4 for ROCm 7.13+ MX FP4 (gfx950 EXT block scales)");
-    TORCH_CHECK_VALUE(
-        swizzle_b == SwizzleType::SWIZZLE_32_4_4,
-        "scale_b must use SWIZZLE_32_4_4 for ROCm 7.13+ MX FP4 (gfx950 EXT block scales)");
-  } else
+  TORCH_CHECK_VALUE(
+      swizzle_a == SwizzleType::SWIZZLE_32_4_4,
+      "scale_a must use SWIZZLE_32_4_4 for ROCm 7.13+ MX FP4 (gfx950 EXT block scales)");
+  TORCH_CHECK_VALUE(
+      swizzle_b == SwizzleType::SWIZZLE_32_4_4,
+      "scale_b must use SWIZZLE_32_4_4 for ROCm 7.13+ MX FP4 (gfx950 EXT block scales)");
+#elif ROCM_VERSION >= 70000
+  TORCH_CHECK_VALUE(swizzle_a == SwizzleType::NO_SWIZZLE, "scale_a must not be swizzled (NO_SWIZZLE format)");
+  TORCH_CHECK_VALUE(swizzle_b == SwizzleType::NO_SWIZZLE, "scale_b must not be swizzled (NO_SWIZZLE format)");
 #endif
-  {
-    TORCH_CHECK_VALUE(swizzle_a == SwizzleType::NO_SWIZZLE, "scale_a must not be swizzled (NO_SWIZZLE format)");
-    TORCH_CHECK_VALUE(swizzle_b == SwizzleType::NO_SWIZZLE, "scale_b must not be swizzled (NO_SWIZZLE format)");
-  }
 #else
   // NVIDIA
   TORCH_CHECK_VALUE(swizzle_a == SwizzleType::SWIZZLE_32_4_4, "scale_a must be swizzled to SWIZZLE_32_4_4 format");
