@@ -12,10 +12,9 @@ set -eux -o pipefail
 #    this is currently not true)
 # 4. Standard Python imports work
 # 5. MKL is available everywhere except for MacOS wheels
-# 6. XNNPACK is available everywhere except for MacOS wheels
-# 7. CUDA is setup correctly and does not hang
-# 8. Magma is available for CUDA builds
-# 9. CuDNN is available for CUDA builds
+# 6. CUDA is setup correctly and does not hang
+# 7. Magma is available for CUDA builds
+# 8. CuDNN is available for CUDA builds
 #
 # This script needs the env variables DESIRED_PYTHON, DESIRED_CUDA,
 # DESIRED_DEVTOOLSET and PACKAGE_TYPE
@@ -208,27 +207,13 @@ elif [[ "$(uname -m)" != "arm64" && "$(uname -m)" != "s390x" ]]; then
 fi
 
 ###############################################################################
-# Check for XNNPACK
-###############################################################################
-
-if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
-  echo "Checking that XNNPACK is available"
-  build_and_run_example_cpp check-torch-xnnpack
-else
-  if [[ "$(uname)" != 'Darwin' || "$PACKAGE_TYPE" != *wheel ]] && [[ "$(uname -m)" != "s390x"  ]]; then
-    echo "Checking that XNNPACK is available"
-    pushd /tmp
-    python -c 'import torch.backends.xnnpack; exit(0 if torch.backends.xnnpack.enabled else 1)'
-    popd
-  fi
-fi
-
-###############################################################################
 # Check XPU configured correctly
 ###############################################################################
 if [[ "$DESIRED_CUDA" == 'xpu' && "$PACKAGE_TYPE" != 'libtorch' ]]; then
   echo "Checking that xpu is compiled"
+  pushd /tmp
   python -c 'import torch; exit(0 if torch.xpu._is_compiled() else 1)'
+  popd
 fi
 
 ###############################################################################
@@ -290,25 +275,6 @@ if [[ "$PACKAGE_TYPE" != 'libtorch' ]]; then
     python -c "from smoke_test import test_linalg; test_linalg('cuda')"
   fi
   popd
-fi
-
-###############################################################################
-# Check PyTorch supports TCP_TLS gloo transport
-###############################################################################
-
-if [[ "$(uname)" == 'Linux' && "$PACKAGE_TYPE" != 'libtorch' ]]; then
-  GLOO_CHECK="import torch.distributed as dist
-try:
-    dist.init_process_group('gloo', rank=0, world_size=1)
-except RuntimeError as e:
-    print(e)
-"
-  RESULT=`GLOO_DEVICE_TRANSPORT=TCP_TLS MASTER_ADDR=localhost MASTER_PORT=63945 python -c "$GLOO_CHECK"`
-  GLOO_TRANSPORT_IS_NOT_SUPPORTED='gloo transport is not supported'
-  if [[ "$RESULT" =~ "$GLOO_TRANSPORT_IS_NOT_SUPPORTED" ]]; then
-    echo "PyTorch doesn't support TLS_TCP transport, please build with USE_GLOO_WITH_OPENSSL=1"
-    exit 1
-  fi
 fi
 
 ###############################################################################

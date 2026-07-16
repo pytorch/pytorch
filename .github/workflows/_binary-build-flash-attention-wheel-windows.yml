@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng", "module: windows"]
 name: Build Flash Attention 3 wheels (Windows)
 
 on:
@@ -19,20 +20,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
-
   build-wheel:
+    if: github.repository_owner == 'pytorch'
     name: "Build FA3 Windows ${{ matrix.cuda_version }}"
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
+    runs-on: "${{ matrix.runner }}"
     strategy:
       fail-fast: false
       matrix:
@@ -90,7 +81,7 @@ jobs:
           echo "CUDA_HOME=${CUDA_PATH}" >> "${GITHUB_ENV}"
           echo "${CUDA_PATH}/bin" >> "${GITHUB_PATH}"
       - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
 
       - name: Remove link.exe conflict
         run: rm -f /usr/bin/link

@@ -423,9 +423,12 @@ class PadMMTest(TestCase):
         def mm(a, b):
             return a @ b
 
-        mm(torch.rand([25, 25], device=GPU_TYPE), torch.rand([25, 25], device=GPU_TYPE))
+        # Size must be big enough such that `is_mm_compute_bound` returns True and we need padding to 4 elements
+        # machine balance is ~8.3 (A100), 14.1 (H100), size must be 3x that, see arithmetic_intensity for M=N=K
+        size = [61, 61]
+        mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
-        self.assertTrue(len(local_cache) == 2)
+        self.assertEqual(len(local_cache), 2)
         FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
             repr(local_cache)
         )
@@ -434,10 +437,10 @@ class PadMMTest(TestCase):
         def mm(a, b):
             return (a + 1) @ b
 
-        mm(torch.rand([25, 25], device=GPU_TYPE), torch.rand([25, 25], device=GPU_TYPE))
+        mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
         # reuse original base timing
-        self.assertTrue(len(local_cache) == 3)
+        self.assertEqual(len(local_cache), 3)
 
         FileCheck().check_count("exclude_pad:False", 3, exactly=True).run(
             repr(local_cache)
@@ -513,7 +516,9 @@ class PadMMTest(TestCase):
         {
             "triton.unique_kernel_names": "original_aten",
             "max_autotune_gemm_backends": "TRITON",
-            "shape_padding": True,
+            # Force padding so it is applied regardless of the device-dependent
+            # is_mm_compute_bound checks in should_pad_common.
+            "force_shape_pad": True,
         }
     )
     def test_original_aten_preserved_pad_mm(self):
@@ -650,7 +655,7 @@ class PadMMTest(TestCase):
         torch.manual_seed(42)
         test_masked_mha(B, H, S, D, device, dtype)
 
-    @inductor_config.patch(force_shape_pad=True)
+    @inductor_config.patch(force_shape_pad=True, strict_output_strides=True)
     def test_pad_mm_output_strides_preserved(self):
         """Regression test: pad_mm creates views with padded strides.
         User-visible output strides must match eager execution."""

@@ -72,6 +72,15 @@ class _LoadBalancer(ABC):
             - when `restore == True`, this method returns an indices tensor `restore_idx`
             such that Q[rearrange_idx][restore_idx] == Q, i.e. restoring the rearranged tensor
             back to the original status before rearranging.
+
+        Sharding contract:
+            After rearranging, Context Parallel shards `Q[rearrange_idx]` with
+            `Shard(seq_dim)`, which follows `torch.chunk` semantics: the sequence is
+            split into `world_size` contiguous, equal-sized chunks and chunk `r` is
+            assigned to rank `r`. Implementations must therefore lay out
+            `rearrange_idx` so that each such contiguous chunk is well-balanced --
+            i.e. group each rank's positions together (rank-major), not interleaved
+            by any other axis such as document.
         """
 
 
@@ -148,27 +157,16 @@ class _HeadTailLoadBalancer(_LoadBalancer):
         if seq_length % (world_size * 2) != 0:
             raise AssertionError
         chunk_size = seq_length // (world_size * 2)
-        all_indices = []
 
-        for rank in range(world_size):
-            # Generate indices for first chunk of the cp rank
-            first_chunk_start = rank * chunk_size
-            first_chunk_indices = list(
-                range(first_chunk_start, first_chunk_start + chunk_size)
-            )
+        # Split sequence into 2*world_size chunks, then pair chunk r with
+        # chunk (2*world_size - 1 - r) for each rank.
+        indices = torch.arange(seq_length, dtype=torch.int, device=self.device)
+        chunks = indices.view(world_size * 2, chunk_size)
+        head_idx = torch.arange(world_size, device=self.device)
+        tail_idx = 2 * world_size - 1 - head_idx
+        paired = torch.stack([chunks[head_idx], chunks[tail_idx]], dim=1)
+        all_indices_tensor = paired.reshape(-1)
 
-            # Second chunk: positions from the complementary chunk
-            second_chunk_idx = world_size * 2 - rank - 1
-            second_chunk_start = second_chunk_idx * chunk_size
-            second_chunk_indices = list(
-                range(second_chunk_start, second_chunk_start + chunk_size)
-            )
-            # combine the indices for this rank
-            all_indices.extend(first_chunk_indices + second_chunk_indices)
-
-        all_indices_tensor = torch.tensor(
-            all_indices, dtype=torch.int, device=self.device
-        )
         if restore:
             all_indices_tensor = torch.argsort(all_indices_tensor)
 
@@ -266,37 +264,33 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
             seq_length % (2 * world_size) == 0 for seq_length in seq_length_per_doc
         ):
             raise AssertionError
-        chunk_length_per_doc = [
-            seq_length // (2 * world_size) for seq_length in seq_length_per_doc
-        ]
 
-        indices = []
+        # For each document, split it into 2 * world_size equal chunks and pair
+        # chunk r with chunk (2 * world_size - 1 - r), so row r holds rank r's
+        # head+tail chunks (the same strategy as _HeadTailLoadBalancer). Stacking
+        # the per-document rows rank-wise (dim=1) and flattening lays the indices
+        # out rank-major, so a contiguous per-rank shard gives each rank a
+        # head+tail slice of every document. A document-major layout would instead
+        # let the cut fall mid-document, imbalancing work for mixed-length docs.
+        head_idx = torch.arange(world_size, device=device)
+        tail_idx = 2 * world_size - 1 - head_idx
+        per_doc_rank_chunks = []
         document_start_idx = 0
-        for seq_length, chunk_length in zip(seq_length_per_doc, chunk_length_per_doc):
-            # Generate the indices for the current document
-            for rank in range(world_size):
-                head_chunk_start_idx = document_start_idx + chunk_length * rank
-                tail_chunk_end_idx = document_start_idx + chunk_length * (
-                    2 * world_size - rank
-                )
-                indices.append(
-                    torch.arange(
-                        head_chunk_start_idx,
-                        head_chunk_start_idx + chunk_length,
-                        device=device,
-                    )
-                )
-                indices.append(
-                    torch.arange(
-                        tail_chunk_end_idx - chunk_length,
-                        tail_chunk_end_idx,
-                        device=device,
-                    )
-                )
-
+        for seq_length in seq_length_per_doc:
+            chunk_length = seq_length // (2 * world_size)
+            chunks = torch.arange(
+                document_start_idx,
+                document_start_idx + seq_length,
+                device=device,
+            ).view(2 * world_size, chunk_length)
+            # (world_size, 2, chunk_length) -> (world_size, 2 * chunk_length):
+            # row r is rank r's head chunk followed by its tail chunk.
+            paired = torch.stack([chunks[head_idx], chunks[tail_idx]], dim=1)
+            per_doc_rank_chunks.append(paired.reshape(world_size, -1))
             document_start_idx += seq_length
 
-        indices_tensor = torch.cat(indices)
+        # (world_size, seq_len / world_size) flattened rank-major.
+        indices_tensor = torch.cat(per_doc_rank_chunks, dim=1).reshape(-1)
         if restore:
             indices_tensor = torch.argsort(indices_tensor)
 
@@ -483,7 +477,7 @@ def _create_default_load_balancer(
 ) -> _LoadBalancer | None:
     from ._attention import _cp_options
 
-    if _cp_options.enable_load_balance:
+    if _cp_options.enable_load_balance and seq_length % (world_size * 2) == 0:
         return _HeadTailLoadBalancer(seq_length, world_size, device)
     else:
         return None

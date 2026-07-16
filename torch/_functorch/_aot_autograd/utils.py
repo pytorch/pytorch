@@ -6,6 +6,7 @@ import copy
 import dataclasses
 import logging
 import operator
+import sys
 import warnings
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
@@ -16,9 +17,9 @@ from typing_extensions import ParamSpec, TypeVar, TypeVarTuple, Unpack
 import torch
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
@@ -26,6 +27,8 @@ from torch.fx.experimental.proxy_tensor import py_sym_types
 
 _T = TypeVar("_T")
 if TYPE_CHECKING:
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
     from .schemas import AOTConfig, ViewAndMutationMeta
 
 
@@ -48,16 +51,20 @@ annotation_log = getArtifactLogger(__name__, "annotation")
 strict_zip = partial(zip, strict=True)
 
 
-def _get_symint_hints(exprs: Any) -> Any:
-    """
-    Get the hints of a list/tuple of int/SymInt.
-    """
-    if isinstance(exprs, (list, tuple)):
-        return type(exprs)(_get_symint_hints(e) for e in exprs)
-    elif isinstance(exprs, torch.SymInt):
-        return exprs.node.shape_env.size_hint(exprs.node.expr)
-    else:
-        return exprs
+def get_loaded_async_collective_tensor_type() -> type["AsyncCollectiveTensor"] | None:
+    """Return the ACT type if distributed collectives are already loaded."""
+    if "torch.distributed._functional_collectives" not in sys.modules:
+        return None
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+    return AsyncCollectiveTensor
+
+
+def import_async_collective_tensor_type() -> type["AsyncCollectiveTensor"]:
+    """Import and return the ACT type."""
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+    return AsyncCollectiveTensor
 
 
 def partial_flatten_asdict(obj: object) -> Any:
@@ -204,7 +211,7 @@ def create_tree_flattened_fn(
         tree_out = fn(*args, **kwargs)
         flat_out, spec = pytree.tree_flatten(tree_out)
         for i in flat_out:
-            is_known_type = isinstance(i, tuple(KNOWN_TYPES)) or is_opaque_value(i)
+            is_known_type = isinstance(i, tuple(KNOWN_TYPES)) or is_custom_class_obj(i)
             if not is_known_type:
                 raise RuntimeError(
                     f"Found {type(i)} in output, which is not a known type. "
@@ -636,7 +643,12 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
             # TODO: better to change to a specific field of custom?
             custom = fwd_node.meta.get("custom")
             if custom is not None:
-                node.meta["custom"] = copy.deepcopy(custom)
+                # Merge rather than overwrite so bw-only keys survive
+                # fw keys win on conflict.
+                node.meta["custom"] = {
+                    **node.meta.get("custom", {}),
+                    **copy.deepcopy(custom),
+                }
 
 
 def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
@@ -691,7 +703,7 @@ def register_buffer_assignment_hook(
             if isinstance(buffer, FunctionalTensor):
                 buffer = buffer.from_functional()
             # or buffer is a fake tensor
-            if not isinstance(buffer, FakeTensor):
+            if not is_fake_tensor(buffer):
                 raise AssertionError(f"expected FakeTensor, got {type(buffer)}")
             # The fake tensor in turn is associated with a proxy node.
             proxy_mode = torch.fx.experimental.proxy_tensor.get_proxy_mode()
@@ -723,15 +735,57 @@ def contain_metadata_mutation_ops(module: torch.fx.GraphModule) -> bool:
     return False
 
 
-def get_cuda_generator_meta_val(device_idx: int) -> Any:
-    """
-    Get a generator value to use as a meta val
+_GRAPHSAFE_RNG_DEVICE_TYPES: set[str] = {"cuda"}
 
-    newly cloned generator will not contain tensors. it is only Generators that are
-    registered to a CUDAGraph that contain tensors. since this does not contain Tensor
-    it is fine to use in the meta.
+
+def register_graphsafe_rng_device_type(device_type: str) -> None:
+    """Register a device type as supporting graphsafe RNG operations.
+
+    The device backend module (``torch.<device_type>``) must provide:
+    - ``_get_generator(device: torch.device) -> Generator``: return the default
+      generator for the given device. The generator must implement
+      ``graphsafe_get_state()``, ``graphsafe_set_state(state)``, and
+      ``clone_state()``.
+    - ``get_rng_state(device_index: int) -> Tensor``: return the current RNG
+      state tensor.
+
+    Args:
+        device_type: The device type string (e.g. "cuda", "xpu").
     """
-    return torch.cuda.default_generators[device_idx].clone_state()
+    from torch._prims.rng_prims import register_graphsafe_rng_dispatch
+
+    key_name = torch._C._dispatch_key_for_device(device_type)
+    dispatch_key = getattr(torch._C.DispatchKey, key_name)
+    _GRAPHSAFE_RNG_DEVICE_TYPES.add(device_type)
+    register_graphsafe_rng_dispatch(dispatch_key)
+
+
+def supports_graphsafe_rng(device: torch.device) -> bool:
+    """Check whether a device supports graphsafe RNG operations."""
+    return device.type in _GRAPHSAFE_RNG_DEVICE_TYPES
+
+
+def get_default_generator(device: torch.device) -> Any:
+    """Get the default RNG generator for a device.
+
+    Calls ``torch.<device_type>._get_generator(device)``.
+    """
+    device_mod = getattr(torch, device.type, None)
+    if device_mod is None or not hasattr(device_mod, "_get_generator"):
+        raise AssertionError(
+            f"Device type '{device.type}' does not implement _get_generator. "
+            f"Registered graphsafe RNG types: {sorted(_GRAPHSAFE_RNG_DEVICE_TYPES)}."
+        )
+    return device_mod._get_generator(device)
+
+
+def get_device_rng_state(device: torch.device) -> torch.Tensor:
+    """Get the RNG state tensor for a device."""
+    device_mod = getattr(torch, device.type, None)
+    if device_mod is not None and hasattr(device_mod, "get_rng_state"):
+        idx = device.index if device.index is not None else 0
+        return device_mod.get_rng_state(idx)
+    return torch.get_rng_state()
 
 
 def top_saved_tensors_hooks() -> Any:

@@ -8,8 +8,6 @@
 
 ## PyTorch
 
-.coverage
-coverage.xml
 .dmypy.json
 .gradle
 .hypothesis
@@ -40,7 +38,6 @@ docs/build/
 docs/cpp/src
 docs/src/**/*
 docs/cpp/build
-docs/cpp/source/api
 docs/cpp/source/html/
 docs/cpp/source/latex/
 docs/source/compile/generated/
@@ -52,7 +49,6 @@ usage_log*
 test-reports/
 test/*.bak
 test/**/*.bak
-test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist
 test/custom_operator/model.pt
@@ -83,6 +79,7 @@ torch/nn/functional.pyi
 torch/utils/data/datapipes/datapipe.pyi
 torch/csrc/autograd/generated/*
 torch/csrc/functionalization/generated/*
+torch/profiler/_cupti/_cupti_stubs.py
 torch/csrc/lazy/generated/*.[!m]*
 torch_compile_debug/
 # Listed manually because some files in this directory are not generated
@@ -305,6 +302,9 @@ cmake-build-debug
 #
 # Below files are not deleted by "setup.py clean".
 
+# Scratch space for agent-authored throwaway files
+agent_space/
+
 # Downloaded bazel
 tools/bazel
 
@@ -367,7 +367,13 @@ xla/
 pr.diff
 
 # coverage files
-*/**/.coverage.*
+.coverage.*
+.coverage
+coverage.xml
+*.profdata
+*.profraw
+coverage-html
+coverage.lcov
 
 # buck generated files
 .buckd/

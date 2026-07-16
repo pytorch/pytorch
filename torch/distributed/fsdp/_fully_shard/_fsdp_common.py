@@ -2,9 +2,11 @@
 import functools
 import math
 import traceback
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any
+from typing import Any, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch.distributed as dist
@@ -13,15 +15,32 @@ from torch.distributed._composable.contract import _get_registry
 from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
+from ._fsdp_api import DataParallelMeshDims
 
-def _dynamo_disable(func):
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _dynamo_disable(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """Disable dynamo tracing for FSDP hooks."""
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs):
         return torch._dynamo.disable(
             func, recursive=True, reason="skipping FSDP hooks"
         )(*args, **kwargs)
+
+    return wrapper
+
+
+def _disable_functorch_if_active(func: Callable[_P, _R]) -> Callable[_P, _R]:
+    @functools.wraps(func)
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if torch._C._are_functorch_transforms_active():
+            with torch._C._DisableFuncTorch():
+                return func(*args, **kwargs)
+        return func(*args, **kwargs)
 
     return wrapper
 
@@ -31,12 +50,19 @@ class DataParallelMeshInfo:
     mesh: DeviceMesh
     shard_mesh_dim: int | None = None
     replicate_mesh_dim: int | None = None
+    dp_mesh_dims: DataParallelMeshDims | None = None
+    # The full SPMD mesh (excluding PP dims) that params are distributed on.
+    # Must include all non-PP SPMD dims (e.g. DP + TP); passing a submesh
+    # that omits dims like TP will lead to incorrect behavior.
+    spmd_mesh: DeviceMesh | None = field(default=None, repr=False)
+    is_spmd_mesh: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self):
         if self.shard_mesh_dim is None and self.replicate_mesh_dim is None:
             raise AssertionError(
                 "At least one of shard_mesh_dim and replicate_mesh_dim must not be None"
             )
+        self.is_spmd_mesh = self.dp_mesh_dims is not None
 
 
 @dataclass
@@ -48,6 +74,10 @@ class FSDPMeshInfo(DataParallelMeshInfo):
         self.shard_mesh_size: int = self.mesh.size(self.shard_mesh_dim)
         self.shard_process_group = self.mesh.get_group(self.shard_mesh_dim)
         self.shard_mesh_rank: int = self.shard_process_group.rank()
+        # Reduce-scatter shares the shard PG (one NCCL communicator) by default;
+        # FSDPModule.set_separate_reduce_scatter_group assigns a dedicated PG
+        # here so reduce-scatter can overlap all-gather in backward.
+        self.reduce_scatter_process_group: dist.ProcessGroup | None = None
 
 
 @dataclass

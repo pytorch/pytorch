@@ -157,7 +157,7 @@ int main(int argc, char* argv[]) {
         << c10::str(
                "Error traced_operators size: ",
                tracer_result.traced_operators.size(),
-               ". Expected the traced operator list to be bigger then the default size ",
+               ". Expected the traced operator list to be bigger than the default size ",
                torch::jit::mobile::always_included_traced_ops.size(),
                ". Please report a bug in PyTorch.")
         << '\n';

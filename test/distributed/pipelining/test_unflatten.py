@@ -74,6 +74,57 @@ class UnflattenTests(TestCase):
         print(f"Equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
+class UnflattenPlaceholderOrderingTests(TestCase):
+    """regression tests for https://github.com/pytorch/pytorch/issues/162898"""
+
+    def _check(self, node_ops, expected_ops):
+        from torch.distributed.pipelining._IR import _move_placeholders_to_front
+
+        g = torch.fx.Graph()
+        for i, op in enumerate(node_ops):
+            if op == "placeholder":
+                g.placeholder(f"n{i}")
+            elif op == "get_attr":
+                g.create_node("get_attr", f"submod_{i}")
+        g.output(None)
+
+        _move_placeholders_to_front(g)
+        g.lint()
+
+        result = [n.op for n in g.nodes if n.op != "output"]
+        self.assertEqual(result, expected_ops)
+
+    def test_get_attr_between_placeholders(self):
+        self._check(
+            ["placeholder", "placeholder", "get_attr", "placeholder", "placeholder"],
+            ["placeholder", "placeholder", "placeholder", "placeholder", "get_attr"],
+        )
+
+    def test_get_attr_before_all_placeholders(self):
+        self._check(
+            ["get_attr", "placeholder", "placeholder", "placeholder"],
+            ["placeholder", "placeholder", "placeholder", "get_attr"],
+        )
+
+    def test_multiple_get_attrs(self):
+        self._check(
+            ["placeholder", "get_attr", "placeholder", "get_attr", "placeholder"],
+            ["placeholder", "placeholder", "placeholder", "get_attr", "get_attr"],
+        )
+
+    def test_no_interleaving(self):
+        self._check(
+            ["placeholder", "placeholder", "placeholder", "get_attr"],
+            ["placeholder", "placeholder", "placeholder", "get_attr"],
+        )
+
+    def test_only_placeholders(self):
+        self._check(
+            ["placeholder", "placeholder", "placeholder"],
+            ["placeholder", "placeholder", "placeholder"],
+        )
+
+
 devices = ["cpu", "cuda", "hpu", "xpu"]
 instantiate_device_type_tests(
     UnflattenTests, globals(), only_for=devices, allow_xpu=True

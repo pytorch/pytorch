@@ -41,6 +41,7 @@ void XNNPackLinearOpContext::free_orig_weight_and_bias() {
 }
 
 Tensor XNNPackLinearOpContext::run(const Tensor& input) {
+  std::lock_guard<std::mutex> lock(xnnp_mutex_);
   return xnnpack::internal::linear::run(op_context_, input);
 }
 

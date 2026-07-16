@@ -44,6 +44,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -79,7 +80,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     def test_tensor_metadata_with_missing_rank_spec(self) -> None:
@@ -96,7 +97,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
 
         self.assertEqual(1, len(st_md.chunks))
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     def test_default_metadata(self) -> None:
@@ -244,7 +245,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
             ],
         )
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     def test_dummy_writer_works(self) -> None:
@@ -256,7 +257,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
 
         save_state_dict(state_dict, FaultyStorageWriter({}))
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     def test_dummy_reader_works(self) -> None:
@@ -281,7 +282,9 @@ class TestDistributedFailure(ShardedTensorTestBase):
             e = cast(CheckpointException, cm.exception)
             for rank, wrapped_ex in e.failures.items():
                 ex = wrapped_ex[0]
-                self.assertTrue(rank in bad_ranks, msg=f"{rank} did not fail")
+                self.assertTrue(
+                    rank in bad_ranks, msg=lambda msg: f"{msg}\n{rank} did not fail"
+                )
                 if not kwargs.get("ignore_exception_type", False):
                     self.assertEqual(ValueError, type(ex), str(ex))
 
@@ -289,7 +292,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
             for rank in bad_ranks:
                 self.assertTrue(
                     rank in failed_ranks,
-                    msg=f"{rank} was supposed to fail was fine",
+                    msg=lambda msg: f"{msg}\n{rank} was supposed to fail was fine",
                 )
 
     def _test_save(self, state_dict, coordinator=0, **kwargs):
@@ -319,7 +322,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
 
         self._test_dist_failure(_load, kwargs)
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend()
     def test_save_error_handling(self) -> None:
@@ -353,7 +356,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_save(state_dict, fail_write_data=[0])
         self._test_save(state_dict, fail_write_data_async=[0])
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend()
     def test_load_error_handling(self) -> None:

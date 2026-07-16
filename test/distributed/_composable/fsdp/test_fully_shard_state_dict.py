@@ -46,7 +46,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         )
         if 16 % self.world_size == 0:
             # TODO: remove this evenness check when FSDP2 supports uneven sharding
-            # see: https://github.com/pytorch/pytorch/blob/cbb03e69717943ddf912f9a68b3a6f935bbf21f5/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L353-L361  # noqa: B950
+            # see: https://github.com/pytorch/pytorch/blob/cbb03e69717943ddf912f9a68b3a6f935bbf21f5/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L353-L361
             self.run_subtests(
                 {
                     "mlp_dim": [16],
@@ -334,7 +334,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             self.assertIsInstance(
                 param,
                 DTensor,
-                f"Expects parameters to be sharded as DTensors but got {param_name} "
+                lambda msg: f"{msg}\nExpects parameters to be sharded as DTensors but got {param_name} "
                 f"as {type(param)}: {param}",
             )
         old_fill_value = 1
