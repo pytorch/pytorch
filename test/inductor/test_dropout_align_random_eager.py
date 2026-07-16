@@ -139,7 +139,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     @requires_gpu()
     @unittest.skip(
         "Disabled due to CI failures; see "
-        "https://github.com/pytorch/pytorch/issues/188687"
+        "https://github.com/pytorch/pytorch/issues/190237"
     )
     def test_linear_block_compile_parity_forward(self):
         device = torch.device(GPU_TYPE)
@@ -172,7 +172,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     @requires_gpu()
     @unittest.skip(
         "Disabled due to CI failures; see "
-        "https://github.com/pytorch/pytorch/issues/188740"
+        "https://github.com/pytorch/pytorch/issues/190237"
     )
     def test_linear_block_compile_parity_backward(self):
         device = torch.device(GPU_TYPE)
@@ -286,7 +286,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     @requires_gpu()
     @unittest.skip(
         "Disabled due to CI failures; see "
-        "https://github.com/pytorch/pytorch/issues/188836"
+        "https://github.com/pytorch/pytorch/issues/190237"
     )
     def test_dropout_parity_dynamic_shapes(self):
         device = torch.device(GPU_TYPE)
@@ -321,7 +321,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     @requires_gpu()
     @unittest.skip(
         "Disabled due to CI failures; see "
-        "https://github.com/pytorch/pytorch/issues/188837"
+        "https://github.com/pytorch/pytorch/issues/190237"
     )
     def test_dropout_parity_cudagraphs_reduce_overhead(self):
         device = torch.device(GPU_TYPE)
