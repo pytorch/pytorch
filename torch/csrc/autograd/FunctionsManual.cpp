@@ -5884,7 +5884,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
           at::SymDimVector(input_.sym_sizes().slice(0, input_.dim() - 1));
       zero_grad_shape.push_back(input.sym_size(-1) - k);
       auto zero_grad = at::zeros_symint(zero_grad_shape, input_.options());
-      input_grads[k] = zero_grad;
+      input_grads[k] = std::move(zero_grad);
     }
 
     input_grad = at::cat(input_grads, -1);
