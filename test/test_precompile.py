@@ -48,6 +48,17 @@ _pytree.register_pytree_node(
 )
 
 
+def _strip_artifact(cache: bytes) -> bytes:
+    """Return the cache envelope with its compiled artifact removed, forcing load()
+    onto the inlined (no-cache) path that JIT-compiles from python_code. Many tests
+    reload the same artifact both cache-primed and stripped to check they agree."""
+    blob = torch.load(io.BytesIO(cache), weights_only=True)
+    blob["artifact"] = None
+    buf = io.BytesIO()
+    torch.save(blob, buf)
+    return buf.getvalue()
+
+
 # precompile drives make_fx internally, which cannot symbolically trace a
 # dynamo-optimized function; the whole suite is therefore incompatible with
 # PYTORCH_TEST_WITH_DYNAMO (dynamo_wrapped CI), so skip it there.
@@ -306,11 +317,8 @@ class TestPrecompile(TestCase):
 
         blob = torch.load(io.BytesIO(cache), weights_only=False)
         self.assertIsNotNone(blob["artifact"])
-        blob["artifact"] = None
-        buf = io.BytesIO()
-        torch.save(blob, buf)
 
-        f_c = torch.compiler.precompile.load(code, buf.getvalue())
+        f_c = torch.compiler.precompile.load(code, _strip_artifact(cache))
         self.assertEqual(f_c(m, x), m(x))
 
     def test_cache_envelope_is_weights_only_safe(self):
@@ -359,11 +367,7 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
         code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        blob["artifact"] = None
-        buf = io.BytesIO()
-        torch.save(blob, buf)
-        f_c = torch.compiler.precompile.load(code, buf.getvalue())
+        f_c = torch.compiler.precompile.load(code, _strip_artifact(cache))
 
         bigger = torch.nn.Sequential(
             torch.nn.Linear(4, 4), torch.nn.Linear(4, 3)
@@ -458,11 +462,7 @@ class TestPrecompile(TestCase):
 
         code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
         f_c = torch.compiler.precompile.load(code, cache)
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        blob["artifact"] = None
-        buf = io.BytesIO()
-        torch.save(blob, buf)
-        f_i = torch.compiler.precompile.load(code, buf.getvalue())
+        f_i = torch.compiler.precompile.load(code, _strip_artifact(cache))
         code_e, cache_e = torch.compiler.precompile(
             lambda mm, t: mm(t), m, x, backend="eager"
         )
@@ -535,12 +535,8 @@ class TestPrecompile(TestCase):
             ca, cb, cc, x, target
         )  # cached path
 
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        blob["artifact"] = None
-        buf = io.BytesIO()
-        torch.save(blob, buf)
         ia, ib, ic = copy.deepcopy((a, b, c))
-        torch.compiler.precompile.load(code, buf.getvalue())(
+        torch.compiler.precompile.load(code, _strip_artifact(cache))(
             ia, ib, ic, x, target
         )  # inlined
 
@@ -609,16 +605,13 @@ class TestPrecompile(TestCase):
         x = torch.randn(2, 4)
         # Module at position 1 (so a missing trailing arg would index past args).
         code, cache = torch.compiler.precompile(lambda xx, model: model(xx), x, m)
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        blob["artifact"] = None  # force the inlined path
-        buf = io.BytesIO()
-        torch.save(blob, buf)
+        inlined_cache = _strip_artifact(cache)  # force the inlined path
         ecode, ecache = torch.compiler.precompile(
             lambda xx, model: model(xx), x, m, backend="eager"
         )
         loaders = {
             "cached": torch.compiler.precompile.load(code, cache),
-            "inlined": torch.compiler.precompile.load(code, buf.getvalue()),
+            "inlined": torch.compiler.precompile.load(code, inlined_cache),
             "eager": torch.compiler.precompile.load(ecode, ecache),
         }
         for label, f_c in loaders.items():
@@ -772,13 +765,9 @@ class TestPrecompile(TestCase):
                 return self.l0(x) + self.l1(x)
 
         b = B().eval()
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        blob["artifact"] = None
-        buf = io.BytesIO()
-        torch.save(blob, buf)
         loaders = {
             "cached": torch.compiler.precompile.load(code, cache),
-            "inlined": torch.compiler.precompile.load(code, buf.getvalue()),
+            "inlined": torch.compiler.precompile.load(code, _strip_artifact(cache)),
         }
         for label, f_c in loaders.items():
             with self.subTest(path=label):
@@ -1102,12 +1091,10 @@ class TestPrecompile(TestCase):
         xrt = torch.randn(6, 8)  # same shape, contiguous -> different layout
         with self.assertRaisesRegex(PrecompileError, "memory format"):
             torch.compiler.precompile.load(code, cache)(m, xrt)  # cached path
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        blob["artifact"] = None
-        buf = io.BytesIO()
-        torch.save(blob, buf)
         with self.assertRaisesRegex(PrecompileError, "memory format"):
-            torch.compiler.precompile.load(code, buf.getvalue())(m, xrt)  # inlined path
+            torch.compiler.precompile.load(code, _strip_artifact(cache))(
+                m, xrt
+            )  # inlined path
         # A matching (same-stride) input still works on inductor.
         xmatch = torch.randn(8, 6).t()
         self.assertEqual(
@@ -1132,12 +1119,10 @@ class TestPrecompile(TestCase):
             code, cache = torch.compiler.precompile(lambda model, t: model(t), m, xex)
             with self.assertRaisesRegex(PrecompileError, "memory format"):
                 torch.compiler.precompile.load(code, cache)(m, xrt)  # cached path
-            blob = torch.load(io.BytesIO(cache), weights_only=True)
-            blob["artifact"] = None
-            buf = io.BytesIO()
-            torch.save(blob, buf)
             with self.assertRaisesRegex(PrecompileError, "memory format"):
-                torch.compiler.precompile.load(code, buf.getvalue())(m, xrt)  # inlined
+                torch.compiler.precompile.load(code, _strip_artifact(cache))(
+                    m, xrt
+                )  # inlined
 
     def test_input_shape_mismatch_clean_error(self):
         # A same-structure but wrong-SHAPE input is an invariant-3 (shape) mismatch, NOT
@@ -1149,12 +1134,10 @@ class TestPrecompile(TestCase):
         code, cache = torch.compiler.precompile(lambda model, t: model(t), m, xex)
         with self.assertRaisesRegex(PrecompileError, "shape"):
             torch.compiler.precompile.load(code, cache)(m, xrt)  # cached path
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        blob["artifact"] = None
-        buf = io.BytesIO()
-        torch.save(blob, buf)
         with self.assertRaisesRegex(PrecompileError, "shape"):
-            torch.compiler.precompile.load(code, buf.getvalue())(m, xrt)  # inlined path
+            torch.compiler.precompile.load(code, _strip_artifact(cache))(
+                m, xrt
+            )  # inlined path
         # The error must NOT mislabel a pure shape mismatch as a memory-format one.
         try:
             torch.compiler.precompile.load(code, cache)(m, xrt)
@@ -1174,12 +1157,9 @@ class TestPrecompile(TestCase):
         self.assertEqual(tuple(row.shape), (1, 4))
         self.assertNotEqual(row.stride(), xex.stride())
         self.assertEqual(torch.compiler.precompile.load(code, cache)(m, row), m(row))
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        blob["artifact"] = None
-        buf = io.BytesIO()
-        torch.save(blob, buf)
         self.assertEqual(
-            torch.compiler.precompile.load(code, buf.getvalue())(m, row), m(row)
+            torch.compiler.precompile.load(code, _strip_artifact(cache))(m, row),
+            m(row),
         )
 
     def test_empty_input_shape_is_still_checked(self):
@@ -1257,11 +1237,7 @@ class TestPrecompile(TestCase):
         x = torch.randn(5, 4)  # float32 example
         code, cache = torch.compiler.precompile(lambda model, t: model(t), m, x)
         if path == "inlined":
-            blob = torch.load(io.BytesIO(cache), weights_only=True)
-            blob["artifact"] = None
-            buf = io.BytesIO()
-            torch.save(blob, buf)
-            cache = buf.getvalue()
+            cache = _strip_artifact(cache)
         f_c = torch.compiler.precompile.load(code, cache)
         with self.assertRaisesRegex(PrecompileError, "dtype"):
             f_c(m, x.double())
@@ -1275,11 +1251,7 @@ class TestPrecompile(TestCase):
         x = torch.randn(5, 4)  # cpu example
         code, cache = torch.compiler.precompile(lambda model, t: model(t), m, x)
         if path == "inlined":
-            blob = torch.load(io.BytesIO(cache), weights_only=True)
-            blob["artifact"] = None
-            buf = io.BytesIO()
-            torch.save(blob, buf)
-            cache = buf.getvalue()
+            cache = _strip_artifact(cache)
         f_c = torch.compiler.precompile.load(code, cache)
         with self.assertRaisesRegex(PrecompileError, "device"):
             f_c(m, x.cuda())
@@ -1640,11 +1612,7 @@ class TestPrecompile(TestCase):
         else:
             code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
             if path == "inlined":
-                blob = torch.load(io.BytesIO(cache), weights_only=True)
-                blob["artifact"] = None
-                buf = io.BytesIO()
-                torch.save(blob, buf)
-                cache = buf.getvalue()
+                cache = _strip_artifact(cache)
         f_c = torch.compiler.precompile.load(code, cache)
         with self.assertRaisesRegex(PrecompileError, "dtype"):
             f_c(m, x.double())
@@ -1749,11 +1717,11 @@ class TestPrecompile(TestCase):
         def loaders():
             yield "default", torch.compiler.precompile.load(code, cache)
             if backend == "inductor":
-                blob = torch.load(io.BytesIO(cache), weights_only=True)
-                blob["artifact"] = None  # force the inlined driver
-                buf = io.BytesIO()
-                torch.save(blob, buf)
-                yield "inlined", torch.compiler.precompile.load(code, buf.getvalue())
+                # Strip the artifact to force the inlined driver.
+                yield (
+                    "inlined",
+                    torch.compiler.precompile.load(code, _strip_artifact(cache)),
+                )
 
         for label, f_c in loaders():
             with self.subTest(path=label):
@@ -1779,11 +1747,11 @@ class TestPrecompile(TestCase):
         def loaders():
             yield "default", torch.compiler.precompile.load(code, cache)
             if backend == "inductor":
-                blob = torch.load(io.BytesIO(cache), weights_only=True)
-                blob["artifact"] = None  # force the inlined driver
-                buf = io.BytesIO()
-                torch.save(blob, buf)
-                yield "inlined", torch.compiler.precompile.load(code, buf.getvalue())
+                # Strip the artifact to force the inlined driver.
+                yield (
+                    "inlined",
+                    torch.compiler.precompile.load(code, _strip_artifact(cache)),
+                )
 
         for label, f_c in loaders():
             with self.subTest(path=label):
@@ -1822,11 +1790,11 @@ class TestPrecompile(TestCase):
         def loaders():
             yield "default", torch.compiler.precompile.load(code, cache)
             if backend == "inductor":
-                blob = torch.load(io.BytesIO(cache), weights_only=True)
-                blob["artifact"] = None  # force the inlined driver
-                buf = io.BytesIO()
-                torch.save(blob, buf)
-                yield "inlined", torch.compiler.precompile.load(code, buf.getvalue())
+                # Strip the artifact to force the inlined driver.
+                yield (
+                    "inlined",
+                    torch.compiler.precompile.load(code, _strip_artifact(cache)),
+                )
 
         for label, f_c in loaders():
             with self.subTest(path=label):
@@ -1858,11 +1826,10 @@ class TestPrecompile(TestCase):
 
         def loaders():
             yield "cached", torch.compiler.precompile.load(code, cache)
-            blob = torch.load(io.BytesIO(cache), weights_only=True)
-            blob["artifact"] = None
-            buf = io.BytesIO()
-            torch.save(blob, buf)
-            yield "inlined", torch.compiler.precompile.load(code, buf.getvalue())
+            yield (
+                "inlined",
+                torch.compiler.precompile.load(code, _strip_artifact(cache)),
+            )
 
         for label, f_c in loaders():
             with self.subTest(path=label):

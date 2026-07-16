@@ -1438,6 +1438,9 @@ def _check_structure(pb, names):
             )
 
 
+_MODULE_POSITIONS_SET = set(MODULE_POSITIONS)  # noqa: F821
+
+
 def forward(*args):
     """Run the compiled computation. Pass the same args the traced fn took -- the
     module(s) in the same positions plus the runtime inputs. The module(s) must be
@@ -1470,7 +1473,7 @@ def forward(*args):
                 "fn took (invariant 2), got %s." % (_i, type(args[_i]).__name__)
             )
         mods.append(args[_i])
-    user_inputs = [a for i, a in enumerate(args) if i not in set(MODULE_POSITIONS)]  # noqa: F821
+    user_inputs = [a for i, a in enumerate(args) if i not in _MODULE_POSITIONS_SET]  # noqa: F821
     user_flat, _runtime_in_spec = _pytree.tree_flatten(tuple(user_inputs))
     if IN_SPEC is not None and _runtime_in_spec != _pytree.treespec_loads(IN_SPEC):  # noqa: F821
         _fail(
@@ -1574,7 +1577,10 @@ def forward(*args):
         out = out[:len(out) - n]
         for idx, g in zip(GRAD_PARAM_INDICES, grads):  # noqa: F821
             p = pb[idx]
-            p.grad = g if p.grad is None else p.grad + g
+            if p.grad is None:
+                p.grad = g
+            else:
+                p.grad.add_(g)
     return _pytree.tree_unflatten(out, _pytree.treespec_loads(OUT_SPEC))  # noqa: F821
 
 
