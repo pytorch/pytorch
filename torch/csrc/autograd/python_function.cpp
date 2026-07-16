@@ -53,6 +53,8 @@ using namespace torch;
 using namespace torch::autograd;
 using at::Tensor;
 
+// NOLINTBEGIN(hicpp-exception-baseclass)
+
 PyObject* THPFunctionClass = nullptr;
 PyObject* THPGradientEdgeClass = nullptr;
 
@@ -97,23 +99,28 @@ PyObject* materialize_needs_input_grad(THPFunction* self) {
   if (self->needs_input_grad) {
     return Py_NewRef(self->needs_input_grad);
   }
-  if (!self->needs_input_grad_bits_valid) {
+  if (!self->needs_input_grad_bits.has_value()) {
+    // needs_input_grad=None is represented as needs_input_grad=nullptr and
+    // needs_input_grad_bits=nullopt. The needs_input_grad setter/getter, like
+    // other autograd.Function fields, normalizes Py_None to nullptr.
     Py_RETURN_NONE;
   }
 
-  PyObject* result =
-      PyTuple_New(static_cast<Py_ssize_t>(self->needs_input_grad_bits.size()));
+  const auto& needs_input_grad_bits = *self->needs_input_grad_bits;
+  THPObjectPtr result(
+      PyTuple_New(static_cast<Py_ssize_t>(needs_input_grad_bits.size())));
   if (!result) {
     return nullptr;
   }
-  for (const auto i : c10::irange(self->needs_input_grad_bits.size())) {
+  for (const auto i : c10::irange(needs_input_grad_bits.size())) {
     PyTuple_SET_ITEM(
-        result,
+        result.get(),
         static_cast<Py_ssize_t>(i),
-        Py_NewRef(self->needs_input_grad_bits[i] ? Py_True : Py_False));
+        Py_NewRef(needs_input_grad_bits[i] ? Py_True : Py_False));
   }
-  self->needs_input_grad = result;
-  return Py_NewRef(result);
+  self->needs_input_grad = result.release();
+  self->needs_input_grad_bits.reset();
+  return Py_NewRef(self->needs_input_grad);
 }
 
 static PyObject* unpack_saved_variables(
@@ -601,7 +608,7 @@ static void THPFunction_dealloc(THPFunction* self) {
   self->input_info.~vector();
   self->saved_variables.~vector();
   self->is_variable_input.~vector();
-  self->needs_input_grad_bits.~SmallVector();
+  std::destroy_at(&self->needs_input_grad_bits);
   if (self->cdata) {
     auto* slot = self->cdata->pyobj_slot();
     if (slot->load_pyobj() == reinterpret_cast<PyObject*>(self)) {
@@ -627,11 +634,11 @@ static PyObject* THPFunction_new(
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
-  new (&self->needs_input_grad_bits) c10::SmallVector<bool, 24>();
+  new (&self->needs_input_grad_bits)
+      std::optional<c10::SmallVector<bool, 24>>();
   self->materialize_grads = true;
   self->pure_view = false;
   self->materialize_non_diff_grads = true;
-  self->needs_input_grad_bits_valid = false;
   self->clear_saved_tensors_on_access = false;
   self->saved_tensors_accessed_and_cleared = false;
   torch::utils::PyObjectPreservation::init_fresh_nonatomic(*self->cdata, obj);
@@ -1610,8 +1617,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
   bool is_executable = input_info.is_executable;
   cdata->set_next_edges(std::move(input_info.next_edges));
   Py_CLEAR(ctx->needs_input_grad);
-  ctx->needs_input_grad_bits = std::move(input_info.needs_input_grad);
-  ctx->needs_input_grad_bits_valid = true;
+  ctx->needs_input_grad_bits.emplace(std::move(input_info.needs_input_grad));
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
   // Get clear_saved_tensors_on_access from the Function class
@@ -2003,8 +2009,7 @@ int setNeedsInputGrad(PyObject* obj, PyObject* value, void* _unused) {
   Py_XDECREF(self->needs_input_grad);
   Py_XINCREF(value);
   self->needs_input_grad = value;
-  self->needs_input_grad_bits.clear();
-  self->needs_input_grad_bits_valid = false;
+  self->needs_input_grad_bits.reset();
   return 0;
 }
 
@@ -2175,3 +2180,5 @@ bool THPFunction_initModule(PyObject* module) {
     return false;
   return true;
 }
+
+// NOLINTEND(hicpp-exception-baseclass)
