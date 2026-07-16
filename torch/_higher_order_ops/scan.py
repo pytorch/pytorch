@@ -123,6 +123,7 @@ def scan(
             the final carry of the scan operation with same pytree structure as init.
         out (torch.Tensor or pytree with tensor leaves),
             each tensor leaf is a stacked output along first dim, where each slice is the output of a scan iteration.
+            If the scan dimension has size 0, ``final_carry`` equals ``init``, each output leaf has size 0 along ``dim``, and all input gradients are zero.
 
     Restrictions:
         - The combine_fn shouldn't have any aliasing between input-input, input-output, and output-output. E.g. return a view
@@ -337,9 +338,9 @@ scan_op = ScanOp()
 def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
     def _scan(init, xs):
         """Perform scan on `elems` using `elems_init."""
-        carry_orig = init
+        carry = init
         if len(xs) == 0:
-            return carry_orig, []
+            return carry, []
 
         num_elems = xs[0].shape[dim]
         num_init_leaves = len(init)
@@ -355,7 +356,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         carry, out_0 = _extract_carry_and_out(
             call_operator(
                 operator,
-                *carry_orig,
+                *carry,
                 *proto_xs,
                 *additional_inputs,
             ),
@@ -383,10 +384,8 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         ]
 
         if num_elems == 0:
-            outs_expanded = [
-                outs.pop(0) if out_m else None for out_m in out_tensor_mask
-            ]
-            return (*carry_orig, *outs_expanded)
+            outs_expanded = [outs.pop(0) if out_m else None for out_m in out_tensor_mask]
+            return (*init, *outs_expanded)
 
         def store_out_in_outs(out, ind):
             # Store the intermediate out in the outs matrix
@@ -1152,8 +1151,6 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
         result_flat.append(y)
 
     if len(result_flat) == 0:
-        # Zero-length scan: no iterations ran, so stack empty outputs shaped from
-        # the prototype output leaves obtained above.
         results = [
             torch.empty([0] + list(e.shape), dtype=e.dtype, device=e.device)
             for e in dummy_out_leaves

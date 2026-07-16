@@ -174,7 +174,6 @@ def associative_scan(
             This function must be pure, i.e., no lifted arguments are supported at the moment,
             satisfy the associative property and have no side-effects.
         xs (torch.Tensor): The input tensor, or nested pytree of tensors.
-            All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
         combine_mode (str): A string indicating whether the ``combine_fn`` is ``pointwise`` or ``generic``, default ``pointwise``.
@@ -184,6 +183,9 @@ def associative_scan(
             In all other cases ``combine_mode=generic`` should be used.
             Note: ``combine_mode=pointwise`` is more efficient than ``combine_mode=generic``.
 
+    Returns:
+        A pytree of the same structure and shape as ``xs``; if the scan dimension
+        has size 0, the output mirrors the (empty) input unchanged and all input gradients are zero.
 
     Example::
 
@@ -706,9 +708,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         )
 
         if scan_length == 0:
-            # Zero-length scan: no elements contribute, so the gradient w.r.t.
-            # each xs leaf is an empty tensor matching that leaf. The triangular
-            # transition matrices below are not defined for scan_length == 0.
             return (
                 *[None] * 3,
                 *[torch.zeros_like(x) for x in xs],
@@ -919,7 +918,6 @@ def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
         result_flat.append(r_flat)
 
     if len(result_flat) == 0:
-        # Zero-length scan: the output mirrors the (empty) input.
         results = list(inp_leaves)
     else:
         results = [
