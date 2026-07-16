@@ -551,7 +551,8 @@ class CPFlexAttentionTest(DTensorTestBase):
         document_lengths: list[list[int]] | None = None,
     ) -> None:
         torch.use_deterministic_algorithms(True)
-        torch.manual_seed(1234)
+        device_mod = torch.get_device_module(self.device_type)
+        device_mod.manual_seed(1234)
 
         dtype = torch.float32
         bs = B if B > 1 else 8
