@@ -15,6 +15,7 @@
 #include <ATen/CachedTensorUtils.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/FakeTensorDispatchTables.h>
 #include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
 
@@ -422,8 +423,11 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   at::Tensor tmp_b = b->cdata;
 
   // Swap the Tensor Impl
+  // NOLINTBEGIN(performance-use-std-move): the extra refcount from copying
+  // (rather than moving) tmp_a/tmp_b is load-bearing, see NB comment above.
   a->cdata = tmp_b;
   b->cdata = tmp_a;
+  // NOLINTEND(performance-use-std-move)
 
   // Fix up the PyObjects associated with each TensorImpl
   a->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(a_);
@@ -709,7 +713,7 @@ static PyObject* THPModule_torchDeviceToDLDevice(
 }
 
 struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
-  TorchDLPackExchangeAPI() {
+  TorchDLPackExchangeAPI() : DLPackExchangeAPI{} {
     header.version.major = DLPACK_MAJOR_VERSION;
     header.version.minor = DLPACK_MINOR_VERSION;
     header.prev_api = nullptr;
@@ -720,7 +724,7 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     current_work_stream = CurrentWorkStream;
   }
 
-  static const DLPackExchangeAPI* Global() {
+  static DLPackExchangeAPI* Global() {
     static TorchDLPackExchangeAPI inst;
     return &inst;
   }
@@ -783,7 +787,8 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
           at::TensorOptions()
               .dtype(at::toScalarType(prototype->dtype))
               .device(at::dlDeviceToTorchDevice(
-                  prototype->device.device_type, prototype->device.device_id));
+                  prototype->device.device_type,
+                  static_cast<c10::DeviceIndex>(prototype->device.device_id)));
       at::Tensor tensor = at::empty(shape, options);
       *out = at::toDLPackVersioned(tensor);
       return 0;
@@ -805,8 +810,9 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
         return 0;
       }
       if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
-        *out_stream =
-            at::accelerator::getCurrentStream(device_id).native_handle();
+        *out_stream = at::accelerator::getCurrentStream(
+                          static_cast<c10::DeviceIndex>(device_id))
+                          .native_handle();
       }
       return 0;
     } catch (const std::exception& e) {
@@ -821,9 +827,7 @@ static PyObject* THPModule_DLPackExchangeAPI(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
   return PyCapsule_New(
-      const_cast<DLPackExchangeAPI*>(TorchDLPackExchangeAPI::Global()),
-      "dlpack_exchange_api",
-      nullptr);
+      TorchDLPackExchangeAPI::Global(), "dlpack_exchange_api", nullptr);
   END_HANDLE_TH_ERRORS
 }
 
@@ -838,7 +842,7 @@ struct TorchConstDLPackExchangeAPI : public TorchDLPackExchangeAPI {
     dltensor_from_py_object_no_sync = DLTensorFromPyObjectNoSync;
   }
 
-  static const DLPackExchangeAPI* Global() {
+  static DLPackExchangeAPI* Global() {
     static TorchConstDLPackExchangeAPI inst;
     return &inst;
   }
@@ -876,9 +880,7 @@ static PyObject* THPModule_ConstDLPackExchangeAPI(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
   return PyCapsule_New(
-      const_cast<DLPackExchangeAPI*>(TorchConstDLPackExchangeAPI::Global()),
-      "dlpack_exchange_api",
-      nullptr);
+      TorchConstDLPackExchangeAPI::Global(), "dlpack_exchange_api", nullptr);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1468,6 +1470,31 @@ static PyObject* THPModule_allowTF32CuBLAS(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
   if (at::globalContext().allowTF32CuBLAS()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_setPreferCublasltGroupedGemm(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_prefer_cublaslt_grouped_gemm expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setPreferCublasltGroupedGemm(Py_IsTrue(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_preferCublasltGroupedGemm(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (at::globalContext().preferCublasltGroupedGemm()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
@@ -2183,6 +2210,14 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_warn_deprecation", THPModule_warnDeprecation, METH_NOARGS, nullptr},
     {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS, nullptr},
     {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O, nullptr},
+    {"_get_cublaslt_prefer_grouped_gemm",
+     THPModule_preferCublasltGroupedGemm,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cublaslt_prefer_grouped_gemm",
+     THPModule_setPreferCublasltGroupedGemm,
+     METH_O,
+     nullptr},
     {"_get_float32_matmul_precision",
      THPModule_float32MatmulPrecision,
      METH_NOARGS,
@@ -2406,7 +2441,8 @@ class WeakTensorRef {
   c10::weak_intrusive_ptr<c10::TensorImpl> weakref_;
 
  public:
-  WeakTensorRef(const at::Tensor& t) : weakref_(t.getIntrusivePtr()) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  explicit WeakTensorRef(const at::Tensor& t) : weakref_{t.getIntrusivePtr()} {}
 
   bool expired() {
     return weakref_.expired();
@@ -2678,6 +2714,33 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
+
+  {
+    using at::impl::FakeDispatchCategory;
+    auto add_for = [](FakeDispatchCategory category) {
+      return [category](const std::string& name, const std::string& overload) {
+        at::impl::fakeDispatchTableAdd(
+            category, c10::OperatorName(name, overload));
+      };
+    };
+    py_module.def(
+        "_fake_dispatch_register_decomp",
+        add_for(FakeDispatchCategory::Decomp));
+    py_module.def(
+        "_fake_dispatch_register_meta", add_for(FakeDispatchCategory::Meta));
+    py_module.def(
+        "_fake_dispatch_register_op_impl",
+        add_for(FakeDispatchCategory::OpImpl));
+    py_module.def(
+        "_fake_dispatch_register_prim_meta",
+        add_for(FakeDispatchCategory::PrimMeta));
+    py_module.def(
+        "_fake_dispatch_deregister_op_impl",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::OpImpl, c10::OperatorName(name, overload));
+        });
+  }
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
 
   py_module.def(
@@ -2706,6 +2769,10 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_cached_tensor", [](const at::Tensor& t) {
     return at::caching::is_cached_tensor(t);
+  });
+
+  py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
+    return t.is_fake();
   });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
@@ -2753,7 +2820,7 @@ Call this whenever a new thread is created in order to propagate values from
   });
 
   py::class_<WeakTensorRef>(py_module, "_WeakTensorRef")
-      .def(py::init([](py::object tensor) {
+      .def(py::init([](const py::object& tensor) {
         return WeakTensorRef(THPVariable_Unpack(tensor.ptr()));
       }))
       .def("expired", &WeakTensorRef::expired);
@@ -2793,7 +2860,7 @@ Call this whenever a new thread is created in order to propagate values from
          at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
-         c10::SymInt groups_) {
+         const c10::SymInt& groups_) {
         return at::native::select_conv_backend(
             input,
             weight,
@@ -2803,7 +2870,7 @@ Call this whenever a new thread is created in order to propagate values from
             dilation_,
             transposed_,
             output_padding_,
-            std::move(groups_),
+            groups_,
             std::nullopt);
       },
       py::arg("input"),
@@ -2827,7 +2894,7 @@ Call this whenever a new thread is created in order to propagate values from
          at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
-         c10::SymInt groups_,
+         const c10::SymInt& groups_,
          std::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
         c10::OptionalArrayRef<c10::SymInt> ref = std::nullopt;
         if (bias_sizes_opt) {
@@ -2842,7 +2909,7 @@ Call this whenever a new thread is created in order to propagate values from
             dilation_,
             transposed_,
             output_padding_,
-            std::move(groups_),
+            groups_,
             ref);
       },
       py::arg("input"),
@@ -3250,6 +3317,9 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_is_cow_tensor",
       [](const at::Tensor& tensor) {
+        TORCH_CHECK(
+            !tensor.key_set().has(c10::DispatchKey::Python),
+            "_is_cow_tensor is not defined for Python tensor subclasses");
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");

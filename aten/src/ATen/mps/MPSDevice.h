@@ -94,6 +94,8 @@ TORCH_API bool is_available();
 TORCH_API bool is_macos_at_least(MacOSVersion version);
 TORCH_API AppleGPUFamily get_apple_gpu_family();
 TORCH_API bool is_apple_family_or_newer(AppleGPUFamily family);
+// Whether MetalPerformancePrimitives (cooperative tensors) is usable;
+TORCH_API bool has_mpp();
 TORCH_API at::Allocator* GetMPSAllocator();
 
 inline Device getDeviceFromPtr(void* ptr) {

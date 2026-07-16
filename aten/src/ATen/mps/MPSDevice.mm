@@ -147,4 +147,9 @@ bool is_apple_family_or_newer(AppleGPUFamily family) {
   return static_cast<uint32_t>(get_apple_gpu_family()) >= static_cast<uint32_t>(family);
 }
 
+bool has_mpp() {
+  // MetalPerformancePrimitives matmul2d (cooperative tensors) needs macOS 26.2+
+  return is_macos_at_least(MacOSVersion::MACOS_26_2);
+}
+
 } // namespace at::mps
