@@ -22,6 +22,7 @@ from torch.nn.functional import (
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     _get_torch_cuda_version,
+    _get_torch_rocm_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -2337,8 +2338,15 @@ class TestFP8Matmul(TestCase):
 
         C_ref = A_ref @ B_ref.t()
 
-        # convert to swizzled format
-        if not torch.version.hip and "xpu" not in device:
+        # convert to swizzled format: cuBLAS layout on CUDA; on ROCm MXFP4/MXFP8 use hipBLASLt GFX950 scale layout
+        rocm_ext_swizzle = (
+            torch.version.hip
+            and (
+                (recipe == "mxfp4" and _get_torch_rocm_version() >= (7, 13))
+                or (recipe == "mxfp8" and _get_torch_rocm_version() >= (7, 14))
+            )
+        )
+        if (not torch.version.hip and "xpu" not in device) or rocm_ext_swizzle:
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 

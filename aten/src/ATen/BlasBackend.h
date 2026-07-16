@@ -37,6 +37,8 @@ enum class ScalingType : std::uint8_t {
   BlockWise1x32, // fp8_e8m0fnu scales
   BlockWise1x128, // fp32 scales
   BlockWise128x128, // fp32 scales
+  // ROCm gfx950: hipBLASLt Block_32_UE8M0_32_8_EXT pre-swizzled E8M0 scales (see HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT)
+  BlockWiseBlk32Ue8m0_32_8_EXT,
 };
 
 enum class SwizzleType : std::uint8_t { NO_SWIZZLE = 0, SWIZZLE_32_4_4 = 1 };
