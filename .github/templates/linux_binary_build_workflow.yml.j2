@@ -468,11 +468,11 @@ jobs:
 
   libtorch-extract:
     name: ${{ matrix.build_name }}-extract
-    if: !{{ owner_if }}
-    needs: [manywheel-build, get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}]
-    runs-on: "!{{ runner_prefix }}l-x86iavx512-16-128"
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: [manywheel-build]
+    runs-on: "mt-l-x86iavx512-16-128"
     container:
-      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}!{{ docker_image_suffix }}
+      image: python:3.11
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -486,8 +486,6 @@ jobs:
             libtorch_config: "!{{ lt_config['libtorch_config'] }}"
             source_wheel_build_name: "!{{ lt_config['source_wheel_build_name'] }}"
             build_name: "!{{ lt_config['build_name'] }}"
-            container_image: "!{{ lt_config['container_image'] }}"
-            container_image_tag_prefix: "!{{ lt_config['container_image_tag_prefix'] }}"
         {%- endfor %}
     env:
       DESIRED_CUDA: ${{ matrix.desired_cuda }}

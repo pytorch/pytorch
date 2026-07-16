@@ -547,13 +547,6 @@ def generate_libtorch_extraction_configs(
                 "gpu_arch_type": gpu_arch_type,
                 "gpu_arch_version": gpu_arch_version,
                 "arch": arch,
-                # Run the extraction in the same builder image the wheel was
-                # built in so the toolchain (binutils for debug-symbol split)
-                # matches; used by the linux template's containerized job.
-                "container_image": source_config.get("container_image", ""),
-                "container_image_tag_prefix": source_config.get(
-                    "container_image_tag_prefix", ""
-                ),
             }
         )
 
