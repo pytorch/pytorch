@@ -84,10 +84,10 @@ struct THPFunction {
   PyObject_HEAD
 
   PyObject* needs_input_grad;
-  // Optimization: avoid materializing the needs_input_grad Python tuple until
-  // first access. The hot apply path records the values here instead.
-  c10::SmallVector<bool, 24> needs_input_grad_bits;
-  bool needs_input_grad_bits_valid;
+  // Lazily stores the default ctx.needs_input_grad values until the Python
+  // tuple is first requested. needs_input_grad is authoritative once set,
+  // either by materialization or direct Python assignment.
+  std::optional<c10::SmallVector<bool, 24>> needs_input_grad_bits;
 
   // Python tuple of tensors whose variables we should save.  Set
   // by Python with 'save_for_backward'.  If nullptr, no tensors were

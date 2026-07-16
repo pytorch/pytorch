@@ -40,8 +40,8 @@ static variable_list call_jvp(
 }
 
 static bool is_forward_ad_active() {
-  return c10::AutogradState::get_tls_state().get_fw_grad_mode() &&
-      ForwardADLevel::has_any_level();
+  return ForwardADLevel::has_any_level() &&
+      c10::AutogradState::get_tls_state().get_fw_grad_mode();
 }
 
 // This function has two main goals:
@@ -389,9 +389,10 @@ static optional_variable_list _process_backward_mode_ad(
   };
 
   optional_variable_list outputs;
-  std::optional<std::unordered_set<at::TensorImpl*>> outputs_impl;
+  // Only filled when needed for the mark_dirty output check.
+  std::optional<std::unordered_set<at::TensorImpl*>> maybe_output_impls;
   if (!dirty_inputs.empty()) {
-    outputs_impl.emplace();
+    maybe_output_impls.emplace();
   }
   outputs.reserve(num_outputs);
   int num_diff_outputs = 0;
@@ -453,8 +454,8 @@ static optional_variable_list _process_backward_mode_ad(
       ++num_diff_outputs;
     }
 
-    if (outputs_impl) {
-      outputs_impl->insert(out_tensor_impl);
+    if (maybe_output_impls) {
+      maybe_output_impls->insert(out_tensor_impl);
     }
     outputs.emplace_back(var);
   }
@@ -474,10 +475,10 @@ static optional_variable_list _process_backward_mode_ad(
 
   // All the modified Tensors must be returned as is for the rewrite to be
   // valid.
-  if (outputs_impl) {
+  if (maybe_output_impls) {
     for (auto& dirty_input : dirty_inputs) {
       TORCH_CHECK(
-          outputs_impl->count(dirty_input) > 0,
+          maybe_output_impls->count(dirty_input) > 0,
           "Some elements marked as dirty during the forward method were not returned as output. The"
           " inputs that are modified inplace must all be outputs of the Function.");
     }
