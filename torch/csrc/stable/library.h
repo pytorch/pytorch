@@ -86,16 +86,17 @@ class StableLibrary final {
       const char* name,
       void (*fn)(StableIValue*, uint64_t, uint64_t)) {
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-    torch_library_impl(lib_, name, fn, TORCH_ABI_VERSION);
+    STABLE_TORCH_ERROR_CODE_CHECK(
+        torch_library_impl(lib_, name, fn, TORCH_ABI_VERSION));
 #else
-    aoti_torch_library_impl(lib_, name, fn);
+    STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_library_impl(lib_, name, fn));
 #endif
     return *this;
   }
 
   // corresponds to a limited, stable version of torch::library::def()
   StableLibrary& def(const char* schema) {
-    aoti_torch_library_def(lib_, schema);
+    STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_library_def(lib_, schema));
     return *this;
   }
 
@@ -108,8 +109,8 @@ class StableLibrary final {
       tag_ints.push_back(
           torch::stable::detail::to<int32_t>(torch::stable::detail::from(t)));
     }
-    torch_library_def_with_tags(
-        lib_, schema, tag_ints.data(), static_cast<int32_t>(tag_ints.size()));
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_library_def_with_tags(
+        lib_, schema, tag_ints.data(), static_cast<int32_t>(tag_ints.size())));
     return *this;
   }
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0

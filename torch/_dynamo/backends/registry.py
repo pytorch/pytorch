@@ -100,7 +100,7 @@ def register_backend(
     """
     if compiler_fn is None:
         # @register_backend(name="") syntax
-        return functools.partial(register_backend, name=name, tags=tags)
+        return functools.partial(register_backend, name=name, tags=tags)  # type: ignore[return-value]
     if not callable(compiler_fn):
         raise AssertionError(f"compiler_fn must be callable, got {type(compiler_fn)}")
     name = name or compiler_fn.__name__
@@ -125,9 +125,12 @@ def lookup_backend(compiler_fn: str | CompilerFn) -> CompilerFn:
         if compiler_fn not in _BACKENDS:
             _lazy_import()
         if compiler_fn not in _BACKENDS:
+            import difflib
+
             from ..exc import InvalidBackend
 
-            raise InvalidBackend(name=compiler_fn)
+            suggestions = difflib.get_close_matches(compiler_fn, list_backends(), n=2)
+            raise InvalidBackend(name=compiler_fn, suggestions=suggestions)
 
         if compiler_fn not in _COMPILER_FNS:
             entry_point = _BACKENDS[compiler_fn]

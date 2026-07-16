@@ -183,7 +183,7 @@ class GluonTemplate(KernelTemplate):
         self.grid = grid
         self.source = source
         self.template = GluonTemplate._template_from_string(source)
-        assert name not in self.all_templates, f"duplicate template name: {name}"
+        assert name not in self.all_templates, f"duplicate template name: {name}"  # noqa: S101
         GluonTemplate.all_templates[name] = self
         self.debug = debug
 

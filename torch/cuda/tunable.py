@@ -71,7 +71,7 @@ debugging purposes. This will produce a lot of diagnostic messages but may be
 useful to see if TunableOp is being used at all. Otherwise, TunableOp is
 completely silent, besides file output, unless there is a warning or error
 during its use. The verbose option is only available by setting the environment
-variable PYTORCH_TUNABLEOP_VEROBSE=1.
+variable PYTORCH_TUNABLEOP_VERBOSE=1.
 
 A Note on Tuning Behavior, Warmup, and Cache Effects
 ====================================================
@@ -93,19 +93,28 @@ among all that were successfully profiled will be chosen. A profile might fail
 if the given solution doesn't achieve the same accuracy as the default
 implementation or if the solution returns an error code.
 
+CUDA cuBLASLt support uses the TunableOp result cache and profiling machinery
+to time a configurable number of cuBLASLt heuristic candidates.
+
 Current Tunable Operators
 =========================
 
 TunableGemm for ROCm
 --------------------
 
-Currently only a TunableGemm for ROCm is implemented. Note that CUDA builds of
-PyTorch will function correctly when using TunableOp but the only solution
-available to CUDA builds is the 'Default' implementation i.e. the original
-cuBLAS default, now called through TunableOp. Any call to at::cuda::blas::gemm()
-or ::bgemm() will be routed through TunableOp when enabled. Calling gemm() for a
-given set of input arguments (transa, transb, m, n, k) will attempt to use the
-fastest available implementation across both rocblas and hipblaslt.
+Any call to at::cuda::blas::gemm() or ::bgemm() will be routed through TunableOp
+when enabled. Calling gemm() for a given set of input arguments
+(transa, transb, m, n, k) on ROCm will attempt to use the fastest available
+implementation across both rocblas and hipblaslt. On CUDA, TunableGemm registers
+cuBLASLt heuristic candidates for GEMM paths that already use cuBLASLt.
+
+cuBLASLt Heuristic Tuning for CUDA
+----------------------------------
+
+The number of cuBLASLt heuristic candidates is controlled by
+set_cublaslt_requested_algo_count() or
+PYTORCH_TUNABLEOP_CUBLASLT_REQUESTED_ALGO_COUNT, which defaults to 8. If this
+count is 1, only the top cuBLASLt heuristic candidate is available.
 
 Offline Tuning
 ==============
@@ -180,7 +189,6 @@ Use the C++ or Python APIs instead.
 
 """
 
-import concurrent.futures
 import glob
 import multiprocessing as mp
 import os
@@ -201,6 +209,8 @@ __all__ = [
     "get_max_tuning_duration",
     "set_max_tuning_iterations",
     "get_max_tuning_iterations",
+    "set_cublaslt_requested_algo_count",
+    "get_cublaslt_requested_algo_count",
     "set_filename",
     "get_filename",
     "get_results",
@@ -239,7 +249,7 @@ def tuning_is_enabled() -> bool:
 
 
 def record_untuned_enable(val: bool = True) -> None:
-    r"""Enable recording untuned of TunableOp perations for offline tuning.
+    r"""Enable recording untuned TunableOp operations for offline tuning.
 
     When enabled, if a tuned entry isn't found, write it to the untuned file.
     """
@@ -277,6 +287,22 @@ def set_max_tuning_iterations(iterations: int) -> None:
 def get_max_tuning_iterations() -> int:
     r"""Get max iterations to spend tuning a given solution."""
     return torch._C._cuda_tunableop_get_max_tuning_iterations()  # type: ignore[attr-defined]
+
+
+def set_cublaslt_requested_algo_count(count: int) -> None:
+    r"""Set the number of cuBLASLt heuristic algorithms to request on CUDA.
+
+    Values less than 1 are clamped to 1.
+    """
+    torch._C._cuda_tunableop_set_cublaslt_requested_algo_count(count)  # type: ignore[attr-defined]
+
+
+def get_cublaslt_requested_algo_count() -> int:
+    r"""Get the number of cuBLASLt heuristic algorithms requested on CUDA."""
+    get_count = (
+        torch._C._cuda_tunableop_get_cublaslt_requested_algo_count  # type: ignore[attr-defined]
+    )
+    return get_count()
 
 
 def set_filename(filename: str, insert_device_ordinal: bool = False) -> None:
@@ -550,8 +576,10 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     r"""Process a single untuned GEMM."""
 
     deviceid = "cuda:" + str(gpu_id)
+    torch.cuda.set_device(deviceid)
 
     dtype_dict = {
+        "Float": torch.float32,
         "float": torch.float32,
         "tf32": torch.float32,
         "double": torch.float64,
@@ -655,7 +683,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         # Warnings for unsupported cases:
         if m == 1 or n == 1 or k == 1:
             warnings.warn(
-                "Offline tuning is not support for this GEMM. Use online tuning instead. "
+                "Offline tuning is not supported for this GEMM. Use online tuning instead. "
                 + f"Skipped tuning for: {untuned_gemm[1]}",
                 stacklevel=2,
             )
@@ -778,6 +806,13 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         warnings.warn(f"error: unknown op {op_sig}", stacklevel=2)
 
 
+def _process_offline_gemms(untuned_gemm_lines: list[str], gpu_id: int) -> None:
+    r"""Process multiple untuned GEMMs on a single GPU."""
+    _check_tuning_assertions()
+    for line in untuned_gemm_lines:
+        _process_single_offline_gemm(line, gpu_id)
+
+
 def _check_tuning_assertions() -> None:
     r"""Helper function for multi-GPU tuning case. Need to check that TunableOp feature
     is enabled and that tuning is enabled.
@@ -807,27 +842,30 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
     mp_context = mp.get_context("spawn")
 
-    futures = []  # empty list to hold futures
+    gemm_entries_by_gpu: list[list[str]] = [[] for _ in range(num_gpus)]
 
     # GEMM are assigned to GPUs in a round robin manner
-    h = 0
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=num_gpus,
-        mp_context=mp_context,
-        initializer=_check_tuning_assertions,
-    ) as executor:
-        # The workers are a separate process. TunableOp will be
-        # enabled in the child processes if PYTORCH_TUNABLEOP_ENABLED=1
-        # In the initializer, we also try to enable TunableOP if th
-        # environment variable was NOT set.
+    for h, line in enumerate(unique_gemm_entries):
+        gemm_entries_by_gpu[h % num_gpus].append(line)
 
-        for line in unique_gemm_entries:
-            future = executor.submit(_process_single_offline_gemm, line, h)
-            futures.append(future)
-            h = (h + 1) % num_gpus
+    processes = []
+    for h, entries in enumerate(gemm_entries_by_gpu):
+        if not entries:
+            continue
+        # TunableOp initializes its output filename once per process, so keep
+        # each spawned process bound to a single GPU.
+        process = mp_context.Process(target=_process_offline_gemms, args=(entries, h))
+        process.start()
+        processes.append((h, process))
 
-        for future in concurrent.futures.as_completed(futures):
-            future.result()
+    failed_processes = []
+    for h, process in processes:
+        process.join()
+        if process.exitcode != 0:
+            failed_processes.append((h, process.exitcode))
+
+    if failed_processes:
+        raise RuntimeError(f"offline tuning processes failed: {failed_processes}")
 
     torch.cuda.synchronize()
 

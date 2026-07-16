@@ -1319,6 +1319,9 @@ function unpickleData(buffer) {
   const LIST = 'l'.charCodeAt(0);
   const DICT = 'd'.charCodeAt(0);
   const SETITEM = 's'.charCodeAt(0);
+  const BYTEARRAY8 = 0x96;
+  const NEXT_BUFFER = 0x97;
+  const READONLY_BUFFER = 0x98;
 
   const scratch_buffer = new ArrayBuffer(8);
   const scratch_bytes = new Uint8Array(scratch_buffer);
@@ -1334,6 +1337,15 @@ function unpickleData(buffer) {
     offset += 4;
     return n;
   }
+  function read_uint64() {
+    const lo = read_uint4();
+    const hi = read_uint4();
+    const n = lo + hi * 0x100000000;
+    if (!Number.isSafeInteger(n)) {
+      throw new Error('Pickle length exceeds safe integer range');
+    }
+    return n;
+  }
   function setitems(d, mark) {
     for (let i = mark; i < stack.length; i += 2) {
       d[stack[i]] = stack[i + 1];
@@ -1347,7 +1359,7 @@ function unpickleData(buffer) {
       case PROTO:
         {
           const version = bytebuffer[offset++];
-          if (version < 2 || version > 4) {
+          if (version < 2 || version > 5) {
             throw new Error(`Unhandled version ${version}`);
           }
         }
@@ -1527,6 +1539,16 @@ function unpickleData(buffer) {
         }
         stack.push(float64[0]);
         break;
+      case BYTEARRAY8:
+        {
+          const n = read_uint64();
+          stack.push(new Uint8Array(buffer.slice(offset, offset + n)));
+          offset += n;
+        }
+        break;
+      case NEXT_BUFFER:
+      case READONLY_BUFFER:
+        throw new Error('Out-of-band buffer opcodes are not supported');
       default:
         throw new Error(`UNKNOWN OPCODE: ${opcode}`);
     }

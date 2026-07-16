@@ -23,6 +23,8 @@ from tools.linter.adapters._stable_shim_utils import (
     get_current_version,
     LintMessage,
     LintSeverity,
+    merge_base_with_main,
+    MULTILINE_MATCHERS,
     PreprocessorTracker,
 )
 
@@ -76,31 +78,7 @@ def get_added_lines(filename: str) -> set[int]:
             added_lines.update(parse_diff(result.stdout))
 
         # Get merge-base with origin/main to check all PR commits
-        result = subprocess.run(
-            ["git", "fetch", "origin", "main"],
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Failed to fetch origin. Error: {result.stderr.strip()}"
-            )
-
-        result = subprocess.run(
-            ["git", "merge-base", "HEAD", "origin/main"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Failed to find merge-base with origin/main. "
-                f"Make sure origin/main exists (run 'git fetch origin main'). "
-                f"Error: {result.stderr.strip()}"
-            )
-
-        merge_base = result.stdout.strip()
+        merge_base = merge_base_with_main()
         result = subprocess.run(
             ["git", "diff", f"{merge_base}..HEAD", filename],
             capture_output=True,
@@ -149,7 +127,7 @@ def check_file(filename: str) -> list[LintMessage]:
         lines = f.readlines()
 
     # Use PreprocessorTracker to handle preprocessor directives
-    tracker = PreprocessorTracker()
+    tracker = PreprocessorTracker(MULTILINE_MATCHERS)
 
     # Track extern "C" blocks separately
     inside_extern_c = False
@@ -157,13 +135,6 @@ def check_file(filename: str) -> list[LintMessage]:
     # Patterns for extern "C" blocks
     extern_c_pattern = re.compile(r'extern\s+"C"\s*{')
     extern_c_end_pattern = re.compile(r'}\s*//\s*extern\s+"C"')
-
-    # Function declaration patterns - looking for AOTI_TORCH_EXPORT or typedef
-    function_decl_patterns = [
-        re.compile(r"^\s*AOTI_TORCH_EXPORT\s+\w+"),  # AOTI_TORCH_EXPORT functions
-        re.compile(r"^\s*typedef\s+.*\(\*\w+\)"),  # typedef function pointers
-        re.compile(r"^\s*using\s+\w+\s*="),  # using declarations
-    ]
 
     for line_num, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -188,17 +159,13 @@ def check_file(filename: str) -> list[LintMessage]:
 
         # Check for function declarations
         if inside_extern_c:
-            is_function_decl = any(
-                pattern.match(stripped) for pattern in function_decl_patterns
-            )
-
-            if is_function_decl:
+            for identifier_version in tracker.identifiers_used():
                 # Check if this is a newly added line
                 is_new_line = line_num in added_lines
 
                 # Get current version state from tracker
-                inside_version_block = tracker.is_in_version_block()
-                tracker_version = tracker.get_version_of_block()
+                inside_version_block = identifier_version.version is not None
+                tracker_version = identifier_version.version
                 version_of_block_macro = (
                     f"TORCH_VERSION_{tracker_version[0]}_{tracker_version[1]}_0"
                     if tracker_version
