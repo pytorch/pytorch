@@ -277,6 +277,14 @@ class KernelTests(torch._inductor.test_case.TestCase):
             tmp = tl.load(tmp_ptr + offsets, mask=mask)
             tl.store(z + offsets, x + y + tmp, mask=mask)
 
+        @triton.jit
+        def mul2_kernel(x, z, BLOCK_SIZE: "tl.constexpr", n_elements):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            tl.store(z + offsets, 2 * tl.load(x + offsets, mask=mask), mask=mask)
+
         def f(x, y, block_size, use_offset_views):
             tmp = x + y
             if use_offset_views:
@@ -297,6 +305,21 @@ class KernelTests(torch._inductor.test_case.TestCase):
             grid = (triton.cdiv(n_elements, block_size),)
             add_kernel[grid](xy, z, block_size, n_elements)
             return z, xy
+
+        def f_unrelated_kernel_first(x, y):
+            doubled = torch.empty_like(x)
+            n_elements = x.numel()
+            grid = (triton.cdiv(n_elements, 4),)
+            mul2_kernel[grid](x, doubled, 4, n_elements)
+            tmp = doubled + y
+            xy = torch.tensor(
+                [x.data_ptr(), y.data_ptr(), tmp.data_ptr()],
+                dtype=torch.long,
+                pin_memory=True,
+            ).to(device=x.device, non_blocking=True)
+            z = torch.empty_like(x)
+            add_kernel[grid](xy, z, 4, n_elements)
+            return z
 
         x = torch.randn(18, device=GPU_TYPE)
         y = torch.randn(18, device=GPU_TYPE)
@@ -340,6 +363,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 self.assertIn(".record_stream(torch.accelerator.current_stream(", code)
                 self.assertIn("_h2d_event_", code)
                 copy_idx = code.index(".copy_(")
+                copy_line = next(
+                    line for line in code.splitlines() if ".copy_(" in line
+                )
+                self.assertIn(", False)", copy_line)
                 h2d_stream_line = next(
                     line
                     for line in code.splitlines()
@@ -396,6 +423,17 @@ class KernelTests(torch._inductor.test_case.TestCase):
                     stream_code = "\n".join(stream_codes)
                     self.assertIn("with stream1:", stream_code)
                     self.assertIn(".record_stream(stream1)", stream_code)
+
+                with inductor_config.patch(memory_planning=True):
+                    compiled_memory_planning = torch.compile(f, fullgraph=True)
+                    actual, packed_ptrs = compiled_memory_planning(x, y, 4, False)
+                    torch.accelerator.synchronize()
+                    self.assertEqual(actual, x + y + (x + y))
+                    self.assertNotEqual(actual.data_ptr(), packed_ptrs[2].item())
+
+                actual = torch.compile(f_unrelated_kernel_first, fullgraph=True)(x, y)
+                torch.accelerator.synchronize()
+                self.assertEqual(actual, x + y + (2 * x + y))
             elif GPU_TYPE == "cuda":
                 sync_fn = (
                     "hipDeviceSynchronize"
@@ -4444,6 +4482,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["O_ptr"],
         )
 
+    @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
     @make_mutation_test
     def test_for_loop_arg_2():
         @triton.jit
@@ -4504,6 +4543,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["o_ptr"],
         )
 
+    @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
     @make_mutation_test
     def test_while_loop():
         @triton.jit

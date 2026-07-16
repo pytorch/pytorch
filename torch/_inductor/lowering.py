@@ -2809,7 +2809,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
             return False
 
         for meta in pytree.tree_leaves(inp_out_node.meta["val"]):
-            if not isinstance(meta, torch._subclasses.FakeTensor):
+            if not torch._subclasses.fake_tensor.is_fake_tensor(meta):
                 continue
 
             if is_output:
@@ -3764,6 +3764,8 @@ make_fallback(aten._fft_r2c)  # needs complex as well
 
 # Data dependent (are these necessary?)
 make_fallback(aten.nonzero.default)
+# Not data-dependent, but still using fallback
+make_fallback(aten.nonzero_static.default)
 # Data-dependent output size; route to ATen eager kernel (CPU/CUDA/XPU all have
 # native implementations)
 make_fallback(aten.bincount.default, warn=False)
@@ -9324,6 +9326,15 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
+    # An effectful op may retain its tensor inputs in state that inductor cannot
+    # see (e.g. pushing a tensor onto a torchbind queue), so those input buffers
+    # must outlive the op and must never be reused for another buffer.
+    if effect_type:
+        for arg in pytree.tree_leaves((args, kwargs)):
+            if isinstance(arg, TensorBox):
+                arg.realize()
+                V.graph.never_reuse_buffers.add(arg.get_name())
+
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9353,7 +9364,9 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
+                op_name = (
+                    new_op.get_operation_name()
+                )  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (

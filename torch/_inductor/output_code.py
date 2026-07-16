@@ -27,7 +27,7 @@ import dataclasses
 import logging
 import os
 from functools import partial
-from typing import Any, cast, TYPE_CHECKING, TypeAlias
+from typing import Any, cast, Protocol, TYPE_CHECKING, TypeAlias
 
 import torch
 from torch._custom_class_base import CustomClassBase
@@ -76,6 +76,24 @@ if TYPE_CHECKING:
 
     from .compile_fx import _CompileFxKwargs
     from .triton_bundler import TritonBundle
+
+    # Boxed calling convention: a single list of inputs in, graph outputs out.
+    # Inductor's compiled-graph entry points and cudagraph wrappers all take
+    # exactly this shape, so we name it rather than repeating Callable[..., Any].
+    _BoxedCallable: TypeAlias = Callable[[Sequence[InputType]], object]
+
+    class CompiledFnRunner(Protocol):
+        """Runner emitted by the Python wrapper when graph_partition is on.
+
+        codegen writes a Runner class (see codegen/wrapper.py) whose partitions
+        hold the per-partition callables and whose recursively_apply_fns rewrites
+        each partition in place (e.g. wrapping it in a cudagraph).
+        """
+
+        partitions: list[Callable[..., Any]]
+
+        def recursively_apply_fns(self, fns: Sequence[Callable[..., Any]]) -> None: ...
+
 
 log = logging.getLogger(__name__)
 
@@ -185,7 +203,7 @@ def maybe_handle_backward_generation(
         if manager is None:
             raise AssertionError("CUDAGraph manager must not be None")
 
-        def compiled_artifact(new_inputs: list[Any]) -> Callable[..., Any]:
+        def compiled_artifact(new_inputs: Sequence[InputType]) -> object:
             manager.set_to_running_backward()  # type: ignore[union-attr]
             return compiled_graph_callable(new_inputs)
 
@@ -443,7 +461,10 @@ def maybe_realign_inputs(
                 mutated_inputs_idxs,
             )
             if new_callable is not compiled_graph.current_callable:
-                compiled_graph.current_callable = new_callable
+                # align_inputs_from_check_idxs preserves the boxed convention but
+                # its wrapper is typed with a list[InputType] parameter; the field
+                # uses the Sequence[InputType] boxed alias, so re-tag it here.
+                compiled_graph.current_callable = cast("_BoxedCallable", new_callable)
 
 
 class CompiledFxGraphConstants:
@@ -498,9 +519,9 @@ class CompiledFxGraph(OutputCode):
     to support FxGraph caching.
     """
 
-    current_callable: Callable[..., Any] | None
-    recursively_apply_fns: Callable[..., Any] | None
-    compiled_fn_runner: Any | None
+    current_callable: _BoxedCallable | None
+    recursively_apply_fns: Callable[[Sequence[Callable[..., Any]]], None] | None
+    compiled_fn_runner: CompiledFnRunner | None
     cache_key: str
     source_code: str = dataclasses.field(repr=False)  # Do not display source_code
     runnable_graph_str: str = dataclasses.field(repr=False)  # Do not display graph
@@ -552,7 +573,7 @@ class CompiledFxGraph(OutputCode):
 
     def __init__(
         self,
-        current_callable: Callable[..., Any] | None,
+        current_callable: _BoxedCallable | None,
         graph: GraphLowering,
         gm: torch.fx.GraphModule,
         output_strides: list[tuple[_StrideExprStr, ...] | None],
@@ -567,7 +588,7 @@ class CompiledFxGraph(OutputCode):
         inputs_to_check: Sequence[int],
         runnable_graph_str: str,
         inductor_post_grad_graph_str: str,
-        compiled_fn_runner: Any | None = None,
+        compiled_fn_runner: CompiledFnRunner | None = None,
         inductor_provenance_mapping_str: str | None = None,
         inductor_provenance_stack_traces_str: str | None = None,
     ) -> None:

@@ -12,6 +12,7 @@ import textwrap
 import time
 import typing_extensions
 from collections import defaultdict
+from collections.abc import Iterable
 from contextlib import contextmanager
 from typing import Any, Literal, NoReturn, TYPE_CHECKING
 
@@ -36,7 +37,7 @@ from torch._prims_common import (
     compute_required_storage_length,
     make_channels_last_strides_for,
 )
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -498,6 +499,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.data_ptr_keepalive_buffers: OrderedSet[str] = OrderedSet()
         self.data_ptr_keepalive_input_names: OrderedSet[str] = OrderedSet()
         self.data_ptr_keepalive_input_idxs: OrderedSet[int] = OrderedSet()
+        self.data_ptr_keepalive_by_symbol: dict[sympy.Symbol, str] = {}
+        self.data_ptr_keepalive_by_buffer: dict[str, OrderedSet[str]] = {}
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
@@ -950,6 +953,37 @@ class GraphLowering(torch.fx.Interpreter):
         self.never_reuse_buffers.add(name)
         if input_idx is not None:
             self.data_ptr_keepalive_input_idxs.add(input_idx)
+
+    def mark_data_ptr_keepalive_symbol(self, symbol: sympy.Symbol, name: str) -> None:
+        self.data_ptr_keepalive_by_symbol[symbol] = name
+
+    def mark_data_ptr_tensor_buffer(self, name: str, sources: OrderedSet[str]) -> None:
+        if sources:
+            self.data_ptr_keepalive_by_buffer[name] = sources
+
+    def get_data_ptr_keepalive_sources_for_symbols(
+        self, symbols: Iterable[sympy.Symbol]
+    ) -> OrderedSet[str]:
+        sources: OrderedSet[str] = OrderedSet()
+        unbacked_renamings = self.sizevars.shape_env.unbacked_renamings
+        for symbol in symbols:
+            symbols_to_check = [symbol]
+            renamed = unbacked_renamings.get(symbol)
+            if renamed is not None:
+                symbols_to_check.append(renamed)
+            symbols_to_check.extend(
+                original
+                for original, renamed in unbacked_renamings.items()
+                if renamed == symbol
+            )
+            for symbol_to_check in symbols_to_check:
+                source = self.data_ptr_keepalive_by_symbol.get(symbol_to_check)
+                if source is not None:
+                    sources.add(source)
+        return sources
+
+    def get_data_ptr_keepalive_sources_for_buffer(self, name: str) -> OrderedSet[str]:
+        return self.data_ptr_keepalive_by_buffer.get(name, OrderedSet())
 
     def find_data_ptr_keepalive_input_names(self, graph: Graph) -> OrderedSet[str]:
         def is_data_ptr_target(target: object) -> bool:
@@ -2611,7 +2645,7 @@ class GraphLowering(torch.fx.Interpreter):
                     elif isinstance(x, (torch.SymInt, torch.SymFloat)):
                         # Need concrete value to run dynamic shapes and tune the result
                         return not_none(x.hint)
-                    elif isinstance(x, FakeTensor):
+                    elif is_fake_tensor(x):
                         return defake(x)
                     else:
                         if not isinstance(x, torch.Tensor):
@@ -2904,7 +2938,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         def materialize_constant(name: str) -> torch.Tensor:
             constant = self.constants[name]
-            if isinstance(constant, FakeTensor):
+            if is_fake_tensor(constant):
                 constant = defake(constant)
             if not isinstance(constant, torch.Tensor):
                 raise AssertionError(f"Expected tensor constant for {name}")

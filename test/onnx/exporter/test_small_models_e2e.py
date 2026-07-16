@@ -438,8 +438,7 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             Model(),
             (torch.randn(4, 4), torch.randn(4, 4)),
             {"kw2": torch.ones(4, 4), "kw1": torch.zeros(4, 4)},
-            # We are specifying dynamism on the first kwarg even though user passed in
-            # different order
+            # Tuple dynamic_shapes follows the original function signature order.
             dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
         )
 

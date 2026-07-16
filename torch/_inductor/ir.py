@@ -4144,6 +4144,12 @@ class DtypeView(BaseView):
     def get_size(self) -> Sequence[Expr]:
         return self.data.get_size()
 
+    def make_reindexer(self) -> Callable[[Sequence[Expr]], Sequence[Expr]]:
+        def reindex(index: Sequence[Expr]) -> Sequence[Expr]:
+            return index
+
+        return reindex
+
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         inner = self.data.make_loader()
 
@@ -6675,6 +6681,22 @@ class InputsKernel(OperationBuffer):
         return r
 
 
+def data_ptr_keepalive_sources(node: IRNode) -> OrderedSet[str]:
+    sources = V.graph.get_data_ptr_keepalive_sources_for_symbols(
+        node.get_free_symbol_uses(unbacked_only=True)
+    )
+    name = node.maybe_get_name()
+    if name is not None:
+        sources.update(V.graph.get_data_ptr_keepalive_sources_for_buffer(name))
+    try:
+        read_names = node.get_read_names()
+    except NotImplementedError:
+        read_names = OrderedSet()
+    for read_name in read_names:
+        sources.update(V.graph.get_data_ptr_keepalive_sources_for_buffer(read_name))
+    return sources
+
+
 class NopKernel(InputsKernel):
     def is_no_op(self) -> bool:
         return True
@@ -6783,6 +6805,7 @@ class ConcatKernel(NopKernel):
         )
         kernel = StorageBox(concat_kernel)
         op_names = []
+        keepalive_sources: OrderedSet[str] = OrderedSet()
         for i, inp in enumerate(inputs):
             if not isinstance(inp, (BaseView, MutableBox)):
                 raise AssertionError(type(inp))
@@ -6797,6 +6820,7 @@ class ConcatKernel(NopKernel):
             if not isinstance(concat_kernel.inputs, list):
                 raise AssertionError(type(concat_kernel.inputs))
             concat_kernel.inputs.append(input_buffer)
+            keepalive_sources.update(data_ptr_keepalive_sources(input_buffer))
 
             if isinstance(inp.data, BaseView):
                 input_unwrapped = inp.data.unwrap_view()
@@ -6818,6 +6842,8 @@ class ConcatKernel(NopKernel):
         concat_kernel.name = V.graph.register_buffer(concat_kernel)
         concat_kernel.inputs = cls.unwrap_storage(concat_kernel.inputs)
         V.graph.register_operation(concat_kernel)
+        if keepalive_sources:
+            V.graph.mark_data_ptr_tensor_buffer(concat_kernel.name, keepalive_sources)
 
         return kernel
 
@@ -8656,6 +8682,23 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_device(self) -> torch.device | None:
         return self.device
 
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        read_writes = super().get_read_writes()
+        output_names = OrderedSet(output.get_name() for output in self.get_outputs())
+
+        def add_data_ptr_keepalive_sources(input: IRNode) -> None:
+            for name in data_ptr_keepalive_sources(input):
+                if name not in output_names:
+                    read_writes.reads.add(dependencies.StarDep(name))
+
+        for input in self.inputs:
+            if isinstance(input, Sequence):
+                for value in input:
+                    add_data_ptr_keepalive_sources(value)
+            else:
+                add_data_ptr_keepalive_sources(input)
+        return read_writes
+
 
 class InplaceBernoulliFallback(ExternKernel):
     """
@@ -8962,6 +9005,7 @@ class DeviceCopy(ExternKernelOut):
         x_device = x.get_device()
         if x_device is None:
             raise AssertionError("Expected x_device is not None")
+        keepalive_sources = data_ptr_keepalive_sources(x)
         if (
             not x.is_extern()
             # Can not apply this optimization if x has been mutated
@@ -8994,7 +9038,7 @@ class DeviceCopy(ExternKernelOut):
         )
         if is_source_pinned and is_storage_and_layout(x):
             x.get_layout().is_pinned = True
-        return DeviceCopy(
+        result = DeviceCopy(
             FixedLayout(
                 device,
                 x.get_dtype(),
@@ -9005,27 +9049,34 @@ class DeviceCopy(ExternKernelOut):
             [cls.realize_input(x)],
             constant_args,
         )
+        if is_source_pinned and keepalive_sources:
+            V.graph.mark_data_ptr_tensor_buffer(result.get_name(), keepalive_sources)
+        return result
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         args = self.codegen_args()
         if len(args) != 2:
             raise AssertionError("Expected len(args) == 2")
+        sync_h2d_data_ptr_copy = self.should_sync_h2d_data_ptr_copy()
+        non_blocking = args[1]
+        if sync_h2d_data_ptr_copy and not V.graph.cpp_wrapper:
+            # Use a host-complete H2D copy for tensors that carry escaped raw
+            # pointers.  The later opaque kernel dereferences those addresses
+            # without a normal tensor dependency edge.
+            non_blocking = False
         if self.output_view:
             wrapper.codegen_device_copy(
-                args[0], self.output_view.codegen_reference(), args[1]
+                args[0], self.output_view.codegen_reference(), non_blocking
             )
         else:
-            wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
+            wrapper.codegen_device_copy(args[0], self.codegen_reference(), non_blocking)
         if isinstance(self.layout, Layout) and self.layout.is_pinned:
             wrapper.sync_d2h_copy(self.get_name())
-        if self.should_sync_h2d_data_ptr_copy():
+        if sync_h2d_data_ptr_copy:
             wrapper.sync_h2d_copy(self.get_name())
 
     def should_sync_h2d_data_ptr_copy(self) -> bool:
-        # This intentionally over-approximates to any pinned CPU->GPU copy in a
-        # graph with traced data_ptr, since the pointer table copy has no direct
-        # edge back to the keepalive source tensors whose addresses escaped.
-        if not V.graph.data_ptr_keepalive_buffers:
+        if not V.graph.get_data_ptr_keepalive_sources_for_buffer(self.get_name()):
             return False
         if not self.constant_args or self.constant_args[0] is not True:
             return False
@@ -9299,6 +9350,8 @@ class FallbackKernel(ExternKernelAlloc):
                 except ValueError:
                     idx = None
                 V.graph.mark_data_ptr_keepalive_buffer(name, idx)
+                for symbol in self.unbacked_bindings:
+                    V.graph.mark_data_ptr_keepalive_symbol(symbol, name)
         if self.python_kernel_name is None:
             raise AssertionError("Expected self.python_kernel_name is not None")
         V.graph.warn_fallback(self.python_kernel_name)
@@ -9667,7 +9720,7 @@ class FallbackKernel(ExternKernelAlloc):
         if len(returns) == 1:
             # NOTE: [special handling of all_reduce_coalesced_'s return value]
             # all_reduce_coalesced_ return a list of tensors via self.mutation_outputs
-            outputs = self.outputs if self.outputs else self.mutation_outputs
+            outputs = self.codegen_outputs()
             return_type = returns[0].real_type
             output_arguments = [handle_single_output(return_type, outputs)]
         else:
@@ -9784,16 +9837,19 @@ class FallbackKernel(ExternKernelAlloc):
                 self.op_overload,
                 exported_args,
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
-                self.outputs if self.outputs else self.mutation_outputs,
+                self.codegen_outputs(),
             )
         else:
             wrapper.generate_fallback_kernel(self)
-            if isinstance(self.layout, Layout):
-                self.codegen_size_asserts(wrapper)
-                self.codegen_alignment_asserts(wrapper)
-                self.codegen_memory_tracking(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
+        # AOT runtime dispatch assertions are emitted by the proxy executor path.
+        if not (self.use_runtime_dispatch and V.graph.aot_mode) and isinstance(
+            self.layout, Layout
+        ):
+            self.codegen_size_asserts(wrapper)
+            self.codegen_alignment_asserts(wrapper)
+            self.codegen_memory_tracking(wrapper)
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor) -> FixedLayout:
@@ -9927,6 +9983,26 @@ class FallbackKernel(ExternKernelAlloc):
         ):
             device = torch.device("cpu")
 
+        def create_direct_output(output: torch.Tensor) -> FallbackKernel:
+            if not device:
+                raise AssertionError("Not sure where to find device info")
+            packed = cls(
+                cls.tensor_to_layout(output),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                kwargs=kwargs,
+                unbacked_bindings=unbacked_bindings,
+            )
+            if (
+                config.assume_unaligned_fallback_output
+                or has_unaligned_input
+                or not tensor_is_aligned(output)
+            ):
+                V.graph.unaligned_buffers.add(packed.get_name())
+            return packed
+
         # Try multi-output .out() lowering for custom ops with the out tag.
         if (
             isinstance(kernel, torch._ops.OpOverload)
@@ -9958,6 +10034,9 @@ class FallbackKernel(ExternKernelAlloc):
                 kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
+
+        elif isinstance(example_output, torch.Tensor):
+            return create_direct_output(example_output)
 
         else:
             if not device:
@@ -10526,6 +10605,7 @@ class StorageBox(MutableBox):
 
         if not isinstance(self.data, (Pointwise, Reduction, Scan, Sort)):
             raise AssertionError(type(self.data))
+        keepalive_sources = data_ptr_keepalive_sources(self.data)
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
         device = self.data.get_device()
@@ -10548,6 +10628,8 @@ class StorageBox(MutableBox):
         self.data.origin_node = origin_node
         self.data.traceback = traceback
         self.data.stream_idx = self.data.data.stream_idx
+        if keepalive_sources:
+            V.graph.mark_data_ptr_tensor_buffer(self.data.name, keepalive_sources)
         return self.data.name
 
     def realize_hint(self) -> None:
