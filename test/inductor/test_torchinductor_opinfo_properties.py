@@ -895,7 +895,7 @@ class TestOpInfoProperties(TestCase):
             and backend == "inductor_default"
         ):
             # Disabled due to CI failures; see
-            # https://github.com/pytorch/pytorch/issues/188840
+            # https://github.com/pytorch/pytorch/issues/190242
             self.skipTest("disabled due to CI failures; see #188840")
         torch._dynamo.reset()
         device_type = torch.device(device).type
