@@ -5720,6 +5720,95 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       "nccl:gather");
 }
 
+c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_into_tensor(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    const GatherOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::gather_into_tensor: " + msg);
+  };
+
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  check_gpu_single_tensor(inputTensor);
+
+  const bool isRoot = getRank() == opts.rootRank;
+  if (isRoot) {
+    check_gpu_single_tensor(outputTensor);
+    if (inputTensor.dtype() != outputTensor.dtype()) {
+      invalidArgument("output tensor must have the same type as input tensor");
+    }
+    if (inputTensor.numel() * size_ != outputTensor.numel()) {
+      invalidArgument(
+          "output tensor size must be equal to world_size times input tensor size");
+    }
+  }
+
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
+      std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
+      inputTensor, // inputTensors
+      outputTensor, // outputTensors
+      opts.rootRank, // root rank
+      "gather_into_tensor", // collective name
+      inputTensor.numel(), // inNelems
+      inputTensor.numel() * this->getSize(), // outNelems
+      inputTensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSize
+      globalRankStart_, // globalRankStart_
+      globalRankStride_, // globalRankStride_
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
+
+  return collective(
+      inputTensor,
+      outputTensor,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        const auto root = static_cast<int>(opts.rootRank);
+        const auto count = input.numel();
+        const auto type = getNcclDataType(input.scalar_type());
+#if defined(NCCL_VERSION_CODE) && (NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0))
+        // ncclGather writes each rank's contribution directly into the flat
+        // output buffer on the root, so no per-rank copy is needed.
+        void* recvbuff = isRoot ? output.data_ptr() : nullptr;
+        return ncclGather(
+            input.data_ptr(), recvbuff, count, type, root, comm, stream.stream());
+#else
+        // Fallback for NCCL < 2.28: emulate ncclGather with grouped send/recv
+        // targeting contiguous slices of the flat output buffer.
+        C10D_NCCL_CHECK(ncclGroupStart(), std::nullopt);
+        if (isRoot) {
+          auto* recvbuff = reinterpret_cast<char*>(output.data_ptr());
+          const auto stride = count * output.element_size();
+          for (const auto r : c10::irange(size_)) {
+            C10D_NCCL_CHECK(
+                ncclRecv(
+                    recvbuff + r * stride,
+                    count,
+                    type,
+                    r,
+                    comm,
+                    stream.stream()),
+                std::nullopt);
+          }
+        }
+        C10D_NCCL_CHECK(
+            ncclSend(input.data_ptr(), count, type, root, comm, stream.stream()),
+            std::nullopt);
+        C10D_NCCL_CHECK(ncclGroupEnd(), std::nullopt);
+        return ncclSuccess;
+#endif
+      },
+      OpType::GATHER,
+      opts.asyncOp,
+      "nccl:gather_into_tensor");
+}
+
 c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,

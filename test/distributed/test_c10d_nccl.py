@@ -667,6 +667,60 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_gather_into_tensor(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        device = torch.device(f"cuda:{self.rank:d}")
+        torch.cuda.set_device(device)
+        world_size = self.world_size
+
+        # Each rank contributes a distinct block; the flat output on the
+        # destination rank is the concatenation of every rank's block.
+        elems = 3
+        for dst in range(world_size):
+            tensor = torch.arange(elems, device=device).float() + self.rank * elems
+            if self.rank == dst:
+                gather_tensor = torch.empty(world_size * elems, device=device)
+            else:
+                gather_tensor = None
+
+            dist.gather_into_tensor(tensor, gather_tensor, dst=dst)
+
+            if self.rank == dst:
+                expected = torch.arange(world_size * elems, device=device).float()
+                self.assertEqual(gather_tensor, expected)
+            else:
+                self.assertIsNone(gather_tensor)
+
+        # Stack form: output shaped [world_size, *tensor.shape].
+        tensor = torch.ones(2, 2, device=device) * self.rank
+        gather_tensor = (
+            torch.empty(world_size, 2, 2, device=device) if self.rank == 0 else None
+        )
+        dist.gather_into_tensor(tensor, gather_tensor, dst=0)
+        if self.rank == 0:
+            expected = torch.stack(
+                [torch.ones(2, 2, device=device) * r for r in range(world_size)]
+            )
+            self.assertEqual(gather_tensor, expected)
+
+        # Async variant returns a work handle that can be waited on.
+        tensor = torch.arange(elems, device=device).float() + self.rank * elems
+        gather_tensor = (
+            torch.empty(world_size * elems, device=device) if self.rank == 0 else None
+        )
+        work = dist.gather_into_tensor(tensor, gather_tensor, dst=0, async_op=True)
+        work.wait()
+        if self.rank == 0:
+            expected = torch.arange(world_size * elems, device=device).float()
+            self.assertEqual(gather_tensor, expected)
+
+        c10d.destroy_process_group()
+
     def _helper_test_extra_cuda_context_by_nvml(self):
         """
         A helper for `test_extra_cuda_context`, if pynvml is available.
