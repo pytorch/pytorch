@@ -17,26 +17,20 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
     skip_if_lt_x_gpu,
     spawn_threads_and_init_comms,
 )
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    IS_SANDCASTLE,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, TestCase
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 DEFAULT_WORLD_SIZE = 4
 
 
 class TestCollectivesWithWrapper(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     @spawn_threads_and_init_comms(world_size=4)
     def test_broadcast_object_list(self):
         val = 99 if dist.get_rank() == 0 else None
@@ -141,9 +135,7 @@ class TestCollectivesWithWrapper(TestCase):
         self.assertEqual(out.tolist(), list(zip(range(world_size), range(world_size))))
 
 
-class TestCollectivesWithBaseClassGeneric(MultiThreadedTestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class TestCollectivesWithBaseClass(MultiThreadedTestCase):
     @property
     def world_size(self):
         return 4
@@ -309,23 +301,6 @@ class TestCollectivesWithBaseClassGeneric(MultiThreadedTestCase):
         self.assertEqual(t0, torch.ones(3, 3) * res_num)
         self.assertEqual(t1, torch.ones(3, 3) * (res_num * 2))
 
-
-class TestCollectivesWithBaseClassMultiAccelerator(MultiThreadedTestCase):
-    hw_classification = HardwareClassification.MULTI_ACCELERATOR
-
-    @property
-    def world_size(self):
-        return 4
-
-    def setUp(self):
-        os.environ["TORCH_DIST_INIT_BARRIER"] = "1"
-        super().setUp()
-        self._spawn_threads()
-
-    def tearDown(self):
-        super().tearDown()
-        os.environ["TORCH_DIST_INIT_BARRIER"] = "0"
-
     @skip_if_lt_x_gpu(1)
     def test_bwd_sees_fwd_pg(self):
         fwd_tid = threading.current_thread().ident
@@ -360,22 +335,10 @@ class TestCollectivesWithBaseClassMultiAccelerator(MultiThreadedTestCase):
                 return grad_output * result
 
         x = torch.tensor(
-            [dist.get_rank()],
-            dtype=torch.float,
-            device=self.device_type,
-            requires_grad=True,
+            [dist.get_rank()], dtype=torch.float, device=device_type, requires_grad=True
         )
         x = MyFunc.apply(x)
         x.sum().backward()
-
-
-instantiate_device_type_tests(
-    TestCollectivesWithBaseClassMultiAccelerator,
-    globals(),
-    except_for="cpu",
-    allow_mps=True,
-    allow_xpu=True,
-)
 
 
 if __name__ == "__main__":
