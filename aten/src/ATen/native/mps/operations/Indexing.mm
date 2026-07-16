@@ -359,17 +359,6 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   const int64_t nDim = self.dim();
   const int64_t numel = input.numel();
 
-  // Metal's thread_position_in_grid is uint32, so a single 1D dispatch is
-  // bounded at UINT32_MAX threads. Enforce that here. This also bounds the
-  // prefix-sum accumulators and the total-nonzero count to fit in uint32.
-  TORCH_CHECK(numel <= std::numeric_limits<uint32_t>::max(),
-              "nonzero: tensor has ",
-              numel,
-              " elements which exceeds the "
-              "supported MPS limit of ",
-              std::numeric_limits<uint32_t>::max(),
-              ".");
-
   const auto type_str = scalarToMetalTypeString(input);
   MPSStream* stream = getCurrentMPSStream();
 
@@ -379,6 +368,17 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   uint32_t threads_per_group = static_cast<uint32_t>([pso_step1 maxTotalThreadsPerThreadgroup]);
   uint64_t num_blocks = at::ceil_div(static_cast<uint64_t>(numel), static_cast<uint64_t>(threads_per_group));
   uint32_t num_blocks_u32 = static_cast<uint32_t>(num_blocks);
+
+  // Metal's thread_position_in_grid is 32-bit, so a single dispatch is bounded
+  // at UINT32_MAX threads. For tensors with more elements, the count (step 1)
+  // and scatter (step 3) dispatches are chunked over threadgroup-aligned
+  // ranges, each passing a 64-bit flat_base / block_base so the kernels index
+  // the global element and block. The block prefix-sum (step 2) still runs once
+  // over all blocks, so the running count stays global across chunks.
+  // chunk_elems is the largest multiple of threads_per_group not exceeding
+  // 2^31; tensors that fit in one chunk (the common case) dispatch exactly once
+  // with base 0, identical to the unchunked path.
+  const uint64_t chunk_elems = (static_cast<uint64_t>(1) << 31) / threads_per_group * threads_per_group;
 
   // Storage for the four helper buffers is a single int32-typed tensor (same
   // 4 bytes/slot as uint32 on-device), but the Metal kernels write and read
@@ -397,8 +397,12 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
       auto computeEncoder = stream->commandEncoder();
 
       [computeEncoder setComputePipelineState:pso_step1];
-      mtl_setArgs(computeEncoder, input, prefix_buf, block_sums_buf);
-      mtl_dispatch1DJob(computeEncoder, pso_step1, numel);
+      for (uint64_t base = 0; base < static_cast<uint64_t>(numel); base += chunk_elems) {
+        uint64_t this_chunk = std::min(chunk_elems, static_cast<uint64_t>(numel) - base);
+        uint32_t block_base = static_cast<uint32_t>(base / threads_per_group);
+        mtl_setArgs(computeEncoder, input, prefix_buf, block_sums_buf, base, block_base);
+        mtl_dispatch1DJob(computeEncoder, pso_step1, this_chunk);
+      }
 
       [computeEncoder setComputePipelineState:pso_step2];
       mtl_setArgs(computeEncoder, block_sums_buf, block_offsets_buf, total_nonzero_buf, num_blocks_u32);
@@ -444,8 +448,21 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:pso_step3];
-      mtl_setArgs(computeEncoder, input, prefix_buf, out, ndim_int, input.sizes(), block_offsets_buf, max_entries);
-      mtl_dispatch1DJob(computeEncoder, pso_step3, numel);
+      for (uint64_t base = 0; base < static_cast<uint64_t>(numel); base += chunk_elems) {
+        uint64_t this_chunk = std::min(chunk_elems, static_cast<uint64_t>(numel) - base);
+        uint32_t block_base = static_cast<uint32_t>(base / threads_per_group);
+        mtl_setArgs(computeEncoder,
+                    input,
+                    prefix_buf,
+                    out,
+                    ndim_int,
+                    input.sizes(),
+                    block_offsets_buf,
+                    max_entries,
+                    base,
+                    block_base);
+        mtl_dispatch1DJob(computeEncoder, pso_step3, this_chunk);
+      }
     }
   });
 

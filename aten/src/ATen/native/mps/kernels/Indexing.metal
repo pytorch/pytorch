@@ -990,6 +990,8 @@ kernel void count_nonzero_prefix_sum(
     const device T* input [[buffer(0)]],
     device uint* prefix [[buffer(1)]],
     device uint* block_sums [[buffer(2)]],
+    constant ulong& flat_base [[buffer(3)]],
+    constant uint& block_base [[buffer(4)]],
     uint tid [[thread_position_in_grid]],
     uint lid [[thread_position_in_threadgroup]],
     uint tgsize [[threads_per_threadgroup]],
@@ -998,7 +1000,13 @@ kernel void count_nonzero_prefix_sum(
     uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
   uint num_simds = (tgsize + simdgroup_size - 1) / simdgroup_size;
 
-  uint flag = is_nonzero(input[tid]) ? 1u : 0u;
+  // Chunked dispatch: tid/tgid are chunk-local; flat_base/block_base map them
+  // to global element and block indices so tensors with more than 2^32 elements
+  // (which exceed Metal's 32-bit thread_position_in_grid) are handled across
+  // multiple dispatches over a single global prefix-sum.
+  ulong gid = flat_base + tid;
+
+  uint flag = is_nonzero(input[gid]) ? 1u : 0u;
 
   // Inclusive prefix sum within SIMD group using shuffle
   uint val = flag;
@@ -1041,10 +1049,10 @@ kernel void count_nonzero_prefix_sum(
 
   uint exclusive_val = val - flag + simdgroup_offsets[simd_group_id];
 
-  prefix[tid] = exclusive_val;
+  prefix[gid] = exclusive_val;
 
   if (lid == tgsize - 1) {
-    block_sums[tgid] =
+    block_sums[block_base + tgid] =
         simdgroup_offsets[num_simds - 1] + simdgroup_totals[num_simds - 1];
   }
 }
@@ -1142,18 +1150,22 @@ kernel void scatter_nonzero_indices(
     constant int64_t* sizes [[buffer(4)]],
     constant uint* block_offsets [[buffer(5)]],
     constant uint& max_entries [[buffer(6)]],
+    constant ulong& flat_base [[buffer(7)]],
+    constant uint& block_base [[buffer(8)]],
     uint tid [[thread_position_in_grid]],
     uint tgid [[threadgroup_position_in_grid]]) {
-  if (!is_nonzero(input[tid]))
+  // Chunked dispatch: map chunk-local tid/tgid to the global element/block.
+  ulong gid = flat_base + tid;
+  if (!is_nonzero(input[gid]))
     return;
 
-  uint pos = block_offsets[tgid] + prefix[tid];
+  uint pos = block_offsets[block_base + tgid] + prefix[gid];
   if (pos >= max_entries)
     return;
 
   // index_t is uint for tensors that fit 32-bit index math and ulong otherwise.
   // The 32-bit path keeps the per-dimension div/mod below in fast 32-bit math.
-  index_t flat = tid;
+  index_t flat = gid;
   index_t out_base = static_cast<index_t>(pos) * static_cast<index_t>(ndim);
   for (int d = ndim - 1; d >= 0; d--) {
     index_t dim_size = static_cast<index_t>(sizes[d]);
@@ -1168,6 +1180,8 @@ kernel void scatter_nonzero_indices(
       const device DTYPE* input [[buffer(0)]],                                \
       device uint* prefix [[buffer(1)]],                                      \
       device uint* block_sums [[buffer(2)]],                                  \
+      constant ulong& flat_base [[buffer(3)]],                                \
+      constant uint& block_base [[buffer(4)]],                                \
       uint tid [[thread_position_in_grid]],                                   \
       uint lid [[thread_position_in_threadgroup]],                            \
       uint tgsize [[threads_per_threadgroup]],                                \
@@ -1185,6 +1199,8 @@ kernel void scatter_nonzero_indices(
           constant int64_t* sizes [[buffer(4)]],                              \
           constant uint* block_offsets [[buffer(5)]],                         \
           constant uint& max_entries [[buffer(6)]],                           \
+          constant ulong& flat_base [[buffer(7)]],                            \
+          constant uint& block_base [[buffer(8)]],                            \
           uint tid [[thread_position_in_grid]],                               \
           uint tgid [[threadgroup_position_in_grid]]);                        \
                                                                               \
@@ -1198,6 +1214,8 @@ kernel void scatter_nonzero_indices(
           constant int64_t* sizes [[buffer(4)]],                              \
           constant uint* block_offsets [[buffer(5)]],                         \
           constant uint& max_entries [[buffer(6)]],                           \
+          constant ulong& flat_base [[buffer(7)]],                            \
+          constant uint& block_base [[buffer(8)]],                            \
           uint tid [[thread_position_in_grid]],                               \
           uint tgid [[threadgroup_position_in_grid]])
 
