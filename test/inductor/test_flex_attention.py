@@ -5471,7 +5471,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_mps  # asserts Triton-specific BLOCK_M/BLOCK_N divisibility error
     @unittest.skip(
         "Disabled due to CI failures; see "
-        "https://github.com/pytorch/pytorch/issues/189706"
+        "https://github.com/pytorch/pytorch/issues/190239"
     )
     def test_invalid_block_size(self, device):
         # Create tensors on different devices
