@@ -169,6 +169,14 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     storage_changed_counter_++;
   }
 
+  bool was_shallow_copy_data() {
+    return was_shallow_copy_data_;
+  }
+
+  void mark_shallow_copy_data() {
+    was_shallow_copy_data_ = true;
+  }
+
   uint64_t storage_changed_counter() {
     return storage_changed_counter_;
   }
@@ -281,6 +289,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool is_multi_output_view_ = false;
   // Did the tensor experience a set_() call.
   bool was_storage_changed_ = false;
+  // Did the tensor experience a shallow_copy_data_() call.
+  bool was_shallow_copy_data_ = false;
   uint64_t storage_changed_counter_ = 0;
   // Did the tensor experience any view operation with symbolic int.
   bool is_symbolic_ = false;

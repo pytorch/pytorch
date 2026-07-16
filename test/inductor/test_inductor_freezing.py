@@ -904,7 +904,9 @@ class OptimizeForInferenceTemplate(TestCase):
             out_compiled = func1(x.clone())
             self.assertEqual(out_eager, out_compiled)
 
-    @torch._inductor.config.patch(force_layout_optimization=True)
+    @torch._inductor.config.patch(
+        layout_optimization=True, force_layout_optimization=True
+    )
     def test_as_strided_input_layout_with_symbolic_strides(self):
         from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 
@@ -1007,10 +1009,16 @@ class OptimizeForInferenceTemplate(TestCase):
 
         # we don't change the stride of y returned by forward. So there will
         # be no extra copy
-        self.assertTrue(num_same_stride == 1, f"num_same_stride is {num_same_stride}")
+        self.assertTrue(
+            num_same_stride == 1,
+            lambda msg: f"{msg}\nnum_same_stride is {num_same_stride}",
+        )
         # we changed the stride of self.conv(x) returned by forward. So there
         # may be an extra copy
-        self.assertTrue(num_diff_stride == 1, f"num_diff_stride is {num_diff_stride}")
+        self.assertTrue(
+            num_diff_stride == 1,
+            lambda msg: f"{msg}\nnum_diff_stride is {num_diff_stride}",
+        )
 
 
 if TEST_WITH_ROCM:

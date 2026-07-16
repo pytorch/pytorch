@@ -556,7 +556,7 @@ class DataLoader(Generic[_T_co]):
         # This function check whether the dataloader's worker number is rational based on
         # current system's resource. Current rule is that if the number of workers this
         # Dataloader will create is bigger than the number of logical cpus that is allowed to
-        # use, than we will pop up a warning to let user pay attention.
+        # use, then we will pop up a warning to let user pay attention.
         #
         # eg. If current system has 2 physical CPUs with 16 cores each. And each core support 2
         #     threads, then the total logical cpus here is 2 * 16 * 2 = 64. Let's say current
