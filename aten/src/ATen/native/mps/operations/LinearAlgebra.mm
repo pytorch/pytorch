@@ -204,9 +204,9 @@ void dispatch_gemv(const Tensor& A,
                         idx_str);
   }
   auto pso = lib.getPipelineStateForFunc(fname);
-  const NSUInteger threads_per_tg = static_cast<NSUInteger>(launch_cfg.nsimd * 32);
-  const int64_t rows_per_tg = gemv_t2d ? (32 / launch_cfg.kq) * t2d_vec
-      : gemv_use_t                     ? 32 * launch_cfg.vec
+  const NSUInteger threads_per_tg = static_cast<NSUInteger>(launch_cfg.nsimd * c10::metal::simdgroup_size);
+  const int64_t rows_per_tg = gemv_t2d ? (c10::metal::simdgroup_size / launch_cfg.kq) * t2d_vec
+      : gemv_use_t                     ? c10::metal::simdgroup_size * launch_cfg.vec
                                        : launch_cfg.nsimd;
   const int64_t num_groups = (outlen + rows_per_tg - 1) / rows_per_tg;
   const std::array<float, 2> ab = {static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};

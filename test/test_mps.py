@@ -1308,12 +1308,13 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(result_cpu, result_mps)
 
     @staticmethod
-    def _gemv_tol(dtype):
+    def _gemv_tol(dtype, inner_dim):
+        scale = math.sqrt(inner_dim / 4096)
         if dtype == torch.float16:
-            return dict(atol=1e-2, rtol=1e-2)
+            return dict(atol=1e-2 * scale, rtol=1e-2 * scale)
         if dtype == torch.bfloat16:
-            return dict(atol=2e-2, rtol=2e-2)
-        return dict(atol=1e-3, rtol=1e-4)
+            return dict(atol=2e-2 * scale, rtol=2e-2 * scale)
+        return dict(atol=1e-3 * scale, rtol=1e-4 * scale)
 
     def _gemv_mat(self, rows, cols, dtype, transpose):
         if transpose:
@@ -1328,19 +1329,18 @@ class TestMPS(TestCaseMPS):
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("transpose", [False, True])
     def test_gemv_mm(self, dtype, transpose):
-        tol = self._gemv_tol(dtype)
         # M==1: (1,K) @ (K,N), matrix operand is B. Ragged shapes exercise the
         # kernels' K-loop tails and row/column bounds guards.
         for K, N in [(1, 1), (7, 16), (64, 17), (512, 1000), (2048, 4096), (8192, 256)]:
             a = torch.randn(1, K, device="mps", dtype=dtype)
             b = self._gemv_mat(K, N, dtype, transpose)
-            self._gemv_check(a, b, **tol)
+            self._gemv_check(a, b, **self._gemv_tol(dtype, K))
         # N==1: (M,K) @ (K,1), matrix operand is A. Regression guard: a prior bug
         # passed outlen=N=1 here and computed only the first output row.
         for M, K in [(1, 1), (16, 7), (17, 64), (1000, 512), (4096, 2048), (256, 8192)]:
             a = self._gemv_mat(M, K, dtype, transpose)
             b = torch.randn(K, 1, device="mps", dtype=dtype)
-            self._gemv_check(a, b, **tol)
+            self._gemv_check(a, b, **self._gemv_tol(dtype, K))
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("case", ["t2d", "t2d_misaligned", "deep_split", "kcap_16", "kcap_8", "kcap_4", "scalar_cols", "vec_clamp"])
@@ -1351,7 +1351,6 @@ class TestMPS(TestCaseMPS):
         # {32, 2}; kcap_N = K/min_k_per_simd caps nsimd at N (fp32; lp floors
         # at 16); scalar_cols = fp32 long-K {32, 1}; vec_clamp = odd leading
         # dim halves vec to 1.
-        tol = self._gemv_tol(dtype)
         K, N, sliced = {
             "t2d": (1024, 512, False),
             "t2d_misaligned": (1024, 512, True),
@@ -1367,7 +1366,7 @@ class TestMPS(TestCaseMPS):
         if sliced:
             # Slicing off column 0 leaves an odd leading dim and storage offset.
             b = b[:, 1:]
-        self._gemv_check(a, b, **tol)
+        self._gemv_check(a, b, **self._gemv_tol(dtype, K))
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("case", ["narrow", "mid", "wide", "vec_clamp", "strided_x"])
@@ -1376,12 +1375,11 @@ class TestMPS(TestCaseMPS):
         # wide_outlen knees (fp32 {16,4}->{4,4} at 2048, lp {4,8}->{8,8} at
         # 8192); vec_clamp = odd leading dim halves vec to 1 (plus a K tail);
         # strided_x = the non-unit-stride x kernel.
-        tol = self._gemv_tol(dtype)
         M, K = {"narrow": (1024, 2048), "mid": (4096, 2048), "wide": (8192, 2048),
                 "vec_clamp": (4096, 1001), "strided_x": (4096, 2048)}[case]
         a = torch.randn(M, K, device="mps", dtype=dtype)
         b = torch.randn(K, 2 if case == "strided_x" else 1, device="mps", dtype=dtype)[:, :1]
-        self._gemv_check(a, b, **tol)
+        self._gemv_check(a, b, **self._gemv_tol(dtype, K))
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("transpose", [False, True])
@@ -1390,7 +1388,6 @@ class TestMPS(TestCaseMPS):
         # transpose flips the matrix operand's layout, so both directions hit
         # both the gemv_t and gemv_nt alpha/beta epilogues; outlen 1000 lands
         # on the t2d kernel and 2048 on the standard split-K one.
-        tol = self._gemv_tol(dtype)
         alpha = 0.75
         for M, K, N in [(1, 512, 1000), (1, 512, 2048), (1000, 512, 1), (2048, 512, 1)]:
             a = torch.randn(1, K, device="mps", dtype=dtype) if M == 1 else self._gemv_mat(M, K, dtype, transpose)
@@ -1398,7 +1395,7 @@ class TestMPS(TestCaseMPS):
             bias = torch.randn(M, N, device="mps", dtype=dtype)
             out_mps = torch.addmm(bias, a, b, alpha=alpha, beta=beta)
             out_cpu = torch.addmm(bias.cpu(), a.cpu(), b.cpu(), alpha=alpha, beta=beta)
-            self.assertEqual(out_cpu, out_mps.cpu(), **tol)
+            self.assertEqual(out_cpu, out_mps.cpu(), **self._gemv_tol(dtype, K))
 
     def test_gemv_addmm_beta_zero_ignores_bias(self):
         # beta==0 must not read the bias (may hold NaN), matching addmm semantics.
@@ -1412,25 +1409,23 @@ class TestMPS(TestCaseMPS):
     def test_gemv_addmm_broadcast_bias(self):
         # Bias broadcasts over the output (scalar / vector) for both directions.
         for dtype in (torch.float32, torch.bfloat16):
-            tol = self._gemv_tol(dtype)
             a = torch.randn(1, 512, device="mps", dtype=dtype)
             b = torch.randn(512, 1000, device="mps", dtype=dtype)
             for bias_shape in [(), (1000,), (1, 1000)]:
                 bias = torch.randn(bias_shape, device="mps", dtype=dtype)
                 out = torch.addmm(bias, a, b)
                 out_cpu = torch.addmm(bias.cpu(), a.cpu(), b.cpu())
-                self.assertEqual(out_cpu, out.cpu(), **tol)
+                self.assertEqual(out_cpu, out.cpu(), **self._gemv_tol(dtype, 512))
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_gemv_noncontiguous_matrix(self, dtype):
         # A matrix that is neither row- nor column-major is read with its strides.
-        tol = self._gemv_tol(dtype)
         b = torch.randn(512, 2 * 1000, device="mps", dtype=dtype)[:, ::2]
         a = torch.randn(1, 512, device="mps", dtype=dtype)
-        self._gemv_check(a, b, **tol)
+        self._gemv_check(a, b, **self._gemv_tol(dtype, 512))
         a2 = torch.randn(1000, 2 * 512, device="mps", dtype=dtype)[:, ::2]
         b2 = torch.randn(512, 1, device="mps", dtype=dtype)
-        self._gemv_check(a2, b2, **tol)
+        self._gemv_check(a2, b2, **self._gemv_tol(dtype, 512))
 
     def test_gemv_strided_output_falls_back(self):
         # Non-unit-stride output is rejected by the gemv gate; the fallback path
@@ -1443,9 +1438,9 @@ class TestMPS(TestCaseMPS):
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_gemv_mv_addmv(self, dtype):
-        tol = self._gemv_tol(dtype)
         A = torch.randn(1000, 512, device="mps", dtype=dtype)
         x = torch.randn(512, device="mps", dtype=dtype)
+        tol = self._gemv_tol(dtype, 512)
         self.assertEqual(A.cpu() @ x.cpu(), torch.mv(A, x).cpu(), **tol)
         bias = torch.randn(1000, device="mps", dtype=dtype)
         out = torch.addmv(bias, A, x, alpha=0.5, beta=0.7)
@@ -1455,7 +1450,7 @@ class TestMPS(TestCaseMPS):
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_gemv_linear(self, dtype):
         # Batch-1 nn.Linear lowers to addmm GEMV with a transposed weight.
-        tol = self._gemv_tol(dtype)
+        tol = self._gemv_tol(dtype, 512)
         x = torch.randn(1, 512, device="mps", dtype=dtype)
         w = torch.randn(1000, 512, device="mps", dtype=dtype)
         bias = torch.randn(1000, device="mps", dtype=dtype)
