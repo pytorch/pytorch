@@ -762,7 +762,7 @@ print(torch.xpu.is_initialized())
     def test_sleep(self):
         # clock_rate() returns MHz; multiply by 1e6 to get ~1 second of device cycles.
         cycles = torch.xpu.clock_rate() * 1_000_000
-        # PVC's bundled IGC is too old to support it.
+        # Some Xe GPU's bundled IGC is too old to support it.
         if not Xe2_Or_Later:
             with self.assertRaisesRegex(
                 NotImplementedError, "is not supported on this device"
