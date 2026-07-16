@@ -1206,10 +1206,10 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
         {c10::DispatchKeySet(c10::DispatchKey::Fake)});
     c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
     auto meta_obj = converter.attr("to_meta_tensor")(real);
-    meta_tensor = py::cast<at::Tensor>(meta_obj);
+    meta_tensor = py::cast<at::Tensor>(std::move(meta_obj));
   }
   meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(real.device());
-  meta_tensor.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+  meta_tensor.unsafeGetTensorImpl()->set_fake_tensor_mode(std::move(mode));
   return meta_tensor.getIntrusivePtr();
 }
 

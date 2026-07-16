@@ -225,19 +225,22 @@ struct C10_API PyInterpreterVTable {
 
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
 
-  // C++ FakeTensor callbacks: try running a Python decomposition, op_impl,
-  // or prim_meta_impl for the given op.  Return true if handled.
+  // C++ FakeTensor callbacks; each returns true if it handled the op.
+  // try a registered Python decomposition for op
   virtual bool fake_try_decomp(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
+  // try the Python op_implementations handlers for op
   virtual bool fake_try_op_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       c10::Device common_device) const = 0;
+  // try the Python pointwise fast op-impl for op
   virtual bool fake_try_fast_op_impls(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       c10::Device common_device) const = 0;
+  // try op's prim_meta_impl if it defines one
   virtual bool fake_try_prim_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
