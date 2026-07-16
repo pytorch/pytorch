@@ -2446,7 +2446,7 @@ class CommonTemplate:
         if self.device == GPU_TYPE:
             self.skipTest(
                 "Disabled on GPU due to CI failures; see "
-                "https://github.com/pytorch/pytorch/issues/189707"
+                "https://github.com/pytorch/pytorch/issues/190238"
             )
         def fn(a):
             return torch.cumsum(a, -1)
@@ -2497,7 +2497,7 @@ class CommonTemplate:
         if self.device == GPU_TYPE:
             self.skipTest(
                 "Disabled on GPU due to CI failures; see "
-                "https://github.com/pytorch/pytorch/issues/189708"
+                "https://github.com/pytorch/pytorch/issues/190238"
             )
         def fn(a, b):
             a = a.view(-1)
@@ -4449,7 +4449,7 @@ for dtype in (torch.int32, torch.int64):
         if self.device == GPU_TYPE:
             self.skipTest(
                 "Disabled on GPU due to CI failures; see "
-                "https://github.com/pytorch/pytorch/issues/189709"
+                "https://github.com/pytorch/pytorch/issues/190238"
             )
         # Test 64-bit indexing is used when input numel is less than INT_MAX
         # but stride calculations go above INT_MAX
@@ -4811,7 +4811,7 @@ for dtype in (torch.int32, torch.int64):
         if self.device == GPU_TYPE:
             self.skipTest(
                 "Disabled on GPU due to CI failures; see "
-                "https://github.com/pytorch/pytorch/issues/189711"
+                "https://github.com/pytorch/pytorch/issues/190238"
             )
         def dot_based(a, b):
             return torch.dot(a, b) + torch.dot(a, b)
@@ -13242,7 +13242,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if self.device == GPU_TYPE:
             self.skipTest(
                 "Disabled on GPU due to CI failures; see "
-                "https://github.com/pytorch/pytorch/issues/189710"
+                "https://github.com/pytorch/pytorch/issues/190238"
             )
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
         # and https://github.com/pytorch/pytorch/issues/184893
