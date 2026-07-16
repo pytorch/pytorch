@@ -282,3 +282,75 @@ def uniform(
     # pyrefly: ignore [no-matching-overload]
     result = torch.empty(shape, dtype=dtype, device=key.device)
     return uniform_(key, result, low=low, high=high)
+
+
+def bits_(key: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+    r"""Fill ``result`` in-place with raw random bits from a PRNG key.
+
+    Unlike :func:`uniform` and :func:`normal`, the output is not interpreted as
+    a distribution: each element receives raw uniformly-distributed bits from the
+    underlying PRNG. The output is fully determined by the key, so calling with
+    the same key always produces the same result.
+
+    Supports batched keys: if ``key`` has shape ``(*batch, K)``, the leading
+    dimensions of ``result`` must be broadcastable with ``*batch`` and each key
+    independently generates its slice of the output.
+
+    Args:
+        key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
+            :func:`fold_in`.
+        result (Tensor): The output tensor to fill in-place. Must have dtype
+            ``torch.uint32`` or ``torch.uint64``.
+
+    Returns:
+        ``result``, filled with raw random bits.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
+        >>> result = torch.empty(1000, dtype=torch.uint32, device="cuda")  # doctest: +SKIP
+        >>> torch.func._random.bits_(key, result)  # doctest: +SKIP
+    """
+    return torch.ops.aten._philox_bits_(result, key)
+
+
+def bits(
+    key: torch.Tensor,
+    *shape: tuple[int, ...],
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    r"""Generate raw random bits from a PRNG key.
+
+    Produces a tensor of the given shape where each element receives raw
+    uniformly-distributed bits from the underlying PRNG (not interpreted as a
+    distribution; see :func:`uniform` and :func:`normal` for those). The output
+    is fully determined by the key, so calling with the same key always returns
+    the same result. The output is placed on the same device as ``key``.
+
+    Supports batched keys: if ``key`` has shape ``(*batch, K)``, the leading
+    dimensions of ``shape`` must be broadcastable with ``*batch`` and each key
+    independently generates its slice of the output.
+
+    Args:
+        key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
+            :func:`fold_in`.
+        *shape (int): The desired output shape.
+        dtype (:class:`torch.dtype`, optional): The desired dtype, either
+            ``torch.uint32`` or ``torch.uint64``. Default: ``torch.uint32``.
+
+    Returns:
+        A tensor of the given shape filled with raw random bits.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
+        >>> torch.func._random.bits(key, (1000,), dtype=torch.uint64)  # doctest: +SKIP
+    """
+    if len(shape) == 1 and isinstance(shape[0], Sequence):
+        # pyrefly: ignore [bad-argument-type]
+        shape = tuple(shape[0])
+    if dtype is None:
+        dtype = torch.uint32
+    # pyrefly: ignore [no-matching-overload]
+    result = torch.empty(shape, dtype=dtype, device=key.device)
+    return bits_(key, result)
