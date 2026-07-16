@@ -280,11 +280,7 @@ dependencies as well as the nightly binaries into the repo directory.
 
 ## AI-Assisted Development
 
-PyTorch is a project developed and reviewed by humans.
-PyTorch encourages the use of AI in its development, however, PyTorch is a large and technically complex project and it is easy for current LLMs,
-if not properly guided, to produce seemingly correct PRs or issues with major flaws. Because of this, to ensure the health
-of the project, we must limit how contributors, especially those new to the project,
-submit PRs and open issues.
+Please see PyTorch's detailed [AI Policy here](AI_POLICY.md).
 
 All the details on how to contribute (with or without AI assistance) are in the [Ultimate Guide to PyTorch Contributions](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions).
 A couple reminders here though:
