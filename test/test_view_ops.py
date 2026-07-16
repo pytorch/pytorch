@@ -15,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     skipLazy,
     skipMeta,
+    skipMPS,
     skipXLA,
     skipXPUIf,
 )
@@ -600,6 +601,7 @@ class TestViewOps(TestCase):
 
     # TODO: opinfo this or move to unbind's test suite
     @skipLazy
+    @skipMPS  # MPS doesn't support float64
     def test_unbind(self, device):
         stacked = torch.randn(3, 10, 10, device=device, requires_grad=True)
         x, y, z = stacked.unbind()
@@ -770,6 +772,7 @@ class TestViewOps(TestCase):
         self.assertEqual(t[1, 1], v[6])
 
     @skipLazy
+    @skipMPS  # MPS doesn't support float64
     def test_as_strided_gradients(self, device):
         def test(x, prepro_fn, size, strides, offset=None):
             x = x.to(torch.double).detach().requires_grad_()
