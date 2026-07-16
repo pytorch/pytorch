@@ -8349,8 +8349,49 @@ class TestMemPool(TestCase):
 
     @serialTest()
     def test_mempool_ctx_multithread(self):
-        torch._C._cuda_clearCublasWorkspaces()
-        torch.cuda.empty_cache()
+        # Note: if cuda graph tests have an expected fail, it can lead to
+        # resource leakage: an exception during capture means that the graph
+        # pool can contain "zombie" segments that are never released as both
+        # the capture active count may not be reset, and the use count of the
+        # graph's private pool is higher than 0. There is no python API to
+        # reset the capture active count, but it will be queried through CUDA
+        # APIs, so the effect is negligible for these tests. However, we still
+        # need to decrement the graph's private pool use count, which we do
+        # up to 4 times (max supported use count is 4).
+        # Note: moving this cleanup to tear down of tests using CUDA graphs
+        # is possible, but it is harder to perform the exact cleanup of
+        # leaked objects. Since this is currently the only test with full
+        # accounting of segments, it is easier to simply move the cleanup here.
+
+        def cleanup_stale_cudagraph_pools(max_iterations=4):
+            torch._C._cuda_clearCublasWorkspaces()
+            for _ in range(max_iterations):
+                torch.cuda.empty_cache()
+                segments = torch.cuda.memory._snapshot()["segments"]
+                private_segments = [
+                    s for s in segments if tuple(s["segment_pool_id"]) != (0, 0)
+                ]
+                if not private_segments:
+                    return
+
+                active_by_pool = defaultdict(int)
+                for s in private_segments:
+                    active_by_pool[s["segment_pool_id"]] += s["active_size"]
+
+                releasable_pools = sorted(
+                    tuple(pool_id)
+                    for pool_id, active_size in active_by_pool.items()
+                    if active_size == 0
+                )
+                if not releasable_pools:
+                    return
+
+                device = torch.cuda.current_device()
+                for pool_id in releasable_pools:
+                    torch._C._cuda_releasePool(device, pool_id)
+            torch.cuda.empty_cache()
+
+        cleanup_stale_cudagraph_pools()
         segments = torch.cuda.memory._snapshot()["segments"]
         self.assertEqual(len(segments), 0, "Expected empty pool in the beginning")
 
