@@ -890,23 +890,23 @@ class InductorFwMetadata:
     See https://github.com/pytorch/pytorch/issues/114403
     """
 
-    def __init__(self, meta: "ViewAndMutationMeta") -> None:
+    def __init__(self, meta: ViewAndMutationMeta) -> None:
         self._meta = meta
 
     @property
-    def input_info(self) -> "list[InputAliasInfo]":
+    def input_info(self) -> list[InputAliasInfo]:
         return self._meta.input_info
 
     @property
-    def output_info(self) -> "list[OutputAliasInfo]":
+    def output_info(self) -> list[OutputAliasInfo]:
         return self._meta.output_info
 
     @property
-    def static_input_indices(self) -> "list[int]":
+    def static_input_indices(self) -> list[int]:
         return self._meta.static_input_indices
 
     @static_input_indices.setter
-    def static_input_indices(self, value: "list[int]") -> None:
+    def static_input_indices(self, value: list[int]) -> None:
         self._meta.static_input_indices = value
 
     @property
@@ -914,14 +914,15 @@ class InductorFwMetadata:
         return self._meta.num_mutated_inp_runtime_indices
 
     @property
-    def bw_donated_idxs(self) -> "list[int] | None":
+    def bw_donated_idxs(self) -> list[int] | None:
         return self._meta.bw_donated_idxs
 
     @staticmethod
     def from_view_and_mutation_meta(
-        meta: "ViewAndMutationMeta",
-    ) -> "InductorFwMetadata":
+        meta: ViewAndMutationMeta,
+    ) -> InductorFwMetadata:
         return InductorFwMetadata(meta)
+
 
 @dataclass(eq=False)
 class SubclassMeta:
