@@ -232,16 +232,72 @@ def preserve_node_ordering_with_meta(
         if dependent_node.op != "call_function":
             raise AssertionError(dependent_node.op)
 
-        deps = dependent_node.meta.get(META_OVERLAP_DEPS)
-        if deps is None:
-            deps = OrderedSet()
-            dependent_node.meta[META_OVERLAP_DEPS] = deps
-        elif not isinstance(deps, OrderedSet):
-            deps = OrderedSet(deps)
-            dependent_node.meta[META_OVERLAP_DEPS] = deps
+        deps = _get_meta_overlap_deps(dependent_node)
 
         for dep_node in dep_nodes:
             deps.add(dep_node)
+
+
+def _get_meta_overlap_deps(node: fx.Node) -> OrderedSet[fx.Node]:
+    deps = node.meta.get(META_OVERLAP_DEPS)
+    if deps is None:
+        deps = OrderedSet()
+        node.meta[META_OVERLAP_DEPS] = deps
+    elif not isinstance(deps, OrderedSet):
+        deps = OrderedSet(deps)
+        node.meta[META_OVERLAP_DEPS] = deps
+    return deps
+
+
+def _rewrite_meta_overlap_deps(
+    deps: OrderedSet[fx.Node],
+    replacements: dict[fx.Node, fx.Node | None],
+    target: fx.Node,
+) -> OrderedSet[fx.Node]:
+    rewritten: OrderedSet[fx.Node] = OrderedSet()
+    for dep in deps:
+        dep = replacements.get(dep, dep)
+        if dep is None or dep is target or dep._erased:
+            continue
+        rewritten.add(dep)
+    return rewritten
+
+
+def transfer_meta_overlap_deps(
+    graph: fx.Graph,
+    replacements: dict[fx.Node, fx.Node | None],
+) -> None:
+    """
+    Transfer metadata ordering constraints across graph rewrites.
+
+    Collective bucketing erases the original start/wait nodes and replaces them
+    with bucketed nodes. Metadata deps must follow those replacements; otherwise
+    lowering cannot map the erased FX nodes to scheduler operation names.
+    """
+    if not replacements:
+        return
+
+    for old_node, new_node in replacements.items():
+        if new_node is None:
+            continue
+        deps = old_node.meta.get(META_OVERLAP_DEPS)
+        if not deps:
+            continue
+        rewritten = _rewrite_meta_overlap_deps(OrderedSet(deps), replacements, new_node)
+        if not rewritten:
+            continue
+        new_deps = _get_meta_overlap_deps(new_node)
+        new_deps.update(rewritten)
+
+    for node in graph.nodes:
+        deps = node.meta.get(META_OVERLAP_DEPS)
+        if not deps:
+            continue
+        rewritten = _rewrite_meta_overlap_deps(OrderedSet(deps), replacements, node)
+        if rewritten:
+            node.meta[META_OVERLAP_DEPS] = rewritten
+        else:
+            node.meta.pop(META_OVERLAP_DEPS, None)
 
 
 def preserve_node_ordering_from_config(
