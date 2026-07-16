@@ -609,11 +609,18 @@ void initModule(PyObject* module) {
     return at::mps::MPSDevice::getInstance()->getCoreCount();
   });
   m.def("_mps_start_autotune_trace", [](size_t max_entries) {
+    // See MPSModule_deviceSynchronize; starting can wait on GPU callbacks.
+    pybind11::gil_scoped_release no_gil;
     at::mps::startMPSAutotuneTrace(max_entries);
   });
   m.def("_mps_stop_autotune_trace", [](bool wait_for_callbacks) {
-    return autotune_snapshot_to_python(
-        at::mps::stopMPSAutotuneTrace(wait_for_callbacks));
+    at::mps::MPSAutotuneSnapshot snapshot;
+    {
+      // See MPSModule_deviceSynchronize; stopping can wait on GPU callbacks.
+      pybind11::gil_scoped_release no_gil;
+      snapshot = at::mps::stopMPSAutotuneTrace(wait_for_callbacks);
+    }
+    return autotune_snapshot_to_python(snapshot);
   });
   m.def(
       "_mps_get_autotune_override",

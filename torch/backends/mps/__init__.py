@@ -39,13 +39,11 @@ class AutotuneTrace:
         self.records: list[dict[str, Any]] = []
         self.dropped = 0
         self.schema_version = 1
-        self._active = False
 
     def __enter__(self) -> "AutotuneTrace":
-        if not is_built():
+        if not is_available():
             raise RuntimeError("MPS is not available")
         torch._C._mps_start_autotune_trace(self.max_entries)
-        self._active = True
         return self
 
     def __exit__(
@@ -62,7 +60,6 @@ class AutotuneTrace:
             self.records = snapshot["records"]
             self.dropped = snapshot["dropped"]
             self.schema_version = snapshot["schema_version"]
-            self._active = False
             from torch._logging import trace_structured
 
             trace_structured(

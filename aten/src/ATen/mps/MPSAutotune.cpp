@@ -29,7 +29,17 @@ MPSAutotuneTraceState& traceState() {
   return *state;
 }
 
-thread_local std::unordered_map<std::string, std::string> autotune_overrides;
+struct MPSAutotuneOverrides {
+  std::mutex mutex;
+  std::unordered_map<std::string, std::string> map;
+  std::atomic<size_t> count{0};
+};
+
+MPSAutotuneOverrides& overrideState() {
+  static auto* state = new MPSAutotuneOverrides();
+  return *state;
+}
+
 std::atomic<uint64_t> cache_generation{0};
 
 } // namespace
@@ -41,10 +51,12 @@ bool isMPSAutotuneTraceEnabled() {
 void startMPSAutotuneTrace(size_t max_entries) {
   TORCH_CHECK(max_entries > 0, "max_entries must be greater than zero");
   auto& state = traceState();
-  std::lock_guard<std::mutex> guard(state.mutex);
+  std::unique_lock<std::mutex> guard(state.mutex);
   TORCH_CHECK(
-      !state.recording.load() && state.pending_callbacks == 0,
-      "an MPS autotune trace is already active");
+      !state.recording.load(), "an MPS autotune trace is already active");
+  // Callbacks retained by a previous trace stopped without waiting may still
+  // be draining; wait them out so their records cannot leak into this trace.
+  state.completed.wait(guard, [&] { return state.pending_callbacks == 0; });
   state.records.clear();
   state.max_entries = max_entries;
   state.dropped = 0;
@@ -109,24 +121,31 @@ void releaseMPSAutotuneTrace() {
 
 std::optional<std::string> getMPSAutotuneOverride(
     std::string_view operation) {
-  for (const auto& [name, config] : autotune_overrides) {
-    if (std::string_view(name) == operation) {
-      return config;
-    }
+  auto& state = overrideState();
+  if (state.count.load(std::memory_order_acquire) == 0) {
+    return std::nullopt;
   }
-  return std::nullopt;
+  std::lock_guard<std::mutex> guard(state.mutex);
+  const auto it = state.map.find(std::string(operation));
+  if (it == state.map.end()) {
+    return std::nullopt;
+  }
+  return it->second;
 }
 
 void setMPSAutotuneOverride(
     const std::string& operation,
     std::optional<std::string> config) {
   TORCH_CHECK(!operation.empty(), "operation must not be empty");
+  auto& state = overrideState();
+  std::lock_guard<std::mutex> guard(state.mutex);
   if (config.has_value()) {
     TORCH_CHECK(!config->empty(), "config must not be empty");
-    autotune_overrides.insert_or_assign(operation, std::move(*config));
+    state.map.insert_or_assign(operation, std::move(*config));
   } else {
-    autotune_overrides.erase(operation);
+    state.map.erase(operation);
   }
+  state.count.store(state.map.size(), std::memory_order_release);
 }
 
 uint64_t getMPSAutotuneCacheGeneration() {

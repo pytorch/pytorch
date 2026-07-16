@@ -49,6 +49,12 @@ tile configurations and cache the fastest configuration for each input shape
 and layout. The first executions of a new shape can therefore be slower. The
 setting is disabled by default.
 
+Because the winning configuration is selected from timing measurements, it can
+differ between otherwise identical runs, which can change results at
+floating-point rounding granularity. Enable
+`torch.use_deterministic_algorithms(True)` to bypass autotuning and always use
+the deterministic heuristic configuration.
+
 Currently, autotuning applies to eligible GEMV paths used by `torch.mm`,
 `torch.addmm`, `torch.mv`, `torch.addmv`, and equivalent non-batched
 `torch.matmul` calls. It supports `float32`, `float16`, and `bfloat16` when the

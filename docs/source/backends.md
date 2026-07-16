@@ -331,6 +331,12 @@ These backends include:
     operation and input shape, the first executions benchmark multiple kernel
     and tile configurations and cache the fastest one. The setting applies to
     MPS operations that implement autotuning. The default value is False.
+
+    Because the winner is selected from timing measurements, the cached
+    configuration can differ between otherwise identical runs, which can
+    change results at floating-point rounding granularity. While
+    :func:`torch.use_deterministic_algorithms` is enabled, autotuning is
+    bypassed and the deterministic heuristic configuration is used.
 ```
 
 ```{eval-rst}
@@ -343,6 +349,10 @@ These backends include:
 
 ```{eval-rst}
 .. autofunction::  torch.backends.mps.autotune_trace
+```
+
+```{eval-rst}
+.. autoclass::  torch.backends.mps.AutotuneTrace
 ```
 
 ```{eval-rst}

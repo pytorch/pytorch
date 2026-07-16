@@ -26,7 +26,8 @@ from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf,
+     DeterministicGuard)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier, mps_ops_error_inputs_modifier
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
@@ -11680,18 +11681,13 @@ class TestAutotuneMPS(TestCaseMPS):
             with torch.backends.mps.flags(benchmark=1):
                 pass
 
-    def test_benchmark_hint_warning(self, device):
+    def test_benchmark_deterministic_algorithms(self, device):
         a = torch.randn(1, 256, device=device)
         b = torch.randn(256, 512, device=device)
-        with torch.backends.mps.flags(benchmark=False):
-            with self.assertWarnsOnceRegex(UserWarning, r".*torch\.backends\.mps\.benchmark"):
+        with DeterministicGuard(True):
+            with torch.backends.mps.autotune_trace() as trace:
                 _ = a @ b
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            _ = a @ b
-        self.assertFalse(
-            any("mps.benchmark" in str(w.message) for w in caught)
-        )
+        self.assertEqual(trace.records[-1]["phase"], "heuristic")
 
     def test_trace_validation(self, device):
         with self.assertRaisesRegex(TypeError, "max_entries must be an int"):
@@ -11729,6 +11725,15 @@ class TestAutotuneMPS(TestCaseMPS):
                 _ = a @ b
         self.assertEqual(len(trace.records), 1)
         self.assertEqual(trace.records[0]["phase"], "heuristic")
+
+    def test_trace_no_wait_back_to_back(self, device):
+        # Explore launches retain callbacks that outlive a no-wait trace; the
+        # next trace must wait for them instead of raising "already active".
+        a = torch.randn(1, 259, device=device)
+        b = torch.randn(259, 515, device=device)
+        for _ in range(2):
+            with torch.backends.mps.autotune_trace(wait_until_completed=False):
+                _ = a @ b
 
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     @parametrize("transpose", [False, True])
@@ -11882,6 +11887,28 @@ class TestAutotuneMPS(TestCaseMPS):
                 RuntimeError, "invalid forced GEMV autotune config"
             ):
                 _ = a @ b
+
+    def test_gemv_override_inapplicable_config(self, device):
+        # t2d exists only in the gemv_t pool; forcing it on a gemv_nt shape
+        # falls back to the heuristic instead of erroring.
+        a = torch.randn(64, 256, device=device)
+        b = torch.randn(256, 1, device=device)
+        with torch.backends.mps._autotune_override("gemv", "t2d:nsimd=16:kq=4"):
+            with torch.backends.mps.autotune_trace() as trace:
+                out = a @ b
+        self.assertEqual(a.cpu() @ b.cpu(), out.cpu(), atol=1e-3, rtol=1e-4)
+        self.assertEqual(trace.records[-1]["phase"], "heuristic")
+
+    def test_gemv_override_cross_thread(self, device):
+        a = torch.randn(1, 261, device=device)
+        b = torch.randn(261, 517, device=device)
+        with torch.backends.mps.autotune_trace() as trace:
+            with torch.backends.mps._autotune_override("gemv", "standard:nsimd=16:vec=1"):
+                thread = threading.Thread(target=lambda: a @ b)
+                thread.start()
+                thread.join()
+        self.assertEqual(trace.records[-1]["phase"], "forced")
+        self.assertEqual(trace.records[-1]["config"], "standard:nsimd=16:vec=1")
 
     def test_gemv_cache_clear(self, device):
         a = torch.randn(1, 256, device=device)
