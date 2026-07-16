@@ -866,8 +866,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         push(stack, IValue());
         try {
           f.run(stack);
-        } catch (std::exception& _) {
-          // TODO(T98048876): Handle `_` correctly.
+        } catch (std::exception&) {
+          // TODO(T98048876): Handle the caught exception correctly.
         }
       }
       if (FLAGS_torch_jit_enable_rethrow_caught_exception) {
