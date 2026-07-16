@@ -7272,7 +7272,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "addcmul_positional",
             "addcdiv",
             "addcdiv_positional",
-            subtest("baddbmm", decorators=[expectedFailureDynamic]),
+            "baddbmm",
         ],
     )
     def test_scalar_arg_0d_tensor(self, op):
