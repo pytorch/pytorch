@@ -2,6 +2,11 @@
 import abc
 import functools
 import inspect
+import json
+import os
+import subprocess
+import sys
+import textwrap
 import unittest
 import weakref
 
@@ -66,6 +71,19 @@ def less_match(x, expected):
 
 def less_match_verbose_code_parts(expected):
     return [f"expected < {expected}"]
+
+
+def run_guard_manager_script(script, *, env_updates=None):
+    env = os.environ.copy()
+    if env_updates:
+        env.update(env_updates)
+    output = subprocess.check_output(
+        [sys.executable, "-c", textwrap.dedent(script)],
+        cwd=os.getcwd(),
+        env=env,
+        text=True,
+    )
+    return json.loads(output.splitlines()[-1])
 
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
@@ -899,6 +917,2529 @@ num_guards_executed=0)
 
             foo = (10.0, 11)
             opt_fn(x, foo, bar)
+
+    def test_guard_lookup_stats_api_records_cache_hits(self):
+        def fn(x, y, scale: int):
+            return (x + y) * scale
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        y = torch.randn(4)
+
+        opt_fn(x, y, 3)
+        guards.reset_guard_lookup_stats(True)
+        before = guards.get_guard_lookup_stats()
+        self.assertEqual(before["lookup_count"], 0)
+
+        opt_fn(x, y, 3)
+
+        after = guards.get_guard_lookup_stats()
+        self.assertGreater(after["lookup_count"], 0)
+        self.assertGreater(after["lookup_total_ns"], 0)
+        self.assertGreater(after["slow_guard_ns"], 0)
+        self.assertGreater(after["root_guard_count"], 0)
+        self.assertGreater(after["root_guard_total_ns"], 0)
+        self.assertFalse(after["unsafe_mock_guard_bypass_enabled"])
+        self.assertEqual(after["unsafe_mock_guard_bypass_count"], 0)
+
+    def test_guard_lookup_stats_records_accessor_types(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        foo = Foo(1)
+
+        guards.reset_guard_lookup_stats(True)
+
+        attr_root = RootGuardManager()
+        attr_root.getattr_manager("x", "x", 1, default_mgr_enum).add_lambda_guard(
+            functools.partial(equals_match, expected=1),
+            equals_match_verbose_code_parts(1),
+        )
+        self.assertTrue(attr_root.check(foo))
+
+        item_root = RootGuardManager()
+        item_root.getitem_manager(0, "", 1, default_mgr_enum).add_lambda_guard(
+            functools.partial(equals_match, expected=1),
+            equals_match_verbose_code_parts(1),
+        )
+        self.assertTrue(item_root.check([1]))
+
+        type_root = RootGuardManager()
+        type_root.getitem_manager("foo", "", foo, default_mgr_enum).type_manager(
+            "", type(foo), default_mgr_enum
+        ).add_lambda_guard(lambda x: x is type(foo), ["type(foo)"])
+        self.assertTrue(type_root.check({"foo": foo}))
+
+        generic_dict_root = RootGuardManager()
+        generic_dict_root.get_generic_dict_manager(
+            "foo.__dict__", foo.__dict__, default_mgr_enum
+        ).add_lambda_guard(lambda x: x["x"] == 1, ["foo.__dict__['x'] == 1"])
+        self.assertTrue(generic_dict_root.check(foo))
+
+        dict_getitem_root = RootGuardManager()
+        dict_getitem_root.dict_getitem_manager(
+            "foo", "D['foo']", foo, default_mgr_enum
+        ).add_lambda_guard(lambda x: x is foo, ["D['foo'] is foo"])
+        self.assertTrue(dict_getitem_root.check({"foo": foo}))
+
+        dict_root = RootGuardManager()
+        f_locals = {"d": {"a": 1}}
+        dict_mgr = dict_root.getitem_manager(
+            "d",
+            "",
+            f_locals["d"],
+            torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
+        )
+        dict_mgr.get_key_manager(0, "", "a", default_mgr_enum).add_equals_match_guard(
+            "a",
+            ["dict.keys()[0] == a"],
+        )
+        dict_mgr.get_value_manager(0, "", 1, default_mgr_enum).add_equals_match_guard(
+            1,
+            ["d[0] == 1"],
+        )
+        self.assertTrue(dict_root.check(f_locals))
+
+        accessor_stats = guards.get_guard_lookup_stats()[
+            "root_guard_accessor_type_stats"
+        ]
+        for name in (
+            "GetAttrGuardAccessor",
+            "GetItemGuardAccessor",
+            "TypeGuardAccessor",
+            "DictGetItemGuardAccessor",
+        ):
+            self.assertIn(name, accessor_stats)
+            self.assertGreater(accessor_stats[name]["count"], 0)
+            self.assertGreater(accessor_stats[name]["inclusive_ns"], 0)
+
+        detail_stats = guards.get_guard_lookup_stats()[
+            "root_guard_accessor_detail_topk"
+        ]
+        for name in (
+            "GetItemGuardAccessor",
+            "GetGenericDictGuardAccessor",
+            "DictGetItemGuardAccessor",
+        ):
+            matches = [
+                stats
+                for key, stats in detail_stats.items()
+                if key.startswith(f"{name}:")
+            ]
+            self.assertTrue(
+                matches, f"missing {name}: {sorted(detail_stats)}"
+            )
+            self.assertGreater(matches[0]["count"], 0)
+            self.assertGreater(matches[0]["inclusive_ns"], 0)
+            self.assertIn("self_ns", matches[0])
+            self.assertIn("child_ns", matches[0])
+
+    def test_guard_lookup_stats_records_leaf_guards(self):
+        guards.reset_guard_lookup_stats(True)
+
+        root = RootGuardManager()
+        root.add_type_match_guard(id_type([1, 2]), ["type(x) == list"])
+        root.add_length_check_guard(2, ["len(x) == 2"])
+
+        for _ in range(16):
+            self.assertTrue(root.check([1, 2]))
+            self.assertFalse(root.check((1, 2)))
+
+        stats = guards.get_guard_lookup_stats()
+        leaf_type_stats = stats["root_guard_leaf_type_stats"]
+        for name in ("TYPE_MATCH", "LENGTH_CHECK"):
+            self.assertIn(name, leaf_type_stats)
+            self.assertGreater(leaf_type_stats[name]["count"], 0)
+            self.assertGreater(leaf_type_stats[name]["inclusive_ns"], 0)
+        self.assertGreater(leaf_type_stats["TYPE_MATCH"]["fail_count"], 0)
+
+        leaf_detail_stats = stats["root_guard_leaf_detail_topk"]
+        self.assertTrue(
+            any(
+                key.startswith("TYPE_MATCH:") and item["fail_count"] > 0
+                for key, item in leaf_detail_stats.items()
+            )
+        )
+
+    def test_unsafe_mock_guard_bypass_skips_slow_guard(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+SCALE = 3
+
+def fn(x, y):
+    return (x + y) * SCALE
+
+opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+x = torch.randn(4)
+y = torch.randn(4)
+
+expected = fn(x, y)
+assert torch.equal(opt_fn(x, y), expected)
+
+SCALE = 5
+out = opt_fn(x, y)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "unsafe_mock_guard_bypass_enabled": stats[
+        "unsafe_mock_guard_bypass_enabled"
+    ],
+    "stale_cached_result": torch.equal(out, expected),
+    "fresh_result": torch.equal(out, fn(x, y)),
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_UNSAFE_MOCK_GUARD_BYPASS"] = "1"
+        env.pop("TORCHDYNAMO_GUARD_LOOKUP_STATS", None)
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["unsafe_mock_guard_bypass_enabled"])
+        self.assertTrue(stats["stale_cached_result"])
+        self.assertFalse(stats["fresh_result"])
+
+    def test_unsafe_mock_guard_bypass_does_not_require_stats_collection(self):
+        script = r"""
+import json
+from torch._C._dynamo import guards
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "unsafe_mock_guard_bypass_enabled": stats[
+        "unsafe_mock_guard_bypass_enabled"
+    ],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_UNSAFE_MOCK_GUARD_BYPASS"] = "1"
+        env.pop("TORCHDYNAMO_GUARD_LOOKUP_STATS", None)
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["unsafe_mock_guard_bypass_enabled"])
+
+    def test_guard_subtree_probe_is_off_by_default(self):
+        guards.reset_guard_lookup_stats()
+        stats = guards.get_guard_lookup_stats()
+
+        self.assertEqual(stats["guard_subtree_probe_mode"], "off")
+        self.assertEqual(stats["guard_subtree_probe_attempt"], 0)
+        self.assertEqual(stats["guard_subtree_probe_entry_match"], 0)
+        self.assertNotIn("guard_subtree_probe_top_paths", stats)
+
+    def test_reset_guard_lookup_stats_does_not_force_collect_perf_counters(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+def fn(x):
+    return x + 1
+
+x = torch.randn(4)
+opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+opt_fn(x)
+guards.reset_guard_lookup_stats()
+opt_fn(x)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "lookup_count": stats["lookup_count"],
+    "lookup_total_ns": stats["lookup_total_ns"],
+    "slow_guard_ns": stats["slow_guard_ns"],
+    "root_guard_count": stats["root_guard_count"],
+    "root_guard_total_ns": stats["root_guard_total_ns"],
+    "actual_partial_token_check_ns": stats[
+        "guard_last_success_actual_partial_token_check_ns"
+    ],
+    "probe_attempt": stats["guard_subtree_probe_attempt"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env.pop("TORCHDYNAMO_GUARD_LOOKUP_STATS", None)
+        env.pop("TORCHDYNAMO_GUARD_SUBTREE_PROBE", None)
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertEqual(stats["lookup_count"], 0)
+        self.assertEqual(stats["lookup_total_ns"], 0)
+        self.assertEqual(stats["slow_guard_ns"], 0)
+        self.assertEqual(stats["root_guard_count"], 0)
+        self.assertEqual(stats["root_guard_total_ns"], 0)
+        self.assertEqual(stats["actual_partial_token_check_ns"], 0)
+        self.assertEqual(stats["probe_attempt"], 0)
+
+    def test_guard_subtree_probe_requires_fast_plan(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+    def forward(self, x):
+        return self.seq(x)
+
+model = Mod()
+opt_model = torch.compile(model, backend="eager", fullgraph=True)
+x = torch.randn(2, 4)
+
+opt_model(x)
+guards.reset_guard_lookup_stats()
+for _ in range(3):
+    opt_model(x)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "mode": stats["guard_subtree_probe_mode"],
+    "enabled": stats["guard_fastplan_enabled"],
+    "attempt": stats["guard_subtree_probe_attempt"],
+    "entry_match": stats["guard_subtree_probe_entry_match"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_SUBTREE_PROBE"] = "summary"
+        env.pop("TORCHDYNAMO_GUARD_FAST_PLAN", None)
+        env.pop("TORCHDYNAMO_GUARD_LOOKUP_STATS", None)
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertEqual(stats["mode"], "summary")
+        self.assertFalse(stats["enabled"])
+        self.assertEqual(stats["attempt"], 0)
+        self.assertEqual(stats["entry_match"], 0)
+
+    def test_guard_subtree_probe_summary_records_shadow_entries(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+    def forward(self, x):
+        return self.seq(x)
+
+model = Mod()
+opt_model = torch.compile(model, backend="eager", fullgraph=True)
+x = torch.randn(2, 4)
+
+opt_model(x)
+guards.reset_guard_lookup_stats()
+for _ in range(3):
+    opt_model(x)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "mode": stats["guard_subtree_probe_mode"],
+    "attempt": stats["guard_subtree_probe_attempt"],
+    "entry_match": stats["guard_subtree_probe_entry_match"],
+    "shadow_ok": stats["guard_subtree_probe_shadow_ok"],
+    "child_check_ns": stats["guard_subtree_probe_child_check_ns"],
+    "has_top_paths": "guard_subtree_probe_top_paths" in stats,
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_SUBTREE_PROBE"] = "summary"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertEqual(stats["mode"], "summary")
+        self.assertGreater(stats["attempt"], 0)
+        self.assertGreater(stats["entry_match"], 0)
+        self.assertGreater(stats["shadow_ok"], 0)
+        self.assertGreater(stats["child_check_ns"], 0)
+        self.assertFalse(stats["has_top_paths"])
+
+    def test_guard_subtree_probe_detail_is_pruned_to_summary(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+    def forward(self, x):
+        return self.seq(x)
+
+model = Mod()
+opt_model = torch.compile(model, backend="eager", fullgraph=True)
+x = torch.randn(2, 4)
+
+opt_model(x)
+guards.reset_guard_lookup_stats()
+for _ in range(3):
+    opt_model(x)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "mode": stats["guard_subtree_probe_mode"],
+    "attempt": stats["guard_subtree_probe_attempt"],
+    "entry_match": stats["guard_subtree_probe_entry_match"],
+    "shadow_ok": stats["guard_subtree_probe_shadow_ok"],
+    "has_top_paths": "guard_subtree_probe_top_paths" in stats,
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_SUBTREE_PROBE"] = "detail"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertEqual(stats["mode"], "summary")
+        self.assertGreater(stats["attempt"], 0)
+        self.assertGreater(stats["entry_match"], 0)
+        self.assertGreater(stats["shadow_ok"], 0)
+        self.assertFalse(stats["has_top_paths"])
+
+    def test_guard_fast_plan_skips_top_modules(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+model = Mod()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+modules_mgr.add_dict_length_check_guard(
+    len(model._modules), ["len(L['self']._modules) == 1"]
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "enabled": stats["guard_fastplan_enabled"],
+    "candidate": stats["guard_fastplan_candidate"],
+    "shadow_pass": stats["guard_fastplan_shadow_pass"],
+    "enable": stats["guard_fastplan_enable"],
+    "hit": stats["guard_fastplan_hit"],
+    "miss": stats["guard_fastplan_miss"],
+    "disabled": stats["guard_fastplan_disabled"],
+    "token_count_sum": stats["guard_fastplan_token_count_sum"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["enabled"])
+        self.assertEqual(stats["candidate"], 0)
+        self.assertEqual(stats["shadow_pass"], 0)
+        self.assertEqual(stats["enable"], 0)
+        self.assertEqual(stats["hit"], 0)
+        self.assertEqual(stats["miss"], 0)
+        self.assertEqual(stats["disabled"], 0)
+        self.assertEqual(stats["token_count_sum"], 0)
+
+    def test_guard_fast_plan_skips_top_module_disabled_reasons(self):
+        script = r"""
+import functools
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+def equals_match(x, expected):
+    return x == expected
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+model = Mod()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+modules_mgr.add_lambda_guard(
+    functools.partial(equals_match, expected=model._modules),
+    ["L['self']._modules == original"],
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+assert root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "enabled": stats["guard_fastplan_enabled"],
+    "candidate": stats["guard_fastplan_candidate"],
+    "disabled": stats["guard_fastplan_disabled"],
+    "reasons": stats["guard_fastplan_disabled_reasons"],
+    "top_paths": stats["guard_fastplan_disabled_top_paths"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["enabled"])
+        self.assertEqual(stats["candidate"], 0)
+        self.assertEqual(stats["disabled"], 0)
+        self.assertEqual(stats["reasons"], {})
+        self.assertEqual(stats["top_paths"], {})
+
+    def test_guard_fast_plan_nested_modules_records_hits(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Child(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.clean = Child()
+
+model = Mod()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_mgr = modules_mgr.getitem_manager(
+    "clean",
+    "L['self']._modules['clean']",
+    model.clean,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_dict_mgr = clean_mgr.get_generic_dict_manager(
+    "L['self']._modules['clean'].__dict__",
+    model.clean.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_modules_mgr = clean_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['clean']._modules",
+    model.clean._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_modules_mgr.add_dict_length_check_guard(
+    len(model.clean._modules),
+    ["len(L['self']._modules['clean']._modules) == 1"],
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "enabled": stats["guard_fastplan_enabled"],
+    "candidate_nested": stats["guard_fastplan_candidate_nested"],
+    "shadow_pass_nested": stats["guard_fastplan_shadow_pass_nested"],
+    "enable_nested": stats["guard_fastplan_enable_nested"],
+    "hit_nested": stats["guard_fastplan_hit_nested"],
+    "miss": stats["guard_fastplan_miss"],
+    "disabled_nested": stats["guard_fastplan_disabled_nested"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["enabled"])
+        self.assertGreater(stats["candidate_nested"], 0)
+        self.assertGreater(stats["shadow_pass_nested"], 0)
+        self.assertGreater(stats["enable_nested"], 0)
+        self.assertGreater(stats["hit_nested"], 0)
+        self.assertEqual(stats["miss"], 0)
+        self.assertEqual(stats["disabled_nested"], 0)
+
+    def test_guard_fast_plan_blocked_sibling_does_not_disable_clean_nested(self):
+        script = r"""
+import functools
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+def equals_match(x, expected):
+    return x == expected
+
+class Child(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.clean = Child()
+        self.blocked = Child()
+
+model = Mod()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_mgr = modules_mgr.getitem_manager(
+    "clean",
+    "L['self']._modules['clean']",
+    model.clean,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_dict_mgr = clean_mgr.get_generic_dict_manager(
+    "L['self']._modules['clean'].__dict__",
+    model.clean.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_modules_mgr = clean_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['clean']._modules",
+    model.clean._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_modules_mgr.add_dict_length_check_guard(
+    len(model.clean._modules),
+    ["len(L['self']._modules['clean']._modules) == 1"],
+)
+
+blocked_mgr = modules_mgr.getitem_manager(
+    "blocked",
+    "L['self']._modules['blocked']",
+    model.blocked,
+    GuardManagerType.GUARD_MANAGER,
+)
+blocked_dict_mgr = blocked_mgr.get_generic_dict_manager(
+    "L['self']._modules['blocked'].__dict__",
+    model.blocked.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+blocked_modules_mgr = blocked_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['blocked']._modules",
+    model.blocked._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+blocked_modules_mgr.add_lambda_guard(
+    functools.partial(equals_match, expected=model.blocked._modules),
+    ["L['self']._modules['blocked']._modules == original"],
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "enabled": stats["guard_fastplan_enabled"],
+    "candidate_top": stats["guard_fastplan_candidate_top"],
+    "candidate_nested": stats["guard_fastplan_candidate_nested"],
+    "enable_nested": stats["guard_fastplan_enable_nested"],
+    "hit_nested": stats["guard_fastplan_hit_nested"],
+    "disabled": stats["guard_fastplan_disabled"],
+    "disabled_nested": stats["guard_fastplan_disabled_nested"],
+    "reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["enabled"])
+        self.assertEqual(stats["candidate_top"], 0)
+        self.assertGreater(stats["candidate_nested"], 0)
+        self.assertGreater(stats["enable_nested"], 0)
+        self.assertGreater(stats["hit_nested"], 0)
+        self.assertGreater(stats["disabled"], 0)
+        self.assertGreater(stats["disabled_nested"], 0)
+        self.assertGreaterEqual(
+            stats["reasons"].get("unsupported_leaf:LAMBDA_GUARD", 0), 1
+        )
+
+    def test_guard_fast_plan_partial_hit_checks_unsupported_child(self):
+        script = r"""
+import functools
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+def is_original_dict(x, expected):
+    return x is expected
+
+class Child(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+class Parent(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.clean = Child()
+        self.blocked = Child()
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.parent = Parent()
+
+model = Mod()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+parent_mgr = modules_mgr.getitem_manager(
+    "parent",
+    "L['self']._modules['parent']",
+    model.parent,
+    GuardManagerType.GUARD_MANAGER,
+)
+parent_dict_mgr = parent_mgr.get_generic_dict_manager(
+    "L['self']._modules['parent'].__dict__",
+    model.parent.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+parent_modules_mgr = parent_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['parent']._modules",
+    model.parent._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+
+clean_mgr = parent_modules_mgr.getitem_manager(
+    "clean",
+    "L['self']._modules['parent']._modules['clean']",
+    model.parent.clean,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_dict_mgr = clean_mgr.get_generic_dict_manager(
+    "L['self']._modules['parent']._modules['clean'].__dict__",
+    model.parent.clean.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_modules_mgr = clean_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['parent']._modules['clean']._modules",
+    model.parent.clean._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_modules_mgr.add_dict_length_check_guard(
+    len(model.parent.clean._modules),
+    ["len(L['self']._modules['parent']._modules['clean']._modules) == 1"],
+)
+
+blocked_mgr = parent_modules_mgr.getitem_manager(
+    "blocked",
+    "L['self']._modules['parent']._modules['blocked']",
+    model.parent.blocked,
+    GuardManagerType.GUARD_MANAGER,
+)
+blocked_dict_mgr = blocked_mgr.get_generic_dict_manager(
+    "L['self']._modules['parent']._modules['blocked'].__dict__",
+    model.parent.blocked.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+blocked_modules_mgr = blocked_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['parent']._modules['blocked']._modules",
+    model.parent.blocked._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+blocked_modules_mgr.add_lambda_guard(
+    functools.partial(is_original_dict, expected=model.parent.blocked._modules),
+    ["blocked._modules is original"],
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+model.parent.blocked._modules = {}
+assert not root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "partial_enable": stats["guard_fastplan_partial_enable"],
+    "partial_hit": stats["guard_fastplan_partial_hit"],
+    "miss": stats["guard_fastplan_miss"],
+    "reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["partial_enable"], 0)
+        self.assertGreater(stats["partial_hit"], 0)
+        self.assertEqual(stats["miss"], 0)
+        self.assertGreaterEqual(
+            stats["reasons"].get("unsupported_leaf:LAMBDA_GUARD", 0), 1
+        )
+
+    def test_guard_fast_plan_tensor_match_token_hits_and_checks_metadata(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+model = torch.nn.Sequential(torch.nn.Linear(4, 4))
+container = torch.nn.Module()
+container.child = model
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", container, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", container.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    container._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_mgr = modules_mgr.getitem_manager(
+    "child",
+    "L['self']._modules['child']",
+    model,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_dict_mgr = child_mgr.get_generic_dict_manager(
+    "L['self']._modules['child'].__dict__",
+    model.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_modules_mgr = child_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['child']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+linear_mgr = child_modules_mgr.getitem_manager(
+    "0",
+    "L['self']._modules['child']._modules['0']",
+    model[0],
+    GuardManagerType.GUARD_MANAGER,
+)
+linear_dict_mgr = linear_mgr.get_generic_dict_manager(
+    "L['self']._modules['child']._modules['0'].__dict__",
+    model[0].__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+parameters_mgr = linear_dict_mgr.getitem_manager(
+    "_parameters",
+    "L['self']._modules['child']._modules['0']._parameters",
+    model[0]._parameters,
+    GuardManagerType.GUARD_MANAGER,
+)
+weight_mgr = parameters_mgr.getitem_manager(
+    "weight",
+    "L['self']._modules['child']._modules['0']._parameters['weight']",
+    model[0].weight,
+    GuardManagerType.GUARD_MANAGER,
+)
+weight_mgr.add_tensor_match_guard(
+    model[0].weight,
+    list(model[0].weight.size()),
+    list(model[0].weight.stride()),
+    "L['self']._modules['child']._modules['0']._parameters['weight']",
+    ["check_tensor(weight)"],
+    type(model[0].weight),
+    torch._C._dispatch_keys(model[0].weight),
+)
+
+f_locals = {"self": container}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+with torch.no_grad():
+    model[0].weight.add_(1)
+assert root.check(f_locals)
+
+model[0].weight.requires_grad_(False)
+assert not root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "tensor_shadow": stats["guard_fastplan_tensor_token_shadow"],
+    "tensor_hit": stats["guard_fastplan_tensor_token_hit"],
+    "tensor_miss": stats["guard_fastplan_tensor_token_miss"],
+    "miss_reasons": stats["guard_fastplan_tensor_token_miss_reasons"],
+    "fastplan_miss": stats["guard_fastplan_miss"],
+    "disabled_reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["tensor_shadow"], 0)
+        self.assertGreater(stats["tensor_hit"], 0)
+        self.assertGreater(stats["tensor_miss"], 0)
+        self.assertGreater(stats["fastplan_miss"], 0)
+        self.assertGreater(
+            stats["miss_reasons"].get("requires_grad", 0), 0
+        )
+        self.assertEqual(
+            stats["disabled_reasons"].get("unsupported_leaf:TENSOR_MATCH", 0),
+            0,
+        )
+
+    def test_guard_fast_plan_tensor_match_token_skips_attr_sources(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.other_tensor = torch.ones(2)
+
+model = Mod()
+parent = torch.nn.Module()
+parent.leaf = model
+container = torch.nn.Module()
+container.child = parent
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", container, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", container.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    container._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_mgr = modules_mgr.getitem_manager(
+    "child",
+    "L['self']._modules['child']",
+    parent,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_dict_mgr = child_mgr.get_generic_dict_manager(
+    "L['self']._modules['child'].__dict__",
+    parent.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_modules_mgr = child_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['child']._modules",
+    parent._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+leaf_mgr = child_modules_mgr.getitem_manager(
+    "leaf",
+    "L['self']._modules['child']._modules['leaf']",
+    model,
+    GuardManagerType.GUARD_MANAGER,
+)
+cached_mgr = leaf_mgr.getattr_manager(
+    "other_tensor",
+    "L['self']._modules['child']._modules['leaf'].other_tensor",
+    model.other_tensor,
+    GuardManagerType.GUARD_MANAGER,
+)
+cached_mgr.add_tensor_match_guard(
+    model.other_tensor,
+    list(model.other_tensor.size()),
+    list(model.other_tensor.stride()),
+    "L['self']._modules['child']._modules['leaf'].other_tensor",
+    ["check_tensor(cached)"],
+    type(model.other_tensor),
+    torch._C._dispatch_keys(model.other_tensor),
+)
+
+f_locals = {"self": container}
+guards.reset_guard_lookup_stats()
+for _ in range(4):
+    assert root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "tensor_shadow": stats["guard_fastplan_tensor_token_shadow"],
+    "disabled_reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertEqual(stats["tensor_shadow"], 0)
+        self.assertGreater(
+            stats["disabled_reasons"].get("unsupported_leaf:TENSOR_MATCH", 0),
+            0,
+        )
+
+    def test_guard_fast_plan_tensor_match_token_supports_cached_tensor_attr(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self._cached_tensor = torch.ones(2)
+
+model = Mod()
+parent = torch.nn.Module()
+parent.leaf = model
+container = torch.nn.Module()
+container.child = parent
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", container, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", container.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    container._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_mgr = modules_mgr.getitem_manager(
+    "child",
+    "L['self']._modules['child']",
+    parent,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_dict_mgr = child_mgr.get_generic_dict_manager(
+    "L['self']._modules['child'].__dict__",
+    parent.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_modules_mgr = child_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['child']._modules",
+    parent._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+leaf_mgr = child_modules_mgr.getitem_manager(
+    "leaf",
+    "L['self']._modules['child']._modules['leaf']",
+    model,
+    GuardManagerType.GUARD_MANAGER,
+)
+cached_mgr = leaf_mgr.getattr_manager(
+    "_cached_tensor",
+    "L['self']._modules['child']._modules['leaf']._cached_tensor",
+    model._cached_tensor,
+    GuardManagerType.GUARD_MANAGER,
+)
+cached_mgr.add_tensor_match_guard(
+    model._cached_tensor,
+    list(model._cached_tensor.size()),
+    list(model._cached_tensor.stride()),
+    "L['self']._modules['child']._modules['leaf']._cached_tensor",
+    ["check_tensor(cached)"],
+    type(model._cached_tensor),
+    torch._C._dispatch_keys(model._cached_tensor),
+)
+
+f_locals = {"self": container}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+model._cached_tensor.resize_(3)
+assert not root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "tensor_shadow": stats["guard_fastplan_tensor_token_shadow"],
+    "tensor_hit": stats["guard_fastplan_tensor_token_hit"],
+    "tensor_miss": stats["guard_fastplan_tensor_token_miss"],
+    "miss_reasons": stats["guard_fastplan_tensor_token_miss_reasons"],
+    "fastplan_miss": stats["guard_fastplan_miss"],
+    "disabled_reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["tensor_shadow"], 0)
+        self.assertGreater(stats["tensor_hit"], 0)
+        self.assertGreater(stats["tensor_miss"], 0)
+        self.assertGreater(stats["fastplan_miss"], 0)
+        self.assertGreater(stats["miss_reasons"].get("size", 0), 0)
+        self.assertEqual(
+            stats["disabled_reasons"].get("unsupported_leaf:TENSOR_MATCH", 0),
+            0,
+        )
+
+    def test_guard_fast_plan_tensor_match_token_supports_scale_attr(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.scale = torch.ones(2)
+
+model = Mod()
+parent = torch.nn.Module()
+parent.leaf = model
+container = torch.nn.Module()
+container.child = parent
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", container, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", container.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    container._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_mgr = modules_mgr.getitem_manager(
+    "child",
+    "L['self']._modules['child']",
+    parent,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_dict_mgr = child_mgr.get_generic_dict_manager(
+    "L['self']._modules['child'].__dict__",
+    parent.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_modules_mgr = child_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['child']._modules",
+    parent._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+leaf_mgr = child_modules_mgr.getitem_manager(
+    "leaf",
+    "L['self']._modules['child']._modules['leaf']",
+    model,
+    GuardManagerType.GUARD_MANAGER,
+)
+scale_mgr = leaf_mgr.getattr_manager(
+    "scale",
+    "L['self']._modules['child']._modules['leaf'].scale",
+    model.scale,
+    GuardManagerType.GUARD_MANAGER,
+)
+scale_mgr.add_tensor_match_guard(
+    model.scale,
+    list(model.scale.size()),
+    list(model.scale.stride()),
+    "L['self']._modules['child']._modules['leaf'].scale",
+    ["check_tensor(scale)"],
+    type(model.scale),
+    torch._C._dispatch_keys(model.scale),
+)
+
+f_locals = {"self": container}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+model.scale.resize_(3)
+assert not root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "tensor_shadow": stats["guard_fastplan_tensor_token_shadow"],
+    "tensor_hit": stats["guard_fastplan_tensor_token_hit"],
+    "tensor_miss": stats["guard_fastplan_tensor_token_miss"],
+    "miss_reasons": stats["guard_fastplan_tensor_token_miss_reasons"],
+    "fastplan_miss": stats["guard_fastplan_miss"],
+    "disabled_reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["tensor_shadow"], 0)
+        self.assertGreater(stats["tensor_hit"], 0)
+        self.assertGreater(stats["tensor_miss"], 0)
+        self.assertGreater(stats["fastplan_miss"], 0)
+        self.assertGreater(stats["miss_reasons"].get("size", 0), 0)
+        self.assertEqual(
+            stats["disabled_reasons"].get("unsupported_leaf:TENSOR_MATCH", 0),
+            0,
+        )
+
+    def test_guard_fast_plan_supports_no_tensor_aliasing_token(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Leaf(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("a", torch.ones(2))
+        self.register_buffer("b", torch.zeros(2))
+
+class Child(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.leaf = Leaf()
+
+container = torch.nn.Module()
+container.child = Child()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", container, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", container.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    container._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_mgr = modules_mgr.getitem_manager(
+    "child",
+    "L['self']._modules['child']",
+    container.child,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_dict_mgr = child_mgr.get_generic_dict_manager(
+    "L['self']._modules['child'].__dict__",
+    container.child.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_modules_mgr = child_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['child']._modules",
+    container.child._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+leaf_mgr = child_modules_mgr.getitem_manager(
+    "leaf",
+    "L['self']._modules['child']._modules['leaf']",
+    container.child.leaf,
+    GuardManagerType.GUARD_MANAGER,
+)
+leaf_dict_mgr = leaf_mgr.get_generic_dict_manager(
+    "L['self']._modules['child']._modules['leaf'].__dict__",
+    container.child.leaf.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+leaf_buffers_mgr = leaf_dict_mgr.getitem_manager(
+    "_buffers",
+    "L['self']._modules['child']._modules['leaf']._buffers",
+    container.child.leaf._buffers,
+    GuardManagerType.GUARD_MANAGER,
+)
+a_mgr = leaf_buffers_mgr.getitem_manager(
+    "a",
+    "L['self']._modules['child']._modules['leaf']._buffers['a']",
+    container.child.leaf.a,
+    GuardManagerType.GUARD_MANAGER,
+)
+b_mgr = leaf_buffers_mgr.getitem_manager(
+    "b",
+    "L['self']._modules['child']._modules['leaf']._buffers['b']",
+    container.child.leaf.b,
+    GuardManagerType.GUARD_MANAGER,
+)
+guards.install_no_tensor_aliasing_guard(
+    [a_mgr, b_mgr],
+    ["a", "b"],
+    ["no_aliasing(a, b)"],
+)
+
+f_locals = {"self": container}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+container.child.leaf.b = container.child.leaf.a
+assert not root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "candidate_nested": stats["guard_fastplan_candidate_nested"],
+    "fastplan_hit": stats["guard_fastplan_hit"],
+    "fastplan_miss": stats["guard_fastplan_miss"],
+    "disabled_reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["candidate_nested"], 0)
+        self.assertGreater(stats["fastplan_hit"], 0)
+        self.assertGreater(stats["fastplan_miss"], 0)
+        self.assertEqual(
+            stats["disabled_reasons"].get(
+                "unsupported_leaf:NO_TENSOR_ALIASING", 0
+            ),
+            0,
+        )
+
+    def test_guard_fast_plan_supports_object_aliasing_token(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Leaf(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("a", torch.ones(2))
+        self.register_buffer("b", self.a)
+
+class Child(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.leaf = Leaf()
+
+container = torch.nn.Module()
+container.child = Child()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", container, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", container.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    container._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_mgr = modules_mgr.getitem_manager(
+    "child",
+    "L['self']._modules['child']",
+    container.child,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_dict_mgr = child_mgr.get_generic_dict_manager(
+    "L['self']._modules['child'].__dict__",
+    container.child.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_modules_mgr = child_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['child']._modules",
+    container.child._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+leaf_mgr = child_modules_mgr.getitem_manager(
+    "leaf",
+    "L['self']._modules['child']._modules['leaf']",
+    container.child.leaf,
+    GuardManagerType.GUARD_MANAGER,
+)
+leaf_dict_mgr = leaf_mgr.get_generic_dict_manager(
+    "L['self']._modules['child']._modules['leaf'].__dict__",
+    container.child.leaf.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+leaf_buffers_mgr = leaf_dict_mgr.getitem_manager(
+    "_buffers",
+    "L['self']._modules['child']._modules['leaf']._buffers",
+    container.child.leaf._buffers,
+    GuardManagerType.GUARD_MANAGER,
+)
+a_mgr = leaf_buffers_mgr.getitem_manager(
+    "a",
+    "L['self']._modules['child']._modules['leaf']._buffers['a']",
+    container.child.leaf.a,
+    GuardManagerType.GUARD_MANAGER,
+)
+b_mgr = leaf_buffers_mgr.getitem_manager(
+    "b",
+    "L['self']._modules['child']._modules['leaf']._buffers['b']",
+    container.child.leaf.b,
+    GuardManagerType.GUARD_MANAGER,
+)
+guards.install_object_aliasing_guard(
+    a_mgr,
+    b_mgr,
+    ["aliasing(a, b)"],
+)
+
+f_locals = {"self": container}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+container.child.leaf.b = torch.zeros(2)
+assert not root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "candidate_nested": stats["guard_fastplan_candidate_nested"],
+    "fastplan_hit": stats["guard_fastplan_hit"],
+    "fastplan_miss": stats["guard_fastplan_miss"],
+    "disabled_reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["candidate_nested"], 0)
+        self.assertGreater(stats["fastplan_hit"], 0)
+        self.assertGreater(stats["fastplan_miss"], 0)
+        self.assertEqual(
+            stats["disabled_reasons"].get(
+                "unsupported_leaf:OBJECT_ALIASING", 0
+            ),
+            0,
+        )
+
+    def test_guard_last_success_shadow_records_lookup_attempts(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+def fn(x):
+    return x + 1
+
+compiled = torch.compile(fn, backend="eager")
+x = torch.ones(4)
+guards.reset_guard_lookup_stats()
+for _ in range(5):
+    out = compiled(x)
+    assert torch.equal(out, x + 1)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "lookup_count": stats["lookup_count"],
+    "attempt": stats["guard_last_success_shadow_attempt"],
+    "success": stats["guard_last_success_shadow_success"],
+    "incomplete": stats["guard_last_success_shadow_incomplete"],
+    "support_check_ns": stats["guard_last_success_support_check_ns"],
+    "token_cap_count_sum": stats["guard_last_success_token_cap_count_sum"],
+    "token_cap_count_max": stats["guard_last_success_token_cap_count_max"],
+    "compare_mismatch": stats["guard_last_success_compare_mismatch"],
+    "mismatch_reasons": stats["guard_last_success_mismatch_reasons"],
+    "mismatch_token_kinds": stats["guard_last_success_mismatch_token_kinds"],
+    "mismatch_top_paths": stats["guard_last_success_mismatch_top_paths"],
+    "disabled_reasons": stats["guard_last_success_disabled_reasons"],
+    "actual_attempt": stats["guard_last_success_actual_attempt"],
+    "actual_hit": stats["guard_last_success_actual_hit"],
+    "actual_miss": stats["guard_last_success_actual_miss"],
+    "actual_enable": stats["guard_last_success_actual_enable"],
+    "actual_disabled": stats["guard_last_success_actual_disabled"],
+    "actual_token_check_ns": stats["guard_last_success_actual_token_check_ns"],
+    "actual_train_ns": stats["guard_last_success_actual_train_ns"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["lookup_count"], 0)
+        self.assertGreater(stats["attempt"], 0)
+        self.assertGreater(stats["incomplete"] + stats["success"], 0)
+        self.assertGreaterEqual(stats["support_check_ns"], 0)
+        self.assertGreaterEqual(stats["token_cap_count_sum"], 0)
+        self.assertGreaterEqual(stats["token_cap_count_max"], 0)
+        self.assertGreaterEqual(stats["compare_mismatch"], 0)
+        self.assertIsInstance(stats["mismatch_reasons"], dict)
+        self.assertIsInstance(stats["mismatch_token_kinds"], dict)
+        self.assertIsInstance(stats["mismatch_top_paths"], dict)
+        self.assertGreaterEqual(stats["actual_attempt"], 0)
+        self.assertGreaterEqual(stats["actual_hit"], 0)
+        self.assertGreaterEqual(stats["actual_miss"], 0)
+        self.assertGreaterEqual(stats["actual_enable"], 0)
+        self.assertGreaterEqual(stats["actual_disabled"], 0)
+        self.assertGreaterEqual(stats["actual_token_check_ns"], 0)
+        self.assertGreaterEqual(stats["actual_train_ns"], 0)
+
+    def test_guard_last_success_full_actual_stays_disabled(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("bias", torch.ones(4))
+
+    def forward(self):
+        return self.bias + 1
+
+m = Mod()
+compiled = torch.compile(m, backend="eager")
+expected = m.bias + 1
+assert torch.equal(compiled(), expected)
+
+guards.reset_guard_lookup_stats()
+for _ in range(8):
+    out = compiled()
+    assert torch.equal(out, expected)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "actual_attempt": stats["guard_last_success_actual_attempt"],
+    "actual_enable": stats["guard_last_success_actual_enable"],
+    "actual_hit": stats["guard_last_success_actual_hit"],
+    "actual_miss": stats["guard_last_success_actual_miss"],
+    "actual_disabled": stats["guard_last_success_actual_disabled"],
+    "disabled_reasons": stats["guard_last_success_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertEqual(stats["actual_attempt"], 0)
+        self.assertEqual(stats["actual_enable"], 0)
+        self.assertEqual(stats["actual_hit"], 0)
+        self.assertEqual(stats["actual_miss"], 0)
+        self.assertEqual(stats["actual_disabled"], 0, stats["disabled_reasons"])
+
+    def test_guard_last_success_partial_self_hits_with_unstable_global(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+GLOBAL_DICT = {"used": 1, "noise": [0]}
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("bias", torch.ones(4))
+
+    def forward(self):
+        return self.bias + GLOBAL_DICT["used"]
+
+m = Mod()
+compiled = torch.compile(m, backend="eager")
+expected = m.bias + 1
+assert torch.equal(compiled(), expected)
+
+guards.reset_guard_lookup_stats()
+for _ in range(8):
+    GLOBAL_DICT["noise"] = [1]
+    out = compiled()
+    assert torch.equal(out, expected)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "partial_attempt": stats["guard_last_success_actual_partial_attempt"],
+    "partial_enable": stats["guard_last_success_actual_partial_enable"],
+    "partial_hit": stats["guard_last_success_actual_partial_hit"],
+    "partial_miss": stats["guard_last_success_actual_partial_miss"],
+    "partial_disabled": stats["guard_last_success_actual_partial_disabled"],
+    "partial_hot_tokens": stats[
+        "guard_last_success_actual_partial_hot_token_count_sum"
+    ],
+    "partial_hot_token_unique": stats[
+        "guard_last_success_actual_partial_hot_token_unique_count_sum"
+    ],
+    "partial_hot_token_duplicate": stats[
+        "guard_last_success_actual_partial_hot_token_duplicate_count_sum"
+    ],
+    "partial_hot_token_kinds": stats[
+        "guard_last_success_actual_partial_hot_token_kind_counts"
+    ],
+    "partial_hot_token_duplicate_kinds": stats[
+        "guard_last_success_actual_partial_hot_token_duplicate_kind_counts"
+    ],
+    "partial_residual_fail": stats[
+        "guard_last_success_actual_partial_residual_fail"
+    ],
+    "partial_shadow_full_pass": stats[
+        "guard_last_success_actual_partial_shadow_full_pass"
+    ],
+    "partial_shadow_full_fail": stats[
+        "guard_last_success_actual_partial_shadow_full_fail"
+    ],
+    "partial_shadow_full_ns": stats[
+        "guard_last_success_actual_partial_shadow_full_ns"
+    ],
+    "partial_shadow_fail_reasons": stats[
+        "guard_last_success_actual_partial_shadow_fail_reasons"
+    ],
+    "partial_shadow_fail_top_paths": stats[
+        "guard_last_success_actual_partial_shadow_fail_top_paths"
+    ],
+    "mismatch_top_paths": stats["guard_last_success_mismatch_top_paths"],
+}))
+"""
+        stats = run_guard_manager_script(
+            script,
+            env_updates={
+                "TORCHDYNAMO_GUARD_FAST_PLAN": "1",
+                "TORCHDYNAMO_GUARD_LOOKUP_STATS": "1",
+            },
+        )
+
+        self.assertGreater(stats["partial_attempt"], 0)
+        self.assertGreater(stats["partial_enable"], 0)
+        self.assertGreater(stats["partial_hit"], 0)
+        self.assertEqual(stats["partial_miss"], 0)
+        self.assertEqual(stats["partial_disabled"], 0)
+        self.assertEqual(stats["partial_residual_fail"], 0)
+        self.assertEqual(stats["partial_shadow_full_pass"], 0)
+        self.assertEqual(stats["partial_shadow_full_fail"], 0)
+        self.assertEqual(stats["partial_shadow_full_ns"], 0)
+        self.assertEqual(stats["partial_shadow_fail_reasons"], {})
+        self.assertEqual(stats["partial_shadow_fail_top_paths"], {})
+        self.assertGreater(stats["partial_hot_tokens"], 0)
+        self.assertGreater(stats["partial_hot_token_unique"], 0)
+        self.assertLessEqual(
+            stats["partial_hot_token_unique"], stats["partial_hot_tokens"]
+        )
+        self.assertEqual(
+            stats["partial_hot_token_unique"] + stats["partial_hot_token_duplicate"],
+            stats["partial_hot_tokens"],
+        )
+        self.assertIsInstance(stats["partial_hot_token_kinds"], dict)
+        for unused_kind in (
+            "BoundMethod",
+            "DefaultDevice",
+            "FrameGlobals",
+            "GlobalState",
+            "TorchFunctionModeStack",
+        ):
+            self.assertEqual(stats["partial_hot_token_kinds"][unused_kind], 0)
+        self.assertEqual(
+            sum(stats["partial_hot_token_kinds"].values()),
+            stats["partial_hot_tokens"],
+        )
+        self.assertIsInstance(stats["partial_hot_token_duplicate_kinds"], dict)
+
+    def test_guard_last_success_partial_does_not_claim_bound_method_token(self):
+        script = r"""
+import json
+import torch
+import torch._dynamo
+from torch._C._dynamo import guards
+
+GLOBAL_DICT = {"used": 1, "noise": [0]}
+
+class PlainMod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("bias", torch.ones(4))
+
+    def forward(self, x):
+        return x + self.bias + GLOBAL_DICT["used"]
+
+class BoundMethodMod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("bias", torch.ones(4))
+        self.bound = self.helper
+
+    def helper(self, x):
+        return x + self.bias
+
+    def forward(self, x):
+        return self.bound(x) + GLOBAL_DICT["used"]
+
+def run(cls):
+    torch._dynamo.reset()
+    GLOBAL_DICT["noise"] = [0]
+    m = cls()
+    compiled = torch.compile(m, backend="eager")
+    x = torch.ones(4)
+    expected = m(x)
+    assert torch.equal(compiled(x), expected)
+
+    guards.reset_guard_lookup_stats()
+    for i in range(8):
+        GLOBAL_DICT["noise"] = [i + 1]
+        out = compiled(x)
+        assert torch.equal(out, expected)
+
+    stats = guards.get_guard_lookup_stats()
+    return {
+        "partial_attempt": stats["guard_last_success_actual_partial_attempt"],
+        "partial_enable": stats["guard_last_success_actual_partial_enable"],
+        "partial_hit": stats["guard_last_success_actual_partial_hit"],
+        "partial_disabled": stats["guard_last_success_actual_partial_disabled"],
+        "partial_hot_token_kinds": stats[
+            "guard_last_success_actual_partial_hot_token_kind_counts"
+        ],
+    }
+
+print(json.dumps({
+    "plain": run(PlainMod),
+    "bound": run(BoundMethodMod),
+}))
+"""
+        stats = run_guard_manager_script(
+            script,
+            env_updates={
+                "TORCHDYNAMO_GUARD_FAST_PLAN": "1",
+                "TORCHDYNAMO_GUARD_LOOKUP_STATS": "1",
+            },
+        )
+
+        self.assertGreater(stats["plain"]["partial_attempt"], 0)
+        self.assertGreater(stats["plain"]["partial_enable"], 0)
+        self.assertGreater(stats["plain"]["partial_hit"], 0)
+        self.assertEqual(stats["plain"]["partial_disabled"], 0)
+
+        self.assertGreater(stats["bound"]["partial_attempt"], 0)
+        self.assertGreater(stats["bound"]["partial_enable"], 0)
+        self.assertGreater(stats["bound"]["partial_hit"], 0)
+        self.assertEqual(stats["bound"]["partial_disabled"], 0)
+        self.assertEqual(
+            stats["bound"]["partial_hot_token_kinds"]["BoundMethod"], 0
+        )
+
+    def test_guard_last_success_partial_shadow_full_is_pruned(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+GLOBAL_DICT = {"used": 1, "noise": [0]}
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("bias", torch.ones(4))
+
+    def forward(self):
+        return self.bias + GLOBAL_DICT["used"]
+
+m = Mod()
+compiled = torch.compile(m, backend="eager")
+expected = m.bias + 1
+assert torch.equal(compiled(), expected)
+
+guards.reset_guard_lookup_stats()
+for _ in range(8):
+    GLOBAL_DICT["noise"] = [1]
+    out = compiled()
+    assert torch.equal(out, expected)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "partial_hit": stats["guard_last_success_actual_partial_hit"],
+    "partial_shadow_full_pass": stats[
+        "guard_last_success_actual_partial_shadow_full_pass"
+    ],
+    "partial_shadow_full_fail": stats[
+        "guard_last_success_actual_partial_shadow_full_fail"
+    ],
+    "partial_shadow_full_ns": stats[
+        "guard_last_success_actual_partial_shadow_full_ns"
+    ],
+    "partial_shadow_fail_reasons": stats[
+        "guard_last_success_actual_partial_shadow_fail_reasons"
+    ],
+    "partial_shadow_fail_top_paths": stats[
+        "guard_last_success_actual_partial_shadow_fail_top_paths"
+    ],
+}))
+"""
+        stats = run_guard_manager_script(
+            script,
+            env_updates={
+                "TORCHDYNAMO_GUARD_FAST_PLAN": "1",
+                "TORCHDYNAMO_GUARD_LOOKUP_STATS": "1",
+                "TORCHDYNAMO_GUARD_LAST_SUCCESS_SHADOW_FULL": "1",
+            },
+        )
+
+        self.assertGreater(stats["partial_hit"], 0)
+        self.assertEqual(stats["partial_shadow_full_pass"], 0)
+        self.assertEqual(stats["partial_shadow_full_fail"], 0)
+        self.assertEqual(stats["partial_shadow_full_ns"], 0)
+        self.assertIsInstance(stats["partial_shadow_fail_reasons"], dict)
+        self.assertIsInstance(stats["partial_shadow_fail_top_paths"], dict)
+
+    def test_guard_last_success_full_actual_disabled_with_stable_global_dict(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+GLOBAL_DICT = {"used": 1}
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("bias", torch.ones(4))
+
+    def forward(self):
+        return self.bias + GLOBAL_DICT["used"]
+
+m = Mod()
+compiled = torch.compile(m, backend="eager")
+expected = m.bias + GLOBAL_DICT["used"]
+assert torch.equal(compiled(), expected)
+
+guards.reset_guard_lookup_stats()
+for _ in range(8):
+    out = compiled()
+    assert torch.equal(out, expected)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "actual_attempt": stats["guard_last_success_actual_attempt"],
+    "actual_enable": stats["guard_last_success_actual_enable"],
+    "actual_hit": stats["guard_last_success_actual_hit"],
+    "actual_miss": stats["guard_last_success_actual_miss"],
+    "actual_disabled": stats["guard_last_success_actual_disabled"],
+    "actual_hot_token_count_sum": stats[
+        "guard_last_success_actual_hot_token_count_sum"
+    ],
+    "partial_hit": stats["guard_last_success_actual_partial_hit"],
+    "disabled_reasons": stats["guard_last_success_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertEqual(stats["actual_attempt"], 0)
+        self.assertEqual(stats["actual_enable"], 0)
+        self.assertEqual(stats["actual_hit"], 0)
+        self.assertEqual(stats["actual_miss"], 0)
+        self.assertEqual(stats["actual_disabled"], 0, stats["disabled_reasons"])
+        self.assertEqual(stats["actual_hot_token_count_sum"], 0)
+        self.assertGreaterEqual(stats["partial_hit"], 0)
+
+    def test_guard_last_success_respects_global_tensor_replacement(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+GLOBAL_TENSOR = torch.ones(4)
+
+def fn(x):
+    return x + GLOBAL_TENSOR
+
+compiled = torch.compile(fn, backend="eager")
+x = torch.zeros(4)
+assert torch.equal(compiled(x), torch.ones(4))
+
+guards.reset_guard_lookup_stats()
+for value in (2.0, 3.0, 4.0):
+    GLOBAL_TENSOR = torch.full((4,), value)
+    out = compiled(x)
+    assert torch.equal(out, torch.full((4,), value)), out
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "actual_hit": stats["guard_last_success_actual_hit"],
+    "actual_miss": stats["guard_last_success_actual_miss"],
+    "partial_hit": stats["guard_last_success_actual_partial_hit"],
+    "partial_residual_fail": stats[
+        "guard_last_success_actual_partial_residual_fail"
+    ],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreaterEqual(stats["actual_hit"], 0)
+        self.assertGreaterEqual(stats["actual_miss"], 0)
+        self.assertGreaterEqual(stats["partial_hit"], 0)
+        self.assertEqual(stats["partial_residual_fail"], 0)
+
+    def test_guard_last_success_respects_module_buffer_replacement(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("bias", torch.ones(4))
+
+    def forward(self, x):
+        return x + self.bias
+
+m = Mod()
+compiled = torch.compile(m, backend="eager")
+x = torch.zeros(4)
+assert torch.equal(compiled(x), torch.ones(4))
+
+guards.reset_guard_lookup_stats()
+for value in (2.0, 3.0, 4.0):
+    m.bias = torch.full((4,), value)
+    out = compiled(x)
+    assert torch.equal(out, torch.full((4,), value)), out
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "actual_hit": stats["guard_last_success_actual_hit"],
+    "actual_miss": stats["guard_last_success_actual_miss"],
+    "partial_hit": stats["guard_last_success_actual_partial_hit"],
+    "partial_residual_fail": stats[
+        "guard_last_success_actual_partial_residual_fail"
+    ],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreaterEqual(stats["actual_hit"], 0)
+        self.assertGreaterEqual(stats["actual_miss"], 0)
+        self.assertGreaterEqual(stats["partial_hit"], 0)
+        self.assertEqual(stats["partial_residual_fail"], 0)
+
+    def test_guard_last_success_dynamic_shape_inputs_keep_working(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+def fn(x):
+    return x.sin() + 1
+
+compiled = torch.compile(fn, backend="eager", dynamic=True)
+guards.reset_guard_lookup_stats()
+for batch in (2, 5, 3, 7):
+    x = torch.randn(batch, 4)
+    out = compiled(x)
+    expected = fn(x)
+    assert out.shape == (batch, 4)
+    assert torch.allclose(out, expected)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "actual_hit": stats["guard_last_success_actual_hit"],
+    "actual_miss": stats["guard_last_success_actual_miss"],
+    "partial_hit": stats["guard_last_success_actual_partial_hit"],
+    "tensor_miss_reasons": stats["guard_fastplan_tensor_token_miss_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreaterEqual(stats["actual_hit"], 0)
+        self.assertGreaterEqual(stats["actual_miss"], 0)
+        self.assertGreaterEqual(stats["partial_hit"], 0)
+        self.assertIsInstance(stats["tensor_miss_reasons"], dict)
+
+    def test_guard_last_success_global_dict_ignores_unrelated_version(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+GLOBAL_DICT = {"used": 1, "noise": 0}
+
+def fn(x):
+    return x + GLOBAL_DICT["used"]
+
+compiled = torch.compile(fn, backend="eager")
+x = torch.ones(4)
+assert torch.equal(compiled(x), x + GLOBAL_DICT["used"])
+
+guards.reset_guard_lookup_stats()
+for i in range(5):
+    GLOBAL_DICT["noise"] = i
+    out = compiled(x)
+    assert torch.equal(out, x + GLOBAL_DICT["used"])
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "success": stats["guard_last_success_shadow_success"],
+    "stable": stats["guard_last_success_shadow_stable"],
+    "reset": stats["guard_last_success_shadow_reset"],
+    "mismatch_top_paths": stats["guard_last_success_mismatch_top_paths"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["success"], 0)
+        self.assertGreater(stats["stable"], 0)
+        for path, item in stats["mismatch_top_paths"].items():
+            self.assertFalse(path.startswith("G") and item.get("reason") == "version")
+
+    def test_guard_last_success_supports_default_device_token(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+def fn(x):
+    return x + 1
+
+compiled = torch.compile(fn, backend="eager")
+x = torch.ones(4)
+guards.reset_guard_lookup_stats()
+for _ in range(5):
+    out = compiled(x)
+    assert torch.equal(out, x + 1)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "attempt": stats["guard_last_success_shadow_attempt"],
+    "success": stats["guard_last_success_shadow_success"],
+    "disabled_reasons": stats["guard_last_success_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["attempt"], 0)
+        self.assertGreaterEqual(stats["success"], 0)
+        self.assertEqual(
+            stats["disabled_reasons"].get("unsupported_leaf:DEFAULT_DEVICE", 0),
+            0,
+        )
+
+    def test_guard_last_success_supports_global_state_token(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+def fn(x):
+    return x + 1
+
+compiled = torch.compile(fn, backend="eager")
+x = torch.ones(4)
+guards.reset_guard_lookup_stats()
+for _ in range(5):
+    out = compiled(x)
+    assert torch.equal(out, x + 1)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "attempt": stats["guard_last_success_shadow_attempt"],
+    "success": stats["guard_last_success_shadow_success"],
+    "disabled_reasons": stats["guard_last_success_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["attempt"], 0)
+        self.assertGreaterEqual(stats["success"], 0)
+        self.assertEqual(
+            stats["disabled_reasons"].get("unsupported_leaf:GLOBAL_STATE", 0),
+            0,
+        )
+
+    def test_guard_last_success_supports_torch_function_mode_stack_token(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+def fn(x):
+    return x + 1
+
+compiled = torch.compile(fn, backend="eager")
+x = torch.ones(4)
+guards.reset_guard_lookup_stats()
+for _ in range(5):
+    out = compiled(x)
+    assert torch.equal(out, x + 1)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "attempt": stats["guard_last_success_shadow_attempt"],
+    "success": stats["guard_last_success_shadow_success"],
+    "disabled_reasons": stats["guard_last_success_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["attempt"], 0)
+        self.assertGreaterEqual(stats["success"], 0)
+        self.assertEqual(
+            stats["disabled_reasons"].get(
+                "unsupported_leaf:TORCH_FUNCTION_MODE_STACK", 0
+            ),
+            0,
+        )
+
+    def test_guard_fast_plan_subtree_memo_miss_disables_and_falls_back(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+model = Mod()
+container = torch.nn.Module()
+container.child = model
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", container, GuardManagerType.GUARD_MANAGER
+)
+dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", container.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    container._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_mgr = modules_mgr.getitem_manager(
+    "child",
+    "L['self']._modules['child']",
+    model,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_dict_mgr = child_mgr.get_generic_dict_manager(
+    "L['self']._modules['child'].__dict__",
+    model.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_modules_mgr = child_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['child']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_modules_mgr.add_dict_length_check_guard(
+    len(model._modules),
+    ["len(L['self']._modules['child']._modules) == 1"],
+)
+
+f_locals = {"self": container}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+model.extra = torch.nn.ReLU()
+assert not root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "enabled": stats["guard_fastplan_enabled"],
+    "hit": stats["guard_fastplan_hit"],
+    "miss": stats["guard_fastplan_miss"],
+    "disabled": stats["guard_fastplan_disabled"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["enabled"])
+        self.assertGreater(stats["hit"], 0)
+        self.assertGreater(stats["miss"], 0)
+        self.assertGreater(stats["disabled"], 0)
+
+    def test_guard_fast_plan_subtree_memo_detects_list_item_change(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Leaf(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.items = [1]
+
+class Child(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.leaf = Leaf()
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.child = Child()
+
+model = Mod()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_mgr = modules_mgr.getitem_manager(
+    "child",
+    "L['self']._modules['child']",
+    model.child,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_dict_mgr = child_mgr.get_generic_dict_manager(
+    "L['self']._modules['child'].__dict__",
+    model.child.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_modules_mgr = child_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['child']._modules",
+    model.child._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+leaf_mgr = child_modules_mgr.getitem_manager(
+    "leaf",
+    "L['self']._modules['child']._modules['leaf']",
+    model.child.leaf,
+    GuardManagerType.GUARD_MANAGER,
+)
+leaf_dict_mgr = leaf_mgr.get_generic_dict_manager(
+    "L['self']._modules['child']._modules['leaf'].__dict__",
+    model.child.leaf.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+items_mgr = leaf_dict_mgr.getitem_manager(
+    "items",
+    "L['self']._modules['child']._modules['leaf'].items",
+    model.child.leaf.items,
+    GuardManagerType.GUARD_MANAGER,
+)
+item_mgr = items_mgr.getitem_manager(
+    0,
+    "L['self']._modules['child']._modules['leaf'].items[0]",
+    model.child.leaf.items[0],
+    GuardManagerType.GUARD_MANAGER,
+)
+item_mgr.add_equals_match_guard(
+    model.child.leaf.items[0],
+    ["L['self']._modules['child']._modules['leaf'].items[0] == 1"],
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+model.child.leaf.items[0] = 2
+assert not root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "enabled": stats["guard_fastplan_enabled"],
+    "hit": stats["guard_fastplan_hit"],
+    "miss": stats["guard_fastplan_miss"],
+    "disabled": stats["guard_fastplan_disabled"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["enabled"])
+        self.assertGreater(stats["hit"], 0)
+        self.assertGreater(stats["miss"], 0)
+        self.assertGreater(stats["disabled"], 0)
 
 
 class TypePropagationTests(torch._dynamo.test_case.TestCase):
