@@ -4788,6 +4788,19 @@ def _round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
 
+def _rocm_release_ge(major: int, minor: int, patch: int = 0) -> bool:
+    r = getattr(torch.version, "rocm", None)
+    if r is None:
+        return False
+    try:
+        parts = [int(x) for x in str(r).split(".")[:3]]
+    except ValueError:
+        return False
+    while len(parts) < 3:
+        parts.append(0)
+    return (parts[0], parts[1], parts[2]) >= (major, minor, patch)
+
+
 def _infer_scale_swizzle_impl(
     mat_size: tuple[Any, Any],
     scale_size: tuple[Any, ...],
@@ -4869,7 +4882,34 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
-            # AMD/XPU: no swizzle
+            # AMD: MXFP8 uses plain BlockWise1x32 below 7.14. MXFP4 EXT at runtime ROCm >= 7.13.0;
+            # MXFP8 EXT at runtime ROCm >= 7.14.0. XPU uses plain BlockWise1x32 with no swizzle.
+            if mat_dtype == torch.float4_e2m1fn_x2 and _rocm_release_ge(7, 13, 0):
+                k_blocks_a = ceildiv(K_multiplier * mat_size[1], 32)
+                ext_numel_a = _round_up(mat_size[0], 32) * _round_up(k_blocks_a, 8)
+                k_blocks_b = ceildiv(K_multiplier * mat_size[0], 32)
+                ext_numel_b = _round_up(mat_size[1], 32) * _round_up(k_blocks_b, 8)
+                if eq_fn(scale_numel, ext_numel_a) or eq_fn(
+                    scale_numel, ext_numel_b
+                ):
+                    return (
+                        ScalingType.BlockWiseBlk32Ue8m0_32_8_EXT,
+                        SwizzleType.SWIZZLE_32_4_4,
+                    )
+
+            if mat_dtype == torch.float8_e4m3fn and _rocm_release_ge(7, 14, 0):
+                k_blocks_a = ceildiv(K_multiplier * mat_size[1], 32)
+                ext_numel_a = _round_up(mat_size[0], 32) * _round_up(k_blocks_a, 8)
+                k_blocks_b = ceildiv(K_multiplier * mat_size[0], 32)
+                ext_numel_b = _round_up(mat_size[1], 32) * _round_up(k_blocks_b, 8)
+                if eq_fn(scale_numel, ext_numel_a) or eq_fn(
+                    scale_numel, ext_numel_b
+                ):
+                    return (
+                        ScalingType.BlockWiseBlk32Ue8m0_32_8_EXT,
+                        SwizzleType.SWIZZLE_32_4_4,
+                    )
+
             expected_numel_a = ceildiv(mat_size[0], 32) * K_multiplier * mat_size[1]
             expected_numel_b = ceildiv(K_multiplier * mat_size[1], 32) * mat_size[0]
             if eq_fn(scale_numel, expected_numel_a) or eq_fn(

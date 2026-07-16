@@ -3089,7 +3089,11 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "BlockWise128x128",
           at::blas::ScalingType::BlockWise128x128,
-          "Scale per 128x128 tile");
+          "Scale per 128x128 tile")
+      .value(
+          "BlockWiseBlk32Ue8m0_32_8_EXT",
+          at::blas::ScalingType::BlockWiseBlk32Ue8m0_32_8_EXT,
+          "ROCm gfx950 pre-swizzled Block_32_UE8M0_32_8_EXT scale layout");
 
   py::enum_<at::blas::SwizzleType>(
       py_module, "_SwizzleType", "Supported scale swizzle types")
