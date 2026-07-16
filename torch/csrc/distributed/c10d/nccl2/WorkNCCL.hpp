@@ -85,6 +85,7 @@ class WorkNCCL : public c10d::Work {
 
   friend class ProcessGroupNCCL;
   friend class WorkNCCLQueue;
+  friend class WindowNCCL;
 
  private:
   void setStatus(WorkStatus status) {

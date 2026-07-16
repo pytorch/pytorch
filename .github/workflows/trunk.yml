@@ -42,6 +42,12 @@ jobs:
     with:
       jobs-to-include: ${{ github.event.inputs.jobs-to-include || '' }}
 
+  dynamo-unittest:
+    if: github.repository_owner == 'pytorch'
+    name: dynamo-unittest
+    uses: ./.github/workflows/dynamo-unittest.yml
+    secrets: inherit
+
   llm-td:
     if: github.repository_owner == 'pytorch'
     name: before-test
@@ -64,7 +70,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc,lf,amd-do
+      check_experiments: lf,amd-do
 
   libtorch-linux-jammy-cuda13_0-py3_10-gcc11-debug-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' libtorch-linux-jammy-cuda13.0-py3.10-gcc11-debug ') }}

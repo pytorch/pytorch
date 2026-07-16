@@ -91,6 +91,19 @@ class TestStandaloneInductor(TestCase):
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
+    @unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
+    @config.patch(cpp_wrapper=True)
+    def test_compiled_conv_rejects_mixed_input_weight_devices(self):
+        mod = torch.nn.Conv2d(3, 3, kernel_size=3, padding=1).eval()
+        inp = torch.randn(1, 3, 8, 8)
+        mod_opt = torch.compile(mod, backend="inductor")
+
+        mod.to("cuda")
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected all tensors to be on the same device"
+        ):
+            mod_opt(inp)
+
     def test_inductor_via_fx_dict_input(self):
         mod = MyModule2().eval()
         inp = {"key": [torch.randn(10), torch.randn(10)]}
