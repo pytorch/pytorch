@@ -179,7 +179,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         long_reduction = [
             n
             for n in reduction
-            if V.graph.sizevars.optimization_hint(n.group[-1][-1], fallback=1) > 2048
+            if V.graph.sizevars.optimization_hint(n.group[-1][-1], fallback=1) > 2048  # type: ignore[arg-type]
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         very_large_reduction = [
