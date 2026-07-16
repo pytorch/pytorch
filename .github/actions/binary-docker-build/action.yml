@@ -25,52 +25,95 @@ runs:
     - name: Checkout PyTorch
       uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
-    - name: Calculate docker image
-      id: calculate-docker-image
-      uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-      with:
-        docker-image-name: ${{ inputs.docker-image-name }}
-        docker-build-dir: .ci/docker
-        custom-tag-prefix: ${{ inputs.custom-tag-prefix }}
-        docker-build-script: ${{ inputs.docker-build-dir }}/build.sh
-        always-rebuild: true
-        push: true
+    # Build on a remote BuildKit builder (OSDC/ARC has no host docker daemon)
+    # and push straight to the registry. The referenced <docker-build-dir>/build.sh
+    # honors REMOTE_BUILDKIT (see .ci/docker/build.sh).
+    - name: Set up Docker Buildx (remote, no bootstrap)
+      shell: bash
+      run: |
+        set -ex
+        case "$(uname -m)" in
+          aarch64|arm64) buildkit_addr="tcp://buildkitd-arm64.buildkit:1234" ;;
+          *)             buildkit_addr="tcp://buildkitd-amd64.buildkit:1234" ;;
+        esac
+        docker buildx create \
+          --name remote-buildkit \
+          --driver remote \
+          --use \
+          "${buildkit_addr}"
 
-    - name: Tag and (if WITH_PUSH) push docker image to docker.io
+    - name: Build (and, on push, publish) via remote BuildKit
       env:
+        REMOTE_BUILDKIT: "1"
         DOCKER_TOKEN: ${{ inputs.DOCKER_TOKEN }}
         DOCKER_ID: ${{ inputs.DOCKER_ID }}
         DOCKER_IMAGE_NAME: ${{ inputs.docker-image-name }}
         DOCKER_IMAGE_PREFIX: ${{ inputs.custom-tag-prefix }}
-        CREATED_FULL_DOCKER_IMAGE_NAME: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        DOCKER_BUILD_DIR: ${{ inputs.docker-build-dir }}
       shell: bash
       run: |
-        set -euox pipefail
+        set -euxo pipefail
+
+        # checkout-pytorch may leave the tree owned by a different uid than the
+        # step user on ARC; avoid git's "dubious ownership" error for rev-parse.
+        git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
         GITHUB_REF=${GITHUB_REF:-$(git symbolic-ref -q HEAD || git describe --tags --exact-match)}
         GIT_BRANCH_NAME=${GITHUB_REF##*/}
         GIT_COMMIT_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
         CI_FOLDER_SHA=$(git rev-parse HEAD:.ci/docker)
 
-        DOCKER_IMAGE_NAME_PREFIX=docker.io/pytorch/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}
-
-        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}
-        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_BRANCH_NAME}
-        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}
-        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}
-
-        # Pretty sure Github will mask tokens and I'm not sure if it will even be
-        # printed due to pipe, but just in case
-        set +x
-        if [[ ${WITH_PUSH:-false} == "true" ]]; then
-          echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
-          # Only push the floating base tag from main; release branch rebuilds
-          # must not clobber the image that main CI consumes. The suffixed tags
-          # (branch / commit / .ci/docker hash) are still published so release
-          # builds can pin to ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}.
-          if [[ "${GIT_BRANCH_NAME}" == "main" ]]; then
-            docker push ${DOCKER_IMAGE_NAME_PREFIX}
-          fi
-          docker push ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_BRANCH_NAME}
-          docker push ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}
-          docker push ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}
+        # Same tag set the local-daemon path publishes: branch / commit /
+        # .ci/docker-hash tags are always produced; the floating ${prefix} tag is
+        # only published from main so a release-branch rebuild can't clobber the
+        # image main CI consumes.
+        PREFIX="docker.io/pytorch/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}"
+        TAGS=(
+          -t "${PREFIX}-${GIT_BRANCH_NAME}"
+          -t "${PREFIX}-${GIT_COMMIT_SHA}"
+          -t "${PREFIX}-${CI_FOLDER_SHA}"
+        )
+        if [[ "${GIT_BRANCH_NAME}" == "main" ]]; then
+          TAGS+=(-t "${PREFIX}")
         fi
+
+        # WITH_PUSH gates publishing (build.sh pushes when it is true; PRs just
+        # validate the build). Log in only when we are going to push.
+        set +x
+        if [[ "${WITH_PUSH:-false}" == "true" ]]; then
+          echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+        fi
+        set -x
+
+        # build.sh reads REMOTE_BUILDKIT and buildx-pushes the passed -t tags.
+        run_build() {
+          ".ci/docker/${DOCKER_BUILD_DIR}/build.sh" "${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}" "${TAGS[@]}"
+        }
+
+        # The autoscaled BuildKit pool may be cold / at capacity at start, where
+        # buildx's ~20s connect (gRPC default) fails before scale-up. Retry
+        # connection failures (not build errors) so a capacity-limited build waits
+        # for a free pod instead of hard-failing -- still within the job timeout.
+        attempts="${REMOTE_BUILDKIT_CONNECT_ATTEMPTS:-360}"
+        delay="${REMOTE_BUILDKIT_CONNECT_DELAY:-15}"
+        for attempt in $(seq 1 "${attempts}"); do
+          build_log="$(mktemp)"
+          set +e
+          run_build 2>&1 | tee "${build_log}"
+          rc="${PIPESTATUS[0]}"
+          set -e
+          if [[ "${rc}" -eq 0 ]]; then
+            rm -f "${build_log}"
+            break
+          fi
+          if [[ "${attempt}" -lt "${attempts}" ]] && grep -qiE \
+            "waiting for connection|context deadline exceeded|server preface|failed to (dial|list workers)|connection (refused|reset)|no such host|transport: Error|i/o timeout|use of closed network connection|EOF" \
+            "${build_log}"; then
+            echo "Remote BuildKit not ready yet (attempt ${attempt}/${attempts}); retrying in ${delay}s..." >&2
+            rm -f "${build_log}"
+            sleep "${delay}"
+            continue
+          fi
+          rm -f "${build_log}"
+          exit "${rc}"
+        done
