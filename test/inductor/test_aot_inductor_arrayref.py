@@ -102,6 +102,58 @@ class AOTInductorArrayRefTestsTemplate(AOTInductorTestsTemplate):
             "borrow_arrayref_tensor_as_tensor("
         ).run(code)
 
+    def test_thread_local_cached_output_uses_brace_init(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                z = torch.matmul(x, y)
+                return (z.view(torch.int32),)
+
+        example_inputs = (
+            torch.randn(4, 4, device=self.device),
+            torch.randn(4, 4, device=self.device),
+        )
+        model = Model()
+        with config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+
+        FileCheck().check("ThreadLocalCachedOutput").check_regex(
+            r"cached_output_\d+\{RAIIAtenTensorHandle\("
+        ).run(code)
+
+    def test_thread_local_cached_output_uses_brace_init_multi_output(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                z = torch.matmul(x, y)
+                return z.view(torch.int32), z.view(torch.float16)
+
+        example_inputs = (
+            torch.randn(4, 4, device=self.device),
+            torch.randn(4, 4, device=self.device),
+        )
+        model = Model()
+        with config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+
+        FileCheck().check("ThreadLocalCachedOutput").check_regex(
+            r"cached_output_\d+\{RAIIAtenTensorHandle\("
+        ).check("ThreadLocalCachedOutput").check_regex(
+            r"cached_output_\d+\{RAIIAtenTensorHandle\("
+        ).run(code)
+
     def test_simple_v2_interface(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -169,8 +221,6 @@ CPU_TEST_FAILURES = {
     # minimal arrayref interface only works with CPU; test crashes.
     # https://github.com/pytorch/pytorch/issues/122983
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
-    # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
-    "test_normal_functional": fail_stack_allocation(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
     # segfault

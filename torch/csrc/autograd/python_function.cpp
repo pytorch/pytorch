@@ -4,6 +4,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/SequenceNumber.h>
+#include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <structmember.h>
@@ -118,8 +119,7 @@ static PyObject* unpack_saved_variables(
     auto unpacked_var = saved_variables[i].unpack(saved_for);
     THPObjectPtr value;
     if (!unpacked_var.defined()) {
-      Py_INCREF(Py_None);
-      value = Py_None;
+      value = Py_NewRef(Py_None);
     } else {
       value = unpack_fn(unpacked_var);
     }
@@ -263,27 +263,30 @@ auto PyNode::apply_with_saved_impl(
   for (const auto i : c10::irange(is_variable_input.size())) {
     if (!is_variable_input[i]) {
       // input at i is not a variable, skip index
-      PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, Py_None);
+      PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, Py_NewRef(Py_None));
       offset++;
       continue;
     }
 
     const auto& input_info = input_infos[i - offset];
 
-    PyObject* device(THPDevice_New(input_info.device));
+    THPObjectPtr device(THPDevice_New(input_info.device));
     if (!device)
       throw_python_error();
     // Metadata is a tuple of 4 elements: (layout, device, dtype, size)
-    PyObject* fwdInputMetadata = PyTuple_Pack(
-        4,
-        autograd::utils::wrap(input_info.layout),
-        device,
-        autograd::utils::wrap(input_info.scalar_type),
-        to_py_size(input_info.size));
+    THPObjectPtr fwdInputMetadata(PyTuple_New(4));
     if (!fwdInputMetadata)
       throw python_error();
+    PyTuple_SET_ITEM(
+        fwdInputMetadata.get(), 0, autograd::utils::wrap(input_info.layout));
+    PyTuple_SET_ITEM(fwdInputMetadata.get(), 1, device.release());
+    PyTuple_SET_ITEM(
+        fwdInputMetadata.get(),
+        2,
+        autograd::utils::wrap(input_info.scalar_type));
+    PyTuple_SET_ITEM(fwdInputMetadata.get(), 3, to_py_size(input_info.size));
 
-    PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, fwdInputMetadata);
+    PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, fwdInputMetadata.release());
   }
   THPObjectPtr saved_tensors(unpack_saved_variables(
       py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
@@ -291,11 +294,13 @@ auto PyNode::apply_with_saved_impl(
   auto [bwd_idx, maybe_bwd_state_idx, opaque_obj_indices] =
       saved.retrieve_pynode_objs(this);
 
-  PyObject* backward_state_idx = Py_None;
+  THPObjectPtr backward_state_idx;
   if (maybe_bwd_state_idx.has_value()) {
     backward_state_idx = THPUtils_packUInt64(maybe_bwd_state_idx.value());
     // this might be simplifiable now that we no longer inline
     Py_CLEAR(py_fn->compiled_autograd_backward_state);
+  } else {
+    backward_state_idx = Py_NewRef(Py_None);
   }
 
   THPObjectPtr opaque_indices_list(
@@ -319,7 +324,7 @@ auto PyNode::apply_with_saved_impl(
       saved_tensors.get(),
       bwd_idx,
       pyobj(),
-      backward_state_idx,
+      backward_state_idx.get(),
       opaque_indices_list.get()));
 
   if (!r)
@@ -478,7 +483,7 @@ PyObject* PyNode::to_py_args(
   };
 
   auto num_inputs = inputs.size();
-  PyObject* pyInputs = PyTuple_New(static_cast<Py_ssize_t>(num_inputs));
+  THPObjectPtr pyInputs(PyTuple_New(static_cast<Py_ssize_t>(num_inputs)));
   if (!pyInputs)
     throw_python_error();
   auto& output_info = py_fn->output_info;
@@ -494,10 +499,10 @@ PyObject* PyNode::to_py_args(
     }
     if (!input)
       throw_python_error();
-    PyTuple_SET_ITEM(pyInputs, i, input);
+    PyTuple_SET_ITEM(pyInputs.get(), i, input);
   }
 
-  return pyInputs;
+  return pyInputs.release();
 }
 
 variable_list PyNode::to_variable_list(
@@ -654,7 +659,7 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
 // mappings for output tensors as well.
 static void _wrap_outputs(
     THPFunction* self,
-    const variable_list& input_vars,
+    at::ArrayRef<const Variable*> input_vars,
     PyObject* raw_output,
     PyObject* outputs,
     bool is_executable,
@@ -707,8 +712,7 @@ static void _wrap_outputs(
         }
         variable_idx++;
       } else {
-        Py_INCREF(Py_None);
-        input = Py_None;
+        input = Py_NewRef(Py_None);
       }
       PyTuple_SET_ITEM(pyInputs.get(), i, input);
     }
@@ -776,7 +780,7 @@ static void _wrap_outputs(
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
-    const auto& wrapped_output = wrapped_outputs[i];
+    auto& wrapped_output = wrapped_outputs[i];
     // Keep the non-tensor outputs as is.
     if (!THPVariable_Check(obj) || !wrapped_output.has_value()) {
       if (is_executable) {
@@ -797,7 +801,8 @@ static void _wrap_outputs(
             is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
       }
-      PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_output.value()));
+      PyTuple_SetItem(
+          outputs, i, THPVariable_Wrap(std::move(wrapped_output.value())));
     }
   }
 }
@@ -928,7 +933,9 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
 
 struct UnpackedInput {
   THPObjectPtr input_tuple;
-  variable_list input_vars;
+  // Borrowed from Tensor arguments kept alive by input_tuple. Avoids copying
+  // at::Tensor handles on the common apply path.
+  c10::SmallVector<const Variable*, 24> input_vars;
   // record_function_inputs is for RECORD_FUNCTION only
   std::vector<c10::IValue> record_function_inputs;
 };
@@ -941,16 +948,29 @@ struct InputFlags {
 };
 
 namespace {
-template <bool enforce_variables>
-std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
+edge_list collect_next_edges(at::ArrayRef<const Variable*> input_vars) {
+  edge_list next_edges;
+  next_edges.reserve(input_vars.size());
+  for (const auto* input_var : input_vars) {
+    next_edges.emplace_back(torch::autograd::impl::gradient_edge(*input_var));
+  }
+  return next_edges;
+}
+
+std::pair<UnpackedInput, InputFlags> unpack_input(
+    PyObject* args,
+    bool fill_record_function_inputs) {
   UnpackedInput unpacked;
   InputFlags flags;
 
   auto num_args = PyTuple_GET_SIZE(args);
   unpacked.input_tuple = PyTuple_New(num_args);
   flags.needs_input_grad = PyTuple_New(num_args);
+  unpacked.input_vars.reserve(num_args);
+  flags.is_variable_input.reserve(num_args);
   bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
       torch::autograd::profiler::getProfilerConfig().report_input_shapes;
+  bool any_requires_grad = false;
 
   for (const auto i : c10::irange(num_args)) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
@@ -958,15 +978,8 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
     bool is_variable = THPVariable_Check(arg);
     flags.is_variable_input.push_back(is_variable);
     if (!is_variable) {
-      // TODO: remove this code path once Variable and Tensor are merged in
-      // Python
-      if (enforce_variables) {
-        THPUtils_setError(
-            "expected a Tensor argument, but got ", THPUtils_typename(arg));
-        throw python_error();
-      }
-      Py_INCREF(Py_False);
-      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
+      // Non-tensor argument: it can't require grad.
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_NewRef(Py_False));
 
       if (profiler_need_input) {
         // The following conversion from PyObject to IValue is expensive
@@ -979,21 +992,25 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
       }
     } else {
       const auto& tensor = THPVariable_Unpack(arg);
-      unpacked.input_vars.push_back(tensor);
-      PyObject* needs_grad = tensor.requires_grad() ? Py_True : Py_False;
+      unpacked.input_vars.push_back(&tensor);
+      const bool requires_grad = tensor.requires_grad();
+      any_requires_grad |= requires_grad;
+      PyObject* needs_grad = requires_grad ? Py_True : Py_False;
       Py_INCREF(needs_grad);
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
-      unpacked.record_function_inputs.emplace_back(tensor);
+      // tensor -> IValue conversion is expensive, only do it if we need it.
+      if (fill_record_function_inputs) {
+        unpacked.record_function_inputs.emplace_back(tensor);
+      }
     }
     Py_INCREF(arg);
     PyTuple_SET_ITEM(unpacked.input_tuple.get(), i, arg);
   }
 
-  flags.is_executable =
-      GradMode::is_enabled() && any_variable_requires_grad(unpacked.input_vars);
-  flags.next_edges =
-      (flags.is_executable ? collect_next_edges(unpacked.input_vars)
-                           : edge_list());
+  flags.is_executable = GradMode::is_enabled() && any_requires_grad;
+  flags.next_edges = flags.is_executable
+      ? collect_next_edges(unpacked.input_vars)
+      : edge_list();
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
@@ -1049,7 +1066,7 @@ void _append_subgraph(
 torch::jit::Node* _trace_pre_record(
     PyObject* op_obj,
     PyObject* input_objects,
-    const variable_list& input_vars) {
+    at::ArrayRef<const Variable*> input_vars) {
   if (!jit::tracer::isTracing()) {
     return nullptr;
   }
@@ -1073,14 +1090,19 @@ torch::jit::Node* _trace_pre_record(
 
   Py_INCREF(op_obj);
   auto pyobj = THPObjectPtr(op_obj);
+  variable_list owned;
+  owned.reserve(input_vars.size());
+  for (const auto* input_var : input_vars) {
+    owned.emplace_back(*input_var);
+  }
   return jit::tracer::preRecordPythonTrace(
-      std::move(pyobj), arg_types, input_vars, std::move(scalar_args));
+      std::move(pyobj), arg_types, owned, std::move(scalar_args));
 }
 
 void _trace_post_record(
     torch::jit::Node* node,
     PyObject* op_obj,
-    const variable_list& input_vars,
+    at::ArrayRef<const Variable*> /* input_vars */,
     PyObject* output_objects,
     bool is_inplace,
     bool unpack_output) {
@@ -1177,8 +1199,8 @@ PyObject* process_outputs(
   if (is_executable) {
     grad_fn->input_info.clear();
     grad_fn->input_info.reserve(unpacked.input_vars.size());
-    for (auto& var : unpacked.input_vars) {
-      grad_fn->input_info.emplace_back(var);
+    for (const auto* var : unpacked.input_vars) {
+      grad_fn->input_info.emplace_back(*var);
     }
   }
 
@@ -1361,8 +1383,7 @@ static PyObject* resolve_kwargs_to_positional(
     PyObject* args,
     PyObject* kwargs) {
   if (!kwargs || PyDict_Size(kwargs) == 0) {
-    Py_INCREF(args);
-    return args;
+    return Py_NewRef(args);
   }
 
   THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
@@ -1513,16 +1534,22 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
 
   // save a local copy of seq_id before it gets incremented
   auto seq_id = at::sequence_number::peek();
-  auto info_pair = unpack_input<false>(inputs);
+  at::RecordFunction guard(at::RecordScope::FUNCTION);
+  const bool fill_record_function_inputs =
+      guard.isActive() && guard.needsInputs();
+  auto info_pair = unpack_input(inputs, fill_record_function_inputs);
   UnpackedInput& unpacked_input = info_pair.first;
   InputFlags& input_info = info_pair.second;
 
   // Call record function after all the inputs have been decoded, but
   // before context has been allocated.
-  RECORD_FUNCTION(
-      ((PyTypeObject*)cls)->tp_name,
-      unpacked_input.record_function_inputs,
-      seq_id);
+  if (guard.isActive()) {
+    ::at::detail::record_function_with_scope(
+        guard,
+        ((PyTypeObject*)cls)->tp_name,
+        unpacked_input.record_function_inputs,
+        seq_id);
+  }
 
   const auto& functorch_tls = at::functorch::functorchTLSAccessor();
   if (functorch_tls) {
@@ -1798,17 +1825,17 @@ PyObject* THPFunction_get_compiled_autograd_symints(
   HANDLE_TH_ERRORS
   auto self = (THPFunction*)_self;
   auto size = self->compiled_autograd_symints.size();
-  PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(size));
+  THPObjectPtr result(PyTuple_New(static_cast<Py_ssize_t>(size)));
   if (!result) {
     throw python_error();
   }
   for (const auto i : c10::irange(size)) {
     PyTuple_SET_ITEM(
-        result,
+        result.get(),
         i,
         py::cast(self->compiled_autograd_symints[i]).release().ptr());
   }
-  return result;
+  return result.release();
   END_HANDLE_TH_ERRORS
 }
 

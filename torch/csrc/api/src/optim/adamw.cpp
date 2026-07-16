@@ -82,7 +82,7 @@ Tensor AdamW::step(LossClosure closure) {
       auto param_state = state_.find(p.unsafeGetTensorImpl());
       auto& options = static_cast<AdamWOptions&>(group.options());
 
-      // Perform stepweight decay
+      // Perform step weight decay
       if (options.weight_decay() != 0) {
         p.mul_(1 - options.lr() * options.weight_decay());
       }
