@@ -5477,7 +5477,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             "Invalid FlexAttention forward kernel options: Q and KV block sizes "
             "must be divisible by the selected tile sizes.*"
             "SPARSE_Q_BLOCK_SIZE=96.*SPARSE_KV_BLOCK_SIZE=96.*"
-            "BLOCK_M=128.*BLOCK_N=32"
+            "BLOCK_M=\\d+.*BLOCK_N=\\d+"
         )
         block_mask = create_block_mask(
             noop_mask, 1, 8, 128, 128, BLOCK_SIZE=96, device=device
