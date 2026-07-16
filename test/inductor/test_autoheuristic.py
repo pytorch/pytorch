@@ -206,6 +206,36 @@ class AutoHeuristicTest(TestCase):
         # because AutoHeuristics makes the decision without benchmarking
         self.assertEqual(counters["inductor"]["pad_mm_bench"], 0)
 
+    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
+    @unittest.skipIf(not IS_H100 and not IS_A100, "heuristic only run on H100")
+    @inductor_config.patch("deterministic_ops.pad_mm", True)
+    @inductor_config.patch("autoheuristic_use.pad_mm", True)
+    def test_pad_mm_autoheuristic_enabled_via_deterministic_ops(self):
+        """Test that pad_mm AutoHeuristics works in deterministic mode."""
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+
+        def f(a, b):
+            return torch.mm(a, b)
+
+        cf = torch.compile(f)
+        # Use shapes that would normally trigger padding but aren't well-aligned
+        a = torch.randn(2047, 2048, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(2048, 2049, device=GPU_TYPE, dtype=torch.float16)
+
+        # Run the compiled function
+        result = cf(a, b)
+
+        # Verify correctness with tolerance for potential padding differences
+        expected = torch.mm(a, b)
+        torch.testing.assert_close(result, expected, atol=0.1, rtol=0.05)
+
+        # In deterministic mode with AutoHeuristics enabled,
+        # we should not do any benchmarking (pad_mm_bench should stay 0)
+        # because AutoHeuristics makes the decision without benchmarking
+        self.assertEqual(counters["inductor"]["pad_mm_bench"], 0)
+
     @inductor_config.patch(deterministic=True)
     def test_use_autoheuristic_pad_mm_enabled_in_deterministic_mode(self):
         inductor_config.autoheuristic_use.pad_mm = None
