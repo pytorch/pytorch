@@ -1,7 +1,7 @@
 ubuntu|pytorch|apex|release/1.11.0|c0f56f7eccd343a08a1b0d0be59f1e7e0e9b90b7|https://github.com/ROCm/apex
 centos|pytorch|apex|release/1.11.0|c0f56f7eccd343a08a1b0d0be59f1e7e0e9b90b7|https://github.com/ROCm/apex
-ubuntu|pytorch|torchvision|release/0.26|f37951448379bca5dfb29f6f345a80e721ea477c|https://github.com/ROCm/vision
-centos|pytorch|torchvision|release/0.26|f37951448379bca5dfb29f6f345a80e721ea477c|https://github.com/ROCm/vision
+ubuntu|pytorch|torchvision|release/0.26|3d50b2155c02d26e78b9c09baf99f5c707d70215|https://github.com/ROCm/vision
+centos|pytorch|torchvision|release/0.26|3d50b2155c02d26e78b9c09baf99f5c707d70215|https://github.com/ROCm/vision
 ubuntu|pytorch|torchdata|release/0.11|377e64c1be69a9be6649d14c9e3664070323e464|https://github.com/pytorch/data
 centos|pytorch|torchdata|release/0.11|377e64c1be69a9be6649d14c9e3664070323e464|https://github.com/pytorch/data
 ubuntu|pytorch|torchaudio|release/2.11|34c52a67e8941bbd8e6adaca0eb0b9eabec11d78|https://github.com/pytorch/audio
