@@ -10230,6 +10230,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         y = fn_compiled(x)
         self.assertTrue(y is not x)
 
+    def test_constant_pad_nd_fused_with_split_reduction(self):
+        # https://github.com/pytorch/pytorch/issues/<你的issue号>
+        # The pad's fill value used to be dropped when the pad was fused with
+        # the second stage of a split reduction: the body's load is served
+        # from the CSE store cache (producer fused into the same kernel), so
+        # no tl.load is emitted and the masked-load `other` never applies.
+        def fn(mask):
+            lengths = mask.sum(dim=-1, dtype=torch.int32)
+            return F.pad(torch.cumsum(lengths, dim=0, dtype=torch.int32), (1, 0))
+
+        self.common(fn, (torch.ones(1, 16384, dtype=torch.bool),))
+
     def test_l1_loss(self):
         def fn(a, b):
             return torch.nn.functional.l1_loss(a, b), torch.nn.functional.mse_loss(a, b)
