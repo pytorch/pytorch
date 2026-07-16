@@ -9,6 +9,11 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
 from torch.distributed._local_tensor import LocalTensor, maybe_run_for_local_tensor
+from torch.distributed._stateful_rng import (
+    RNGIndexBlock,
+    set_stateful_rng_metadata,
+    StatefulRNGMode,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor import (
@@ -138,10 +143,10 @@ class DistTensorRandomInitTest(DTensorTestBase):
         torch.manual_seed(42)
         rng = torch.Generator(device=self.device_type).manual_seed(42)
         t1 = torch.distributed.tensor.empty(
-            (8, 3), device_mesh=device_mesh, placements=[Shard(0)]
+            (8, 3), device_mesh=device_mesh, placements=[Shard(1)]
         )
         t2 = torch.distributed.tensor.empty(
-            (8, 3), device_mesh=device_mesh, placements=[Shard(0)]
+            (8, 3), device_mesh=device_mesh, placements=[Shard(1)]
         )
         for i in range(2):
             # run a second time, to make sure that `rng`'s offset-state is advancing on the second usage
@@ -380,7 +385,7 @@ class DistTensorStatefulRNGInitTest(DTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    def _assert_init_matches_dense(self, device_mesh, shape, init_fn):
+    def _assert_init_matches_dense(self, device_mesh, shape, shard_dim, init_fn):
         device = torch.device("cuda", torch.cuda.current_device())
 
         torch.manual_seed(123)
@@ -393,7 +398,7 @@ class DistTensorStatefulRNGInitTest(DTensorTestBase):
         actual = torch.distributed.tensor.empty(
             shape,
             device_mesh=device_mesh,
-            placements=[Shard(0)],
+            placements=[Shard(shard_dim)],
         )
         init_fn(actual)
         actual_state = torch.cuda.get_rng_state(device)
@@ -402,6 +407,51 @@ class DistTensorStatefulRNGInitTest(DTensorTestBase):
         self.assertEqual(actual.full_tensor(), expected, rtol=0, atol=0)
         self.assertEqual(actual_state, expected_state)
         self.assertEqual(actual_next, expected_next, rtol=0, atol=0)
+
+    def test_stateful_rng_tensor_protocol(self):
+        device = torch.device("cuda", torch.cuda.current_device())
+        index_blocks = (
+            RNGIndexBlock(2, 2, 5, 3),
+            RNGIndexBlock(20, 3, 3, 1),
+        )
+        global_indices = torch.tensor([2, 3, 7, 8, 12, 13, 20, 21, 22], device=device)
+        init_fns = {
+            "normal": partial(torch.nn.init.normal_, mean=0.1, std=0.02),
+            "uniform": partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
+            "trunc_normal": partial(
+                torch.nn.init.trunc_normal_,
+                mean=0.0,
+                std=0.02,
+                a=-0.06,
+                b=0.06,
+            ),
+        }
+        for name, init_fn in init_fns.items():
+            with self.subTest(name=name):
+                torch.manual_seed(123)
+                expected = torch.empty(24, device=device)
+                init_fn(expected)
+                expected_state = torch.cuda.get_rng_state(device)
+
+                torch.manual_seed(123)
+                actual = torch.empty(global_indices.numel(), device=device)
+                set_stateful_rng_metadata(actual, 24, index_blocks)
+                with StatefulRNGMode():
+                    init_fn(actual)
+
+                self.assertEqual(actual, expected[global_indices], rtol=0, atol=0)
+                self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
+
+        torch.manual_seed(123)
+        torch.empty(24, device=device).uniform_()
+        expected_state = torch.cuda.get_rng_state(device)
+
+        torch.manual_seed(123)
+        empty = torch.empty(0, device=device)
+        set_stateful_rng_metadata(empty, 24, ())
+        with StatefulRNGMode():
+            empty.uniform_()
+        self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -419,14 +469,17 @@ class DistTensorStatefulRNGInitTest(DTensorTestBase):
             ),
         }
         for name, init_fn in init_fns.items():
-            with self.subTest(name=name):
-                # The dense launch uses three blocks while each local shard uses two.
-                self._assert_init_matches_dense(device_mesh, (37, 19), init_fn)
+            for shard_dim in range(3):
+                with self.subTest(name=name, shard_dim=shard_dim):
+                    self._assert_init_matches_dense(
+                        device_mesh, (5, 37, 19), shard_dim, init_fn
+                    )
 
         with self.subTest(name="empty_local_shard"):
             self._assert_init_matches_dense(
                 device_mesh,
-                (1, 19),
+                (3, 1, 7),
+                1,
                 partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
             )
 
@@ -447,6 +500,7 @@ class DistTensorStatefulRNGInitTest(DTensorTestBase):
         self._assert_init_matches_dense(
             self.build_device_mesh(),
             shape,
+            1,
             partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
         )
 

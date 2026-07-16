@@ -7,6 +7,7 @@ from torch.distributed._local_tensor import (
     enabled_local_tensor_mode,
     maybe_run_for_local_tensor,
 )
+from torch.distributed._stateful_rng import _run_stateful_rng_op, RNGIndexBlock
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._op_schema import ArgsType, KwargsType
@@ -16,7 +17,7 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
 )
 from torch.distributed.tensor._random import is_rng_supported_mesh
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
-from torch.distributed.tensor.placement_types import Placement
+from torch.distributed.tensor.placement_types import Placement, Shard
 
 
 aten = torch.ops.aten
@@ -31,7 +32,10 @@ def _contiguous_stride(shape: torch.Size) -> tuple[int, ...]:
     return tuple(reversed(stride))
 
 
-def _start_index_for_flat_slice(tensor: DTensor) -> int | None:
+def _rng_index_blocks(tensor: DTensor) -> tuple[RNGIndexBlock, ...] | None:
+    if tensor.device_mesh.ndim != 1:
+        return None
+
     local_shape, global_offset = compute_local_shape_and_global_offset(
         tensor.shape,
         tensor.device_mesh,
@@ -42,17 +46,29 @@ def _start_index_for_flat_slice(tensor: DTensor) -> int | None:
             f"Local shape mismatch for {tensor.shape}: metadata={local_shape}, "
             f"actual={tuple(tensor._local_tensor.shape)}"
         )
-    if len(tensor.shape) > 1 and (
-        any(global_offset[dim] != 0 for dim in range(1, len(tensor.shape)))
-        or any(
-            local_shape[dim] != tensor.shape[dim] for dim in range(1, len(tensor.shape))
-        )
-    ):
+    if not enabled_local_tensor_mode() and tensor._local_tensor.numel() == 0:
+        return ()
+    placement = tensor.placements[0]
+    if placement.is_replicate():
+        return (RNGIndexBlock(0, tensor.numel(), tensor.numel(), 1),)
+    if not isinstance(placement, Shard):
         return None
-    return sum(
-        offset * stride
-        for offset, stride in zip(global_offset, _contiguous_stride(tensor.shape))
+
+    shard_dim = placement.dim
+    if shard_dim < 0:
+        shard_dim += tensor.ndim
+    if shard_dim < 0 or shard_dim >= tensor.ndim:
+        return None
+    global_stride = _contiguous_stride(tensor.shape)
+    start_index = sum(
+        offset * stride for offset, stride in zip(global_offset, global_stride)
     )
+    block_size = local_shape[shard_dim] * global_stride[shard_dim]
+    block_stride = tensor.shape[shard_dim] * global_stride[shard_dim]
+    num_blocks = 1
+    for size in local_shape[:shard_dim]:
+        num_blocks *= size
+    return (RNGIndexBlock(start_index, block_size, block_stride, num_blocks),)
 
 
 def _sync_rng_state_from_mesh_root(tensor: DTensor, state: torch.Tensor) -> None:
@@ -65,22 +81,40 @@ def _sync_rng_state_from_mesh_root(tensor: DTensor, state: torch.Tensor) -> None
 
 
 @maybe_run_for_local_tensor
-def _run_flat_slice_with_generator(
+def _run_flat_slice(
     local_tensor: torch.Tensor,
     total_numel: int,
-    start_index: int,
+    start_indices: tuple[int, ...],
+    block_sizes: tuple[int, ...],
+    block_strides: tuple[int, ...],
+    num_blocks: tuple[int, ...],
     flat_slice_op_call: torch._ops.OpOverload,
-    generator: torch.Generator,
-    generator_state: torch.Tensor,
+    generator: torch.Generator | None,
+    generator_state: torch.Tensor | None,
     op_args: tuple[object, ...],
 ) -> torch.Tensor:
-    generator.set_state(generator_state)
-    return flat_slice_op_call(
+    if generator_state is not None:
+        if generator is None:
+            raise AssertionError
+        generator.set_state(generator_state)
+    index_blocks = tuple(
+        RNGIndexBlock(start_index, block_size, block_stride, block_count)
+        for start_index, block_size, block_stride, block_count in zip(
+            start_indices,
+            block_sizes,
+            block_strides,
+            num_blocks,
+            strict=True,
+        )
+        if block_size > 0 and block_count > 0
+    )
+    return _run_stateful_rng_op(
         local_tensor,
         total_numel,
-        start_index,
+        index_blocks,
+        flat_slice_op_call,
+        generator,
         *op_args,
-        generator=generator,
     )
 
 
@@ -107,8 +141,8 @@ def _run_dtensor_local_rng_op(
         )
 
     total_numel = tensor.numel()
-    start_index = _start_index_for_flat_slice(tensor)
-    if start_index is None:
+    index_blocks = _rng_index_blocks(tensor)
+    if index_blocks is None:
         if not random._rng_tracker and is_rng_supported_mesh(tensor.device_mesh):
             random._rng_tracker = random.OffsetBasedRNGTracker(tensor.device_mesh)
         tracker = random._rng_tracker
@@ -129,22 +163,26 @@ def _run_dtensor_local_rng_op(
         tracker._set_device_state(device_state)
 
     if generator is not None and enabled_local_tensor_mode():
-        _run_flat_slice_with_generator(
+        _run_flat_slice(
             local_tensor,
             total_numel,
-            start_index,
+            tuple(block.start_index for block in index_blocks),
+            tuple(block.block_size for block in index_blocks),
+            tuple(block.block_stride for block in index_blocks),
+            tuple(block.num_blocks for block in index_blocks),
             flat_slice_op_call,
             generator,
             generator.get_state(),
             op_args,
         )
     else:
-        flat_slice_op_call(
+        _run_stateful_rng_op(
             local_tensor,
             total_numel,
-            start_index,
+            index_blocks,
+            flat_slice_op_call,
+            generator,
             *op_args,
-            generator=generator,
         )
     return tensor
 
