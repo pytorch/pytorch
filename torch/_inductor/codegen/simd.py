@@ -11,7 +11,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import Any, cast, Generic, NamedTuple, TYPE_CHECKING, TypeAlias
+from typing import Any, cast, Generic, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVar
 
 import sympy
@@ -99,26 +99,6 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 pexpr = PythonPrinter().doprint
 
 all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
-
-
-class FullRangeIndexTerm(NamedTuple):
-    """One term in the recorded basis for a root's full logical index.
-
-    ``length`` is this term's extent in the split of the owning
-    IterationRangesRoot. ``divisor`` is its stride in that root's flattened
-    logical index. For example, splitting a root of size 4 into [2, 2] gives
-    terms (divisor=2, length=2) and (divisor=1, length=2), reconstructing
-    ``full_index = 2 * outer + inner``.
-
-    Represents ``lookup(divisor, length).symbol() * divisor`` in the
-    reconstructed full index.
-    """
-
-    divisor: sympy.Expr
-    length: sympy.Expr
-
-
-FullRangeIndexBasis: TypeAlias = tuple[FullRangeIndexTerm, ...]
 
 
 def get_max_tiles(default: int = 2) -> int:
@@ -216,10 +196,7 @@ class IterationRangesRoot(IterationRanges):
         self.index = index
         # Store all the nodes in one flat list
         self.nodes: dict[sympy.Expr, IterationRangesEntry] = {}
-        # Chosen coordinate basis for this root's full logical index. self.nodes
-        # records all entries seen so far; this records which full-covering
-        # set_ranges() split to reuse for later full-range mappings.
-        self._full_range_index_basis: FullRangeIndexBasis | None = None
+        self._full_range_split: tuple[IterationRangesEntry, ...] | None = None
         # This is for re-ordering program ID in triton mm template
         # pid_cache["tl.program_id(0)"] = pid_m
         self.pid_cache: dict[str, str] = pid_cache
@@ -334,22 +311,22 @@ class IterationRangesRoot(IterationRanges):
         the full index through div/mod expressions.
         """
         sizevars = V.graph.sizevars
-        if self._full_range_index_basis is not None:
+        if self._full_range_split is not None:
             return
         if not sizevars.statically_known_equals(
             sympy_product(entry.length for entry in entries), self.numel
         ):
             return
 
-        split = [
-            FullRangeIndexTerm(entry.divisor, entry.length)
+        split = tuple(
+            entry
             for entry in entries
             if not sizevars.statically_known_equals(entry.length, sympy.S.One)
-        ]
+        )
         if len(split) <= 1:
             return
 
-        self._full_range_index_basis = tuple(split)
+        self._full_range_split = split
 
     def split_expr_for_full_range(
         self, entry: IterationRangesEntry
@@ -361,12 +338,12 @@ class IterationRangesRoot(IterationRanges):
             and sizevars.statically_known_equals(entry.length, self.numel)
         ):
             return None
-        if self._full_range_index_basis is None:
+        if self._full_range_split is None:
             return None
         return sum(
             (
-                self.lookup(term.divisor, term.length).symbol() * term.divisor
-                for term in self._full_range_index_basis
+                split_entry.symbol() * split_entry.divisor
+                for split_entry in self._full_range_split
             ),
             sympy.S.Zero,
         )
@@ -3767,9 +3744,8 @@ class SIMDScheduling(BaseScheduling):
             is_persistent_reduction = (
                 features.is_reduction()
                 and V.choices.should_use_persistent_reduction(
-                    features,
+                    features.with_tiling_scores(tiling_scores),
                     cooperative_reduction=False,
-                    tiling_scores=tiling_scores,
                 )
             )
             node_schedule_map[pn] = NodeInfo(

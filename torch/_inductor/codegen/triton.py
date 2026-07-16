@@ -119,6 +119,7 @@ from .simd import (
     SIMDKernel,
     SIMDScheduling,
 )
+from .simd_kernel_features import tiling_scores_suggest_inner_reduction
 from .triton_utils import (
     config_of,
     equal_1_arg_indices,
@@ -148,31 +149,6 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
-
-
-INNER_REDUCTION_RATIO_THRESHOLD = 32
-INNER_REDUCTION_SMALL_RBLOCK_RATIO_THRESHOLD = 16
-INNER_REDUCTION_SMALL_RBLOCK_MAX = 512
-
-
-def tiling_scores_suggest_inner_reduction(
-    tiling_scores: dict[str, sympy.Expr], reduction_numel: sympy.Expr
-) -> bool:
-    """Return whether tiling scores justify treating a reduction as inner."""
-    x_score = max(V.graph.sizevars.optimization_hint(tiling_scores["x"], fallback=1), 1)
-    r_score = V.graph.sizevars.optimization_hint(tiling_scores["r0_"], fallback=0)
-    r_coalesce_ratio = r_score / x_score
-    if r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD:
-        return True
-    if r_coalesce_ratio < INNER_REDUCTION_SMALL_RBLOCK_RATIO_THRESHOLD:
-        return False
-
-    # Persistent reductions use the full reduction extent as RBLOCK.  Moderate
-    # score ratios are enough only while configs can still keep XBLOCK=8.
-    rblock_hint = next_power_of_2(
-        max(V.graph.sizevars.optimization_hint(reduction_numel, fallback=1), 1)
-    )
-    return rblock_hint <= INNER_REDUCTION_SMALL_RBLOCK_MAX
 
 
 def get_triton_reduction_function(reduction_type):
@@ -3395,8 +3371,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return True
 
     def should_use_persistent_reduction(self) -> bool:
-        return self.inside_reduction and V.choices.should_use_persistent_reduction(
-            self.features, self.cooperative_reduction, self.tiling_scores
+        if not self.inside_reduction:
+            return False
+        features = self.features.with_tiling_scores(self.tiling_scores)
+        return V.choices.should_use_persistent_reduction(
+            features, self.cooperative_reduction
         )
 
     def want_no_x_dim(self):
