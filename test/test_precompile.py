@@ -1266,14 +1266,18 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "mark_dynamic"):
             torch.compiler.precompile(lambda mm, t: mm(t), m, x)
 
-    def test_mark_unbacked_hint_override_rejected(self):
-        # A mark_unbacked hint_override cannot be honored (precompile does not recompile
-        # / specialize on hints); it is rejected at capture.
+    def test_mark_unbacked_hint_override_honored(self):
+        # A mark_unbacked hint_override is a perf-only autotuning size hint (never a
+        # guard), so precompile does NOT reject it; the single artifact is valid for any
+        # runtime size and the hint is threaded onto the capture ShapeEnv's symbol.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(8, 4)
         mark_unbacked(x, 0, hint_override=16)
-        with self.assertRaisesRegex(PrecompileError, "hint_override"):
-            torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+        f_c = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(f_c(m, x), m(x))
+        x2 = torch.randn(32, 4)
+        self.assertEqual(f_c(m, x2), m(x2))
 
     def test_mark_unbacked_specialize_on_rejected(self):
         # A mark_unbacked specialize_on list cannot be honored (precompile produces a
