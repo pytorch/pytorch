@@ -128,14 +128,7 @@ def _run_dtensor_local_rng_op(
         _sync_rng_state_from_mesh_root(tensor, device_state)
         tracker._set_device_state(device_state)
 
-    if generator is None:
-        flat_slice_op_call(
-            local_tensor,
-            total_numel,
-            start_index,
-            *op_args,
-        )
-    elif enabled_local_tensor_mode():
+    if generator is not None and enabled_local_tensor_mode():
         _run_flat_slice_with_generator(
             local_tensor,
             total_numel,
