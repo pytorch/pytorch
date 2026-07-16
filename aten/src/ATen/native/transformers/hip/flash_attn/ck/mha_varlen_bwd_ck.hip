@@ -227,7 +227,7 @@ aiter::mha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
     bool enable_bias = attn_bias_.has_value();
 
     aiter::mha_bwd_args args{};
-    args.use_asm_v3     = hdim <= 192; // ASM v3 only supports head dim <= 192
+    args.use_asm_v3     = false; // fallback to CK instead of asm_v3 until supported
     args.v3_atomic_fp32 = true;
     args.v3_bf16_cvt    = 1;
     args.v3_api_check   = false;
