@@ -1343,21 +1343,22 @@ PyObject* THPFunction_maybe_clear_saved_tensors(
   END_HANDLE_TH_ERRORS
 }
 
-THPObjectPtr make_ctx_input_tuple(
+THPObjectPtr call_forward_with_ctx(
+    PyObject* forward_fn,
     THPFunction* ctx,
     const UnpackedInput& unpacked_input,
-    int64_t num_args) {
-  THPObjectPtr ctx_input_tuple(PyTuple_New(num_args + 1));
-  if (!ctx_input_tuple)
-    return {};
-  Py_INCREF(ctx);
-  PyTuple_SET_ITEM(ctx_input_tuple.get(), 0, (PyObject*)ctx);
+    Py_ssize_t num_args) {
+  c10::SmallVector<PyObject*, 24> call_args;
+  call_args.reserve(num_args + 1);
+  call_args.push_back(reinterpret_cast<PyObject*>(ctx));
   for (const auto i : c10::irange(num_args)) {
-    PyObject* arg = PyTuple_GET_ITEM(unpacked_input.input_tuple.get(), i);
-    Py_INCREF(arg);
-    PyTuple_SET_ITEM(ctx_input_tuple.get(), i + 1, arg);
+    call_args.push_back(PyTuple_GET_ITEM(unpacked_input.input_tuple.get(), i));
   }
-  return ctx_input_tuple;
+  return THPObjectPtr(PyObject_Vectorcall(
+      forward_fn,
+      call_args.data(),
+      static_cast<size_t>(num_args + 1),
+      nullptr));
 }
 
 THPObjectPtr make_ctx_input_output_tuple(
@@ -1687,12 +1688,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
       }
     } else {
       // call forward
-      auto ctx_input_tuple =
-          make_ctx_input_tuple(ctx, unpacked_input, num_args);
-      if (!ctx_input_tuple) {
-        return nullptr;
-      }
-      output = PyObject_CallObject(forward_fn, ctx_input_tuple);
+      output = call_forward_with_ctx(forward_fn, ctx, unpacked_input, num_args);
     }
     if (!output)
       return nullptr;
