@@ -13,6 +13,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_philox_bits_native.h>
 #include <ATen/ops/_philox_normal_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #endif
@@ -23,10 +24,12 @@ namespace {
 
 using at::cuda::philox_4x32;
 
-// Elements produced per Philox 4x32 call: 4 for float/half/bfloat16, 2 for double.
-// Note that we use a full float for each generated half/bfloat16 for better numerics.
+// Elements produced per Philox 4x32 call: a call yields 128 bits, so 4 elements
+// for 4-byte types (float/half/bfloat16/uint32) and 2 for 8-byte types
+// (double/uint64). Note that we use a full float for each generated
+// half/bfloat16 for better numerics.
 template <typename scalar_t>
-constexpr int elems_per_call = std::is_same_v<scalar_t, double> ? 2 : 4;
+constexpr int elems_per_call = sizeof(scalar_t) == 8 ? 2 : 4;
 
 // Box-Muller: convert 4 uniform uint32 values into 4 standard normal floats.
 __device__ __forceinline__ float4 box_muller_float(uint4 r) {
@@ -160,9 +163,6 @@ void philox_distribution_kernel(
     const char* op_name,
     Tensor& self, const Tensor& key,
     const sample_t& sample_func, const param_t& param_func) {
-  TORCH_CHECK(self.is_floating_point(),
-      op_name, ": self must be a floating point tensor, got ",
-      self.scalar_type());
   TORCH_CHECK(key.scalar_type() == kUInt64,
       op_name, ": key must have dtype uint64, got ",
       key.scalar_type());
@@ -259,6 +259,9 @@ void philox_distribution_kernel(
 
 Tensor& _philox_uniform_cuda_(
     Tensor& self, const Tensor& key, double low, double high) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_uniform_: self must be a floating point tensor, got ",
+      self.scalar_type());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
     auto sample_func = []() {
@@ -292,6 +295,9 @@ Tensor& _philox_uniform_cuda_(
 
 Tensor& _philox_normal_cuda_(
     Tensor& self, const Tensor& key, double mean, double stddev) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_normal_: self must be a floating point tensor, got ",
+      self.scalar_type());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
     using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
@@ -316,6 +322,38 @@ Tensor& _philox_normal_cuda_(
     philox_distribution_kernel<scalar_t>(
         "_philox_normal_", self, key, sample_func, param_func);
   });
+  return self;
+}
+
+Tensor& _philox_bits_cuda_(Tensor& self, const Tensor& key) {
+  TORCH_CHECK(self.scalar_type() == kUInt32 || self.scalar_type() == kUInt64,
+      "_philox_bits_: self must have dtype uint32 or uint64, got ",
+      self.scalar_type());
+  if (self.scalar_type() == kUInt64) {
+    // Pack the four uint32 Philox outputs into two uint64 values.
+    auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
+      uint4 r = philox_4x32(seed, offset);
+      ulonglong2 packed;
+      packed.x = (static_cast<unsigned long long>(r.x) << 32) | r.y;
+      packed.y = (static_cast<unsigned long long>(r.z) << 32) | r.w;
+      return packed;
+    };
+    auto param_func = [] __device__ (auto rand) {
+      return static_cast<uint64_t>(rand);
+    };
+    philox_distribution_kernel<uint64_t>(
+        "_philox_bits_", self, key, sample_func, param_func);
+  } else {
+    // Emit the four raw uint32 Philox outputs directly.
+    auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
+      return philox_4x32(seed, offset);
+    };
+    auto param_func = [] __device__ (auto rand) {
+      return static_cast<uint32_t>(rand);
+    };
+    philox_distribution_kernel<uint32_t>(
+        "_philox_bits_", self, key, sample_func, param_func);
+  }
   return self;
 }
 
