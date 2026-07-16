@@ -776,6 +776,7 @@ class CachingAutotuner(KernelInterface):
         device_prop = self.device_props
         return (
             not self.deterministic_mode
+            and self.inductor_meta.get("numerics") != "strict"
             and self.inductor_meta.get("dynamic_scale_rblock", True)
             and not self.inductor_meta.get("persistent_reduction")
             and self.heuristic_type == HeuristicType.REDUCTION
@@ -2225,9 +2226,12 @@ class CachingAutotuner(KernelInterface):
             HeuristicType.FIXED,
         ):
             return False
-        # Deterministic mode forbids tuning RBLOCK / num_warps for reductions
-        # because those knobs shift numerics.
-        if self.deterministic_mode and self.heuristic_type in (
+        # Deterministic mode (and strict numerics) forbid tuning RBLOCK / num_warps for
+        # reductions because those knobs shift numerics.
+        if (
+            self.deterministic_mode
+            or self.inductor_meta.get("numerics") == "strict"
+        ) and self.heuristic_type in (
             HeuristicType.REDUCTION,
             HeuristicType.PERSISTENT_REDUCTION,
             HeuristicType.SPLIT_SCAN,
@@ -4440,12 +4444,36 @@ def _reduction_configs(
     from torch._inductor.heuristics.registry import get_codegen_heuristic
 
     reduction_heuristic = get_codegen_heuristic("reduction", triton_meta["device"].type)
-    return reduction_heuristic.get_configs(
+    configs = reduction_heuristic.get_configs(
         size_hints=size_hints,
         inductor_meta=inductor_meta,
         triton_meta=triton_meta,
         num_dynamic=num_dynamic,
     )
+    if inductor_meta.get("numerics") == "strict":
+        configs = _force_strict_rblock(configs, size_hints)
+    return configs
+
+
+def _force_strict_rblock(configs: list[Config], size_hints: dict[str, int]) -> list[Config]:
+    # Strict numerics: pin R0_BLOCK to eager's strict_rblock so eager and Inductor tile a
+    # (looped) reduction identically -> same reduction order -> bitwise. Persistent configs
+    # (no R0_BLOCK kwarg -- they reduce the whole axis) are left unchanged.
+    from torch._strict_config import strict_rblock
+
+    r0 = strict_rblock(get_total_reduction_numel(size_hints))
+    out: list[Config] = []
+    seen: set = set()
+    for c in configs:
+        kw = dict(c.kwargs)
+        if "R0_BLOCK" in kw:
+            kw["R0_BLOCK"] = r0
+        key = (tuple(sorted(kw.items())), c.num_warps, c.num_stages)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(Config(kw, num_warps=c.num_warps, num_stages=c.num_stages))
+    return out or configs
 
 
 def filter_reduction_configs_for_determinism(

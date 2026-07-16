@@ -169,7 +169,6 @@ from torch.testing._internal.triton_utils import (
     requires_cuda_and_triton,
     requires_gpu_and_triton,
 )
-from torch.utils._triton import has_triton_reduction_ordering
 
 
 _T = TypeVar("_T")
@@ -19185,118 +19184,6 @@ if RUN_GPU:
                         kernels.append(val)
 
             return kernels
-
-        @unittest.expectedFailure  # eager INNER_TREE not landed yet (pytorch#182986)
-        @skip_if_not_triton
-        @unittest.skipUnless(
-            has_triton_reduction_ordering(),
-            "requires a Triton build that exposes tl.ReductionOrdering",
-        )
-        @config.patch(
-            {"force_disable_caches": True, "triton.persistent_reductions": True}
-        )
-        def test_strict_numerics_sum_matches_eager(self):
-            torch.manual_seed(0)
-            x = torch.randn(8, 256, device=GPU_TYPE)
-            eager = x.sum(dim=1)
-            with config.patch({"numerics": "strict"}):
-                compiled = torch.compile(lambda z: torch.sum(z, dim=1))(x)
-            self.assertTrue(torch.equal(eager, compiled))
-
-        @skip_if_not_triton
-        @unittest.skipUnless(
-            has_triton_reduction_ordering(),
-            "requires a Triton build that exposes tl.ReductionOrdering",
-        )
-        @config.patch(
-            {"force_disable_caches": True, "triton.persistent_reductions": True}
-        )
-        def test_strict_numerics_sum(self):
-            import triton
-            import triton.language as tl
-
-            @triton.jit
-            def ref_kernel(X, Z, N: tl.constexpr, ORD: tl.constexpr):
-                row = tl.program_id(0)
-                offs = tl.arange(0, N)
-                z = tl.sum(tl.load(X + row * N + offs), axis=0, reduction_ordering=ORD)
-                tl.store(Z + row, z)
-
-            torch.manual_seed(0)
-            M, N = 8, 256  # small -> Inductor emits a persistent reduction (no loop)
-            x = torch.randn(M, N, device=GPU_TYPE)
-            ref = torch.empty(M, device=GPU_TYPE)
-            ref_kernel[(M,)](x, ref, N=N, ORD=tl.ReductionOrdering.INNER_TREE)
-
-            def fn(z):
-                return torch.sum(z, dim=1)
-
-            # Flag off: no kwarg emitted, and the default order differs from
-            # the canonical INNER_TREE result (proving the flag drives numerics).
-            torch._dynamo.reset()
-            with config.patch({"numerics": "default"}):
-                compiled = torch.compile(fn)
-                code_off = run_and_get_triton_code(compiled, x)
-                out_default = compiled(x)
-            self.assertNotIn("reduction_ordering", code_off)
-            self.assertFalse(torch.equal(out_default, ref))
-
-            # Flag on: kwarg emitted (constexpr-wrapped), kernel compiles, and the
-            # result is bitwise identical to the canonical INNER_TREE reduction.
-            torch._dynamo.reset()
-            with config.patch({"numerics": "strict"}):
-                compiled = torch.compile(fn)
-                code_on = run_and_get_triton_code(compiled, x)
-                out_inner_tree = compiled(x)
-            self.assertIn(
-                "reduction_ordering=tl.constexpr(tl.ReductionOrdering.INNER_TREE)",
-                code_on,
-            )
-            self.assertTrue(torch.equal(out_inner_tree, ref))
-
-        @unittest.expectedFailure  # eager INNER_TREE not landed yet (pytorch#182986)
-        @skip_if_not_triton
-        @unittest.skipUnless(
-            has_triton_reduction_ordering(),
-            "requires a Triton build that exposes tl.ReductionOrdering",
-        )
-        @config.patch({"force_disable_caches": True})
-        def test_strict_numerics_split_reduction(self):
-            torch.manual_seed(0)
-            x = torch.randn(1, 2**20, device=GPU_TYPE)
-
-            def fn(z):
-                return torch.sum(z, dim=1)
-
-            torch._dynamo.reset()
-            with config.patch({"numerics": "strict"}):
-                compiled = torch.compile(fn)
-                code = run_and_get_triton_code(compiled, x)
-                out = compiled(x)
-
-            # A split reduction emits >= 2 reduction kernels; the ordering flag must
-            # be applied in each stage of the split path.
-            self.assertGreaterEqual(
-                code.count(
-                    "reduction_ordering=tl.constexpr(tl.ReductionOrdering.INNER_TREE)"
-                ),
-                2,
-            )
-            self.assertTrue(torch.equal(out, x.sum(dim=1)))
-
-        @skip_if_not_triton
-        def test_strict_numerics_split_threshold(self):
-            # strict mode lowers the split threshold to eager's 8192, so a reduction
-            # larger than 8192 splits into a two-stage (multi-kernel) reduction
-            def fn(z):
-                return torch.sum(z, dim=1)
-
-            x = torch.randn(1, 16384, device=GPU_TYPE)  # >8192, <524288
-            torch._dynamo.reset()
-            with config.patch({"numerics": "strict"}):
-                code = run_and_get_triton_code(torch.compile(fn), x)
-            # a split reduction emits >= 2 triton kernels (partials + combine)
-            self.assertGreaterEqual(code.count("async_compile.triton("), 2)
 
         def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()

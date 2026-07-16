@@ -7258,6 +7258,36 @@ def _make_reduction_inner(
     )
 
 
+def _strict_reduction_contiguous(x, axis, keepdims):
+    # Strict numerics: reduce a CONTIGUOUS buffer with the reduced dims innermost, so the
+    # reduction order is layout-independent and matches eager (which materializes the same
+    # way). require_contiguous forces a real copy that survives fusion. No-op when the
+    # reduced dims are already innermost (row / reduce-inner -> already contiguous order).
+    # Returns (x, new_axis, inv_order): inv_order (or None) un-permutes a keepdim result
+    # back to the original dim order (the reduction produces it in the permuted layout).
+    size = x.get_size()
+    nd = len(size)
+    red = sorted(a % nd for a in (axis if isinstance(axis, (list, tuple)) else [axis]))
+    kept = [d for d in range(nd) if d not in red]
+    order = kept + red
+    if order == list(range(nd)):
+        return x, axis, None
+    # Materialize a CONTIGUOUS copy that stays its own kernel: realize the transposed
+    # copy and mark it a fusion boundary (no_fuse_buffer_names) so the scheduler can't
+    # inline its strided load back into the reduction, then force contiguous strides.
+    # Otherwise the copy fuses away and the reduction reads strided -> wrong order.
+    xp = clone(permute(x, order))
+    xp.realize()
+    V.graph.no_fuse_buffer_names.add(xp.get_name())
+    xp = ir.ExternKernel.require_contiguous(xp)
+    inv_order = None
+    if keepdims:
+        inv_order = [0] * nd
+        for i, d in enumerate(order):
+            inv_order[d] = i
+    return xp, list(range(len(kept), nd)), inv_order
+
+
 def make_reduction(
     reduction_type: ReductionType, override_return_dtype=None
 ) -> Callable[..., TensorBox]:
@@ -7269,6 +7299,12 @@ def make_reduction(
         # and https://github.com/pytorch/pytorch/issues/184893
         if reduction_type in ("argmax", "argmin") and x.get_dtype() == torch.bool:
             x = to_dtype(x, torch.int32)
+        inv_order = None
+        if reduction_type == "sum" and axis is not None and config.numerics == "strict":
+            from torch.utils._triton import has_triton_reduction_ordering
+
+            if has_triton_reduction_ordering():
+                x, axis, inv_order = _strict_reduction_contiguous(x, axis, keepdims)
         kwargs = _make_reduction_inner(
             x,
             axis=axis,
@@ -7283,6 +7319,8 @@ def make_reduction(
             Reduction,
         ):  # Only realize if reduction isn't unrolled
             result.realize()
+        if inv_order is not None:  # keepdim: restore original dim order after the permute
+            result = permute(result, inv_order)
         return result
 
     return inner

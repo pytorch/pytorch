@@ -1777,6 +1777,7 @@ class Reduction(Loops):
             and int(reduction_numel) < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
             and reduction_type != "dot"
+            and not (config.numerics == "strict" and reduction_type == "sum")
         ):
             # When native matmul, don't unroll the dot reduction.
 
@@ -2369,6 +2370,7 @@ class ArgReduction(MultiOutputReduction):
             isinstance(reduction_numel, Integer)
             and int(reduction_numel) < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
+            and not (config.numerics == "strict" and reduction_type == "sum")
         ):
             unrolled_fn = Reduction._unroll_reduction_fn(
                 inner_fn, reduction_ranges, reduction_type, src_dtype

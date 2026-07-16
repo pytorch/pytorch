@@ -525,18 +525,24 @@ class InductorChoices:
         num_threads = warp_size * num_warps
 
         if inner_reduction:
+            # Strict numerics: share the split factor with eager via the SAME shared API
+            # (torch._strict_config.strict_split_factor), so eager and Inductor chunk the
+            # reduction axis identically -> the two-stage split sums group the same way ->
+            # bitwise. (Analogous to sharing strict_rblock for R0_BLOCK.) strict_split_factor
+            # returns 1 when there aren't enough outputs to split.
+            if config.numerics == "strict":
+                from torch._strict_config import strict_split_factor
+
+                return strict_split_factor(reduction_numel_hint, numel_hint, num_sm)
             # do heuristics that's close to eager mode for split inner reduction
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
             if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
                 return 1
             # based on sum(x[N]) on GB200, split reduction provides higher performance when N >= 1M
             # TODO: test more hardwares
-            if config.numerics == "strict":
-                no_split_threshold = 8192  # match eager's kInnerTreeThreshold
-            else:
-                no_split_threshold = (
-                    524288 if props.major is not None and props.major >= 10 else 8192
-                )
+            no_split_threshold = (
+                524288 if props.major is not None and props.major >= 10 else 8192
+            )
             if reduction_numel_hint <= no_split_threshold:
                 return 1
             if reduction_numel_hint * numel_hint <= min_elements_per_device:
