@@ -15,11 +15,21 @@ from torchgen.model import (
 from torchgen.utils import mapMaybe
 
 
-# native_functions.yaml tag: see tags.yaml ("cpu_dll_cuda_kernel").
-_CPU_DLL_CUDA_KERNEL_TAG = "cpu_dll_cuda_kernel"
-# QuantizedCUDA dispatch implemented in torch_cpu-only TU; tag applies only to
-# QuantizedCUDA forward decl macro selection (see dll_export_macro_for_kernel).
-_CPU_DLL_QUANTIZED_CUDA_KERNEL_TAG = "cpu_dll_quantized_cuda_kernel"
+# Kernels registered to a CUDA-family dispatch key but defined in a torch_cpu TU.
+# Their forward decls must use TORCH_API to match torch_cpu.dll on Windows.
+# Shared-name kernels (e.g. CPU, CUDA: foo) are merged to TORCH_API in
+# get_ns_grouped_kernels; only distinct CUDA-family kernel names need listing.
+_CPU_DLL_CUDA_KERNELS = frozenset(
+    {
+        "count_nonzero_cuda",
+        "log_sigmoid_backward_cuda",
+        "log_sigmoid_backward_cuda_out",
+        "triton_multi_head_attention",
+        "NestedTensor_softmax_dropout_cuda",
+        "masked_fill__quantized_cuda",
+        "_index_put_impl_quantized_cuda_",
+    }
+)
 
 
 # Dispatch key → TORCH_* for generated forward decls (Windows). Also used from register_dispatch_key.
@@ -38,26 +48,33 @@ def torch_api_key_word_prefix(backend_index: BackendIndex) -> str:
     return "TORCH_API"
 
 
-# See tags.yaml for cpu_dll_* tag semantics; shared-name kernels are merged in get_ns_grouped_kernels.
 def dll_export_macro_for_kernel(
     backend_index: BackendIndex,
     g: NativeFunction | NativeFunctionsGroup | None,
 ) -> str:
     macro = torch_api_key_word_prefix(backend_index)
     if macro == "TORCH_CUDA_CPP_API" and g is not None:
-        tags = (
-            g.tags
-            if isinstance(g, NativeFunction)
-            else set().union(*(f.tags for f in g.functions()))
-        )
-        if _CPU_DLL_CUDA_KERNEL_TAG in tags:
-            return "TORCH_API"
-        if (
-            _CPU_DLL_QUANTIZED_CUDA_KERNEL_TAG in tags
-            and backend_index.dispatch_key == DispatchKey.QuantizedCUDA
-        ):
+        metadata = backend_index.get_kernel(g)
+        if metadata and metadata.kernel in _CPU_DLL_CUDA_KERNELS:
             return "TORCH_API"
     return macro
+
+
+def validate_cpu_dll_cuda_kernels(
+    backend_indices: dict[DispatchKey, BackendIndex],
+) -> None:
+    reachable: set[str] = set()
+    for dk, index in backend_indices.items():
+        if not is_cuda_dispatch_key(dk):
+            continue
+        for metadata in index.index.values():
+            reachable.add(metadata.kernel)
+    stale = _CPU_DLL_CUDA_KERNELS - reachable
+    if stale:
+        raise AssertionError(
+            "_CPU_DLL_CUDA_KERNELS has stale entries not registered to any "
+            f"CUDA-family dispatch key: {sorted(stale)}"
+        )
 
 
 @with_native_function_and_index

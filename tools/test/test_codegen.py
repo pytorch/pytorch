@@ -329,12 +329,6 @@ TORCH_LIBRARY(custom2, m) {
         )
 
 
-_WINDOWS_DLL_LINKAGE_TAGS = {
-    "cpu_dll_cuda_kernel",
-    "cpu_dll_quantized_cuda_kernel",
-}
-
-
 def _build_backend_indices_from_yaml(
     yaml_entries: list[dict],
 ) -> tuple[list[NativeFunction], dict[DispatchKey, BackendIndex]]:
@@ -346,7 +340,7 @@ def _build_backend_indices_from_yaml(
         func, indices = NativeFunction.from_yaml(
             entry,
             loc=Location(__file__, 1),
-            valid_tags=_WINDOWS_DLL_LINKAGE_TAGS,
+            valid_tags=set(),
         )
         native_functions.append(func)
         BackendIndex.grow_index(raw_indices, indices)
@@ -380,13 +374,12 @@ class TestNativeDeclDllExportMacro(unittest.TestCase):
         self.assertTrue(decl[0].startswith("TORCH_CUDA_CPP_API "))
         self.assertIn("cuda_only_kernel(", decl[0])
 
-    def test_cpu_dll_cuda_kernel_tag_uses_torch_api(self) -> None:
+    def test_cpu_dll_cuda_kernel_uses_torch_api(self) -> None:
         native_function, backend_indices = _build_backend_indices_from_yaml(
             [
                 {
                     "func": "count_nonzero_cuda(Tensor self) -> Tensor",
                     "dispatch": {"CUDA": "count_nonzero_cuda"},
-                    "tags": ["cpu_dll_cuda_kernel"],
                 }
             ]
         )
@@ -417,7 +410,7 @@ class TestNativeDeclDllExportMacro(unittest.TestCase):
         self.assertIn("shared_op(", joined)
         self.assertNotIn("TORCH_CUDA_CPP_API", joined)
 
-    def test_cpu_dll_quantized_cuda_kernel_tag_overrides_quantized_cuda_only(
+    def test_cpu_dll_quantized_cuda_kernel_overrides_quantized_cuda_only(
         self,
     ) -> None:
         native_function, backend_indices = _build_backend_indices_from_yaml(
@@ -429,7 +422,6 @@ class TestNativeDeclDllExportMacro(unittest.TestCase):
                         "CUDA": "masked_fill__cuda",
                         "QuantizedCUDA": "masked_fill__quantized_cuda",
                     },
-                    "tags": ["cpu_dll_quantized_cuda_kernel"],
                 }
             ]
         )
@@ -459,7 +451,6 @@ class TestNativeDeclDllExportMacro(unittest.TestCase):
                         "CUDA": "_index_put_impl_",
                         "QuantizedCUDA": "_index_put_impl_quantized_cuda_",
                     },
-                    "tags": ["cpu_dll_quantized_cuda_kernel"],
                 }
             ]
         )

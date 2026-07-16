@@ -3027,6 +3027,7 @@ def main() -> None:
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
     )
+    dest.native_functions.validate_cpu_dll_cuda_kernels(backend_indices)
 
     grouped_native_functions = get_grouped_native_functions(native_functions)
 
