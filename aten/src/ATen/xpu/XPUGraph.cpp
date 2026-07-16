@@ -101,9 +101,13 @@ void XPUGraphImpl::capture_begin(
         return filter(XPUStream(XPUStream::UNCHECKED, stream));
       });
 
+// Enable sycl graph native recording mode for sycl compiler version >= 2026.1.0.
 #if SYCL_COMPILER_VERSION >= 20260100
   auto sycl_property = sycl::property_list{property::graph::enable_native_recording{}};
 #else
+  TORCH_CHECK(
+      false,
+      "XPU Graphs in this PyTorch build require oneAPI 2026.1.0 or later.");
   auto sycl_property = sycl::property_list{};
 #endif
 
