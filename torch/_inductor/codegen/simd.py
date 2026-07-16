@@ -2577,7 +2577,8 @@ class SIMDScheduling(BaseScheduling):
             # Use a generated Triton finalize kernel for sum reduction
             # to get coalesced memory access instead of ATen's generic reduce.
             use_triton_finalize = (
-                partial_accum.reduction_type == "sum"
+                config.triton_finalize_sum
+                and partial_accum.reduction_type == "sum"
                 and not V.graph.cpp_wrapper
                 and V.graph.device_type == "cuda"
             )
