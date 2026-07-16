@@ -526,7 +526,7 @@ def flex_attention_functionalize(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Defines the functionalization rules for the flex_attention operator.
 
-    Write now we are unwrapping each tensor and then redispatching to the next, however we want to
+    Right now we are unwrapping each tensor and then redispatching to the next, however we want to
     guard against any mutations in the score_mod function, to the other_buffers since those
     are free variables.
     """
@@ -580,7 +580,7 @@ def flex_attention_functionalize(
             mutates = _has_potential_branch_input_mutation(
                 score_mod, example_vals, pre_dispatch
             )
-        # The only care about mutations of existing buffers since we can't replay these.
+        # We only care about mutations of existing buffers since we can't replay these.
         # However, we can just error if anything is detected
         if mutates:
             raise UnsupportedAliasMutationException("Mutations detected in score_mod")
@@ -654,7 +654,7 @@ def create_fw_bw_graph(
     from torch._dispatch.python import suspend_functionalization
     from torch._dynamo._trace_wrapped_higher_order_op import mod_index
     from torch._functorch.aot_autograd import AOTConfig, create_joint
-    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
     from torch._subclasses.functional_tensor import disable_functional_mode
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
@@ -698,7 +698,7 @@ def create_fw_bw_graph(
                 unwrapped_other_buffers = pytree.tree_map(_from_fun, other_buffers)
 
             if not all(
-                isinstance(t, (FakeTensor, int, torch.SymInt))
+                is_fake_tensor(t) or isinstance(t, (int, torch.SymInt))
                 for t in unwrapped_score_mod_indexes + unwrapped_other_buffers
             ):
                 raise AssertionError(
@@ -1375,7 +1375,7 @@ def flex_attention_backward_functionalize(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, tuple[torch.Tensor | None, ...]]:
     """Defines the functionalization rules for the flex_attention operator.
 
-    Write now we are unwrapping each tensor and then redispatching to the next,
+    Right now we are unwrapping each tensor and then redispatching to the next,
     since we know that the forward score mod function is assured to be free of mutations
     to the other_buffers, we skip that mutate check and go straight to redispatching.
     """
