@@ -4,7 +4,6 @@
 #include <c10/util/Exception.h>
 
 namespace at {
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class TORCH_API OptionalTensorRef {
  public:
   OptionalTensorRef() = default;
@@ -18,12 +17,24 @@ class TORCH_API OptionalTensorRef {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(src.defined());
   }
 
+  // ref_ is a non-owning borrow, so copies re-borrow instead of bumping the
+  // refcount and assignment must avoid Tensor's refcount-adjusting operator=.
+  // Copy-and-swap keeps every path refcount-neutral: the swapped-out value is
+  // released via unsafeReleaseTensorImpl() by the temporary's destructor.
   OptionalTensorRef(const OptionalTensorRef& rhs)
       : ref_(Tensor::unsafe_borrow_t{}, rhs.ref_) {}
 
   OptionalTensorRef(OptionalTensorRef&& rhs) = default;
-  OptionalTensorRef& operator=(OptionalTensorRef rhs) {
-    std::swap(ref_, rhs.ref_);
+
+  OptionalTensorRef& operator=(const OptionalTensorRef& rhs) {
+    OptionalTensorRef tmp(rhs);
+    std::swap(ref_, tmp.ref_);
+    return *this;
+  }
+
+  OptionalTensorRef& operator=(OptionalTensorRef&& rhs) noexcept {
+    OptionalTensorRef tmp(std::move(rhs));
+    std::swap(ref_, tmp.ref_);
     return *this;
   }
 
