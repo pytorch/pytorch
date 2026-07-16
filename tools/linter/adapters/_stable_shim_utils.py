@@ -9,7 +9,9 @@ Consumed by:
 
 from __future__ import annotations
 
+import functools
 import re
+import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
@@ -430,6 +432,70 @@ class PreprocessorTracker:
     def identifiers_used(self) -> list[IdentifierUse]:
         found = self._identifier_accumulator.identifiers_used()
         return found if found is not None else []
+
+
+@functools.cache
+def merge_base_with_main() -> str:
+    """
+    Merge-base of HEAD with origin's current main. Raises on any git failure.
+
+    Cached so git runs once per process no matter how many files the adapter
+    is asked to lint. main is resolved to a SHA and fetched by SHA with
+    --no-write-fetch-head so no local refs are written: lintrunner runs
+    adapters concurrently in one repo, and concurrent fetches racing to update
+    refs/remotes/origin/main fail with "cannot lock ref ... unable to update
+    local ref".
+    """
+    result = subprocess.run(
+        ["git", "ls-remote", "origin", "refs/heads/main"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        raise RuntimeError(
+            f"Failed to resolve main on origin. Error: {result.stderr.strip()}"
+        )
+    main_sha = result.stdout.split()[0]
+    try:
+        commit_missing = (
+            subprocess.run(
+                ["git", "cat-file", "-e", f"{main_sha}^{{commit}}"],
+                capture_output=True,
+                timeout=5,
+            ).returncode
+            != 0
+        )
+    except subprocess.TimeoutExpired:
+        # On partial-clone repos (what's in CI), the git cat-file can take
+        # longer than 5s due to calling the network. Treat this as "not
+        # present locally" and let the longer fetch below retrieve it.
+        commit_missing = True
+    if commit_missing:
+        result = subprocess.run(
+            ["git", "fetch", "--no-write-fetch-head", "origin", main_sha],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to fetch {main_sha} from origin. "
+                f"Error: {result.stderr.strip()}"
+            )
+
+    result = subprocess.run(
+        ["git", "merge-base", "HEAD", main_sha],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Failed to find merge-base with origin main ({main_sha}). "
+            f"Error: {result.stderr.strip()}"
+        )
+    return result.stdout.strip()
 
 
 def get_current_version() -> tuple[int, int, int]:
