@@ -3658,16 +3658,21 @@ class TestFxGraphCacheHashing(TestCase):
         fw_config = get_invoke_subgraph_compile_options(
             bw_inductor_config_patches=bw_patches
         )
+        bw_config = get_backward_nested_region_config(fw_config)
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
-        # Mirror run_joint_graph_passes_on_hops: the backward subgraph module
-        # carries the backward config.
-        gm.meta["nested_region_config"] = get_backward_nested_region_config(fw_config)
+        # Mirror run_joint_graph_passes_on_hops: the backward config is stamped on
+        # the partitioned backward invoke_subgraph node's meta["custom"] (the
+        # source of truth), not the subgraph module.
+        node = gm.graph.call_function(torch.ops.higher_order.invoke_subgraph)
+        node.meta["custom"] = {"nested_region_config": bw_config}
+        gm.graph.output(())
+        gm.recompile()
         return gm
 
     def test_nested_region_bw_config_patches_affect_cache_key(self):
-        # bw_inductor_config_patches (stamped onto the backward subgraph module)
-        # must be part of the cache key, or two graphs differing only in backward
-        # config would collide.
+        # bw_inductor_config_patches (stamped on the backward invoke_subgraph
+        # node) must be part of the cache key, or two graphs differing only in
+        # backward config would collide.
         from torch._higher_order_ops.invoke_subgraph import (
             get_backward_nested_region_config,
             get_invoke_subgraph_compile_options,
