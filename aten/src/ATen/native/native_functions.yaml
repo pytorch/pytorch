@@ -6636,6 +6636,12 @@
     CUDA: _philox_uniform_cuda_
   autogen: _philox_uniform, _philox_uniform.out
 
+- func: _philox_bits_(Tensor(a!) self, Tensor key) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CUDA: _philox_bits_cuda_
+  autogen: _philox_bits, _philox_bits.out
+
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
   dispatch:
     CPU: _dirichlet_grad_cpu
