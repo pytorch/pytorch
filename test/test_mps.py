@@ -10378,6 +10378,21 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
+    @largeTensorTest("16GB", device="mps")
+    @serialTest()
+    def test_conv3d_tile_count_int32_overflow(self):
+        output_channels = torch.iinfo(torch.int32).max - 1
+        # Stride 2 bypasses the pointwise matmul path while keeping the output
+        # spatial volume at one, so only the channel tile count is large.
+        x = torch.ones(1, 1, 1, 1, 1, dtype=torch.float16, device="mps")
+        w = torch.ones(output_channels, 1, 1, 1, 1, dtype=torch.float16, device="mps")
+        y = F.conv3d(x, w, stride=2)
+        indices = torch.tensor([0, output_channels // 2, output_channels - 1], device="mps")
+        self.assertEqual(y[0, indices, 0, 0, 0].cpu(), torch.ones(3, dtype=torch.float16))
+        del x, w, y, indices
+        gc.collect()
+        torch.mps.empty_cache()
+
     @serialTest()
     def test_64bit_index_copy(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
