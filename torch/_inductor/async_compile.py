@@ -86,6 +86,54 @@ size_hints_regex = re.compile(
 )
 
 
+_CUTEDSL_ARCH_BY_CAPABILITY = {
+    (9, 0): "sm_90a",
+    (10, 0): "sm_100a",
+    (10, 3): "sm_103a",
+    (12, 0): "sm_120a",
+    (12, 1): "sm_121a",
+}
+
+
+def _cutedsl_arch_from_device_capability(
+    device_capability: object,
+) -> str | None:
+    if not isinstance(device_capability, (list, tuple)) or len(device_capability) != 2:
+        return None
+
+    try:
+        major = int(device_capability[0])
+        minor = int(device_capability[1])
+    except (TypeError, ValueError):
+        return None
+
+    if major < 0 or minor < 0:
+        return None
+
+    return _CUTEDSL_ARCH_BY_CAPABILITY.get((major, minor))
+
+
+def _cutlass_compile_env(precompile_metadata=None) -> dict[str, str]:
+    env_vars = [
+        "TORCHINDUCTOR_CACHE_DIR",
+        "TORCHINDUCTOR_CUTLASS_DIR",
+        "CUTE_DSL_ARCH",
+    ]
+    extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+
+    if precompile_metadata is not None:
+        device_capability = precompile_metadata.get("device_capability")
+        arch = _cutedsl_arch_from_device_capability(device_capability)
+        if arch is not None:
+            extra_env["CUTE_DSL_ARCH"] = arch
+        elif device_capability is not None:
+            raise RuntimeError(
+                f"Unsupported CuTe DSL CUDA device capability: {device_capability}"
+            )
+
+    return extra_env
+
+
 def pre_fork_setup():
     """
     Setup that must be done prior to forking with a process pool.
@@ -658,8 +706,7 @@ class AsyncCompile:
         is_parallel = self.use_process_pool()
 
         if is_parallel:
-            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TORCHINDUCTOR_CUTLASS_DIR"]
-            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+            extra_env = _cutlass_compile_env(precompile_metadata)
 
             subprocess_task = self.process_pool().submit(
                 _worker_compile_pycodecache_kernel,
@@ -763,8 +810,7 @@ class AsyncCompile:
         is_parallel = self.use_process_pool()
 
         if is_parallel:
-            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TORCHINDUCTOR_CUTLASS_DIR"]
-            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+            extra_env = _cutlass_compile_env(precompile_metadata)
 
             subprocess_task = self.process_pool().submit(
                 _worker_compile_pycodecache_kernel,

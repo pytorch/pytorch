@@ -687,6 +687,77 @@ class TestCuteDSLSubprocessCompile(TestCase):
             if os.path.exists(cache_dir):
                 shutil.rmtree(cache_dir)
 
+    def test_cutedsl_arch_from_device_capability(self):
+        from torch._inductor.async_compile import (
+            _cutedsl_arch_from_device_capability,
+            _cutlass_compile_env,
+        )
+
+        self.assertEqual(_cutedsl_arch_from_device_capability((10, 3)), "sm_103a")
+        self.assertEqual(_cutedsl_arch_from_device_capability((10, 0)), "sm_100a")
+        self.assertEqual(_cutedsl_arch_from_device_capability((9, 0)), "sm_90a")
+        self.assertIsNone(_cutedsl_arch_from_device_capability((8, 9)))
+        self.assertIsNone(_cutedsl_arch_from_device_capability((10, 2)))
+        self.assertIsNone(_cutedsl_arch_from_device_capability(None))
+        with self.assertRaisesRegex(RuntimeError, "Unsupported CuTe DSL"):
+            _cutlass_compile_env({"device_capability": (10, 2)})
+
+    def test_cutedsl_worker_sets_exact_arch_from_metadata(self):
+        import json
+
+        from torch._inductor.async_compile import _cutlass_compile_env
+        from torch._inductor.runtime.compile_tasks import (
+            _worker_compile_pycodecache_kernel,
+        )
+
+        sentinel_path = os.path.join(
+            tempfile.gettempdir(), "cutedsl_test_arch_sentinel"
+        )
+        if os.path.exists(sentinel_path):
+            os.unlink(sentinel_path)
+
+        source = (
+            "import json, os\n"
+            f"SENTINEL_PATH = {sentinel_path!r}\n"
+            "IMPORT_ARCH = os.environ.get('CUTE_DSL_ARCH')\n"
+            "def test_kernel_main(*args, **kwargs): pass\n"
+            "def test_kernel_precompile(precompile_shapes, device_capability=None, **kwargs):\n"
+            "    with open(SENTINEL_PATH, 'w') as f:\n"
+            "        json.dump({\n"
+            "            'import_arch': IMPORT_ARCH,\n"
+            "            'precompile_arch': os.environ.get('CUTE_DSL_ARCH'),\n"
+            "            'device_capability': device_capability,\n"
+            "        }, f)\n"
+        )
+
+        metadata = {
+            "precompile_shapes": {"input_a": [4, 4], "output": [4, 4]},
+            "device_capability": (10, 3),
+        }
+
+        try:
+            with patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_100a"}):
+                extra_env = _cutlass_compile_env(metadata)
+                self.assertEqual(extra_env["CUTE_DSL_ARCH"], "sm_103a")
+                with fresh_cache():
+                    _worker_compile_pycodecache_kernel(
+                        "test_kernel",
+                        source,
+                        "main",
+                        extra_env,
+                        metadata,
+                    )
+
+            with open(sentinel_path) as f:
+                result = json.load(f)
+
+            self.assertEqual(result["import_arch"], "sm_103a")
+            self.assertEqual(result["precompile_arch"], "sm_103a")
+            self.assertEqual(result["device_capability"], [10, 3])
+        finally:
+            if os.path.exists(sentinel_path):
+                os.unlink(sentinel_path)
+
     def test_cutedsl_worker_skips_precompile_without_metadata(self):
         """Test _worker_compile_pycodecache_kernel skips _precompile when metadata is None."""
         from torch._inductor.runtime.compile_tasks import (
