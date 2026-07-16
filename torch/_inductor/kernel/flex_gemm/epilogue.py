@@ -985,6 +985,11 @@ class FlexGemmEpilogueEmitter:
         self.store_sources[node] = self.env[node]
         return True
 
+    def propagate_physical_reduction(self, node: torch.fx.Node, source: Any) -> None:
+        """Preserve physical callback provenance through shape-only wrappers."""
+        if isinstance(source, torch.fx.Node) and source in self.physical_reductions:
+            self.physical_reductions[node] = self.physical_reductions[source]
+
     def physical_finalize_arg(self, value: Any) -> Any:
         """Replace physical reduction inputs with their generated value expression."""
         if isinstance(value, torch.fx.Node) and value in self.physical_reductions:
@@ -1029,10 +1034,12 @@ class FlexGemmEpilogueEmitter:
         lowered = lower_squeeze(node, self.env, self.store_sources)
         if lowered is not None:
             self.env[node] = lowered
+            self.propagate_physical_reduction(node, node.args[0])
             return
         lowered = lower_getitem(node, self.env, self.store_sources)
         if lowered is not None:
             self.env[node] = lowered
+            self.propagate_physical_reduction(node, node.args[0])
             return
         lowered = lower_prepare_softmax_online(
             node,
@@ -1055,6 +1062,7 @@ class FlexGemmEpilogueEmitter:
         )
         if lowered is not None:
             self.env[node] = lowered
+            self.propagate_physical_reduction(node, node.args[0])
             return
         lowered = lower_tensorssa_reduce(
             node,

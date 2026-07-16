@@ -26,6 +26,7 @@ from .epi_ops import (
     RowVecLoad,
     RowVecTupleLoad,
     ColVecTupleLoad,
+    EpiSmemBytes,
     GroupedLocalReduce,
     Scalar,
     TileTupleLoad,
@@ -186,8 +187,22 @@ class GemmActMixin(ComposableEpiMixin):
                 d[key] = layout_utils.concat_to_interleave(d[key], 1)
         return self.EpilogueParams(**d)
 
-    # epi_get_tma_atoms, epi_smem_bytes, epi_get_smem_struct,
-    # epi_get_smem_tensors are all inherited from ComposableEpiMixin via _epi_ops.
+    @classmethod
+    def epi_smem_bytes(cls, args, cta_tile_shape_mnk, epi_tile, warp_shape_mnk=None):
+        result = super().epi_smem_bytes(args, cta_tile_shape_mnk, epi_tile, warp_shape_mnk)
+        if (
+            args.mLocalReduce is not None
+            and args.local_reduce_axis == 0
+            and args.local_reduce_group > 32
+        ):
+            smem_warps = max((warp_shape_mnk[0] if warp_shape_mnk is not None else 1) - 1, 0)
+            result += EpiSmemBytes(
+                unstaged=cta_tile_shape_mnk[1] * smem_warps * (Float32.width // 8)
+            )
+        return result
+
+    # epi_get_tma_atoms, epi_get_smem_struct, and epi_get_smem_tensors are all
+    # inherited from ComposableEpiMixin via _epi_ops.
 
     def epi_make_aux_out_copy_atom_r2s(self, params, tiled_copy_t2r, index=None):
         """Build the register-to-shared copy atom used by aux outputs."""
@@ -982,11 +997,11 @@ def gemm_act(
             raise RuntimeError("local_reduce_group must be positive")
         if local_reduce_axis not in (0, 1):
             raise RuntimeError("local_reduce_axis must be 0 or 1")
-        if local_reduce_axis == 0 and (
+        if (local_reduce_axis == 0 or local_reduce_group > 16) and (
             local_reduce_combine_key is None or local_reduce_finalize_key is None
         ):
             raise RuntimeError(
-                "local_reduce_axis=0 requires generated local-reduce callback keys"
+                "physical local reductions require generated local-reduce callback keys"
             )
         if local_reduce_out.ndim != 3:
             raise NotImplementedError("QUACK local_reduce_out must be 3-D")
