@@ -102,7 +102,7 @@ class SDPAWrapper(torch.nn.Module):
 class RingAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        return torch.cuda.device_count()
+        return torch.accelerator.device_count()
 
     @property
     def destroy_pg_upon_exit(self) -> bool:
@@ -551,7 +551,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         document_lengths: list[list[int]] | None = None,
     ) -> None:
         torch.use_deterministic_algorithms(True)
-        torch.cuda.manual_seed(1234)
+        torch.manual_seed(1234)
 
         dtype = torch.float32
         bs = B if B > 1 else 8
