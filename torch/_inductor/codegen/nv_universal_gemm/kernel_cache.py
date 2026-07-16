@@ -2,10 +2,10 @@
 """
 Global kernel cache for NVIDIA Universal GEMM.
 
-This module provides a lazy-initialized cache for cutlass_api kernels,
+This module provides a lazy-initialized cache for cutlass.operators kernels,
 avoiding expensive manifest scans on every kernel lookup.
 
-The first call to get_kernel_by_name() loads all kernels from cutlass_api
+The first call to get_kernel_by_name() loads all kernels from cutlass.operators
 (~10 seconds) and builds a name->kernel dict. Subsequent calls use the
 dict for O(1) lookup (~0.1 μs).
 """
@@ -55,7 +55,7 @@ _kernel_by_name_cache: dict[str, Any] | None = None
 
 def _build_kernel_cache() -> dict[str, Any]:
     """Build the kernel name -> kernel object cache."""
-    import cutlass_api
+    import cutlass.operators
 
     log.debug("Building NVGEMM kernel cache (this may take a few seconds)...")
 
@@ -66,8 +66,8 @@ def _build_kernel_cache() -> dict[str, Any]:
     except ImportError:
         log.debug("Vendored kernel wrappers not available")
 
-    all_kernels = cutlass_api.get_kernels()
-    cache = {k.metadata.kernel_name: k for k in all_kernels}
+    all_kernels = cutlass.operators.get_operators()
+    cache = {k.metadata.operator_name: k for k in all_kernels}
     log.debug("NVGEMM kernel cache built: %d kernels", len(cache))
     return cache
 
@@ -104,7 +104,7 @@ def partition_compatible_kernels(
     cache = _get_kernel_cache()
     buckets: list[list[Any]] = [[] for _ in range(num_buckets)]
     for kernel in cache.values():
-        if kernel.metadata.min_cc > cc:
+        if kernel.designed_for_min_cc > cc:
             continue
         bucket = classifier(kernel.metadata)
         if bucket < 0:
@@ -122,7 +122,7 @@ def partition_compatible_kernels(
 
 
 def get_kernel_by_name(kernel_name: str) -> Any:
-    """Get a cutlass_api kernel by name using the global cache."""
+    """Get a cutlass.operators kernel by name using the global cache."""
     return _get_kernel_cache().get(kernel_name)
 
 
@@ -184,21 +184,21 @@ def get_efc_kernel_with_epilogue(
             log.debug("Base EFC kernel not found: %s", efc_kernel_name)
             return None
 
-        from cutlass_api.metadata import EpilogueMetadata, KernelMetadata
+        from cutlass.operators.metadata import EpilogueMetadata, OperatorMetadata
 
         epilogue_metadata = EpilogueMetadata.from_args(epilogue_args)
 
         base_metadata = base_kernel.metadata
-        new_metadata = KernelMetadata(
+        new_metadata = OperatorMetadata(
             operands=base_metadata.operands,
             design=base_metadata.design,
-            kernel_name=base_metadata.kernel_name,
-            kernel_class=base_metadata.kernel_class,
-            min_cc=base_metadata.min_cc,
+            operator_name=base_metadata.operator_name,
+            operator_class=base_metadata.operator_class,
+            supported_targets=base_metadata.supported_targets,
             epilogue=epilogue_metadata,
         )
 
-        kernel_class = base_metadata.kernel_class
+        kernel_class = base_metadata.operator_class
         new_kernel = kernel_class(new_metadata)
 
         _efc_epilogue_cache[cache_key] = new_kernel
