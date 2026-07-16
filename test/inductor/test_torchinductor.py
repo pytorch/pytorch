@@ -523,6 +523,7 @@ def check_model(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
+    gradcheck_wrapper: Callable | None = None,
     output_process_fn_grad=lambda x: x,
     # TODO: enable this for all tests
     exact_stride=False,
@@ -579,6 +580,11 @@ def check_model(
     torch.manual_seed(0)
 
     correct = ref_model(*ref_inputs, **ref_kwargs)
+    correct_gradcheck = (
+        gradcheck_wrapper(ref_model, *ref_inputs, **ref_kwargs)
+        if gradcheck_wrapper
+        else correct
+    )
 
     torch._inductor.metrics.reset()
 
@@ -590,17 +596,16 @@ def check_model(
         return compile_fx(model_, example_inputs_)
 
     def run(*ex, **kwargs):
-        return model(*ex, **kwargs)
+        ret = model(*ex, **kwargs)
+        return ret, gradcheck_wrapper(
+            model, *ex, **kwargs
+        ) if gradcheck_wrapper else ret
 
     run = torch.compile(run, backend=compile_fx_wrapper, fullgraph=nopython)
 
     torch.manual_seed(0)
-    actual = run(*example_inputs, **kwargs)
-    # if not called:
-    #     exp = torch._dynamo.explain(run)(*example_inputs)
-    #     print("Explain:", exp[0])
-    #     for graph in exp[2]:
-    #         print("Graph", graph)
+    actual, actual_gradcheck = run(*example_inputs, **kwargs)
+
     if check_has_compiled:
         if not called:
             raise AssertionError("Ran graph without calling compile_fx")
@@ -740,8 +745,8 @@ def check_model(
                             f"Expected dtype {correct_val.dtype}, got {actual_val.dtype}"
                         )
     if check_gradient:
-        actual = output_process_fn_grad(actual)
-        correct = output_process_fn_grad(correct)
+        actual = output_process_fn_grad(actual_gradcheck)
+        correct = output_process_fn_grad(correct_gradcheck)
         actual_flat = pytree.tree_leaves(actual)
         correct_flat = pytree.tree_leaves(correct)
 
@@ -820,6 +825,7 @@ def check_model_gpu(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
+    gradcheck_wrapper: Callable | None = None,
     output_process_fn_grad=lambda x: x,
     # TODO: enable this for all tests
     exact_stride=False,
@@ -848,6 +854,7 @@ def check_model_gpu(
         assert_equal=assert_equal,
         check_gradient=check_gradient,
         check_has_compiled=check_has_compiled,
+        gradcheck_wrapper=gradcheck_wrapper,
         output_process_fn_grad=output_process_fn_grad,
         exact_stride=exact_stride,
     )
@@ -881,6 +888,7 @@ def check_model_gpu(
             assert_equal=assert_equal,
             check_gradient=check_gradient,
             check_has_compiled=check_has_compiled,
+            gradcheck_wrapper=gradcheck_wrapper,
             output_process_fn_grad=output_process_fn_grad,
             exact_stride=exact_stride,
         )

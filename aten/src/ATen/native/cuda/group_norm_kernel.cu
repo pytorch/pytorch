@@ -135,8 +135,9 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
     const int64_t c = g * D + i;
     const T_ACC gamma_v =
         gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[c]);
-    sum1 += dY[index] * X[index] * gamma_v;
-    sum2 += dY[index] * gamma_v;
+    const T_ACC dY_acc = static_cast<T_ACC>(dY[index]);
+    sum1 += dY_acc * static_cast<T_ACC>(X[index]) * gamma_v;
+    sum2 += dY_acc * gamma_v;
   }
   if (blockDim.x <= C10_WARP_SIZE) {
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
@@ -585,9 +586,7 @@ void GroupNormKernelImplInternal(
   TORCH_CHECK(X.numel() == N * C * HxW);
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
   TORCH_CHECK(!beta.defined() || beta.numel() == C);
-  if (N == 0) {
-    return;
-  }
+
   const int64_t G = group;
   const int64_t D = C / G;
   const T* X_data = X.const_data_ptr<T>();
@@ -849,16 +848,6 @@ void GroupNormBackwardKernelImplInternal(
   TORCH_CHECK(rstd.numel() == N * G);
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
-
-  if (N == 0) {
-    if (dgamma.defined()) {
-      dgamma.fill_(T(0));
-    }
-    if (dbeta.defined()) {
-      dbeta.fill_(T(0));
-    }
-    return;
-  }
 
   const T* dY_data = dY.const_data_ptr<T>();
   const T* X_data = X.const_data_ptr<T>();

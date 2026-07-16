@@ -6176,7 +6176,7 @@ class TestGradients(TestCase):
                     inp, input_idx = _input_recomposition_helper(inputs, v, input_idx)
                     kwargs[k] = inp
 
-                output = op.gradcheck_wrapper(variant, *positional_args, **kwargs)
+                output = op.get_gradcheck_wrapper()(variant, *positional_args, **kwargs)
                 if sample.output_process_fn_grad is not None:
                     return sample.output_process_fn_grad(output)
                 return output
