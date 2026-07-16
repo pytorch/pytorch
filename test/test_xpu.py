@@ -773,6 +773,7 @@ print(torch.xpu.is_initialized())
         # asynchronously: stream should be busy right after the call and idle only
         # after synchronize() completes.
         torch.xpu.synchronize()
+        self.assertTrue(torch.xpu.current_stream().query())
         torch.xpu._sleep(cycles)
         self.assertFalse(torch.xpu.current_stream().query())
         torch.xpu.synchronize()
