@@ -384,7 +384,9 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         ]
 
         if num_elems == 0:
-            outs_expanded = [outs.pop(0) if out_m else None for out_m in out_tensor_mask]
+            outs_expanded = [
+                outs.pop(0) if out_m else None for out_m in out_tensor_mask
+            ]
             return (*init, *outs_expanded)
 
         def store_out_in_outs(out, ind):
