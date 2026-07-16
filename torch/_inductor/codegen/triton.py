@@ -632,9 +632,7 @@ class BlockDescriptorOptions:
 
     def has_rindex(self) -> bool:
         return any(
-            TritonSymbols.has_reduction_index_symbol(
-                cast("TritonKernel", V.kernel), expr
-            )
+            TritonSymbols.has_reduction_index_symbol(V.kernel, expr)
             for expr in self.block_shape
         )
 
@@ -1255,9 +1253,7 @@ class TritonCSEVariable(CSEVariable):
                 # however, when index vars are used to compute indices for indirect reads
                 # those reads should subsequently be masked,
                 if (
-                    mask_name := TritonSymbols.mask_name_for_symbol(
-                        cast("TritonKernel", V.kernel), arg
-                    )
+                    mask_name := TritonSymbols.mask_name_for_symbol(V.kernel, arg)
                 ) is not None:
                     self.mask_vars.add(mask_name)
 
@@ -4488,8 +4484,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def matching_dep(dep):
             if prev_node is None:
                 raise AssertionError("prev_node must not be None")
-            if current_node is None:
-                raise AssertionError("current_node must not be None")
             prev_deps = prev_node.read_writes.writes
             if consider_reads:
                 prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
