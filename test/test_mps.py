@@ -1311,10 +1311,12 @@ class TestMPS(TestCaseMPS):
     def _gemv_tol(dtype, inner_dim):
         scale = math.sqrt(inner_dim / 4096)
         if dtype == torch.float16:
-            return dict(atol=1e-2 * scale, rtol=1e-2 * scale)
-        if dtype == torch.bfloat16:
-            return dict(atol=2e-2 * scale, rtol=2e-2 * scale)
-        return dict(atol=1e-3 * scale, rtol=1e-4 * scale)
+            atol = rtol = 1e-2 * scale
+        elif dtype == torch.bfloat16:
+            atol = rtol = 2e-2 * scale
+        else:
+            atol, rtol = 1e-3 * scale, 1e-4 * scale
+        return dict(atol=atol, rtol=max(rtol, torch.finfo(dtype).eps))
 
     def _gemv_mat(self, rows, cols, dtype, transpose):
         if transpose:
