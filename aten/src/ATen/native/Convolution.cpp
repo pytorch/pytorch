@@ -599,9 +599,15 @@ struct ConvParams {
     if (!input.is_mps()) {
       return false;
     }
-    // conv3d forward handles 64-bit shapes (long-indexed Metal kernel variant)
-    if (needs_64bit_indexing_no_split(input, weight) && !(input.ndimension() == 5 && !transposed)) {
-      return false;
+    // conv3d/conv1d forward handle 64-bit shapes (long-indexed Metal kernel
+    // variant); conv1d reaches here already expanded to (N, C, 1, L).
+    if (needs_64bit_indexing_no_split(input, weight)) {
+      const bool conv3d_fwd = input.ndimension() == 5 && !transposed;
+      const bool conv1d_fwd = input.ndimension() == 4 && !transposed && at::symint::size<T>(input, 2) == 1 &&
+          at::symint::size<T>(weight, 2) == 1 && padding[0] == 0;
+      if (!conv3d_fwd && !conv1d_fwd) {
+        return false;
+      }
     }
     return true;
 #else

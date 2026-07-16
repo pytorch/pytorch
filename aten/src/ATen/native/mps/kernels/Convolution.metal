@@ -254,19 +254,84 @@ INSTANTIATE_CONV3D_SIMD_ALL(bfloat)
   nchw_to_nhwc<DT, TC, TX, 256, VECR, VECW>(                         \
       device const DT*, device DT*, constant int2&, uint3, uint);
 
-#define INSTANTIATE_NCHW_TO_NHWC_ALL(DT)             \
-  INSTANTIATE_NCHW_TO_NHWC(DT, 16, 64, false, false) \
-  INSTANTIATE_NCHW_TO_NHWC(DT, 16, 64, false, true)  \
-  INSTANTIATE_NCHW_TO_NHWC(DT, 16, 64, true, false)  \
-  INSTANTIATE_NCHW_TO_NHWC(DT, 16, 64, true, true)   \
-  INSTANTIATE_NCHW_TO_NHWC(DT, 32, 32, false, false) \
-  INSTANTIATE_NCHW_TO_NHWC(DT, 32, 32, false, true)  \
-  INSTANTIATE_NCHW_TO_NHWC(DT, 32, 32, true, false)  \
-  INSTANTIATE_NCHW_TO_NHWC(DT, 32, 32, true, true)
+#define INSTANTIATE_NCHW_TO_NHWC_ALL(DT)              \
+  INSTANTIATE_NCHW_TO_NHWC(DT, 16, 64, false, false)  \
+  INSTANTIATE_NCHW_TO_NHWC(DT, 16, 64, false, true)   \
+  INSTANTIATE_NCHW_TO_NHWC(DT, 16, 64, true, false)   \
+  INSTANTIATE_NCHW_TO_NHWC(DT, 16, 64, true, true)    \
+  INSTANTIATE_NCHW_TO_NHWC(DT, 32, 32, false, false)  \
+  INSTANTIATE_NCHW_TO_NHWC(DT, 32, 32, false, true)   \
+  INSTANTIATE_NCHW_TO_NHWC(DT, 32, 32, true, false)   \
+  INSTANTIATE_NCHW_TO_NHWC(DT, 32, 32, true, true)    \
+  INSTANTIATE_NCHW_TO_NHWC(DT, 32, 128, false, false) \
+  INSTANTIATE_NCHW_TO_NHWC(DT, 32, 128, false, true)  \
+  INSTANTIATE_NCHW_TO_NHWC(DT, 32, 128, true, false)  \
+  INSTANTIATE_NCHW_TO_NHWC(DT, 32, 128, true, true)
 
 INSTANTIATE_NCHW_TO_NHWC_ALL(float)
 INSTANTIATE_NCHW_TO_NHWC_ALL(half)
 INSTANTIATE_NCHW_TO_NHWC_ALL(bfloat)
+
+// Depthwise conv1d directly on NCL: rows are per-channel independent, so the
+// NDHWC transpose the GEMM kernels need would be pure overhead here.
+template <typename T>
+kernel void conv1d_dw(
+    device const T* x [[buffer(0)]],
+    device const T* w [[buffer(1)]],
+    device T* y [[buffer(2)]],
+    constant Conv1dDwParams& p [[buffer(3)]],
+    device const T* bias [[buffer(4)]],
+    uint3 gid [[thread_position_in_grid]]) {
+  const int lo = int(gid.x);
+  const int c = int(gid.y);
+  const int n = int(gid.z);
+  float acc = p.has_bias ? (float)bias[c] : 0.0f;
+  device const T* xr = x + ((int64_t)n * p.C + c) * p.L;
+  const int base = lo * p.S - p.P;
+  for (int k = 0; k < p.K; ++k) {
+    const int li = base + k * p.D;
+    if (li >= 0 && li < p.L) {
+      acc += (float)xr[li] * (float)w[(int64_t)c * p.K + k];
+    }
+  }
+  y[((int64_t)n * p.C + c) * p.LO + lo] = (T)acc;
+}
+
+// DHWIO copy of an OIDHW weight view; ATen's generic permute copy is
+// launch-bound at typical weight sizes, a flat kernel is ~10x faster.
+template <typename T>
+kernel void conv_weight_to_dhwio(
+    device const T* src [[buffer(0)]],
+    device T* dst [[buffer(1)]],
+    constant ConvWeightPermuteParams& p [[buffer(2)]],
+    uint3 gid [[thread_position_in_grid]]) {
+  const int o = int(gid.x);
+  const int cg = int(gid.y);
+  const int k = int(gid.z);
+  const int kw = k % p.KW;
+  const int r = k / p.KW;
+  const int kh = r % p.KH;
+  const int kd = r / p.KH;
+  dst[((int64_t)k * p.CG + cg) * p.O + o] =
+      src[(int64_t)o * p.SO + (int64_t)cg * p.SC + kd * p.SD + kh * p.SH +
+          kw * p.SW];
+}
+
+#define INSTANTIATE_CONV1D_DW(DT)                                     \
+  template [[host_name("conv1d_dw_" #DT)]] kernel void conv1d_dw<DT>( \
+      device const DT*,                                               \
+      device const DT*,                                               \
+      device DT*,                                                     \
+      constant Conv1dDwParams&,                                       \
+      device const DT*,                                               \
+      uint3);                                                         \
+  template [[host_name("conv_weight_to_dhwio_" #DT)]] kernel void     \
+  conv_weight_to_dhwio<DT>(                                           \
+      device const DT*, device DT*, constant ConvWeightPermuteParams&, uint3);
+
+INSTANTIATE_CONV1D_DW(float)
+INSTANTIATE_CONV1D_DW(half)
+INSTANTIATE_CONV1D_DW(bfloat)
 
 #if __METAL_VERSION__ >= 400 && \
     __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
@@ -751,6 +816,37 @@ kernel void conv3d_mpp(
       true,                                                    \
       grouped,                                                 \
       true)
+
+// conv1d rides conv3d with a unit depth axis and outH == 1; destination
+// tiles are flat along W. Relaxed-mode MPP miscomputes BH == 1 tiles with
+// BW / NSG < 16 (measured), so every candidate keeps BW >= 16 * NSG.
+// clang-format off
+#define INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, BNAME, HAS_BIAS) \
+  INSTANTIATE_CONV3D_MPP_DTYPES(32, 32, 1, 2, 1, 1, KW, 1, 1, SX, 1, 1, DX,   \
+      CNAME, SRCC, BNAME, HAS_BIAS, ncdhw, true, ungrouped, false)             \
+  INSTANTIATE_CONV3D_MPP_DTYPES(64, 64, 1, 2, 1, 1, KW, 1, 1, SX, 1, 1, DX,   \
+      CNAME, SRCC, BNAME, HAS_BIAS, ncdhw, true, ungrouped, false)             \
+  INSTANTIATE_CONV3D_MPP_DTYPES(64, 128, 1, 4, 1, 1, KW, 1, 1, SX, 1, 1, DX,  \
+      CNAME, SRCC, BNAME, HAS_BIAS, ncdhw, true, ungrouped, false)             \
+  INSTANTIATE_CONV3D_MPP_DTYPES(128, 64, 1, 4, 1, 1, KW, 1, 1, SX, 1, 1, DX,  \
+      CNAME, SRCC, BNAME, HAS_BIAS, ncdhw, true, ungrouped, false)
+
+#define INSTANTIATE_CONV1D_MPP(KW, SX, DX, CNAME, SRCC)             \
+  INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, bias, true) \
+  INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, nobias, false)
+// clang-format on
+
+// Deduplicated direct conv1d specs from the surveyed model shapes (wav2vec2
+// k10s5 / k3s2 / k2s2, Whisper k3s1 / k3s2, EnCodec k7s1 / k8s4, TCN k3 d2/d4).
+INSTANTIATE_CONV1D_MPP(10, 5, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(10, 5, 1, 1, 1)
+INSTANTIATE_CONV1D_MPP(2, 2, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(3, 1, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(3, 1, 2, dyn, -1)
+INSTANTIATE_CONV1D_MPP(3, 1, 4, dyn, -1)
+INSTANTIATE_CONV1D_MPP(3, 2, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(7, 1, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(8, 4, 1, dyn, -1)
 
 // Deduplicated direct Conv3d specs from the surveyed model shapes.
 INSTANTIATE_CONV3D_MPP_GROUPED(1, 1, 2, 1, 1, 2)

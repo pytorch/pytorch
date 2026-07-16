@@ -1,6 +1,31 @@
 #pragma once
 #include <c10/metal/common.h>
 
+struct Conv1dDwParams {
+  int32_t C;
+  int32_t L;
+  int32_t LO;
+  int32_t NB;
+  int32_t K;
+  int32_t S;
+  int32_t P;
+  int32_t D;
+  bool has_bias;
+};
+
+// src element strides of the OIDHW weight view (may be non-contiguous)
+struct ConvWeightPermuteParams {
+  int32_t O;
+  int32_t CG;
+  int32_t KH;
+  int32_t KW;
+  int32_t SO;
+  int32_t SC;
+  int32_t SD;
+  int32_t SH;
+  int32_t SW;
+};
+
 struct Conv2DParams {
   int32_t N;
   int32_t C_in;

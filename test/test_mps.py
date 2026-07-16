@@ -10378,6 +10378,23 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
+    @largeTensorTest("16GB", device="mps")
+    @serialTest()
+    @parametrize("C,O", [(65536, 8), (8, 65536)])  # input-plane / output-plane overflow
+    def test_conv1d_int32_overflow(self, C, O):
+        L = 182 * 181
+        x = torch.randn(1, C, L, dtype=torch.float16, device='mps')
+        w = torch.randn(O, C, 2, dtype=torch.float16, device='mps') * 0.01
+        y = F.conv1d(x, w)
+        ls = [0, (L - 1) // 2, L - 2]
+        x0 = x[0, :, ls].float().cpu()
+        x1 = x[0, :, [l + 1 for l in ls]].float().cpu()
+        ref = w[:, :, 0].float().cpu() @ x0 + w[:, :, 1].float().cpu() @ x1
+        self.assertEqual(y[0, :, ls].float().cpu(), ref, atol=2e-2, rtol=2e-2)
+        del x, w, y
+        gc.collect()
+        torch.mps.empty_cache()
+
     @serialTest()
     def test_64bit_index_copy(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
