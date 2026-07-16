@@ -793,12 +793,16 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-    runs-on: "linux.4xlarge"
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: python:3.11
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
     steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -814,10 +818,10 @@ jobs:
         shell: bash
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          mkdir -p "${RUNNER_TEMP}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
+            --output-dir "${RUNNER_TEMP}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
@@ -853,12 +857,16 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-    runs-on: "linux.4xlarge"
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: python:3.11
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cu126
       LIBTORCH_VARIANT: shared-with-deps
     steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -874,10 +882,10 @@ jobs:
         shell: bash
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          mkdir -p "${RUNNER_TEMP}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
+            --output-dir "${RUNNER_TEMP}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
@@ -914,12 +922,16 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-    runs-on: "linux.4xlarge"
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: python:3.11
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cu130
       LIBTORCH_VARIANT: shared-with-deps
     steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -935,10 +947,10 @@ jobs:
         shell: bash
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          mkdir -p "${RUNNER_TEMP}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
+            --output-dir "${RUNNER_TEMP}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
@@ -975,12 +987,16 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-    runs-on: "linux.4xlarge"
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: python:3.11
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cu132
       LIBTORCH_VARIANT: shared-with-deps
     steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -996,10 +1012,10 @@ jobs:
         shell: bash
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          mkdir -p "${RUNNER_TEMP}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
+            --output-dir "${RUNNER_TEMP}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
