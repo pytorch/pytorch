@@ -8524,6 +8524,11 @@ maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
 register_lowering(aten.clamp_max)(minimum)
+register_op_dtype_propagation_rules(
+    "fmaximum",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    override_return_dtype=None,
+)
 neg = register_pointwise(aten.neg)
 abs = register_pointwise(aten.abs)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
