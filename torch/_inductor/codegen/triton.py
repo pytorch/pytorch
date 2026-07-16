@@ -75,6 +75,7 @@ from ..stream_utils import get_raw_stream_name
 from ..utils import (
     _TMA_SUPPORTED_DTYPES,
     cache_on_self,
+    DeferredLineBase,
     DelayReplaceLine,
     device_supports_fp64,
     get_bounds_index_expr,
@@ -5015,6 +5016,82 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape=tuple(target_shape),
         )
 
+    def _rewrite_masked_load_other_neg_inf(self, load_var, masks) -> bool:
+        """
+        Try to rewrite the masked tl.load feeding an online-softmax reduction
+        so that masked-out lanes are filled with -inf directly
+        (``other=float("-inf")``) instead of 0.0.  This lets the caller skip
+        the per-iteration ``tl.where(mask, value, -inf)`` re-masking in the
+        reduction loop, which measurably speeds up bandwidth-bound
+        online-softmax kernels.
+
+        Only fires when ``load_var`` is the direct result of a single masked
+        load (no intermediate compute) whose mask is exactly the reduction
+        mask.  Masked-out lanes of a load are never observable through other
+        consumers (reductions re-mask with their own default and stores are
+        masked), so changing the fill value is safe.
+
+        Returns True if the load was rewritten.
+        """
+        if self._load_mask is not None:
+            return False
+        # Native-matmul masking decisions inspect the textual "other=0.0" in
+        # CSE cache keys (ops.dot); don't invalidate them.
+        if self.is_native_matmul:
+            return False
+        if not isinstance(load_var, TritonCSEVariable):
+            return False
+        if load_var.dtype is None or not load_var.dtype.is_floating_point:
+            return False
+        if load_var.mask_vars != OrderedSet(masks):
+            return False
+
+        target_prefix = f"{load_var} = tl.load("
+        old_other = ", other=0.0"
+        new_other = ', other=float("-inf")'
+        for i, line in enumerate(self.loads._lines):
+            text = line.line if isinstance(line, DeferredLineBase) else line
+            if not isinstance(text, str):
+                continue
+            stripped = text.strip()
+            if not stripped.startswith(target_prefix):
+                continue
+            if stripped.count(old_other) != 1:
+                return False
+            new_text = text.replace(old_other, new_other)
+            if isinstance(line, DeferredLineBase):
+                line.line = new_text
+            else:
+                self.loads._lines[i] = new_text
+            return True
+        return False
+
+    @property
+    def _online_softmax_block_max_fn(self) -> str:
+        """
+        Triton function for the per-block running max of the online-softmax
+        combine loop (used by both online_softmax_reduce and
+        online_softmax_cross_entropy).
+
+        With config.triton.online_softmax_fast_combine (default) this is the
+        native ``tl.max`` builtin, which compiles to substantially faster code
+        than ``triton_helpers.max2`` (a generic ``tl.reduce`` with a custom
+        combine fn).  The block max is *non-NaN-propagating*, matching the
+        semantics that #189162 established (and got approved) for the "fmax"
+        reduction on the softmax two-pass fallback: the softmax-internal max
+        only stabilizes ``exp(x - xmax)`` and is never user-visible, and NaN
+        inputs still poison the sum output via ``exp(NaN)``, so softmax /
+        log-softmax / cross-entropy stay NaN-identical.  We emit the ``tl.max``
+        builtin rather than #189162's ``triton_helpers.fmax2`` precisely
+        because fmax2 is itself ``tl.reduce``-based and would forfeit the
+        speedup; the two are semantically identical here.
+        """
+        return (
+            "tl.max"
+            if config.triton.online_softmax_fast_combine
+            else "triton_helpers.max2"
+        )
+
     def reduction(
         self,
         dtype: torch.dtype,
@@ -5085,6 +5162,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # tmp0 in the triton code is either a scalar, or single-element tensor
         # so if we emit tl.sum directly, it will only give 1 instead of RBLOCK * 1
         # To avoid this, we broadcast to the expected shape first.
+        # Keep the pre-broadcast value around so online-softmax can trace it
+        # back to a direct masked load (see _rewrite_masked_load_other_neg_inf).
+        pre_broadcast_value = value
         value = self._map_tuple_or_scalar(
             lambda v: self.cse.generate(
                 self.compute,
@@ -5547,16 +5627,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     # 4. block_sum = sum(exp(value - new_max)) over reduction dim
                     # 5. running_sum = running_sum * correction + block_sum
                     # 6. running_max = new_max
-                    if cond:
+                    if cond and not (
+                        config.triton.online_softmax_fast_combine
+                        and self._rewrite_masked_load_other_neg_inf(
+                            pre_broadcast_value, masks
+                        )
+                    ):
                         masked_val_for_max = f"tl.where({cond}, {value}, float('-inf'))"
                         masked_val_for_sum = masked_val_for_max
                     else:
                         masked_val_for_max = str(value)
                         masked_val_for_sum = str(value)
 
+                    block_max_fn = self._online_softmax_block_max_fn
+
                     self.compute.splice(
                         f"""
-                        {accumulator_max}_block_max = triton_helpers.max2({masked_val_for_max}, {dim})
+                        {accumulator_max}_block_max = {block_max_fn}({masked_val_for_max}, {dim})
                         {accumulator_max}_new = triton_helpers.maximum({accumulator_max}, {accumulator_max}_block_max)
                         {accumulator_sum}_correction = tl_math.exp(({accumulator_max} - {accumulator_max}_new).to(tl.float32))
                         {accumulator_sum}_block = tl.sum(
@@ -5671,7 +5758,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     )
 
                     # In-loop: online softmax combine on logit_val
-                    if cond:
+                    pre_broadcast_logit = (
+                        pre_broadcast_value[0]
+                        if isinstance(pre_broadcast_value, tuple)
+                        else pre_broadcast_value
+                    )
+                    if cond and not (
+                        config.triton.online_softmax_fast_combine
+                        and self._rewrite_masked_load_other_neg_inf(
+                            pre_broadcast_logit, masks
+                        )
+                    ):
                         masked_val_for_max = (
                             f"tl.where({cond}, {logit_val}, float('-inf'))"
                         )
@@ -5680,9 +5777,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         masked_val_for_max = str(logit_val)
                         masked_val_for_sum = str(logit_val)
 
+                    block_max_fn = self._online_softmax_block_max_fn
+
                     self.compute.splice(
                         f"""
-                        {accumulator_max}_block_max = triton_helpers.max2({masked_val_for_max}, {dim})
+                        {accumulator_max}_block_max = {block_max_fn}({masked_val_for_max}, {dim})
                         {accumulator_max}_new = triton_helpers.maximum({accumulator_max}, {accumulator_max}_block_max)
                         {accumulator_sum}_correction = tl_math.exp(({accumulator_max} - {accumulator_max}_new).to(tl.float32))
                         {accumulator_sum}_block = tl.sum(

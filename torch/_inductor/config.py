@@ -2149,6 +2149,23 @@ class triton:
         os.environ.get("TORCHINDUCTOR_SCALAR_REDUCTION_ACCUMULATORS", "1") == "1"
     )
 
+    # Speed up the inner loop of online-softmax reductions:
+    #  1. use native tl.max for the per-block running max instead of
+    #     triton_helpers.max2 (generic tl.reduce with a NaN-propagating
+    #     combine fn), which compiles to substantially faster code; and
+    #  2. when the value feeding the reduction is a direct masked load,
+    #     load with other=-inf and skip the in-loop
+    #     tl.where(mask, value, -inf) re-masking.
+    # This applies the non-NaN-propagating-max idea that #189162 introduced
+    # for the softmax two-pass fallback ("fmax") to the looped online-softmax
+    # combine, which #189162 does not touch.  NaN inputs still poison the
+    # sum_exp output (exp(NaN) = NaN), so softmax / log-softmax /
+    # cross-entropy results computed from (max, sum) remain NaN-identical;
+    # only the raw max output may differ in the presence of NaNs.
+    online_softmax_fast_combine = (
+        os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX_FAST_COMBINE", "1") == "1"
+    )
+
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
     use_block_ptr = False
 
