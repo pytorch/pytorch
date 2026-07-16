@@ -2140,6 +2140,15 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
+    # Use scalar accumulators for simple associative reductions (sum, max,
+    # min, prod, xor_sum, any) in non-persistent reduction loops.  This
+    # reduces register pressure by accumulating into a scalar per x-element
+    # instead of keeping the full R0_BLOCK tile alive across iterations.
+    # Only applies when paired with large R0_BLOCK configs (2048/4096).
+    scalar_reduction_accumulators = (
+        os.environ.get("TORCHINDUCTOR_SCALAR_REDUCTION_ACCUMULATORS", "1") == "1"
+    )
+
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
     use_block_ptr = False
 
