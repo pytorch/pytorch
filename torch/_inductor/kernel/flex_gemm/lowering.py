@@ -157,28 +157,45 @@ def flex_gemm_ordered_outputs(result, aux_outs, local_reduce_outs, local_reduce_
             raise AssertionError("FlexGEMM expects at most one local-reduce output")
 
 
-def flex_gemm_local_reduce_metas(
-    gemm_op: torch._ops.OpOverload,
-    local_reduce,
-) -> tuple[Any, ...]:
-    """Return local-reduce output metadata after validating its GEMM scope."""
-    if local_reduce is None:
-        return ()
-    if gemm_op is not torch.ops.aten.mm.default:
-        raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
-    if local_reduce.store is None:
+def flex_gemm_local_reduce_metas(local_reduce) -> tuple[Any, ...]:
+    """Return metadata for the optional compressed local-reduce output."""
+    if local_reduce is None or local_reduce.store is None:
         return ()
     return (local_reduce.store.node.meta["val"],)
+
+
+def flex_gemm_autotune_view_input(node: ir.ReinterpretView) -> torch.Tensor:
+    """Rebuild a logical view for Python-backed template benchmarks."""
+    from torch._inductor.select_algorithm import (
+        AlgorithmSelectorCache,
+        get_strides_with_layout_constraints,
+    )
+    from torch._inductor.virtualized import V
+
+    value = AlgorithmSelectorCache.benchmark_example_value(node)
+    base = value if value._base is None else value._base
+    sizevars = V.graph.sizevars
+    sizes = sizevars.optimization_hints(node.get_size())
+    strides = sizevars.optimization_hints(get_strides_with_layout_constraints(node))
+    offset = sizevars.optimization_hint(node.get_layout().offset)
+    return torch.as_strided(base, sizes, strides, offset)
 
 
 def flex_gemm_config_keys_for_local_reduce(
     device,
     m: int,
     n: int,
-    local_reduce,
+    local_reduce_geometries: tuple[Any, ...],
     tuned: bool,
 ) -> tuple[tuple[Any, ...], ...]:
-    """Select QuACK config keys after applying local-reduce layout constraints."""
+    """Select QuACK config keys after applying grouped-layout config constraints.
+
+    Every grouped geometry constrains the config the same way, whether it backs
+    a runtime local-reduce plan or a plan-less grouped TensorSSA fragment
+    reshape in the generated epilogue: swap_ab reorients the accumulator
+    fragment and non-divisible tiles split groups across fragments, so either
+    would silently regroup the wrong elements.
+    """
     from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
         default_gemm_config_key,
@@ -188,37 +205,35 @@ def flex_gemm_config_keys_for_local_reduce(
 
     if not tuned:
         default_key = default_gemm_config_key(device, m, n)
-        if local_reduce is None or validate_flex_gemm_local_reduce_config(
-            gemm_config_from_key(default_key),
-            local_reduce.match.geometry.group,
-            local_reduce.match.geometry.axis,
+        if all(
+            validate_flex_gemm_local_reduce_config(
+                gemm_config_from_key(default_key), geometry.group, geometry.axis
+            )
+            for geometry in local_reduce_geometries
         ):
             return (default_key,)
 
     candidate_configs = candidate_gemm_configs_for_device(device)
-    if local_reduce is None:
-        return tuple(gemm_config_key(config) for config in candidate_configs)
-
-    local_reduce_configs = tuple(
-        config
-        for config in candidate_configs
-        if validate_flex_gemm_local_reduce_config(
-            config,
-            local_reduce.match.geometry.group,
-            local_reduce.match.geometry.axis,
-        )
-    )
-    if not local_reduce_configs:
-        raise NotImplementedError(
-            flex_gemm_local_reduce_config_error(
-                candidate_configs,
-                local_reduce.match.geometry.group,
-                local_reduce.match.geometry.axis,
+    configs = candidate_configs
+    for geometry in local_reduce_geometries:
+        configs = tuple(
+            config
+            for config in configs
+            if validate_flex_gemm_local_reduce_config(
+                config, geometry.group, geometry.axis
             )
         )
+        if not configs:
+            raise NotImplementedError(
+                flex_gemm_local_reduce_config_error(
+                    candidate_configs,
+                    geometry.group,
+                    geometry.axis,
+                )
+            )
     if tuned:
-        return tuple(gemm_config_key(config) for config in local_reduce_configs)
-    return (gemm_config_key(local_reduce_configs[0]),)
+        return tuple(gemm_config_key(config) for config in configs)
+    return (gemm_config_key(configs[0]),)
 
 
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
@@ -283,6 +298,11 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
         raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
     epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module)
+    if (
+        epilogue_analysis.required_geometries
+        and gemm_op is not torch.ops.aten.mm.default
+    ):
+        raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
     outputs = epilogue_analysis.outputs
     local_reduce_store = (
         None if outputs.local_reduce is None else outputs.local_reduce.store
@@ -296,7 +316,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     aux_metas = validate_flex_gemm_aux_outputs(
         gemm_op, outputs.aux_outputs, output_size
     )
-    local_reduce_metas = flex_gemm_local_reduce_metas(gemm_op, outputs.local_reduce)
+    local_reduce_metas = flex_gemm_local_reduce_metas(outputs.local_reduce)
     layout = ir.FixedLayout(
         gemm_args[mat1_index].get_device_or_error(),
         output_meta.dtype,
@@ -345,7 +365,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         layout.device,
         gemm_args[mat1_index].get_size()[-2],
         gemm_args[mat2_index].get_size()[-1],
-        outputs.local_reduce,
+        epilogue_analysis.required_geometries,
         tuned,
     )
     epilogue_arg_indices = tuple(
@@ -377,8 +397,17 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         )
         if error is not None:
             raise error
+    input_gen_fns = {
+        index: flex_gemm_autotune_view_input
+        for index, input_node in enumerate(input_nodes)
+        if isinstance(input_node, ir.ReinterpretView)
+    }
     result, _ = autotune_select_algorithm(
-        "flex_gemm_epilogue", choices, input_nodes, layout
+        "flex_gemm_epilogue",
+        choices,
+        input_nodes,
+        layout,
+        input_gen_fns=input_gen_fns or None,
     )
     return flex_gemm_ordered_outputs(
         result,
