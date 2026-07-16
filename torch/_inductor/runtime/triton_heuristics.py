@@ -4084,8 +4084,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
         # num_stages) -> combo autotunes kernel-level knobs over them; the chosen block sizes
         # are passed as args via default_config. No-bench mode has no candidates and bakes its
         # blocks into the body, so its config carries only backend kwargs (no block args).
-        # Key presence (not truthiness) selects the mode, matching
-        # _combo_has_reduction_subkernel.
+        # Must use the same key-presence check as _combo_has_reduction_subkernel.
         if "stitched_launch_candidates" in combo_meta:
             launch_candidates = combo_meta["stitched_launch_candidates"]
             block_config = combo_meta.get("default_config") or {}
