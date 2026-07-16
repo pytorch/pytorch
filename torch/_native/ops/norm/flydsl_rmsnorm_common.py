@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 FlyDSL Project Contributors
 
-"""Shared building blocks for the RMSNorm forward/backward kernels.
+"""Shared building blocks for the RMSNorm forward kernel.
 
 Holds only the constants and device-side helpers shared by the vendored plain
-forward and backward builders. Quantized and fused-add RMSNorm variants remain
-in the upstream FlyDSL repository and are intentionally out of scope here.
+forward builder. Quantized and fused-add RMSNorm variants remain in the
+upstream FlyDSL repository and are intentionally out of scope here.
 """
 
 import flydsl.expr as fx

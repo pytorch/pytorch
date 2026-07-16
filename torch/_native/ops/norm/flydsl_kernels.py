@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 FlyDSL Project Contributors
 
-"""Vendored FlyDSL plain RMSNorm FWD/BWD kernels and PyTorch wrappers.
+"""Vendored FlyDSL plain RMSNorm forward kernel and PyTorch wrapper.
 
-The device code is derived from ROCm/FlyDSL kernels/norm/rmsnorm_kernel.py
-and rmsnorm_bwd_kernel.py at commit
-a85595136c647b2ac4532be43ad6e37beaedc085. Only the plain RMSNorm path
-needed by ATen is included; quantized and fused-add variants remain out of
-scope.
+The device code is derived from ROCm/FlyDSL kernels/norm/rmsnorm_kernel.py at
+commit a85595136c647b2ac4532be43ad6e37beaedc085. Only the plain RMSNorm
+forward path needed by ATen is included; quantized and fused-add variants
+remain out of scope.
 """
 
 # mypy: allow-untyped-defs
@@ -28,7 +27,6 @@ from flydsl.runtime.device import get_rocm_arch
 from torch._native.flydsl_cache import jit_cache
 
 from .flydsl_kernel_utils import dtype_to_elem_type
-from .flydsl_rmsnorm_bwd_kernel import build_rmsnorm_bwd_module
 from .flydsl_rmsnorm_common import BLOCK_THREADS, EPS, VEC_WIDTH, WARP_SIZE
 from .flydsl_rmsnorm_common import load_scalar as _load_scalar
 from .flydsl_rmsnorm_common import load_vec as _load_vec
@@ -55,14 +53,6 @@ def _dtype_str(dtype: torch.dtype) -> str:
         return _SUPPORTED_DTYPES[dtype]
     except KeyError as exc:
         raise TypeError(f"unsupported RMSNorm dtype for FlyDSL: {dtype}") from exc
-
-
-def _canonical_normalized_shape(normalized_shape) -> tuple[int, ...]:
-    if isinstance(normalized_shape, torch.Size):
-        return tuple(int(x) for x in normalized_shape)
-    if isinstance(normalized_shape, (tuple, list)):
-        return tuple(int(x) for x in normalized_shape)
-    return (int(normalized_shape),)
 
 
 def _normalized_shape_1d(normalized_shape) -> int | None:
@@ -552,34 +542,6 @@ def _compile_rmsnorm_fwd(
     )
 
 
-@jit_cache
-def _compile_rmsnorm_bwd(
-    n: int,
-    dtype: str,
-    arch: str,
-    backend: str,
-    device_index: int,
-    *,
-    compile_args,
-) -> flyc.CompiledFunction:
-    del arch, backend, device_index
-    input_2d, weight, grad_2d, rstd, grad_input, grad_weight, rows_m, stream = (
-        compile_args
-    )
-    launch = build_rmsnorm_bwd_module(n, dtype)
-    return flyc.compile(
-        launch,
-        _make_compile_arg(input_2d),
-        flyc.from_torch_tensor(weight),
-        _make_compile_arg(grad_2d),
-        _make_compile_arg(rstd),
-        _make_compile_arg(grad_input),
-        flyc.from_torch_tensor(grad_weight),
-        rows_m,
-        stream,
-    )
-
-
 def rmsnorm_fwd(
     input: torch.Tensor,
     normalized_shape,
@@ -632,82 +594,15 @@ def rmsnorm_fwd(
     return result
 
 
-def rmsnorm_bwd(
-    grad_out: torch.Tensor,
-    input: torch.Tensor,
-    normalized_shape,
-    rstd: torch.Tensor,
-    weight: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run FlyDSL backward and return grad_input and grad_weight."""
-
-    n = _normalized_shape_1d(normalized_shape)
-    if n is None:
-        raise ValueError("FlyDSL RMSNorm currently requires one normalized dimension")
-
-    rows_m = input.numel() // n
-
-    with torch.cuda.device(input.device):
-        is_2d = input.ndim == 2
-        input_2d = input if is_2d else input.reshape(rows_m, n)
-        grad_2d = grad_out if is_2d else grad_out.reshape(rows_m, n)
-        rstd_flat = rstd.reshape(rows_m)
-        grad_input_2d = torch.empty_like(input_2d)
-
-        # The kernel atomically accumulates dweight in fp32. flyc.compile may
-        # execute the kernel once while tracing, so this buffer is deliberately
-        # cleared after compilation and immediately before the measured launch.
-        grad_weight_fp32 = torch.zeros(n, device=input.device, dtype=torch.float32)
-        stream = torch.cuda.current_stream()
-        device_index = input.device.index
-        if device_index is None:
-            device_index = torch.cuda.current_device()
-
-        compiled = _compile_rmsnorm_bwd(
-            n,
-            _dtype_str(input.dtype),
-            _compile_key_arch(device_index),
-            _COMPILE_BACKEND_NAME,
-            device_index,
-            compile_args=(
-                input_2d,
-                weight,
-                grad_2d,
-                rstd_flat,
-                grad_input_2d,
-                grad_weight_fp32,
-                rows_m,
-                stream,
-            ),
-        )
-        grad_weight_fp32.zero_()
-        compiled(
-            input_2d,
-            weight,
-            grad_2d,
-            rstd_flat,
-            grad_input_2d,
-            grad_weight_fp32,
-            rows_m,
-            stream,
-        )
-
-    grad_input = grad_input_2d if is_2d else grad_input_2d.reshape(input.shape)
-    grad_weight = grad_weight_fp32.to(weight.dtype)
-    return grad_input, grad_weight
-
-
 def clear_rmsnorm_caches() -> None:
-    """Clear both native-op-level compile caches (used by tests/benchmarks)."""
+    """Clear native-op-level compile caches (used by tests/benchmarks)."""
 
     _compile_rmsnorm_fwd.cache_clear()
-    _compile_rmsnorm_bwd.cache_clear()
 
 
 def rmsnorm_cache_info() -> dict[str, object]:
-    """Return forward/backward cache statistics for diagnostics."""
+    """Return forward cache statistics for diagnostics."""
 
     return {
         "fwd": _compile_rmsnorm_fwd.cache_info(),
-        "bwd": _compile_rmsnorm_bwd.cache_info(),
     }

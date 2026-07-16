@@ -1,4 +1,4 @@
-"""FlyDSL overrides for ATen's internal fused RMSNorm FWD/BWD operators."""
+"""FlyDSL override for ATen's internal fused RMSNorm forward operator."""
 
 # mypy: allow-untyped-defs
 
@@ -13,7 +13,6 @@ _SUPPORTED_EPS = 1e-5
 _HIP_AVAILABLE = torch.version.hip is not None
 _is_cow_tensor = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
 _rmsnorm_fwd = None
-_rmsnorm_bwd = None
 
 
 def _normalized_shape_1d(normalized_shape) -> int | None:
@@ -46,7 +45,7 @@ def _common_supported(
     n: int,
     weight: torch.Tensor | None,
 ) -> bool:
-    """Cheap dispatcher predicate shared by forward and backward."""
+    """Cheap dispatcher predicate for supported forward inputs."""
     if not _HIP_AVAILABLE or input.device.type != "cuda":
         return False
     if input.dtype not in _SUPPORTED_DTYPES:
@@ -86,15 +85,6 @@ def _fused_rms_norm_fwd_perf_wins(input: torch.Tensor, n: int) -> bool:
     )
 
 
-def _fused_rms_norm_bwd_perf_wins(input: torch.Tensor, n: int) -> bool:
-    # Tuned on MI355. Keep only regions where benchmarks show at least a
-    # 10% win over ATen.  Borderline fp16/bf16 large-N and fp32 cases fall back.
-    rows_m = input.numel() // n
-    if input.dtype in (torch.float16, torch.bfloat16):
-        return 8192 <= n < 32768 and rows_m >= 32768
-    return False
-
-
 def _fused_rms_norm_cond(
     input: torch.Tensor,
     normalized_shape,
@@ -123,18 +113,6 @@ def _get_rmsnorm_fwd(input: torch.Tensor):
     return _rmsnorm_fwd
 
 
-def _get_rmsnorm_bwd(input: torch.Tensor):
-    global _rmsnorm_bwd
-    if _rmsnorm_bwd is None:
-        # See _get_rmsnorm_fwd: importing the kernel module can query the active
-        # device while initializing vendored FlyDSL constants.
-        with torch.cuda.device(input.device):
-            from .flydsl_kernels import rmsnorm_bwd
-
-        _rmsnorm_bwd = rmsnorm_bwd
-    return _rmsnorm_bwd
-
-
 def _fused_rms_norm_impl(
     input: torch.Tensor,
     normalized_shape,
@@ -150,65 +128,8 @@ def _fused_rms_norm_impl(
     return rmsnorm_fwd(input, normalized_shape, weight, float(eps))
 
 
-def _fused_rms_norm_backward_cond(
-    grad_out: torch.Tensor,
-    input: torch.Tensor,
-    normalized_shape,
-    rstd: torch.Tensor,
-    weight: torch.Tensor | None,
-    output_mask,
-) -> bool:
-    # Backward receives the already-computed rstd, so its formula is independent
-    # of the eps value used by forward.
-    n = _normalized_shape_1d(normalized_shape)
-    if n is None:
-        return False
-    if not _common_supported(input, n, weight):
-        return False
-    rows_m = input.numel() // n
-    if (
-        grad_out.shape != input.shape
-        or grad_out.dtype != input.dtype
-        or grad_out.device != input.device
-        or not grad_out.is_contiguous()
-    ):
-        return False
-    if (
-        rstd.device != input.device
-        or rstd.dtype != torch.float32
-        or rstd.numel() != rows_m
-        or not rstd.is_contiguous()
-    ):
-        return False
-    if len(output_mask) != 2 or not any(bool(x) for x in output_mask):
-        return False
-
-    if _is_cow_tensor(grad_out) or _is_cow_tensor(rstd):
-        return False
-    return _fused_rms_norm_bwd_perf_wins(input, n)
-
-
-def _fused_rms_norm_backward_impl(
-    grad_out: torch.Tensor,
-    input: torch.Tensor,
-    normalized_shape,
-    rstd: torch.Tensor,
-    weight: torch.Tensor | None,
-    output_mask,
-) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-    if weight is None:
-        raise RuntimeError("FlyDSL RMSNorm backward requires an explicit weight")
-
-    rmsnorm_bwd = _get_rmsnorm_bwd(input)
-    grad_input, grad_weight = rmsnorm_bwd(grad_out, input, normalized_shape, rstd, weight)
-    return (
-        grad_input if bool(output_mask[0]) else None,
-        grad_weight if bool(output_mask[1]) else None,
-    )
-
-
 def register_flydsl_rmsnorm_overrides() -> None:
-    """Register both training operators while retaining transparent fallback."""
+    """Register the forward operator while retaining transparent fallback."""
 
     # QuACK also overrides these symbols for NVIDIA. Multiple registrations are
     # intentional: the predicates are mutually exclusive (ROCm versus NVIDIA).
@@ -218,13 +139,5 @@ def register_flydsl_rmsnorm_overrides() -> None:
         "CUDA",
         cond=_fused_rms_norm_cond,
         impl=_fused_rms_norm_impl,
-        allow_multiple_override=True,
-    )
-    fu.register_op_override(
-        "aten",
-        "_fused_rms_norm_backward",
-        "CUDA",
-        cond=_fused_rms_norm_backward_cond,
-        impl=_fused_rms_norm_backward_impl,
         allow_multiple_override=True,
     )
