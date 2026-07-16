@@ -4199,7 +4199,7 @@ def handle_traced_output(
         ]
         or (
             # TODO: this is a little sus, because we didn't check what the self is
-            proxy.node.op == "call_method" and proxy.node.target == "bit_length"
+            proxy.node.op == "call_method" and proxy.node.target in {"bit_length", "__index__"}
         )
     ):
         set_example_value(proxy.node, example_value)
