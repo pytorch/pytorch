@@ -113,53 +113,24 @@ esac
 if [[ -n ${MANY_LINUX_VERSION} && -z ${DOCKERFILE_SUFFIX} ]]; then
     DOCKERFILE_SUFFIX=_${MANY_LINUX_VERSION}
 fi
-# The daemon tweak only applies to the local-docker-daemon path; the remote
-# BuildKit path (OSDC/ARC) has no local daemon.
-if [ "$(uname -m)" != "s390x" ] && [ -v CI ] && [ -z "${REMOTE_BUILDKIT:-}" ]; then
-    # TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
-    # is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
-    sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
-    sudo systemctl daemon-reload
-    sudo systemctl restart docker
-fi
-
-if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
-    # Remote BuildKit path (OSDC/ARC, no local daemon): buildx-push straight to
-    # the registry. The caller passes the target tag(s) as trailing `-t ...`
-    # args ("$@"); WITH_PUSH gates publishing (PRs only validate the build).
-    output_flag=""
-    if [[ "${WITH_PUSH:-false}" == "true" ]]; then
-        output_flag="--push"
-    fi
-
-    build_image() {
-        docker buildx build \
-            ${DOCKER_GPU_BUILD_ARG} \
-            --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
-            --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
-            --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
-            --target "${TARGET}" \
-            --progress plain \
-            ${output_flag} \
-            "$@" \
-            -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
-            "${TOPDIR}/.ci/docker/"
-    }
-
-    # The caller (binary-docker-build action) wraps this in a cold-pool
-    # connect-retry loop, so just build once here.
-    build_image "$@"
+# Remote BuildKit (OSDC) pushes straight to the registry on WITH_PUSH; the local
+# path (s390x) loads the built image so its workflow can tag and push it.
+if [[ -n "${REMOTE_BUILDKIT:-}" && "${WITH_PUSH:-false}" == "true" ]]; then
+    output_flag="--push"
+elif [[ -z "${REMOTE_BUILDKIT:-}" ]]; then
+    output_flag="--load"
 else
-    tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
-
-    DOCKER_BUILDKIT=1 docker build  \
-        ${DOCKER_GPU_BUILD_ARG} \
-        --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
-        --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
-        --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
-        --target "${TARGET}" \
-        -t "${tmp_tag}" \
-        $@ \
-        -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
-        "${TOPDIR}/.ci/docker/"
+    output_flag=""
 fi
+
+docker buildx build \
+    ${DOCKER_GPU_BUILD_ARG} \
+    --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
+    --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
+    --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
+    --target "${TARGET}" \
+    --progress plain \
+    ${output_flag} \
+    "$@" \
+    -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
+    "${TOPDIR}/.ci/docker/"
