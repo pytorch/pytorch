@@ -17,7 +17,7 @@ import sys
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, TypeVar
-from typing_extensions import deprecated, Self
+from typing_extensions import Self
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -41,6 +41,7 @@ from torch.jit._state import (
     _enabled,
     _set_jit_function_cache,
     _set_jit_overload_cache,
+    _torchscript_deprecation_error,
     _try_get_jit_cached_function,
     _try_get_jit_cached_overloads,
 )
@@ -356,16 +357,13 @@ class ScriptWarning(Warning):
 
 def script_method(fn):
     if sys.version_info >= (3, 14):
-        warnings.warn(
+        msg = (
             "`torch.jit.script_method` is not supported in Python 3.14+ and may break. "
-            "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            "Please switch to `torch.compile` or `torch.export`."
         )
     else:
-        warnings.warn(
-            "`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
-        )
+        msg = "`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`."
+    _torchscript_deprecation_error(msg)
     if not _enabled:
         return fn
     # NOTE: we need to traverse two frames here because the meta-class frame
@@ -771,10 +769,6 @@ if _enabled:
             """
             return self._c.save(str(f), **kwargs)
 
-        @deprecated(
-            "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
-            https://docs.pytorch.org/executorch/stable/getting-started.html"
-        )
         def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""Add (or update) the bytecode session to the script model.
 
@@ -788,24 +782,16 @@ if _enabled:
                 _extra_files: Map from filename to contents which will be stored as part of 'f'.
 
             """
-            warnings.warn(
-                "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
-                https://docs.pytorch.org/executorch/stable/getting-started.html",
-                DeprecationWarning,
-                stacklevel=2,
+            _torchscript_deprecation_error(
+                "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. "
+                "https://docs.pytorch.org/executorch/stable/getting-started.html"
             )
             return self._c._save_for_mobile(*args, **kwargs)
 
-        @deprecated(
-            "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
-            https://docs.pytorch.org/executorch/stable/getting-started.html"
-        )
         def _save_to_buffer_for_lite_interpreter(self, *args, **kwargs):
-            warnings.warn(
-                "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
-                https://docs.pytorch.org/executorch/stable/getting-started.html",
-                DeprecationWarning,
-                stacklevel=2,
+            _torchscript_deprecation_error(
+                "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. "
+                "https://docs.pytorch.org/executorch/stable/getting-started.html"
             )
             return self._c._save_to_buffer_for_mobile(*args, **kwargs)
 
@@ -1482,16 +1468,13 @@ def script(
             print(scripted_model([20]))
     """
     if sys.version_info >= (3, 14):
-        warnings.warn(
+        msg = (
             "`torch.jit.script` is not supported in Python 3.14+ and may break. "
-            "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            "Please switch to `torch.compile` or `torch.export`."
         )
     else:
-        warnings.warn(
-            "`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
-        )
+        msg = "`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`."
+    _torchscript_deprecation_error(msg)
     if not _enabled:
         return obj
     try:
@@ -1640,9 +1623,8 @@ def interface(obj: _T) -> _T:
         user_fn_jit(impls, 0, val)
         user_fn_jit(impls, 1, val)
     """
-    warnings.warn(
-        "`torch.jit.interface` is deprecated. Please use `torch.compile` instead.",
-        DeprecationWarning,
+    _torchscript_deprecation_error(
+        "`torch.jit.interface` is deprecated. Please use `torch.compile` instead."
     )
     if not inspect.isclass(obj):
         raise RuntimeError("interface must be applied to a class")

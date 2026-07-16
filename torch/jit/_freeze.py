@@ -5,10 +5,9 @@ This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
 
-import warnings
-
 import torch
 from torch.jit._script import RecursiveScriptModule, ScriptModule
+from torch.jit._state import _torchscript_deprecation_error
 
 
 def freeze(
@@ -103,9 +102,8 @@ def freeze(
         You can remap devices by specifying `map_location` in `torch.jit.load`, however
         device-specific logic may have been baked into the model.
     """
-    warnings.warn(
-        "`torch.jit.freeze` is deprecated. Please use `torch.compile` instead.",
-        DeprecationWarning,
+    _torchscript_deprecation_error(
+        "`torch.jit.freeze` is deprecated. Please use `torch.compile` instead."
     )
     if not isinstance(mod, ScriptModule):
         raise RuntimeError(
@@ -227,9 +225,8 @@ def optimize_for_inference(
         # if built with MKLDNN, convolution will be run with MKLDNN weights
         assert "MKLDNN" in frozen_mod.graph
     """
-    warnings.warn(
-        "`torch.jit.optimize_for_inference` is deprecated. Please use `torch.compile` instead.",
-        DeprecationWarning,
+    _torchscript_deprecation_error(
+        "`torch.jit.optimize_for_inference` is deprecated. Please use `torch.compile` instead."
     )
     if not isinstance(mod, ScriptModule):
         raise RuntimeError(

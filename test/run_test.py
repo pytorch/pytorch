@@ -431,6 +431,29 @@ JIT_EXECUTOR_TESTS = [
     "test_jit_fuser_legacy",
 ]
 
+# TorchScript APIs (torch.jit.script/trace/save/...) raise a RuntimeError unless
+# this escape-hatch env var is set to the exact promised value; see
+# torch/jit/_state.py. Set it for the test files that exercise TorchScript so
+# they keep running until the suite is migrated off TS before 2.15.
+TORCHSCRIPT_SILENCE_ENV = "TORCH_2_14_ONLY_UNSAFE_SILENCE_TORCHSCRIPT_ERROR"
+TORCHSCRIPT_SILENCE_VALUE = "I promise to migrate by 2.15"
+
+
+def _uses_torchscript(test_name: str) -> bool:
+    return (
+        test_name.startswith(
+            (
+                "jit/",
+                "quantization/jit/",
+                "distributed/nn/jit/",
+                "test_jit",
+                "test_tensorexpr",
+            )
+        )
+        or test_name == "test_ops_jit"
+    )
+
+
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
@@ -517,6 +540,8 @@ def run_test(
         print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is NOT set")
 
     env = env or os.environ.copy()
+    if _uses_torchscript(test_module.name):
+        env[TORCHSCRIPT_SILENCE_ENV] = TORCHSCRIPT_SILENCE_VALUE
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_args.copy()
     test_file = test_module.name

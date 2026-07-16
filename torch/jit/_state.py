@@ -48,6 +48,25 @@ class EnabledProxy:
 _enabled = EnabledProxy()
 
 
+_SILENCE_TORCHSCRIPT_ERROR_ENV = "TORCH_2_14_ONLY_UNSAFE_SILENCE_TORCHSCRIPT_ERROR"
+_SILENCE_TORCHSCRIPT_ERROR_VALUE = "I promise to migrate by 2.15"
+# Read once at import; the escape hatch must be set before `import torch`.
+_torchscript_error_silenced = (
+    os.environ.get(_SILENCE_TORCHSCRIPT_ERROR_ENV) == _SILENCE_TORCHSCRIPT_ERROR_VALUE
+)
+
+
+def _torchscript_deprecation_error(message: str) -> None:
+    if _torchscript_error_silenced:
+        return
+    raise RuntimeError(
+        f"{message} This is now an error. To temporarily silence it, set the "
+        f'environment variable {_SILENCE_TORCHSCRIPT_ERROR_ENV}="'
+        f'{_SILENCE_TORCHSCRIPT_ERROR_VALUE}" before importing torch. '
+        "You must migrate before 2.15."
+    )
+
+
 def disable() -> None:
     _enabled.enabled = False
 
