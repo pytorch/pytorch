@@ -7211,12 +7211,16 @@ class ExternKernel(InputsKernel):
                     args_flat_is_tensor.append(False)
                     non_tensor_args.append(arg)
                     device_index = arg.device.index
-                    if not (arg.device.type == "cuda" and device_index is not None):
+                    if not (
+                        arg.device.type in ["cuda", "xpu"] and device_index is not None
+                    ):
                         raise AssertionError(
-                            'Expected arg.device.type == "cuda" and device_index is not None'
+                            'Expected arg.device.type in ["cuda", "xpu"] and device_index is not None'
                         )
                     real_non_tensor_args.append(
-                        torch.cuda.default_generators[device_index].clone_state()
+                        torch._C._accelerator_getDefaultGenerator(
+                            device_index
+                        ).clone_state()
                     )
 
                 case OpaqueObjectState():
@@ -7281,12 +7285,14 @@ class ExternKernel(InputsKernel):
                 example_args.append(x.opaque_example_value)
             elif isinstance(x, torch._inductor.ir.GeneratorState):
                 device_index = x.device.index
-                if not (x.device.type == "cuda" and device_index is not None):
+                if not (x.device.type in ["cuda", "xpu"] and device_index is not None):
                     raise AssertionError(
-                        'Expected x.device.type == "cuda" and device_index is not None'
+                        'Expected x.device.type in ["cuda", "xpu"] and device_index is not None'
                     )
                 example_args.append(
-                    torch.cuda.default_generators[device_index].clone_state()
+                    torch._C._accelerator_getDefaultGenerator(
+                        device_index
+                    ).clone_state()
                 )
             else:
                 example_args.append(ir_node_to_tensor(x))
