@@ -4798,8 +4798,10 @@ for dtype in (torch.int32, torch.int64):
                     actual, code = run_and_get_code(
                         torch.compile(fn, fullgraph=True), a, b
                     )
-                    # TODO: Temporary workaround bf16 accuracy issue for gfx1100, remove once that ticket is fixed.
-                    # Issue created https://github.com/AMD-Triton/triton-tickets/issues/1909 to track the fix.
+                    # TODO: Temporary workaround bf16 accuracy issue for gfx1100, remove once that it is fixed.
+                    # Root cause is incorrect calculation `expected` in eager mode that uses
+                    # rocBLAS(rocblas_gemvtsm_kernel) on gfx1100
+                    # RDNA4 is ok due to hipBLASLt uses by default.
                     if is_gfx1100 and dtype == torch.bfloat16:
                         self.assertEqual(actual, expected, atol=0.05, rtol=0.1)
                     else:
