@@ -4802,6 +4802,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         expected_ys = torch.stack([batch_init + k for k in range(1, 5)], dim=1)
         self.assertEqual(batched_ys, expected_ys)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @skipIfNoDynamoSupport
     def test_scan_xs_none_length_dynamic_compile(self):
         def body(c, x):
