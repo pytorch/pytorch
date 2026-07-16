@@ -3762,6 +3762,44 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # This would error before fixing guard orering on nn.Modules (https://github.com/pytorch/pytorch/issues/170429)
         _ = runner_func(model, input_tensor)
 
+    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
+    def test_prepend_forward_pre_hook_after_hook_with_closure(self):
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def make_hook(offset):
+            def hook(module, args):
+                return (args[0] + offset,)
+
+            return hook
+
+        def prepended_hook(module, args):
+            return args[0] + 2.0
+
+        model = SimpleModel()
+        existing_handle = model.linear.register_forward_pre_hook(make_hook(1.0))
+        prepended_handle = model.linear.register_forward_pre_hook(
+            prepended_hook, prepend=True
+        )
+
+        self.assertEqual(
+            list(model.linear._forward_pre_hooks.keys()),
+            [prepended_handle.id, existing_handle.id],
+        )
+        self.assertEqual(
+            list(dict.keys(model.linear._forward_pre_hooks)),
+            [existing_handle.id, prepended_handle.id],
+        )
+
+        compiled_model = torch.compile(model, fullgraph=True, backend="eager")
+        input_tensor = torch.randn(1, 10)
+        self.assertEqual(compiled_model(input_tensor), model(input_tensor))
+
     def test_prepend_hook_ordering(self):
         class HookedLinear(torch.nn.Linear):
             def __init__(self, *args, **kwargs):
