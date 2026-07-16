@@ -1587,7 +1587,15 @@ class GraphLowering(torch.fx.Interpreter):
             if target in self.seen_subgraphs:
                 return self.seen_subgraphs[target]
 
-            out = ir.Subgraph(name=target, graph_module=value)
+            nested_config = getattr(value, "meta", {}).get("nested_region_config")
+            inductor_config_patches = getattr(
+                nested_config, "inductor_config_patches", None
+            )
+            out = ir.Subgraph(
+                name=target,
+                graph_module=value,
+                inductor_config_patches=inductor_config_patches,
+            )
             self.seen_subgraphs[target] = out
             return out
 
