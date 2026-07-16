@@ -860,7 +860,6 @@ def run_joint_graph_passes_on_hops(
     from torch._higher_order_ops import invoke_subgraph
     from torch._higher_order_ops.invoke_subgraph import (
         get_backward_nested_region_config,
-        NestedCompileRegionOptions,
     )
 
     def num_outputs(mod: torch.fx.GraphModule) -> int:
@@ -1243,12 +1242,19 @@ def run_joint_graph_passes_on_hops(
             fw_region_config = fw_node.meta.get("custom", {}).get(
                 "nested_region_config"
             )
-            if (
-                isinstance(fw_region_config, NestedCompileRegionOptions)
-                and fw_region_config.bw_inductor_config_patches is not None
-            ):
-                bw_region_config = get_backward_nested_region_config(fw_region_config)
-                new_bw_hop_gm.meta["nested_region_config"] = bw_region_config
+            # get_backward_nested_region_config returns fw_config unchanged when
+            # the region has no distinct backward config, so identity tells us
+            # whether to stamp.
+            bw_region_config = get_backward_nested_region_config(fw_region_config)
+            if bw_region_config is not fw_region_config:
+                # Re-stamp on the fresh backward node's meta["custom"] (the source
+                # of truth: unlike a GraphModule's meta it survives FX transforms).
+                # Lowering picks it up via the subgraph-module mirror (_propagate_*)
+                # or the ir.py node fallback.
+                new_bw_node.meta["custom"] = {
+                    **new_bw_node.meta.get("custom", {}),
+                    "nested_region_config": bw_region_config,
+                }
 
         bw_node.replace_all_uses_with(new_bw_node)
         joint_gm.graph.erase_node(bw_node)
