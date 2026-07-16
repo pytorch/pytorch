@@ -34,10 +34,8 @@ if "%USE_CUDA%" == "1" (
     set "CUDNN_LIB_DIR=%CUDNN_HOME%\lib\arm64"
     set TORCH_CUDA_ARCH_LIST=TODO
     set CMAKE_CUDA_ARCHITECTURES=TODO
-    set USE_MAGMA=1
-    rem TH_BINARY_BUILD=1 links BLAS (ArmPL, which also carries LAPACK) INTO torch_cuda so magma's
-    rem Fortran BLAS/LAPACK externals resolve (aten/src/ATen/CMakeLists.txt); else torch_cuda LNK2019.
-    set TH_BINARY_BUILD=1
+    set USE_MAGMA=0
+    set TH_BINARY_BUILD=0
     set "CMAKE_CUDA_FLAGS=%CMAKE_CUDA_FLAGS% -Xcompiler /Zc:preprocessor"
     set "CFLAGS=/Zc:preprocessor /EHsc"
     set "CXXFLAGS=/Zc:preprocessor /EHsc"

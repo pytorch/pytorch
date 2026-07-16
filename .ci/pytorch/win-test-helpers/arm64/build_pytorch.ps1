@@ -53,10 +53,8 @@ if ($env:USE_CUDA -eq "1") {
     $env:CUDNN_LIB_DIR = Join-Path $env:CUDNN_HOME "lib\arm64"
     $env:TORCH_CUDA_ARCH_LIST = "TODO"
     $env:CMAKE_CUDA_ARCHITECTURES = "TODO"
-    $env:USE_MAGMA = "1"
-    # TH_BINARY_BUILD=1 links BLAS (ArmPL, which also carries LAPACK) INTO torch_cuda so magma's Fortran
-    # BLAS/LAPACK externals resolve (aten/src/ATen/CMakeLists.txt); else torch_cuda fails LNK2019/LNK1120.
-    $env:TH_BINARY_BUILD = "1"
+    $env:USE_MAGMA = "0"
+    $env:TH_BINARY_BUILD = "0"
     $env:CMAKE_CUDA_FLAGS = "$($env:CMAKE_CUDA_FLAGS) -Xcompiler /Zc:preprocessor"
     $env:CFLAGS = "/Zc:preprocessor /EHsc"
     $env:CXXFLAGS = "/Zc:preprocessor /EHsc"
