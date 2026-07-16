@@ -81,6 +81,9 @@ class WorkNCCL : public c10d::Work {
   void setOutputs(std::vector<at::Tensor> outputs) {
     outputs_ = std::move(outputs);
   }
+  void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children) {
+    children_ = std::move(children);
+  }
 
  protected:
   void recordStart(std::string_view coll_name);
@@ -104,6 +107,7 @@ class WorkNCCL : public c10d::Work {
   std::vector<at::Tensor> inputTensors_;
   at::Tensor inputTensor_;
   std::vector<at::Tensor> outputs_;
+  std::vector<c10::intrusive_ptr<WorkNCCL>> children_;
 
   ProcessGroupNCCL* comm_; // non-owning; see class comment
   std::unique_ptr<at::cuda::CUDAEvent> start_event_;

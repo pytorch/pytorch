@@ -23,6 +23,24 @@
 
 namespace c10d::nccl2 {
 
+namespace {
+
+void checkSameDtype(const at::Tensor& reference, const at::Tensor& tensor) {
+  if (reference.scalar_type() != tensor.scalar_type()) {
+    C10_THROW_ERROR(TypeError, "Tensors must have identical type");
+  }
+}
+
+void checkSameDtype(
+    const at::Tensor& reference,
+    const std::vector<at::Tensor>& tensors) {
+  for (const auto& tensor : tensors) {
+    checkSameDtype(reference, tensor);
+  }
+}
+
+} // namespace
+
 ncclResult_t NCCLException::getResult() const noexcept {
   return result_;
 }
@@ -94,6 +112,7 @@ void ProcessGroupNCCL::init(at::Device device) {
         device_,
         getRank(),
         getSize(),
+        bootstrap_generation_++,
         nccl_api_,
         options_c10d_->timeout);
     device_ = bootstrap->getDevice();
@@ -670,6 +689,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
 
   checkTensorDevice(tensor);
   checkTensorsDevice(tensor_list);
+  checkSameDtype(tensor, tensor_list);
 
   TracingGuard tracingGuard(
       name_, comm_size_, "all_gather", rank_, tensor_list, {tensor});
@@ -724,6 +744,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
   ensureTensorContiguous(input);
   checkTensorDevice(output);
   checkTensorDevice(input);
+  checkSameDtype(input, output);
 
   if (output.numel() != input.numel() * comm_size_) {
     throw std::runtime_error(
@@ -785,6 +806,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
 
   checkTensorsDevice(input_list);
   checkTensorDevice(output);
+  checkSameDtype(output, input_list);
 
   TracingGuard tracingGuard(
       name_, comm_size_, "reduce_scatter", rank_, input_list, {output});
@@ -857,6 +879,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
   ensureTensorContiguous(input);
   checkTensorDevice(output);
   checkTensorDevice(input);
+  checkSameDtype(input, output);
 
   if (input.numel() != output.numel() * comm_size_) {
     throw std::runtime_error(
@@ -907,6 +930,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
   ensureTensorContiguous(input);
   checkTensorDevice(output);
   checkTensorDevice(input);
+  checkSameDtype(input, output);
 
   if (input.numel() != output.numel()) {
     throw std::runtime_error(
@@ -1000,6 +1024,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
   ensureTensorContiguous(input);
   checkTensorDevice(output);
   checkTensorDevice(input);
+  checkSameDtype(input, output);
 
   // Validate split sizes vectors
   if (input_split_sizes.size() != static_cast<size_t>(comm_size_)) {
@@ -1136,6 +1161,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
   for (int i = 0; i < comm_size_; ++i) {
     ensureTensorContiguous(input_tensor_list[i]);
     ensureTensorContiguous(output_tensor_list[i]);
+    checkSameDtype(input_tensor_list[0], input_tensor_list[i]);
+    checkSameDtype(input_tensor_list[0], output_tensor_list[i]);
   }
 
   TracingGuard tracingGuard(
@@ -1253,6 +1280,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
 
     for (const auto& t : input_tensor_list) {
       ensureTensorContiguous(t);
+      checkSameDtype(output_tensor, t);
       if (t.numel() != output_tensor.numel()) {
         throw std::runtime_error(
             "All input tensors must have same size as output tensor");
@@ -1347,6 +1375,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
 
     for (const auto& t : output_tensor_list) {
       ensureTensorContiguous(t);
+      checkSameDtype(input_tensor, t);
       if (t.numel() != input_tensor.numel()) {
         throw std::runtime_error(
             "All output tensors must have same size as input tensor");
