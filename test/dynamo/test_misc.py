@@ -17902,6 +17902,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 got = torch.compile(fn, backend=backend, fullgraph=True)(a, b)
                 self.assertEqual(got, expected)
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
