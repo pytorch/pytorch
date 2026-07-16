@@ -338,11 +338,29 @@ def _reject_unsupported_marks(user_flat: list[Any]) -> None:
     capture path -- silently dropping them would bake a wrong artifact, so reject rather
     than ignore. (mark_unbacked's hint_override is NOT rejected: it is a perf-only
     autotuning size hint, never a guard, so the single artifact is valid regardless; it
-    is threaded into the capture ShapeEnv in _fakeify_with_unbacked.)
+    is threaded into the capture ShapeEnv in _fakeify_with_unbacked.) A mark_unbacked dim
+    on a tensor SUBCLASS (e.g. DTensor) is rejected: the dynamic capture cannot preserve
+    the subclass through the refake, so it too would bake a wrong artifact.
     """
     for t in user_flat:
         if not isinstance(t, torch.Tensor):
             continue
+        # mark_unbacked on a tensor subclass (e.g. DTensor) stamps its marks on the OUTER
+        # subclass as well as the inner tensor, so precompile's dynamic path picks it up --
+        # but _fakeify_with_unbacked refakes a marked leaf via torch.empty, which yields a
+        # plain dense tensor and DROPS the subclass, so the trace would run on the wrong
+        # type. Reject loudly here rather than silently capturing a subclass-stripped tensor
+        # (mirrors the decorator itself, which raises for every non-DTensor subclass).
+        if is_traceable_wrapper_subclass(t) and (
+            getattr(t, "_dynamo_unbacked_indices", None)
+            or getattr(t, "_dynamo_strict_unbacked_indices", None)
+        ):
+            raise PrecompileError(
+                "precompile: an input is a tensor subclass (e.g. DTensor) with a "
+                "mark_unbacked dynamic dim, which precompile cannot honor: the dynamic "
+                "capture cannot preserve the subclass. Mark a dense input instead, or "
+                "capture that dim static (do not mark_unbacked it)."
+            )
         if getattr(t, "_dynamo_dynamic_indices", None):
             raise PrecompileError(
                 "precompile: an input has a mark_dynamic (backed dynamic) dim, which "
@@ -377,7 +395,10 @@ def _read_unbacked_marks(user_flat: list[Any]) -> list[dict[int, Any]]:
         # Union the non-strict and strict unbacked index sets. mark_unbacked(strict=True)
         # records ONLY _dynamo_strict_unbacked_indices; precompile already enforces
         # strict's error-on-specialize semantics via the GuardOnDataDependentSymNode ->
-        # PrecompileError path, so both are honored identically here.
+        # PrecompileError path, so both are honored identically here. NOTE: the decorator's
+        # strict branch returns early, so a strict dim carries no shape_id/min/max/
+        # hint_override (those are dropped at mark time) -- combine strict with shape_id/
+        # min/max only if that limitation is acceptable; use non-strict to get them.
         idx = set(getattr(t, "_dynamo_unbacked_indices", None) or ())
         idx |= set(getattr(t, "_dynamo_strict_unbacked_indices", None) or ())
         if not idx:
