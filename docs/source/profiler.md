@@ -26,6 +26,10 @@
 .. autofunction:: torch.profiler.schedule
 
 .. autofunction:: torch.profiler.tensorboard_trace_handler
+
+.. autofunction:: torch.profiler.register_export_chrome_trace_callback
+
+.. autofunction:: torch.profiler.unregister_export_chrome_trace_callback
 ```
 
 ## Intel Instrumentation and Tracing Technology APIs
