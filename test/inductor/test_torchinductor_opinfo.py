@@ -201,6 +201,9 @@ inductor_skips["cpu"] = {
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
     ("index_reduce", "prod"): {f16},  # flaky
     ("index_reduce", "mean"): {f16},  # flaky
+    # torch._C._linalg.linalg_polar graph-breaks on some CPU runners but
+    # succeeds on others, so a strict xfail causes XPASS failures.
+    "linalg.polar": {f32, f64},
     "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
@@ -408,6 +411,7 @@ inductor_override_kwargs["cpu"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "nn.functional.rrelu": {"check_gradient": False},
     ("nn.functional.multilabel_soft_margin_loss", f16): {
         "atol": 3e-4,
         "rtol": 0.002,
@@ -458,10 +462,15 @@ inductor_override_kwargs["cuda"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "nn.functional.rrelu": {"check_gradient": False},
     ("cross", f16): {"reference_in_float": True},
     ("linalg.cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
+    ("combinations", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 0.01,
+    },  # inductor does accum in fp16
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
     ("atanh", f16): {"reference_in_float": True},
@@ -576,6 +585,7 @@ inductor_override_kwargs["xpu"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "nn.functional.rrelu": {"check_gradient": False},
     # XPU
     ("cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
@@ -737,7 +747,11 @@ inductor_override_kwargs["xpu"] = {
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
-        {("cummin", f16): {"atol": 1e-3, "rtol": 1e-5}}
+        {
+            ("cummin", f16): {"atol": 1e-3, "rtol": 1e-5},
+            # See https://github.com/pytorch/pytorch/pull/186595#issuecomment-4849920339
+            ("combinations", f16): {"grad_atol": 5e-4, "grad_rtol": 2e-3},
+        }
     )
 
 

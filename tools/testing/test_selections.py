@@ -40,7 +40,8 @@ THRESHOLD = 60 * 10  # 10 minutes
 MIN_TEST_FILE_TIMES = {
     # Generated stats can record a fully skipped CPU Inductor OpInfo run.
     # Keep enough pytest shards to stay under per-test timeouts when that
-    # near-zero runtime is stale.
+    # near-zero runtime is stale. Windows CI intentionally skips this file, so
+    # do not inflate Windows shard estimates with no-op pytest shards.
     "inductor/test_torchinductor_opinfo": THRESHOLD * 56,
 }
 
@@ -115,7 +116,9 @@ def get_duration(
     test_class_times.  Returns None if the time is unknown."""
     file_duration = test_file_times.get(test.test_file, None)
     if test.is_full_file():
-        min_duration = MIN_TEST_FILE_TIMES.get(test.test_file)
+        min_duration = None
+        if not BUILD_ENVIRONMENT.startswith(("win-", "windows-")):
+            min_duration = MIN_TEST_FILE_TIMES.get(test.test_file)
         if min_duration is not None:
             return max(file_duration or 0, min_duration)
         return file_duration

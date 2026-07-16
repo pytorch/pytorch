@@ -48,23 +48,21 @@ name: !{{ build_environment }}
     with GHA's native `container:` directive. They share the same reusable
     workflows but pass `use_container_directive: false` so the build/test
     container is launched via `docker run` from a step instead. -#}
+{%- set release_runner_if = "(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))" %}
 {%- if "aarch64" in build_environment %}
-  {%- set build_runs_on = "linux.arm64.r7g.12xlarge.memory" %}
-  {%- set test_runs_on  = "linux.arm64.2xlarge" %}
+  {%- set build_runs_on = "${{ " ~ release_runner_if ~ " && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}" %}
   {%- set alpine_image  = "arm64v8/alpine" %}
   {%- set timeout_minutes = 420 %}
   {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
   {%- set use_container_directive = true %}
 {%- elif "s390x" in build_environment %}
   {%- set build_runs_on = "linux.s390x" %}
-  {%- set test_runs_on  = "linux.s390x" %}
   {%- set alpine_image  = "docker.io/s390x/alpine" %}
   {%- set timeout_minutes = 420 %}
   {%- set runner_prefix = "" %}
   {%- set use_container_directive = false %}
 {%- else %}
-  {%- set build_runs_on = "linux.12xlarge.memory.ephemeral" %}
-  {%- set test_runs_on  = "" %}{# CPU/CUDA test runners are picked per-matrix entry below #}
+  {%- set build_runs_on = "${{ " ~ release_runner_if ~ " && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}" %}
   {%- set alpine_image  = "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine" %}
   {%- set timeout_minutes = common.timeout_minutes %}
   {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
@@ -138,6 +136,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      check_experiments: lf
 {%- if pin_docker_image %}
 
   # Computes the manylinux builder image tag suffix at runtime. On release
@@ -327,13 +326,13 @@ jobs:
         include:
         {%- for config in test_standard_configs %}
           {%- if "aarch64" in build_environment %}
-          {%- set _runs_on = "linux.arm64.2xlarge" %}
+          {%- set _runs_on = "l-arm64g3-16-62" %}
           {%- elif "s390x" in build_environment %}
           {%- set _runs_on = "linux.s390x" %}
           {%- elif config['gpu_arch_type'] == "cuda" %}
-          {%- set _runs_on = "linux.g4dn.4xlarge.nvidia.gpu" %}
+          {%- set _runs_on = "l-x86iavx512-29-115-t4" %}
           {%- else %}
-          {%- set _runs_on = "linux.4xlarge" %}
+          {%- set _runs_on = "l-x86iavx512-16-128" %}
           {%- endif %}
           - desired_python: "!{{ config['python_version'] }}"
             desired_cuda: "!{{ config['desired_cuda'] }}"
@@ -470,8 +469,8 @@ jobs:
   libtorch-extract:
     name: ${{ matrix.build_name }}-extract
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, manywheel-build]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    needs: [manywheel-build]
+    runs-on: "linux.4xlarge"
     timeout-minutes: 60
     strategy:
       fail-fast: false
