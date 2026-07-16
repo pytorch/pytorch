@@ -10,3 +10,5 @@
 0005-flex-gemm-tuple-aux-output.patch
 0006-flex-gemm-local-reduce-aux-output.patch
 0007-flex-gemm-large-local-reduce.patch
+0008-flex-gemm-local-reduce-feed-main.patch
+0009-flex-gemm-fragment-group-32.patch

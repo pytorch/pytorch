@@ -1141,8 +1141,58 @@ class VecReduce(EpiOp):
         return result
 
 
+class _GroupedLocalReduceParams(NamedTuple):
+    tensor: object
+    combine_fn: object
+    finalize_fn: object
+    feeds_main: bool
+
+
+class _GroupedLocalReduceFeedState(NamedTuple):
+    lane_layout_MN: object
+    local_reduce: object | None
+
+
+@cute.jit
+def grouped_rowvec_reduce_value(gemm, tRS_rInput, row_state, combine_fn, finalize_fn):
+    """Return same-warp grouped-M reductions broadcast to every row lane.
+
+    Feed-main has no cross-warp replay phase, so ``group`` must fit within the
+    current lane-layout M extent; cross-warp M stitching is only implemented for
+    compressed aux stores.
+    """
+    result = None
+    if const_expr(row_state is not None):
+        group = const_expr(gemm.local_reduce_group)
+        lane_layout_MN = row_state.lane_layout_MN
+        lanes_in_M = cute.size(lane_layout_MN, mode=[0])
+        lanes_in_N = cute.size(lane_layout_MN, mode=[1])
+        assert group <= lanes_in_M
+        assert lanes_in_M % group == 0
+        if const_expr(lanes_in_N > 1):
+            assert lane_layout_MN.stride[1] == 1
+        result = cute.make_rmem_tensor_like(tRS_rInput, tRS_rInput.element_type)
+        cute.autovec_copy(tRS_rInput, result)
+        result_flt = cute.filter_zeros(result)
+        if const_expr(group > 1):
+            for i in cutlass.range(cute.size(result_flt), unroll_full=True):
+                reduction_rows = group // 2
+                while reduction_rows > 0:
+                    result_flt[i] = combine_fn(
+                        result_flt[i],
+                        cute.arch.shuffle_sync_bfly(
+                            result_flt[i],
+                            offset=cute.crd2idx((reduction_rows, 0), lane_layout_MN),
+                        ),
+                    )
+                    reduction_rows = reduction_rows // 2
+        for i in cutlass.range(cute.size(result_flt), unroll_full=True):
+            result_flt[i] = finalize_fn(result_flt[i])
+    return result
+
+
 class GroupedLocalReduce(VecReduce):
-    """Store generated grouped local-reduce values into a compressed aux output."""
+    """Store or broadcast generated grouped local-reduce values."""
 
     dim = 0
     epi_m_major_preference = -1
@@ -1171,10 +1221,11 @@ class GroupedLocalReduce(VecReduce):
 
     def to_params(self, gemm, args):
         return {
-            self.name: (
+            self.name: _GroupedLocalReduceParams(
                 getattr(args, self.name),
                 args.local_reduce_combine_fn,
                 args.local_reduce_finalize_fn,
+                args.local_reduce_feeds_main,
             )
         }
 
@@ -1188,17 +1239,42 @@ class GroupedLocalReduce(VecReduce):
             tile = tile_N if const_expr(axis == 1) else tile_M
             assert group != 0 and group <= tile
             assert tile % group == 0
-            vec_mma_layout = cute.make_layout((ctx.tile_M, ctx.tile_N))
-            tDrReduce_layout = ctx.partition_for_epilogue_fn(
-                cute.make_rmem_tensor(vec_mma_layout, Float32)
-            ).layout
-            result = (cute.make_rmem_tensor(tDrReduce_layout, Float32), smem_tensor)
+            if const_expr(param.feeds_main):
+                assert axis == 0
+                tiled_copy = ctx.tiled_copy_t2r if ctx.tiled_copy_t2r is not None else ctx.tiled_copy_r2s
+                lane_layout_MN, _ = _get_lane_warp_layouts(
+                    tiled_copy, ctx.tiled_copy_t2r is None
+                )
+                local_reduce = None
+                if const_expr(param.tensor is not None):
+                    vec_mma_layout = cute.make_layout((ctx.tile_M, ctx.tile_N))
+                    tDrReduce_layout = ctx.partition_for_epilogue_fn(
+                        cute.make_rmem_tensor(vec_mma_layout, Float32)
+                    ).layout
+                    local_reduce = cute.make_rmem_tensor(tDrReduce_layout, Float32)
+                result = _GroupedLocalReduceFeedState(lane_layout_MN, local_reduce)
+            else:
+                vec_mma_layout = cute.make_layout((ctx.tile_M, ctx.tile_N))
+                tDrReduce_layout = ctx.partition_for_epilogue_fn(
+                    cute.make_rmem_tensor(vec_mma_layout, Float32)
+                ).layout
+                result = (cute.make_rmem_tensor(tDrReduce_layout, Float32), smem_tensor)
         return result
 
     @cute.jit
     def begin_loop(self, gemm, state, epi_coord):
         result = None
         if const_expr(state is not None):
+            if const_expr(gemm.local_reduce_feeds_main):
+                if const_expr(state.local_reduce is None):
+                    return state
+                tDrReduce_cur = state.local_reduce[
+                    None, None, None, epi_coord[0], epi_coord[1]
+                ]
+                cute.filter_zeros(tDrReduce_cur).fill(0.0)
+                return _GroupedLocalReduceFeedState(
+                    state.lane_layout_MN, tDrReduce_cur
+                )
             tDrReduce = state[0]
             result = tDrReduce[None, None, None, epi_coord[0], epi_coord[1]]
             cute.filter_zeros(result).fill(0.0)
@@ -1219,12 +1295,14 @@ class GroupedLocalReduce(VecReduce):
         tidx,
     ):
         if const_expr(param is not None):
-            param_tensor = param[0]
-            combine_fn = const_expr(param[1])
-            finalize_fn = const_expr(param[2])
+            if const_expr(param.feeds_main and param.tensor is None):
+                return
+            param_tensor = param.tensor
+            combine_fn = const_expr(param.combine_fn)
+            finalize_fn = const_expr(param.finalize_fn)
             group = const_expr(gemm.local_reduce_group)
             axis = const_expr(gemm.local_reduce_axis)
-            tDrReduce = state[0]
+            tDrReduce = state.local_reduce if const_expr(param.feeds_main) else state[0]
             tDrReduce_cur = tDrReduce[None, None, None, epi_coord[0], epi_coord[1]]
             tiled_copy = tiled_copy_t2r if tiled_copy_t2r is not None else tiled_copy_r2s
             partition_for_epilogue_fn = partial(
