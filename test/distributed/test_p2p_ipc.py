@@ -118,7 +118,7 @@ class P2PIpcTest(MultiProcContinuousTest):
 
     @unittest.skip(
         "Disabled due to CI failures; see "
-        "https://github.com/pytorch/pytorch/issues/189878"
+        "https://github.com/pytorch/pytorch/issues/189879"
     )
     @unittest.skipIf(
         TEST_WITH_ROCM, "expandable_segments mode is not supported on ROCm"
