@@ -518,31 +518,27 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "f32[s77, s77]", L_y_: "f32[s77, s77]"):
+    def forward(self, L_x_: "f32[s77, s77]", s77: "Sym(s77)", L_y_: "f32[s77, s77]"):
         l_x_ = L_x_
         l_y_ = L_y_
 
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        matmul: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled_1 = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled_1 = None
-
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
-
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
-        return (x,)
+        return (matmul,)
 """,
             )
         else:
@@ -557,24 +553,20 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        matmul: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled_1 = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled_1 = None
-
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
-
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
-        return (x,)
+        return (matmul,)
 """,
             )
 
@@ -606,21 +598,19 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "f32[s77, s77]", L_y_: "f32[s77, s77]"):
+    def forward(self, L_x_: "f32[s77, s77]", s77: "Sym(s77)", L_y_: "f32[s77, s77]"):
         l_x_ = L_x_
         l_y_ = L_y_
 
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
-        return (x,)
+        matmul: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        return (matmul,)
 """,
             )
         else:
@@ -635,14 +625,12 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
-        return (x,)
+        matmul: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        return (matmul,)
 """,
             )
 
@@ -655,22 +643,20 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "bf16[s77, s77]", L_z_: "f32[s77, s77]"):
+    def forward(self, L_x_: "bf16[s77, s77]", s77: "Sym(s77)", L_z_: "f32[s77, s77]"):
         l_x_ = L_x_
         l_z_ = L_z_
 
-        x: "bf16[s77, s77]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
+        matmul: "bf16[s77, s77]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
-        return (x,)
+        return (matmul,)
 """,
             )
         else:
@@ -682,20 +668,53 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_z_ = L_z_
 
-        x: "bf16[3, 3]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
+        matmul: "bf16[3, 3]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
-        return (x,)
+        return (matmul,)
 """,
             )
+
+    def test__enter__exit_autocast_graph_break_explicit_dtype(self):
+        def f(x):
+            m = torch.amp.autocast_mode._enter_autocast(
+                "cpu", torch.float16, True, True
+            )
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 2
+            torch.amp.autocast_mode._exit_autocast(m)
+            return x
+
+        prev_enabled = torch.is_autocast_enabled("cpu")
+        prev_dtype = torch.get_autocast_dtype("cpu")
+        prev_cache = torch.is_autocast_cache_enabled()
+        try:
+            torch.set_autocast_enabled("cpu", False)
+            torch.set_autocast_dtype("cpu", torch.bfloat16)
+            torch.set_autocast_cache_enabled(True)
+
+            opt_f = torch.compile(f, backend="eager", fullgraph=False)
+            x = torch.randn(3, 3, dtype=torch.float32)
+            out = f(x)
+            self.assertFalse(torch.is_autocast_enabled("cpu"))
+            self.assertEqual(torch.get_autocast_dtype("cpu"), torch.bfloat16)
+
+            opt_out = opt_f(x)
+            self.assertEqual(out, opt_out)
+            self.assertFalse(torch.is_autocast_enabled("cpu"))
+            self.assertEqual(torch.get_autocast_dtype("cpu"), torch.bfloat16)
+            self.assertTrue(torch.is_autocast_cache_enabled())
+        finally:
+            torch.set_autocast_enabled("cpu", prev_enabled)
+            torch.set_autocast_dtype("cpu", prev_dtype)
+            torch.set_autocast_cache_enabled(prev_cache)
 
     def test_autocast_low_level_api(self):
         def f(x, y):
@@ -787,10 +806,10 @@ class GraphModule(torch.nn.Module):
 
         _enter_autocast = torch.amp.autocast_mode._enter_autocast('cpu', None, True, None)
 
-        x: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        matmul: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
 
         _exit_autocast = torch.amp.autocast_mode._exit_autocast(_enter_autocast);  _enter_autocast = _exit_autocast = None
-        return (x,)
+        return (matmul,)
 """,
         )
 
@@ -817,24 +836,52 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
-        x: "bf16[3, 3]" = l_l_x_ @ l_l_y_;  l_l_x_ = l_l_y_ = None
+        matmul: "bf16[3, 3]" = l_l_x_ @ l_l_y_;  l_l_x_ = l_l_y_ = None
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled_1 = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled_1 = None
-
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
-
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
-        return (x,)
+        return (matmul,)
 """,
         )
+
+    def test_retrace_inference_mode(self):
+        # Recompile trick doesn't work with dynamic shapes
+        if check_dynamic_shape_capture():
+            return
+
+        def f(x):
+            with torch.inference_mode():
+                y = x + 1
+            return y
+
+        x = torch.randn(2, 2)
+        eager = EagerAndRecordGraphs()
+        opt_f = torch.compile(f, backend=eager, fullgraph=True)
+        out = f(x)
+        opt_out = opt_f(x)
+        self.assertEqual(out, opt_out)
+        self.assertFalse(torch.is_inference_mode_enabled())
+
+        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
+        self.assertIn(
+            "torch.autograd.grad_mode._enter_inference_mode(True)", first_graph
+        )
+        self.assertIn("torch.autograd.grad_mode._exit_inference_mode", first_graph)
+
+        d = {}
+        exec(first_graph, globals(), d)
+        eager = EagerAndRecordGraphs()
+        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
+        retraced_out = retraced()(x)[0]
+        self.assertEqual(out, retraced_out)
+        self.assertFalse(torch.is_inference_mode_enabled())
 
     @parametrize(
         "Ctx",
@@ -1116,11 +1163,11 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x: "f32[1]" = torch.ones(1)
+        ones: "f32[1]" = torch.ones(1)
 
-        y: "f32[1]" = torch.zeros(1)
+        zeros: "f32[1]" = torch.zeros(1)
 
-        add: "f32[1]" = x + y;  x = y = None
+        add: "f32[1]" = ones + zeros;  ones = zeros = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (add,)
@@ -1159,11 +1206,11 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x: "f32[1]" = torch.ones(1)
+        ones: "f32[1]" = torch.ones(1)
 
-        y: "f32[1]" = torch.zeros(1)
+        zeros: "f32[1]" = torch.zeros(1)
 
-        add: "f32[1]" = x + y;  x = y = None
+        add: "f32[1]" = ones + zeros;  ones = zeros = None
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_1 = None
         return (add,)
@@ -1208,17 +1255,17 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x: "f32[1]" = torch.ones(1)
+        ones: "f32[1]" = torch.ones(1)
 
-        y: "f32[1]" = torch.zeros(1)
+        zeros: "f32[1]" = torch.zeros(1)
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner');  _saved_tensors_hooks_disable_1 = None
 
-        add: "f32[1]" = x + y;  y = None
+        add: "f32[1]" = ones + zeros;  zeros = None
 
         _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable_2 = None
 
-        add_1: "f32[1]" = add + x;  add = x = None
+        add_1: "f32[1]" = add + ones;  add = ones = None
 
         _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_3 = None
         return (add_1,)
@@ -1251,10 +1298,10 @@ class GraphModule(torch.nn.Module):
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        y: "f32[]" = l_x_ + 1;  l_x_ = None
+        add: "f32[]" = l_x_ + 1;  l_x_ = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
-        return (y,)
+        return (add,)
 """,
         )
 
@@ -1295,14 +1342,14 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[]"):
         l_x_ = L_x_
 
-        y: "f32[]" = l_x_ + 1;  l_x_ = None
+        add: "f32[]" = l_x_ + 1;  l_x_ = None
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        y *= 2;  y_1: "f32[]" = y;  y = None
+        add *= 2;  imul: "f32[]" = add;  add = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
-        return (y_1,)
+        return (imul,)
 """,
         )
 
@@ -2968,6 +3015,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    # autocast with float64 not support on XPU
     @onlyCUDA
     def test_amp_autocast(self, device):
         device_type = torch.device(device).type
@@ -3160,10 +3208,10 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         set_default_dtype = torch.set_default_dtype(torch.float64);  set_default_dtype = None
 
-        x: "c128[2]" = torch.tensor([3.0, (3+5j)])
+        tensor: "c128[2]" = torch.tensor([3.0, (3+5j)])
 
         set_default_dtype_1 = torch.set_default_dtype(torch.float32);  set_default_dtype_1 = None
-        return (x,)
+        return (tensor,)
 """,
         )
 

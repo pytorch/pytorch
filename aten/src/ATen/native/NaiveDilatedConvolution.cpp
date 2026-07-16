@@ -612,7 +612,7 @@ Tensor slow_conv_dilated3d_cpu(
   Tensor output_ = (is_batch ? output : output.unsqueeze(0));
 
   slow_conv_dilated_all_cpu_template<3>(
-      output,
+      output_,
       input_,
       weight_,
       bias_,
@@ -675,7 +675,7 @@ static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
       weight_,
       undefined,
       grad_output_,
-      grad_input,
+      grad_input_,
       grad_weight,
       grad_bias,
       kernel_size,
@@ -731,7 +731,7 @@ static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
       weight_,
       undefined,
       grad_output_,
-      grad_input,
+      grad_input_,
       grad_weight,
       grad_bias,
       kernel_size,

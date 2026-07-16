@@ -314,6 +314,8 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             options = kwargs.get("options", {})
             captured_options.append(options)
 
+            if kwargs.get("donate_graph_module") is not True:
+                raise AssertionError("regional_inductor should donate submodule GMs")
             # Verify config is set as expected from explicit options
             if not inductor_config.max_autotune:
                 raise AssertionError("max_autotune should be True")
@@ -747,6 +749,27 @@ def forward(self, tangents_0):
         # self.assertEqual(len(codes), 2)
         self.assertEqual(result, fn(c))
 
+    @requires_cuda_and_triton
+    def test_unbacked_expr_size_input(self):
+        def fn(c):
+            d = torch.concat([c, c], dim=0)
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                d = d + 1
+            return d
+
+        c = torch.randn((64, 32), device="cuda", requires_grad=True)
+        torch._dynamo.decorators.mark_unbacked(c, 0)
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(serialize=False),
+            fullgraph=True,
+        )
+
+        result, codes = run_fw_bw_and_get_code(lambda: opt_fn(c))
+        self.assertEqual(len(codes), 1)
+        self.assertEqual(result, fn(c))
+
     @parametrize("serialize", [False])
     def test_repeated_blocks(self, serialize):
         nested_config = get_invoke_subgraph_compile_options()
@@ -984,7 +1007,7 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8):
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(primals_0, primals_0, primals_0, sdpa_score0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  sdpa_score0 = sdpa_mask0 = None
+    flex_attention = torch.ops.higher_order.flex_attention(primals_0, primals_0, primals_0, sdpa_score0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, None, None, None, None, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  sdpa_score0 = sdpa_mask0 = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  flex_attention = None
     return (getitem, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, getitem, getitem_1)""",
@@ -999,7 +1022,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
     fw_graph0 = self.fw_graph0
     joint_graph0 = self.joint_graph0
     mask_graph0 = self.mask_graph0
-    flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_0, primals_0, primals_0, getitem, getitem_1, tangents_0, None, fw_graph0, joint_graph0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, mask_graph0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_0 = getitem = getitem_1 = tangents_0 = fw_graph0 = joint_graph0 = primals_1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_6 = primals_7 = primals_8 = mask_graph0 = None
+    flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_0, primals_0, primals_0, getitem, getitem_1, tangents_0, None, fw_graph0, joint_graph0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, None, None, None, None, 128, 128, mask_graph0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_0 = getitem = getitem_1 = tangents_0 = fw_graph0 = joint_graph0 = primals_1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_6 = primals_7 = primals_8 = mask_graph0 = None
     getitem_3 = flex_attention_backward[0]
     getitem_4 = flex_attention_backward[1]
     getitem_5 = flex_attention_backward[2];  flex_attention_backward = None
@@ -1722,12 +1745,12 @@ def forward(self, primals_0, primals_1):
             """\
 def forward(self, primals_0, primals_1, amax, log, tangents_0):
     unsqueeze_2 = torch.ops.aten.unsqueeze.default(tangents_0, 1);  tangents_0 = None
-    full_default_1 = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    full_default_4 = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     unsqueeze_1 = torch.ops.aten.unsqueeze.default(primals_1, 1);  primals_1 = None
     ne_2 = torch.ops.aten.ne.Scalar(unsqueeze_1, -100)
-    where_3 = torch.ops.aten.where.self(ne_2, unsqueeze_2, full_default_1);  unsqueeze_2 = full_default_1 = None
-    full_default = torch.ops.aten.full.default([], 0, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    where_2 = torch.ops.aten.where.self(ne_2, unsqueeze_1, full_default);  ne_2 = unsqueeze_1 = full_default = None
+    where_3 = torch.ops.aten.where.self(ne_2, unsqueeze_2, full_default_4);  unsqueeze_2 = full_default_4 = None
+    full_default_2 = torch.ops.aten.full.default([], 0, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    where_2 = torch.ops.aten.where.self(ne_2, unsqueeze_1, full_default_2);  ne_2 = unsqueeze_1 = full_default_2 = None
     iota_default = torch.ops.prims.iota.default(64, start = 0, step = 1, dtype = torch.int64, device = device(type='cpu'), requires_grad = False)
     view_default = torch.ops.aten.view.default(iota_default, [1, 64]);  iota_default = None
     expand_default = torch.ops.aten.expand.default(where_2, [8, 64]);  where_2 = None

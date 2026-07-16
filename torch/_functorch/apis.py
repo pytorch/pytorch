@@ -30,6 +30,32 @@ if TYPE_CHECKING:
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+
+# functools.wraps copies __dict__, but these attrs describe the original
+# compiled callable, not the transformed function wrapper.
+_DYNAMO_WRAPPER_ATTRS = (
+    "_torchdynamo_inline",
+    "_torchdynamo_orig_callable",
+    "_torchdynamo_wrapper_id",
+    "_isolate_recompiles_id",
+    "get_compiler_config",
+    "aot_compile",
+    "_is_torch_compile",
+)
+
+
+def _wraps_without_dynamo_attrs(
+    func: Callable[..., Any],
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    def inner(wrapper: Callable[_P, _R]) -> Callable[_P, _R]:
+        wrapper = functools.wraps(func)(wrapper)
+        for attr in _DYNAMO_WRAPPER_ATTRS:
+            wrapper.__dict__.pop(attr, None)
+        return wrapper
+
+    return inner
+
+
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
 # sends those into func, and then unwraps the output BatchedTensors. Operations
 # on BatchedTensors perform the batched operations that the user is asking for.
@@ -229,7 +255,7 @@ def vmap(
         )
 
     if not is_compiling():
-        wrapped = functools.wraps(func)(wrapped)
+        wrapped = _wraps_without_dynamo_attrs(func)(wrapped)
 
     return wrapped
 
@@ -301,7 +327,7 @@ def chunk_vmap(
         chunks_flat_args = zip(*flat_args_chunks)
         return chunks_flat_args
 
-    @functools.wraps(func)
+    @_wraps_without_dynamo_attrs(func)
     def wrapped_with_chunks(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         _check_out_dims_is_int_or_int_pytree(out_dims, func)
         _, flat_in_dims, flat_args, args_spec = _process_batched_inputs(
@@ -433,7 +459,7 @@ def grad(
         return eager_transforms.grad_impl(func, argnums, has_aux, args, kwargs)
 
     if not is_compiling():
-        wrapper = functools.wraps(func)(wrapper)
+        wrapper = _wraps_without_dynamo_attrs(func)(wrapper)
 
     return wrapper
 
@@ -479,6 +505,6 @@ def grad_and_value(
         )
 
     if not is_compiling():
-        wrapper = functools.wraps(func)(wrapper)
+        wrapper = _wraps_without_dynamo_attrs(func)(wrapper)
 
     return wrapper

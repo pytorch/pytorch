@@ -22,6 +22,7 @@
 #include <ATen/ATen.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/native/Resize.h>
+#include <ATen/ops/from_blob.h>
 
 #include <Python.h>
 #include <fmt/format.h>
@@ -30,7 +31,6 @@
 #include <vector>
 
 using at::DeviceGuard;
-using at::DimnameList;
 using at::IntArrayRef;
 using at::OptionalDeviceGuard;
 using at::Scalar;
@@ -248,10 +248,10 @@ static PyObject* THPVariable_tensor(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
+      "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
   });
 
-  constexpr int ctor_num_args = 6;
+  constexpr int ctor_num_args = 5;
   ParsedArgs<ctor_num_args> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.has_torch_function()) {
@@ -287,6 +287,51 @@ static PyObject* THPVariable_get_device(
   if (r.idx == 0) {
     return wrap(r.tensor(0).get_device());
   }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+// Not registered through native_functions.yaml because from_blob takes a raw
+// pointer and has no autograd or JIT semantics. Exposed as a private API for
+// advanced use cases (e.g. wrapping externally managed memory).
+static PyObject* THPVariable__from_blob(
+    PyObject* self_,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {
+          "_from_blob(int64_t data, IntArrayRef sizes, IntArrayRef? strides=None, *, ScalarType? dtype=None, Device? device=None)",
+      },
+      /*traceable=*/false);
+
+  ParsedArgs<5> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (r.idx == 0) {
+    auto data_ptr = reinterpret_cast<void*>(r.toInt64(0));
+    auto sizes = r.intlist(1);
+    auto strides = r.intlistOptional(2);
+    auto dtype = r.scalartypeOptional(3);
+    auto device = r.deviceOptional(4);
+
+    auto options = at::TensorOptions{};
+    if (dtype.has_value()) {
+      options = options.dtype(*dtype);
+    }
+    if (device.has_value()) {
+      options = options.device(*device);
+    }
+
+    at::Tensor tensor;
+    if (strides.list.has_value()) {
+      tensor = at::from_blob(data_ptr, sizes, *strides.list, options);
+    } else {
+      tensor = at::from_blob(data_ptr, sizes, options);
+    }
+    return THPVariable_Wrap(std::move(tensor));
+  }
+
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -374,6 +419,10 @@ static PyMethodDef torch_functions_manual[] = {
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"from_numpy", THPVariable_from_numpy, METH_STATIC | METH_O, nullptr},
+    {"_from_blob",
+     castPyCFunctionWithKeywords(THPVariable__from_blob),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
     {"frombuffer",
      castPyCFunctionWithKeywords(THPVariable_frombuffer),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
@@ -622,6 +671,13 @@ void initTorchFunctions(PyObject* module) {
         return impl->was_inductor_storage_resized();
       });
   py_module.def(
+      "_functionalize_was_shallow_copy_data", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return impl->was_shallow_copy_data();
+      });
+  py_module.def(
       "_functionalize_inductor_storage_resized_counter",
       [](const at::Tensor& t) {
         TORCH_INTERNAL_ASSERT(
@@ -744,13 +800,25 @@ void initTorchFunctions(PyObject* module) {
         // - non-differentiable aliasing: aliasing of subclass_x and subclass_y
         //   is defined recursively based on the aliasing of their inner
         //   tensors.
-        at::native::checkSetStorage(
-            dst,
-            src.storage(),
-            dst.sym_storage_offset(),
-            dst.sym_sizes(),
-            dst.sym_strides(),
-            /*check_offset_in_bounds=*/false);
+        if (dst.device() == src.device()) {
+          at::native::checkSetStorage(
+              dst,
+              src.storage(),
+              dst.sym_storage_offset(),
+              dst.sym_sizes(),
+              dst.sym_strides(),
+              /*check_offset_in_bounds=*/false);
+        } else {
+          TORCH_CHECK(
+              dst.sym_sizes() == src.sym_sizes() &&
+                  dst.sym_strides() == src.sym_strides() &&
+                  dst.dtype() == src.dtype(),
+              "cross-device .data requires matching dtype, sizes, "
+              "and strides");
+          dst.unsafeGetTensorImpl()->_change_backend_component_keys(
+              src.device());
+          dst.unsafeGetTensorImpl()->set_storage_keep_dtype(src.storage());
+        }
       });
   py_module.def("_is_functional_tensor", [](const at::Tensor& t) {
     return at::functionalization::impl::isFunctionalTensor(t);
