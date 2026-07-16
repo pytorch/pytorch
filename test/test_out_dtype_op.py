@@ -183,7 +183,7 @@ class TestOutDtypeOp(TestCase):
             singleton_list_out(*inp)
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
-class TestOutDtypeOpCUDA(TestCase):
+class TestOutDtypeOpDevice(TestCase):
     @unittest.skipIf(IS_WINDOWS, "_int_mm unavailable")
     @unittest.skipIf(not SM80OrLater, "_int_mm unavailable")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
@@ -233,7 +233,7 @@ def forward(self, x_1, w_1):
     return out_dtype""")
 
 
-instantiate_device_type_tests(TestOutDtypeOpCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(TestOutDtypeOpDevice, globals(), only_for="cuda")
 
 if __name__ == '__main__':
     run_tests()
