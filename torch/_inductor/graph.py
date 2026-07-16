@@ -2274,8 +2274,6 @@ class GraphLowering(torch.fx.Interpreter):
         # symbol is likely to hit lots of GuardOnDataDependent errors that
         # we already know facts for.
         renamed_unbacked_bindings = OrderedSet(
-            # unbacked_renamings is not declared on every ShapeEnv path
-            # pyrefly: ignore[missing-attribute]
             V.fake_mode.shape_env.unbacked_renamings.get(s, s)
             for s in unbacked_bindings
         )
@@ -2573,7 +2571,6 @@ class GraphLowering(torch.fx.Interpreter):
                         if param is not None
                     ]
                     real_inputs = [
-                        # pyrefly: ignore[bad-argument-type]
                         materialize(x)
                         for x in itertools.chain(params_flat, V.real_inputs)
                     ]
