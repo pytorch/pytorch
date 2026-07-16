@@ -4,11 +4,11 @@ from typing import cast, NamedTuple
 
 import torch
 from torch import Tensor
-from torch._native.instrumentation import instrumented_cutedsl_cache
 from torch._C import (
     _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
     _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
 )
+from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from ._compile_with_safe_names import _compile_with_safe_names
 from .scaled_grouped_mm_prepare_metadata import (
