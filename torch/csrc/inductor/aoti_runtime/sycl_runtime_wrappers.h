@@ -65,7 +65,7 @@ static ze_module_handle_t _createModule(
       strLog.resize(szLog);
       zeModuleBuildLogGetString(buildLog, &szLog, strLog.data());
     }
-    std::cerr << "L0 build module failed. Log: " << strLog << '\n';
+    std::cerr << "L0 build module failed. Log: " << strLog.c_str() << '\n';
   }
   if (buildLog) {
     ZE_CHECK(zeModuleBuildLogDestroy(buildLog));
@@ -160,7 +160,7 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   size_t globalRangeX = static_cast<size_t>(gridX) * threadsPerWarp * numWarps;
   size_t globalRangeY = gridY;
   size_t globalRangeZ = gridZ;
-  size_t localRangeX = numWarps * threadsPerWarp;
+  size_t localRangeX = static_cast<size_t>(numWarps) * threadsPerWarp;
   size_t localRangeY = 1;
   size_t localRangeZ = 1;
   sycl::range<3> globalRange(globalRangeZ, globalRangeY, globalRangeX);
@@ -173,14 +173,14 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   // Submit the imported kernel.
   auto cgf = [&](sycl::handler& cgh) {
     for (uint32_t i = 0; i < numParams; ++i) {
-      cgh.set_arg(i, *(static_cast<void**>(params[i])));
+      cgh.set_arg(static_cast<int>(i), *(static_cast<void**>(params[i])));
     }
 
     if (sharedMemory > 0) {
       constexpr int dimensions = 1;
       using share_mem_t = sycl::local_accessor<int8_t, dimensions>;
       share_mem_t localBuffer = share_mem_t(sharedMemory, cgh);
-      cgh.set_arg(numParams, localBuffer);
+      cgh.set_arg(static_cast<int>(numParams), localBuffer);
       cgh.parallel_for(parallelWorkSize, *kernelPtr);
     } else {
       cgh.parallel_for(parallelWorkSize, *kernelPtr);

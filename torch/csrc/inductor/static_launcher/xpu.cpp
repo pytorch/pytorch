@@ -226,7 +226,7 @@ inline ze_module_handle_t _createModule(
       strLog.resize(szLog);
       ze().zeModuleBuildLogGetString(buildLog, &szLog, strLog.data());
     }
-    std::cerr << "L0 build module failed. Log: " << strLog << '\n';
+    std::cerr << "L0 build module failed. Log: " << strLog.c_str() << '\n';
   }
   if (buildLog) {
     ZE_CHECK(ze().zeModuleBuildLogDestroy(buildLog));
