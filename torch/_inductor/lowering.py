@@ -3798,9 +3798,6 @@ make_fallback(aten.masked_scatter_backward)
 make_fallback(aten.view_as_complex, require_contiguous)
 make_fallback(aten.angle)  # needs complex
 
-# Needs efficentzerotensor
-make_fallback(aten._efficientzerotensor)
-
 # Needs Sparse
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
@@ -4537,6 +4534,17 @@ def full(size, fill_value, **kwargs):
     if kwargs.get("dtype") is None:
         raise AssertionError("dtype should be handled by decomposition")
     return tensor_constructor(fill_value)(size, **kwargs)
+
+
+@register_lowering(aten._efficientzerotensor, type_promotion_kind=None)
+def _efficientzerotensor(
+    size, *, dtype=None, layout=None, device=None, pin_memory=False
+):
+    assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+    dtype = torch.get_default_dtype() if dtype is None else decode_dtype(dtype)
+    with torch.utils._python_dispatch._disable_current_modes():
+        scalar = torch.zeros((), dtype=dtype, device=decode_device(device))
+    return expand(V.graph.add_tensor_constant(scalar), size)
 
 
 @register_lowering(aten.gather, type_promotion_kind=None)
@@ -8516,6 +8524,11 @@ maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
 register_lowering(aten.clamp_max)(minimum)
+register_op_dtype_propagation_rules(
+    "fmaximum",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    override_return_dtype=None,
+)
 neg = register_pointwise(aten.neg)
 abs = register_pointwise(aten.abs)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
@@ -9326,6 +9339,15 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
+    # An effectful op may retain its tensor inputs in state that inductor cannot
+    # see (e.g. pushing a tensor onto a torchbind queue), so those input buffers
+    # must outlive the op and must never be reused for another buffer.
+    if effect_type:
+        for arg in pytree.tree_leaves((args, kwargs)):
+            if isinstance(arg, TensorBox):
+                arg.realize()
+                V.graph.never_reuse_buffers.add(arg.get_name())
+
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9355,7 +9377,9 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
+                op_name = (
+                    new_op.get_operation_name()
+                )  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (

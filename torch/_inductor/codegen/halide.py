@@ -340,6 +340,11 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def fmaximum(a, b):
+        return f"hl.max({a}, {b})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         if hasattr(b, "name"):
             c = f"hl.cast({b.name}.type(), {c})"
