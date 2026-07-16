@@ -1052,7 +1052,7 @@ def _parse_deterministic_ops_env():
 
 # fine-grained deterministic mode flag
 class deterministic_ops:
-    pad_mm = True if "pad_mm" in _parse_deterministic_ops_env() else None
+    pad_mm = "pad_mm" in _parse_deterministic_ops_env()
 
 
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
