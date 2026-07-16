@@ -1,5 +1,9 @@
 import re
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 from enum import Enum, EnumMeta
+
+import pytest
 
 
 class Unsupported(Exception):
@@ -201,6 +205,8 @@ class platform(_Detectable, _Constraint):
 
     linux_x86_cuda_a100 = os.linux, cpu.x86_64, gpu.cuda_a100
     linux_x86_cuda_h100 = os.linux, cpu.x86_64, gpu.cuda_h100
+    linux_x86_rocm_mi300 = os.linux, cpu.x86_64, gpu.rocm_mi300
+    linux_x86_xpu_pvc = os.linux, cpu.x86_64, gpu.xpu_pvc
 
     @classmethod
     def current(cls) -> "platform":
@@ -222,3 +228,80 @@ class platform(_Detectable, _Constraint):
         raise Unsupported(
             f"unsupported platform: {current_os}, {current_cpu}, {current_gpu}"
         )
+
+    @property
+    def vendor(self) -> str:
+        # cuda_* / rocm_* / xpu_* -> cuda / rocm / xpu ; no gpu -> cpu
+        return self.gpu.name.split("_", 1)[0] if self.gpu is not None else "cpu"
+
+
+@dataclass(frozen=True)
+class _test:
+    """Collection-time metadata for a test: the platforms it can run on plus
+    exactly one schedule and one size. Immutable, so the presets below are
+    shared safely and every transform returns a fresh config. Applying the
+    instance to a test attaches the constraints as pytest markers.
+    """
+
+    platforms: frozenset[platform]
+    schedule: schedule
+    size: size
+
+    def on(self, platforms: Iterable[platform]) -> "_test":
+        return replace(self, platforms=frozenset(platforms))
+
+    def include(self, platforms: Iterable[platform]) -> "_test":
+        return replace(self, platforms=self.platforms | frozenset(platforms))
+
+    def exclude(self, platforms: Iterable[platform]) -> "_test":
+        return replace(self, platforms=self.platforms - frozenset(platforms))
+
+    def only(self, vendor: str) -> "_test":
+        kept = frozenset(p for p in self.platforms if p.vendor == vendor)
+        return replace(self, platforms=kept)
+
+    def with_schedule(self, value: schedule) -> "_test":
+        return replace(self, schedule=value)
+
+    def with_size(self, value: size) -> "_test":
+        return replace(self, size=value)
+
+    def _markers(self) -> list[str]:
+        # frozenset is unordered; sort platforms for a deterministic pytestmark
+        platforms = sorted(self.platforms, key=lambda p: p.name)
+        return [str(p) for p in platforms] + [str(self.schedule), str(self.size)]
+
+    def __call__(self, fn):
+        if not self.platforms:
+            raise ValueError("tci.test: config selects no platform")
+        # Marker names contain '.' and ':' so they are not valid identifiers;
+        # getattr on the public factory accepts arbitrary names and handles the
+        # function-or-class target for us.
+        for marker in self._markers():
+            fn = getattr(pytest.mark, marker)(fn)
+        return fn
+
+
+# Sugar derived from the enums themselves so it stays in sync as members change:
+# .pull/.periodic/.small/.medium/.large replace the scalar, .only_<vendor> filter.
+for _member in (*schedule, *size):
+    _setter = "with_schedule" if isinstance(_member, schedule) else "with_size"
+    _prop = property(lambda self, m=_member, s=_setter: getattr(self, s)(m))
+    setattr(_test, _member.name, _prop)
+for _vendor in ("cuda", "rocm", "xpu", "cpu"):
+    _prop = property(lambda self, v=_vendor: self.only(v))
+    setattr(_test, f"only_{_vendor}", _prop)
+del _member, _setter, _vendor, _prop
+
+
+class test:
+    """Namespace of ``tci.test`` presets. Each preset is a starting ``_test``
+    config that can be applied directly or refined with the fluent transforms;
+    every vendor preset is derived from ``default`` so it never drifts.
+    """
+
+    default = _test(frozenset(platform), schedule.pull, size.small)
+    cuda = default.only_cuda
+    rocm = default.only_rocm
+    xpu = default.only_xpu
+    cpu = default.only_cpu
