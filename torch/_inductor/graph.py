@@ -806,7 +806,7 @@ class GraphLowering(torch.fx.Interpreter):
             or (
                 n.target is torch.ops.aten.convolution_backward.default
                 and any(
-                    n.args[idx].meta["val"].device.type in SUPPORTED_MKLDNN_DEVICES
+                    n.args[idx].meta["val"].device.type == "xpu"
                     for idx in [0, 1]
                 )
             )
