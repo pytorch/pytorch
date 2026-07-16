@@ -45,6 +45,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     MI350_ARCH,
@@ -2036,6 +2037,8 @@ class TestFP8Matmul(TestCase):
         if "xpu" in device:
             if fast_accum:
                 raise unittest.SkipTest("fast_accum not supported on XPU, skipping")
+            if recipe == "nvfp4" and not Xe2_Or_Later:
+                raise unittest.SkipTest("NVFP4 numerics require Xe2+ on XPU")
         M, K, N = mkn
         if recipe == "nvfp4" and K % 32 != 0:
             raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
