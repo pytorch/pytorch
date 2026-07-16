@@ -3,7 +3,7 @@
 import torch
 from torch import Tensor
 
-from .optimizer import _to_scalar, Optimizer, ParamsT
+from .optimizer import _maximize_doc, _to_scalar, Optimizer, ParamsT
 
 
 __all__ = ["LBFGS"]
@@ -204,38 +204,7 @@ def _strong_wolfe(
 
 
 class LBFGS(Optimizer):
-    """Implements L-BFGS algorithm.
-
-    Heavily inspired by `minFunc
-    <https://www.cs.ubc.ca/~schmidtm/Software/minFunc.html>`_.
-
-    .. warning::
-        This optimizer doesn't support per-parameter options and parameter
-        groups (there can be only one).
-
-    .. warning::
-        Right now all parameters have to be on a single device. This will be
-        improved in the future.
-
-    .. note::
-        This is a very memory intensive optimizer (it requires additional
-        ``param_bytes * (history_size + 1)`` bytes). If it doesn't fit in memory
-        try reducing the history size, or use a different algorithm.
-
-    Args:
-        params (iterable): iterable of parameters to optimize. Parameters must be real.
-        lr (float, optional): learning rate (default: 1)
-        max_iter (int, optional): maximal number of iterations per optimization step
-            (default: 20)
-        max_eval (int, optional): maximal number of function evaluations per optimization
-            step (default: max_iter * 1.25).
-        tolerance_grad (float, optional): termination tolerance on first order optimality
-            (default: 1e-7).
-        tolerance_change (float, optional): termination tolerance on function
-            value/parameter changes (default: 1e-9).
-        history_size (int, optional): update history size (default: 100).
-        line_search_fn (str, optional): either 'strong_wolfe' or None (default: None).
-    """
+    r"""Implements L-BFGS algorithm."""
 
     def __init__(
         self,
@@ -537,3 +506,41 @@ class LBFGS(Optimizer):
         state["prev_loss"] = prev_loss
 
         return orig_loss
+
+
+LBFGS.__doc__ = (
+    r"""Implements L-BFGS algorithm.
+
+    Heavily inspired by `minFunc
+    <https://www.cs.ubc.ca/~schmidtm/Software/minFunc.html>`_.
+
+    .. warning::
+        This optimizer doesn't support per-parameter options and parameter
+        groups (there can be only one).
+
+    .. warning::
+        Right now all parameters have to be on a single device. This will be
+        improved in the future.
+
+    .. note::
+        This is a very memory intensive optimizer (it requires additional
+        ``param_bytes * (history_size + 1)`` bytes). If it doesn't fit in memory
+        try reducing the history size, or use a different algorithm.
+    """
+    + rf"""
+    Args:
+        params (iterable): iterable of parameters to optimize. Parameters must be real.
+        lr (float, optional): learning rate (default: 1)
+        max_iter (int, optional): maximal number of iterations per optimization step
+            (default: 20)
+        max_eval (int, optional): maximal number of function evaluations per optimization
+            step (default: max_iter * 1.25).
+        tolerance_grad (float, optional): termination tolerance on first order optimality
+            (default: 1e-7).
+        tolerance_change (float, optional): termination tolerance on function
+            value/parameter changes (default: 1e-9).
+        history_size (int, optional): update history size (default: 100).
+        line_search_fn (str, optional): either 'strong_wolfe' or None (default: None).
+        {_maximize_doc}
+    """
+)
