@@ -384,7 +384,9 @@ if BUILD_PYTHON_ONLY:
 ################################################################################
 # Parameters parsed from environment
 ################################################################################
-
+## For NNPACK-> Peachpy need to define PYTHON_SIX_SOURCE_DIR otherwise it pulls from the web
+if int(os.getenv("USE_NNPACK")) and not os.getenv("PYTHON_SIX_SOURCE_DIR") :
+    os.getenv("PYTHON_SIX_SOURCE_DIR", os.path.dirname(six.__file__))
 VERBOSE_SCRIPT = str2bool(os.getenv("VERBOSE", "1"))
 RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect

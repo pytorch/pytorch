@@ -42,6 +42,7 @@ set(_ENV_PASSTHROUGH
   TORCH_XPU_ARCH_LIST
   TRACING_BASED
   PYTHON_LIB_REL_PATH
+  PYTHON_SIX_SOURCE_DIR
 )
 
 # Low-priority aliases: if the canonical var is not set, use the alias.
