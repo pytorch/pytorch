@@ -406,7 +406,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       at::Tensor& /* outputBuffer */,
       at::Tensor& /* inputBuffer */,
       const GatherOptions& /* opts */ = GatherOptions()) {
-    TORCH_CHECK(
+    TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         c10::str(
             "Backend ",

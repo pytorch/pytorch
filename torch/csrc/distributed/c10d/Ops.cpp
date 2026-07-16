@@ -516,7 +516,7 @@ IMPL_GATHER(PrivateUse1)
     process_group->firePostHook(                                              \
         HookOpName::GATHER, asyncOp, hook_op_id, work);                       \
     return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(                  \
-        output_tensor, work);                                                 \
+        output_tensor, std::move(work));                                      \
   }
 
 IMPL_GATHER_INTO_TENSOR(CPU)

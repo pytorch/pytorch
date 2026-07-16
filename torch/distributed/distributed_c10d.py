@@ -5109,7 +5109,7 @@ def gather_into_tensor(
     filling a Python list of per-rank tensors on the destination rank, each
     rank's contribution is written directly into a single, correctly-sized
     ``gather_tensor``. Backends that support a native gather-into-tensor path
-    (e.g. NCCL >= 2.28 via ``ncclGather``) avoid the extra per-rank copy that
+    (e.g. NCCL >= 2.28.3 via ``ncclGather``) avoid the extra per-rank copy that
     :func:`gather` incurs.
 
     This function requires ``tensor`` to be the same size on each process.
