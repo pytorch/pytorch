@@ -6482,7 +6482,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
     Buffer for NVIDIA Universal GEMM kernels.
 
     Unlike CuteDSL templates which use Jinja templates, this generates
-    simpler Python code that directly calls the cutlass_api library.
+    simpler Python code that directly calls the cutlass.operators library.
     """
 
     def __init__(
@@ -6498,6 +6498,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         swizzle_type_a: Any | None = None,
         swizzle_type_b: Any | None = None,
         supports_epilogue_fusion: bool = False,
+        swap_ab: bool = False,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6511,10 +6512,11 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.swizzle_type_a = swizzle_type_a
         self.swizzle_type_b = swizzle_type_b
         self.supports_epilogue_fusion = supports_epilogue_fusion
+        self.swap_ab = swap_ab
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
-            "kernel_name": kernel.metadata.kernel_name,
-            "min_cc": kernel.metadata.min_cc,
+            "kernel_name": kernel.metadata.operator_name,
+            "min_cc": kernel.designed_for_min_cc,
         }
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
@@ -6579,6 +6581,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             epilogue_reads=epilogue_reads,
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
+            swap_ab=self.swap_ab,
         )
 
         def render():
@@ -7208,12 +7211,16 @@ class ExternKernel(InputsKernel):
                     args_flat_is_tensor.append(False)
                     non_tensor_args.append(arg)
                     device_index = arg.device.index
-                    if not (arg.device.type == "cuda" and device_index is not None):
+                    if not (
+                        arg.device.type in ["cuda", "xpu"] and device_index is not None
+                    ):
                         raise AssertionError(
-                            'Expected arg.device.type == "cuda" and device_index is not None'
+                            'Expected arg.device.type in ["cuda", "xpu"] and device_index is not None'
                         )
                     real_non_tensor_args.append(
-                        torch.cuda.default_generators[device_index].clone_state()
+                        torch._C._accelerator_getDefaultGenerator(
+                            device_index
+                        ).clone_state()
                     )
 
                 case OpaqueObjectState():
@@ -7278,12 +7285,14 @@ class ExternKernel(InputsKernel):
                 example_args.append(x.opaque_example_value)
             elif isinstance(x, torch._inductor.ir.GeneratorState):
                 device_index = x.device.index
-                if not (x.device.type == "cuda" and device_index is not None):
+                if not (x.device.type in ["cuda", "xpu"] and device_index is not None):
                     raise AssertionError(
-                        'Expected x.device.type == "cuda" and device_index is not None'
+                        'Expected x.device.type in ["cuda", "xpu"] and device_index is not None'
                     )
                 example_args.append(
-                    torch.cuda.default_generators[device_index].clone_state()
+                    torch._C._accelerator_getDefaultGenerator(
+                        device_index
+                    ).clone_state()
                 )
             else:
                 example_args.append(ir_node_to_tensor(x))
@@ -9393,8 +9402,17 @@ class FallbackKernel(ExternKernelAlloc):
 
     def codegen_unbacked_symbol_defs(self, wrapper: PythonWrapperCodegen) -> None:
         return wrapper.codegen_unbacked_symbol_defs_for_outputs(
-            self.get_name(), self.outputs, getattr(self, "unbacked_bindings", None)
+            self.get_name(),
+            self.codegen_outputs(),
+            getattr(self, "unbacked_bindings", None),
         )
+
+    def codegen_outputs(self) -> Sequence[Any]:
+        if self.outputs:
+            return self.outputs
+        if isinstance(self.layout, Layout):
+            return [self]
+        return self.mutation_outputs
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
@@ -9604,7 +9622,7 @@ class FallbackKernel(ExternKernelAlloc):
         if len(returns) == 1:
             # NOTE: [special handling of all_reduce_coalesced_'s return value]
             # all_reduce_coalesced_ return a list of tensors via self.mutation_outputs
-            outputs = self.outputs if self.outputs else self.mutation_outputs
+            outputs = self.codegen_outputs()
             return_type = returns[0].real_type
             output_arguments = [handle_single_output(return_type, outputs)]
         else:
@@ -9721,16 +9739,19 @@ class FallbackKernel(ExternKernelAlloc):
                 self.op_overload,
                 exported_args,
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
-                self.outputs if self.outputs else self.mutation_outputs,
+                self.codegen_outputs(),
             )
         else:
             wrapper.generate_fallback_kernel(self)
-            if isinstance(self.layout, Layout):
-                self.codegen_size_asserts(wrapper)
-                self.codegen_alignment_asserts(wrapper)
-                self.codegen_memory_tracking(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
+        # AOT runtime dispatch assertions are emitted by the proxy executor path.
+        if not (self.use_runtime_dispatch and V.graph.aot_mode) and isinstance(
+            self.layout, Layout
+        ):
+            self.codegen_size_asserts(wrapper)
+            self.codegen_alignment_asserts(wrapper)
+            self.codegen_memory_tracking(wrapper)
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor) -> FixedLayout:
@@ -9864,6 +9885,26 @@ class FallbackKernel(ExternKernelAlloc):
         ):
             device = torch.device("cpu")
 
+        def create_direct_output(output: torch.Tensor) -> FallbackKernel:
+            if not device:
+                raise AssertionError("Not sure where to find device info")
+            packed = cls(
+                cls.tensor_to_layout(output),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                kwargs=kwargs,
+                unbacked_bindings=unbacked_bindings,
+            )
+            if (
+                config.assume_unaligned_fallback_output
+                or has_unaligned_input
+                or not tensor_is_aligned(output)
+            ):
+                V.graph.unaligned_buffers.add(packed.get_name())
+            return packed
+
         # Try multi-output .out() lowering for custom ops with the out tag.
         if (
             isinstance(kernel, torch._ops.OpOverload)
@@ -9895,6 +9936,9 @@ class FallbackKernel(ExternKernelAlloc):
                 kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
+
+        elif isinstance(example_output, torch.Tensor):
+            return create_direct_output(example_output)
 
         else:
             if not device:
