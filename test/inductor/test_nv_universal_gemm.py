@@ -959,7 +959,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
     @unittest.skip(
         "Disabled due to CI failures; see "
-        "https://github.com/pytorch/pytorch/issues/188674"
+        "https://github.com/pytorch/pytorch/issues/190234"
     )
     def test_workspace_runtime_integration(self):
         """End-to-end: mock the chosen kernel's workspace_size to non-zero and
