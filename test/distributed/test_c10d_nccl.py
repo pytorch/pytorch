@@ -719,6 +719,25 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             expected = torch.arange(world_size * elems, device=device).float()
             self.assertEqual(gather_tensor, expected)
 
+        # Negative path: the destination rank validates the output tensor
+        # locally (before any NCCL op is issued), so only the root needs to
+        # participate -- a wrong-sized or wrong-dtype output must raise.
+        if self.rank == 0:
+            good_input = torch.arange(elems, device=device).float()
+            with self.assertRaises((ValueError, RuntimeError)):
+                bad_size = torch.empty(world_size * elems + 1, device=device)
+                dist.gather_into_tensor(good_input, bad_size, dst=0)
+            with self.assertRaises((ValueError, RuntimeError)):
+                bad_dtype = torch.empty(world_size * elems, device=device).double()
+                dist.gather_into_tensor(good_input, bad_dtype, dst=0)
+        dist.barrier()
+
+        # NOTE: NCCL CI runs against >= 2.28.3, so the tests above exercise the
+        # native ncclGather path. The < 2.28.3 fallback reuses the shared
+        # torch::cuda::nccl::gather send/recv helper (covered by dist.gather
+        # tests) rather than hand-written send/recv, so it is not separately
+        # exercised here.
+
         c10d.destroy_process_group()
 
     def _helper_test_extra_cuda_context_by_nvml(self):

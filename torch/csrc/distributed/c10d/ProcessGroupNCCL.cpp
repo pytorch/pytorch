@@ -5771,36 +5771,33 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_into_tensor(
           at::cuda::CUDAStream& stream) {
         const auto root = static_cast<int>(opts.rootRank);
         const auto count = input.numel();
-        const auto type = getNcclDataType(input.scalar_type());
-#if defined(NCCL_VERSION_CODE) && (NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0))
-        // ncclGather writes each rank's contribution directly into the flat
-        // output buffer on the root, so no per-rank copy is needed.
+#if defined(NCCL_VERSION_CODE) && (NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3))
+        // ncclGather (added in NCCL 2.28.3) writes each rank's contribution
+        // directly into the flat output buffer on the root, so no per-rank
+        // copy is needed.
         void* recvbuff = isRoot ? output.data_ptr() : nullptr;
         return ncclGather(
-            input.data_ptr(), recvbuff, count, type, root, comm, stream.stream());
+            input.data_ptr(),
+            recvbuff,
+            count,
+            getNcclDataType(input.scalar_type()),
+            root,
+            comm,
+            stream.stream());
 #else
-        // Fallback for NCCL < 2.28: emulate ncclGather with grouped send/recv
-        // targeting contiguous slices of the flat output buffer.
-        C10D_NCCL_CHECK(ncclGroupStart(), std::nullopt);
+        // Fallback for NCCL < 2.28.3: reuse the shared send/recv gather helper,
+        // pointing its per-rank outputs at contiguous slices of the flat output
+        // buffer so there is still no extra copy. The helper's group-end check
+        // is non-blocking-communicator aware.
+        std::vector<at::Tensor> outputViews;
         if (isRoot) {
-          auto* recvbuff = reinterpret_cast<char*>(output.data_ptr());
-          const auto stride = count * output.element_size();
+          auto flat = output.view(-1);
+          outputViews.reserve(size_);
           for (const auto r : c10::irange(size_)) {
-            C10D_NCCL_CHECK(
-                ncclRecv(
-                    recvbuff + r * stride,
-                    count,
-                    type,
-                    r,
-                    comm,
-                    stream.stream()),
-                std::nullopt);
+            outputViews.push_back(flat.narrow(0, r * count, count));
           }
         }
-        C10D_NCCL_CHECK(
-            ncclSend(input.data_ptr(), count, type, root, comm, stream.stream()),
-            std::nullopt);
-        C10D_NCCL_CHECK(ncclGroupEnd(), std::nullopt);
+        torch::cuda::nccl::gather(input, outputViews, comm, stream, root);
         return ncclSuccess;
 #endif
       },

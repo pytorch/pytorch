@@ -5117,11 +5117,14 @@ def gather_into_tensor(
     Args:
         tensor (Tensor): Input tensor to be gathered from the current rank.
         gather_tensor (Tensor, optional): Output tensor to accommodate the
-            gathered contributions from all ranks. It must be correctly sized
-            to hold ``world_size`` copies of ``tensor``, either as a
-            concatenation along the primary dimension or as a stack (see
-            :func:`all_gather_into_tensor` for the two supported forms).
-            Only required (and only used) on the destination rank.
+            gathered contributions from all ranks. It must be contiguous and
+            sized to hold ``world_size`` copies of ``tensor``; only its total
+            number of elements is validated, so either a flat concatenation
+            (``world_size * tensor.numel()``) or a stack
+            (``[world_size, *tensor.shape]``) works, as both share the same
+            contiguous layout. A non-contiguous output (e.g. a strided stacked
+            view) raises a contiguity error rather than a shape error. Only
+            required (and only used) on the destination rank.
         dst (int, optional): Destination rank on global process group (regardless
             of ``group`` argument). (If both ``dst`` and ``group_dst`` are None,
             default is global rank 0)

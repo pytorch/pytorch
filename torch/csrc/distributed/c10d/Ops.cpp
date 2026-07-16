@@ -497,25 +497,23 @@ IMPL_GATHER(CUDA)
 IMPL_GATHER(PrivateUse1)
 
 #define IMPL_GATHER_INTO_TENSOR(DEV)                                          \
-  std::tuple<at::Tensor, c10::intrusive_ptr<Work>>                            \
-      gather_into_tensor_##DEV(                                               \
-          at::Tensor& output_tensor,                                          \
-          at::Tensor& input_tensor,                                           \
-          const c10::intrusive_ptr<ProcessGroup>& process_group,             \
-          int64_t root_rank,                                                  \
-          bool asyncOp,                                                       \
-          int64_t timeout) {                                                  \
-    auto hook_op_id = process_group->firePreHook(                            \
+  std::tuple<at::Tensor, c10::intrusive_ptr<Work>> gather_into_tensor_##DEV(  \
+      at::Tensor& output_tensor,                                              \
+      at::Tensor& input_tensor,                                               \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,                  \
+      int64_t root_rank,                                                      \
+      bool asyncOp,                                                           \
+      int64_t timeout) {                                                      \
+    auto hook_op_id = process_group->firePreHook(                             \
         HookOpName::GATHER, asyncOp, root_rank, input_tensor, output_tensor); \
-    auto work = process_group->getBackend(c10::DeviceType::DEV)              \
-                    ->gather_into_tensor(                                     \
-                        output_tensor,                                        \
-                        input_tensor,                                         \
-                        GatherOptions{                                        \
-                            root_rank,                                        \
-                            std::chrono::milliseconds(timeout),               \
-                            asyncOp});                                        \
-    process_group->firePostHook(                                             \
+    auto work =                                                               \
+        process_group->getBackend(c10::DeviceType::DEV)                       \
+            ->gather_into_tensor(                                             \
+                output_tensor,                                                \
+                input_tensor,                                                 \
+                GatherOptions{                                                \
+                    root_rank, std::chrono::milliseconds(timeout), asyncOp}); \
+    process_group->firePostHook(                                              \
         HookOpName::GATHER, asyncOp, hook_op_id, work);                       \
     return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(                  \
         output_tensor, work);                                                 \
