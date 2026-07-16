@@ -87,7 +87,6 @@ def autograd_registration_check(op, args, kwargs):
     key = None
     for device_type in all_device_types:
         # torch._C._dispatch_key_for_device maps device type to dispatch key
-        # (e.g. "cuda" -> "CUDA", "npu" -> "PrivateUse1")
         autograd_key = "Autograd" + torch._C._dispatch_key_for_device(device_type)
         if key is None:
             key = autograd_key
