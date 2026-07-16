@@ -14,3 +14,4 @@
 0009-flex-gemm-fragment-group-32.patch
 0010-flex-gemm-scalar-epilogue-args.patch
 0011-flex-gemm-grouped-n-main-output.patch
+0012-flex-gemm-general-grouped-main-output.patch

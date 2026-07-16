@@ -15,7 +15,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
 )
 from torch._inductor.heuristics.template.flex_gemm import GemmConfigKey
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FlexGemmGroupedNMainOutputTransform,
+    FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
@@ -64,7 +64,7 @@ class FlexGemmEpilogueLocalReduceConfig:
 class FlexGemmEpilogueMainOutputConfig:
     """Template-time logical main-output transform."""
 
-    transform: FlexGemmGroupedNMainOutputTransform | None = None
+    transform: FlexGemmGroupedMainOutputTransform | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -160,7 +160,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             """
             import torch
             from torch._inductor.kernel.flex_gemm.constraints import (
-                FlexGemmGroupedNMainOutputTransform,
+                FlexGemmGroupedMainOutputTransform,
                 FlexGemmLocalReduceCallbacks,
                 FlexGemmLocalReduceGeometry,
             )
@@ -284,8 +284,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         transform_expr = (
             "None"
             if transform is None
-            else "FlexGemmGroupedNMainOutputTransform("
-            f"group={transform.group!r}, concat_layout={transform.concat_layout!r})"
+            else "FlexGemmGroupedMainOutputTransform("
+            f"group={transform.group!r}, chunked={transform.chunked!r})"
         )
         return (
             "FlexGemmRuntimeOutputPlan("

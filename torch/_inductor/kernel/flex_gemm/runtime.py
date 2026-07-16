@@ -8,9 +8,9 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FLEX_GEMM_GROUPED_N_MAIN_COMPOSITION_ERROR,
-    FLEX_GEMM_GROUPED_N_MAIN_SHAPE_ERROR,
-    FlexGemmGroupedNMainOutputTransform,
+    FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
+    FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR,
+    FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceCallbacks,
     FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR,
@@ -238,13 +238,13 @@ class FlexGemmRuntimeLocalReducePlan:
 class FlexGemmRuntimeMainOutputPlan:
     """Describe the logical main-output transform selected by lowering."""
 
-    transform: FlexGemmGroupedNMainOutputTransform | None = None
+    transform: FlexGemmGroupedMainOutputTransform | None = None
 
     def output_shape(self, physical_shape: tuple[int, ...]) -> tuple[int, ...]:
         if self.transform is None:
             return physical_shape
         if physical_shape[-1] % self.transform.group != 0:
-            raise RuntimeError(FLEX_GEMM_GROUPED_N_MAIN_SHAPE_ERROR)
+            raise RuntimeError(FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR)
         return (*physical_shape[:-1], physical_shape[-1] // self.transform.group)
 
 
@@ -262,7 +262,7 @@ class FlexGemmRuntimeOutputPlan:
         if self.main.transform is not None and (
             self.aux_outs or self.local_reduce is not None
         ):
-            raise NotImplementedError(FLEX_GEMM_GROUPED_N_MAIN_COMPOSITION_ERROR)
+            raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
 
 
 def validate_runtime_local_reduce(
@@ -527,11 +527,19 @@ def gemm_epilogue(
         )
     aux_outs = output_plan.aux_outs
     local_reduce = output_plan.local_reduce
+    main_transform = output_plan.main.transform
+    if main_transform is not None:
+        device_capacity = (
+            device_capacity_override
+            if device_capacity_override is not None
+            else torch.cuda.get_device_capability(a.device)
+        )
+        main_transform.validate_quack(device_capacity[0])
     logical_output_shape = output_plan.main.output_shape(physical_output_shape)
-    if output_plan.main.transform is not None and (
+    if main_transform is not None and (
         a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0 or epilogue_args
     ):
-        raise NotImplementedError(FLEX_GEMM_GROUPED_N_MAIN_COMPOSITION_ERROR)
+        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
     expected_dtype = out_dtype
     if expected_dtype is None:
         expected_dtype = out.dtype if out is not None else a.dtype

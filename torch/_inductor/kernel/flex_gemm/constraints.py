@@ -127,15 +127,12 @@ LOCAL_REDUCE_OUT_SHAPE_ERROR = "local_reduce_out shape must be {expected}, got {
 LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
     "physical local reductions require generated local-reduce callbacks"
 )
-FLEX_GEMM_GROUPED_N_MAIN_GROUP_ERROR = (
-    "FlexGEMM grouped-N main outputs currently support only group 2"
-)
-FLEX_GEMM_GROUPED_N_MAIN_COMPOSITION_ERROR = (
-    "FlexGEMM grouped-N main outputs do not compose with aux outputs, local "
+FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR = (
+    "FlexGEMM grouped main outputs do not compose with aux outputs, local "
     "reductions, captured tensors, C, alpha/beta, or batched GEMMs yet"
 )
-FLEX_GEMM_GROUPED_N_MAIN_SHAPE_ERROR = (
-    "unsupported FlexGEMM epilogue: grouped-N main output shape must equal the "
+FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR = (
+    "unsupported FlexGEMM epilogue: grouped main output shape must equal the "
     "physical GEMM output shape with N divided by the transform group"
 )
 
@@ -403,19 +400,33 @@ def flex_gemm_local_reduce_config_error(
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmGroupedNMainOutputTransform:
-    """Describe a logical main output that contracts contiguous N groups."""
+class FlexGemmGroupedMainOutputTransform:
+    """Contract groups on the innermost GEMM output dimension."""
 
     group: int
-    concat_layout: tuple[str, ...] = ()
+    chunked: bool = False
 
     def __post_init__(self) -> None:
-        if self.group != 2:
-            raise NotImplementedError(FLEX_GEMM_GROUPED_N_MAIN_GROUP_ERROR)
-        if self.concat_layout not in ((), ("B",)):
+        if self.group <= 0:
+            raise ValueError("grouped main-output group must be positive")
+
+    @property
+    def concat_layout(self) -> tuple[str, ...]:
+        return ("B",) if self.chunked else ()
+
+    def validate_quack(self, device_capacity: int) -> None:
+        if device_capacity == 12:
             raise NotImplementedError(
-                f"unsupported FlexGEMM grouped-N concat layout: {self.concat_layout}"
+                "FlexGEMM grouped main outputs are not yet supported on SM120"
             )
+        if self.group == 2:
+            return
+        if self.group == 4 and not self.chunked and device_capacity == 10:
+            return
+        raise NotImplementedError(
+            "FlexGEMM grouped main-output stores support group 2, plus "
+            "interleaved group 4 on SM100"
+        )
 
 
 @dataclasses.dataclass(frozen=True)

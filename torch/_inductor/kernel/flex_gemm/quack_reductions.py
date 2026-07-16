@@ -511,6 +511,7 @@ def lower_grouped_n_select(
         or node.target is not torch.ops.aten.select.int
         or len(node.args) < 3
         or not isinstance(node.args[0], torch.fx.Node)
+        or not isinstance(node.args[1], int)
         or not isinstance(node.args[2], int)
     ):
         return None
@@ -519,16 +520,19 @@ def lower_grouped_n_select(
     shape = tensor_meta_shape(source_node)
     if layout is None or layout.axis != 1 or shape is None:
         return None
-    dim = node.args[1]
-    is_group_dim = dim in (-1, len(shape) - 1) or (
+    if not -len(shape) <= node.args[1] < len(shape):
+        return None
+    dim = node.args[1] % len(shape)
+    is_group_dim = dim == len(shape) - 1 or (
         len(shape) == 3 and shape[1] == layout.group and dim == 1
     )
-    if not is_group_dim or not 0 <= node.args[2] < layout.group:
+    if not is_group_dim or not -layout.group <= node.args[2] < layout.group:
         return None
+    index = node.args[2] % layout.group
     source = _cute_arg(source_node, env)
     return _generate_like(
         kernel,
-        f"{source}[((0, {node.args[2]}, None), None, None)]",
+        f"{source}[((0, {index}, None), None, None)]",
         source,
     )
 

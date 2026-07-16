@@ -22,12 +22,11 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     upcast_compute_type,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FLEX_GEMM_GROUPED_N_MAIN_COMPOSITION_ERROR,
-    FLEX_GEMM_GROUPED_N_MAIN_GROUP_ERROR,
-    FLEX_GEMM_GROUPED_N_MAIN_SHAPE_ERROR,
+    FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
+    FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR,
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
-    FlexGemmGroupedNMainOutputTransform,
+    FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_AUX_TENSORSSA_ERROR,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
@@ -275,7 +274,7 @@ class FlexGemmMainOutputPlan:
     """Describe the logical main output independently of physical GEMM shape."""
 
     value: torch.fx.Node
-    transform: FlexGemmGroupedNMainOutputTransform | None = None
+    transform: FlexGemmGroupedMainOutputTransform | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.value, torch.fx.Node):
@@ -860,20 +859,34 @@ def output_plan(
     )
 
 
-def grouped_n_main_output_transform(
+def grouped_main_output_transform(
     output: torch.fx.Node,
     gemm: torch.fx.Node,
     local_reduce: FlexGemmLocalReduceAnalysis,
-) -> FlexGemmGroupedNMainOutputTransform | None:
-    """Recognize one group-2 N contraction feeding the logical main output."""
-    selected_view: torch.fx.Node | None = None
-    selected_view_key: tuple[Any, ...] | None = None
+) -> FlexGemmGroupedMainOutputTransform | None:
+    """Recognize one innermost-axis grouping feeding the logical main output."""
+    selected_key: tuple[Any, ...] | None = None
+    selected_group: int | None = None
+    selected_chunked = False
     selected_indices: OrderedSet[int] = OrderedSet()
-    concat_layout: tuple[str, ...] = ()
     seen: OrderedSet[torch.fx.Node] = OrderedSet()
 
+    def bind_lane(
+        shape: tuple[Any, ...], group: int, chunked: bool, index: int
+    ) -> bool:
+        nonlocal selected_chunked, selected_group, selected_key
+        key = (tuple(str(dim) for dim in shape), group, chunked)
+        if selected_key is not None and selected_key != key:
+            return False
+        if not -group <= index < group:
+            return False
+        selected_key = key
+        selected_group = group
+        selected_chunked = chunked
+        selected_indices.add(index % group)
+        return True
+
     def visit(node: Any) -> bool:
-        nonlocal concat_layout, selected_view, selected_view_key
         if not isinstance(node, torch.fx.Node) or node in seen:
             return True
         seen.add(node)
@@ -895,27 +908,18 @@ def grouped_n_main_output_transform(
                 and local_reduce.graph.depends_on(split.args[0], gemm)
             ):
                 source_shape = tensor_meta_shape(split.args[0])
+                physical_n = None if source_shape is None else source_shape[-1]
                 if (
                     source_shape is not None
-                    and source_shape[-1] == 2 * split.args[1]
-                    and 0 <= node.args[1] < 2
+                    and isinstance(physical_n, int)
+                    and physical_n % split.args[1] == 0
                 ):
-                    view_key = (
-                        tuple(str(dim) for dim in source_shape),
-                        split.args[1],
-                        split.args[2],
-                        ("B",),
-                    )
-                    if selected_view_key is not None and selected_view_key != view_key:
-                        return False
-                    selected_view = split
-                    selected_view_key = view_key
-                    concat_layout = ("B",)
-                    selected_indices.add(node.args[1])
-                    local_reduce.grouped_tensors[split] = GroupedTensorSSALayout(
-                        group=2, axis=1
-                    )
-                    return True
+                    group = physical_n // split.args[1]
+                    if group > 1 and bind_lane(source_shape, group, True, node.args[1]):
+                        local_reduce.grouped_tensors[split] = GroupedTensorSSALayout(
+                            group=group, axis=1
+                        )
+                        return True
         if (
             node.op == "call_function"
             and node.target is torch.ops.aten.select.int
@@ -924,51 +928,34 @@ def grouped_n_main_output_transform(
             and isinstance(node.args[2], int)
         ):
             view = node.args[0]
-            layout = local_reduce.grouped_tensors.get(view)
             view_args = view_or_reshape_args(view)
             shape = tensor_meta_shape(view)
-            dim = node.args[1]
-            select_concat_layout: tuple[str, ...] = ()
             if (
                 view_args is not None
                 and local_reduce.graph.depends_on(view_args[0], gemm)
                 and shape is not None
-                and len(shape) == 3
-                and shape[1] == 2
-                and dim == 1
+                and isinstance(node.args[1], int)
+                and -len(shape) <= node.args[1] < len(shape)
             ):
-                select_concat_layout = ("B",)
-                layout = GroupedTensorSSALayout(group=2, axis=1)
-                local_reduce.grouped_tensors[view] = layout
-            if (
-                layout is not None
-                and layout.axis == 1
-                and layout.group != 2
-                and view_args is not None
-                and local_reduce.graph.depends_on(view_args[0], gemm)
-            ):
-                raise NotImplementedError(FLEX_GEMM_GROUPED_N_MAIN_GROUP_ERROR)
-            if (
-                layout is not None
-                and layout.axis == 1
-                and layout.group == 2
-                and view_args is not None
-                and local_reduce.graph.depends_on(view_args[0], gemm)
-                and shape is not None
-                and (dim in (-1, len(shape) - 1) or (select_concat_layout and dim == 1))
-                and 0 <= node.args[2] < layout.group
-            ):
-                view_key = (
-                    tuple(str(dim) for dim in shape),
-                    select_concat_layout,
+                dim = node.args[1] % len(shape)
+                layout = local_reduce.grouped_tensors.get(view)
+                chunked = (
+                    len(shape) == 3
+                    and dim == 1
+                    and isinstance(shape[1], int)
+                    and shape[1] > 1
                 )
-                if selected_view_key is not None and selected_view_key != view_key:
-                    return False
-                selected_view = view
-                selected_view_key = view_key
-                concat_layout = select_concat_layout
-                selected_indices.add(node.args[2])
-                return True
+                if chunked:
+                    layout = GroupedTensorSSALayout(group=shape[1], axis=1)
+                if (
+                    layout is not None
+                    and layout.axis == 1
+                    and (chunked or dim == len(shape) - 1)
+                    and bind_lane(shape, layout.group, chunked, node.args[2])
+                ):
+                    if chunked:
+                        local_reduce.grouped_tensors[view] = layout
+                    return True
         if node is gemm:
             return False
         if node in local_reduce.grouped_tensors and local_reduce.graph.depends_on(
@@ -977,20 +964,21 @@ def grouped_n_main_output_transform(
             return False
         return all(visit(arg) for arg in iter_fx_node_inputs((node.args, node.kwargs)))
 
-    if (
-        not visit(output)
-        or selected_view is None
-        or selected_indices != OrderedSet([0, 1])
-    ):
+    if not visit(output) or selected_group is None:
+        return None
+    if selected_indices != OrderedSet(range(selected_group)):
         return None
     gemm_meta = gemm.meta.get("val")
     output_meta = output.meta.get("val")
     if gemm_meta is None or output_meta is None or len(gemm_meta.shape) != 2:
         return None
-    expected_shape = (gemm_meta.shape[0], gemm_meta.shape[1] // 2)
+    expected_shape = (gemm_meta.shape[0], gemm_meta.shape[1] // selected_group)
     if not statically_known_shape_equal(output_meta.shape, expected_shape):
-        raise NotImplementedError(FLEX_GEMM_GROUPED_N_MAIN_SHAPE_ERROR)
-    return FlexGemmGroupedNMainOutputTransform(group=2, concat_layout=concat_layout)
+        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR)
+    return FlexGemmGroupedMainOutputTransform(
+        group=selected_group,
+        chunked=selected_chunked,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1012,12 +1000,12 @@ class FlexGemmEpilogueAnalysis:
         """Analyze grouped values and classify logical output consumers."""
         local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
         outputs = output_plan(graph_module, local_reduce)
-        transform = grouped_n_main_output_transform(
+        transform = grouped_main_output_transform(
             outputs.main.value, gemm, local_reduce
         )
         if transform is not None:
             if outputs.aux_outputs or outputs.local_reduce is not None:
-                raise NotImplementedError(FLEX_GEMM_GROUPED_N_MAIN_COMPOSITION_ERROR)
+                raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
             outputs = dataclasses.replace(
                 outputs,
                 main=dataclasses.replace(outputs.main, transform=transform),
@@ -1030,7 +1018,7 @@ class FlexGemmEpilogueAnalysis:
                 or gemm_shape is None
                 or not statically_known_shape_equal(main_shape, gemm_shape)
             ):
-                raise NotImplementedError(FLEX_GEMM_GROUPED_N_MAIN_SHAPE_ERROR)
+                raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR)
         return cls(outputs, local_reduce)
 
     @property
@@ -1044,7 +1032,8 @@ class FlexGemmEpilogueAnalysis:
         if self.outputs.main.transform is not None:
             geometries.add(
                 FlexGemmLocalReduceGeometry(
-                    group=self.outputs.main.transform.group, axis=1
+                    group=self.outputs.main.transform.group,
+                    axis=1,
                 )
             )
         return tuple(geometries)

@@ -25,7 +25,7 @@ from ... import ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
 from .constraints import (
-    FLEX_GEMM_GROUPED_N_MAIN_COMPOSITION_ERROR,
+    FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     flex_gemm_local_reduce_config_error,
     is_flex_gemm_partial_reduction_shape,
     LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
@@ -204,13 +204,12 @@ def flex_gemm_config_keys(
     main stores additionally require tile_n not to oversubscribe physical N and
     a single-CTA cluster until QuACK predicates those layouts correctly.
     """
-    if main_transform is not None and torch.cuda.get_device_capability(device)[0] == 12:
-        raise NotImplementedError(
-            "FlexGEMM grouped-N main outputs are not yet supported on SM120"
-        )
+    device_capacity = torch.cuda.get_device_capability(device)[0]
+    if main_transform is not None:
+        main_transform.validate_quack(device_capacity)
     if main_transform is not None and isinstance(n, sympy.Expr) and n.free_symbols:
         raise NotImplementedError(
-            "FlexGEMM grouped-N main outputs require statically known physical N"
+            "FlexGEMM grouped main outputs require statically known physical N"
         )
 
     from torch._inductor.heuristics.template.flex_gemm import (
@@ -252,7 +251,7 @@ def flex_gemm_config_keys(
     )
     if main_transform is not None and not configs:
         raise NotImplementedError(
-            "FlexGEMM grouped-N main outputs require statically known physical N "
+            "FlexGEMM grouped main outputs require statically known physical N "
             "large enough for a single-CTA QuACK tile"
         )
     for geometry in local_reduce_geometries:
@@ -403,7 +402,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         or beta != 1.0
         or gemm_op is not torch.ops.aten.mm.default
     ):
-        raise NotImplementedError(FLEX_GEMM_GROUPED_N_MAIN_COMPOSITION_ERROR)
+        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
     aux_metas = validate_flex_gemm_aux_outputs(
         gemm_op, outputs.aux_outputs, physical_output_size
     )

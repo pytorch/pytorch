@@ -2640,8 +2640,46 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         torch.testing.assert_close(actual, fn(a, b), atol=1e-1, rtol=1e-1)
         self.assertEqual(actual.shape, (m, n))
         FileCheck().check("FlexGemmRuntimeMainOutputPlan(").check(
-            "FlexGemmGroupedNMainOutputTransform(group=2"
+            "FlexGemmGroupedMainOutputTransform(group=2"
         ).check_not("activation=").check_not("extern_kernels.mm").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10,
+        "interleaved group 4 is currently validated only on SM100",
+    )
+    def test_mm_grouped_main_output_group4(self):
+        m, k, n, group = 64, 64, 64, 4
+
+        def epilogue(acc):
+            lanes = acc.float().view(m, n, group)
+            return (
+                lanes[..., 0]
+                + 2 * lanes[..., 1]
+                + 3 * lanes[..., 2]
+                + 5 * lanes[..., 3]
+            ).to(acc.dtype)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
+        b = torch.randn(k, group * n, device="cuda", dtype=torch.float16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        torch.testing.assert_close(actual, fn(a, b), atol=2e-1, rtol=5e-2)
+        self.assertEqual(actual.shape, (m, n))
+        FileCheck().check(
+            "FlexGemmGroupedMainOutputTransform(group=4, chunked=False)"
+        ).check_not("extern_kernels.mm").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -2680,13 +2718,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         m, k, n = 64, 64, 64
 
         def view_epilogue(acc):
-            gate = acc.float().view(m, 2, n).select(1, 0)
-            up = acc.float().view(m, 2, n).select(1, 1)
+            lanes = acc.float().view(m, 2, n)
+            gate = lanes.select(-2, -2)
+            up = lanes.select(-2, -1)
             return (torch.nn.functional.silu(gate) * up).to(acc.dtype)
 
         def chunk_epilogue(acc):
-            gate, up = acc.float().chunk(2, dim=-1)
-            return (torch.nn.functional.silu(gate) * up).to(acc.dtype)
+            lanes = acc.float().chunk(2, dim=-1)
+            return (torch.nn.functional.silu(lanes[-2]) * lanes[-1]).to(acc.dtype)
 
         a = torch.randn(m, k, device="cuda", dtype=torch.float16)
         b = torch.randn(2 * n, k, device="cuda", dtype=torch.float16).t()
@@ -2706,8 +2745,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 )
 
                 torch.testing.assert_close(actual, fn(a, b), atol=2e-1, rtol=2e-2)
-                FileCheck().check("FlexGemmGroupedNMainOutputTransform(group=2").check(
-                    "concat_layout=('B',)"
+                FileCheck().check("FlexGemmGroupedMainOutputTransform(group=2").check(
+                    "chunked=True"
                 ).check_not("activation=").check_not("extern_kernels.mm").run(code)
 
     @skipIfNoCuteDSL
@@ -2720,7 +2759,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             gemm_config_from_key,
         )
         from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmGroupedNMainOutputTransform,
+            FlexGemmGroupedMainOutputTransform,
             FlexGemmLocalReduceGeometry,
         )
         from torch._inductor.kernel.flex_gemm.lowering import flex_gemm_config_keys
@@ -2741,7 +2780,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 128,
                 (FlexGemmLocalReduceGeometry(group=2, axis=1),),
                 tuned=True,
-                main_transform=FlexGemmGroupedNMainOutputTransform(group=2),
+                main_transform=FlexGemmGroupedMainOutputTransform(group=2),
             )
         )
         self.assertTrue(configs)
@@ -2761,8 +2800,19 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     128,
                     (FlexGemmLocalReduceGeometry(group=2, axis=1),),
                     tuned=True,
-                    main_transform=FlexGemmGroupedNMainOutputTransform(group=2),
+                    main_transform=FlexGemmGroupedMainOutputTransform(group=2),
                 )
+        with self.assertRaisesRegex(NotImplementedError, "interleaved group 4"):
+            flex_gemm_config_keys(
+                device,
+                64,
+                128,
+                (FlexGemmLocalReduceGeometry(group=4, axis=1),),
+                tuned=True,
+                main_transform=FlexGemmGroupedMainOutputTransform(
+                    group=4, chunked=True
+                ),
+            )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -2774,10 +2824,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         with self.subTest("group"):
 
-            def group_four(a, b):
+            def group_eight(a, b):
                 def epilogue(acc):
-                    lanes = acc.view(m, n, 4)
-                    return lanes[..., 0] + lanes[..., 1] + lanes[..., 2] + lanes[..., 3]
+                    lanes = acc.view(m, n, 8)
+                    return sum(lanes[..., index] for index in range(8))
 
                 return flex_gemm(
                     torch.mm,
@@ -2786,9 +2836,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     kernel_options={"backend": "QUACK"},
                 )
 
-            b = torch.randn(k, 4 * n, device="cuda", dtype=torch.float16)
-            with self.assertRaisesRegex(InductorError, "only group 2"):
-                torch.compile(group_four, backend="inductor", fullgraph=True)(a, b)
+            b = torch.randn(k, 8 * n, device="cuda", dtype=torch.float16)
+            with self.assertRaisesRegex(InductorError, "group 2.*group 4"):
+                torch.compile(group_eight, backend="inductor", fullgraph=True)(a, b)
 
         with self.subTest("capture"):
             torch._dynamo.reset()
