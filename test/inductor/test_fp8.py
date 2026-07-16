@@ -1130,7 +1130,7 @@ class TestFP8Lowering(TestCase):
             ((32768, 4096, 4096), True, (128, 128, 1, 128)),  # 188675
         }
         if (shape, use_fast_accum, scaling_block_sizes) in _disabled_combos:
-            self.skipTest("disabled due to CI failures; see #188675/#188704/#188706-188717")
+            self.skipTest("disabled due to CI failures; see #190236")
         if "xpu" in device and use_fast_accum:
             self.skipTest("XPU does not support use_fast_accum=True for now")
         # Only bf16 output type is supported for non-tensorwise scaling, not fp32
