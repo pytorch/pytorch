@@ -301,6 +301,16 @@ def at_least_x_gpu(x):
     return False
 
 
+def at_least_x_device(x):
+    """Return True if the current accelerator has at least x devices.
+
+    Device-agnostic replacement for :func:`at_least_x_gpu`, which only
+    checks cuda/hpu/xpu. Uses :func:`torch.accelerator.device_count` of the
+    current accelerator.
+    """
+    return torch.accelerator.device_count() >= x
+
+
 def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
     _handle_test_skip = getattr(args[0], "_handle_test_skip", None)
     if len(args) == 0 or _handle_test_skip is None:

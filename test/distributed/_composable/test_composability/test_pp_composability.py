@@ -29,10 +29,11 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_distributed import (
-    at_least_x_gpu,
+    ACCELERATOR_DIST_BACKENDS,
+    at_least_x_device,
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
+    skip_if_lt_x_devices,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -100,9 +101,9 @@ class ComposabilityTest(MultiProcContinuousTest):
     def device(self):
         return self.rank
 
-    @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
+    @requires_accelerator_dist_backend(ACCELERATOR_DIST_BACKENDS + ["privateuse1"])
+    @skip_if_lt_x_devices(8)
+    @skip_but_pass_in_sandcastle_if(not at_least_x_device(8), "Test requires 8+ accelerators")
     def test_pp_and_dcp(self):
         """
         Test that pipeline parallelism and distributed checkpointing can be used together and
@@ -183,9 +184,9 @@ class ComposabilityTest(MultiProcContinuousTest):
 
         _dcp_test(self)
 
-    @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
+    @requires_accelerator_dist_backend(ACCELERATOR_DIST_BACKENDS + ["privateuse1"])
+    @skip_if_lt_x_devices(8)
+    @skip_but_pass_in_sandcastle_if(not at_least_x_device(8), "Test requires 8+ accelerators")
     @parametrize(
         "ScheduleClass",
         [
@@ -326,9 +327,9 @@ class ComposabilityTest(MultiProcContinuousTest):
             for optimizer in optimizers:
                 optimizer.step()
 
-    @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
+    @requires_accelerator_dist_backend(ACCELERATOR_DIST_BACKENDS + ["privateuse1"])
+    @skip_if_lt_x_devices(8)
+    @skip_but_pass_in_sandcastle_if(not at_least_x_device(8), "Test requires 8+ accelerators")
     @parametrize(
         "ScheduleClass",
         [
@@ -510,9 +511,9 @@ class ComposabilityTest(MultiProcContinuousTest):
             for ref_optimizer in ref_optimizers:
                 ref_optimizer.step()
 
-    @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
+    @requires_accelerator_dist_backend(ACCELERATOR_DIST_BACKENDS + ["privateuse1"])
+    @skip_if_lt_x_devices(8)
+    @skip_but_pass_in_sandcastle_if(not at_least_x_device(8), "Test requires 8+ accelerators")
     @parametrize(
         "ScheduleClass",
         [
