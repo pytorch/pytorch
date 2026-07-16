@@ -501,6 +501,23 @@ class TestIndexingSimplification(InductorTestCase):
         out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, sentinel)
         out_compiled.sum().backward()
 
+    @unittest.skipUnless(HAS_CPU, "requires CPU")
+    def test_bool_minimum_maximum_index_propagation(self):
+        def foo(x):
+            thresh = torch.nn.functional.threshold(x, 6.08522335982976, -0.05932757)
+            eq = torch.eq(thresh, x)
+            empty = torch.empty_like(eq)
+            return torch.minimum(empty, empty), torch.maximum(empty, empty)
+
+        x = torch.randn([32], dtype=torch.float64)
+        compiled_foo = torch.compile(foo, backend="inductor")
+        with torch.no_grad():
+            out_min, out_max = compiled_foo(x)
+        self.assertEqual(out_min.dtype, torch.bool)
+        self.assertEqual(out_max.dtype, torch.bool)
+        self.assertEqual(out_min.shape, x.shape)
+        self.assertEqual(out_max.shape, x.shape)
+
 
 class ExprPrinterTests(InductorTestCase):
     def test_print_pow(self):

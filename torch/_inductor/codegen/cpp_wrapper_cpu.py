@@ -46,6 +46,7 @@ from .cpp_utils import (
     LAYOUT_TO_ATEN,
 )
 from .wrapper import (
+    _get_profiling_input_handles,
     _rewrite_symbol_solution_for_int_codegen,
     codegen_reinterpret_view_helper,
     EnterSubgraphLine,
@@ -1879,6 +1880,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         *,
         debug_args: list[str] | None = None,
         stack_traces: OrderedSet[str] | None = None,
+        input_handles: list[str] | None = None,
+        num_scalars: int = 0,
+        output_handle: str | None = None,
         disable_autograd: bool = False,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
@@ -1904,7 +1908,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ]
             if enable_kernel_profile:
                 call_code = shim_fn_codes[0]
-                shim_fn_codes = ["{"]
+                stack_trace_str = ""
                 if enable_kernel_context_guard:
                     stack_trace_str = 'R"('
                     if stack_traces:
@@ -1913,16 +1917,82 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                 stack_trace_str += f"\n{line}"
                             stack_trace_str += "\n"
                     stack_trace_str += ')"'
-                    shim_fn_codes.append(
-                        f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});"""
+
+                has_profiling_inputs = input_handles or num_scalars > 0 or output_handle
+                if has_profiling_inputs:
+                    # Generate IValue conversions so that tensor shapes
+                    # and scalar types are recorded by the profiler.
+                    ivalue_lines: list[str] = []
+                    ivalue_names: list[str] = []
+
+                    # Convert tensor input handles to IValues.
+                    if input_handles:
+                        for idx, handle in enumerate(input_handles):
+                            ivalue_var = f"tmp_{shim_fn}_input_{idx}"
+                            ivalue_lines.extend(
+                                [
+                                    f"C10IValueHandle {ivalue_var};",
+                                    f"aoti_torch_tensor_to_ivalue({handle}, &{ivalue_var});",
+                                    f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});",
+                                ]
+                            )
+                            ivalue_names.append(ivalue_var)
+
+                    # Generate dummy scalar IValues (we only care about
+                    # shapes, so use int64(0) as a placeholder).
+                    for idx in range(num_scalars):
+                        ivalue_var = f"tmp_{shim_fn}_scalar_{idx}"
+                        ivalue_lines.extend(
+                            [
+                                f"C10IValueHandle {ivalue_var};",
+                                f"aoti_torch_int64_to_ivalue(0, &{ivalue_var});",
+                                f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});",
+                            ]
+                        )
+                        ivalue_names.append(ivalue_var)
+
+                    # Convert output tensor handle to IValue.
+                    if output_handle:
+                        ivalue_var = f"tmp_{shim_fn}_output"
+                        ivalue_lines.extend(
+                            [
+                                f"C10IValueHandle {ivalue_var};",
+                                f"aoti_torch_tensor_to_ivalue({output_handle}, &{ivalue_var});",
+                                f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});",
+                            ]
+                        )
+                        ivalue_names.append(ivalue_var)
+
+                    inputs_vec_var = f"{shim_fn}_inputs_"
+                    ivalue_lines.append(
+                        f"std::vector<C10IValueHandle> {inputs_vec_var}({{{', '.join(ivalue_names)}}});"
                     )
-                shim_fn_codes.extend(
-                    [
-                        f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);""",
-                        call_code,
-                        "}",
-                    ]
-                )
+
+                    shim_fn_codes = ["{", *ivalue_lines]
+                    if enable_kernel_context_guard:
+                        shim_fn_codes.append(
+                            f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});"""
+                        )
+                    shim_fn_codes.extend(
+                        [
+                            f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr, {inputs_vec_var});""",
+                            call_code,
+                            "}",
+                        ]
+                    )
+                else:
+                    shim_fn_codes = ["{"]
+                    if enable_kernel_context_guard:
+                        shim_fn_codes.append(
+                            f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});"""
+                        )
+                    shim_fn_codes.extend(
+                        [
+                            f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);""",
+                            call_code,
+                            "}",
+                        ]
+                    )
             if disable_autograd:
                 shim_fn_codes = self.wrap_fallback_dispatch_cpp(shim_fn_codes)
             self.writelines(shim_fn_codes)
@@ -1957,10 +2027,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
 
+        num_kwargs = sum(
+            1 for key in extern_kernel.ordered_kwargs_for_cpp_kernel if key != "out"
+        )
         self.generate_c_shim_extern_kernel_call(
             extern_kernel.get_kernel_name(),
             args,
             device,
+            input_handles=_get_profiling_input_handles(extern_kernel.inputs, args),
+            num_scalars=len(extern_kernel.constant_args) + num_kwargs,
             disable_autograd=isinstance(extern_kernel, ir.FallbackKernel),
         )
 
@@ -1987,6 +2062,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_c_shim_fallback_kernel(
         self, fallback_kernel: ir.FallbackKernel, args: list[str]
     ) -> None:
+        # FallbackKernel.codegen_args() interleaves tensors and constants
+        # via unflatten_args, so args[i] may not correspond to inputs[i].
+        # Use get_name() for tensor (IRNode) inputs; skip nested-list args
+        # (e.g. TensorList) which have no single handle.
+        input_handles = []
+        for inp in fallback_kernel.inputs:
+            if isinstance(inp, ir.IRNode):
+                input_handles.append(inp.get_name())
+
         output_args = []
         output_raii_handles = []
         output_name_base = fallback_kernel.get_name()
@@ -2020,10 +2104,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
         args = args + output_args
         device = d.type if (d := fallback_kernel.get_device()) else self.device
 
+        num_kwargs = sum(
+            1 for key in fallback_kernel.ordered_kwargs_for_cpp_kernel if key != "out"
+        )
         self.generate_c_shim_extern_kernel_call(
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
             device,
+            input_handles=input_handles,
+            num_scalars=len(fallback_kernel.constant_args) + num_kwargs,
             disable_autograd=True,
         )
         for raii_handle in output_raii_handles:
@@ -2037,6 +2126,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         args: list[str],
         device: str,
         stack_traces: OrderedSet[str] | None = None,
+        input_handles: list[str] | None = None,
+        num_scalars: int = 0,
         disable_autograd: bool = False,
     ) -> None:
         if out_view:
@@ -2044,6 +2135,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"auto {out_name} = {out_view};")
             args.insert(0, out_name)
         else:
+            out_name = out
             args.insert(0, out)
 
         self.generate_c_shim_extern_kernel_call(
@@ -2051,6 +2143,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args,
             device,
             stack_traces=stack_traces,
+            input_handles=input_handles,
+            num_scalars=num_scalars,
+            output_handle=out_name,
             disable_autograd=disable_autograd,
         )
 
@@ -3348,7 +3443,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ) -> str | None | _OUTPUT_ARGS_TYPE:
             if out is None:
                 return None
-            if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
+            if isinstance(
+                out, (ir.MultiOutput, ir._CollectiveKernel, ir.FallbackKernel)
+            ):
                 return out.get_name()
             if isinstance(out, ir.MutationOutput):
                 mutated_buf_names = out.get_mutation_names()

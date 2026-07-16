@@ -120,3 +120,4 @@ torch_new_generator_handle: TORCH_VERSION_2_13_0
 torch_new_stable_ivalue: TORCH_VERSION_2_13_0
 torch_stream_native_handle: TORCH_VERSION_2_13_0
 aoti_torch_copy_below_autograd_: TORCH_VERSION_2_14_0
+torch_has_storage: TORCH_VERSION_2_14_0

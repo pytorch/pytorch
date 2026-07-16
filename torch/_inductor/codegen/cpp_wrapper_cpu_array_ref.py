@@ -1054,6 +1054,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         *,
         debug_args: list[str] | None = None,
         stack_traces: OrderedSet[str] | None = None,
+        input_handles: list[str] | None = None,
+        num_scalars: int = 0,
+        output_handle: str | None = None,
         disable_autograd: bool = False,
     ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
@@ -1080,6 +1083,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             wrapped_args,
             device,
             debug_args=debug_args if debug_args is not None else args,
+            input_handles=input_handles,
+            num_scalars=num_scalars,
+            output_handle=output_handle,
             stack_traces=stack_traces,
             disable_autograd=disable_autograd,
         )

@@ -2802,19 +2802,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     tx, args[0], variables.DeletedVariable()
                 )
 
-            if torch._dynamo.config.enable_faithful_generator_behavior and isinstance(
-                self.value, types.GeneratorType
-            ):
+            if isinstance(self.value, types.GeneratorType):
                 unimplemented(
                     gb_type="call_method on generator",
                     context=f"object={self.value}, method={name}, args={args}, kwargs={kwargs}",
                     explanation="Detected a method call to a user-defined generator object. "
                     "This is not fully supported.",
-                    hints=[
-                        "Set `torch._dynamo.config.enable_faithful_generator_behavior = False`. Note that this "
-                        "may cause silent incorrectness, since we will eagerly unpack generators instead of lazily "
-                        "evaluating them.",
-                    ],
+                    hints=[*graph_break_hints.SUPPORTABLE],
                 )
 
             # torch.Generator methods like manual_seed(), get_state(), etc.
@@ -3539,6 +3533,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             AttributeError,
             tx,
             args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
+            kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
         )
 
     def getattro_impl(
