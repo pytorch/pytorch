@@ -5,6 +5,7 @@
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -192,9 +193,12 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
 }
 
 void TensorImpl::set_fake_device(c10::Device fake_device) {
-  TORCH_CHECK(
-      fake_device.type() != c10::DeviceType::Meta,
-      "FakeTensor does not support meta device");
+  if (fake_device.type() == c10::DeviceType::Meta) {
+    auto mode = c10::impl::FakeTensorModeTLS::get_state();
+    TORCH_CHECK(
+        mode == nullptr || mode->allow_meta_,
+        "device.type must not be 'meta' when allow_meta is False");
+  }
 
   // in python FakeTensor, it checks whether or not
   // we are in in_kernel_invocation manager to determine
@@ -211,13 +215,15 @@ void TensorImpl::set_fake_device(c10::Device fake_device) {
   // where the fake device logic is instead of just calling device_default()
   set_custom_device(true);
 
-  // change backend key from Meta to the fake device
-  _change_backend_component_keys(fake_device);
+  if (fake_device.type() != c10::DeviceType::Meta) {
+    _change_backend_component_keys(fake_device);
+  }
 }
 
 void TensorImpl::set_and_normalize_fake_device(c10::Device fake_device) {
-  // normalize device index for indexed device types (not CPU)
-  if (fake_device.index() == -1 && fake_device.type() != c10::DeviceType::CPU) {
+  // normalize device index for indexed device types (not CPU or meta)
+  if (fake_device.index() == -1 && fake_device.type() != c10::DeviceType::CPU &&
+      fake_device.type() != c10::DeviceType::Meta) {
     const auto* guard_impl = c10::impl::getDeviceGuardImpl(fake_device.type());
     if (guard_impl) {
       fake_device = guard_impl->getDevice();
@@ -644,6 +650,7 @@ void TensorImpl::copy_generic_tensor_metadata(
   // policy is NOT (you have no Python object to dispatch to!)
   // NB: subclass relevant policy doesn't have to be copied; the
   // constructor sets this up
+  dest_impl->custom_device_ = src_impl->custom_device_;
 
   dest_impl->refresh_sizes_strides_policy();
   dest_impl->refresh_layout_policy();
@@ -1059,5 +1066,40 @@ AutogradMetaFactory* GetAutogradMetaFactory() {
 }
 
 } // namespace impl
+
+void FakeTensorMode::set_constant(
+    const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
+    std::shared_ptr<at::Tensor> constant,
+    c10::StorageImpl* constant_storage) {
+  std::lock_guard<std::mutex> lock(constant_mutex_);
+  if (constant_storage) {
+    constant_storage_mapping_[constant_storage].emplace_back(fake_impl);
+  }
+  tensor_to_constant_[fake_impl.get()] = std::move(constant);
+}
+
+std::shared_ptr<at::Tensor> FakeTensorMode::get_constant(
+    c10::TensorImpl* fake_impl) const {
+  std::lock_guard<std::mutex> lock(constant_mutex_);
+  auto it = tensor_to_constant_.find(fake_impl);
+  if (it == tensor_to_constant_.end())
+    return nullptr;
+  return it->second;
+}
+
+void FakeTensorMode::invalidate_constant_aliases(
+    c10::StorageImpl* storage_impl) {
+  std::lock_guard<std::mutex> lock(constant_mutex_);
+  auto it = constant_storage_mapping_.find(storage_impl);
+  if (it == constant_storage_mapping_.end())
+    return;
+  for (auto& weak_ref : it->second) {
+    auto impl = weak_ref.lock();
+    if (impl) {
+      tensor_to_constant_.erase(impl.get());
+    }
+  }
+  constant_storage_mapping_.erase(it);
+}
 
 } // namespace c10
