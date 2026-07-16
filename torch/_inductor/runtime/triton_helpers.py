@@ -252,6 +252,11 @@ def maximum(a, b):
 
 
 @triton.jit
+def fmaximum(a, b):
+    return tl.maximum(a, b)
+
+
+@triton.jit
 def min2(a, dim):
     return tl.reduce(a, dim, minimum)
 
@@ -259,6 +264,11 @@ def min2(a, dim):
 @triton.jit
 def max2(a, dim):
     return tl.reduce(a, dim, maximum)
+
+
+@triton.jit
+def fmax2(a, dim):
+    return tl.reduce(a, dim, fmaximum)
 
 
 @triton.jit
