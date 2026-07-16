@@ -306,6 +306,11 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
 
     // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
     // H/t Daniel Haziza
+    // NOTE: when this swap is taken, the kernel args/output MUST use the swapped tensors
+    // (q_padded/k_padded/v_padded) and an output allocated with the swapped shape. The
+    // original CK port passed the un-swapped q and out=empty_like(q), so for GQA + seqlen_q==1
+    // the kernel strided out of bounds and produced garbage (~FLT_MAX) -> downstream NaN. The
+    // arg/output plumbing below is fixed to use the swapped tensors.
     const int seqlenq_ngroups_swapped = seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size % 8 == 0 && !attn_bias_.has_value();
     const int ngroups = num_heads / num_heads_k;
     at::Tensor temp_q = q;
@@ -344,7 +349,12 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         if (head_size % 8 != 0) { out = at::empty_like(q_padded); };
     }
     else {
-        out = at::empty_like(q);
+        // When the ngroups swap is active, seqlen_q/num_heads have been reassigned to the
+        // swapped (ngroups, num_heads_k) values, so allocate the output with that shape -
+        // empty_like(q) would use the original shape and the kernel would write out of bounds.
+        out = seqlenq_ngroups_swapped
+            ? at::empty({batch_size, seqlen_q, num_heads, head_size}, q.options())
+            : at::empty_like(q);
     }
 
     auto round_multiple = [](int x, int m) { return (x + m -1) / m*m;};
@@ -403,6 +413,45 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     {
       attn_bias = attn_bias_;
     }
+    // === [stopgap] gfx950 CK FMHA tile-tail OOB guard ===
+    // The generated no-seqlen-pad fwd instances issue unpredicated tile loads/
+    // stores of round_up(seqlen, tile) rows. For tile-unaligned seqlens this
+    // over-reads Q/K/V and over-writes O/LSE past the tensor end, which faults
+    // ("Memory access fault by GPU node-N ... Reason: Unknown") when the buffer
+    // ends on an unmapped page (observed on MI350X AOTT lowering, fwd pass).
+    // Hand the kernel seqlen-padded *allocations* (the extra rows are mapped
+    // scratch) while leaving seqlen_q/seqlen_k unchanged, so the kernel's logical
+    // masking is identical and numerics are unchanged; the real rows are copied
+    // back into the caller-visible tensors below. Engages only for tile-unaligned
+    // seqlens on the non-swapped path; skipped when seqlenq_ngroups_swapped is
+    // active (that fast path reshapes seqlen_q into the batch/group dim, so the
+    // tile-tail over-read does not apply).
+    // Scope: covers Q/K/V (read) and O/LSE (write) only. attn_bias (bias_ptr,
+    // seqlen_q x seqlen_k) and the dropout randval buffer (p / rand_val_ptr) are
+    // touched by the same round_up(seqlen, tile) pattern but are left unpadded
+    // here -- out of scope for this stopgap (pre-existing, not in the observed
+    // fault repro; whether CK issues full-tile loads on them is upstream-
+    // dependent). The proper fix is upstream CK kPadSeqLen fwd instances.
+    // TODO: remove once CK generates/selects kPadSeqLen fwd instances upstream.
+    at::Tensor q_arg = q_padded, k_arg = k_padded, v_arg = v_padded;
+    at::Tensor out_arg = out, lse_arg = softmax_lse;
+    constexpr int kCkSeqTileLCM = 256; // >= every fwd kM0/kN0 in the generated set
+    const int seqlen_q_pad = round_multiple(seqlen_q, kCkSeqTileLCM);
+    const int seqlen_k_pad = round_multiple(seqlen_k, kCkSeqTileLCM);
+    const bool ck_oob_guard = !seqlenq_ngroups_swapped &&
+        ((seqlen_q_pad != seqlen_q) || (seqlen_k_pad != seqlen_k));
+    if (ck_oob_guard) {
+        if (seqlen_q_pad != seqlen_q) {
+            q_arg   = at::pad(q_padded, {0, 0, 0, 0, 0, seqlen_q_pad - seqlen_q});
+            out_arg = at::empty({out.size(0), seqlen_q_pad, out.size(2), out.size(3)}, out.options());
+            lse_arg = at::empty({batch_size, num_heads, seqlen_q_pad}, softmax_lse.options());
+        }
+        if (seqlen_k_pad != seqlen_k) {
+            k_arg = at::pad(k_padded, {0, 0, 0, 0, 0, seqlen_k_pad - seqlen_k});
+            v_arg = at::pad(v_padded, {0, 0, 0, 0, 0, seqlen_k_pad - seqlen_k});
+        }
+    }
+
     if (seqlen_k > 0) {
         drop_seed_offset.first = rng_state[0].data_ptr<uint64_t>();
         drop_seed_offset.second = rng_state[1].data_ptr<uint64_t>();
@@ -429,18 +478,23 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
                 num_heads,
                 num_heads_k,
                 head_size_8x,
-                q,
-                k,
-                v,
+                q_arg,
+                k_arg,
+                v_arg,
                 attn_bias,
-                out,
-                softmax_lse,
+                out_arg,
+                lse_arg,
                 p,
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
         float t = fmha_fwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
+        if (ck_oob_guard && seqlen_q_pad != seqlen_q) {
+            // copy the real rows out of the padded scratch into the caller tensors
+            out.copy_(out_arg.narrow(1, 0, seqlen_q));
+            softmax_lse.copy_(lse_arg.narrow(2, 0, seqlen_q));
+        }
     }
     else {
         // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.

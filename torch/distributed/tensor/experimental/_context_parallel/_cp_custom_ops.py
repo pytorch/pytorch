@@ -11,8 +11,8 @@ def flex_cp_allgather(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     k = k.contiguous()
     v = v.contiguous()
-    k = funcol.all_gather_tensor(k, seq_dim, pg_name)
-    v = funcol.all_gather_tensor(v, seq_dim, pg_name)
+    k = funcol.all_gather_single(k, seq_dim, pg_name)
+    v = funcol.all_gather_single(v, seq_dim, pg_name)
     if isinstance(k, funcol.AsyncCollectiveTensor):
         k = k.wait()
     if isinstance(v, funcol.AsyncCollectiveTensor):
@@ -40,10 +40,10 @@ def flex_cp_allgather_backward(
     seq_dim: int,
     pg_name: c10d.GroupName,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    grad_k = funcol.reduce_scatter_tensor(grad_full_k, "sum", seq_dim, pg_name)
+    grad_k = funcol.reduce_scatter_single(grad_full_k, "sum", seq_dim, pg_name)
     if isinstance(grad_k, funcol.AsyncCollectiveTensor):
         grad_k = grad_k.wait()
-    grad_v = funcol.reduce_scatter_tensor(grad_full_v, "sum", seq_dim, pg_name)
+    grad_v = funcol.reduce_scatter_single(grad_full_v, "sum", seq_dim, pg_name)
     if isinstance(grad_v, funcol.AsyncCollectiveTensor):
         grad_v = grad_v.wait()
 
