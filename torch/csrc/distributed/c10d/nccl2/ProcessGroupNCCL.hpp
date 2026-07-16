@@ -217,6 +217,15 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void abort() override;
   ::c10d::ErrorType getError() override;
 
+  // Memory offload API (see Backend.hpp): suspend() releases NCCL's dynamic
+  // GPU allocations (offloading contents to CPU backups), resume() restores
+  // them, and getMemoryStats() reports the ncclCommMemStats counters. The
+  // communicator cannot be used while suspended. Requires NCCL 2.29.7+ at
+  // runtime.
+  void suspend() override;
+  void resume() override;
+  std::unordered_map<std::string, uint64_t> getMemoryStats() override;
+
   // Fault tolerance / reconfigure API (see Backend.hpp). The handle encodes
   // "nccl2:<rank>:<uuid>:<store host:port>"; reconfigure() tears down the
   // current communicator generation (if any) and bootstraps a fresh ncclComm
