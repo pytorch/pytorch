@@ -488,7 +488,7 @@ class _MultiprocessingTestMixin:
         self.assertEqual(
             0,
             p.exitcode,
-            msg=f'Failed to serialize successfully for "{device}" device!',
+            msg=lambda msg: f'{msg}\nFailed to serialize successfully for "{device}" device!',
         )
 
 

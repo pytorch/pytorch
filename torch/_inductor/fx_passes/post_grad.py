@@ -141,6 +141,27 @@ def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
     preserve_node_ordering(graph, additional_deps_map)
 
 
+def reject_current_device_nodes(graph: torch.fx.Graph) -> None:
+    """[device-as-parameter] Reject CooR coor::current_device() nodes in inductor.
+
+    Under compile_on_one_rank, make_fx rewrites a baked accelerator device operand to a
+    ``coor::current_device()`` node so the FX graph is rank-agnostic. Inductor has no
+    device-valued IR and cannot lower a device-returning op, so raise a clear, actionable
+    error instead of failing later with a cryptic lowering assertion. A follow-up adds
+    real support by stripping the node before lowering.
+    """
+    import torch.fx.experimental.proxy_tensor
+
+    target = torch.ops.coor.current_device.default
+    if any(n.op == "call_function" and n.target is target for n in graph.nodes):
+        raise RuntimeError(
+            "compile_on_one_rank is not supported with the inductor backend when the "
+            "graph contains a device-derived factory or cast (it emits a "
+            "coor::current_device node that inductor cannot lower). Use a non-inductor "
+            "backend (e.g. aot_eager) or disable compile_on_one_rank."
+        )
+
+
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
@@ -157,7 +178,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if is_inference and config.reorder_for_locality:
+    if config.reorder_for_locality and (
+        is_inference or config.reorder_for_locality_in_training
+    ):
         GraphTransformObserver(gm, "reorder_for_locality").apply_graph_pass(
             reorder_for_locality
         )
@@ -194,6 +217,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # Remove profiler ops (record_function) to prevent them blocking fusion
     GraphTransformObserver(gm, "remove_profiler_ops").apply_graph_pass(
         _remove_profiler_ops
+    )
+
+    # [device-as-parameter] Reject CooR device nodes inductor can't lower (clear error).
+    GraphTransformObserver(gm, "reject_current_device").apply_graph_pass(
+        reject_current_device_nodes
     )
 
     if config.pattern_matcher:
@@ -894,7 +922,13 @@ def reorder_for_locality(graph: torch.fx.Graph):
 
 
 def register_lowering_pattern(
-    pattern, extra_check=_return_true, pass_number=1
+    pattern,
+    extra_check=_return_true,
+    pass_number=1,
+    *,
+    output_metadata_ignores_input_storage: bool = True,
+    output_metadata_is_input: int | str | None = None,
+    output_metadata_fn: Callable[..., Any] | None = None,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Register an aten to inductor IR replacement pattern
@@ -904,6 +938,9 @@ def register_lowering_pattern(
         extra_check,
         # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[pass_number],
+        output_metadata_ignores_input_storage=output_metadata_ignores_input_storage,
+        output_metadata_is_input=output_metadata_is_input,
+        output_metadata_fn=output_metadata_fn,
     )
 
 
@@ -1655,6 +1692,7 @@ def decompose_auto_functionalized(graph):
     ),
     pass_number=2,
     extra_check=is_valid_splitwithsizes_cat,
+    output_metadata_is_input="input_",
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
@@ -1709,6 +1747,7 @@ def is_valid_cat_splitwithsizes(match):
     ),
     pass_number=2,
     extra_check=is_valid_cat_splitwithsizes,
+    output_metadata_is_input="input_",
 )
 def cat_splitwithsizes_replace(match, input_):
     return input_
@@ -1732,12 +1771,51 @@ def view_to_reshape(gm):
     _recursive_view_to_reshape(gm.graph)
 
 
+def _is_bias_like_addmm_input(inp: torch.fx.Node, output: torch.fx.Node) -> bool:
+    if inp.op in ("placeholder", "get_attr"):
+        return True
+
+    inp_val = inp.meta.get("val")
+    output_val = output.meta.get("val")
+    if not (isinstance(inp_val, torch.Tensor) and isinstance(output_val, torch.Tensor)):
+        return False
+
+    if len(inp_val.shape) != len(output_val.shape):
+        return True
+
+    same_shape = statically_known_true(sym_eq(inp_val.shape, output_val.shape))
+    if not same_shape:
+        for inp_dim, output_dim in zip(inp_val.shape, output_val.shape):
+            if statically_known_true(sym_eq(inp_dim, 1)) and not statically_known_true(
+                sym_eq(output_dim, 1)
+            ):
+                return True
+        return False
+
+    return inp_val.layout == torch.strided and any(
+        statically_known_true(sym_eq(stride, 0)) for stride in inp_val.stride()
+    )
+
+
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
     output = match.output_node()
+    if not _is_bias_like_addmm_input(inp, output):
+        return False
+    return all(is_pointwise_use(use) for use in output.users)
+
+
+def should_prefer_unfused_baddbmm(match):
+    inp = match.kwargs["inp"]
+    if not is_gpu(inp.meta["val"].device.type):
+        return False
+
+    output = match.output_node()
+    if not _is_bias_like_addmm_input(inp, output):
+        return False
     return all(is_pointwise_use(use) for use in output.users)
 
 
@@ -1780,6 +1858,47 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         if beta != 1:
             inp = beta * inp
         return inp + mm_result
+
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.baddbmm,
+        KeywordArg("inp"),
+        Arg(),
+        Arg(),
+        beta=KeywordArg("beta"),
+        alpha=KeywordArg("alpha"),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[2],
+    extra_check=should_prefer_unfused_baddbmm,
+)
+def unfuse_bias_baddbmm_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
+    if config.keep_addmm_fused_for_half_dtypes and inp.meta["val"].dtype in (
+        torch.bfloat16,
+        torch.float16,
+    ):
+        if inp.meta["val"].device.type != "xpu":
+            return
+        if not (
+            inp.op == "call_function"
+            and inp.target is torch.ops.prims.convert_element_type.default
+            and inp.args[0].meta["val"].dtype.is_floating_point
+            and torch.finfo(inp.args[0].meta["val"].dtype).bits
+            > torch.finfo(inp.meta["val"].dtype).bits
+        ):
+            return
+
+    def repl(inp, x1, x2, alpha, beta):
+        bmm_result = torch.bmm(x1, x2)
+        if alpha != 1:
+            bmm_result = alpha * bmm_result
+        if beta != 1:
+            inp = beta * inp
+        return inp + bmm_result
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
