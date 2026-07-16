@@ -549,8 +549,10 @@ class DeviceCachingAllocator {
       graph_pools_freeable;
 
   // Blocks freed during XPU graph capture whose stream_uses are non-empty.
-  // Deferred because inserting events and querying event status are illegal
-  // during graph recording. Flushed in endAllocateToPool once capture ends.
+  // Deferred because querying event status are illegal
+  // during graph recording. The owning graph pool is handled in
+  // endAllocateToPool; any remaining deferred blocks are drained once allocator
+  // maintenance runs outside capture.
   ska::flat_hash_set<Block*> deferred_blocks;
 
   // Tracks which stream uses on a block were recorded during capture.
@@ -1874,9 +1876,9 @@ class DeviceCachingAllocator {
 
   // Called by XPUGraph::capture_end
   void endAllocateToPool(MempoolId_t mempool_id) {
-    std::lock_guard<std::recursive_mutex> lock(mutex);
     // Outside mutex to avoid deadlocks.
     auto context = maybeGatherContext(RecordContext::ALL);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     if (!deferred_blocks.empty()) {
       auto pool_it = graph_pools.find(mempool_id);
       if (pool_it != graph_pools.end()) {

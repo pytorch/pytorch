@@ -3600,6 +3600,25 @@ class TestXPUAPISanity(TestCase):
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestMemPool(TestCase):
+    def _alloc_record_free_sync(self, pool_ctx, stream, nbytes):
+        """Allocate a block, record it on a second stream, free, synchronize,
+        then try to reallocate. Returns (original_ptr, new_ptr)."""
+        with pool_ctx:
+            a = torch.empty(nbytes, dtype=torch.uint8, device="xpu")
+            original_ptr = a.data_ptr()
+
+            with torch.xpu.stream(stream):
+                a.record_stream(stream)
+                _ = a + 1
+
+            del a
+            torch.xpu.synchronize()
+
+            b = torch.empty(nbytes, dtype=torch.uint8, device="xpu")
+            new_ptr = b.data_ptr()
+            del b
+        return original_ptr, new_ptr
+
     def test_mempool_id(self):
         pool1 = torch.xpu.MemPool().id
         pool2 = torch.xpu.MemPool().id
@@ -3649,6 +3668,67 @@ class TestMemPool(TestCase):
         self.assertTrue(after_pool_release < peak_reserved)
         self.assertTrue(after_pool_release > 0)
 
+    @serialTest()
+    def test_mempool_oom_recovery_releases_cached_blocks(self):
+        MB = 1024 * 1024
+        device = torch.device("xpu:0")
+
+        def align_down_2mb(n):
+            return n & ~(2 * MB - 1)
+
+        for label, make_ctx in [
+            ("default pool", lambda: contextlib.nullcontext()),
+            (
+                "user mempool",
+                lambda: torch.xpu.use_mem_pool(torch.xpu.MemPool()),
+            ),
+        ]:
+            with self.subTest(label=label):
+                torch.xpu.empty_cache()
+                free_before = torch.xpu.mem_get_info(device)[0]
+
+                fill_size = align_down_2mb(free_before // 2)
+                if fill_size < 64 * MB:
+                    self.skipTest("Not enough XPU memory for this test")
+
+                filler = torch.empty(fill_size, dtype=torch.uint8, device=device)
+                del filler
+
+                alloc_size = align_down_2mb(free_before - free_before // 8)
+                oom = False
+                try:
+                    with make_ctx():
+                        big = torch.empty(alloc_size, dtype=torch.uint8, device=device)
+                        del big
+                except torch.OutOfMemoryError:
+                    oom = True
+
+                self.assertFalse(
+                    oom,
+                    f"[{label}] OOM even though the default pool had "
+                    f"{fill_size // MB} MiB of freeable cached blocks "
+                    "-- release_cached_blocks was likely skipped",
+                )
+
+    @serialTest()
+    def test_mempool_block_free_not_deferred(self):
+        torch.xpu.empty_cache()
+        stream = torch.xpu.Stream()
+        nbytes = 1024 * 1024
+
+        for label, pool_ctx in [
+            ("default pool", contextlib.nullcontext()),
+            ("user mempool", torch.xpu.use_mem_pool(torch.xpu.MemPool())),
+        ]:
+            with self.subTest(label=label):
+                torch.xpu.empty_cache()
+                orig, new = self._alloc_record_free_sync(pool_ctx, stream, nbytes)
+                self.assertEqual(
+                    new,
+                    orig,
+                    lambda msg: f"{msg}\n[{label}] Block not reused after multi-stream free "
+                    "-- free was likely deferred as if under graph capture",
+                )
 
 instantiate_parametrized_tests(TestXpu)
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
