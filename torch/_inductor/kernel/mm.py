@@ -20,7 +20,7 @@ from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config as inductor_config, distributed_autotune
+from .. import config as inductor_config, distributed_autotune, lowering as L
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
@@ -59,6 +59,7 @@ from ..utils import (
 )
 from .mm_common import (
     _is_static_problem,
+    _use_small_mm_pointwise,
     load_kernel_template,
     mm_args,
     mm_grid,
@@ -378,6 +379,18 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
+
+    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout):
+        counters["inductor"]["decompose_mm_pointwise"] += 1
+        # Clone both to force contiguous strides (#189401): unrolled sum
+        # reduction computes wrong indices for transposed views. Clone both
+        # rather than detecting the transposed side; scheduler fuses the copy.
+        mat1 = L.clone(mat1)
+        mat2 = L.clone(mat2)
+        mat1 = L.unsqueeze(mat1, -1)
+        mat2 = L.unsqueeze(mat2, 0)
+        return L.sum_(L.mul(mat1, mat2), axis=1)
+
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "mm"
 
