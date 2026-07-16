@@ -142,7 +142,7 @@ class PrivateUse1BackendTest(TestCase):
 
     @unittest.skip(
         "Disabled due to CI failures; see "
-        "https://github.com/pytorch/pytorch/issues/188688"
+        "https://github.com/pytorch/pytorch/issues/190232"
     )
     def test_backend_simple(self):
         a_cpu = torch.randn((2, 2))
