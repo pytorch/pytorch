@@ -3,9 +3,9 @@
 
 FlexGEMM recognizes a narrow local-reduction contract inside the GEMM output
 tile: an epilogue reshapes the accumulator to expose contiguous groups along M
-or N, then reduces only that grouped dimension. Supported small N-axis groups
-lower as ordinary in-fragment TensorSSA reductions; larger N groups produce
-TensorSSA partials that QuACK combines physically.
+or N, then reduces only that grouped dimension. N-axis groups up to one 32-lane
+fragment lower as ordinary in-fragment TensorSSA reductions; larger N groups
+produce TensorSSA partials that QuACK combines physically.
 M-axis groups currently always use QuACK's physical row-lane/warp combine path,
 even when the group is small enough to fit in one fragment. Inductor owns the
 FX pattern matching and output contracts; these helpers describe the supported
@@ -564,7 +564,8 @@ def lower_tensorssa_reduce(
         f"value / {layout.group_size}.0" if reduction_type == "mean" else "value"
     )
     source = _cute_arg(input_node, env)
-    if layout.needs_physical_combine:
+    needs_physical_combine = layout.needs_physical_combine
+    if needs_physical_combine:
         local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
             desc.combine_expr, finalize_expr
         )
@@ -576,7 +577,7 @@ def lower_tensorssa_reduce(
         f"{source}.reduce({desc.cute_op}, init_val={desc.init_val}, reduction_profile={layout.reduction_profile})",
         source,
     )
-    if reduction_type == "mean" and not layout.needs_physical_combine:
+    if reduction_type == "mean" and not needs_physical_combine:
         reduced = _generate_like(
             kernel, f"{reduced} / {float(layout.group_size)!r}", reduced
         )
