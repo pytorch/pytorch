@@ -1247,7 +1247,8 @@ class FSDPTestMixin:
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if torch.accelerator.is_available():
+        # Keep the same semantics as the original `TEST_CUDA or TEST_XPU`
+        if torch.accelerator.is_available() and not TEST_HPU:
             torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
@@ -1590,7 +1591,8 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if torch.accelerator.is_available():
+        # Keep the same semantics as the original `TEST_CUDA or TEST_XPU`
+        if torch.accelerator.is_available() and not TEST_HPU:
             torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
@@ -1637,7 +1639,8 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
             sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
         device_id = rank % DEVICE_COUNT
-        if torch.accelerator.is_available():
+        # Keep the same semantics as the original `TEST_CUDA or TEST_XPU`
+        if torch.accelerator.is_available() and not TEST_HPU:
             torch.accelerator.set_device_index(device_id)
 
         super()._init_pg(rank, world_size, rdvz_file)
