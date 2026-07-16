@@ -333,14 +333,6 @@ def _tensor_str(self, indent):
     if self.numel() == 0:
         return "[]"
 
-    if self.has_names():
-        # There are two main codepaths (possibly more) that tensor printing goes through:
-        # - tensor data can fit comfortably on screen
-        # - tensor data needs to be summarized
-        # Some of the codepaths don't fully support named tensors, so we send in
-        # an unnamed tensor to the formatting code as a workaround.
-        self = self.rename(None)
-
     summarize = self.numel() > PRINT_OPTS.threshold
 
     if self._is_zerotensor():
@@ -469,9 +461,9 @@ def _str_intern(inp, *, tensor_contents=None):
     )
     if self.is_sparse:
         suffixes.append("size=" + str(tuple(self.shape)))
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
-        is_meta = self.is_meta or isinstance(self, FakeTensor)
+        is_meta = self.is_meta or is_fake_tensor(self)
         if not is_meta:
             suffixes.append("nnz=" + str(self._nnz()))
         if not has_default_dtype:
@@ -508,10 +500,10 @@ def _str_intern(inp, *, tensor_contents=None):
         torch.sparse_bsr,
         torch.sparse_bsc,
     }:
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
         suffixes.append("size=" + str(tuple(self.shape)))
-        is_meta = self.is_meta or isinstance(self, FakeTensor)
+        is_meta = self.is_meta or is_fake_tensor(self)
         if not is_meta:
             suffixes.append("nnz=" + str(self._nnz()))
         if not has_default_dtype:
@@ -607,9 +599,9 @@ def _str_intern(inp, *, tensor_contents=None):
         tensor_str = repr(torch._from_functional_tensor(self))
     else:
         # Circular import problem, so we import it here
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
-        if self.is_meta or isinstance(self, FakeTensor):
+        if self.is_meta or is_fake_tensor(self):
             suffixes.append("size=" + str(tuple(self.shape)))
             if self.dtype != torch.get_default_dtype():
                 suffixes.append("dtype=" + str(self.dtype))
@@ -667,9 +659,6 @@ def _str_intern(inp, *, tensor_contents=None):
         suffixes.append(f"grad_fn=<{grad_fn_name}>")
     elif inp.requires_grad:
         suffixes.append("requires_grad=True")
-
-    if self.has_names():
-        suffixes.append(f"names={self.names}")
 
     if tangent is not None:
         suffixes.append(f"tangent={tangent}")

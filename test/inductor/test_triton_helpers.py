@@ -83,10 +83,10 @@ if HAS_GPU:
                 helper = rand4x(seed, offsets, BLOCK_SIZE)
                 r0, r1, r2, r3 = tl.rand4x(seed, reduced_offsets)
 
-            tl.store(expected_result_ptr + reduced_offsets, r0)
-            tl.store(expected_result_ptr + quarter_block_size + reduced_offsets, r1)
-            tl.store(expected_result_ptr + 2 * quarter_block_size + reduced_offsets, r2)
-            tl.store(expected_result_ptr + 3 * quarter_block_size + reduced_offsets, r3)
+            tl.store(expected_result_ptr + 4 * reduced_offsets, r0)
+            tl.store(expected_result_ptr + 4 * reduced_offsets + 1, r1)
+            tl.store(expected_result_ptr + 4 * reduced_offsets + 2, r2)
+            tl.store(expected_result_ptr + 4 * reduced_offsets + 3, r3)
         else:
             if NORMAL:
                 helper = randn4x(seed, offsets, BLOCK_SIZE)
@@ -251,6 +251,39 @@ class Random4xTest(TestCase):
     @requires_gpu()
     def test_randn4x_fallback_block_size_2(self) -> None:
         self._run_random_4x_order(normal=True, block_size=2)
+
+    def _run_random_4x_block_size_stability(self, normal: bool) -> None:
+        device = torch.device(GPU_TYPE)
+        sample_count = 1024
+        small_block_result = torch.empty(
+            sample_count, dtype=torch.float32, device=device
+        )
+        large_block_result = torch.empty(
+            sample_count, dtype=torch.float32, device=device
+        )
+
+        test_kernel_random_4x_distribution[(sample_count // 8,)](
+            1234,
+            small_block_result,
+            BLOCK_SIZE=8,
+            NORMAL=normal,
+        )
+        test_kernel_random_4x_distribution[(sample_count // 1024,)](
+            1234,
+            large_block_result,
+            BLOCK_SIZE=1024,
+            NORMAL=normal,
+        )
+
+        torch.testing.assert_close(small_block_result, large_block_result)
+
+    @requires_gpu()
+    def test_rand4x_block_size_stability(self) -> None:
+        self._run_random_4x_block_size_stability(normal=False)
+
+    @requires_gpu()
+    def test_randn4x_block_size_stability(self) -> None:
+        self._run_random_4x_block_size_stability(normal=True)
 
     @requires_gpu()
     def test_rand4x_distribution(self) -> None:
