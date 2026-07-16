@@ -26,6 +26,7 @@ from torch.testing._internal.common_dtype import (
     all_types,
     all_types_and,
     all_types_and_complex_and,
+    barebones_unsigned_types,
 )
 from torch.testing._internal.common_utils import (
     IS_JETSON,
@@ -351,6 +352,61 @@ class TestShapeOps(TestCase):
                     Y_out = torch.empty_like(X)
                     op(X, min=min_val, max=max_val, out=Y_out)
                     self.assertEqual(Y_expected, Y_out)
+
+    # Values above the signed max catch a signed reading of the data. One-sided
+    # tensor bounds lower to maximum/minimum, which do not dispatch these dtypes.
+    @dtypes(*barebones_unsigned_types())
+    def test_clamp_barebones_unsigned(self, device, dtype):
+        info = torch.iinfo(dtype)
+        vals = [0, 1, info.max // 2, info.max - 1, info.max]
+        X = torch.tensor(vals, device=device, dtype=dtype)
+
+        def reference(min_bound, max_bound):
+            clamped = []
+            for v in vals:
+                if min_bound is not None:
+                    v = max(v, min_bound)
+                if max_bound is not None:
+                    v = min(v, max_bound)
+                clamped.append(v)
+            return torch.tensor(clamped, device=device, dtype=dtype)
+
+        op_list = (
+            torch.clamp,
+            torch.Tensor.clamp,
+            torch.Tensor.clamp_,
+            torch.clip,
+            torch.Tensor.clip,
+            torch.Tensor.clip_,
+        )
+
+        # A pair straddling the signed max would promote a Long scalar against a
+        # UInt64 one, which is unsupported.
+        bound_pairs = ((1, info.max // 4), (info.max - 2, info.max - 1))
+
+        for min_val, max_val in bound_pairs:
+            for op in op_list:
+                for min_bound, max_bound in product((min_val, None), (max_val, None)):
+                    if min_bound is None and max_bound is None:
+                        continue
+
+                    Y_expected = reference(min_bound, max_bound)
+
+                    X1 = X.clone()  # So that the in-place ops do not change X
+                    self.assertEqual(Y_expected, op(X1, min_bound, max_bound))
+
+                    # Test op-out behavior (out does not exist for method versions)
+                    if op in (torch.clamp, torch.clip):
+                        Y_out = torch.empty_like(X)
+                        op(X, min=min_bound, max=max_bound, out=Y_out)
+                        self.assertEqual(Y_expected, Y_out)
+
+            self.assertEqual(reference(min_val, None), torch.clamp_min(X, min_val))
+            self.assertEqual(reference(None, max_val), torch.clamp_max(X, max_val))
+
+            min_t = torch.full_like(X, min_val)
+            max_t = torch.full_like(X, max_val)
+            self.assertEqual(reference(min_val, max_val), torch.clamp(X, min_t, max_t))
 
     def test_clamp_propagates_nans(self, device):
         op_list = (
