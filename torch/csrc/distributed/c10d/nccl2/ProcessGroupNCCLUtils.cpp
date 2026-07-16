@@ -53,8 +53,19 @@ ncclDataType_t getNcclDataTypeInternal(const at::Tensor& tensor) {
       return ncclInt64;
     case at::ScalarType::Char:
       return ncclInt8;
+#if HAVE_FP8
+    case at::ScalarType::Float8_e5m2:
+      return ncclFloat8e5m2;
+    case at::ScalarType::Float8_e4m3fn:
+      return ncclFloat8e4m3;
+#else
+    case at::ScalarType::Float8_e5m2:
+    case at::ScalarType::Float8_e4m3fn:
+#endif
     case at::ScalarType::Byte:
     case at::ScalarType::Bool:
+    case at::ScalarType::Float8_e4m3fnuz:
+    case at::ScalarType::Float8_e5m2fnuz:
       return ncclUint8;
     default:
       throw std::runtime_error("Unsupported tensor data type for NCCL");
@@ -479,8 +490,8 @@ cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
 }
 
 void ProcessGroupNCCL::ensureTensorContiguous(const at::Tensor& tensor) {
-  if (!tensor.is_contiguous()) {
-    throw std::runtime_error("Tensor must be contiguous for NCCL operations");
+  if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
+    C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
   }
 }
 

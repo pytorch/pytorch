@@ -17,9 +17,6 @@
 
 namespace c10d::nccl2 {
 
-// Initialize the static counter
-int NCCLBootstrap::counter_ = 0;
-
 const std::string kUniqueidXchgMethodAuto = "auto";
 const std::string kUniqueidXchgMethodTCPStore = "tcpstore";
 const std::string kUniqueidXchgMethodDefault = kUniqueidXchgMethodAuto;
@@ -29,9 +26,11 @@ NCCLBootstrap::NCCLBootstrap(
     c10::Device device,
     int rank,
     int comm_size,
+    uint64_t generation,
     std::shared_ptr<NcclApi> nccl_api,
     std::chrono::milliseconds timeout)
     : timeout_(timeout),
+      generation_(generation),
       store_(std::move(store)),
       created_internal_store_(false),
       device_(device),
@@ -68,24 +67,10 @@ NCCLBootstrap::NCCLBootstrap(
       c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
 }
 
-std::string NCCLBootstrap::getNCCLStoreKey() {
-  std::string key = fmt::format("{}{}", getNCCLStoreKeyPrefix(), counter_);
-  counter_++;
-  return key;
-}
-
-std::string NCCLBootstrap::getNCCLStoreKeyPrefix() {
-  return "nccl_storekey_";
-};
-
-int NCCLBootstrap::getNCCLStoreKeyCounter() {
-  return counter_;
-}
-
 ncclUniqueId NCCLBootstrap::exchangeUniqueIdStore() {
   ncclUniqueId uniqueId;
 
-  auto key = getNCCLStoreKey();
+  auto key = fmt::format("nccl_storekey_{}", generation_);
   if (rank_ == 0) {
     // Generate unique ID on rank 0
     ncclResult_t ncclErr = nccl_api_->getUniqueId(&uniqueId);
@@ -263,6 +248,7 @@ void populateNcclConfigFromHints(
 ncclComm_t NCCLBootstrap::createNcclComm(
     const std::string& name,
     const std::unordered_map<std::string, std::string>& hints) {
+  c10::cuda::CUDAGuard gpuGuard(device_);
   ncclUniqueId uniqueId;
   ncclComm_t nccl_comm = nullptr;
 
