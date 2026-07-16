@@ -14,6 +14,7 @@
 #include <c10/util/flat_hash_map.h>
 
 #include <mutex>
+#include <utility>
 
 // Starting from NVSHMEM 3.3.9, nvshmem_host.h exists so that we can cleanly
 // include only the nvshmem host library headers:
@@ -33,12 +34,25 @@ namespace symmetric_memory {
 static StoreExchange storeExchange = StoreExchange("NVSHMEMSymmetricMemory");
 
 struct NVSHMEMAllocation {
-  void* ptr;
+  // Layout (signal pad first):
+  //   [0, signal_pad_size)                          - signal pad
+  //   [buffer_offset, buffer_offset + buffer_size)  - user data buffer
+  // alloc_base is the nvshmem_malloc base (== signal pad base); alloc() hands
+  // back `alloc_base + buffer_offset` (the data buffer).
+  void* alloc_base;
   size_t buffer_size;
+  size_t buffer_offset;
   int device_idx;
 
-  NVSHMEMAllocation(void* ptr, size_t buffer_size, int device_idx)
-      : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
+  NVSHMEMAllocation(
+      void* alloc_base,
+      size_t buffer_size,
+      size_t buffer_offset,
+      int device_idx)
+      : alloc_base(alloc_base),
+        buffer_size(buffer_size),
+        buffer_offset(buffer_offset),
+        device_idx(device_idx) {}
 
   // Delete copy and move operations to prevent double-free
   NVSHMEMAllocation(const NVSHMEMAllocation&) = delete;
@@ -52,7 +66,7 @@ struct NVSHMEMAllocation {
       return;
     }
     c10::cuda::CUDAGuard guard(device_idx);
-    nvshmem_free(ptr); // nvshmem_free has no return value
+    nvshmem_free(alloc_base); // nvshmem_free has no return value
   }
 };
 
@@ -73,7 +87,11 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
   NVSHMEMPeerAllocInfo(
       NVSHMEMAllocation* allocation,
       const std::string& group_name)
-      : base_ptr_(allocation->ptr), buffer_size_(allocation->buffer_size) {
+      : base_ptr_(allocation->alloc_base),
+        buffer_size_(allocation->buffer_size) {
+    // Byte offset from base_ptr_ to the start of the user buffer; only needed
+    // during setup below.
+    const size_t buffer_offset = allocation->buffer_offset;
     // For logging only
     static int exchanged_n_times = 0;
     c10::cuda::CUDAGuard guard(allocation->device_idx);
@@ -115,25 +133,27 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
     }
     auto& rank_to_global_rank = it->second;
 
+    // The signal pad shares the allocation with the data buffer: each peer's
+    // allocation base is its signal pad base, and its data buffer follows at
+    // buffer_offset. The signal pad is zeroed once in alloc(). This is one pad
+    // per allocation, shared across every process group that rendezvouses on
+    // it -- the same model as the CUDA backend (previously each group did its
+    // own nvshmem_malloc for an isolated pad). barrier()/put_signal()/
+    // wait_signal() are not yet implemented for NVSHMEM (see below), so nothing
+    // consumes the pad today; a future implementation must index signal slots
+    // by (rank, world_size, channel) as the CUDA backend does, so that groups
+    // with overlapping ranks on the same allocation do not clobber each other.
     world_within_cuda_p2p_ = true;
     for (int r = 0; r < world_size_; ++r) {
-      auto peer_ptr = nvshmem_ptr(base_ptr_, rank_to_global_rank[r]);
-      buffers_.push_back(peer_ptr);
+      auto peer_base = nvshmem_ptr(base_ptr_, rank_to_global_rank[r]);
       // If a peer is over network, `nvshmem_ptr` returns null
-      if (peer_ptr == nullptr) {
+      if (peer_base == nullptr) {
         world_within_cuda_p2p_ = false;
       }
-    }
-
-    // TODO: use the same allocation for signal pad
-    const size_t signal_pad_size = get_signal_pad_size();
-    void* signal_pad_ptr = nvshmem_malloc(signal_pad_size);
-    TORCH_CHECK(signal_pad_ptr != nullptr, "nvshmem_malloc failed");
-    AT_CUDA_CHECK(cudaMemset(signal_pad_ptr, 0, signal_pad_size));
-
-    for (int r = 0; r < world_size_; ++r) {
-      signal_pads_.push_back(
-          nvshmem_ptr(signal_pad_ptr, rank_to_global_rank[r]));
+      signal_pads_.push_back(peer_base);
+      buffers_.push_back(
+          peer_base == nullptr ? nullptr
+                               : static_cast<char*>(peer_base) + buffer_offset);
     }
 
     const size_t arr_size = sizeof(void*) * world_size_;
@@ -156,7 +176,11 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
     auto device = c10::Device(c10::DeviceType::CUDA, allocation->device_idx);
     auto& team_manager = c10d::nvshmem_extension::TeamManager::get(device);
     auto team = team_manager.get_team(group_name, rank_to_global_rank);
-    mc_addr_ = nvshmemx_mc_ptr(team, base_ptr_);
+    // Pass the data buffer's symmetric address (base + buffer_offset) so the
+    // returned multicast pointer already points at the data buffer; the MC
+    // mapping mirrors the symmetric layout, so no manual adjustment is needed.
+    mc_addr_ =
+        nvshmemx_mc_ptr(team, static_cast<char*>(base_ptr_) + buffer_offset);
 #endif
   }
 
@@ -362,6 +386,11 @@ static void initialize_nvshmem_with_store(
 
 class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
+  // Allocates a symmetric-memory region laid out as [signal pad | data buffer]:
+  // the signal pad occupies [0, buffer_offset) and the user data buffer starts
+  // at buffer_offset. Returns the data buffer pointer (alloc_base +
+  // buffer_offset), NOT the allocation base -- the signal pad stays hidden in
+  // front, and free()/rendezvous() key off this returned data pointer.
   void* alloc(
       size_t size,
       int device_idx,
@@ -377,15 +406,30 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     initialize_nvshmem_with_store(
         group->getStore(), group->getRank(), group->getSize(), device_idx);
 
-    auto ptr = nvshmem_malloc(size);
-    // If size is 0 (which is legal allocation request) we shouldn't error out
-    TORCH_CHECK(ptr != nullptr || size == 0, "nvshmem_malloc failed");
+    // Signal pad first at [0, buffer_offset), data buffer at buffer_offset,
+    // which is the signal pad size rounded up to signal_pad_alignment.
+    const size_t buffer_offset =
+        at::round_up(get_signal_pad_size(), signal_pad_alignment);
+    const size_t total_size = buffer_offset + at::round_up(size, 16UL);
+    auto alloc_base = nvshmem_malloc(total_size);
+    TORCH_CHECK(alloc_base != nullptr, "nvshmem_malloc failed");
+    // Zero the signal pad (at the front, [0, buffer_offset)) for the signaling
+    // protocol.
+    AT_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
+    // Hand back the data buffer pointer, not alloc_base; the signal pad stays
+    // hidden in front. Returning the data ptr is safe for free(): the whole
+    // block is owned by the NVSHMEMAllocation keyed below, which nvshmem_free's
+    // alloc_base in its destructor, so free() only needs the data ptr to drop
+    // the allocation entry.
+    void* buffer_ptr = static_cast<char*>(alloc_base) + buffer_offset;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       allocations_.try_emplace(
-          ptr, std::make_unique<NVSHMEMAllocation>(ptr, size, device_idx));
+          buffer_ptr,
+          std::make_unique<NVSHMEMAllocation>(
+              alloc_base, size, buffer_offset, device_idx));
     }
-    return ptr;
+    return buffer_ptr;
   }
 
   void free(void* ptr) override {
@@ -408,11 +452,12 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value());
     std::lock_guard<std::mutex> lock(mutex_);
-    {
-      auto it = symm_mems_.find(SymmMemKey{ptr, *group_name});
-      if (it != symm_mems_.end()) {
-        return it->second;
-      }
+    // Build the (ptr, group) key once and reuse it below: the fast-path lookup
+    // here and the base-allocation lookup differ only in the pointer, so we
+    // retarget key.first instead of copying the group name string again.
+    SymmMemKey key{ptr, *group_name};
+    if (auto it = symm_mems_.find(key); it != symm_mems_.end()) {
+      return it->second;
     }
     // In case of MemPool, tensor.storage().data_ptr() may not match
     // exactly an allocation's base address. Thus we perform the search by
@@ -421,9 +466,11 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         allocations_.begin(), allocations_.end(), [&](const auto& pair) {
           auto& allocation = pair.second;
           auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-          auto base_ptr = reinterpret_cast<uintptr_t>(allocation->ptr);
-          return ptr_int >= base_ptr &&
-              ptr_int < base_ptr + allocation->buffer_size;
+          // pair.first is buffer_ptr, the key alloc() stored (alloc_base +
+          // buffer_offset), i.e. the data buffer start past the signal pad.
+          auto buffer_ptr = reinterpret_cast<uintptr_t>(pair.first);
+          return ptr_int >= buffer_ptr &&
+              ptr_int < buffer_ptr + allocation->buffer_size;
         });
     TORCH_CHECK(
         alloc_it != allocations_.end(),
@@ -431,12 +478,16 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         "is the tensor allocated from SymmetricMemory?");
 
     auto& allocation = alloc_it->second;
+    // alloc_it->first is buffer_ptr, the data buffer base (the pointer alloc()
+    // returned). Offsets are relative to it, and it is the key used to cache
+    // this allocation's base rendezvous.
+    void* buffer_ptr = alloc_it->first;
 
-    // Search again using allocation base ptr (which is the key we use for
-    // caching, see below)
-    auto it = symm_mems_.find(SymmMemKey{allocation->ptr, *group_name});
+    // Retarget the key at the data buffer base (reusing the group name string)
+    // to look up and cache the base rendezvous.
+    key.first = buffer_ptr;
     c10::intrusive_ptr<NVSHMEMSymmetricMemory> symm_mem;
-    if (it != symm_mems_.end()) {
+    if (auto it = symm_mems_.find(key); it != symm_mems_.end()) {
       // Base allocation has been rendezvoused
       symm_mem = it->second;
     } else {
@@ -445,21 +496,23 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
           allocation.get(), *group_name);
     }
 
-    // Cache rendezvous using allocation's base address as key
-    symm_mems_[SymmMemKey{allocation->ptr, *group_name}] = symm_mem;
+    // Cache rendezvous using the data buffer base address as key
+    symm_mems_[std::move(key)] = symm_mem;
 
     // TODO: change the `ptr` below to `tensor.data_ptr()` when adding support
     // for user slice/view operations. For MemPool support,
     // `tensor.storage().data_ptr()` is fine (today's `ptr`).
 
-    // If the tensor's ptr happen to be the same as allocation ptr
-    if (ptr == allocation->ptr) {
+    // If the tensor's ptr happens to be the data buffer base
+    if (ptr == buffer_ptr) {
       return symm_mem;
     } else {
       // Return a copy of the SymmetricMemory with an offset. This is a
       // "shallow" copy adjusting the offset field in the handle.
       return c10::make_intrusive<NVSHMEMSymmetricMemory>(
-          *symm_mem, (uintptr_t)ptr - (uintptr_t)allocation->ptr);
+          *symm_mem,
+          reinterpret_cast<uintptr_t>(ptr) -
+              reinterpret_cast<uintptr_t>(buffer_ptr));
     }
   };
 
@@ -472,9 +525,11 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto alloc_it = std::find_if(
         allocations_.begin(), allocations_.end(), [&](const auto& pair) {
           auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-          auto base_ptr = reinterpret_cast<uintptr_t>(pair.second->ptr);
-          return ptr_int >= base_ptr &&
-              ptr_int < base_ptr + pair.second->buffer_size;
+          auto buffer_ptr =
+              reinterpret_cast<uintptr_t>(pair.second->alloc_base) +
+              pair.second->buffer_offset;
+          return ptr_int >= buffer_ptr &&
+              ptr_int < buffer_ptr + pair.second->buffer_size;
         });
     return alloc_it != allocations_.end();
   }
