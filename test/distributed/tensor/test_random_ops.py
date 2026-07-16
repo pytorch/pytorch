@@ -734,14 +734,18 @@ class DistTensorRandomOpTest(DTensorTestBase):
 class DistTensorRandomOpCompileTest(DTensorTestBase):
     def _run_with_seed(self, fn, create_input, num_runs):
         """Run fn num_runs times after resetting RNG, returning results and states."""
+        device_module = torch.get_device_module(self.device_type)
+        if not hasattr(device_module, "get_rng_state"):
+            self.skipTest(f"{self.device_type} does not support get_rng_state")
+
         torch.manual_seed(0)
         results = []
-        rng_states = [torch.cuda.get_rng_state()]
+        rng_states = [device_module.get_rng_state()]
         for _ in range(num_runs):
             x = create_input()
             result = fn(x)
             results.append(result.to_local().clone())
-            rng_states.append(torch.cuda.get_rng_state())
+            rng_states.append(device_module.get_rng_state())
         # verify RNG state advances after each call
         for i in range(len(rng_states) - 1):
             self.assertFalse(
