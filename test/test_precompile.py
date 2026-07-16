@@ -1288,6 +1288,40 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "specialize_on"):
             torch.compiler.precompile(lambda mm, t: mm(t), m, x)
 
+    def test_mark_unbacked_subclass_rejected(self):
+        # A mark_unbacked dim on a tensor subclass (DTensor) cannot be honored: the
+        # dynamic capture refakes a marked leaf via torch.empty, which drops the subclass
+        # and would trace on a plain dense tensor. mark_unbacked stamps its marks on the
+        # OUTER DTensor too (the decorator's DTensor branch falls through), so precompile
+        # sees the mark and must reject it LOUDLY rather than silently tracing a
+        # subclass-stripped tensor (invariant 3).
+        import torch.distributed as dist
+
+        if not dist.is_available() or not dist.is_gloo_available():
+            self.skipTest("gloo not available")
+
+        from torch.distributed.tensor import DeviceMesh, distribute_tensor, Replicate
+        from torch.testing._internal.common_utils import find_free_port
+
+        saved_env = {k: os.environ.get(k) for k in ("MASTER_ADDR", "MASTER_PORT")}
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        dist.init_process_group("gloo", rank=0, world_size=1)
+        try:
+            mesh = DeviceMesh("cpu", list(range(1)))
+            m = torch.nn.Linear(4, 3).eval()
+            x = distribute_tensor(torch.randn(8, 4), mesh, [Replicate()])
+            mark_unbacked(x, 0)
+            with self.assertRaisesRegex(PrecompileError, "tensor subclass"):
+                torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+        finally:
+            dist.destroy_process_group()
+            for k, v in saved_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
     @parametrize("path", ("cached", "inlined"))
     def test_shape_id_mismatched_sizes_rejected(self, path):
         # Two inputs sharing a shape_id reuse ONE unbacked symbol, so their marked dims
@@ -2548,6 +2582,18 @@ class TestPrecompileNumerics(TestCase):
         xt = xt.to(memory_format=torch.channels_last)
         out = f_c(xt)
         self.assertEqual(out, torch.relu(xt) * 2.0)
+
+    def test_marked_exotic_layout_rejected(self, device):
+        # _detect_memory_format cannot preserve a layout that is neither contiguous nor
+        # channels_last(_3d) through the refake, so a mark_unbacked input in such a layout
+        # (here a transposed, non-contiguous 2D tensor) is rejected LOUDLY at capture rather
+        # than silently forced contiguous (which would bake a wrong assert_size_stride).
+        # Transpose makes a non-contiguous (8, 4) tensor in neither channels_last format.
+        x = make_tensor((4, 8), device=device, dtype=torch.float32).t()
+        self.assertFalse(x.is_contiguous())
+        mark_unbacked(x, 0)
+        with self.assertRaisesRegex(PrecompileError, "memory format"):
+            torch.compiler.precompile(lambda t: t.contiguous() * 2.0, x)
 
     def test_eager_backend_input_mutation(self, device):
         # The eager backend replays the raw ATen graph, so input mutation is reflected on
