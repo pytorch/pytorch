@@ -3730,6 +3730,7 @@ class TestMemPool(TestCase):
                     "-- free was likely deferred as if under graph capture",
                 )
 
+
 instantiate_parametrized_tests(TestXpu)
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
 instantiate_device_type_tests(TestXpuOptims, globals())

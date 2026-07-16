@@ -549,10 +549,10 @@ class DeviceCachingAllocator {
       graph_pools_freeable;
 
   // Blocks freed during XPU graph capture whose stream_uses are non-empty.
-  // Deferred because querying event status are illegal
-  // during graph recording. The owning graph pool is handled in
-  // endAllocateToPool; any remaining deferred blocks are drained once allocator
-  // maintenance runs outside capture.
+  // Deferred because querying event status are illegal during graph recording.
+  // The owning graph pool is handled in endAllocateToPool; any remaining
+  // deferred blocks are drained once allocator maintenance runs outside
+  // capture.
   ska::flat_hash_set<Block*> deferred_blocks;
 
   // Tracks which stream uses on a block were recorded during capture.
