@@ -203,14 +203,14 @@ from user code:
                 zip(range(5), range(10))
             ),
             """\
-Unsupported function call
-  Explanation: Dynamo does not know how to trace the function `UserDefinedObjectVariable(zip)`
-  Hint: Avoid calling `UserDefinedObjectVariable(zip)` in your code.
-  Hint: Please report an issue to PyTorch.
+Observed exception
+  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: call_function UserDefinedObjectVariable(zip) [] {}
+  Developer debug context: raised exception TypeError("'zip' object is not callable")
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0147.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0088.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -2569,12 +2569,12 @@ User code traceback:
         self.assertEqual(
             len(full_messages),
             1,
-            f"Expected 1 full graph break message, got {len(full_messages)}",
+            lambda msg: f"{msg}\nExpected 1 full graph break message, got {len(full_messages)}",
         )
         self.assertEqual(
             len(suppressed_messages),
             2,
-            f"Expected 2 suppressed messages, got {len(suppressed_messages)}",
+            lambda msg: f"{msg}\nExpected 2 suppressed messages, got {len(suppressed_messages)}",
         )
 
         self.assertExpectedInline(
@@ -2659,7 +2659,7 @@ Call to `torch._dynamo.graph_break()`
         self.assertEqual(
             len(records),
             2,
-            f"Expected 2 graph break messages (one per call site), got {len(records)}",
+            lambda msg: f"{msg}\nExpected 2 graph break messages (one per call site), got {len(records)}",
         )
 
         self.assertExpectedInline(

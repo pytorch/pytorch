@@ -29,6 +29,17 @@ include(cmake/EnvVarForwarding.cmake)
 # unconditionally.
 include(cmake/PreBuildSteps.cmake)
 
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.3")
+  cmake_instrumentation(
+    API_VERSION 1
+    DATA_VERSION 1.0
+    HOOKS postCMakeBuild
+    OPTIONS trace
+    CALLBACK "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trace_summary.py" --root "${CMAKE_CURRENT_SOURCE_DIR}" --index
+  )
+  set(PYTORCH_CMAKE_INSTRUMENTATION ON)
+endif()
+
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()
@@ -80,7 +91,7 @@ endif()
 
 # This define is needed to preserve behavior given anticpated changes to
 # cccl/thrust
-# https://nvidia.github.io/cccl/libcudacxx/standard_api/numerics_library/complex.html
+# https://github.com/NVIDIA/cccl/blob/main/docs/libcudacxx/standard_api/numerics_library/complex.rst
 string(APPEND CMAKE_CUDA_FLAGS
        " -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
 
@@ -261,6 +272,13 @@ endif()
 
 # CUDA is incompatible with TSAN
 cmake_dependent_option(USE_CUDA "Use CUDA" ON "NOT USE_TSAN" OFF)
+
+# If USE_XPU is already defined in cache, it means user explicitly set it
+if(DEFINED CACHE{USE_XPU})
+  set(_USE_XPU_EXPLICITLY_SET TRUE)
+else()
+  set(_USE_XPU_EXPLICITLY_SET FALSE)
+endif()
 
 option(USE_XPU "Use XPU" ON)
 option(USE_MTIA "Use MTIA" OFF)

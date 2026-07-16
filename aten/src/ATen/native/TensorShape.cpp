@@ -1515,7 +1515,7 @@ Tensor narrow_copy_sparse(
   } else {
     /* This means we are narrowing on a dense dim, which is in effect just a
         regular narrow on _values() */
-    new_indices = indices;
+    new_indices = std::move(indices);
     int64_t dense_dim = dim - sparse_dim + 1;
     new_values = self._values().narrow_copy(dense_dim, start, length);
   }
@@ -1938,9 +1938,9 @@ Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
   return self.repeat_symint(reps);
 }
 
-//
-// templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
-//
+// Handles both int (ArrayRef<int64_t>/SmallVector<int64_t>) and symbolic
+// (ArrayRef<c10::SymInt>/SymDimVector) shapes and strides; the element type of
+// Vec selects the concrete vs symbolic storage offset.
 template <typename Vec>
 static Tensor alias_with_sizes_and_strides(
     const Tensor& self,
@@ -1957,51 +1957,18 @@ static Tensor alias_with_sizes_and_strides(
         self.key_set(),
         self.dtype(),
         get_qtensorimpl(self)->quantizer());
-    auto* self_tmp_ = self_.unsafeGetTensorImpl();
-    self_tmp_->set_storage_offset(self.storage_offset());
-    self_tmp_->set_sizes_and_strides(sizes, strides);
   } else {
     self_ = at::detail::make_tensor<TensorImpl>(
         c10::TensorImpl::VIEW,
         Storage(self.storage()),
         self.key_set(),
         self.dtype());
-    auto* self_tmp_ = self_.unsafeGetTensorImpl();
-    self_tmp_->set_storage_offset(self.storage_offset());
-    self_tmp_->set_sizes_and_strides(sizes, strides);
   }
-  return self_;
-}
-
-// specialization for symbolic shapes and strides.
-// SymIntArrayRef/ArrayRef<c10::SymInt> and
-// SmallVector<c10::SymInt>/SymDimVector
-template <template <typename...> typename Container>
-static Tensor alias_with_sizes_and_strides(
-    const Tensor& self,
-    const Container<c10::SymInt>& sizes,
-    const Container<c10::SymInt>& strides) {
-  // caller should make sure that sizes and strides are valid for self
-  //(storage is sufficient, strides are non-negative, strides and sizes array
-  // size is the same)
-  Tensor self_;
-  if (self.is_quantized()) {
-    self_ = at::detail::make_tensor<QTensorImpl>(
-        c10::TensorImpl::VIEW,
-        Storage(self.storage()),
-        self.key_set(),
-        self.dtype(),
-        get_qtensorimpl(self)->quantizer());
-    self_.unsafeGetTensorImpl()->set_sizes_and_strides(
-        sizes, strides, self.sym_storage_offset());
+  auto* self_tmp_ = self_.unsafeGetTensorImpl();
+  if constexpr (std::is_same_v<typename Vec::value_type, c10::SymInt>) {
+    self_tmp_->set_sizes_and_strides(sizes, strides, self.sym_storage_offset());
   } else {
-    self_ = at::detail::make_tensor<TensorImpl>(
-        c10::TensorImpl::VIEW,
-        Storage(self.storage()),
-        self.key_set(),
-        self.dtype());
-    self_.unsafeGetTensorImpl()->set_sizes_and_strides(
-        sizes, strides, self.sym_storage_offset());
+    self_tmp_->set_sizes_and_strides(sizes, strides, self.storage_offset());
   }
   return self_;
 }
@@ -3406,6 +3373,47 @@ Tensor& _chunk_cat_out(
   return out;
 }
 
+Tensor stack_meta(TensorList tensors, int64_t dim) {
+  TORCH_CHECK(!tensors.empty(), "stack expects a non-empty TensorList");
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
+  if (wrapped_dim < tensors[0].dim()) {
+    auto entry_shape = tensors[0].sym_sizes();
+    for (const auto i : c10::irange(1, tensors.size())) {
+      auto shape = tensors[i].sym_sizes();
+      TORCH_CHECK(
+          shape.size() == entry_shape.size(),
+          "stack expects each tensor to be equal size, but got ",
+          entry_shape,
+          " at entry 0 and ",
+          shape,
+          " at entry ",
+          i);
+      for (const auto d : c10::irange(entry_shape.size())) {
+        TORCH_SYM_CHECK(
+            shape[d].sym_eq(entry_shape[d]),
+            "stack expects each tensor to be equal size, but got ",
+            entry_shape,
+            " at entry 0 and ",
+            shape,
+            " at entry ",
+            i);
+      }
+    }
+    auto result_sizes = entry_shape.vec();
+    result_sizes.insert(
+        result_sizes.begin() + wrapped_dim,
+        c10::SymInt(static_cast<int64_t>(tensors.size())));
+    return at::cat(tensors, wrapped_dim).view_symint(result_sizes);
+  }
+  // dim == tensors[0].dim(): cannot be expressed as a view of cat
+  std::vector<Tensor> unsqueezed;
+  unsqueezed.reserve(tensors.size());
+  for (const Tensor& t : tensors) {
+    unsqueezed.push_back(t.unsqueeze(wrapped_dim));
+  }
+  return at::cat(unsqueezed, wrapped_dim);
+}
+
 // TODO(msubkhankulov): refactor to use _stack
 Tensor stack(TensorList tensors, int64_t dim) {
   TORCH_CHECK(!tensors.empty(), "stack expects a non-empty TensorList");
@@ -3416,8 +3424,8 @@ Tensor stack(TensorList tensors, int64_t dim) {
     result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
     auto out = at::cat(tensors, wrapped_dim);
     return out.view(result_sizes); // one can always split a dimension with view
-  } else { // dim = tensors[0].ndimension() cannot be efficiently handled by
-           // view
+  } else {
+    // if dim = tensors[0].ndimension(), view cannot efficiently handle it
     return at::cat(get_stack_inputs(tensors, dim), dim);
   }
 }
