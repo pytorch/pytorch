@@ -130,7 +130,6 @@ def normal_(
     *,
     mean: float = 0.0,
     std: float = 1.0,
-    portable: bool = True,
 ) -> torch.Tensor:
     r"""Fill ``result`` in-place with normal random values from a PRNG key.
 
@@ -148,10 +147,6 @@ def normal_(
         result (Tensor): The output tensor to fill in-place.
         mean (float): Mean of the normal distribution. Default: ``0.0``.
         std (float): Standard deviation of the normal distribution. Default: ``1.0``.
-        portable (bool): If ``True`` (default), the output is identical
-            across GPU types for the same key. If ``False``, device-specific
-            optimizations may produce different values but may offer better
-            performance.
 
     Returns:
         ``result``, filled with normal random values.
@@ -162,7 +157,7 @@ def normal_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.normal_(key, result)  # doctest: +SKIP
     """
-    return torch.ops.aten._philox_normal_(result, key, mean, std, portable)
+    return torch.ops.aten._philox_normal_(result, key, mean, std)
 
 
 def normal(
@@ -171,7 +166,6 @@ def normal(
     mean: float = 0.0,
     std: float = 1.0,
     dtype: torch.dtype | None = None,
-    portable: bool = True,
 ) -> torch.Tensor:
     r"""Generate normally distributed random values from a PRNG key.
 
@@ -191,13 +185,6 @@ def normal(
         mean (float): Mean of the normal distribution. Default: ``0.0``.
         std (float): Standard deviation of the normal distribution. Default: ``1.0``.
         dtype (:class:`torch.dtype`, optional): The desired dtype. Default: ``torch.float32``.
-        portable (bool): If ``True`` (default), the output is identical
-            across GPU types for the same key. CPU and CUDA outputs are close
-            but may not be bitwise identical due to different transcendental
-            function implementations used in the Box-Muller transform. If
-            ``False``, device-specific optimizations may produce more
-            significantly different values across devices but may offer
-            better performance.
 
     Returns:
         A tensor of the given shape filled with normal random values.
@@ -214,7 +201,7 @@ def normal(
         dtype = torch.float32
     # pyrefly: ignore [no-matching-overload]
     result = torch.empty(shape, dtype=dtype, device=key.device)
-    return normal_(key, result, mean=mean, std=std, portable=portable)
+    return normal_(key, result, mean=mean, std=std)
 
 
 def uniform_(
@@ -223,7 +210,6 @@ def uniform_(
     *,
     low: float = 0.0,
     high: float = 1.0,
-    portable: bool = True,
 ) -> torch.Tensor:
     r"""Fill ``result`` in-place with uniform random values from a PRNG key.
 
@@ -241,10 +227,6 @@ def uniform_(
         result (Tensor): The output tensor to fill in-place.
         low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
         high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
-        portable (bool): If ``True`` (default), the output is identical
-            across CPU, CUDA, and different GPU types for the same key. If
-            ``False``, device-specific optimizations may produce different
-            values across devices but may offer better performance.
 
     Returns:
         ``result``, filled with uniform random values.
@@ -255,7 +237,7 @@ def uniform_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.uniform_(key, result)  # doctest: +SKIP
     """
-    return torch.ops.aten._philox_uniform_(result, key, low, high, portable)
+    return torch.ops.aten._philox_uniform_(result, key, low, high)
 
 
 def uniform(
@@ -264,7 +246,6 @@ def uniform(
     low: float = 0.0,
     high: float = 1.0,
     dtype: torch.dtype | None = None,
-    portable: bool = True,
 ) -> torch.Tensor:
     r"""Generate uniformly distributed random values from a PRNG key.
 
@@ -284,10 +265,6 @@ def uniform(
         low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
         high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
         dtype (:class:`torch.dtype`, optional): The desired dtype. Default: ``torch.float32``.
-        portable (bool): If ``True`` (default), the output is identical
-            across CPU, CUDA, and different GPU types for the same key. If
-            ``False``, device-specific optimizations may produce different
-            values across devices but may offer better performance.
 
     Returns:
         A tensor of the given shape filled with uniform random values.
@@ -304,4 +281,4 @@ def uniform(
         dtype = torch.float32
     # pyrefly: ignore [no-matching-overload]
     result = torch.empty(shape, dtype=dtype, device=key.device)
-    return uniform_(key, result, low=low, high=high, portable=portable)
+    return uniform_(key, result, low=low, high=high)
