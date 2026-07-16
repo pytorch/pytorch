@@ -5,16 +5,17 @@ import functools
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast, Protocol
+from typing_extensions import NotRequired, TypedDict
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import (
     Buffer,
-    ChoiceCaller,
     FixedLayout,
     ir_node_to_tensor,
+    Layout,
     StorageBox,
     TensorBox,
 )
@@ -30,6 +31,31 @@ from torch._inductor.virtualized import V
 log = logging.getLogger(__name__)
 
 DEFAULT_RANGE_UPPER_BOUND = 65536
+
+
+class DispatchOnConfig(TypedDict):
+    """Range-based dispatch spec for register_custom_op_autotuning(dispatch_on=...)."""
+
+    tensor_name: str
+    dim: int
+    range_upper_bound: NotRequired[int]
+
+
+class _AutotuneChoice(Protocol):
+    """Winning-choice surface consumed after autotuning.
+
+    Structurally satisfied by ChoiceCaller and its SubgraphChoiceCaller subclass;
+    lets callers read choice metadata without getattr fallbacks.
+    """
+
+    name: str
+    gm: torch.fx.GraphModule | None
+    config_patches: dict[str, Any]
+    decomposition: Callable[..., Any] | None
+    decomposition_kwargs: dict[str, Any]
+    layout: Layout
+
+    def output_node(self) -> TensorBox: ...
 
 
 @dataclass(frozen=True)
@@ -446,7 +472,7 @@ def autotune_custom_op(
     config_patches_list: list[dict[str, Any]] | None = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
-) -> tuple[TensorBox, ChoiceCaller]:
+) -> tuple[TensorBox, _AutotuneChoice]:
     """Autotune custom operations by comparing multiple decomposition implementations.
 
     Currently supports SINGLE OUTPUT custom ops only.
@@ -537,8 +563,9 @@ def autotune_custom_op(
 
     is_collective = _detect_collective_ops(choices)
 
-    # Run autotuning and get both result and winning choice
-    selected_result, winning_choice = autotune_select_algorithm(
+    # Run autotuning and get both result and winning choice. The selector returns
+    # the base ChoiceCaller type, so cast to the structural winning-choice surface.
+    selected_result, winning_choice_base = autotune_select_algorithm(
         name=name,
         choices=choices,
         input_nodes=list(inputs),
@@ -548,6 +575,7 @@ def autotune_custom_op(
         min_speedup_threshold=min_speedup_threshold,
         benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
+    winning_choice: _AutotuneChoice = cast(_AutotuneChoice, winning_choice_base)
 
     # Test mode: force specific choice to win
     force_choice = config.test_configs.force_custom_op_decomposition
@@ -557,7 +585,7 @@ def autotune_custom_op(
             if choice.gm is not None:
                 log.info(
                     "Test mode: forcing decomposition %s over fallback",
-                    getattr(choice, "name", type(choice).__name__),
+                    choice.name,
                 )
                 winning_choice = choice
                 selected_result = choice.output_node()
@@ -568,7 +596,7 @@ def autotune_custom_op(
             if choice.gm is None:
                 log.info(
                     "Test mode: forcing fallback %s over decomposition",
-                    getattr(choice, "name", type(choice).__name__),
+                    choice.name,
                 )
                 winning_choice = choice
                 selected_result = choice.output_node()
@@ -578,7 +606,7 @@ def autotune_custom_op(
     if winning_choice.gm is not None:
         log.debug(
             "Inlining winning choice: %s (name=%s)",
-            getattr(winning_choice, "name", type(winning_choice).__name__),
+            winning_choice.name,
             name,
         )
         from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
@@ -596,7 +624,7 @@ def autotune_custom_op(
 
     log.debug(
         "Winning choice does not support inlining: %s (name=%s)",
-        getattr(winning_choice, "name", type(winning_choice).__name__),
+        winning_choice.name,
         name,
     )
     return selected_result, winning_choice
@@ -1120,7 +1148,7 @@ def register_custom_op_autotuning(
     | None = None,
     name: str | None = None,
     input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]] | None = None,
-    dispatch_on: dict[str, Any] | None = None,
+    dispatch_on: DispatchOnConfig | None = None,
     split_points: list[int] | None = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,

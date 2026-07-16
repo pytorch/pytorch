@@ -2135,18 +2135,20 @@ def _serialize_pattern(
 
 SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patterns"
 
+
 # This is the set of serialized patterns that we've registered.  Used by
 # test_serialized_patterns_up_to_date() to ensure the patterns are up
 # to date.
-_known_precompiled_patterns: list[
-    tuple[
-        Any,
-        Iterable[Any],
-        Callable[[Callable[..., Any], Iterable[Any]], torch.fx.GraphModule],
-        Any,
-        PatternExpr,
-    ]
-] = []
+@dataclasses.dataclass
+class _PrecompiledPattern:
+    search_fn: SearchFn
+    example_inputs: Sequence[Any]
+    trace_fn: TraceFn
+    scalar_workaround: dict[str, float | int] | None
+    search_fn_pattern: PatternExpr
+
+
+_known_precompiled_patterns: list[_PrecompiledPattern] = []
 
 
 def gen_register_replacement(
@@ -2191,7 +2193,7 @@ def gen_register_replacement(
             arg.constant = None
 
     _known_precompiled_patterns.append(
-        (search_fn, example_inputs, trace_fn, scalar_workaround, pat)
+        _PrecompiledPattern(search_fn, example_inputs, trace_fn, scalar_workaround, pat)
     )
     register_replacement(
         search_fn,
