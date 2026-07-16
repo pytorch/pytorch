@@ -20,6 +20,7 @@ VariableTracker instances based on their type and usage context.
 import abc
 import collections
 import contextlib
+import contextvars
 import copy
 import dataclasses
 import enum
@@ -73,6 +74,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
     is_fake,
+    is_fake_tensor,
     maybe_get_fake_mode,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
@@ -218,7 +220,7 @@ from .ctx_manager import (
     PreserveVersionContextVariable,
     RecordFunctionVariable,
 )
-from .dicts import ConstDictVariable, MappingProxyVariable
+from .dicts import ConstDictVariable, MappingProxyVariable, OrderedItemsDictVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
@@ -1293,9 +1295,8 @@ class VariableBuilder:
                 )
                 return self.tx.output.side_effects.track_object_existing(value, result)
             elif istype(value, collections.OrderedDict):
-                dict_vt = ConstDictVariable(
+                dict_vt = OrderedItemsDictVariable(
                     result,  # type: ignore[arg-type]
-                    user_cls=collections.OrderedDict,
                     mutation_type=ValueMutationExisting(),
                     source=self.source,
                 )
@@ -1924,6 +1925,11 @@ class VariableBuilder:
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
         elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
+            from torch.utils import _config_module
+
+            if isinstance(value, _config_module.ConfigModule):
+                self.install_guards(GuardBuilder.MODULE_MATCH)
+                return UserDefinedObjectVariable(value, source=self.source)
             self.install_guards(GuardBuilder.MODULE_MATCH)
             result = PythonModuleVariable(
                 # type: ignore[arg-type]
@@ -1950,6 +1956,14 @@ class VariableBuilder:
             ]
             genfn = LocalGeneratorFunctionVariable(VariableTracker.build(self.tx, fn))
             return genfn.call_function(self.tx, args, {})
+        elif isinstance(value, contextvars.ContextVar):
+            from .misc import ContextVarVariable
+
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ContextVarVariable(
+                cv_obj=value,
+                source=self.source,
+            )
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
             # using PyGetSetDef. Python, on attribute lookup, can decide to
@@ -2202,9 +2216,11 @@ class VariableBuilder:
             )
 
             is_ordered_dict = isinstance(value, collections.OrderedDict)
-            dict_vt = ConstDictVariable(
+            dict_vt_cls = (
+                OrderedItemsDictVariable if is_ordered_dict else ConstDictVariable
+            )
+            dict_vt = dict_vt_cls(
                 result,
-                user_cls=(collections.OrderedDict if is_ordered_dict else dict),
                 mutation_type=ValueMutationExisting(),
                 source=self.source,
             )
@@ -3696,7 +3712,7 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
     if isinstance(value, torch.Tensor):
         # tensor subclasses will not be converted to FakeTensors and need to be cloned
         if not (
-            isinstance(value, FakeTensor)
+            is_fake_tensor(value)
             or (
                 # Is functional tensor fakeified by this instance of Dynamo
                 torch._is_functional_tensor(value)
@@ -4270,8 +4286,8 @@ def get_specialized_props(
     specialized_props = target_cls.specialize(example_value)
     # TODO: not sure about this fake mode test
     if (
-        isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
-        and example_value.fake_mode is tx.fake_mode
+        is_fake_tensor(example_value)
+        and maybe_get_fake_mode(example_value) is tx.fake_mode
     ):
         if subclass_type:
             tensor_type = subclass_type
@@ -4936,7 +4952,7 @@ def _wrap_to_fake_tensor_and_record_impl(
             _wire_tensor_spec_dims(tensor_spec, fake_e)
         if (
             source is not None
-            and isinstance(fake_e, FakeTensor)
+            and isinstance(fake_e, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             and (sym_val := fake_e.item_memo) is not None
         ):
             # Match the peephole in FakeTensorConverter.from_real_tensor that
@@ -5231,7 +5247,6 @@ class SourcelessBuilder:
         )
         handlers[dict] = lambda tx, value: ConstDictVariable(
             {create(tx, k): create(tx, v) for k, v in value.items()},
-            type(value),
             mutation_type=ValueMutationNew(),
         )
         handlers[list] = lambda tx, value: ListVariable(
@@ -5243,7 +5258,11 @@ class SourcelessBuilder:
         handlers[torch.Size] = lambda tx, value: SizeVariable(
             [create(tx, x) for x in value]
         )
-        handlers[collections.OrderedDict] = handlers[dict]
+        handlers[collections.OrderedDict] = lambda tx, value: OrderedItemsDictVariable(
+            {create(tx, k): create(tx, v) for k, v in value.items()},
+            mutation_type=ValueMutationNew(),
+        )
+        # immutable_dict is a dict subclass; represent it as a plain dict VT.
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
         # Sourceless MappingProxyType object can be encountered while tracing
@@ -5251,7 +5270,6 @@ class SourcelessBuilder:
         handlers[types.MappingProxyType] = lambda tx, value: MappingProxyVariable(
             ConstDictVariable(
                 {create(tx, k): create(tx, v) for k, v in value.items()},
-                dict,
                 mutation_type=ValueMutationNew(),
             ),
         )
