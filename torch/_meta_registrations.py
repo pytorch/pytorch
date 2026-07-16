@@ -3783,6 +3783,19 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
+@register_meta([aten.bincount.default, aten.bincount.out])
+@out_wrapper()
+def meta_bincount(self, weights=None, minlength=0, *, output_size=None):
+    if output_size is None:
+        raise RuntimeError("cannot bincount a meta tensor without output_size")
+    if weights is None:
+        return self.new_empty((output_size,), dtype=torch.long)
+    elif weights.dtype == torch.float32:
+        return self.new_empty((output_size,), dtype=torch.float32)
+    else:
+        return self.new_empty((output_size,), dtype=torch.float64)
+
+
 @register_meta([aten.complex.default, aten.complex.out])
 @out_wrapper()
 def meta_complex(real, imag):

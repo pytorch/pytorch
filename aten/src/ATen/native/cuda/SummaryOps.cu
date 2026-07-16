@@ -246,16 +246,32 @@ bool CUDA_tensor_histogram(
 } // namespace cuda
 
 namespace {
+
+static void check_bincount_output_size(
+    std::optional<int64_t> output_size,
+    int64_t nbins) {
+  if (output_size) {
+    TORCH_CHECK(
+        *output_size == nbins,
+        "bincount: Invalid output_size, expected ",
+        nbins,
+        " but got ",
+        *output_size);
+  }
+}
+
 ///////////////// bincount /////////////////
 template <typename input_t, typename weights_t>
 Tensor _bincount_cuda_template(
     const Tensor& self,
     const Tensor& weights,
-    int64_t minlength) {
+    int64_t minlength,
+    std::optional<int64_t> output_size) {
   if (minlength < 0) {
     TORCH_CHECK(false, "minlength should be >= 0");
   }
   if (self.dim() == 1 && self.numel() == 0) {
+    check_bincount_output_size(output_size, minlength);
     return at::zeros(
         {minlength},
         kLong,
@@ -278,6 +294,7 @@ Tensor _bincount_cuda_template(
 
   const int64_t nbins =
       std::max(self_max.item<input_t>() + (int64_t)1, minlength);
+  check_bincount_output_size(output_size, nbins);
 
   // we are using acc_type for the bounds, in particular int64_t for integers
   // in order to avoid overflows (e.g. using 256 bins for dtype uint8)
@@ -380,7 +397,7 @@ Tensor _histc_cuda_template(
 namespace native {
 Tensor _bincount_cuda(
     const Tensor& self, const std::optional<Tensor>& weights_opt,
-    int64_t minlength) {
+    int64_t minlength, std::optional<int64_t> output_size) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
   const Tensor& weights = *weights_maybe_owned;
@@ -394,9 +411,9 @@ Tensor _bincount_cuda(
   return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cuda", [&] {
     const auto scalar = weights.scalar_type();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
-      return _bincount_cuda_template<scalar_t, float>(self, weights, minlength);
+      return _bincount_cuda_template<scalar_t, float>(self, weights, minlength, output_size);
     return _bincount_cuda_template<scalar_t, double>(
-        self, weights.to(kDouble), minlength);
+        self, weights.to(kDouble), minlength, output_size);
   });
 }
 

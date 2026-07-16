@@ -20,15 +20,30 @@ namespace at::native {
 ///////////////// bincount /////////////////
 namespace {
 
+static void check_bincount_output_size(
+    std::optional<int64_t> output_size,
+    int64_t nbins) {
+  if (output_size) {
+    TORCH_CHECK(
+        *output_size == nbins,
+        "bincount: Invalid output_size, expected ",
+        nbins,
+        " but got ",
+        *output_size);
+  }
+}
+
 template <typename input_t, typename weights_t>
 Tensor _bincount_cpu_template(
     const Tensor& self,
     const Tensor& weights,
-    int64_t minlength) {
+    int64_t minlength,
+    std::optional<int64_t> output_size) {
   if (minlength < 0) {
     TORCH_CHECK(false, "minlength should be >= 0");
   }
   if (self.dim() == 1 && self.numel() == 0) {
+    check_bincount_output_size(output_size, minlength);
     return at::zeros({minlength}, kLong);
   }
   if (self.dim() != 1 || *self.min().const_data_ptr<input_t>() < 0) {
@@ -55,6 +70,7 @@ Tensor _bincount_cpu_template(
   int64_t self_size = self.size(0);
   int64_t nbins = static_cast<int64_t>(max_val) + 1L;
   nbins = std::max(nbins, minlength); // at least minlength # of bins
+  check_bincount_output_size(output_size, nbins);
 
   const input_t* self_p = self.const_data_ptr<input_t>();
   if (has_weights) {
@@ -81,7 +97,7 @@ Tensor _bincount_cpu_template(
 } // namespace
 
 Tensor
-_bincount_cpu(const Tensor& self, const std::optional<Tensor>& weights_opt, int64_t minlength) {
+_bincount_cpu(const Tensor& self, const std::optional<Tensor>& weights_opt, int64_t minlength, std::optional<int64_t> output_size) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
   const Tensor& weights = *weights_maybe_owned;
@@ -89,9 +105,9 @@ _bincount_cpu(const Tensor& self, const std::optional<Tensor>& weights_opt, int6
   return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cpu", [&] {
     const auto scalar = weights.scalar_type();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
-      return _bincount_cpu_template<scalar_t, float>(self.contiguous(), weights.contiguous(), minlength);
+      return _bincount_cpu_template<scalar_t, float>(self.contiguous(), weights.contiguous(), minlength, output_size);
     return _bincount_cpu_template<scalar_t, double>(
-        self.contiguous(), weights.contiguous().to(kDouble), minlength);
+        self.contiguous(), weights.contiguous().to(kDouble), minlength, output_size);
   });
 }
 

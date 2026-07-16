@@ -506,7 +506,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.binary_cross_entropy_with_logits: (
             lambda input, target, weight=None, size_average=None, reduce=None, reduction="mean", pos_weight=None: -1
         ),
-        torch.bincount: lambda input, weights=None, minlength=0: -1,
+        torch.bincount: lambda input, weights=None, minlength=0, *, output_size=None: -1,
         torch.binomial: lambda count, prob, generator=None: -1,
         torch.bitwise_and: lambda input, other, out=None: -1,
         torch.bitwise_not: lambda input, out=None: -1,

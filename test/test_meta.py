@@ -2157,6 +2157,24 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(cpu_result.dtype, meta_result.dtype)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_bincount_output_size(self):
+        input_meta = torch.empty(5, dtype=torch.int64, device="meta")
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot bincount a meta tensor without output_size"
+        ):
+            torch.bincount(input_meta)
+
+        meta_result = torch.bincount(input_meta, output_size=8)
+        self.assertEqual(meta_result.shape, torch.Size([8]))
+        self.assertEqual(meta_result.dtype, torch.long)
+
+        weights_meta = torch.empty(5, dtype=torch.float32, device="meta")
+        meta_result_w = torch.bincount(input_meta, weights=weights_meta, output_size=8)
+        self.assertEqual(meta_result_w.shape, torch.Size([8]))
+        self.assertEqual(meta_result_w.dtype, torch.float32)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_segment_reduce_batched_shape(self):
         # axis=1 with 2D lengths exercises the shape fix (using data.shape
         # as base instead of lengths.shape). CPU segfaults for this case

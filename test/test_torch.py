@@ -3845,6 +3845,36 @@ class TestTorchDeviceType(TestCase):
         a_masked = a.masked_select(mask_copy_3_times)
         self.assertEqual(a_masked, a.unsqueeze(0).expand(3, 100).flatten())
 
+    def test_bincount_output_size(self, device):
+        input = torch.tensor([0, 1, 1, 3, 2, 4], dtype=torch.int64, device=device)
+        expected = torch.tensor([1, 2, 1, 1, 1], dtype=torch.long, device=device)
+
+        self.assertEqual(torch.bincount(input, output_size=5), expected)
+        self.assertEqual(input.bincount(output_size=5), expected)
+
+        weights = torch.tensor([0.5, 1.0, 1.5, 2.0, 2.5, 3.0], device=device)
+        expected_w = torch.tensor([0.5, 2.5, 2.5, 2.0, 3.0], device=device)
+        self.assertEqual(torch.bincount(input, weights=weights, output_size=5), expected_w)
+
+        with self.assertRaisesRegex(RuntimeError, "bincount: Invalid output_size"):
+            torch.bincount(input, output_size=3)
+
+        # minlength extends the output beyond max(input)+1
+        result_ml = torch.bincount(input, minlength=10, output_size=10)
+        self.assertEqual(result_ml.shape, torch.Size([10]))
+        self.assertEqual(result_ml[:5], expected)
+        self.assertEqual(result_ml[5:], torch.zeros(5, dtype=torch.long, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, "bincount: Invalid output_size"):
+            torch.bincount(input, minlength=10, output_size=5)
+
+        # empty input: nbins == minlength
+        empty = torch.tensor([], dtype=torch.int64, device=device)
+        self.assertEqual(torch.bincount(empty, minlength=4, output_size=4), torch.zeros(4, dtype=torch.long, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, "bincount: Invalid output_size"):
+            torch.bincount(empty, minlength=4, output_size=2)
+
     # FIXME: find a test suite for the masked select operator
     def test_masked_select_discontiguous(self, device):
         for size in (10, 200):

@@ -1641,7 +1641,7 @@ Example::
 add_docstr(
     torch.bincount,
     r"""
-bincount(input, weights=None, minlength=0) -> Tensor
+bincount(input, weights=None, minlength=0, *, output_size=None) -> Tensor
 
 Count the frequency of each value in an array of non-negative ints.
 
@@ -1661,6 +1661,13 @@ Arguments:
     weights (Tensor): optional, weight for each value in the input tensor.
         Should be of same size as input tensor.
     minlength (int): optional, minimum number of bins. Should be non-negative.
+
+Keyword args:
+    output_size (int, optional): the expected number of output bins.
+        Must equal ``max(input) + 1`` (or :attr:`minlength`, whichever
+        is larger). A :class:`RuntimeError` is raised on mismatch.
+        Required when running on a meta-device tensor, where the
+        data-dependent bin count cannot be inferred.
 
 Returns:
     output (Tensor): a tensor of shape ``Size([max(input) + 1])`` if

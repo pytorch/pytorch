@@ -1185,7 +1185,7 @@
     CompositeExplicitAutograd: binary_cross_entropy_with_logits
   autogen: binary_cross_entropy_with_logits.out
 
-- func: bincount(Tensor self, Tensor? weights=None, SymInt minlength=0) -> Tensor
+- func: bincount(Tensor self, Tensor? weights=None, SymInt minlength=0, *, SymInt? output_size=None) -> Tensor
   variants: function, method
   dispatch:
     CPU: _bincount_cpu

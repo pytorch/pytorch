@@ -2204,12 +2204,21 @@ def bincount(
     inputs: FakeTensor,
     weights: FakeTensor | None = None,
     minlength: IntLikeType = 0,
+    *,
+    output_size: IntLikeType | None = None,
 ) -> FakeTensor:
+    if output_size is not None:
+        if weights is None:
+            return inputs.new_empty(output_size, dtype=torch.long)  # type: ignore[return]
+        elif weights.dtype == torch.float32:
+            return inputs.new_empty(output_size, dtype=torch.float32)  # type: ignore[return]
+        else:
+            return inputs.new_empty(output_size, dtype=torch.float64)  # type: ignore[return]
+
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
     ):
-        # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
     new_size = fake_mode.shape_env.create_unbacked_symint()

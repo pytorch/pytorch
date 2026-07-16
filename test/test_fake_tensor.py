@@ -2417,6 +2417,25 @@ assert not torch.cuda.is_initialized()
         self.assertEqual(fake_inverse.shape, x.shape)
         self.assertTrue(free_unbacked_symbols(fake_unique.shape[0]))
 
+    def test_bincount_explicit_output_size(self):
+        x = torch.tensor([0, 1, 1, 3, 2, 4], dtype=torch.int64)
+
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(x)
+            fake_result = torch.bincount(fake_x, output_size=5)
+
+        self.assertEqual(fake_result.dtype, torch.long)
+        self.assertEqual(fake_result.shape, torch.Size([5]))
+
+        weights = torch.tensor([0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(x)
+            fake_w = mode.from_tensor(weights)
+            fake_result_w = torch.bincount(fake_x, weights=fake_w, output_size=5)
+
+        self.assertEqual(fake_result_w.dtype, torch.float32)
+        self.assertEqual(fake_result_w.shape, torch.Size([5]))
+
     def test_select_out_of_bounds(self):
         with FakeTensorMode():
             x = torch.randn(3, 4)

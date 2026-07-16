@@ -77,7 +77,20 @@ static Tensor& bincount_mps_impl(const Tensor& self, const Tensor& weights, Tens
   return output;
 }
 
-Tensor _bincount_mps(const Tensor& self, const std::optional<Tensor>& weights_opt, int64_t minlength) {
+static void check_bincount_output_size(
+    std::optional<int64_t> output_size,
+    int64_t nbins) {
+  if (output_size) {
+    TORCH_CHECK(
+        *output_size == nbins,
+        "bincount: Invalid output_size, expected ",
+        nbins,
+        " but got ",
+        *output_size);
+  }
+}
+
+Tensor _bincount_mps(const Tensor& self, const std::optional<Tensor>& weights_opt, int64_t minlength, std::optional<int64_t> output_size) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
   const Tensor& weights = *weights_maybe_owned;
@@ -86,6 +99,7 @@ Tensor _bincount_mps(const Tensor& self, const std::optional<Tensor>& weights_op
   TORCH_CHECK(minlength >= 0, "minlength should be >= 0");
 
   if (self.dim() == 1 && self.numel() == 0) {
+    check_bincount_output_size(output_size, minlength);
     return at::zeros({minlength}, kLong, std::nullopt /* layout */, kMPS, std::nullopt /* pin_memory */);
   }
   TORCH_CHECK(self.dim() == 1 && self.min().item<int64_t>() >= 0,
@@ -96,6 +110,7 @@ Tensor _bincount_mps(const Tensor& self, const std::optional<Tensor>& weights_op
               "weights should be 1-d and have the same length as input");
 
   const int64_t nbins = std::max(self.max().item<int64_t>() + 1L, minlength);
+  check_bincount_output_size(output_size, nbins);
   Tensor output;
 
   Tensor weights_ = weights;
