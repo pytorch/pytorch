@@ -1,7 +1,10 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#ifdef USE_C10D_NCCL
+
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
+#include <array>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
@@ -202,6 +205,57 @@ void ProcessGroupNCCL::abort() {
     abortNcclComm();
   }
   comm_state_ = CommState::ERROR;
+}
+
+void ProcessGroupNCCL::suspend() {
+  checkInitialized();
+  c10::cuda::CUDAGuard gpuGuard(device_);
+  NCCL_CHECK(
+      nccl_api_,
+      nccl_comm_,
+      nccl_api_->commSuspend(nccl_comm_, NCCL_SUSPEND_MEM),
+      "NCCL Suspend failed (requires NCCL 2.29.7+)");
+}
+
+void ProcessGroupNCCL::resume() {
+  checkInitialized();
+  c10::cuda::CUDAGuard gpuGuard(device_);
+  NCCL_CHECK(
+      nccl_api_,
+      nccl_comm_,
+      nccl_api_->commResume(nccl_comm_),
+      "NCCL Resume failed (requires NCCL 2.29.7+)");
+}
+
+std::unordered_map<std::string, uint64_t> ProcessGroupNCCL::getMemoryStats() {
+  checkInitialized();
+  c10::cuda::CUDAGuard gpuGuard(device_);
+  // Stat indices follow ncclCommMemStat_t: suspend=0, suspended=1, persist=2,
+  // total=3. Keys match ProcessGroupNCCL (the original backend).
+  static constexpr std::array<std::pair<const char*, int>, 4> kStats = {
+      {{"suspend", 0}, {"suspended", 1}, {"persist", 2}, {"total", 3}}};
+  std::unordered_map<std::string, uint64_t> stats;
+  for (const auto& [name, stat] : kStats) {
+    uint64_t value = 0;
+    NCCL_CHECK(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->commMemStats(nccl_comm_, stat, &value),
+        "NCCL MemStats failed (requires NCCL 2.29.7+)");
+    stats.emplace(name, value);
+  }
+  return stats;
+}
+
+::c10d::ErrorType ProcessGroupNCCL::getError() {
+  switch (comm_state_.load()) {
+    case CommState::TIMEOUT:
+      return ::c10d::ErrorType::TIMEOUT;
+    case CommState::ERROR:
+      return ::c10d::ErrorType::COMM_ERROR;
+    default:
+      return ::c10d::ErrorType::SUCCESS;
+  }
 }
 
 void ProcessGroupNCCL::finalize() {
@@ -1454,9 +1508,11 @@ NCCLException::NCCLException(
     const std::string& message,
     ncclResult_t result,
     ncclComm_t comm)
-    : message_(
-          message + ": " + nccl_api.getErrorString(result) +
-          " \nNCCL Last Error: " + nccl_api.getLastError(comm)),
+    : message_(fmt::format(
+          "{}: {} \nNCCL Last Error: {}",
+          message,
+          nccl_api.getErrorString(result),
+          nccl_api.getLastError(comm))),
       result_(result) {}
 
 const char* NCCLException::what() const noexcept {
@@ -1464,3 +1520,5 @@ const char* NCCLException::what() const noexcept {
 }
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL
