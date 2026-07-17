@@ -7083,6 +7083,47 @@ class Scheduler:
         if not isinstance(node1_write, MemoryDep):
             return -1
 
+        reindex_snapshot: _LoopStateSnapshot | None = None
+
+        def fail_after_reindex() -> int:
+            if reindex_snapshot is not None:
+                reindex_snapshot.restore()
+            return -1
+
+        def reindex_node2_to_flat_size(flat_size: sympy.Expr) -> bool:
+            nonlocal reindex_snapshot
+            if node2.is_reduction():
+                return False
+            if not V.graph.sizevars.statically_known_equals(
+                sympy_product(node2._sizes[0]), flat_size
+            ):
+                return False
+            if tuple(node2._sizes[0]) == (flat_size,):
+                return False
+
+            reindex_snapshot = _LoopStateSnapshot.create((node2,))
+            node2.apply_loop_reindexing([flat_size])
+            return True
+
+        node1_write_numel = sympy_product(node1_write.size)
+        if (
+            node1_write.index != node2_write.index
+            and node1_write.size != node2_write.size
+            and node2_read.size == node2_write.size
+            and V.graph.sizevars.statically_known_equals(
+                sympy_product(node2_read.size), node1_write_numel
+            )
+            and reindex_node2_to_flat_size(node1_write_numel)
+        ):
+            if len(node2.read_writes.reads) > 1 or len(node2.read_writes.writes) > 1:
+                return fail_after_reindex()
+            node2_read = next(iter(node2.read_writes.reads))
+            node2_write = next(iter(node2.read_writes.writes))
+            if not isinstance(node2_read, MemoryDep) or not isinstance(
+                node2_write, MemoryDep
+            ):
+                return fail_after_reindex()
+
         # We are checking for compatibility with the normalized node1 write
         # then modifying node2 reads/writes. since the node1 write will be just used
         # for compatibility, while node2 will be used in actual modification, just
@@ -7093,18 +7134,18 @@ class Scheduler:
             node1_write.index != node2_write.index
             and node1_write.size != node2_write.size
         ):
-            return -1
+            return fail_after_reindex()
 
         if node2_read.size != node2_write.size or len(node2_read.var_names) != 1:
-            return -1
+            return fail_after_reindex()
 
         # Verify we have exactly two indexing expressions (one read, one write)
         if len(node2._body.indexing_exprs) != 2:  # type: ignore[attr-defined]
-            return -1
+            return fail_after_reindex()
 
         # No subblocks allowed for this optimization
         if node2._body.subblocks:  # type: ignore[attr-defined]
-            return -1
+            return fail_after_reindex()
 
         if not (
             "index0" in node2._body.indexing_exprs  # type: ignore[attr-defined]
@@ -7115,7 +7156,7 @@ class Scheduler:
         # Extract and verify single read expression
         node2_read_exprs = OrderedSet(expr for expr in node2._body.get_read_exprs())  # type: ignore[attr-defined]
         if len(node2_read_exprs) != 1:
-            return -1
+            return fail_after_reindex()
 
         read_expr = next(iter(node2_read_exprs))
 
@@ -7133,7 +7174,7 @@ class Scheduler:
 
         index_vars = node2._body.vars[0]  # type: ignore[attr-defined]
         if len(index_vars) != 1:
-            return -1
+            return fail_after_reindex()
 
         simplified_terms = []
         for term in sympy.Add.make_args(read_expr):
@@ -7148,16 +7189,16 @@ class Scheduler:
 
         # formula is not invertible
         if inverse_formula is None:
-            return -1
+            return fail_after_reindex()
 
         # === Apply Inversion ===
 
         # Swap the indexing expressions using the inverse formula
         node2._before_loop_state_mutation()
-        node2._body.indexing_exprs[read_expr_index] = node2._body.indexing_exprs[  # type: ignore[attr-defined]
+        node2._body.indexing_exprs[read_expr_index] = node2._body.indexing_exprs[
             write_expr_index
         ]
-        node2._body.indexing_exprs[write_expr_index] = inverse_formula  # type: ignore[attr-defined]
+        node2._body.indexing_exprs[write_expr_index] = inverse_formula
 
         # Refresh dependencies and calculate fusion score
         node2.refresh_dependencies(True, False)  # type: ignore[attr-defined]
