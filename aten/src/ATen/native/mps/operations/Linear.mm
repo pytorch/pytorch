@@ -7,11 +7,6 @@
 #include <ATen/ops/linear_backward_native.h>
 #include <ATen/ops/linear_native.h>
 
-// MTLGPUFamilyApple10 is only defined in the macOS 26+ SDK.
-#if !defined(__MAC_26_0)
-static constexpr auto MTLGPUFamilyApple10 = static_cast<MTLGPUFamily>(1010);
-#endif
-
 namespace at::native {
 
 using namespace mps;
@@ -20,7 +15,7 @@ using namespace mps;
 // non-deterministic results for >2D fp16/bf16 inputs on Apple M5+ (Apple10 GPU family).
 // Flatten to 2D to work around the issue (See https://github.com/pytorch/pytorch/issues/180776 )
 static bool needs_nd_workaround(const Tensor& input) {
-  static const bool is_m5_or_newer = [MPSDevice::getInstance()->device() supportsFamily:MTLGPUFamilyApple10];
+  static const bool is_m5_or_newer = is_apple_family_or_newer(AppleGPUFamily::APPLE_10_PLUS);
   return input.dim() > 2 && is_m5_or_newer && (input.scalar_type() == kHalf || input.scalar_type() == kBFloat16);
 }
 

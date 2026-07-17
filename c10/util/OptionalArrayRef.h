@@ -128,58 +128,58 @@ class OptionalArrayRef final {
 
   // Observers
 
-  constexpr ArrayRef<T>* operator->() noexcept {
+  [[nodiscard]] constexpr ArrayRef<T>* operator->() noexcept {
     return &wrapped_opt_array_ref.value();
   }
 
-  constexpr const ArrayRef<T>* operator->() const noexcept {
+  [[nodiscard]] constexpr const ArrayRef<T>* operator->() const noexcept {
     return &wrapped_opt_array_ref.value();
   }
 
-  constexpr ArrayRef<T>& operator*() & noexcept {
+  [[nodiscard]] constexpr ArrayRef<T>& operator*() & noexcept {
     return wrapped_opt_array_ref.value();
   }
 
-  constexpr const ArrayRef<T>& operator*() const& noexcept {
+  [[nodiscard]] constexpr const ArrayRef<T>& operator*() const& noexcept {
     return wrapped_opt_array_ref.value();
   }
 
-  constexpr ArrayRef<T>&& operator*() && noexcept {
+  [[nodiscard]] constexpr ArrayRef<T>&& operator*() && noexcept {
     return std::move(wrapped_opt_array_ref.value());
   }
 
-  constexpr const ArrayRef<T>&& operator*() const&& noexcept {
+  [[nodiscard]] constexpr const ArrayRef<T>&& operator*() const&& noexcept {
     return std::move(wrapped_opt_array_ref.value());
   }
 
-  constexpr explicit operator bool() const noexcept {
+  [[nodiscard]] constexpr explicit operator bool() const noexcept {
     return wrapped_opt_array_ref.has_value();
   }
 
-  constexpr bool has_value() const noexcept {
+  [[nodiscard]] constexpr bool has_value() const noexcept {
     return wrapped_opt_array_ref.has_value();
   }
 
-  constexpr ArrayRef<T>& value() & {
+  [[nodiscard]] constexpr ArrayRef<T>& value() & {
     return wrapped_opt_array_ref.value();
   }
 
-  constexpr const ArrayRef<T>& value() const& {
+  [[nodiscard]] constexpr const ArrayRef<T>& value() const& {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return wrapped_opt_array_ref.value();
   }
 
-  constexpr ArrayRef<T>&& value() && {
+  [[nodiscard]] constexpr ArrayRef<T>&& value() && {
     return std::move(wrapped_opt_array_ref.value());
   }
 
-  constexpr const ArrayRef<T>&& value() const&& {
+  [[nodiscard]] constexpr const ArrayRef<T>&& value() const&& {
     return std::move(wrapped_opt_array_ref.value());
   }
 
   template <typename U>
   // NOLINTNEXTLINE(modernize-use-constraints)
-  constexpr std::
+  [[nodiscard]] constexpr std::
       enable_if_t<std::is_convertible_v<U&&, ArrayRef<T>>, ArrayRef<T>>
       value_or(U&& default_value) const& {
     return wrapped_opt_array_ref.value_or(std::forward<U>(default_value));
@@ -187,7 +187,7 @@ class OptionalArrayRef final {
 
   template <typename U>
   // NOLINTNEXTLINE(modernize-use-constraints)
-  constexpr std::
+  [[nodiscard]] constexpr std::
       enable_if_t<std::is_convertible_v<U&&, ArrayRef<T>>, ArrayRef<T>>
       value_or(U&& default_value) && {
     return wrapped_opt_array_ref.value_or(std::forward<U>(default_value));
@@ -219,7 +219,7 @@ class OptionalArrayRef final {
     return wrapped_opt_array_ref.emplace(il, std::forward<Args>(args)...);
   }
 
-  friend bool operator==(OptionalArrayRef a1, ArrayRef<T> other) {
+  [[nodiscard]] friend bool operator==(OptionalArrayRef a1, ArrayRef<T> other) {
     if (!a1.has_value()) {
       return false;
     }
