@@ -254,7 +254,7 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
 
 
 class ProcessGroupNCCLNoGPUTest(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
     MAIN_PROCESS_RANK = 0
 
     def setUp(self):
@@ -278,7 +278,7 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
 
 
 class ProcessGroupNCCLInitTest(MultiProcessTestCase):
-    hw_classification = HardwareClassification.MULTI_ACCELERATOR_CUDA
+    hw_classification = HardwareClassification.CUDA
     device_type = "cuda"
 
     def setUp(self):
@@ -5111,7 +5111,7 @@ class SetDeviceMethod(Enum):
 class NcclProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
 ):
-    hw_classification = HardwareClassification.MULTI_ACCELERATOR_CUDA
+    hw_classification = HardwareClassification.CUDA
 
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
@@ -5626,7 +5626,7 @@ instantiate_parametrized_tests(LargeCommTest)
 
 
 class SparseCollective(MultiProcessTestCase):
-    hw_classification = HardwareClassification.MULTI_ACCELERATOR_CUDA
+    hw_classification = HardwareClassification.CUDA
 
     @property
     def world_size(self):
@@ -5702,7 +5702,7 @@ class SparseCollective(MultiProcessTestCase):
 
 
 class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
-    hw_classification = HardwareClassification.MULTI_ACCELERATOR_CUDA
+    hw_classification = HardwareClassification.CUDA
 
     @property
     def world_size(self):
