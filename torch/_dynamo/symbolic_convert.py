@@ -1632,7 +1632,7 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
-        if is_generator(fn.get_code()):
+        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(
@@ -6194,19 +6194,43 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         log.debug("DONE INLINING %s", code)
         self.output.tracing_context.traced_code.append(code)
 
-        if (
-            is_generator(code)
-            and isinstance(self, InliningGeneratorInstructionTranslator)
-            and self.frame_state == FrameState.FRAME_CLEARED
+        if config.enable_faithful_generator_behavior or (
+            isinstance(self, InliningGeneratorInstructionTranslator)
+            and self.is_generator_from_ctx_manager
         ):
-            # When the generator returns None, we raise StopIteration
-            # pyrefly: ignore [implicit-any]
-            args = []
-            if not self.symbolic_result.is_constant_none():
-                args = [self.symbolic_result]
-            exc.raise_observed_exception(StopIteration, self, args=args)
+            if (
+                is_generator(code)
+                and isinstance(self, InliningGeneratorInstructionTranslator)
+                and self.frame_state == FrameState.FRAME_CLEARED
+            ):
+                if not isinstance(self, InliningGeneratorInstructionTranslator):
+                    raise AssertionError(
+                        "expected isinstance(self, InliningGeneratorInstructionTranslator) to be true"
+                    )
+                # When the generator returns None, we raise StopIteration
+                # pyrefly: ignore [implicit-any]
+                args = []
+                if not self.symbolic_result.is_constant_none():
+                    args = [self.symbolic_result]
+                exc.raise_observed_exception(StopIteration, self, args=args)
+            else:
+                return self.symbolic_result
         else:
-            return self.symbolic_result
+            if is_generator(code):
+                if not isinstance(self, InliningGeneratorInstructionTranslator):
+                    raise AssertionError(
+                        "expected isinstance(self, InliningGeneratorInstructionTranslator) to be true"
+                    )
+                if not self.symbolic_result.is_constant_none():
+                    raise AssertionError(
+                        "expected self.symbolic_result.is_constant_none() to be true"
+                    )
+                return ListIteratorVariable(
+                    self.generated_items,
+                    mutation_type=ValueMutationNew(),
+                )
+            else:
+                return self.symbolic_result
 
     def __init__(
         self,
@@ -6415,10 +6439,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: list[VariableTracker]
+    # Flag whether or not the InlineGenerator should consume the entire iterator
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
+        self.is_generator_from_ctx_manager = False
         self.frame_state = FrameState.FRAME_CREATED
         self.gi_exc_state = Segment()
 
@@ -6457,9 +6483,13 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.frame_state = FrameState.FRAME_SUSPENDED
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
-        self.symbolic_result = top
-        # Stop tracing
-        raise YieldValueOp
+        if (
+            config.enable_faithful_generator_behavior
+            or self.is_generator_from_ctx_manager
+        ):
+            self.symbolic_result = top
+            # Stop tracing
+            raise YieldValueOp
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]

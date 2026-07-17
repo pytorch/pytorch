@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import asyncio
 import logging
 import re
 import sys
@@ -703,15 +702,6 @@ Invalid call to __build_class__
 from user code:
    File "test_error_messages.py", line N, in fn
     class Foo:""",
-        )
-
-    @skipIfNotPy312
-    def test_async_return_bytecode_exception_table(self):
-        async def fn():
-            return 1
-
-        self.assertEqual(
-            asyncio.run(torch.compile(fn, backend="eager", fullgraph=True)()), 1
         )
 
     @skipIfNotPy312

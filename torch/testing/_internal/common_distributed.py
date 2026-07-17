@@ -2052,10 +2052,7 @@ class MultiProcContinuousTest(TestCase):
         This supports instantiate_device_type_tests which calls setUpClass during
         class creation (before any tests run), when spawning would be premature.
         """
-        # Check the class's own dict: a subclass must not inherit the flag from
-        # a base test class that already ran and tore down its workers, else it
-        # would dispatch tests to the base class's dead worker processes.
-        if cls.__dict__.get("_processes_spawned", False):
+        if cls._processes_spawned:
             return
 
         # Handle method, property, and string attribute for device_type
@@ -2103,10 +2100,8 @@ class MultiProcContinuousTest(TestCase):
         Class-scope test fixture. Run once for entire test class, after all tests finish.
         Tear down the process group if spawned.
         """
-        # If processes were never spawned (e.g., all tests were skipped), nothing to tear down.
-        # Check the class's own dict to avoid tearing down an already-finished
-        # base class's workers (see _ensure_processes_spawned).
-        if not cls.__dict__.get("_processes_spawned", False):
+        # If processes were never spawned (e.g., all tests were skipped), nothing to tear down
+        if not cls._processes_spawned:
             super().tearDownClass()
             return
 

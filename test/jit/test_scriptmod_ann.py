@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: jit"]
 
-import contextlib
 import os
 import sys
 import warnings
@@ -14,17 +13,6 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-@contextlib.contextmanager
-def _catch_warnings_ignoring_jit_deprecation():
-    # torch.jit.script emits a visible FutureWarning; ignore it so these tests
-    # can assert on the absence of *unexpected* warnings.
-    with warnings.catch_warnings(record=True) as w:
-        warnings.filterwarnings(
-            "ignore", ".*Please switch to `torch.", category=FutureWarning
-        )
-        yield w
 
 
 class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
@@ -42,7 +30,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = x
                 return 1
 
-        with _catch_warnings_ignoring_jit_deprecation() as w:
+        with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), (1,))
         if len(w) != 0:
             raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
@@ -57,7 +45,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = x
                 return 1
 
-        with _catch_warnings_ignoring_jit_deprecation() as w:
+        with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), ([1, 2, 3],))
         if len(w) != 0:
             raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
@@ -72,7 +60,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = x
                 return self.x
 
-        with _catch_warnings_ignoring_jit_deprecation() as w:
+        with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), (torch.rand(2, 3),))
         if len(w) != 0:
             raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
@@ -87,7 +75,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = x
                 return self.x
 
-        with _catch_warnings_ignoring_jit_deprecation() as w:
+        with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), ([1, 2, 3],))
         if len(w) != 0:
             raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
@@ -104,7 +92,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = y
                 return self.x
 
-        with _catch_warnings_ignoring_jit_deprecation() as w:
+        with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), ([1, 2, 3],))
         if len(w) != 0:
             raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
@@ -121,7 +109,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = y
                 return self.x
 
-        with _catch_warnings_ignoring_jit_deprecation() as w:
+        with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), ([1, 2, 3],))
         if len(w) != 0:
             raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
@@ -138,7 +126,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = y
                 return self.x
 
-        with _catch_warnings_ignoring_jit_deprecation() as w:
+        with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), ([1, 2, 3],))
         if len(w) != 0:
             raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
