@@ -1430,7 +1430,7 @@ partial_fn = functools.partial(fn, scale=2)
         prop = torch.get_device_module(device_type).get_device_properties(x.device)
         if device_type == "xpu":
             return x + prop.max_compute_units
-        if device_type == "cuda" and prop.major == 8:
+        if prop.major == 8:
             return x + prop.multi_processor_count
         return x + prop.max_threads_per_multi_processor
 
