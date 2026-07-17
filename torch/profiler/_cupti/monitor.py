@@ -15,15 +15,7 @@ from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 import torch
 
 from . import cupti_python
-from .records import (
-    Api,
-    Ctype,
-    FIELD_CTYPE,
-    FIELD_REGISTRY,
-    Kernel,
-    STRING_FIELDS,
-    Sync,
-)
+from .records import Ctype, FIELD_CTYPE, FIELD_REGISTRY, Kernel, STRING_FIELDS, Sync
 
 
 # A registration request: either a plain iterable of activity kinds (meaning "all
@@ -491,17 +483,6 @@ class CuptiMonitor:
             self_flush,
             flush_period_ns,
             flush_fn,
-        )
-        # Drop noisy runtime/driver records in the native decoder by cbid -- CUPTI's own
-        # per-cbid activity filter is NOT_COMPATIBLE under user-defined records
-        from .monitor_trace import driver_kept_cbids, runtime_dropped_cbids
-
-        _cupti_monitor_native.set_cbid_filter(
-            Api.CBID.id,
-            {
-                int(ActivityKind.RUNTIME): (False, list(runtime_dropped_cbids())),
-                int(ActivityKind.DRIVER): (True, list(driver_kept_cbids())),
-            },
         )
         _cupti_monitor_native.start_decoder()
         # The decode thread self-flushes on background_flush_period_s (configured above); this
