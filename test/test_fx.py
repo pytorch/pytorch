@@ -843,30 +843,36 @@ class TestFX(JitTestCase):
                     f"Expected 'test_fx.py' in node.stack_trace, got {node.stack_trace}"
                 )
 
-    def test_stack_traces_with_non_module_callable(self):
-        """
-        Regression test for https://github.com/pytorch/pytorch/issues/130861.
-        Verifies that record_stack_traces still captures stack information when
-        tracing a callable (e.g. a plain function) without an "forward" frame.
-        """
-        def my_fn(x):
-            return torch.relu(x)
 
+    def test_filter_traceback_frames_no_forward_fallback(self):
+        # Regression test for issue #130861: _filter_traceback_frames should
+        # fall back to the full stack when no "forward" frame is found,
+        # rather than returning an empty list.
         tracer = torch.fx.Tracer()
-        tracer.record_stack_traces = True
 
-        graph = tracer.trace(my_fn)
-        gm = GraphModule(tracer.root, graph)
+        # Build a StackSummary with frames but no "forward" frame.
+        # This simulates the call stack when tracing e.g. a plain function
+        # or using Proxy outside of an nn.Module.forward() context.
+        frames = [
+            traceback.FrameSummary("test_code.py", 10, "my_function"),
+            traceback.FrameSummary("test_code.py", 5, "run_model"),
+        ]
+        summary = traceback.StackSummary.from_list(frames)
 
-        for node in gm.graph.nodes:
-            if node.op in {"placeholder", "output"}:
-                continue
-            self.assertTrue(
-                node.stack_trace is not None,
-                f"Expected non-None stack_trace for node {node.name}, "
-                f"got None when tracing non-module callable",
-            )
-
+        filtered = tracer._filter_traceback_frames(summary)
+        self.assertIsNotNone(filtered)
+        # Should be non-empty (before the fix it returned empty)
+        self.assertGreater(
+            len(filtered),
+            0,
+            "_filter_traceback_frames returned empty StackSummary when "
+            "no forward frame was found. This is the bug from issue #130861: "
+            "the else branch unconditionally set user_frames = [] when no "
+            "forward frame existed.",
+        )
+        # Verify the original frames are preserved (uninteresting_files
+        # won't filter these synthetic paths)
+        self.assertEqual(len(filtered), len(frames))
 
     def test_node_pickle_type_preservation(self):
         g = Graph()

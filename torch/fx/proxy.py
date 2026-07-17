@@ -317,10 +317,10 @@ class TracerBase:
                     first_forward = i
                     break
 
-            # If no "forward" call is found, fall back to the full stack
-            # instead of discarding it entirely, to preserve the original
-            # record_stack_traces behavior.
             if first_forward == -1:
+                # No "forward" frame found; fall back to the full stack.
+                # uninteresting_files() filtering below will still strip
+                # internal PyTorch frames.
                 user_frames = list(user_stack_summary)
 
         from torch.fx.experimental.symbolic_shapes import uninteresting_files
