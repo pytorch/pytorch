@@ -7,6 +7,7 @@ import unittest
 import torch
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import CUDACodeCache, ROCmCodeCache
+from torch._inductor.codegen.cuda.compile_utils import _cuda_compiler
 from torch._inductor.codegen.cuda.cuda_env import nvcc_exist
 from torch._inductor.codegen.rocm.compile_command import rocm_compiler
 from torch._inductor.exc import CUDACompileError
@@ -22,7 +23,7 @@ def _has_rocm_compiler():
 
 
 def _has_gpu_codecache_compiler():
-    return _has_rocm_compiler() if TEST_WITH_ROCM else nvcc_exist()
+    return _has_rocm_compiler() if TEST_WITH_ROCM else nvcc_exist(_cuda_compiler())
 
 
 def _gpu_codecache():
