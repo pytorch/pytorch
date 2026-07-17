@@ -50,8 +50,9 @@ from torch.nn.attention.flex_attention import (
     create_block_mask,
     flex_attention,
 )
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_CUDNN_ATTENTION
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_gpu import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,

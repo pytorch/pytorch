@@ -18,14 +18,16 @@ from torch.nn.functional import scaled_mm, ScalingType  # type: ignore[attr-defi
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     IS_SM90,
-    PLATFORM_SUPPORTS_FP8,
-    PLATFORM_SUPPORTS_MX_GEMM,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
     onlyOn,
     skipCUDAIf,
+)
+from torch.testing._internal.common_gpu import (
+    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MX_GEMM,
 )
 from torch.testing._internal.common_quantized import ceil_div, to_blocked
 from torch.testing._internal.common_utils import (
