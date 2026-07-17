@@ -12,6 +12,25 @@ import torch
 RankType = int | torch.SymInt
 
 
+@typing.runtime_checkable
+class StatefulRNGTensor(typing.Protocol):
+    """Plain tensor metadata for replaying logical global RNG indices.
+
+    Each ``rng_index_blocks`` entry contains ``(start_index, block_size,
+    block_stride, num_blocks)``.
+    """
+
+    rng_global_numel: int
+    rng_index_blocks: tuple[tuple[int, int, int, int], ...]
+
+
+def stateful_rng_mode():
+    """Return a scoped mode that applies ``StatefulRNGTensor`` metadata."""
+    from ._stateful_rng import StatefulRNGMode
+
+    return StatefulRNGMode()
+
+
 log = logging.getLogger(__name__)
 
 
