@@ -5794,7 +5794,7 @@ class TestLinalg(TestCase):
         for (b, n), make_input in product(shapes, make_input_methods):
             A = make_input(b, n, n)
             P, L, U = torch.linalg.lu(A)
-            A, P, L, U = map(lambda t: t.to(compute_dtype), (A, P, L, U))
+            A, P, L, U = (t.to(compute_dtype) for t in (A, P, L, U))
             residual = P @ L @ U - A
 
             # Netlib uses 1-norm, MAGMA uses Frobenius
@@ -5853,7 +5853,7 @@ class TestLinalg(TestCase):
         for i in range(1, r):
             A = buffer[..., :n + i, :n + i]
             P, L, U = torch.linalg.lu(A)
-            A, P, L, U = map(lambda t: t.to(compute_dtype), (A, P, L, U))
+            A, P, L, U = (t.to(compute_dtype) for t in (A, P, L, U))
 
             residual = P @ L @ U - A
             # Compute scaled residual
