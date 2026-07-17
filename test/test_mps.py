@@ -16485,6 +16485,22 @@ class TestErrorInputs(TestCase):
         expected[3] = 1.0  # one occurrence, scaled by 1/1
         self.assertEqual(w_mps.grad.cpu(), expected)
 
+        # pin the count divisor staying exact past bfloat16's integer range:
+        # a naive bf16 accumulation of ones saturates at 256 (256 + 1 == 256)
+        # and would divide index 5's gradient by 256 instead of 300. Only bag
+        # 0 receives gradient, so the numerator (a single 1.0) stays exact
+        # and any mismatch is the divisor's.
+        n = 300
+        w_mps = torch.ones(8, 3, dtype=torch.bfloat16, device=device).requires_grad_()
+        idx = torch.full((n,), 5, device=device)
+        offs = torch.tensor([0, 1], device=device)
+        out = torch.nn.functional.embedding_bag(
+            idx, w_mps, offs, mode="sum", scale_grad_by_freq=True)
+        out[0].sum().backward()
+        expected = torch.zeros(8, 3, dtype=torch.bfloat16)
+        expected[5] = torch.tensor(1.0, dtype=torch.bfloat16) / n
+        self.assertEqual(w_mps.grad.cpu(), expected)
+
     def test_gather_out_of_bounds(self, device):
         with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
             torch.gather(torch.zeros(3, 4, device=device), 1, torch.tensor([[4]], device=device))

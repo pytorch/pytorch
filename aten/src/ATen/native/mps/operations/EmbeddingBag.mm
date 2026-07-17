@@ -17,9 +17,9 @@
 #include <ATen/ops/_embedding_bag_forward_only_native.h>
 #include <ATen/ops/_embedding_bag_native.h>
 #include <ATen/ops/_embedding_bag_per_sample_weights_backward_native.h>
+#include <ATen/ops/bincount.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/full.h>
-#include <ATen/ops/ones_like.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -256,10 +256,10 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
   });
 
   if (scale_grad_by_freq) {
-    // Match CPU/CUDA: divide each row's gradient by its index's frequency.
-    auto counts = at::zeros({num_weights}, output_grad.options());
-    counts.index_add_(0, indices, at::ones_like(indices, output_grad.options()));
-    weight_grad.div_(counts.clamp_min(1).unsqueeze(1));
+    // Match CPU/CUDA: divide each row's gradient by its index's frequency,
+    // counted in integer math so half/bfloat gradients get an exact divisor.
+    auto counts = at::bincount(indices, {}, num_weights).clamp_min_(1).to(output_grad.scalar_type());
+    weight_grad.div_(counts.unsqueeze(1));
   }
 
   return std::move(weight_grad);
