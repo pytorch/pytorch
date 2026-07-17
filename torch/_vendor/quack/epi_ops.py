@@ -1141,18 +1141,91 @@ class VecReduce(EpiOp):
         return result
 
 
+class _GroupedLocalReduceParams(NamedTuple):
+    tensor: object
+    combine_fn: object
+    finalize_fn: object
+    feeds_main: bool
+
+
+class _GroupedLocalReduceFeedState(NamedTuple):
+    lane_layout_MN: object
+    local_reduce: object | None
+
+
+@cute.jit
+def grouped_rowvec_reduce_value(gemm, tRS_rInput, row_state, combine_fn, finalize_fn):
+    """Return same-warp grouped-M reductions broadcast to every row lane.
+
+    Feed-main has no cross-warp replay phase, so ``group`` must fit within the
+    current lane-layout M extent; cross-warp M stitching is only implemented for
+    compressed aux stores.
+    """
+    result = None
+    if const_expr(row_state is not None):
+        group = const_expr(gemm.local_reduce_group)
+        lane_layout_MN = row_state.lane_layout_MN
+        lanes_in_M = cute.size(lane_layout_MN, mode=[0])
+        lanes_in_N = cute.size(lane_layout_MN, mode=[1])
+        assert group <= lanes_in_M
+        assert lanes_in_M % group == 0
+        if const_expr(lanes_in_N > 1):
+            assert lane_layout_MN.stride[1] == 1
+        result = cute.make_rmem_tensor_like(tRS_rInput, tRS_rInput.element_type)
+        cute.autovec_copy(tRS_rInput, result)
+        result_flt = cute.filter_zeros(result)
+        if const_expr(group > 1):
+            for i in cutlass.range(cute.size(result_flt), unroll_full=True):
+                reduction_rows = group // 2
+                while reduction_rows > 0:
+                    result_flt[i] = combine_fn(
+                        result_flt[i],
+                        cute.arch.shuffle_sync_bfly(
+                            result_flt[i],
+                            offset=cute.crd2idx((reduction_rows, 0), lane_layout_MN),
+                        ),
+                    )
+                    reduction_rows = reduction_rows // 2
+        for i in cutlass.range(cute.size(result_flt), unroll_full=True):
+            result_flt[i] = finalize_fn(result_flt[i])
+    return result
+
+
 class GroupedLocalReduce(VecReduce):
-    """Store generated grouped local-reduce values into a compressed aux output."""
+    """Store or broadcast generated grouped local-reduce values."""
 
     dim = 0
     epi_m_major_preference = -1
 
+    def smem_bytes(self, arg_tensor, cta_tile_shape_mnk, epi_tile, warp_shape_mnk=None):
+        return EpiSmemBytes()
+
+    def smem_struct_field(self, gemm, params):
+        group = gemm.local_reduce_group
+        axis = gemm.local_reduce_axis
+        smem_warps = max(gemm.epi_smem_warp_shape_mnk()[0] - 1, 0)
+        if axis == 0 and group > 32 and smem_warps > 0:
+            size = gemm.cta_tile_shape_mnk[1] * smem_warps
+            return (f"s_{self.name}", cute.struct.Align[cute.struct.MemRange[Float32, size], 16])
+        return None
+
+    def get_smem_tensor(self, gemm, params, storage_epi):
+        group = gemm.local_reduce_group
+        axis = gemm.local_reduce_axis
+        smem_warps = max(gemm.epi_smem_warp_shape_mnk()[0] - 1, 0)
+        if axis == 0 and group > 32 and smem_warps > 0:
+            return getattr(storage_epi, f"s_{self.name}").get_tensor(
+                cute.make_layout((gemm.cta_tile_shape_mnk[1], smem_warps))
+            )
+        return None
+
     def to_params(self, gemm, args):
         return {
-            self.name: (
+            self.name: _GroupedLocalReduceParams(
                 getattr(args, self.name),
                 args.local_reduce_combine_fn,
                 args.local_reduce_finalize_fn,
+                args.local_reduce_feeds_main,
             )
         }
 
@@ -1166,17 +1239,42 @@ class GroupedLocalReduce(VecReduce):
             tile = tile_N if const_expr(axis == 1) else tile_M
             assert group != 0 and group <= tile
             assert tile % group == 0
-            vec_mma_layout = cute.make_layout((ctx.tile_M, ctx.tile_N))
-            tDrReduce_layout = ctx.partition_for_epilogue_fn(
-                cute.make_rmem_tensor(vec_mma_layout, Float32)
-            ).layout
-            result = (cute.make_rmem_tensor(tDrReduce_layout, Float32), smem_tensor)
+            if const_expr(param.feeds_main):
+                assert axis == 0
+                tiled_copy = ctx.tiled_copy_t2r if ctx.tiled_copy_t2r is not None else ctx.tiled_copy_r2s
+                lane_layout_MN, _ = _get_lane_warp_layouts(
+                    tiled_copy, ctx.tiled_copy_t2r is None
+                )
+                local_reduce = None
+                if const_expr(param.tensor is not None):
+                    vec_mma_layout = cute.make_layout((ctx.tile_M, ctx.tile_N))
+                    tDrReduce_layout = ctx.partition_for_epilogue_fn(
+                        cute.make_rmem_tensor(vec_mma_layout, Float32)
+                    ).layout
+                    local_reduce = cute.make_rmem_tensor(tDrReduce_layout, Float32)
+                result = _GroupedLocalReduceFeedState(lane_layout_MN, local_reduce)
+            else:
+                vec_mma_layout = cute.make_layout((ctx.tile_M, ctx.tile_N))
+                tDrReduce_layout = ctx.partition_for_epilogue_fn(
+                    cute.make_rmem_tensor(vec_mma_layout, Float32)
+                ).layout
+                result = (cute.make_rmem_tensor(tDrReduce_layout, Float32), smem_tensor)
         return result
 
     @cute.jit
     def begin_loop(self, gemm, state, epi_coord):
         result = None
         if const_expr(state is not None):
+            if const_expr(gemm.local_reduce_feeds_main):
+                if const_expr(state.local_reduce is None):
+                    return state
+                tDrReduce_cur = state.local_reduce[
+                    None, None, None, epi_coord[0], epi_coord[1]
+                ]
+                cute.filter_zeros(tDrReduce_cur).fill(0.0)
+                return _GroupedLocalReduceFeedState(
+                    state.lane_layout_MN, tDrReduce_cur
+                )
             tDrReduce = state[0]
             result = tDrReduce[None, None, None, epi_coord[0], epi_coord[1]]
             cute.filter_zeros(result).fill(0.0)
@@ -1197,12 +1295,14 @@ class GroupedLocalReduce(VecReduce):
         tidx,
     ):
         if const_expr(param is not None):
-            param_tensor = param[0]
-            combine_fn = const_expr(param[1])
-            finalize_fn = const_expr(param[2])
+            if const_expr(param.feeds_main and param.tensor is None):
+                return
+            param_tensor = param.tensor
+            combine_fn = const_expr(param.combine_fn)
+            finalize_fn = const_expr(param.finalize_fn)
             group = const_expr(gemm.local_reduce_group)
             axis = const_expr(gemm.local_reduce_axis)
-            tDrReduce = state[0]
+            tDrReduce = state.local_reduce if const_expr(param.feeds_main) else state[0]
             tDrReduce_cur = tDrReduce[None, None, None, epi_coord[0], epi_coord[1]]
             tiled_copy = tiled_copy_t2r if tiled_copy_t2r is not None else tiled_copy_r2s
             partition_for_epilogue_fn = partial(
@@ -1219,19 +1319,88 @@ class GroupedLocalReduce(VecReduce):
             tDcD_cur = tDcD[None, None, None, epi_coord[0], epi_coord[1]]
             tDrReduce_flt = cute.filter_zeros(tDrReduce_cur)
             tDcD_flt = cute.filter_zeros(tDcD_cur)
+            batch_idx = tile_coord_mnkl[3]
+            limit_m = min(
+                varlen_manager.len_m(batch_idx) - tile_coord_mnkl[0] * tile_M,
+                tile_M,
+            )
+            limit_n = min(cute.size(param_tensor, mode=[2]) - tile_coord_mnkl[1] * tile_N, tile_N)
+            if const_expr(axis == 1):
+                local_fragment_n = const_expr(cute.size(tDrReduce_cur.shape, mode=[0]))
+            if const_expr(axis == 1 and group > local_fragment_n):
+                assert combine_fn is not None
+                assert finalize_fn is not None
+                assert group % local_fragment_n == 0
+                fragments_per_group = const_expr(group // local_fragment_n)
+                if const_expr((epi_coord[1] + 1) % fragments_per_group == 0):
+                    group_start_epi_n = const_expr(epi_coord[1] + 1 - fragments_per_group)
+                    limit_groups = (
+                        param_tensor.shape[2]
+                        if not varlen_manager.varlen_m
+                        else param_tensor.shape[1]
+                    )
+                    if const_expr(not varlen_manager.varlen_m):
+                        mReduce = param_tensor[batch_idx, None, None]
+                    else:
+                        mReduce = cute.domain_offset(
+                            (varlen_manager.params.cu_seqlens_m[batch_idx], None),
+                            param_tensor[None, None],
+                        )
+                    gReduce = cute.local_tile(
+                        mReduce,
+                        (tile_M, groups_per_cta),
+                        (tile_coord_mnkl[0], tile_coord_mnkl[1]),
+                    )
+                    tDrReduce_first = tDrReduce[
+                        None, None, None, epi_coord[0], group_start_epi_n
+                    ]
+                    tDrReduce_first_flt = cute.filter_zeros(tDrReduce_first)
+                    for i in cutlass.range(cute.size(tDrReduce_flt), unroll_full=True):
+                        row_idx = tDcD_flt[i][0]
+                        n_idx = tDcD_flt[i][1]
+                        group_idx = n_idx // group
+                        global_group_idx = tile_coord_mnkl[1] * groups_per_cta + group_idx
+                        group_value = tDrReduce_first_flt[i]
+                        for fragment_idx in cutlass.range_constexpr(1, fragments_per_group):
+                            tDrReduce_fragment = tDrReduce[
+                                None,
+                                None,
+                                None,
+                                epi_coord[0],
+                                group_start_epi_n + fragment_idx,
+                            ]
+                            tDrReduce_fragment_flt = cute.filter_zeros(tDrReduce_fragment)
+                            group_value = combine_fn(group_value, tDrReduce_fragment_flt[i])
+                        group_value = finalize_fn(group_value)
+                        if const_expr(param_tensor.element_type != Float32):
+                            group_value = group_value.to(param_tensor.element_type)
+                        if (
+                            n_idx % group == group - local_fragment_n
+                            and row_idx < limit_m
+                            and global_group_idx < limit_groups
+                        ):
+                            gReduce[row_idx, group_idx] = group_value
+                return
             if const_expr(axis == 0):
                 assert combine_fn is not None
                 assert finalize_fn is not None
-                lane_layout_MN, _ = _get_lane_warp_layouts(tiled_copy, tiled_copy_t2r is None)
+                lane_layout_MN, warp_layout_MN = _get_lane_warp_layouts(
+                    tiled_copy, tiled_copy_t2r is None
+                )
                 lanes_in_M = cute.size(lane_layout_MN, mode=[0])
                 lanes_in_N = cute.size(lane_layout_MN, mode=[1])
-                assert group <= lanes_in_M
-                assert lanes_in_M % group == 0
+                assert group <= tile_M
+                if const_expr(group <= lanes_in_M):
+                    assert lanes_in_M % group == 0
+                    reduction_group = const_expr(group)
+                else:
+                    assert group % lanes_in_M == 0
+                    reduction_group = const_expr(lanes_in_M)
                 if const_expr(lanes_in_N > 1):
                     assert lane_layout_MN.stride[1] == 1
-                if const_expr(group > 1):
+                if const_expr(reduction_group > 1):
                     for i in cutlass.range(cute.size(tDrReduce_flt), unroll_full=True):
-                        reduction_rows = group // 2
+                        reduction_rows = reduction_group // 2
                         while reduction_rows > 0:
                             tDrReduce_flt[i] = combine_fn(
                                 tDrReduce_flt[i],
@@ -1241,12 +1410,67 @@ class GroupedLocalReduce(VecReduce):
                                 ),
                             )
                             reduction_rows = reduction_rows // 2
-            batch_idx = tile_coord_mnkl[3]
-            limit_m = min(
-                varlen_manager.len_m(batch_idx) - tile_coord_mnkl[0] * tile_M,
-                tile_M,
-            )
-            limit_n = min(cute.size(param_tensor, mode=[2]) - tile_coord_mnkl[1] * tile_N, tile_N)
+                if const_expr(group > lanes_in_M):
+                    sReduce = state[1]
+                    assert sReduce is not None
+                    warp_M = warp_layout_MN[0]
+                    warps_in_M = const_expr(cute.size(warp_M))
+                    group_warps = const_expr(group // lanes_in_M)
+                    assert group_warps <= warps_in_M
+                    assert groups_per_cta * group_warps <= warps_in_M
+                    warp_idx = cute.arch.make_warp_uniform(tidx // cute.arch.WARP_SIZE)
+                    warp_m_idx = warp_layout_MN.get_hier_coord(warp_idx)[0]
+                    limit_groups = (
+                        param_tensor.shape[1]
+                        if not varlen_manager.varlen_m
+                        else param_tensor.shape[0]
+                    )
+                    if const_expr(not varlen_manager.varlen_m):
+                        mReduce = param_tensor[batch_idx, None, None]
+                    else:
+                        mReduce = cute.domain_offset(
+                            (varlen_manager.params.cu_seqlens_m[batch_idx], None),
+                            param_tensor[None, None],
+                        )
+                    gReduce = cute.local_tile(
+                        mReduce,
+                        (groups_per_cta, tile_N),
+                        (tile_coord_mnkl[0], tile_coord_mnkl[1]),
+                    )
+                    for i in cutlass.range(cute.size(tDrReduce_flt), unroll_full=True):
+                        row_idx = tDcD_flt[i][0]
+                        n_idx = tDcD_flt[i][1]
+                        group_idx = row_idx // group
+                        group_warp_start = group_idx * group_warps
+                        group_warp_idx = warp_m_idx - group_warp_start
+                        smem_warp_idx = warp_m_idx - group_idx - 1
+                        if (
+                            row_idx % lanes_in_M == 0
+                            and group_warp_idx > 0
+                            and group_warp_idx < group_warps
+                        ):
+                            sReduce[n_idx, smem_warp_idx] = tDrReduce_flt[i]
+                    gemm.epilogue_barrier.arrive_and_wait()
+                    for i in cutlass.range(cute.size(tDrReduce_flt), unroll_full=True):
+                        row_idx = tDcD_flt[i][0]
+                        n_idx = tDcD_flt[i][1]
+                        group_idx = row_idx // group
+                        group_warp_start = group_idx * group_warps
+                        global_group_idx = tile_coord_mnkl[0] * groups_per_cta + group_idx
+                        group_value = tDrReduce_flt[i]
+                        if row_idx % group == 0 and warp_m_idx == group_warp_start:
+                            for warp_offset in cutlass.range_constexpr(1, group_warps):
+                                smem_warp_idx = group_warp_start + warp_offset - group_idx - 1
+                                group_value = combine_fn(
+                                    group_value, sReduce[n_idx, smem_warp_idx]
+                                )
+                            group_value = finalize_fn(group_value)
+                            if const_expr(param_tensor.element_type != Float32):
+                                group_value = group_value.to(param_tensor.element_type)
+                            if n_idx < limit_n and global_group_idx < limit_groups:
+                                gReduce[group_idx, n_idx] = group_value
+                    gemm.epilogue_barrier.arrive_and_wait()
+                    return
             if const_expr(axis == 1):
                 limit_groups = param_tensor.shape[2] if not varlen_manager.varlen_m else param_tensor.shape[1]
                 tile_shape = (tile_M, groups_per_cta)
@@ -1337,7 +1561,7 @@ class GroupedLocalReduce(VecReduce):
                     else tile_coord_mnkl[0] * groups_per_cta + group_idx
                 )
                 group_value = tDrReduce_flt[i]
-                if const_expr(axis == 0):
+                if const_expr(axis == 0 or finalize_fn is not None):
                     group_value = finalize_fn(group_value)
                 if const_expr(param_tensor.element_type != Float32):
                     group_value = group_value.to(param_tensor.element_type)

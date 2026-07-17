@@ -2,10 +2,10 @@
 """Bitwise parity tests for ``torch._inductor.config.numerics == "strict"``.
 
 Strict mode makes Inductor emit a fixed, layout-independent reduction order (Triton
-``INNER_TREE``, plus a materialized-contiguous shuffle for strided reductions) so that
-``torch.compile`` matches eager bitwise. ``eager`` here is the CuTeDSL strict reduction
-override (the PR stacked below), which reads the same ``torch._inductor.config.numerics``
-flag; importing it registers the eager ``torch.sum`` override.
+``INNER_TREE``, tree-then-linear accumulation, shared R0_BLOCK/split + persistent/loop
+thresholds) so that ``torch.compile`` matches EAGER (ATen) bit-for-bit. In this env ATen's
+reduction is itself INNER_TREE (tree-then-linear), so ``numerics`` only affects the Inductor
+codegen -- eager ``torch.sum`` is the reference and is unaffected by the flag.
 
 Add a bitwise op by adding one entry to ``STRICT_OPS`` -- it inherits the whole matrix.
 """
@@ -24,21 +24,14 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import has_triton_reduction_ordering
 
 
-# torch._native registers the eager CuTeDSL strict `sum` override at import (the PR stacked
-# below, ops/reductions_strict), so torch.sum routes to it under numerics="strict" -- no manual
-# import needed here. Skip the suite if that override / the CuTeDSL runtime isn't available.
-try:
-    _HAS_EAGER_STRICT = torch._native.ops.reductions_strict.is_available()
-except Exception:
-    _HAS_EAGER_STRICT = False
-
 # op name -> fn(x, dim). Extend with mean/prod/amax/...
 STRICT_OPS = {
     "sum": lambda z, d: torch.sum(z, d) if d is not None else torch.sum(z),
 }
 
-# (name, shape, dim): geometry coverage -- row (contiguous), column (strided), reduce-all,
-# 3D mid/outer/multi-dim, 4D; sizes span persistent / looped / split reduction structures.
+# (name, shape, dim): inner (contiguous) reduced dim only -- 2D row reductions (dim=-1) and 1D;
+# sizes span persistent / looped / split reduction structures, pow2 + non-pow2. Column/strided,
+# full-reduce, and multi-dim reductions are out of scope (eager runs classic ATen there).
 CASES = [
     ("row_persistent", (8192, 256), 1),
     ("row_nonpow2", (8192, 300), 1),
@@ -47,13 +40,9 @@ CASES = [
     ("row_split", (8, 65536), 1),
     ("row_split_wide", (64, 262144), 1),
     ("row_split_manyout", (200, 262144), 1),
-    ("col", (65536, 8), 0),
-    ("col_nonpow2", (777, 512), 0),
-    ("reduce_all", (512, 512), None),
-    ("d3_mid", (16, 512, 32), 1),
-    ("d3_outer", (512, 16, 32), 0),
-    ("d3_multidim", (16, 128, 64), (1, 2)),
-    ("d4_mid", (8, 128, 16, 8), 1),
+    ("d1", (65536,), 0),
+    ("d1_big", (1048576,), 0),
+    ("d1_nonpow2", (5000,), 0),
 ]
 
 DTYPES = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
@@ -62,9 +51,8 @@ AUTOTUNE_CASES = [c for c in CASES if c[0] in ("row_persistent", "row_split")]
 
 
 @unittest.skipUnless(
-    has_triton_reduction_ordering() and _HAS_EAGER_STRICT,
-    "requires a Triton build with tl.ReductionOrdering and the eager CuTeDSL strict "
-    "reduction (PR stacked below)",
+    has_triton_reduction_ordering(),
+    "requires a Triton build with tl.ReductionOrdering",
 )
 @config.patch({"force_disable_caches": True})
 @instantiate_parametrized_tests
@@ -78,11 +66,11 @@ class StrictNumericsTest(TestCase):
         fn = STRICT_OPS[op]
         x = torch.randn(*shape, device=GPU_TYPE, dtype=dtype)
         f = lambda z: fn(z, dim)
+        eager = f(x)  # eager ATen (INNER_TREE here); numerics only affects Inductor codegen
         with config.patch({"numerics": "strict", **cfg}):
-            eager = f(x)  # routes to the eager CuTeDSL strict override
             torch._dynamo.reset()
             result, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
-        self.assertTrue(torch.equal(eager, result))  # bitwise-equal to eager
+        self.assertTrue(torch.equal(eager, result))  # bitwise-equal to eager ATen
         self.assertIn(  # strict emitted the fixed order
             "reduction_ordering=tl.constexpr(tl.ReductionOrdering.INNER_TREE)", code
         )
@@ -100,13 +88,12 @@ class StrictNumericsTest(TestCase):
         name_fn=lambda c: c[0],
     )
     def test_sum_keepdim(self, case):
-        # keepdim=True must give the CORRECT (un-permuted) shape AND bitwise-match eager --
-        # the strided make-contiguous permutes reduced dims, so the result is un-permuted back.
+        # keepdim=True must give the CORRECT shape AND bitwise-match eager ATen.
         _, shape, dim = case
         x = torch.randn(*shape, device=GPU_TYPE, dtype=torch.float32)
         f = lambda z: torch.sum(z, dim, keepdim=True)
+        eager = f(x)
         with config.patch({"numerics": "strict"}):
-            eager = f(x)
             torch._dynamo.reset()
             result, _ = run_and_get_code(torch.compile(f, fullgraph=True), x)
         self.assertEqual(tuple(result.shape), tuple(eager.shape))
@@ -128,11 +115,10 @@ class StrictNumericsTest(TestCase):
         self._check("sum", shape, dim, torch.float32, **mode)
 
     def test_default_drifts_from_eager(self):
-        # negative control: without strict, Inductor drifts from eager (the drift strict fixes).
+        # negative control: without strict, Inductor drifts from eager ATen (the drift strict fixes).
         x = torch.randn(1024, 1024, device=GPU_TYPE)
         fn = lambda z: torch.sum(z, 0)
-        with config.patch({"numerics": "strict"}):
-            eager = fn(x)
+        eager = fn(x)
         torch._dynamo.reset()
         with config.patch({"numerics": "default"}):
             default, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)

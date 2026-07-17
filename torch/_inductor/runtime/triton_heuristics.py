@@ -4456,12 +4456,15 @@ def _reduction_configs(
 
 
 def _force_strict_rblock(configs: list[Config], size_hints: dict[str, int]) -> list[Config]:
-    # Strict numerics: pin R0_BLOCK to eager's strict_rblock so eager and Inductor tile a
-    # (looped) reduction identically -> same reduction order -> bitwise. Persistent configs
-    # (no R0_BLOCK kwarg -- they reduce the whole axis) are left unchanged.
-    from torch._strict_config import strict_rblock
+    # Strict numerics: pin R0_BLOCK to eager's per-batch tile (batch_total_elements) so eager
+    # and Inductor tile a (looped) reduction identically -> same reduction order -> bitwise.
+    # Persistent configs (no R0_BLOCK kwarg -- they reduce the whole axis) are left unchanged.
+    # Planning comes from the shared, runtime-free inner_tree_plan (exposed by the eager PR).
+    from torch._native.ops.sum.inner_tree_plan import compute_inner_tree_params, vec_size
 
-    r0 = strict_rblock(get_total_reduction_numel(size_hints))
+    r0 = compute_inner_tree_params(
+        get_total_reduction_numel(size_hints), 1, vec_size(4)
+    ).batch_total_elements
     out: list[Config] = []
     seen: set = set()
     for c in configs:

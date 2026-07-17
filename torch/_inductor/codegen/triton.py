@@ -160,9 +160,9 @@ INNER_REDUCTION_RATIO_THRESHOLD = 8
 
 
 def get_triton_reduction_function(reduction_type):
-    use_helper = reduction_type in ("any", "max", "min", "prod")
+    use_helper = reduction_type in ("any", "max", "min", "prod", "fmax")
     module = "triton_helpers" if use_helper else "tl"
-    if reduction_type in ("max", "min"):
+    if reduction_type in ("max", "min", "fmax"):
         return f"{module}.{reduction_type}2"
     else:
         return f"{module}.{reduction_type}"
@@ -633,7 +633,9 @@ class BlockDescriptorOptions:
 
     def has_rindex(self) -> bool:
         return any(
-            TritonSymbols.has_reduction_index_symbol(V.kernel, expr)
+            TritonSymbols.has_reduction_index_symbol(
+                cast("TritonKernel", V.kernel), expr
+            )
             for expr in self.block_shape
         )
 
@@ -1254,7 +1256,9 @@ class TritonCSEVariable(CSEVariable):
                 # however, when index vars are used to compute indices for indirect reads
                 # those reads should subsequently be masked,
                 if (
-                    mask_name := TritonSymbols.mask_name_for_symbol(V.kernel, arg)
+                    mask_name := TritonSymbols.mask_name_for_symbol(
+                        cast("TritonKernel", V.kernel), arg
+                    )
                 ) is not None:
                     self.mask_vars.add(mask_name)
 
@@ -1591,6 +1595,11 @@ class TritonOverrides(OpOverrides):
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
         return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def fmaximum(a, b):
+        return f"tl.maximum({a}, {b})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -2535,7 +2544,15 @@ class TritonKernelOverrides(TritonOverrides):
         # operator to save the branching cost.
         for node in nodes:
             for arg in node.args:
-                if arg.target != "load" or should_unwrap_unspec_arg(arg.args[1]):
+                if (
+                    arg.target != "load"
+                    or should_unwrap_unspec_arg(arg.args[1])
+                    # A load whose producer is fused into this kernel is
+                    # served from the CSE store cache and emits no tl.load,
+                    # so the masked-load `other` would be silently dropped;
+                    # fall back to an explicit tl.where.
+                    or arg.args[1] in V.kernel.cse.store_cache
+                ):
                     need_where = True
                     break
 
@@ -4485,6 +4502,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def matching_dep(dep):
             if prev_node is None:
                 raise AssertionError("prev_node must not be None")
+            if current_node is None:
+                raise AssertionError("current_node must not be None")
             prev_deps = prev_node.read_writes.writes
             if consider_reads:
                 prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
@@ -5036,6 +5055,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix[0]
 
+        # Strict "tree-then-linear": tree-reduce (INNER_TREE) each R0_BLOCK chunk, then
+        # LINEARLY accumulate the per-chunk partials across loop iterations. This matches
+        # eager #182986 / INNER_TREE-ATen (tree-then-linear), whereas Inductor's default is
+        # linear-accumulate-into-[XBLOCK,RBLOCK]-then-one-tree (linear-then-tree).
+        strict_sum_loop = (
+            config.numerics == "strict"
+            and reduction_type == "sum"
+            and not self.persistent_reduction
+            and not self.cooperative_reduction
+            and has_triton_reduction_ordering()
+        )
+
         # When we do native matmtul codegen,
         # we don't want to keep the R0_BLOCK/R1_BLOCK in the accumulator.
         # so instead of naively calling dense_size_str(), we filter out
@@ -5402,6 +5433,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.body.writeline(
                         f"{accumulator} = tl.full({dense_size_str}, {default}, {acc_type})"
                     )
+                elif strict_sum_loop:
+                    # accumulator holds the running per-chunk-tree partial -> REDUCED shape
+                    # (reduction dims -> 1), not the full [XBLOCK, RBLOCK] tile.
+                    _nred = self.num_reduction_dims
+                    _red_list = self.dense_size_list()[:-_nred] + ["1"] * _nred
+                    accumulator.shape = tuple(_red_list)
+                    self.body.writeline(
+                        f"{accumulator} = tl.full([{', '.join(_red_list)}], {default}, {acc_type})"
+                    )
                 else:
                     self.body.writeline(
                         f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
@@ -5499,6 +5539,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     dim,
                     dtype,
                 )
+            elif strict_sum_loop:
+                # tree-then-linear: mask the tail lanes to 0, tree-reduce this chunk with
+                # INNER_TREE (via final_reduction), then linearly add the partial. No trailing
+                # tree after the loop -- the linear accumulate IS the cross-chunk combine.
+                _zero = constant_repr(
+                    ir.Reduction.default_accumulator(reduction_type, src_dtype)
+                )
+                _masked = self.cse.generate(
+                    self.compute,
+                    where_cond(value, _zero),
+                    dtype=value.dtype,
+                    shape=value.shape,
+                )
+                _chunk_str, _chunk_dtype, _chunk_shape = final_reduction(
+                    self.compute, _masked, None
+                )
+                _chunk = self.cse.generate(
+                    self.compute, _chunk_str, dtype=_chunk_dtype, shape=_chunk_shape
+                )
+                self.compute.writeline(f"{accumulator} = {accumulator} + {_chunk}")
+                self.post_loop_combine.writeline(f"{result_var} = {accumulator}")
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 updated = combine_fn(accumulator, value)
