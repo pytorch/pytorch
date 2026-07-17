@@ -31,6 +31,7 @@ from _common import download, write_env_exports
 
 # Pin numpy by Python version. Matches the legacy table in setup_build.bat.
 NUMPY_PINS: list[tuple[str, str]] = [
+    ("cp315", "2.5.1"),
     ("cp314", "2.3.2"),
     ("cp313", "2.1.2"),
 ]
