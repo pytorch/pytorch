@@ -5987,6 +5987,41 @@ def _is_safe_to_split() -> bool:
     return _get_default_group().bound_device_id is not None
 
 
+def _torchcomms_new_group_can_split(backend: str | Backend | None) -> bool:
+    if backend is None:
+        return True
+
+    default_pg = _get_default_group()
+    parent_backend, _ = _world.pg_map[default_pg]
+    requested_backend = str(backend).lower()
+    parent_backend_str = str(parent_backend).lower()
+    if requested_backend == parent_backend_str:
+        return True
+
+    parent_devices = {device.type for device in default_pg._device_types}
+    try:
+        parent_device_backends = _parse_backend_string(
+            parent_backend_str,
+            available_devices=parent_devices,
+        )
+    except ValueError:
+        return False
+    if ":" not in requested_backend:
+        return requested_backend in parent_device_backends.values()
+
+    try:
+        requested_device_backends = _parse_backend_string(
+            requested_backend,
+            available_devices=parent_devices,
+        )
+    except ValueError:
+        return False
+    return all(
+        parent_device_backends.get(device_type) == requested_be
+        for device_type, requested_be in requested_device_backends.items()
+    )
+
+
 @_time_logger
 def split_group(
     parent_pg: ProcessGroup | None = None,
@@ -6304,29 +6339,22 @@ def new_group(
     same global creation order.
 
     N.B. When TorchComms is enabled (``torch.distributed.config.use_torchcomms``
-    / ``TORCH_DISTRIBUTED_USE_TORCHCOMMS=1``), this function delegates to
-    :func:`split_group` so subgroup creation goes through the TorchComms path.
-    The delegation raises ``NotImplementedError`` for arguments that
-    :func:`split_group` cannot honor (e.g. ``use_local_synchronization=True``,
-    or an explicit ``device_id`` that diverges from the default group's bound
+    / ``TORCH_DISTRIBUTED_USE_TORCHCOMMS=1``), same-backend groups delegate to
+    :func:`split_group` so subgroup creation goes through the TorchComms split
+    path. Different-backend groups are created through the normal fresh process
+    group path since splitting cannot change the parent communicator's backend.
+    Split delegation raises ``NotImplementedError`` for arguments that
+    :func:`split_group` cannot honor (e.g. ``use_local_synchronization=True`` or
+    an explicit ``device_id`` that diverges from the default group's bound
     device).
     """
     if _use_torchcomms_enabled():
         # split_group can only split the parent's existing communicator, so it
-        # cannot produce a child whose backend differs from the parent's. A
-        # "fake" subgroup of a real parent -- how DeviceMesh creates disabled /
-        # unflattened dims, with use_local_synchronization for hashed names -- is
-        # exactly that case: route it through the normal path, which builds the
-        # FakeProcessGroup directly (see ``_new_group_with_tag``). When the
-        # requested backend matches the parent (including a fake parent), split
-        # delegation is fine.
-        parent_backend, _ = _world.pg_map[_get_default_group()]
-        is_fake_subgroup = (
-            backend is not None
-            and str(backend).lower() == "fake"
-            and str(backend).lower() != str(parent_backend).lower()
-        )
-        if not is_fake_subgroup:
+        # cannot produce a child whose backend differs from the parent's. Route
+        # different-backend requests through the normal path, which creates a
+        # fresh process group and lets TorchComms instantiate the requested
+        # backend directly.
+        if _torchcomms_new_group_can_split(backend):
             return _new_group_via_split_group(
                 ranks=ranks,
                 timeout=timeout,

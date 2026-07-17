@@ -15,8 +15,7 @@ FakeProcessGroup directly and still produces a hashed name.
 These tests use a real (gloo) parent on a single CPU process: no GPU needed.
 """
 
-import os
-
+import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -24,10 +23,10 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class FakeBackendNewGroupTest(TestCase):
     def setUp(self):
-        os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-        os.environ.setdefault("MASTER_PORT", "29517")
         # Real (non-fake) parent so a fake child differs from the parent backend.
-        dist.init_process_group(backend="gloo", rank=0, world_size=1)
+        dist.init_process_group(
+            backend="gloo", rank=0, world_size=1, store=dist.HashStore()
+        )
 
     def tearDown(self):
         if dist.is_initialized():
@@ -75,6 +74,28 @@ class FakeBackendNewGroupTest(TestCase):
             self._check_fake_subgroup()
         finally:
             dist_config.use_torchcomms = prev
+
+    def test_torchcomms_new_group_split_predicate_for_same_and_different_backend(self):
+        """Different requested backend should use fresh new_group, not split."""
+
+        class _DummyDefaultGroup:
+            _device_types = [torch.device("cuda")]
+
+        dummy_default_pg = _DummyDefaultGroup()
+        orig_get_default_group = c10d._get_default_group
+        c10d._get_default_group = lambda: dummy_default_pg
+        c10d._world.pg_map[dummy_default_pg] = ("cuda:ncclx", None)
+        try:
+            self.assertTrue(c10d._torchcomms_new_group_can_split(None))
+            self.assertTrue(c10d._torchcomms_new_group_can_split("ncclx"))
+            self.assertTrue(c10d._torchcomms_new_group_can_split("cuda:ncclx"))
+
+            self.assertFalse(c10d._torchcomms_new_group_can_split("mccl"))
+            self.assertFalse(c10d._torchcomms_new_group_can_split("cuda:mccl"))
+            self.assertFalse(c10d._torchcomms_new_group_can_split("fake"))
+        finally:
+            c10d._world.pg_map.pop(dummy_default_pg, None)
+            c10d._get_default_group = orig_get_default_group
 
 
 if __name__ == "__main__":
