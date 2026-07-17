@@ -324,7 +324,12 @@ if __name__ == "__main__":
 
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_clock_rate_returns_float(self):
-        rate = torch.xpu.clock_rate()
+        try:
+            rate = torch.xpu.clock_rate()
+        except RuntimeError as e:
+            if "elevated privileges" in str(e):
+                self.skipTest("Reading GPU clock rate requires elevated privileges")
+            raise
         self.assertIsInstance(rate, float)
         # Sanity check: GPU clock rate should be in a plausible range (0–5000 MHz)
         self.assertGreaterEqual(rate, 0.0)

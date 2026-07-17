@@ -1212,7 +1212,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 "Multi-stream cpp_wrapper codegen is only supported for AOTI."
             )
         if V.graph.device_type == "xpu":
-            return True  # SYCL in-order queue handles events implicitly
+            return  # SYCL in-order queue handles events implicitly
         self._ensure_aoti_stream_helpers_emitted()
         code.writeline(
             f"_aoti_aux_stream_cache.ensure({num_streams}, this->device_idx_, stream);"
