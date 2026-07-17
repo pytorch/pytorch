@@ -257,9 +257,12 @@ __device__ inline void cmtdStore(void* address, T value) {
       if constexpr (wait_for_commit)
       {
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
-#ifdef __gfx1250__
-        asm volatile("s_wait_loadcnt(0)" ::: "memory");
+#if defined(__GFX12__)
+        asm volatile("s_wait_storecnt(0)" ::: "memory");
+#elif defined(__GFX10__) || defined(__GFX11__)
+        asm volatile("s_waitcnt_vscnt null, 0" ::: "memory");
 #else
+        // Older architectures have only 'vmcnt' counter.
         asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
 #endif
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
