@@ -20,8 +20,9 @@
 #include <unordered_set>
 #include <variant>
 
+#include <fmt/core.h>
+
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
@@ -192,6 +193,9 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
   if (!nccl_api_) {
     nccl_api_ = std::make_shared<DefaultNcclApi>();
   }
+  if (!cuda_api_) {
+    cuda_api_ = std::make_shared<DefaultCudaApi>();
+  }
 
   comm_state_ = CommState::NORMAL;
   shutdown_ = false;
@@ -214,7 +218,10 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
   size_ = newSize;
   device_ = device;
 
-  c10::cuda::CUDAGuard gpuGuard(device_);
+  CUDA_CHECK(
+      cuda_api_,
+      cuda_api_->setDevice(device_.index()),
+      fmt::format("Failed to set CUDA device to {}", device_.index()));
 
   // Exchange the ncclUniqueId through the uuid-namespaced store with a fixed
   // key. NCCLBootstrap is not reused here: its store keys embed a
