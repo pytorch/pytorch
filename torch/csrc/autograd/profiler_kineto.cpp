@@ -15,6 +15,7 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/events.h>
+#include <torch/csrc/profiler/kineto_metadata.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/orchestration/observer.h>
 #include <torch/csrc/profiler/perf.h>
@@ -68,19 +69,11 @@ inline int64_t getTimeNs() {
 using torch::profiler::impl::ActiveProfilerType;
 using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
-using torch::profiler::impl::get_record_concrete_inputs_enabled;
-using torch::profiler::impl::ivalueListToStr;
-using torch::profiler::impl::ivalueToStr;
-using torch::profiler::impl::op_input_t;
+using torch::profiler::impl::parseArgData;
 using torch::profiler::impl::ProfilerStateBase;
 using torch::profiler::impl::PyExtraFieldsBase;
 using torch::profiler::impl::Result;
 using torch::profiler::impl::shape;
-using torch::profiler::impl::shapesToStr;
-using torch::profiler::impl::stacksToStr;
-using torch::profiler::impl::strListToStr;
-using torch::profiler::impl::TensorMetadata;
-using torch::profiler::impl::variantShapesToStr;
 
 // Helper function to check if ProfilerState is a Kineto-compatible state
 inline bool isKinetoCompatibleState(ProfilerState state) {
@@ -111,344 +104,6 @@ inline bool hasRequestedDeviceActivity(
       activities.contains(ActivityType::MTIA) ||
       activities.contains(ActivityType::HPU) ||
       activities.contains(ActivityType::PrivateUse1);
-}
-
-struct OpArgData {
-  bool hasData;
-  std::vector<shape> shapes;
-  std::vector<std::string> dtypes;
-  std::vector<c10::IValue> concreteInputs;
-  std::vector<std::vector<int64_t>> shapesForKinetoEvent;
-  std::vector<shape> strides;
-};
-
-auto parseArgData(
-    const std::vector<op_input_t>& input_shapes,
-    const std::vector<op_input_t>& concreteInputs) {
-  if (input_shapes.empty()) {
-    return OpArgData{.hasData = false};
-  }
-
-  std::vector<shape> shapes(input_shapes.size());
-  std::vector<shape> strides(input_shapes.size());
-  std::vector<std::vector<int64_t>> shapesForKinetoEvent(input_shapes.size());
-
-  std::vector<std::string> dtypes(input_shapes.size());
-  std::vector<c10::IValue> concrete_inputs_list;
-
-  for (const auto& i : c10::irange(input_shapes.size())) {
-    std::visit(
-        c10::overloaded(
-            [&](const TensorMetadata& t) {
-              shapes[i] = t.sizes_;
-              shapesForKinetoEvent[i] = t.sizes_;
-              dtypes[i] = std::string(scalarTypeToTypeMeta(t.dtype_).name());
-              strides[i] = t.strides_;
-            },
-            [&](const std::vector<TensorMetadata>& l) {
-              std::vector<std::vector<int64_t>> shape;
-              shape.reserve(l.size());
-              std::vector<std::vector<int64_t>> stride;
-              stride.reserve(l.size());
-              for (const auto& t : l) {
-                shape.emplace_back(t.sizes_);
-                stride.emplace_back(t.strides_);
-              }
-              shapes[i] = shape;
-              strides[i] = stride;
-              dtypes[i] = "TensorList";
-            },
-            [&](const c10::IValue&) { dtypes[i] = "Scalar"; },
-            [&](const auto&) {}),
-        input_shapes[i]);
-  }
-
-  // If we recorded concrete inputs, then parse them
-  if (input_shapes.size() == concreteInputs.size() && !concreteInputs.empty()) {
-    concrete_inputs_list.resize(input_shapes.size());
-
-    for (const auto& i : c10::irange(input_shapes.size())) {
-      std::visit(
-          c10::overloaded(
-              [&](const c10::IValue& val) { concrete_inputs_list[i] = val; },
-              [&](const auto&) {}),
-          input_shapes[i]);
-      std::visit(
-          c10::overloaded(
-              [&](const c10::IValue& val) {
-                concrete_inputs_list[i] = val;
-                dtypes[i] = "ScalarList";
-              },
-              [&](const auto&) {}),
-          concreteInputs[i]);
-    }
-  }
-
-  return OpArgData{
-      .hasData = true,
-      .shapes = shapes,
-      .dtypes = dtypes,
-      .concreteInputs = concrete_inputs_list,
-      .shapesForKinetoEvent = shapesForKinetoEvent,
-      .strides = strides};
-}
-
-struct MetadataBase {
-  /* implicit */ MetadataBase(const std::shared_ptr<Result>& result)
-      : kinetoActivity_{result->kineto_activity_} {
-    if (std::holds_alternative<ExtraFields<EventType::Kineto>>(
-            result->extra_fields_)) {
-      // In order to add metadata we have to downcast from
-      // `libkineto::ITraceActivity` to `libkineto::GenericTraceActivity`. We
-      // know that all activities provided by PyTorch are of the correct type,
-      // however Kineto profilers can (and do) add events that inherit directly
-      // from ITraceActivity. As a result, any Result which was constructed from
-      // an event that Kineto provided is unsafe to cast.
-      if (!(SOFT_ASSERT(!hasKinetoActivity()))) {
-        result->kineto_activity_ = nullptr;
-      }
-      kinetoActivity_ = result->kineto_activity_;
-    }
-  }
-
-  void addMetadata(
-      const std::string& key,
-      const std::string& value,
-      bool quote = false) {
-    if (kinetoActivity_ && !value.empty() && value != "\"\"") {
-      torch::profiler::impl::kineto::addMetadata(
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-          const_cast<torch::profiler::impl::kineto::activity_t*>(
-              kinetoActivity_),
-          key,
-          value,
-          quote);
-    }
-  }
-
-  bool hasKinetoActivity() const {
-    return kinetoActivity_ != nullptr;
-  }
-
- private:
-  const torch::profiler::impl::kineto::activity_t* kinetoActivity_{nullptr};
-};
-
-struct AddTensorboardFields : public MetadataBase {
-  AddTensorboardFields(
-      const std::shared_ptr<Result>& result,
-      KinetoEvent& kineto_event)
-      : MetadataBase(result) {
-    result->visit(*this);
-    const auto module_hierarchy = kineto_event.moduleHierarchy();
-    addMetadata("Module Hierarchy", stacksToStr(module_hierarchy.vec(), "."));
-    addMetadata("Call stack", stacksToStr(kineto_event.stack().vec(), ";"));
-
-    result->visit_if_base<PyExtraFieldsBase>([&, this](const auto& i) -> void {
-      this->addMetadata("Python id", std::to_string(i.id_));
-
-      std::optional<std::string> parent_id;
-      std::shared_ptr<Result> parent = result->parent_.lock();
-      while (parent && !parent_id.has_value()) {
-        parent->visit_if_base<PyExtraFieldsBase>(
-            [&](const auto& j) { parent_id = std::to_string(j.id_); });
-        parent = parent->parent_.lock();
-      }
-      this->addMetadata("Python parent id", parent_id.value_or("null"));
-      if (i.caller_.line_no_ > 0) {
-        this->addMetadata(
-            "CallFrom",
-            fmt::format("{}:{}", i.caller_.filename_.str(), i.caller_.line_no_),
-            /*quote=*/true);
-      }
-    });
-  }
-
-  void operator()(const ExtraFields<EventType::PyCall>& py_call) {
-    if (py_call.module_.has_value()) {
-      addMetadata("Python module id", std::to_string(py_call.module_->id_));
-    }
-  }
-
-  template <typename T>
-  void operator()(const T& /*unused*/) {}
-};
-
-struct AddGenericMetadata : public MetadataBase {
-  AddGenericMetadata(
-      std::shared_ptr<Result>& result,
-      const torch::profiler::impl::ProfilerConfig* config)
-      : MetadataBase(result), config_(config) {
-    result->visit(*this);
-    if (config->experimental_config.verbose) {
-      result->visit_if_base<PyExtraFieldsBase>(
-          [&, this](const auto& i) -> void {
-            this->addMetadata("Python thread", std::to_string(i.python_tid_));
-          });
-    }
-  }
-
-  void operator()(ExtraFields<EventType::TorchOp>& op_event) {
-    const auto arg_data =
-        parseArgData(op_event.inputs_, op_event.concrete_inputs_);
-
-    if (arg_data.hasData) {
-      if (get_record_concrete_inputs_enabled()) {
-        addMetadata("Input Dims", variantShapesToStr(arg_data.shapes));
-      } else {
-        addMetadata("Input Dims", shapesToStr(arg_data.shapesForKinetoEvent));
-      }
-      addMetadata("Input Strides", variantShapesToStr(arg_data.strides));
-      addMetadata("Input type", strListToStr(arg_data.dtypes));
-      if (!arg_data.concreteInputs.empty()) {
-        addMetadata(
-            "Concrete Inputs", ivalueListToStr(arg_data.concreteInputs));
-      }
-    }
-
-    // Add metadata for kwinputs if exist
-    for (const auto& [key, val] : op_event.kwinputs_) {
-      if (key == "stream" && !val.isInt()) {
-        LOG(WARNING) << "Inputted stream is not an int for op: "
-                     << op_event.name_ << " skipping";
-        continue;
-      }
-
-      // Until needed, let's limit the kwargs to only ints, doubles, strings,
-      // bools, and list of strings
-      bool isValidType =
-          val.isInt() || val.isDouble() || val.isString() || val.isBool();
-      bool isStringList = false;
-
-      if (!isValidType && val.isList()) {
-        // Check if it's a list of strings
-        auto list = val.toListRef();
-        isStringList = std::ranges::all_of(
-            list, [](const c10::IValue& item) { return item.isString(); });
-      }
-
-      if (!isValidType && !isStringList) {
-        LOG(WARNING)
-            << "Inputted kwarg: " << key
-            << " is not an int, double, string, bool, or list of strings for op: "
-            << op_event.name_ << " skipping";
-        continue;
-      }
-
-      if (isStringList) {
-        // For list of strings, use ivalueListToStr
-        auto list = val.toListRef();
-        std::vector<c10::IValue> stringList(list.begin(), list.end());
-        addMetadata(key, ivalueListToStr(stringList));
-      } else {
-        bool isString = val.isString();
-        addMetadata(key, ivalueToStr(val, isString));
-      }
-    }
-    // Add extra metadata if any
-    for (const auto& [key, val] : op_event.extra_meta_) {
-      addMetadata(key, val);
-    }
-
-    if (config_ && !config_->experimental_config.performance_events.empty()) {
-      auto& event_names = config_->experimental_config.performance_events;
-      for (const auto i : c10::irange(op_event.perf_event_counters_->size())) {
-        addMetadata(
-            event_names[i],
-            std::to_string((*op_event.perf_event_counters_)[i]));
-      }
-    }
-
-    // add information about an associated forward op, if a sequence number
-    // is available (e.g. during training)
-    if (op_event.sequence_number_ >= 0) {
-      addMetadata("Fwd thread id", std::to_string(op_event.forward_tid_));
-      addMetadata("Sequence number", std::to_string(op_event.sequence_number_));
-    }
-    addMetadata(
-        "Record function id", std::to_string(op_event.record_function_id_));
-  }
-
-  void operator()(ExtraFields<EventType::Backend>& backend_event) {
-    if (!backend_event.backend_.empty()) {
-      addMetadata("Backend", "\"" + backend_event.backend_ + "\"");
-    }
-  }
-
-  void operator()(const ExtraFields<EventType::Allocation>& alloc) {
-    addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
-    addMetadata("Device Id", std::to_string(alloc.device_index_));
-    addMetadata("Addr", std::to_string(reinterpret_cast<intptr_t>(alloc.ptr_)));
-    addMetadata("Bytes", std::to_string(alloc.alloc_size_));
-    addMetadata("Total Allocated", std::to_string(alloc.total_allocated_));
-    addMetadata("Total Reserved", std::to_string(alloc.total_reserved_));
-  }
-
-  void operator()(const ExtraFields<EventType::OutOfMemory>& alloc) {
-    addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
-    addMetadata("Device Id", std::to_string(alloc.device_index_));
-    addMetadata("Bytes", std::to_string(alloc.alloc_size_));
-    addMetadata("Total Allocated", std::to_string(alloc.total_allocated_));
-    addMetadata("Total Reserved", std::to_string(alloc.total_reserved_));
-  }
-
-  template <typename T>
-  void operator()(const T& /*unused*/) {}
-
- private:
-  /* To get names of the performance events */
-  const torch::profiler::impl::ProfilerConfig* config_;
-};
-
-// Lightweight metadata pass for trace_only mode: annotates Kineto activities
-// with the same metadata as materializeOpEvents but without creating
-// KinetoEvent wrappers or building eventTree.
-void addTraceMetadata(
-    std::vector<std::shared_ptr<Result>>& events,
-    const torch::profiler::impl::ProfilerConfig& config,
-    int64_t trace_end_ns) {
-  for (auto& e : events) {
-    // Unfinished events automatically have end time set to trace end time
-    if (!e->finished_) {
-      e->visit(c10::overloaded(
-          [trace_end_ns](ExtraFields<EventType::TorchOp>& i) {
-            i.end_time_ns_ = trace_end_ns;
-          },
-          [](auto&) {}));
-    }
-
-    if (!e->kineto_activity_) {
-      continue;
-    }
-    AddGenericMetadata add_generic(e, &config);
-
-    // Subset of AddTensorboardFields that doesn't require KinetoEvent or
-    // parent chain (no python_stack_, no Python parent id).
-    MetadataBase tb(e);
-    e->visit(c10::overloaded(
-        [&](const ExtraFields<EventType::TorchOp>& i) {
-          tb.addMetadata("Module Hierarchy", stacksToStr(i.jit_modules_, "."));
-          tb.addMetadata("Call stack", stacksToStr(i.jit_stack_, ";"));
-        },
-        [&](const ExtraFields<EventType::Backend>& i) {
-          tb.addMetadata("Module Hierarchy", stacksToStr(i.jit_modules_, "."));
-          tb.addMetadata("Call stack", stacksToStr(i.jit_stack_, ";"));
-        },
-        [](const auto&) {}));
-    e->visit_if_base<PyExtraFieldsBase>([&](const auto& i) {
-      tb.addMetadata("Python id", std::to_string(i.id_));
-    });
-    e->visit(c10::overloaded(
-        [&](const ExtraFields<EventType::PyCall>& py_call) {
-          if (py_call.module_.has_value()) {
-            tb.addMetadata(
-                "Python module id", std::to_string(py_call.module_->id_));
-          }
-        },
-        [](const auto&) {}));
-
-    e->kineto_activity_ = nullptr;
-  }
 }
 
 struct KinetoThreadLocalState : public ProfilerStateBase {
@@ -585,8 +240,10 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
           [](auto&) {}));
 
       kinetoEvents.emplace_back(e, config_.experimental_config.verbose);
-      AddTensorboardFields add_tb(e, kinetoEvents.back());
-      AddGenericMetadata add_generic(e, &config_);
+      KinetoEvent& kineto_event = kinetoEvents.back();
+      addTensorboardFields(
+          e, kineto_event.moduleHierarchy(), kineto_event.stack());
+      addGenericMetadata(e, &config_);
 
       // It is not safe to use the activity after post processing.
       e->kineto_activity_ = nullptr;
@@ -1554,6 +1211,8 @@ int64_t KinetoEvent::externalId() const {
       type != libkineto::ActivityType::CONCURRENT_KERNEL &&
       type != libkineto::ActivityType::CUDA_RUNTIME &&
       type != libkineto::ActivityType::CUDA_DRIVER &&
+      type != libkineto::ActivityType::XPU_RUNTIME &&
+      type != libkineto::ActivityType::XPU_DRIVER &&
       type != libkineto::ActivityType::PRIVATEUSE1_RUNTIME &&
       type != libkineto::ActivityType::PRIVATEUSE1_DRIVER) {
     return static_cast<int64_t>(result_->visit(c10::overloaded(

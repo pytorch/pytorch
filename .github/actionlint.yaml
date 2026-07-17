@@ -89,10 +89,13 @@ self-hosted-runner:
     - linux.google.tpuv7x.4
     # OSDC ARC (multi-tenant) runners
     - mt-l-x86iavx512-2-4
+    - mt-l-x86iavx512-16-128
     - mt-l-x86iavx512-48-384
     - mt-l-x86iavx512-94-768
     - mt-l-x86iamx-8-16
     - mt-rel-l-x86iavx512-8-64
     - mt-rel-l-arm64g4-16-62
+    - mt-rel-l-x86iavx512-44-340
+    - mt-rel-l-arm64g3-44-340
     - mt-l-arm64g3-61-463
     - mt-l-x86iamx-22-225-h100

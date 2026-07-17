@@ -11,7 +11,6 @@ import inspect
 import io
 import itertools
 import logging
-import math
 import operator
 import os
 import platform
@@ -21,7 +20,6 @@ import statistics
 import sys
 import sysconfig
 import tempfile
-import textwrap
 import time
 import unittest
 from collections.abc import (
@@ -35,20 +33,18 @@ from collections.abc import (
 )
 from datetime import datetime
 from functools import lru_cache
-from io import StringIO
 from typing import (
     Any,
     cast,
     Concatenate,
     Generic,
     Literal,
-    NamedTuple,
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
     TypeGuard,
 )
-from typing_extensions import dataclass_transform, ParamSpec, Self, TypeVar
+from typing_extensions import dataclass_transform, ParamSpec, TypeVar
 from unittest import mock
 
 import sympy
@@ -59,6 +55,16 @@ from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
+
+# The IndentedBuffer primitive and its line-map helpers live in torch.utils so
+# they can be shared across layers (dynamo guards, AOTAutograd codegen) without
+# importing this heavy module. Re-exported here for existing inductor call sites.
+from torch.utils._indented_buffer import (
+    DeferredLineBase,
+    IndentedBuffer,
+    LineContext,  # noqa: F401
+    ValueWithLineMap,  # noqa: F401
+)
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
 from torch.utils._triton import has_triton_package
@@ -1398,14 +1404,21 @@ def unload_xpu_triton_pyds() -> None:
                             torch._inductor.runtime.triton_heuristics.TritonCompileResult,
                         ):
                             # pyrefly: ignore [missing-attribute]
-                            result.kernel.run.mod.__del__()
+                            run = result.kernel.run
+                            if hasattr(run, "mod"):
+                                run.mod.__del__()
         del sys.modules[module_name]
 
     # unload spirv_utils.pyd
     if "triton.runtime.driver" in sys.modules:
-        mod = sys.modules["triton.runtime.driver"]
-        del type(mod.driver.active.utils).instance
-        del mod.driver.active.utils
+        driver_mod = sys.modules["triton.runtime.driver"]
+        if hasattr(driver_mod.driver.active, "utils"):
+            utils_cls = type(driver_mod.driver.active.utils)
+            if hasattr(utils_cls, "instance"):
+                del utils_cls.instance
+            elif hasattr(utils_cls, "_instance"):
+                utils_cls._instance = None
+            del driver_mod.driver.active.utils
 
     gc.collect()
 
@@ -1603,182 +1616,6 @@ def get_dtype_size(dtype: torch.dtype) -> int:
     return torch.empty((), dtype=dtype).element_size()
 
 
-class LineContext(NamedTuple):
-    context: Any
-
-
-@dataclasses.dataclass
-class ValueWithLineMap:
-    value: str
-    line_map: list[tuple[int, LineContext]]
-
-
-class IndentedBuffer:
-    tabwidth = 4
-
-    def __init__(self, initial_indent: int = 0) -> None:
-        self._lines: list[DeferredLineBase | LineContext | str] = []
-        self._indent = initial_indent
-
-    @contextlib.contextmanager
-    def set_tabwidth(self, tabwidth: int) -> Iterator[None]:
-        prev = self.tabwidth
-        try:
-            self.tabwidth = tabwidth
-            yield
-        finally:
-            self.tabwidth = prev
-
-    def getvaluewithlinemap(self) -> ValueWithLineMap:
-        buf = StringIO()
-        p = 1
-        linemap: list[tuple[int, LineContext]] = []
-        for li in self._lines:
-            if isinstance(li, DeferredLineBase):
-                line = li()
-                if line is None:
-                    continue
-            elif isinstance(li, LineContext):
-                linemap.append((p, li.context))
-                continue
-            else:
-                line = li
-            if not isinstance(line, str):
-                raise AssertionError(f"Expected str, got {type(line)}")
-            buf.write(line)
-            buf.write("\n")
-            p += 1 + line.count("\n")
-        return ValueWithLineMap(buf.getvalue(), linemap)
-
-    def getvalue(self) -> str:
-        return self.getvaluewithlinemap().value
-
-    def getrawvalue(self) -> str:
-        buf = StringIO()
-        for li in self._lines:
-            if isinstance(li, DeferredLineBase):
-                line = li()
-                if line is None:
-                    continue
-            elif isinstance(li, LineContext):
-                continue
-            else:
-                line = li
-            if not isinstance(line, str):
-                raise AssertionError(f"Expected str, got {type(line)}")
-            # backslash implies line continuation
-            if line.endswith("\\"):
-                buf.write(line[:-1])
-            else:
-                buf.write(line)
-                buf.write("\n")
-        return buf.getvalue()
-
-    def get_lines_ref(self):
-        return self._lines
-
-    def clear(self) -> None:
-        self._lines.clear()
-
-    def __bool__(self) -> bool:
-        return bool(self._lines)
-
-    def prefix(self) -> str:
-        return " " * (self._indent * self.tabwidth)
-
-    def newline(self) -> None:
-        self.writeline("\n")
-
-    def writeline(self, line: LineContext | DeferredLineBase | str) -> None:
-        if isinstance(line, LineContext):
-            self._lines.append(line)
-        elif isinstance(line, DeferredLineBase):
-            self._lines.append(line.with_prefix(self.prefix()))
-        elif line.strip():
-            self._lines.append(f"{self.prefix()}{line}")
-        else:
-            self._lines.append("")
-
-    def writeline_jit(self, line: LineContext | DeferredLineBase | str) -> None:
-        """Write to JIT buffer only. On a plain IndentedBuffer, same as writeline."""
-        self.writeline(line)
-
-    def writeline_aot(self, line: LineContext | DeferredLineBase | str) -> None:
-        """Write to AOTI buffer only. No-op on a plain IndentedBuffer."""
-
-    def splice_jit(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
-        """Splice to JIT buffer only. On a plain IndentedBuffer, same as splice."""
-        self.splice(other_code, strip=strip)
-
-    def splice_aot(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
-        """Splice to AOTI buffer only. No-op on a plain IndentedBuffer."""
-
-    def writelines(self, lines: Sequence[LineContext | DeferredLineBase | str]) -> None:
-        for line in lines:
-            self.writeline(line)
-
-    def indent(self, offset: int = 1) -> contextlib.AbstractContextManager[None]:
-        @contextlib.contextmanager
-        def ctx() -> Iterator[None]:
-            self._indent += offset
-            try:
-                yield
-            finally:
-                self._indent -= offset
-
-        return ctx()
-
-    def do_indent(self, offset: int = 1) -> None:
-        self._indent += offset
-
-    def do_unindent(self, offset: int = 1) -> None:
-        self._indent -= offset
-
-    def splice(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
-        if isinstance(other_code, IndentedBuffer):
-            dedent = float("inf")
-
-            for line in other_code._lines:
-                if not isinstance(line, LineContext) and line:
-                    dedent = min(dedent, len(line) - len(line.lstrip()))
-            if math.isinf(dedent):
-                dedent = 0
-            for line in other_code._lines:
-                if isinstance(line, LineContext):
-                    self._lines.append(line)
-                else:
-                    IndentedBuffer.writeline(self, line[int(dedent) :])
-        else:
-            other_code = textwrap.dedent(other_code)
-            if strip:
-                other_code = other_code.lstrip()
-            if not other_code:
-                return
-            other_code = other_code.rstrip()
-            for s in other_code.split("\n"):
-                IndentedBuffer.writeline(self, s)
-
-    def map(self, func: Callable[[Any], Any]) -> IndentedBuffer:
-        res = IndentedBuffer(initial_indent=self._indent)
-        res._lines = [func(line) for line in self._lines]
-        return res
-
-    def __repr__(self) -> str:
-        return f"{type(self)}({self.getvalue()})"
-
-    def __add__(self, other: Self) -> IndentedBuffer:
-        if self._indent != other._indent:
-            raise AssertionError(f"Indent mismatch: {self._indent} != {other._indent}")
-        res = IndentedBuffer(initial_indent=self._indent)
-        # TODO(rec): or should this be self.__class__(initial_indent=self._indent)?
-        res.writelines(self._lines)
-        res.writelines(other._lines)
-        return res
-
-    def contains(self, new_line: DeferredLineBase | LineContext | str) -> bool:
-        return new_line in self._lines
-
-
 class DualIndentedBuffer(IndentedBuffer):
     """IndentedBuffer that simultaneously accumulates JIT and AOTI output.
 
@@ -1918,38 +1755,6 @@ def restore_stdout_stderr() -> Iterator[None]:
         yield
     finally:
         sys.stdout, sys.stderr = initial_stdout, initial_stderr
-
-
-class DeferredLineBase:
-    """A line that can be 'unwritten' at a later time"""
-
-    def __init__(self, line: str):
-        if not line.strip():
-            line = ""
-        self.line = line
-
-    def __call__(self) -> str | None:
-        """Returns either self.line or None to indicate the line has been 'unwritten'"""
-        raise NotImplementedError
-
-    def _new_line(self, line: str) -> Self:
-        """Returns a new deferred line with the same condition"""
-        raise NotImplementedError
-
-    def with_prefix(self, prefix: str) -> Self:
-        return self._new_line(f"{prefix}{self.line}")
-
-    def lstrip(self) -> Self:
-        return self._new_line(self.line.lstrip())
-
-    def __getitem__(self, index: int | slice) -> Self:
-        return self._new_line(self.line[index])
-
-    def __bool__(self) -> bool:
-        return bool(self.line)
-
-    def __len__(self) -> int:
-        return len(self.line)
 
 
 class DelayReplaceLine(DeferredLineBase):
@@ -2352,14 +2157,14 @@ def ensure_cute_available() -> bool:
 
 @functools.lru_cache(maxsize=1)
 def ensure_nv_universal_gemm_available() -> bool:
-    """Check if NVIDIA Universal GEMM (cutlass_api) is importable; cache the result for reuse.
+    """Check if NVIDIA Universal GEMM (cutlass.operators) is importable; cache the result for reuse.
 
-    Call ensure_nv_universal_gemm_available.cache_clear() after installing cutlass_api
-    in the same interpreter to retry the import.
+    Call ensure_nv_universal_gemm_available.cache_clear() after installing
+    cutlass.operators in the same interpreter to retry the import.
     """
     try:
-        available = importlib.util.find_spec("cutlass_api") is not None
-    except ImportError:
+        available = importlib.util.find_spec("cutlass.operators") is not None
+    except (ImportError, ValueError):
         return False
     if available:
         _ensure_fp4_dtype_registered()
@@ -2367,27 +2172,27 @@ def ensure_nv_universal_gemm_available() -> bool:
 
 
 def _ensure_fp4_dtype_registered():
-    """Patch cutlass_api to handle torch.float4_e2m1fn_x2 -> cutlass.Float4E2M1FN.
+    """Ensure cutlass.operators maps torch.float4_e2m1fn_x2 -> cutlass.Float4E2M1FN.
 
-    NOTE: cutlass_api doesn't natively map this dtype. We patch the lookup function
-    in-place so all callers (including TensorWrapper) pick up the change.
-    Remove once cutlass_api adds native FP4 support.
+    cutlass.operators natively supports this dtype, so this is normally a no-op.
+    We keep the patch as a safety net (and for backward compat with generated
+    code that calls this) in case a future version regresses.
     """
-    import cutlass_api.utils
+    import cutlass.operators.utils.dtype as _dtype_utils
 
     try:
-        cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
+        _dtype_utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
     except (KeyError, AttributeError):
         import cutlass
 
-        _orig = cutlass_api.utils.cutlass_type_from_torch_type
+        _orig = _dtype_utils.cutlass_type_from_torch_type
 
         def _patched(dtype):
             if dtype == torch.float4_e2m1fn_x2:
                 return cutlass.Float4E2M1FN
             return _orig(dtype)
 
-        cutlass_api.utils.cutlass_type_from_torch_type = _patched
+        _dtype_utils.cutlass_type_from_torch_type = _patched
 
 
 @functools.lru_cache(maxsize=1)
@@ -2519,7 +2324,7 @@ def use_nv_universal_gemm_template(
 
     Required conditions:
         1. NVGEMM backend is enabled
-        2. cutlass_api is available
+        2. cutlass.operators is available
         3. We are on a NVIDIA GPU
         4. Max autotune or max autotune gemm is enabled
         5. Not in AOT Inductor mode (requires runtime JIT compilation)
@@ -2528,7 +2333,7 @@ def use_nv_universal_gemm_template(
 
     Note:
         - Shape and stride constraints are handled internally by
-          cutlass_api.get_kernels() which filters incompatible kernels.
+          cutlass.operators.get_operators() which filters incompatible kernels.
         - GroupedGemm currently only supports TN layout (column-major B).
           Any other layout will act as a noop and fall back to ATen.
         - Dynamic shapes are supported as long as they have hints
@@ -2556,7 +2361,7 @@ def use_nv_universal_gemm_template(
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    # cutlass_api can't handle unbacked symbols because it needs to evaluate
+    # cutlass.operators can't handle unbacked symbols because it needs to evaluate
     # shape constraints (e.g., stride divisibility by 8, N/K divisibility by 16).
     # Unbacked symbols have no hint values, causing GuardOnDataDependentSymNode errors.
     dims_to_check = [m, n, k]
@@ -2565,7 +2370,7 @@ def use_nv_universal_gemm_template(
     if any(has_free_unbacked_symbols(dim) for dim in dims_to_check):
         return False
 
-    # Base pointer must be 16-byte aligned. cutlass_api can't check this at
+    # Base pointer must be 16-byte aligned. cutlass.operators can't check this at
     # compile time because it only sees FakeTensors without real data pointers.
     tensors_to_check = [mat_a, mat_b]
     if offs is not None:
@@ -3235,7 +3040,17 @@ def get_device_tflops(dtype: torch.dtype) -> float:
 
 
 @functools.cache
-def get_gpu_dram_gbps() -> int:
+def get_gpu_dram_gbps() -> float:
+    """
+    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
+    then fall back to the inaccurate triton estimation.
+    """
+    from .analysis.device_info import datasheet_dram_bw_gbs
+
+    ds_bw = datasheet_dram_bw_gbs()
+    if ds_bw is not None:
+        return ds_bw
+
     from triton.testing import get_dram_gbps
 
     return get_dram_gbps()
@@ -4727,6 +4542,42 @@ def python_subprocess_env() -> dict[str, str]:
     return env
 
 
+def apply_subprocess_env(extra_env: Mapping[str, str | None] | None) -> None:
+    """
+    Apply environment updates sent from a parent process to a persistent worker.
+    A None value means the variable is absent in the parent and should be
+    removed from the worker, rather than leaving a stale value behind.
+    """
+    if extra_env is None:
+        return
+
+    for key, value in extra_env.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+@contextlib.contextmanager
+def patch_subprocess_env(
+    extra_env: Mapping[str, str | None] | None,
+) -> Iterator[None]:
+    """
+    Temporarily apply parent process environment updates in a persistent worker.
+    """
+    if extra_env is None:
+        yield
+        return
+
+    old_env = dict(os.environ)
+    apply_subprocess_env(extra_env)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(old_env)
+
+
 @dataclasses.dataclass(frozen=True)
 class CUDAGraphWrapperMetadata:
     """
@@ -4969,18 +4820,30 @@ def _infer_scale_swizzle_impl(
 
     # NVFP4: BlockWise1x16 with float8_e4m3fn scales
     if mat_dtype == torch.float4_e2m1fn_x2 and scale_dtype == torch.float8_e4m3fn:
-        expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
-            ceildiv(K_multiplier * mat_size[1], 16), 4
-        )
-        expected_numel_b = _round_up(mat_size[1], 128) * _round_up(
-            ceildiv(K_multiplier * mat_size[0], 16), 4
-        )
-        if eq_fn(scale_numel, expected_numel_a) or eq_fn(scale_numel, expected_numel_b):
-            return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
+        if torch.xpu._is_compiled():
+            # XPU: no swizzle
+            expected_numel_a = ceildiv(mat_size[0], 16) * K_multiplier * mat_size[1]
+            expected_numel_b = ceildiv(K_multiplier * mat_size[1], 16) * mat_size[0]
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.NO_SWIZZLE
+        else:
+            # NVIDIA: uses swizzled 32x4x4 layout
+            expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
+                ceildiv(K_multiplier * mat_size[1], 16), 4
+            )
+            expected_numel_b = _round_up(mat_size[1], 128) * _round_up(
+                ceildiv(K_multiplier * mat_size[0], 16), 4
+            )
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
 
     # MXFP8: BlockWise1x32 with float8_e8m0fnu scales
     if scale_dtype == torch.float8_e8m0fnu:
-        if not torch.version.hip:
+        if not torch.version.hip and not torch.xpu._is_compiled():
             # NVIDIA: uses swizzled 32x4x4 layout
             expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
                 ceildiv(K_multiplier * mat_size[1], 32), 4
@@ -4993,7 +4856,7 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
-            # AMD: no swizzle
+            # AMD/XPU: no swizzle
             expected_numel_a = ceildiv(mat_size[0], 32) * K_multiplier * mat_size[1]
             expected_numel_b = ceildiv(K_multiplier * mat_size[1], 32) * mat_size[0]
             if eq_fn(scale_numel, expected_numel_a) or eq_fn(
