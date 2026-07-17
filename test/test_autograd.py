@@ -7411,9 +7411,9 @@ for shape in [(1,), ()]:
     MyFunction.apply(v).backward()
 """
         s = TestCase.runWithPytorchAPIUsageStderr(code)
-        # The autograd engine creates worker threads only when GPU devices are present.
-        # So make sure that we do shutdown threads when we're testing cuda and make sure
-        # that there is no thread to shutdown when we're not using cuda.
+        # The autograd engine creates worker threads only when accelerator devices are present.
+        # So make sure that we do shutdown threads when we're testing an accelerator and make sure
+        # that there is no thread to shutdown when we're not using an accelerator.
         if TEST_ACCELERATOR:
             self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
         else:
@@ -12923,46 +12923,6 @@ class TestAutogradDeviceType(TestCase):
         x = torch.randn(shape, requires_grad=True, device=device)
         x[i].sum().backward()
 
-    def _test_reentrant_parent_error_on_cpu(self, device):
-        t1 = torch.rand([3, 3], requires_grad=True)
-        t2 = torch.rand([3, 3], device=device, requires_grad=True)
-        t3 = torch.rand([3, 3], device=device, requires_grad=True)
-
-        # Parent graph cpu graph.
-        t4 = t1 * t1
-        t5 = TestAutograd.SimulateBackwardError.apply(t4)
-
-        # Child gpu graph (much longer than parent graph).
-        prev = t2 * t2
-        for _ in range(10):
-            prev = prev * t2
-        reentrant_root = prev
-
-        class ReentrantFunc(Function):
-            @staticmethod
-            def forward(ctx, inp):
-                return inp.clone()
-
-            @staticmethod
-            def backward(ctx, grad):
-                # Reentrant backward in child will take much longer.
-                reentrant_root.backward(grad)
-                return grad
-
-        # Parent gpu graph.
-        t6 = ReentrantFunc.apply(t3)
-        t7 = t6 * t6
-
-        # Parent graph will error out first, while child graph will continue executing.
-        with self.assertRaisesRegex(Exception, "Simulate error"):
-            torch.autograd.backward([t5.sum(), t7.sum()])
-
-        # No grads should be accumulated since child graph will stop execution
-        # after parent receives error.
-        self.assertIsNone(t2.grad)
-        self.assertIsNone(t1.grad)
-        self.assertIsNone(t3.grad)
-
     # TODO: see if these tests can be ported to OpInfos or moved to where's test suite
     @skipIfMPS  # the test doesn't work on MPS
     def test_where_functional(self, device):
@@ -13006,6 +12966,8 @@ class TestAutogradDeviceType(TestCase):
 
         z = x.sum()
         base_mem = torch.accelerator.memory_allocated()
+        if base_mem == 0:
+            self.skipTest(f"{device} does not implement memory tracking")
         z = ((x + 2) * m).sum()
         end_mem = torch.accelerator.memory_allocated()
 
@@ -13917,10 +13879,10 @@ class TestAutogradDeviceType(TestCase):
         device_type = torch.device(device).type
         if not torch.amp.is_autocast_available(device_type):
             self.skipTest(f"autocast not available for {device_type}")
-        try:
-            torch.tensor([1.0], device=device_type, dtype=torch.bfloat16)
-        except (RuntimeError, TypeError):
-            self.skipTest(f"bf16 not supported on {device_type}")
+        device_mod = getattr(torch, device_type, None)
+        if device_mod is not None and hasattr(device_mod, "is_bf16_supported"):
+            if not device_mod.is_bf16_supported():
+                self.skipTest(f"bf16 not supported on {device_type}")
         for enabled in [True, False]:
 
             def foo(x, y, z):
@@ -13996,6 +13958,8 @@ class TestAutogradDeviceType(TestCase):
         loss = model_no_checkpoint(x.clone()).sum()
         loss.backward()
         mem_no_checkpoint = torch.accelerator.max_memory_allocated()
+        if mem_no_checkpoint == 0:
+            self.skipTest(f"{device} does not implement memory tracking")
 
         torch.accelerator.reset_peak_memory_stats()
         loss = model_reentrant_checkpoint(x.clone()).sum()
@@ -16868,6 +16832,11 @@ class TestMultithreadAutogradDeviceType(TestCase):
             out.backward()
 
 
+# NOTE: This class is deliberately CUDA-only. Tests here use torch.cuda.*
+# APIs (memory_stats, profiler, pin_memory, etc.) that have no device-generic
+# equivalent. The `device` parameter is injected by instantiate_device_type_tests
+# but is only used for tensor placement; do not "complete the migration" by
+# replacing torch.cuda.* calls with torch.accelerator.* equivalents.
 class TestAutogradCUDA(TestCase):
     def test_forward_traceback_preserves_exception_with_checkpoint(self, device):
         # Regression test: gatherForwardTraceback() must not clear a pending
@@ -16994,6 +16963,9 @@ class TestAutogradCUDA(TestCase):
                 a.add(1.0)
 
 
+# NOTE: This class is deliberately CUDA-only. Tests here use torch.cuda.memory_stats()
+# which has no device-generic equivalent. The `device` parameter is injected by
+# instantiate_device_type_tests but is only used for tensor placement.
 class TestSelectiveActivationCheckpointCUDA(TestCase):
     def test_flops_and_mem(self, device):
         # From https://github.com/pytorch/pytorch/pull/126320
@@ -17101,9 +17073,7 @@ instantiate_device_type_tests(TestAutogradCUDA, globals(), only_for=("cuda",))
 instantiate_device_type_tests(
     TestSelectiveActivationCheckpointCUDA, globals(), only_for=("cuda",)
 )
-instantiate_device_type_tests(
-    TestAutogradMultipleDispatch, globals(), only_for=("cpu", "cuda")
-)
+instantiate_device_type_tests(TestAutogradMultipleDispatch, globals())
 instantiate_device_type_tests(
     TestAutogradStreamSynchronization, globals(), except_for=None
 )
