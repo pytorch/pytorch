@@ -27,7 +27,11 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    PLATFORM_SUPPORTS_FP8,
+    SM90OrLater,
+)
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
@@ -274,7 +278,7 @@ class DistMatrixOpsTest(DTensorTestBase):
                     self.assertEqual(
                         bias_placement.reduce_op,
                         output_placement.reduce_op,
-                        f"Bias Partial should have same reduce_op as output Partial. "
+                        lambda msg: f"{msg}\nBias Partial should have same reduce_op as output Partial. "
                         f"Got bias={bias_placement.reduce_op}, output={output_placement.reduce_op}",
                     )
 
@@ -1010,6 +1014,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @with_comms
     @skip_unless_torch_gpu
+    @parametrize("backend", ["cublaslt", "cutlass"])
     @parametrize(
         "kwargs",
         [
@@ -1039,7 +1044,17 @@ class DistMatrixOpsTest(DTensorTestBase):
             },
         ],
     )
-    def test_grouped_mm(self, kwargs):
+    def test_grouped_mm(self, backend, kwargs):
+        if backend == "cublaslt":
+            if _get_torch_cuda_version() < (13, 2):
+                self.skipTest("cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+            sm_major = torch.cuda.get_device_capability()[0]
+            if sm_major < 9 or sm_major >= 12:
+                self.skipTest("cublaslt grouped gemm requires SM 9.0-11.0")
+            if sm_major == 9 and _get_torch_cuda_version() < (13, 3):
+                self.skipTest(
+                    "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3"
+                )
         # TODO: torch.nn.functional.grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
         # More tests need to be added.
         device_mesh = self.build_device_mesh()
@@ -1064,6 +1079,15 @@ class DistMatrixOpsTest(DTensorTestBase):
             requires_grad=True,
         )
         offs = torch.tensor([16, 64], device=self.device_type, dtype=torch.int32)
+
+        prev = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = backend == "cublaslt"
+        self.addCleanup(
+            setattr,
+            torch.backends.cuda.matmul,
+            "prefer_cublaslt_grouped_gemm",
+            prev,
+        )
 
         h = F.grouped_mm(inp, w1, offs=offs)
         out = F.grouped_mm(h, w2, offs=offs)

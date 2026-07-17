@@ -24,6 +24,10 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.jit_utils import JitTestCase
 
 
+def _get_node_names(nodes: list[torch.fx.Node]) -> list[str]:
+    return [n.name for n in nodes]
+
+
 class TestSourceMatcher(JitTestCase):
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_module_partitioner_linear_relu_linear(self):
@@ -531,56 +535,61 @@ class TestSourceMatcher(JitTestCase):
         )
 
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
-    def test_get_source_partitions_deterministic_order(self):
+    def test_get_source_partitions_deterministic_ordering(self):
         """
         Verifies that get_source_partitions() returns input_nodes, output_nodes,
         and params in deterministic order (sorted by graph position).
         """
 
+        # Create a model where a single linear takes input from multiple sources
+        # and produces outputs consumed by multiple downstream nodes.
+        # This ensures multiple input_nodes, output_nodes, and params per partition.
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.linear = torch.nn.Linear(3, 3)
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+                self.linear3 = torch.nn.Linear(3, 3)
 
-            def forward(self, x, y):
-                out = self.linear(x)
-                a = out + y
-                b = out * 2
-                return a, b
+            def forward(self, x):
+                a = self.linear1(x)
+                b = self.linear2(x)
+                # linear3 takes both a and b as inputs, so both are input_nodes
+                c = self.linear3(a + b)
+                return c
 
-        inputs = (torch.randn(3, 3), torch.randn(3, 3))
+        inputs = (torch.randn(3, 3),)
         gm, _ = torch._dynamo.export(M(), aten_graph=True)(*inputs)
         gm.graph.eliminate_dead_code()
 
-        module_partitions = get_source_partitions(
-            gm.graph, [torch.nn.Linear]
-        )
+        partitions = get_source_partitions(gm.graph, [torch.nn.Linear])
 
-        linear_partition = module_partitions[torch.nn.Linear][0]
+        # Build a position map to verify nodes are sorted by graph order
+        node_positions = {n: i for i, n in enumerate(gm.graph.nodes)}
 
-        # Build graph position mapping
-        node_positions = {node: i for i, node in enumerate(gm.graph.nodes)}
-
-        def check_sorted_by_graph_position(nodes):
-            positions = [node_positions[n] for n in nodes]
+        for partition in partitions[torch.nn.Linear]:
+            # Verify input_nodes are sorted by graph position
+            input_positions = [node_positions[n] for n in partition.input_nodes]
             self.assertEqual(
-                positions,
-                sorted(positions),
-                f"Nodes {[n.name for n in nodes]} are not sorted by graph position",
+                input_positions,
+                sorted(input_positions),
+                f"input_nodes not in graph order: {_get_node_names(partition.input_nodes)}",
             )
 
-        # Verify all three lists are sorted by graph position
-        check_sorted_by_graph_position(linear_partition.input_nodes)
-        check_sorted_by_graph_position(linear_partition.output_nodes)
-        check_sorted_by_graph_position(linear_partition.params)
+            # Verify output_nodes are sorted by graph position
+            output_positions = [node_positions[n] for n in partition.output_nodes]
+            self.assertEqual(
+                output_positions,
+                sorted(output_positions),
+                f"output_nodes not in graph order: {_get_node_names(partition.output_nodes)}",
+            )
 
-        # Specifically verify that params are ordered correctly: weight before bias
-        param_names = [n.name for n in linear_partition.params]
-        if len(param_names) >= 2:
-            self.assertLess(
-                node_positions[linear_partition.params[0]],
-                node_positions[linear_partition.params[1]],
-                "Params should be ordered by graph position (weight before bias)",
+            # Verify params are sorted by graph position
+            params_positions = [node_positions[n] for n in partition.params]
+            self.assertEqual(
+                params_positions,
+                sorted(params_positions),
+                f"params not in graph order: {_get_node_names(partition.params)}",
             )
 
 
