@@ -201,9 +201,7 @@ def _common_extra_autocast_dispatch_keys(
     for arg in flat_args:
         if not is_fake_tensor(arg) or arg.device != output_device:
             continue
-        arg_extra_dispatch_keys = _extra_autocast_dispatch_keys_for_tensor(
-            output_device, arg
-        )
+        arg_extra_dispatch_keys = cast("FakeTensor", arg).extra_dispatch_keys
         if arg_extra_dispatch_keys is None:
             continue
         if found_keys is not None and found_keys != arg_extra_dispatch_keys:
