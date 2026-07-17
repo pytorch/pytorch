@@ -107,26 +107,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
 
 Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_MPS_TYPES(result.scalar_type(), "arange_mps", [&]() {
-    using accscalar_t = at::acc_type_device<scalar_t, kMPS>;
-    auto xstart = start.to<accscalar_t>();
-    auto xend = end.to<accscalar_t>();
-    auto xstep = step.to<accscalar_t>();
-
-    // double size_d = ((xend - xstart) / xstep) + 1;
-    double size_d;
-    if constexpr (std::is_same_v<scalar_t, int64_t>) {
-      size_d = static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>()) / step.to<accscalar_t>() + 1;
-    } else {
-      size_d = static_cast<double>(end.to<double>() - start.to<double>()) / step.to<double>() + 1;
-    }
-
-    arange_check_bounds(start, end, step);
-
-    TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
-                "invalid size, possible overflow?");
-
-    int64_t size = static_cast<int64_t>(size_d);
-
+    int64_t size = compute_range_size<scalar_t>(start, end, step);
     int64_t numel = result.numel();
 
     if (numel != size) {

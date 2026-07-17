@@ -154,12 +154,9 @@ Tensor& range_out(const Scalar& start, const Scalar& end, const Scalar& step, Te
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, result.scalar_type(), "range_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
-    auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
-    arange_check_bounds(start, end, step);
-
-    int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
+    int64_t size = compute_range_size<scalar_t>(start, end, step);
     if (result.numel() != size) {
       result.resize_({size});
     }

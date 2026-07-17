@@ -220,12 +220,9 @@ Tensor& range_cuda_out(const Scalar& start, const Scalar& end, const Scalar& ste
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.scalar_type(), "range_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();
-    auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
-    arange_check_bounds(start, end, step);
-
-    int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
+    int64_t size = compute_range_size<scalar_t>(start, end, step);
 
     if (result.numel() != size) {
       result.resize_({size});

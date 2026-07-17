@@ -63,4 +63,33 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
   return static_cast<int64_t>(size_d);
 }
 
+template <typename scalar_t>
+int64_t compute_range_size(const Scalar& start, const Scalar& end, const Scalar& step) {
+  arange_check_bounds(start, end, step);
+
+  // range is the closed-interval sibling of arange: size = (end - start) / step + 1.
+  // Same precision rationale as compute_arange_size: use double for cross-device
+  // consistency, with an int64_t accumulator fallback for integer args of int64
+  // dtype where double's 53-bit mantissa is insufficient.
+  double size_d;
+  if constexpr (std::is_same_v<scalar_t, int64_t>) {
+    if (start.isIntegral(false) && end.isIntegral(false) && step.isIntegral(false)) {
+      using accscalar_t = at::acc_type<scalar_t, false>;
+      auto xstart = start.to<accscalar_t>();
+      auto xend = end.to<accscalar_t>();
+      auto xstep = step.to<accscalar_t>();
+      size_d = static_cast<double>((xend - xstart) / xstep) + 1;
+    } else {
+      size_d = (end.to<double>() - start.to<double>()) / step.to<double>() + 1;
+    }
+  } else {
+    size_d = (end.to<double>() - start.to<double>()) / step.to<double>() + 1;
+  }
+
+  TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
+            "invalid size, possible overflow?");
+
+  return static_cast<int64_t>(size_d);
+}
+
 } // namespace at::native
