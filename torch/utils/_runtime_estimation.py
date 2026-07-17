@@ -81,8 +81,9 @@ def _get_device_from_value(value) -> torch.device | None:  # type: ignore[no-unt
     # first tensor device found in the nested FX metadata values.
     flat_values, _ = pytree.tree_flatten(value)
     for item in flat_values:
-        if isinstance(item, torch.Tensor):
+        if isinstance(item, torch.Tensor) and item.device.type not in ("meta", "cpu"):
             return item.device
+
     return None
 
 
