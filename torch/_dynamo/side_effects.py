@@ -30,9 +30,9 @@ import logging
 import textwrap
 import traceback
 import weakref
-from collections.abc import Callable, Generator, Hashable, MutableMapping
+from collections.abc import Callable, Generator, MutableMapping
 from types import CellType
-from typing import Any, overload, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.nn
@@ -81,12 +81,6 @@ if TYPE_CHECKING:
 side_effects_log = torch._logging.getArtifactLogger(__name__, "side_effects")
 
 
-class SideEffectReplayAction(enum.Enum):
-    REPLAY = "replay"
-    NON_REPLAYABLE = "non_replayable"
-    ERROR = "error"
-
-
 @dataclasses.dataclass(frozen=True)
 class SideEffectReplayContext:
     side_effects: "SideEffects"
@@ -102,25 +96,9 @@ class SideEffectReplayContext:
 
 SideEffectReplayMatcher = Callable[[SideEffectReplayContext], bool]
 SideEffectReplayCodegen = Callable[[SideEffectReplayContext], None]
-SideEffectReplayRuleOperation = Callable[
-    [SideEffectReplayContext], SideEffectReplayAction
-]
-SideEffectReplayRuleDecorator = Callable[
-    [SideEffectReplayRuleOperation], SideEffectReplayRuleOperation
-]
 SideEffectReplayHandlerDecorator = Callable[
     [SideEffectReplayCodegen], SideEffectReplayCodegen
 ]
-
-
-@dataclasses.dataclass(frozen=True)
-class SideEffectReplayRule:
-    name: str
-    matcher: SideEffectReplayMatcher
-    operation: SideEffectReplayRuleOperation
-    reason: str
-    cache_key: Hashable
-    priority: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -133,16 +111,7 @@ class SideEffectReplayHandler:
 
 class _SideEffectReplayRegistry:
     def __init__(self) -> None:
-        self.rules: list[SideEffectReplayRule] = []
         self.handlers: list[SideEffectReplayHandler] = []
-
-    def register_rule(self, rule: SideEffectReplayRule) -> RegistrationHandle:
-        self.rules.append(rule)
-
-        def deregister() -> None:
-            self.rules.remove(rule)
-
-        return RegistrationHandle(deregister)
 
     def register_handler(self, handler: SideEffectReplayHandler) -> RegistrationHandle:
         self.handlers.append(handler)
@@ -152,97 +121,26 @@ class _SideEffectReplayRegistry:
 
         return RegistrationHandle(deregister)
 
-    def lookup_rule(self, ctx: SideEffectReplayContext) -> SideEffectReplayRule | None:
-        return self._lookup_unique("side effect replay rule", self.rules, ctx)
-
     def lookup_handler(
         self, ctx: SideEffectReplayContext
     ) -> SideEffectReplayHandler | None:
-        return self._lookup_unique("side effect replay handler", self.handlers, ctx)
-
-    def get_cache_key(self) -> tuple[Hashable, ...]:
-        return tuple(rule.cache_key for rule in self.rules)
-
-    @staticmethod
-    def _lookup_unique(
-        kind: str,
-        entries: list[Any],
-        ctx: SideEffectReplayContext,
-    ) -> Any | None:
-        matches = [entry for entry in entries if entry.matcher(ctx)]
+        matches = [handler for handler in self.handlers if handler.matcher(ctx)]
         if not matches:
             return None
-        matches.sort(key=lambda entry: entry.priority, reverse=True)
+        matches.sort(key=lambda handler: handler.priority, reverse=True)
         top = matches[0]
         if len(matches) > 1 and matches[1].priority == top.priority:
-            names = [entry.name for entry in matches if entry.priority == top.priority]
+            names = [
+                handler.name for handler in matches if handler.priority == top.priority
+            ]
             raise RuntimeError(
-                f"Ambiguous {kind} for {type(ctx.var).__name__}: {names}"
+                f"Ambiguous side effect replay handler for "
+                f"{type(ctx.var).__name__}: {names}"
             )
         return top
 
 
 _side_effect_replay_registry = _SideEffectReplayRegistry()
-
-
-@overload
-def register_side_effect_replay_rule(
-    rule: SideEffectReplayRule,
-) -> RegistrationHandle: ...
-
-
-@overload
-def register_side_effect_replay_rule(
-    *,
-    name: str,
-    matcher: SideEffectReplayMatcher,
-    reason: str,
-    cache_key: Hashable,
-    priority: int = 0,
-) -> SideEffectReplayRuleDecorator: ...
-
-
-def register_side_effect_replay_rule(
-    rule: SideEffectReplayRule | None = None,
-    *,
-    name: str | None = None,
-    matcher: SideEffectReplayMatcher | None = None,
-    reason: str | None = None,
-    cache_key: Hashable | None = None,
-    priority: int = 0,
-) -> RegistrationHandle | SideEffectReplayRuleDecorator:
-    if rule is not None:
-        return _side_effect_replay_registry.register_rule(rule)
-
-    if name is None:
-        raise AssertionError("side effect replay rule name must be set")
-    if matcher is None:
-        raise AssertionError("side effect replay rule matcher must be set")
-    if reason is None:
-        raise AssertionError("side effect replay rule reason must be set")
-    if cache_key is None:
-        raise AssertionError("side effect replay rule cache key must be set")
-
-    def decorator(
-        operation: SideEffectReplayRuleOperation,
-    ) -> SideEffectReplayRuleOperation:
-        _side_effect_replay_registry.register_rule(
-            SideEffectReplayRule(
-                name=name,
-                matcher=matcher,
-                operation=operation,
-                reason=reason,
-                cache_key=cache_key,
-                priority=priority,
-            )
-        )
-        return operation
-
-    return decorator
-
-
-def get_side_effect_replay_rule_cache_key() -> tuple[Hashable, ...]:
-    return _side_effect_replay_registry.get_cache_key()
 
 
 def _register_side_effect_replay_handler(
@@ -1593,17 +1491,6 @@ class SideEffects:
                 suffixes=suffixes,
                 log=_maybe_log_side_effect,
             )
-            rule = _side_effect_replay_registry.lookup_rule(ctx)
-            if rule is not None:
-                action = rule.operation(ctx)
-                if action is SideEffectReplayAction.NON_REPLAYABLE:
-                    continue
-                if action is SideEffectReplayAction.ERROR:
-                    raise RuntimeError(
-                        f"Side effect replay rule {rule.name!r} rejected "
-                        f"{type(var).__name__}: {rule.reason}"
-                    )
-
             handler = _side_effect_replay_registry.lookup_handler(ctx)
             if handler is None:
                 raise AssertionError(type(var))
