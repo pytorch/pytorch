@@ -162,11 +162,12 @@ class ScheduleTest(TestCase):
             with self.subTest(name=name):
                 schedule_class = get_schedule_class(name)
                 self.assertIsNotNone(
-                    schedule_class, f"Class for {name} should not be None"
+                    schedule_class,
+                    lambda msg: f"{msg}\nClass for {name} should not be None",
                 )
                 self.assertTrue(
                     issubclass(schedule_class, _PipelineSchedule),
-                    f"{name} should be a subclass of _PipelineSchedule",
+                    lambda msg: f"{msg}\n{name} should be a subclass of _PipelineSchedule",
                 )
 
         error_case = ["ScheduleThatDoesNotExist"]
@@ -495,7 +496,6 @@ class TestSchedulePlan(TestCase):
                     for i in range(num_local_stages)
                 ]
                 schedule = ScheduleClass(stages, num_microbatches)
-                _format_pipeline_order(schedule.pipeline_order)
 
                 def stage_to_rank(stage):
                     return stage % group_size
@@ -1330,7 +1330,7 @@ class TestScheduleLowering(TestCase):
             self.assertLess(
                 i,
                 len(non_none) - 1,
-                f"RECV {a} on rank 1 has no following consumer",
+                lambda msg: f"{msg}\nRECV {a} on rank 1 has no following consumer",
             )
             consumer = non_none[i + 1]
             consumer_subs = (
@@ -1354,7 +1354,7 @@ class TestScheduleLowering(TestCase):
                 )
             self.assertTrue(
                 matched,
-                f"RECV {a} on rank 1 is not immediately followed by its "
+                lambda msg: f"{msg}\nRECV {a} on rank 1 is not immediately followed by its "
                 f"consumer (next action: {consumer})",
             )
 
