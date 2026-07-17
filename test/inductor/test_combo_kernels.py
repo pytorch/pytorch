@@ -2045,6 +2045,41 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         # Sorts stay fused in the combo: tuned normally, no carve-out fallbacks.
         self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
 
+    def test_stitched_launch_candidates_include_scaled_blocks(self):
+        """The combo-level autotune must race down-scaled variants of the
+        stitched blocks: each subkernel's standalone winner can be too large
+        for the fused body (union of register footprints), and with only the
+        stitched candidate the runtime autotune cannot correct it.
+
+        Scaled variants are optional: they may violate backend minimums
+        (e.g. TMA descriptor width), so precompile must skip a failing
+        optional candidate instead of erroring.
+        """
+        from torch._inductor.runtime.triton_heuristics import (
+            _handle_combo_kernel_per_subkernel_blocks,
+        )
+
+        combo_meta = {
+            "num_kernels": 2,
+            "heuristic_0": "persistent_reduction",
+            "heuristic_1": "persistent_reduction",
+            "size_hints_0": {"x": 16384, "r0_": 128},
+            "size_hints_1": {"x": 8192, "r0_": 128},
+            "stitched_launch_candidates": [({}, 2, 1)],
+            "default_config": {"XBLOCK_0": 8, "XBLOCK_1": 8},
+        }
+        inductor_meta = {"combo_grid_meta": combo_meta}
+        configs = _handle_combo_kernel_per_subkernel_blocks(
+            {"x": 16384, "r0_": 128}, inductor_meta, {}
+        )
+        kwargs = [cfg.kwargs for cfg in configs]
+        self.assertIn({"XBLOCK_0": 8, "XBLOCK_1": 8}, kwargs)  # stitched winner
+        self.assertIn({"XBLOCK_0": 4, "XBLOCK_1": 4}, kwargs)  # /2 variant
+        self.assertIn({"XBLOCK_0": 2, "XBLOCK_1": 2}, kwargs)  # /4 variant
+        # only the scaled variants are optional (skippable on compile failure)
+        optional = [getattr(cfg, "optional_candidate", False) for cfg in configs]
+        self.assertEqual(optional, [False, True, True])
+
     @requires_gpu_and_triton
     def test_compile_time_autotune_excludes_indirect_indexing(self):
         def fn(a, b, c, idx):
