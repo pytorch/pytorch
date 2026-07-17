@@ -2140,28 +2140,13 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
-    # Use scalar accumulators for simple associative reductions (sum, max,
-    # min, prod, xor_sum, any) in non-persistent reduction loops.  This
-    # reduces register pressure by accumulating into a scalar per x-element
-    # instead of keeping the full R0_BLOCK tile alive across iterations.
-    # Only applies when paired with large R0_BLOCK configs (2048/4096).
+    # Keep looped online-softmax accumulator state scalar across R0_BLOCK tiles.
     scalar_reduction_accumulators = (
         os.environ.get("TORCHINDUCTOR_SCALAR_REDUCTION_ACCUMULATORS", "1") == "1"
     )
 
-    # Speed up the inner loop of online-softmax reductions:
-    #  1. use native tl.max for the per-block running max instead of
-    #     triton_helpers.max2 (generic tl.reduce with a NaN-propagating
-    #     combine fn), which compiles to substantially faster code; and
-    #  2. when the value feeding the reduction is a direct masked load,
-    #     load with other=-inf and skip the in-loop
-    #     tl.where(mask, value, -inf) re-masking.
-    # This applies the non-NaN-propagating-max idea that #189162 introduced
-    # for the softmax two-pass fallback ("fmax") to the looped online-softmax
-    # combine, which #189162 does not touch.  NaN inputs still poison the
-    # sum_exp output (exp(NaN) = NaN), so softmax / log-softmax /
-    # cross-entropy results computed from (max, sum) remain NaN-identical;
-    # only the raw max output may differ in the presence of NaNs.
+    # Use native tl.max instead of a custom tl.reduce for each online-softmax
+    # block maximum. NaNs still propagate through the exponential sum.
     online_softmax_fast_combine = (
         os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX_FAST_COMBINE", "1") == "1"
     )

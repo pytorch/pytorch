@@ -284,6 +284,7 @@ class TestOnlineSoftmax(TestCase):
             current["saved_activation_bytes"],
         )
 
+    @inductor_config.patch("triton.persistent_reductions", False)
     def test_split_reduction(self):
         """
         Split online_softmax_reduce into partial max/sum tuples and combine
@@ -508,59 +509,40 @@ class TestOnlineSoftmax(TestCase):
     @inductor_config.patch("triton.persistent_reductions", False)
     @parametrize("fast_combine", [True, False])
     def test_online_softmax_fast_combine(self, fast_combine):
-        """
-        config.triton.online_softmax_fast_combine controls the inner loop of
-        the looped (non-persistent) online-softmax combine:
-
-        * ON  -> the per-block running max is the native ``tl.max`` builtin and
-          the feeding masked load fills ``other=float("-inf")`` so the in-loop
-          ``tl.where(mask, value, -inf)`` re-masking is skipped;
-        * OFF -> the original two-op combine: ``triton_helpers.max2`` over a
-          ``tl.where(mask, value, -inf)``.
-
-        The block max is non-NaN-propagating (same idea as the "fmax" reduction
-        of #189162), but NaN inputs still poison the sum via ``exp(NaN)``, so
-        softmax output stays NaN-identical regardless of the flag.  Force the
-        looped path with persistent_reductions=False so the test is small
-        enough for CI yet still exercises the combine loop.
-        """
-        if not HAS_TRITON:
-            self.skipTest("requires triton")
-
-        M, N = 8, 2048
+        M, N = 8, 2053
         x = torch.randn(M, N, device=GPU_TYPE, dtype=torch.float32)
 
-        # NaN at the beginning, middle, and end of separate rows; one clean row.
         x[0, 0] = float("nan")
         x[1, N // 2] = float("nan")
         x[2, N - 1] = float("nan")
-        # rows 3.. have no NaN
+        x[3] = float("-inf")
 
         ref = torch.softmax(x, dim=-1)
         with inductor_config.patch("triton.online_softmax_fast_combine", fast_combine):
             act, (code,) = run_and_get_code(torch.compile(torch.softmax), x, dim=-1)
 
-        # Confirm we actually hit the looped online-softmax combine.
-        self.assertIn("_block_max = ", code)
-        if fast_combine:
-            self.assertIn("tl.max(", code)
-            self.assertNotIn("triton_helpers.max2(", code)
-            self.assertIn('other=float("-inf")', code)
-        else:
-            self.assertIn("triton_helpers.max2(", code)
-            self.assertNotIn("tl.max(", code)
-            self.assertIn("tl.where(", code)
+        self.assertIn("online_softmax_reduce_scalar_combine", code)
+        self.assertIn(f"{inductor_config.use_fast_math}, {fast_combine}", code)
+        self.assertIn("tl.where(", code)
+        self.assertEqual(ref[:4].isnan(), act[:4].isnan())
+        self.assertEqual(ref[4:], act[4:])
 
-        # Rows with NaN input must produce all-NaN output; clean rows must match.
-        for row in range(3):
-            self.assertTrue(
-                ref[row].isnan().all(), f"eager row {row} should be all NaN"
-            )
-            self.assertTrue(
-                act[row].isnan().all(), f"compiled row {row} should be all NaN"
-            )
-        self.assertFalse(act[3:].isnan().any())
-        torch.testing.assert_close(ref[3:], act[3:])
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.persistent_reductions": False,
+            "triton.scalar_reduction_accumulators": True,
+        }
+    )
+    def test_online_softmax_scalar_num_load_gate(self):
+        def f(a, b, c, d, e):
+            return torch.softmax(a + b + c + d + e, dim=-1)
+
+        args = [torch.randn(8, 2053, device=GPU_TYPE) for _ in range(5)]
+        act, (code,) = run_and_get_code(torch.compile(f), *args)
+
+        self.assertEqual(f(*args), act)
+        self.assertNotIn("online_softmax_reduce_scalar_combine", code)
 
 
 instantiate_parametrized_tests(TestOnlineSoftmax)
