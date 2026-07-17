@@ -16,6 +16,7 @@ from .dsl_registry import dsl_registry, DSLModuleProtocol
 from .registry import (
     _OpCondFn,
     _OpImplFn,
+    _register_auxiliary_override_sync,
     deregister_op_overrides as _deregister_op_overrides_impl,
     register_op_override as _register_op_override_impl,
 )
@@ -81,11 +82,13 @@ def _sync_auxiliary_overrides() -> None:
         _install_autograd_fallthrough,
         _uninstall_autograd_fallthrough,
     )
-    from .registry import _graphs
+    from .registry import _fallback_kernels, _graphs
 
-    nodes = _graphs.get(("cross_entropy_loss", "CUDA"), ())
+    key = ("cross_entropy_loss", "CUDA")
+    nodes = _graphs.get(key, ())
     if any(node.dsl_name == _HELION_DSL_NAME and node.active for node in nodes):
-        _install_autograd_fallthrough()
+        if key in _fallback_kernels:
+            _install_autograd_fallthrough()
     else:
         _uninstall_autograd_fallthrough()
 
@@ -119,3 +122,4 @@ def register_op_override(
 dsl_registry.register_dsl(
     _HELION_DSL_NAME, cast(DSLModuleProtocol, sys.modules[__name__])
 )
+_register_auxiliary_override_sync(_HELION_DSL_NAME, _sync_auxiliary_overrides)

@@ -392,7 +392,7 @@ class TestNativeDSLOps(TestCase):
         """TORCH_NATIVE_SKIP_VERSION_CHECK=1 allows non-blessed versions."""
         from torch._vendor.packaging.version import Version
 
-        fake_version = Version("99.99.99")
+        fake_version = Version("1.0.0")
 
         # Set the environment variable and clear caches
         with patch.dict(os.environ, {"TORCH_NATIVE_SKIP_VERSION_CHECK": "1"}):

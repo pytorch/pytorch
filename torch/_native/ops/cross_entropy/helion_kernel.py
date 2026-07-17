@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import torch
+from torch._native.instrumentation import instrumented_helion_kernel
 
 
 try:
     import helion  # pyrefly: ignore[missing-import]
-    import helion.experimental  # pyrefly: ignore[missing-import]
     import helion.language as hl  # pyrefly: ignore[missing-import]
 except ModuleNotFoundError as exc:
     if exc.name != "helion":
@@ -17,7 +17,12 @@ except ModuleNotFoundError as exc:
 
 if helion is not None:
 
-    @helion.kernel(config=helion.Config(block_sizes=[32768], num_warps=8))
+    @instrumented_helion_kernel(
+        "aten::cross_entropy_loss",
+        config=helion.Config(block_sizes=[32768], num_warps=8),
+        key_fn=lambda labels,
+        vocab: f"validate labels={tuple(labels.shape)} vocab={vocab}",
+    )
     def validate_labels(labels: torch.Tensor, vocab: int) -> torch.Tensor:
         valid_labels = torch.empty([1], dtype=torch.bool, device=labels.device)
         for tile in hl.tile(labels.shape[0]):
@@ -26,9 +31,12 @@ if helion is not None:
             valid_labels[0] = valid.sum() == labels.shape[0]
         return valid_labels
 
-    @helion.experimental.aot_kernel(
+    @instrumented_helion_kernel(
+        "aten::cross_entropy_loss",
+        aot=True,
         static_shapes=True,
         ignore_warnings=[helion.exc.TensorOperationInWrapper],
+        key_fn=lambda logits, labels: f"cross_entropy logits={tuple(logits.shape)}",
     )
     def cross_entropy(
         logits: torch.Tensor,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 
 from ... import helion_utils as hu
@@ -39,6 +41,8 @@ _B200_PRETUNED_SHAPES: frozenset[tuple[int, int]] = frozenset(
 _B200_SHAPES = _B200_PRETUNED_SHAPES - {(2048, 32000)}
 
 _autograd_lib: torch.library.Library | None = None
+_autocast_lib: torch.library.Library | None = None
+_autocast_fallback_kernel: Any | None = None
 
 
 def _cross_entropy_cond(
@@ -71,8 +75,15 @@ def _cross_entropy_cond(
         return False
     if torch.autograd.forward_ad.unpack_dual(self).tangent is not None:
         return False
+    if torch.is_autocast_enabled("cuda"):
+        return False
+    # Target validation is data-dependent, so this override is eager-only.
+    if type(self) is not torch.Tensor or type(target) is not torch.Tensor:
+        return False
     is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
     if is_cow(self) or is_cow(target):
+        return False
+    if self.data_ptr() % 16 != 0 or target.data_ptr() % 16 != 0:
         return False
 
     from .helion_kernel import validate_labels
@@ -97,22 +108,54 @@ def _cross_entropy_impl(
         return cross_entropy(self, target)
 
 
+def _autocast_cross_entropy(
+    keyset: torch._C.DispatchKeySet,
+    self: torch.Tensor,
+    target: torch.Tensor,
+    weight: torch.Tensor | None = None,
+    reduction: int = 1,
+    ignore_index: int = -100,
+    label_smoothing: float = 0.0,
+) -> torch.Tensor:
+    fallback_kernel = _autocast_fallback_kernel
+    if fallback_kernel is None:
+        raise RuntimeError("native cross entropy fallback is not installed")
+    keyset = keyset.remove(torch._C.DispatchKey.AutocastCUDA)
+    return fallback_kernel.call_boxed(
+        keyset, self, target, weight, reduction, ignore_index, label_smoothing
+    )
+
+
 def _install_autograd_fallthrough() -> None:
-    global _autograd_lib
+    global _autocast_fallback_kernel, _autocast_lib, _autograd_lib
     if _autograd_lib is not None:
         return
+    from ...registry import _fallback_kernels
+
+    _autocast_fallback_kernel = _fallback_kernels[("cross_entropy_loss", "CUDA")]
     _autograd_lib = torch.library.Library("aten", "IMPL", "AutogradCUDA")
     _autograd_lib.impl(
         "cross_entropy_loss", torch.library.fallthrough_kernel, allow_override=True
     )
+    _autocast_lib = torch.library.Library("aten", "IMPL", "AutocastCUDA")
+    _autocast_lib.impl(
+        "cross_entropy_loss",
+        _autocast_cross_entropy,
+        with_keyset=True,
+        allow_override=True,
+    )
 
 
 def _uninstall_autograd_fallthrough() -> None:
-    global _autograd_lib
+    global _autocast_fallback_kernel, _autocast_lib, _autograd_lib
     if _autograd_lib is None:
         return
+    if _autocast_lib is not None:
+        _autocast_lib._destroy()
+        _autocast_lib = None
     _autograd_lib._destroy()
     _autograd_lib = None
+    _autocast_fallback_kernel = None
 
 
 def register_to_dispatch() -> None:

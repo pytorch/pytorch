@@ -35,7 +35,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM89OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
+    IS_SM100, SM53OrLater, SM80OrLater, SM89OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_quantized import (
@@ -46,7 +46,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm
+    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfNoHelionDSL, skipIfRocm
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -6988,6 +6988,21 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
                 target[0] = random.sample(sorted(set(range(num_classes)) - {kwargs["ignore_index"]}), 1)[0]
 
         yield SampleInput(input, target, **kwargs)
+
+
+def sample_inputs_helion_cross_entropy(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    logits = make_tensor(
+        (4096, 32000),
+        device=device,
+        dtype=dtype,
+        low=-3,
+        high=3,
+        requires_grad=False,
+    )
+    target = torch.randint(32000, (4096,), device=device, dtype=torch.int64)
+    yield SampleInput(logits, args=(target,))
 
 def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *, chunked=False, chunked_none=False, **kwargs_unused):
     # ``chunked=True`` filters to chunked-path samples; the scalar
@@ -23939,6 +23954,35 @@ if "cutedsl" in dsl_ops_by_dsl:
             **_cutedsl_topk_kwargs,
         ),
     ])
+
+if "helion" in dsl_ops_by_dsl:
+    dsl_ops_by_dsl["helion"].append(
+        OpInfo(
+            "nn.functional.cross_entropy",
+            variant_test_name="helion",
+            aten_name="cross_entropy_loss",
+            dtypes=custom_types(torch.bfloat16),
+            dtypesIfCUDA=custom_types(torch.bfloat16),
+            sample_inputs_func=sample_inputs_helion_cross_entropy,
+            supports_autograd=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            supports_out=False,
+            supports_cow_input_no_materialize_forward=False,
+            decorators=[
+                onlyCUDA,
+                skipCUDAIf(not IS_SM100, "Helion cross entropy requires SM100"),
+            ],
+            skips=(
+                DecorateInfo(skipIfNoHelionDSL),
+                DecorateInfo(
+                    unittest.skip("override intentionally supports only BF16"),
+                    "TestCommon",
+                    "test_dtypes",
+                ),
+            ),
+        )
+    )
 
 op_db += opinfo.definitions.op_db
 

@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
 import torch.library
 
@@ -162,6 +162,13 @@ _libs: dict[tuple[str, str], torch.library.Library] = {}
 # Keeping the table registry-local means `import torch._native` stays cheap
 # and consumers control exactly when and where overrides take effect.
 _native_decomp_overrides: dict[object, Callable] = {}
+
+# Native backend kernels captured before router installation. Auxiliary
+# dispatch registrations use these handles to preserve the original fallback.
+_fallback_kernels: dict[tuple[str, str], Any] = {}
+
+# DSL-specific dispatcher registrations that must follow graph activation.
+_auxiliary_override_sync_fns: dict[str, Callable[[], None]] = {}
 
 
 def _has_cow_tensor(*args, **kwargs) -> bool:
@@ -665,6 +672,12 @@ def register_op_override(
     _update_registration_maps(backend, op_symbol, dispatch_key, key=key)
 
 
+def _register_auxiliary_override_sync(
+    dsl_name: str, sync_fn: Callable[[], None]
+) -> None:
+    _auxiliary_override_sync_fns[dsl_name] = sync_fn
+
+
 def _should_reregister_graph(
     original_graph: list[_OverrideNode],
     new_graph: list[_OverrideNode],
@@ -899,7 +912,7 @@ def _register_overrides_from_graph(
     if not cond_impl:
         if overload is not None:
             _native_decomp_overrides.pop(overload, None)
-        _sync_auxiliary_overrides(graph)
+        _sync_auxiliary_overrides()
         return
 
     # Capture the prior kernel at this (op, dispatch_key) *before* we install
@@ -909,6 +922,7 @@ def _register_overrides_from_graph(
     # otherwise appear in aten's backward formulas (e.g. bmm's backward
     # calls bmm, which would route back to us).
     fallback_kernel = torch.library.get_kernel(f"aten::{op_symbol}", dispatch_key)
+    _fallback_kernels[(op_symbol, dispatch_key)] = fallback_kernel
 
     # Build the router closures. Both share a first-match-wins loop over
     # `cond_impl`; they differ only in
@@ -974,17 +988,12 @@ def _register_overrides_from_graph(
     # comment on `_native_decomp_overrides` for why).
     if overload is not None:
         _native_decomp_overrides[overload] = compile_router
-    _sync_auxiliary_overrides(graph)
+    _sync_auxiliary_overrides()
 
 
-def _sync_auxiliary_overrides(graph: list[_OverrideNode]) -> None:
-    from .dsl_registry import dsl_registry
-
-    for dsl_name in {node.dsl_name for node in graph}:
-        dsl_module = dsl_registry.get_dsl_module(dsl_name)
-        sync = getattr(dsl_module, "_sync_auxiliary_overrides", None)
-        if sync is not None:
-            sync()
+def _sync_auxiliary_overrides() -> None:
+    for sync in tuple(_auxiliary_override_sync_fns.values()):
+        sync()
 
 
 def _register_all_overrides() -> None:
