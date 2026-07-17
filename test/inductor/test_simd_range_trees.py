@@ -137,16 +137,6 @@ class TestSIMDRangeTrees(TestCase):
                 self.assertEqual(kernel.simplify_indexing.cache_info().currsize, 0)
                 self.assertEqual(kernel.range_trees, [x_tree, r_tree])
 
-    def test_full_range_reuses_recorded_split(self):
-        graph = self._make_graph()
-        with V.set_graph_handler(graph):
-            kernel = self._make_kernel(persistent=False)
-            with V.set_kernel_handler(kernel):
-                split_x, _ = kernel.set_ranges([2, 2], [512])
-                full_x, _ = kernel.set_ranges([4], [512])
-
-        self.assertEqual(full_x, [2 * split_x[0] + split_x[1]])
-
 
 if __name__ == "__main__":
     run_tests()

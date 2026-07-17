@@ -196,7 +196,6 @@ class IterationRangesRoot(IterationRanges):
         self.index = index
         # Store all the nodes in one flat list
         self.nodes: dict[sympy.Expr, IterationRangesEntry] = {}
-        self._full_range_split: tuple[IterationRangesEntry, ...] | None = None
         # This is for re-ordering program ID in triton mm template
         # pid_cache["tl.program_id(0)"] = pid_m
         self.pid_cache: dict[str, str] = pid_cache
@@ -300,53 +299,6 @@ class IterationRangesRoot(IterationRanges):
 
     def construct(self, lengths: list[sympy.Expr]) -> list[sympy.Symbol]:
         return [e.symbol() for e in self.construct_entries(lengths)]
-
-    def _record_full_range_split(self, entries: list[IterationRangesEntry]) -> None:
-        """Remember a nontrivial basis for this root's full logical index.
-
-        If the entry lengths multiply to ``self.numel``, they define a
-        coordinate basis for the whole root:
-        ``full_index = sum(entry.symbol() * entry.divisor)``. Later full-range
-        set_ranges() mappings can reuse that basis instead of rematerializing
-        the full index through div/mod expressions.
-        """
-        sizevars = V.graph.sizevars
-        if self._full_range_split is not None:
-            return
-        if not sizevars.statically_known_equals(
-            sympy_product(entry.length for entry in entries), self.numel
-        ):
-            return
-
-        split = tuple(
-            entry
-            for entry in entries
-            if not sizevars.statically_known_equals(entry.length, sympy.S.One)
-        )
-        if len(split) <= 1:
-            return
-
-        self._full_range_split = split
-
-    def split_expr_for_full_range(
-        self, entry: IterationRangesEntry
-    ) -> sympy.Expr | None:
-        """Map an unsplit full-range entry back to the recorded split basis."""
-        sizevars = V.graph.sizevars
-        if not (
-            sizevars.statically_known_equals(entry.divisor, sympy.S.One)
-            and sizevars.statically_known_equals(entry.length, self.numel)
-        ):
-            return None
-        if self._full_range_split is None:
-            return None
-        return sum(
-            (
-                split_entry.symbol() * split_entry.divisor
-                for split_entry in self._full_range_split
-            ),
-            sympy.S.Zero,
-        )
 
     def vars_and_sizes(
         self, index: sympy.Expr
@@ -860,28 +812,16 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         return ctx()
 
-    def set_ranges(self, *lengths: Sequence[sympy.Expr]) -> list[list[sympy.Expr]]:
+    def set_ranges(self, *lengths: sympy.Expr) -> list[sympy.Symbol]:
         if len(lengths) != len(self.range_trees):
             raise AssertionError(
                 f"expected len(lengths) == len(self.range_trees), "
                 f"got {len(lengths)} and {len(self.range_trees)}"
             )
-        result = []
-        for length, ranges in zip(lengths, self.range_trees):
-            entries = ranges.construct_entries(list(length))
-            ranges._record_full_range_split(entries)
-            mapped_entries = []
-            for entry in entries:
-                # Keep this mapping 1:1 with entries; _split_iteration_ranges
-                # indexes the flattened set_ranges result positionally.
-                # If this is a later full-range request, reuse the split basis
-                # recorded when this root first saw a full-covering set_ranges split.
-                replacement = ranges.split_expr_for_full_range(entry)
-                mapped_entries.append(
-                    replacement if replacement is not None else entry.symbol()
-                )
-            result.append(mapped_entries)
-        return result
+        return [
+            ranges.construct(length)
+            for length, ranges in zip(lengths, self.range_trees)
+        ]
 
     @staticmethod
     def _split_iteration_ranges(
