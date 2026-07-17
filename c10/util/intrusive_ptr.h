@@ -5,6 +5,7 @@
 #include <atomic>
 #include <climits>
 #include <memory>
+#include <tuple>
 #include <type_traits>
 
 namespace pybind11 {
@@ -1008,7 +1009,7 @@ class weak_intrusive_ptr final {
   // it would be simpler and easier to make work if we just expose
   // an unsafe getter for target_
   //
-  TTarget* _unsafe_get_target() const noexcept {
+  [[nodiscard]] TTarget* _unsafe_get_target() const noexcept {
     return target_;
   }
 
@@ -1031,7 +1032,7 @@ class weak_intrusive_ptr final {
     return use_count() == 0;
   }
 
-  intrusive_ptr<TTarget, NullType> lock() const noexcept {
+  [[nodiscard]] intrusive_ptr<TTarget, NullType> lock() const noexcept {
     if (target_ == NullType::singleton()) {
       return intrusive_ptr<TTarget, NullType>();
     } else {
@@ -1082,7 +1083,7 @@ class weak_intrusive_ptr final {
    * weak_intrusive_ptr::reclaim(ptr) to properly destruct it.
    * This is helpful for C APIs.
    */
-  TTarget* release() noexcept {
+  [[nodiscard]] TTarget* release() noexcept {
     TTarget* result = target_;
     target_ = NullType::singleton();
     return result;
@@ -1095,7 +1096,7 @@ class weak_intrusive_ptr final {
    * This is the counter-part to weak_intrusive_ptr::release() and the pointer
    * passed in *must* have been created using weak_intrusive_ptr::release().
    */
-  static weak_intrusive_ptr reclaim(TTarget* owning_weak_ptr) {
+  [[nodiscard]] static weak_intrusive_ptr reclaim(TTarget* owning_weak_ptr) {
     // See Note [Stack allocated intrusive_ptr_target safety]
     // if refcount > 0, weakcount must be >1 for weak references to exist.
     // see weak counting explanation at top of this file.
@@ -1114,7 +1115,7 @@ class weak_intrusive_ptr final {
    * new weak_intrusive_ptr representing a new weak reference, i.e.
    * the raw pointer retains ownership.
    */
-  static weak_intrusive_ptr reclaim_copy(TTarget* owning_ptr) {
+  [[nodiscard]] static weak_intrusive_ptr reclaim_copy(TTarget* owning_ptr) {
     auto ret = reclaim(owning_ptr);
     ret.retain_();
     return ret;
@@ -1231,7 +1232,7 @@ inline void incref(weak_intrusive_ptr_target* self) {
 
 inline void decref(weak_intrusive_ptr_target* self) {
   // Let it die
-  c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
+  std::ignore = c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   // NB: You still "have" the 'self' pointer, but it's now invalid.
   // If you want more safety, used the actual c10::weak_intrusive_ptr class
 }
@@ -1240,7 +1241,7 @@ template <typename T>
 [[nodiscard]] inline T* lock(T* self) {
   auto wptr = c10::weak_intrusive_ptr<T>::reclaim(self);
   auto ptr = wptr.lock();
-  wptr.release();
+  std::ignore = wptr.release();
   return ptr.release();
 }
 
@@ -1248,7 +1249,7 @@ template <typename T>
 [[nodiscard]] inline uint32_t use_count(weak_intrusive_ptr_target* self) {
   auto wptr = c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   auto r = wptr.use_count();
-  wptr.release();
+  std::ignore = wptr.release();
   return r;
 }
 
