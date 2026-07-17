@@ -1143,6 +1143,30 @@ class TensorLikePair(Pair):
         )
 
 
+def _is_dataclass_instance_impl(obj: object) -> bool:
+    return dataclasses.is_dataclass(obj) and not isinstance(obj, type)
+
+
+_is_dataclass_instance_check: Callable[[object], bool] | None = None
+
+
+def _is_dataclass_instance(obj: object) -> bool:
+    """True for dataclass instances only.
+
+    Dynamo-safe: tracing ``dataclasses.is_dataclass`` can fault on exotic values
+    (sparse Tensors, typing.Union, ...), so run the check with Dynamo disabled.
+    """
+    global _is_dataclass_instance_check
+    if _is_dataclass_instance_check is None:
+        # Lazy wrap: torch.testing loads before torch._dynamo during startup.
+        import torch._dynamo
+
+        _is_dataclass_instance_check = torch._dynamo.disable(
+            _is_dataclass_instance_impl
+        )
+    return _is_dataclass_instance_check(obj)
+
+
 def originate_pairs(
     actual: Any,
     expected: Any,
@@ -1255,14 +1279,9 @@ def originate_pairs(
     # raise on Python 3.13+ (no same-object shortcut), or return a Tensor when that
     # field is the sole compare=True field. Only then recurse field-by-field so
     # tensors use the normal tensor comparison path.
-    # Skip Tensors: is_dataclass(tensor) can crash under dynamo_wrapped (sparse PGO).
     elif (
-        not isinstance(actual, torch.Tensor)
-        and not isinstance(expected, torch.Tensor)
-        and dataclasses.is_dataclass(actual)
-        and not isinstance(actual, type)
-        and dataclasses.is_dataclass(expected)
-        and not isinstance(expected, type)
+        _is_dataclass_instance(actual)
+        and _is_dataclass_instance(expected)
         and type(actual) is type(expected)
     ):
         try:
