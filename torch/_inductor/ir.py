@@ -1268,6 +1268,7 @@ class Scatter(Pointwise):
 REDUCTION_COMBINE_FN: dict[str, Callable[..., OpsValue]] = {
     "any": ops_wrapper("logical_or"),
     "max": ops_wrapper("maximum"),
+    "fmax": ops_wrapper("fmaximum"),
     "min": ops_wrapper("minimum"),
     "prod": ops_wrapper("mul"),
     "sum": ops_wrapper("add"),
@@ -1918,7 +1919,13 @@ class Reduction(Loops):
     def default_accumulator(
         reduction_type: str, dtype: torch.dtype
     ) -> _NumLike | Sequence[_NumLike]:
-        if reduction_type in ("max", "argmax", "argmax_value", "argmax_with_value"):
+        if reduction_type in (
+            "max",
+            "fmax",
+            "argmax",
+            "argmax_value",
+            "argmax_with_value",
+        ):
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
@@ -6499,6 +6506,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         swizzle_type_b: Any | None = None,
         supports_epilogue_fusion: bool = False,
         swap_ab: bool = False,
+        bias_node: Buffer | None = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6513,6 +6521,9 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.swizzle_type_b = swizzle_type_b
         self.supports_epilogue_fusion = supports_epilogue_fusion
         self.swap_ab = swap_ab
+        # When set, the last entry of `inputs` is an addmm bias consumed as a
+        # fixed bias-add epilogue; the GEMM operands are the remaining inputs.
+        self.bias_node = bias_node
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.operator_name,
@@ -6563,6 +6574,13 @@ class NVUniversalGemmBuffer(TemplateBuffer):
                 inp = inp.data
             input_nodes.append(inp)
 
+        # For a baked addmm bias, the bias is the last input and is consumed by
+        # the epilogue, not as a GEMM operand.
+        bias_node = None
+        if self.bias_node is not None:
+            bias_node = input_nodes[-1]
+            input_nodes = input_nodes[:-1]
+
         kernel_name = str(Placeholder.KERNEL_NAME)
 
         render_kernel = NVUniversalGemmKernel(
@@ -6582,6 +6600,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
             swap_ab=self.swap_ab,
+            bias_node=bias_node,
         )
 
         def render():
@@ -7311,6 +7330,7 @@ class ExternKernel(InputsKernel):
             ctx: AbstractContextManager[None] = nullcontext()
             if V.current_node.target is torch._higher_order_ops.effects.with_effects:
                 # remove the first effect token in meta["val"] and meta["unbacked_bindings"]
+                # pyrefly: ignore[unsupported-operation]
                 node_meta_val = node_meta_val[1]
                 ctx = _remove_effect_token_unbacked_bindings(V.current_node)
 
@@ -7625,18 +7645,43 @@ class ExternKernel(InputsKernel):
             for dim in expanded_dims:
                 x = torch._inductor.lowering.slice_(x, dim, 0, 1)
 
-        # Although this is a clone, inductor is good about fusing clones into previous
-        # operations if they weren't realized and their layouts were flexible.
-        x = cls.copy_input(x)
+        if x.get_dtype().is_complex:
+            # Triton signature codegen has no complex pointer dtype, so avoid
+            # materializing complex layout constraints through a pointwise copy.
+            if exact_strides is not None:
+                layout = FlexibleLayout(
+                    x.get_device_or_error(), x.get_dtype(), x.get_size()
+                ).as_exact_strides(exact_strides, allow_padding=allow_padding)
+            else:
+                if order is None:
+                    raise AssertionError(
+                        "Expected order is not None when exact_strides is None"
+                    )
+                layout = FlexibleLayout(
+                    x.get_device_or_error(), x.get_dtype(), x.get_size()
+                ).as_stride_order(order, allow_padding=allow_padding)
 
-        as_storage_and_layout(
-            x,
-            freeze=True,
-            want_contiguous=False,
-            stride_order=order,
-            allow_padding=allow_padding,
-            exact_strides=exact_strides,
-        )
+            src = x
+            x = torch._inductor.lowering.empty_strided(
+                x.get_size(),
+                layout.stride,
+                dtype=x.get_dtype(),
+                device=x.get_device_or_error(),
+            )
+            InplaceCopyFallback.create(x, src)
+        else:
+            # Although this is a clone, inductor is good about fusing clones into previous
+            # operations if they weren't realized and their layouts were flexible.
+            x = cls.copy_input(x)
+
+            as_storage_and_layout(
+                x,
+                freeze=True,
+                want_contiguous=False,
+                stride_order=order,
+                allow_padding=allow_padding,
+                exact_strides=exact_strides,
+            )
         if (
             order
             and not free_unbacked_symbols(x.get_size())
@@ -9315,6 +9360,9 @@ class FallbackKernel(ExternKernelAlloc):
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
             self.mutation_names.append(tensor_args[0].get_name())
+            # Record aliasing relationship so memory planning doesn't wrongly
+            # reuse its storage.
+            self.alias_names.append(tensor_args[0].get_name())
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
