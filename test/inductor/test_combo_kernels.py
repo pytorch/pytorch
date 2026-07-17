@@ -2178,6 +2178,41 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         # Sorts stay fused in the combo: tuned normally, no carve-out fallbacks.
         self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
 
+    def test_stitched_launch_candidates_include_scaled_blocks(self):
+        """The combo-level autotune must race down-scaled variants of the
+        stitched blocks: each subkernel's standalone winner can be too large
+        for the fused body (union of register footprints), and with only the
+        stitched candidate the runtime autotune cannot correct it.
+
+        Scaled variants are optional: they may violate backend minimums
+        (e.g. TMA descriptor width), so precompile must skip a failing
+        optional candidate instead of erroring.
+        """
+        from torch._inductor.runtime.triton_heuristics import (
+            _handle_combo_kernel_per_subkernel_blocks,
+        )
+
+        combo_meta = {
+            "num_kernels": 2,
+            "heuristic_0": "persistent_reduction",
+            "heuristic_1": "persistent_reduction",
+            "size_hints_0": {"x": 16384, "r0_": 128},
+            "size_hints_1": {"x": 8192, "r0_": 128},
+            "stitched_launch_candidates": [({}, 2, 1)],
+            "default_config": {"XBLOCK_0": 8, "XBLOCK_1": 8},
+        }
+        inductor_meta = {"combo_grid_meta": combo_meta}
+        configs = _handle_combo_kernel_per_subkernel_blocks(
+            {"x": 16384, "r0_": 128}, inductor_meta, {}
+        )
+        kwargs = [cfg.kwargs for cfg in configs]
+        self.assertIn({"XBLOCK_0": 8, "XBLOCK_1": 8}, kwargs)  # stitched winner
+        self.assertIn({"XBLOCK_0": 4, "XBLOCK_1": 4}, kwargs)  # /2 variant
+        self.assertIn({"XBLOCK_0": 2, "XBLOCK_1": 2}, kwargs)  # /4 variant
+        # only the scaled variants are optional (skippable on compile failure)
+        optional = [getattr(cfg, "optional_candidate", False) for cfg in configs]
+        self.assertEqual(optional, [False, True, True])
+
     @requires_gpu_and_triton
     def test_compile_time_autotune_excludes_indirect_indexing(self):
         def fn(a, b, c, idx):
@@ -3214,17 +3249,20 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         baseline_live_before,
         thresholds,
         graph_outputs=None,
+        mem_ctx=None,
     ):
         from torch._inductor.scheduler import ComboKernelMemoryContext, Scheduler
 
         scheduler = _PeakMemFakeScheduler(nodes)
-        mem_ctx = ComboKernelMemoryContext(
-            graph_outputs=set() if graph_outputs is None else graph_outputs,
-            node_to_idx={node: idx for idx, node in enumerate(nodes)},
-            baseline_peak=baseline_peak,
-            running_peak=baseline_peak,
-            baseline_live_before=baseline_live_before,
-        )
+        if mem_ctx is None:
+            mem_ctx = ComboKernelMemoryContext(
+                graph_outputs=set() if graph_outputs is None else graph_outputs,
+                node_to_idx={node: idx for idx, node in enumerate(nodes)},
+                baseline_peak=baseline_peak,
+                running_peak=baseline_peak,
+                baseline_live_before=baseline_live_before,
+                accepted_live_delta=[0] * (len(nodes) + 1),
+            )
 
         def _fake_combo(scheduler_arg, snodes, **kwargs):
             n = _PeakMemFakeNode("combo")
@@ -3290,6 +3328,86 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         combo, combo_step = run(self._thresholds(abs_thr_gb=1.0))
         self.assertIsNotNone(combo)
         self.assertEqual(combo_step, 0)
+
+    def test_accepts_charge_later_windows(self):
+        """A buffer lifetime-extended by an accepted combo must be visible to
+        later candidate windows (accepted_live_delta), so overlapping
+        extensions cannot each pass the threshold as if independent.
+
+        Schedule (10 steps): two interleaved just-in-time producer/consumer
+        pairs per "layer", global peak elsewhere (BIG at step 8).
+
+          step 0: z1 (80)   step 4: z2 (80)   z pair -> window A
+          step 1: y1 (80)   step 5: y2 (80)   y pair -> window B
+          step 2: uz1       step 6: uz2
+          step 3: uy1       step 7: uy2
+          step 8: BIG (250) step 9: uBIG      <- baseline peak 250
+
+        Window A = combo{z1, z2}: hoists z2's alloc from step 4 to step 0.
+        Its own walk sees the stack (z1+z2 = 160 < 250) -> accepted, and it
+        records +80 live at steps 1..6 in accepted_live_delta.
+        Window B = combo{y1, y2}: hoists y2 to step 1. Combined reality at
+        step 1: z1+z2+y1+y2 = 320 = +28% over the 250 baseline peak.
+        With a 5% threshold B must be rejected -- but only if B's carry-in
+        includes A's extension. Reading baseline_live_before alone reports
+        +0% and wrongly accepts.
+        """
+        from torch._inductor.scheduler import ComboKernelMemoryContext
+
+        z1, y1, uz1, uy1 = (_PeakMemFakeNode(n) for n in ("z1", "y1", "uz1", "uy1"))
+        z2, y2, uz2, uy2 = (_PeakMemFakeNode(n) for n in ("z2", "y2", "uz2", "uy2"))
+        big, ubig = _PeakMemFakeNode("big"), _PeakMemFakeNode("ubig")
+        nodes = [z1, y1, uz1, uy1, z2, y2, uz2, uy2, big, ubig]
+
+        def wire(prod, cons, size):
+            buf = _PeakMemFakeBuffer("b" + prod.get_name(), {cons}, size, size)
+            prod._outputs = [buf]
+            cons.mpi_node.pred_buffers = {buf}
+
+        wire(z1, uz1, 80)
+        wire(y1, uy1, 80)
+        wire(z2, uz2, 80)
+        wire(y2, uy2, 80)
+        wire(big, ubig, 250)
+
+        # live bytes before each step in the baseline schedule above
+        baseline_live_before = [0, 80, 160, 80, 0, 80, 160, 80, 0, 250, 0]
+        baseline_peak = 250
+        mem_ctx = ComboKernelMemoryContext(
+            graph_outputs=set(),
+            node_to_idx={node: idx for idx, node in enumerate(nodes)},
+            baseline_peak=baseline_peak,
+            running_peak=baseline_peak,
+            baseline_live_before=baseline_live_before,
+            accepted_live_delta=[0] * (len(nodes) + 1),
+        )
+        thresholds = self._thresholds(pct_thr=0.05)
+
+        combo_a, _ = self._try_combo_with_fake_scheduler(
+            nodes,
+            [z1, z2],
+            baseline_peak=baseline_peak,
+            baseline_live_before=baseline_live_before,
+            thresholds=thresholds,
+            mem_ctx=mem_ctx,
+        )
+        self.assertIsNotNone(combo_a, "window A fits under the baseline peak")
+        # A's accept must be recorded: z2 now live at steps 1..4 (+80 each)
+        self.assertEqual(mem_ctx.accepted_live_delta[1], 80)
+        self.assertEqual(mem_ctx.accepted_live_delta[4], 80)
+
+        combo_b, _ = self._try_combo_with_fake_scheduler(
+            nodes,
+            [y1, y2],
+            baseline_peak=baseline_peak,
+            baseline_live_before=baseline_live_before,
+            thresholds=thresholds,
+            mem_ctx=mem_ctx,
+        )
+        self.assertIsNone(
+            combo_b,
+            "window B stacks on A's extension (320 = +28% > 5%); must reject",
+        )
 
     def test_region_carry_in_uses_post_free_boundary(self):
         a = _PeakMemFakeNode("a")
@@ -3390,7 +3508,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         steps = {a1: 1, a2: 2, a3: 3, a100: 100, b3: 3, b5: 5}
         nodes_in_window = [a1, a2, a3, b3, b5]
 
-        peak = mem_mod.estimate_region_peak_memory(
+        peak, live_before = mem_mod.estimate_region_peak_memory(
             nodes_in_window,
             region_start=0,
             region_end=5,
@@ -3407,6 +3525,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         # a100 (step 100) is outside the window, so bufD is never seen.
         # bufC is a graph output, so it is never freed.
         self.assertEqual(peak, 350)
+        self.assertEqual(live_before, [0, 0, 100, 300, 250, 250])
 
     @requires_gpu_and_triton
     @torch._inductor.config.patch({"reorder_for_peak_memory": False})
