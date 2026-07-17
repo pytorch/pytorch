@@ -14,10 +14,19 @@ namespace at::mps {
 
 // this is a public interface to access MPSAllocator.
 // Do not declare methods that would depend on MPS or Metal frameworks.
+//
+// The data pointer stored in an MPS Storage/DataPtr is the real
+// unified-memory base address of the allocation (the backing MTLBuffer's
+// contents pointer), so it supports ordinary pointer arithmetic and CPU
+// access. The `const void* ptr` arguments below take that data pointer.
 class IMPSAllocator : public c10::DeviceAllocator {
  public:
   // see the comments in MPSAllocator.h for the description of these methods.
   virtual void freeInactiveBuffers() const = 0;
+  // returns the id<MTLBuffer> backing `ptr` as an opaque pointer (this
+  // header must stay Metal-free), or nullptr if `ptr` was not allocated by
+  // this allocator. `ptr` must be the allocation's base data pointer.
+  virtual void* getMTLBuffer(const void* ptr) const = 0;
   virtual ssize_t getUnalignedBufferSize(const void* ptr) const = 0;
   virtual IntArrayRef getBufferShape(const void* ptr) const = 0;
   virtual id_t getBufferId(const void* ptr) const = 0;
