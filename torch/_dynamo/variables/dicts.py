@@ -1099,14 +1099,15 @@ class DictViewVariable(VariableTracker):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.kv == "keys":
             items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
-        elif self.kv == "values":
+            return VariableTracker.build(tx, f"dict_keys([{items}])")
+        if self.kv == "values":
             items = ", ".join(tracked_repr(tx, value) for value in self.view_items)
-        else:  # items
-            items = ", ".join(
-                f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
-                for key, value in self.view_items
-            )
-        return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
+            return VariableTracker.build(tx, f"dict_values([{items}])")
+        items = ", ".join(
+            f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
+            for key, value in self.view_items
+        )
+        return VariableTracker.build(tx, f"dict_items([{items}])")
 
     def call_method(
         self,
