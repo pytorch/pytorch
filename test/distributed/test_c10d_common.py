@@ -319,6 +319,36 @@ class BackendEntryPointTest(TestCase):
         self.assertIn("nccl", looked_up)
         self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
 
+    def test_unknown_device_qualified_torchcomms_backend_uses_custom_type(self):
+        backend_name = "tc_test_backend"
+        self.assertNotIn(backend_name, dist.Backend.backend_type_map)
+
+        orig = c10d._use_torchcomms_enabled
+        c10d._use_torchcomms_enabled = lambda: True
+        try:
+            backend_config = dist.BackendConfig(f"cuda:{backend_name}")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                dist.ProcessGroup.BackendType.CUSTOM,
+            )
+        finally:
+            c10d._use_torchcomms_enabled = orig
+
+    def test_unknown_device_qualified_backend_without_torchcomms_keeps_gloo_type(self):
+        backend_name = "tc_test_backend"
+        self.assertNotIn(backend_name, dist.Backend.backend_type_map)
+
+        orig = c10d._use_torchcomms_enabled
+        c10d._use_torchcomms_enabled = lambda: False
+        try:
+            backend_config = dist.BackendConfig(f"cuda:{backend_name}")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                dist.ProcessGroup.BackendType.GLOO,
+            )
+        finally:
+            c10d._use_torchcomms_enabled = orig
+
 
 class Net(nn.Module):
     def __init__(self) -> None:

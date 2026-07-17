@@ -2477,6 +2477,27 @@ def _get_split_source(pg: ProcessGroup):
     return split_from
 
 
+def _get_default_backend_type_for_backend_config(
+    backend_config: BackendConfig,
+) -> ProcessGroup.BackendType:
+    if Backend.NCCL in backend_config.device_backend_map.values():
+        return ProcessGroup.BackendType.NCCL
+
+    custom_backend = next(
+        (
+            backend
+            for backend in backend_config.device_backend_map.values()
+            if Backend.backend_type_map.get(str(backend))
+            == ProcessGroup.BackendType.CUSTOM
+            or (_use_torchcomms_enabled() and str(backend) not in Backend.backend_type_map)
+        ),
+        None,
+    )
+    if custom_backend is not None:
+        return ProcessGroup.BackendType.CUSTOM
+    return ProcessGroup.BackendType.GLOO
+
+
 def _new_process_group_helper(
     group_size,
     group_rank,
@@ -2575,22 +2596,9 @@ def _new_process_group_helper(
     # In order to correctly call pg._has_hooks(), we should set the default backend
     # when multi backend is passed in
     if not pg_backend_set:
-        if Backend.NCCL in backend_config.device_backend_map.values():
-            pg._set_default_backend(ProcessGroup.BackendType.NCCL)
-        else:
-            custom_backend = next(
-                (
-                    backend
-                    for backend in backend_config.device_backend_map.values()
-                    if Backend.backend_type_map.get(str(backend))
-                    == ProcessGroup.BackendType.CUSTOM
-                ),
-                None,
-            )
-            if custom_backend is not None:
-                pg._set_default_backend(ProcessGroup.BackendType.CUSTOM)
-            else:
-                pg._set_default_backend(ProcessGroup.BackendType.GLOO)
+        pg._set_default_backend(
+            _get_default_backend_type_for_backend_config(backend_config)
+        )
 
     if device_id:
         pg.bound_device_id = device_id
