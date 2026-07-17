@@ -6374,7 +6374,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
         assert isinstance(caller, NVUniversalGemmCaller), type(caller)  # noqa: S101
-        assert self.layout == caller.layout  # noqa: S101 # noqa: S101
+        assert self.layout == caller.layout  # noqa: S101
 
         render = self.make_kernel_render
         prev_kind = self._render_kind
