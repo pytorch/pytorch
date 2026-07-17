@@ -2574,38 +2574,46 @@ class SIMDScheduling(BaseScheduling):
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
 
+            device = V.graph.get_current_device_or_throw()
+            device_props = DeviceProperties.create(device)
+            rnumel_hint = V.graph.sizevars.optimization_hint(rnumel)
             # Use a generated Triton finalize kernel for sum reduction
             # to get coalesced memory access instead of ATen's generic reduce.
             use_triton_finalize = (
-                config.triton_finalize_sum
+                config.triton.mix_order_reduction_finalize_sum
                 and partial_accum.reduction_type == "sum"
                 and not V.graph.cpp_wrapper
-                and V.graph.device_type == "cuda"
+                and device.type == "cuda"
+                and torch.version.hip is None
+                and (
+                    (device_props.major is not None and device_props.major >= 10)
+                    or rnumel_hint >= 128
+                )
             )
 
             if use_triton_finalize:
                 self._emit_triton_finalize_sum(
-                    buffer_name, ws_name, start, end, nsplit, nsplit_expr, rnumel, idx
+                    buffer_name, ws_name, start, end, nsplit, nsplit_expr, rnumel
                 )
             else:
-                final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+                V.graph.wrapper_code.writeline(
+                    f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+                )
 
-                # Restore the exact original shape via .view() to handle keepdim
-                # and multi-dimensional reductions correctly.
-                buffer = V.graph.get_buffer(buffer_name)
-                if buffer is not None:
-                    final_shape = [
-                        V.graph.wrapper_code.codegen_python_sizevar(s)
-                        for s in buffer.get_layout().size
-                    ]
-                    final_shape_str = f"[{', '.join(final_shape)}]"
-                    final_reduce += f".view({final_shape_str})"
+            buffer = V.graph.get_buffer(buffer_name)
+            if buffer is not None:
+                final_shape = [
+                    V.graph.wrapper_code.codegen_python_sizevar(s)
+                    for s in buffer.get_layout().size
+                ]
+                V.graph.wrapper_code.writeline(
+                    f"{buffer_name} = {buffer_name}.view([{', '.join(final_shape)}])"
+                )
 
-                # The workspace tensor is in torch.float, need a cast if the buffer is
-                # not.
-                if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
-                    final_reduce += f".to({buffer_dtype})"
-                V.graph.wrapper_code.writeline(final_reduce)
+            if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
+                V.graph.wrapper_code.writeline(
+                    f"{buffer_name} = {buffer_name}.to({buffer_dtype})"
+                )
             # mark the buffer as allocated, so we don't try to allocate
             # it again when it's later used
             V.graph.wrapper_code.allocated.add(buffer_name)
@@ -2618,43 +2626,24 @@ class SIMDScheduling(BaseScheduling):
         self.free_buffers_in_scheduler()
 
     def _emit_triton_finalize_sum(
-        self, buffer_name, ws_name, start, end, nsplit, nsplit_expr, rnumel, idx
-    ):
-        """
-        Emit a Triton kernel that finalizes multi-output-reduction workspace
-        partial sums.
-
-        Instead of calling ATen's generic .sum(dim=0), this generates a
-        column-parallel Triton kernel (via async_compile): each program owns a
-        tile of BLOCK_C contiguous output columns and loops over the whole split
-        axis in BLOCK_T chunks, accumulating in registers, then does a single
-        non-atomic tl.store per column.  This is deterministic by construction
-        (each output element is summed by exactly one program in a fixed
-        sequential order) and coalesced (contiguous columns), and beats ATen's
-        generic reduce on the affected shapes.
-        """
+        self,
+        buffer_name: str,
+        ws_name: str,
+        start: str,
+        end: str,
+        nsplit: str,
+        nsplit_expr: sympy.Expr,
+        rnumel: sympy.Expr,
+    ) -> None:
         wrapper = V.graph.wrapper_code
-        rnumel_str = V.graph.wrapper_code.codegen_python_sizevar(rnumel)
+        rnumel_str = wrapper.codegen_python_sizevar(rnumel)
 
-        # Determine output dtype
-        buffer = V.graph.get_buffer(buffer_name)
-        buffer_dtype = V.graph.get_dtype(buffer_name)
-        needs_cast = buffer_dtype != torch.float
-
-        # Pick block sizes for the column-parallel reduction: a coalesced tile
-        # of BLOCK_C columns, and a BLOCK_T wide enough to consume the split
-        # (tile) axis in one/few loaded blocks -- the register-bounded analogue
-        # of an Inductor reduction sizing RBLOCK to cover the reduced dim.
-        # Sweep-derived (B200): BLOCK_C = min(16, rnumel), BLOCK_T = the smallest
-        # power of two >= nsplit, capped at 512.  A small fixed BLOCK_T (e.g. 64)
-        # leaves most of the win on the table and regresses narrow-column shapes.
         rnumel_hint = V.graph.sizevars.optimization_hint(rnumel)
         nsplit_hint = V.graph.sizevars.optimization_hint(nsplit_expr)
 
         block_c = min(16, max(last_power_of_2(rnumel_hint), 1))
         block_t = min(max(next_power_of_2(nsplit_hint), 8), 512)
 
-        # Build the kernel source for async_compile.triton()
         finalize_kernel_name = f"triton_mor_finalize_sum_{wrapper.next_kernel_suffix()}"
         current_device = V.graph.get_current_device_or_throw()
         device_props = DeviceProperties.create(current_device)
@@ -2663,8 +2652,7 @@ class SIMDScheduling(BaseScheduling):
             import triton
             import triton.language as tl
             from torch._inductor.runtime import triton_helpers, triton_heuristics
-            from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
-            from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+            from torch._inductor.runtime.hints import DeviceProperties
             triton_helpers.set_driver_to_gpu()
 
             @triton_heuristics.fixed_config(
@@ -2679,7 +2667,7 @@ class SIMDScheduling(BaseScheduling):
                 cols = col_block * BLOCK_C + tl.arange(0, BLOCK_C)
                 col_mask = cols < C
                 acc = tl.zeros([BLOCK_C], dtype=tl.float32)
-                for t0 in range(0, N_TILES, BLOCK_T):
+                for t0 in tl.range(0, N_TILES, BLOCK_T):
                     tiles = t0 + tl.arange(0, BLOCK_T)
                     tile_mask = tiles < N_TILES
                     offsets = tiles[:, None] * C + cols[None, :]
@@ -2689,7 +2677,6 @@ class SIMDScheduling(BaseScheduling):
                 tl.store(output_ptr + cols, acc, mask=col_mask)
         """)
 
-        # Define kernel via wrapper's define_kernel (emits async_compile.triton(...))
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton('{finalize_kernel_name}', '''")
         compile_wrapper.splice(kernel_src, strip=True)
@@ -2700,46 +2687,20 @@ class SIMDScheduling(BaseScheduling):
             metadata=f"# multi-output-reduction finalize sum kernel for {buffer_name}",
         )
 
-        # Emit the output buffer allocation and kernel call in the body.
-        # Column-parallel 1D grid; the loop over the split axis is internal to
-        # each program, so the tile-dim grid is 1.
         grid_c = f"(({rnumel_str} + {block_c} - 1) // {block_c})"
-        grid_t = "1"
 
-        # Each output column is written by exactly one program via a single
-        # non-atomic store, so no zero-initialization is required.
         wrapper.writeline(
             f"{buffer_name} = empty_strided_cuda(({rnumel_str}, ), (1, ), torch.float32)"
         )
 
-        # Emit kernel call using .run() with FixedGrid args
         stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph.name)
         wrapper.writeline(
             f"{finalize_kernel_name}.run("
             f"{ws_name}[{start} : {end}], {buffer_name}, "
             f"{nsplit}, {rnumel_str}, "
-            f"{grid_c}, {grid_t}, 1, "
+            f"{grid_c}, 1, 1, "
             f"stream={stream_name})"
         )
-
-        # Reshape if needed
-        if buffer is not None:
-            final_shape = [
-                V.graph.wrapper_code.codegen_python_sizevar(s)
-                for s in buffer.get_layout().size
-            ]
-            final_shape_list = f"[{', '.join(final_shape)}]"
-            # Only reshape if final shape isn't already [rnumel]
-            if len(final_shape) > 1 or (
-                len(final_shape) == 1 and final_shape[0] != rnumel_str
-            ):
-                wrapper.writeline(
-                    f"{buffer_name} = {buffer_name}.view({final_shape_list})"
-                )
-
-        # Cast dtype if needed
-        if needs_cast:
-            wrapper.writeline(f"{buffer_name} = {buffer_name}.to({buffer_dtype})")
 
     def codegen_nested_reduction(self, node):
         """

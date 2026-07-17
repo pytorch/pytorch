@@ -1279,89 +1279,47 @@ class OverFusionTest(TestBase):
         "triton.force_cooperative_reductions": False,
     }
 )
+@instantiate_parametrized_tests
 class TritonFinalizeSumTest(TestBase):
-    """
-    Tests for the deterministic Triton multi-output-reduction finalize-sum codegen gated by
-    config.triton_finalize_sum.  A multi-output split reduction whose sum
-    finalize is emitted as a column-parallel, single-store Triton kernel
-    (deterministic, no atomics) instead of ATen's generic .sum(dim=0) over the
-    partial-sum workspace.
-    """
+    def _f(self, x, keepdim=False):
+        return x.sum(dim=0, keepdim=keepdim), x.sum(dim=1)
 
-    # A multi-output reduction where the dim=0 reduction is large enough to be
-    # split, so its sum finalize goes through the workspace path.
-    def _f(self, x):
-        return x.sum(dim=0), x.sum(dim=1)
+    def _make_input(self, columns=768, dtype=torch.float32):
+        return torch.randn(32768, columns, device=GPU_TYPE, dtype=dtype)
 
-    def _make_input(self):
-        return torch.randn(32768, 768, device=GPU_TYPE)
+    def _require_nvidia(self):
+        if GPU_TYPE != "cuda" or torch.version.hip is not None:
+            self.skipTest("finalize kernel is NVIDIA-only")
 
-    @inductor_config.patch(triton_finalize_sum=True)
-    def test_finalize_kernel_emitted(self):
-        """(a) flag on: a Triton finalize kernel is emitted for the sum."""
-        if not inductor_config.triton.mix_order_reduction:
-            self.skipTest("Mix order reduction not enabled")
-
-        # Reset so this config variation forces a fresh compile that
-        # run_and_get_code can capture, independent of test ordering.
+    @parametrize("enabled", [False, True])
+    def test_codegen(self, enabled):
+        self._require_nvidia()
         torch._dynamo.reset()
         x = self._make_input()
-        _, (code,) = utils.run_and_get_code(torch.compile(self._f), x)
-        # The finalize kernel is emitted, and it is the deterministic
-        # single-store form (coalesced tl.store, no atomics).
-        FileCheck().check("triton_mor_finalize_sum").check("tl.store(output_ptr").run(
-            code
-        )
+        with inductor_config.patch("triton.mix_order_reduction_finalize_sum", enabled):
+            _, (code,) = utils.run_and_get_code(torch.compile(self._f), x, False)
 
-    @inductor_config.patch(triton_finalize_sum=True)
-    def test_no_atomic_add(self):
-        """(b) flag on: the generated code emits no atomic_add op."""
-        if not inductor_config.triton.mix_order_reduction:
-            self.skipTest("Mix order reduction not enabled")
+        if enabled:
+            FileCheck().check("triton_mor_finalize_sum").check(
+                "tl.store(output_ptr"
+            ).check_not("tl.atomic_add").run(code)
+        else:
+            self.assertNotIn("triton_mor_finalize_sum", code)
+            FileCheck().check(".sum(dim=0)").run(code)
 
-        torch._dynamo.reset()
-        x = self._make_input()
-        _, (code,) = utils.run_and_get_code(torch.compile(self._f), x)
-        self.assertIn("triton_mor_finalize_sum", code)
-        # Match the actual Triton op call, not the "atomic_add_found" key that
-        # appears in every reduction kernel's inductor_meta.
-        self.assertNotIn("tl.atomic_add", code)
-
-    @inductor_config.patch(triton_finalize_sum=False)
-    def test_aten_fallback_when_disabled(self):
-        """(a) flag off: fall back to ATen's .sum(dim=0), no finalize kernel."""
-        if not inductor_config.triton.mix_order_reduction:
-            self.skipTest("Mix order reduction not enabled")
-
-        torch._dynamo.reset()
-        x = self._make_input()
-        _, (code,) = utils.run_and_get_code(torch.compile(self._f), x)
-        self.assertNotIn("triton_mor_finalize_sum", code)
-        FileCheck().check(".sum(dim=0)").run(code)
-
-    @inductor_config.patch(triton_finalize_sum=True)
-    def test_determinism(self):
-        """(c) two runs on identical input are bitwise identical."""
-        if not inductor_config.triton.mix_order_reduction:
-            self.skipTest("Mix order reduction not enabled")
-
-        x = self._make_input()
+    @inductor_config.patch("triton.mix_order_reduction_finalize_sum", True)
+    @parametrize("columns", [7, 768])
+    @parametrize("dtype", [torch.bfloat16, torch.float32])
+    @parametrize("keepdim", [False, True])
+    def test_numerics_and_determinism(self, columns, dtype, keepdim):
+        self._require_nvidia()
+        x = self._make_input(columns, dtype)
+        ref = self._f(x, keepdim)
         opt_f = torch.compile(self._f)
-        out1 = opt_f(x)
-        out2 = opt_f(x)
-        # The deterministic single-store finalize (unlike atomic_add) sums each
-        # output element in a fixed order, so repeated runs must match exactly.
-        for a, b in zip(out1, out2):
-            self.assertTrue(torch.equal(a, b))
+        actual = opt_f(x, keepdim)
 
-    @inductor_config.patch(triton_finalize_sum=True)
-    def test_numerics(self):
-        """(d) compiled output matches eager."""
-        if not inductor_config.triton.mix_order_reduction:
-            self.skipTest("Mix order reduction not enabled")
-
-        x = self._make_input()
-        self.check_numeric(self._f, (x,))
+        self.assertEqual(ref, actual, atol=1e-3, rtol=1e-3)
+        self.assertEqual(actual, opt_f(x, keepdim), atol=0, rtol=0)
 
 
 @inductor_config.patch(
