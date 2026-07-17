@@ -980,6 +980,7 @@ libtorch_python_core_sources = [
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
+    "torch/csrc/mps/Stream.cpp",
     "torch/csrc/mtia/Module.cpp",
     "torch/csrc/export/pybind.cpp",
     "torch/csrc/export/upgrader.cpp",

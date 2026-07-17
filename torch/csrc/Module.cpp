@@ -2407,6 +2407,11 @@ void initModule(PyObject* module);
 } // namespace torch::xpu
 #endif
 
+#ifdef USE_MPS
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+void THPMPSStream_init(PyObject* module);
+#endif
+
 static std::vector<PyMethodDef> methods;
 
 static void LogAPIUsageMetadataFromPython(
@@ -2604,6 +2609,7 @@ PyObject* initModule() {
 #endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
+  THPMPSStream_init(module);
 #endif
 #ifdef USE_XPU
   torch::xpu::initModule(module);

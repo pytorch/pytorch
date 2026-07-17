@@ -175,6 +175,7 @@ bool MPSHeapAllocatorImpl::alloc_buffer(AllocParams& params) {
   // insert heap after a buffer was created on it to update the order of heap's set
   pool.heaps.insert(heap);
   params.buffer_block = new BufferBlock(params.size(), params.requested_size, buffer, heap);
+  params.buffer_block->stream = getCurrentMPSStream();
   m_allocated_buffers[params.buffer_block->buffer] = params.buffer_block;
   pool.allocated_size += params.size();
   pool.n_buffers++;
@@ -204,37 +205,47 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
       ++b->gc_count;
     }
   }
-  auto it = pool.available_buffers.lower_bound(&params.search_key);
-  // No cached buffer is >= the request size when this is true; used below to
-  // detect a buffer that grows by a small amount on every step.
-  const bool no_larger_buffer = (it == pool.available_buffers.end());
-  if (it != pool.available_buffers.end()) {
-    BufferBlock* buffer_block = *it;
+  MPSStream* current_stream = getCurrentMPSStream();
+  auto stream_pool_it = pool.available_buffers_by_stream.find(current_stream);
+  bool no_larger_buffer = true;
 
-    // the logic in here is simple: keep reusing existing heaps capacity as long as possible (by splitting
-    // or releasing oversize buffers, if required), and avoid 'new' heap allocations as much as possible.
-    if (buffer_block->size <= params.size() + kLargeHeap) {
-      // return the existing buffer if it already fits the requested size (i.e., not oversize)
-      params.buffer_block = buffer_block;
-    } else {
-      HeapBlock search_key(params.size());
-      // if there's an 'existing' heap with enough capacity, then don't
-      // return the oversize buffer and sub-allocate from that existing heap.
-      if (pool.heaps.lower_bound(&search_key) != pool.heaps.end()) {
-        params.buffer_block = nullptr;
-      } else if (buffer_block->retainCount() <= 1) {
-        // otherwise if buffer is releasable immediately, we make room by releasing the
-        // buffer and reuse the new space within its heap container for the new smaller buffer allocation
-        release_buffer(buffer_block, false);
-        // this will skip unnecessary garbage collection as we'll reuse the newly released space
-        params.has_memory_pressure = false;
-      } else if (params.has_memory_pressure) {
-        // the oversized buffer is busy and not reusable at the moment. So release it (and potentially its heap
-        // container) in allocator, and ARC will later free up its backing memory when the busy command buffer finishes.
-        release_buffer(buffer_block, true);
-      } else {
-        // only if there's no memory pressure, we'll reuse the oversized buffer
+  if (stream_pool_it != pool.available_buffers_by_stream.end()) {
+    auto& stream_buffers = stream_pool_it->second;
+    auto it = stream_buffers.lower_bound(&params.search_key);
+
+    // No cached buffer is >= the request size when this is true; used below to
+    // detect a buffer that grows by a small amount on every step.
+    no_larger_buffer = (it == stream_buffers.end());
+
+    if (it != stream_buffers.end()) {
+      BufferBlock* buffer_block = *it;
+
+      // the logic in here is simple: keep reusing existing heaps capacity as long as possible (by splitting
+      // or releasing oversize buffers, if required), and avoid 'new' heap allocations as much as possible.
+      if (buffer_block->size <= params.size() + kLargeHeap) {
+        // return the existing buffer if it already fits the requested size (i.e., not oversize)
         params.buffer_block = buffer_block;
+      } else {
+        HeapBlock search_key(params.size());
+        // if there's an 'existing' heap with enough capacity, then don't
+        // return the oversize buffer and sub-allocate from that existing heap.
+        if (pool.heaps.lower_bound(&search_key) != pool.heaps.end()) {
+          params.buffer_block = nullptr;
+        } else if (buffer_block->retainCount() <= 1) {
+          // otherwise if buffer is releasable immediately, we make room by releasing the
+          // buffer and reuse the new space within its heap container for the new smaller buffer allocation
+          release_buffer(buffer_block, false);
+          // this will skip unnecessary garbage collection as we'll reuse the newly released space
+          params.has_memory_pressure = false;
+        } else if (params.has_memory_pressure) {
+          // the oversized buffer is busy and not reusable at the moment. So release it (and potentially its heap
+          // container) in allocator, and ARC will later free up its backing memory when the busy command buffer
+          // finishes.
+          release_buffer(buffer_block, true);
+        } else {
+          // only if there's no memory pressure, we'll reuse the oversized buffer
+          params.buffer_block = buffer_block;
+        }
       }
     }
   }
@@ -245,16 +256,17 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
     // buffers. Release the largest one within kNearFitReuseDenom (1/8) of the
     // request to free its heap. The tolerance is kept wider than a bucket so the
     // stranded near-fit is caught anywhere in the power-of-two band.
-    if (no_larger_buffer && !(pool.usage & UsageFlags::SMALL) && !pool.available_buffers.empty()) {
+    if (no_larger_buffer && !(pool.usage & UsageFlags::SMALL) &&
+        stream_pool_it != pool.available_buffers_by_stream.end() && !stream_pool_it->second.empty()) {
       constexpr size_t kNearFitReuseDenom = 8;
-      BufferBlock* nearest = *pool.available_buffers.rbegin();
+      BufferBlock* nearest = *stream_pool_it->second.rbegin();
       if (nearest->size >= params.size() - params.size() / kNearFitReuseDenom && nearest->retainCount() <= 1) {
         release_buffer(nearest, /*remove_empty_heap=*/true);
       }
     }
     return false; // this will make allocator to allocate a new buffer
   }
-  pool.available_buffers.erase(params.buffer_block);
+  erase_available_buffer(pool, params.buffer_block);
   params.buffer_block->requested_size = params.requested_size;
   params.buffer_block->gc_count = 0;
   pool.available_size -= params.buffer_block->size;
@@ -347,12 +359,32 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   return buffer_block;
 }
 
+bool MPSHeapAllocatorImpl::insert_available_buffer(BufferPool& pool, BufferBlock* buffer_block) {
+  bool inserted = pool.available_buffers.insert(buffer_block).second;
+  auto it = pool.available_buffers_by_stream.find(buffer_block->stream);
+  if (it == pool.available_buffers_by_stream.end()) {
+    it = pool.available_buffers_by_stream
+             .emplace(buffer_block->stream, std::set<BufferBlock*, BufferComparison>(BufferBlock::Comparator))
+             .first;
+  }
+  it->second.insert(buffer_block);
+  return inserted;
+}
+
+void MPSHeapAllocatorImpl::erase_available_buffer(BufferPool& pool, BufferBlock* buffer_block) {
+  pool.available_buffers.erase(buffer_block);
+  auto it = pool.available_buffers_by_stream.find(buffer_block->stream);
+  if (it != pool.available_buffers_by_stream.end()) {
+    it->second.erase(buffer_block);
+  }
+}
+
 void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   TORCH_INTERNAL_ASSERT(buffer_block->in_use);
 
   BufferPool& pool = *buffer_block->heap->pool;
   // Makes sure the BufferBlock* isn't already present in the pool we're freeing it back into.
-  TORCH_INTERNAL_ASSERT(pool.available_buffers.insert(buffer_block).second);
+  TORCH_INTERNAL_ASSERT(insert_available_buffer(pool, buffer_block));
   pool.available_size += buffer_block->size;
   buffer_block->shape.clear(); // reset shape
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m_current_allocated_memory.current >= static_cast<int64_t>(buffer_block->size));
@@ -378,7 +410,7 @@ bool MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove
   pool.allocated_size -= buffer_block->size;
   pool.available_size -= buffer_block->size;
   m_allocated_buffers.erase(buffer_block->buffer);
-  pool.available_buffers.erase(buffer_block);
+  erase_available_buffer(pool, buffer_block);
   pool.n_buffers--;
   // will re-insert later to keep the heaps list sorted based on heap's new available size (if heap not empty)
   pool.heaps.erase(heap_block);
