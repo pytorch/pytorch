@@ -1,19 +1,28 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#include <ATen/AccumulateType.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/StatelessPhilox4x32.cuh>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/cuda/DistributionTemplates.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-#include <ATen/core/TransformationHelper.h>
+#include <ATen/OpMathType.h>
+#include <curand_kernel.h>
+#include <curand_philox4x32_x.h>
+#include <c10/util/irange.h>
+#include <limits>
 #include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_philox_normal_flat_slice_native.h>
 #include <ATen/ops/_philox_normal_native.h>
+#include <ATen/ops/_philox_uniform_flat_slice_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #endif
 
@@ -61,6 +70,202 @@ __device__ __forceinline__ double2 box_muller_double(uint4 r) {
   double s, c;
   ::sincos(TWO_PI * u2, &s, &c);
   return {radius * c, radius * s};
+}
+
+template <typename scalar_t, typename sample_t, typename param_t>
+__global__ void distribution_flat_slice_kernel(
+    scalar_t* __restrict__ output,
+    PhiloxCudaState philox_args,
+    int64_t local_numel,
+    int64_t total_numel,
+    int64_t start_index,
+    int64_t block_size,
+    int64_t block_stride,
+    int64_t total_grid,
+    sample_t sample_func,
+    param_t param_func) {
+  constexpr int unroll_factor = elems_per_call<scalar_t>;
+  const int64_t local_idx =
+      static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (local_idx >= local_numel) {
+    return;
+  }
+
+  const int64_t logical_index = block_size == local_numel
+      ? start_index + local_idx
+      : start_index + (local_idx / block_size) * block_stride +
+          local_idx % block_size;
+  if (logical_index >= total_numel) {
+    return;
+  }
+
+  const int64_t total_stride = blockDim.x * total_grid;
+  const int64_t thread_index = logical_index % total_stride;
+  const int64_t thread_iteration_and_lane = logical_index / total_stride;
+  const int64_t lane = thread_iteration_and_lane % unroll_factor;
+  const uint64_t thread_iteration =
+      static_cast<uint64_t>(thread_iteration_and_lane / unroll_factor);
+
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
+  curandStatePhilox4_32_10_t state;
+  curand_init(
+      seed,
+      static_cast<uint64_t>(thread_index),
+      offset + thread_iteration * max_generator_offsets_per_curand_call,
+      &state);
+  auto sample = sample_func(&state);
+  output[local_idx] = param_func((&sample.x)[lane]);
+}
+
+template <typename scalar_t, typename sample_t, typename param_t>
+void distribution_flat_slice(
+    const char* op_name,
+    Tensor& self,
+    int64_t total_numel,
+    IntArrayRef start_indices,
+    IntArrayRef block_sizes,
+    IntArrayRef block_strides,
+    IntArrayRef num_blocks,
+    std::optional<Generator> generator,
+    const sample_t& sample_func,
+    const param_t& param_func) {
+  TORCH_CHECK(
+      self.is_floating_point(),
+      op_name,
+      ": self must be a floating point tensor, got ",
+      self.scalar_type());
+  TORCH_CHECK(total_numel >= 0, op_name, ": total_numel must be non-negative");
+  TORCH_CHECK(
+      start_indices.size() == block_sizes.size() &&
+          start_indices.size() == block_strides.size() &&
+          start_indices.size() == num_blocks.size(),
+      op_name,
+      ": index block arrays must have the same length");
+  TORCH_CHECK(
+      self.numel() <= total_numel,
+      op_name,
+      ": output numel ",
+      self.numel(),
+      " exceeds total_numel ",
+      total_numel);
+  TORCH_CHECK(
+      total_numel <= std::numeric_limits<int32_t>::max(),
+      op_name,
+      ": total_numel > INT_MAX is not supported yet");
+
+  int64_t mapped_numel = 0;
+  for (const auto index : c10::irange(start_indices.size())) {
+    const int64_t start_index = start_indices[index];
+    const int64_t block_size = block_sizes[index];
+    const int64_t block_stride = block_strides[index];
+    const int64_t block_count = num_blocks[index];
+    TORCH_CHECK(
+        start_index >= 0, op_name, ": start_index must be non-negative");
+    TORCH_CHECK(
+        start_index <= total_numel,
+        op_name,
+        ": start_index ",
+        start_index,
+        " exceeds total_numel ",
+        total_numel);
+    TORCH_CHECK(
+        block_size >= 0, op_name, ": block_size must be non-negative");
+    TORCH_CHECK(
+        block_count >= 0, op_name, ": num_blocks must be non-negative");
+    if (block_size == 0 || block_count == 0) {
+      continue;
+    }
+    TORCH_CHECK(
+        block_count <= total_numel / block_size,
+        op_name,
+        ": block_size * num_blocks exceeds total_numel");
+    TORCH_CHECK(
+        block_stride >= block_size,
+        op_name,
+        ": block_stride ",
+        block_stride,
+        " must be at least block_size ",
+        block_size);
+    TORCH_CHECK(
+        block_stride <= total_numel,
+        op_name,
+        ": block_stride ",
+        block_stride,
+        " exceeds total_numel ",
+        total_numel);
+    const int64_t local_numel = block_size * block_count;
+    TORCH_CHECK(
+        local_numel <= self.numel() - mapped_numel,
+        op_name,
+        ": index blocks describe more than output numel ",
+        self.numel());
+    const int64_t end_index =
+        start_index + (block_count - 1) * block_stride + block_size;
+    TORCH_CHECK(
+        end_index <= total_numel,
+        op_name,
+        ": output blocks end at ",
+        end_index,
+        ", beyond total_numel ",
+        total_numel);
+    mapped_numel += local_numel;
+  }
+  TORCH_CHECK(
+      mapped_numel == self.numel(),
+      op_name,
+      ": index blocks describe ",
+      mapped_numel,
+      " elements, expected output numel ",
+      self.numel());
+  if (total_numel == 0) {
+    return;
+  }
+
+  constexpr int unroll_factor = elems_per_call<scalar_t>;
+  auto [counter_offset, total_grid, block] =
+      calc_execution_policy(total_numel, unroll_factor);
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(
+      generator, cuda::detail::getDefaultCUDAGenerator());
+  PhiloxCudaState rng_engine_inputs;
+  {
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    rng_engine_inputs = gen->philox_cuda_state(counter_offset);
+  }
+  if (self.numel() == 0) {
+    return;
+  }
+
+  auto output = self.contiguous();
+  int64_t local_start = 0;
+  for (const auto index : c10::irange(start_indices.size())) {
+    const int64_t start_index = start_indices[index];
+    const int64_t block_size = block_sizes[index];
+    const int64_t block_stride = block_strides[index];
+    const int64_t local_numel = block_size * num_blocks[index];
+    if (local_numel == 0) {
+      continue;
+    }
+    const uint32_t local_grid =
+        static_cast<uint32_t>((local_numel + block.x - 1) / block.x);
+    distribution_flat_slice_kernel<scalar_t>
+        <<<local_grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        output.mutable_data_ptr<scalar_t>() + local_start,
+        rng_engine_inputs,
+        local_numel,
+        total_numel,
+        start_index,
+        block_size,
+        block_stride,
+        total_grid.x,
+        sample_func,
+        param_func);
+    local_start += local_numel;
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  if (output.data_ptr() != self.data_ptr()) {
+    self.copy_(output);
+  }
 }
 
 // Single-key kernel: one thread per chunk of elements, where each chunk
@@ -316,6 +521,105 @@ Tensor& _philox_normal_cuda_(
     philox_distribution_kernel<scalar_t>(
         "_philox_normal_", self, key, sample_func, param_func);
   });
+  return self;
+}
+
+Tensor& _philox_uniform_flat_slice_cuda_(
+    Tensor& self,
+    int64_t total_numel,
+    IntArrayRef start_indices,
+    IntArrayRef block_sizes,
+    IntArrayRef block_strides,
+    IntArrayRef num_blocks,
+    double low,
+    double high,
+    std::optional<Generator> generator) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      self.scalar_type(),
+      "_philox_uniform_flat_slice_",
+      [&] {
+        using opmath_t = at::opmath_type<scalar_t>;
+        auto lo = static_cast<scalar_t>(low);
+        auto hi = static_cast<scalar_t>(high);
+        auto range = static_cast<opmath_t>(hi - lo);
+        auto sample_func = []() {
+          if constexpr (std::is_same_v<scalar_t, double>) {
+            return [] __device__ (curandStatePhilox4_32_10_t* state) {
+              return curand_uniform2_double(state);
+            };
+          } else {
+            return [] __device__ (curandStatePhilox4_32_10_t* state) {
+              return curand_uniform4(state);
+            };
+          }
+        }();
+        auto param_func = [range, lo, hi] __device__ (opmath_t rand) {
+          auto value = static_cast<scalar_t>(rand * range + lo);
+          return value == hi ? lo : value;
+        };
+        distribution_flat_slice<scalar_t>(
+            "_philox_uniform_flat_slice_",
+            self,
+            total_numel,
+            start_indices,
+            block_sizes,
+            block_strides,
+            num_blocks,
+            generator,
+            sample_func,
+            param_func);
+      });
+  return self;
+}
+
+Tensor& _philox_normal_flat_slice_cuda_(
+    Tensor& self,
+    int64_t total_numel,
+    IntArrayRef start_indices,
+    IntArrayRef block_sizes,
+    IntArrayRef block_strides,
+    IntArrayRef num_blocks,
+    double mean,
+    double stddev,
+    std::optional<Generator> generator) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      self.scalar_type(),
+      "_philox_normal_flat_slice_",
+      [&] {
+        using accscalar_t = at::acc_type<scalar_t, true>;
+        auto mu = static_cast<accscalar_t>(mean);
+        auto sigma = static_cast<accscalar_t>(stddev);
+        auto sample_func = []() {
+          if constexpr (std::is_same_v<scalar_t, double>) {
+            return [] __device__ (curandStatePhilox4_32_10_t* state) {
+              return curand_normal2_double(state);
+            };
+          } else {
+            return [] __device__ (curandStatePhilox4_32_10_t* state) {
+              return curand_normal4(state);
+            };
+          }
+        }();
+        auto param_func = [mu, sigma] __device__ (accscalar_t rand) {
+          return static_cast<scalar_t>(
+              at::transformation::normal<accscalar_t>(rand, mu, sigma));
+        };
+        distribution_flat_slice<scalar_t>(
+            "_philox_normal_flat_slice_",
+            self,
+            total_numel,
+            start_indices,
+            block_sizes,
+            block_strides,
+            num_blocks,
+            generator,
+            sample_func,
+            param_func);
+      });
   return self;
 }
 
