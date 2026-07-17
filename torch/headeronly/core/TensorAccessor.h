@@ -54,8 +54,8 @@ class TensorAccessorBase {
 
   C10_HOST_DEVICE TensorAccessorBase(
       PtrType data_,
-      const index_t* sizes_,
-      const index_t* strides_)
+      const index_t* sizes_ C10_LIFETIMEBOUND,
+      const index_t* strides_ C10_LIFETIMEBOUND)
       : data_(data_), sizes_(sizes_), strides_(strides_) {}
   C10_HOST ArrayRefCls sizes() const {
     return ArrayRefCls(sizes_, N);
@@ -99,8 +99,8 @@ class TensorAccessor
 
   C10_HOST_DEVICE TensorAccessor(
       PtrType data_,
-      const index_t* sizes_,
-      const index_t* strides_)
+      const index_t* sizes_ C10_LIFETIMEBOUND,
+      const index_t* strides_ C10_LIFETIMEBOUND)
       : TensorAccessorBase<ArrayRefCls, T, N, PtrTraits, index_t>(
             data_,
             sizes_,
@@ -140,8 +140,8 @@ class TensorAccessor<ArrayRefCls, T, 1, PtrTraits, index_t>
 
   C10_HOST_DEVICE TensorAccessor(
       PtrType data_,
-      const index_t* sizes_,
-      const index_t* strides_)
+      const index_t* sizes_ C10_LIFETIMEBOUND,
+      const index_t* strides_ C10_LIFETIMEBOUND)
       : TensorAccessorBase<ArrayRefCls, T, 1, PtrTraits, index_t>(
             data_,
             sizes_,
