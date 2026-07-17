@@ -43,6 +43,7 @@ from torch.utils._triton import get_triton_version, has_triton_stable_tma_api
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
+    get_importable_constexpr_types,
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
     tlx_only_cuda_options,
@@ -3140,19 +3141,12 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             "torch": torch_lib,
             "triton": triton_lib,
         }
-        for value in compile_meta.get("constants", {}).values():
-            value_type = type(value)
-            type_name = getattr(value_type, "__name__", None)
-            type_module = getattr(value_type, "__module__", None)
-            if (
-                type_name is not None
-                and type_module is not None
-                and type_module != "builtins"
-                and repr(value).startswith(f"{type_name}(")
-            ):
-                scope.setdefault(
-                    type_name, getattr(importlib.import_module(type_module), type_name)
-                )
+        for type_spec in get_importable_constexpr_types(
+            compile_meta.get("constants", {}).values()
+        ):
+            scope[type_spec.root_name] = getattr(
+                importlib.import_module(type_spec.module), type_spec.root_name
+            )
 
         if not hasattr(binary, "launch_metadata"):
             # launch args before CompiledKernel.launch_metadata is added.

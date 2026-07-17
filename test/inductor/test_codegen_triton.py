@@ -26,6 +26,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
+    get_importable_constexpr_types,
     is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
@@ -42,9 +43,16 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
 
-@dataclasses.dataclass(frozen=True)
-class UserDefinedTritonKernelConfig:
-    offset: int
+try:
+    from triton_constexpr_configs import (
+        UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelNestedConfig,
+    )
+except ImportError:
+    from test.inductor.triton_constexpr_configs import (
+        UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelNestedConfig,
+    )
 
 
 class TestCodegenTriton(InductorTestCase):
@@ -107,6 +115,40 @@ class TestCodegenTriton(InductorTestCase):
                 )
             finally:
                 kernel.range_trees = saved_range_trees
+
+    def test_importable_constexpr_types_nested_values(self):
+        type_specs = get_importable_constexpr_types(
+            [
+                {
+                    "cfg": UserDefinedTritonKernelNestedConfig(
+                        nested=UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+                    )
+                }
+            ]
+        )
+        self.assertEqual(
+            type_specs,
+            [
+                (
+                    UserDefinedTritonKernelNestedConfig.__module__,
+                    "UserDefinedTritonKernelNestedConfig",
+                    "UserDefinedTritonKernelNestedConfig",
+                ),
+                (
+                    UserDefinedTritonKernelConfigNamespace.__module__,
+                    "UserDefinedTritonKernelConfigNamespace.Nested",
+                    "UserDefinedTritonKernelConfigNamespace",
+                ),
+            ],
+        )
+
+    def test_importable_constexpr_types_local_class_error(self):
+        @dataclasses.dataclass(frozen=True)
+        class LocalConfig:
+            offset: int
+
+        with self.assertRaisesRegex(ImportError, "not importable"):
+            get_importable_constexpr_types([LocalConfig(offset=2)])
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
@@ -653,7 +695,7 @@ class TestCodegenTriton(InductorTestCase):
             offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             values = tl.load(x + offsets, mask=mask)
-            tl.store(out + offsets, values + cfg.offset, mask=mask)
+            tl.store(out + offsets, values + cfg.nested.offset, mask=mask)
 
         def fn(x):
             out = torch.empty_like(x)
@@ -666,7 +708,9 @@ class TestCodegenTriton(InductorTestCase):
                 x,
                 out,
                 n_elements,
-                cfg=UserDefinedTritonKernelConfig(offset=2),
+                cfg=UserDefinedTritonKernelNestedConfig(
+                    nested=UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+                ),
                 BLOCK_SIZE=128,
             )
             return out
