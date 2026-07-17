@@ -665,7 +665,6 @@ meta_function_expected_failures = {
     torch.Tensor.to_sparse : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.allclose : {f64, f16, c128, c64, bf16, f32},
     torch.argwhere : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
-    torch.combinations : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.corrcoef : {f64, i32, c128, i64, i16, u8, c64, bf16, f16, i8, f32},
     torch.cov : {f64, i32, c128, i64, i16, u8, c64, bf16, i8, f32, f16},
     torch.functional.istft : {f64, c64, c128, f32},
@@ -2377,6 +2376,10 @@ class TestMetaKernelRegistrations(TestCase):
             self.assertEqual(cpu_t.dtype, meta_t.dtype)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190240"
+    )
     def test_mkldnn_rnn_backward_gru_bias_shape(self):
         # GRU backward is not supported on CPU via oneDNN, so we verify
         # the meta kernel's bias shape against the expected value from

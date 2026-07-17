@@ -66,6 +66,77 @@ TensorMetadata::TensorMetadata(
   SOFT_ASSERT(r.weak_self_.has_value());
 }
 
+OpArgData parseArgData(
+    const std::vector<op_input_t>& input_shapes,
+    const std::vector<op_input_t>& concreteInputs) {
+  if (input_shapes.empty()) {
+    return OpArgData{.hasData = false};
+  }
+
+  std::vector<shape> shapes(input_shapes.size());
+  std::vector<shape> strides(input_shapes.size());
+  std::vector<std::vector<int64_t>> shapesForKinetoEvent(input_shapes.size());
+
+  std::vector<std::string> dtypes(input_shapes.size());
+  std::vector<c10::IValue> concrete_inputs_list;
+
+  for (const auto& i : c10::irange(input_shapes.size())) {
+    std::visit(
+        c10::overloaded(
+            [&](const TensorMetadata& t) {
+              shapes[i] = t.sizes_;
+              shapesForKinetoEvent[i] = t.sizes_;
+              dtypes[i] = std::string(scalarTypeToTypeMeta(t.dtype_).name());
+              strides[i] = t.strides_;
+            },
+            [&](const std::vector<TensorMetadata>& l) {
+              std::vector<std::vector<int64_t>> shape;
+              shape.reserve(l.size());
+              std::vector<std::vector<int64_t>> stride;
+              stride.reserve(l.size());
+              for (const auto& t : l) {
+                shape.emplace_back(t.sizes_);
+                stride.emplace_back(t.strides_);
+              }
+              shapes[i] = shape;
+              strides[i] = stride;
+              dtypes[i] = "TensorList";
+            },
+            [&](const c10::IValue&) { dtypes[i] = "Scalar"; },
+            [&](const auto&) {}),
+        input_shapes[i]);
+  }
+
+  // If we recorded concrete inputs, then parse them
+  if (input_shapes.size() == concreteInputs.size() && !concreteInputs.empty()) {
+    concrete_inputs_list.resize(input_shapes.size());
+
+    for (const auto& i : c10::irange(input_shapes.size())) {
+      std::visit(
+          c10::overloaded(
+              [&](const c10::IValue& val) { concrete_inputs_list[i] = val; },
+              [&](const auto&) {}),
+          input_shapes[i]);
+      std::visit(
+          c10::overloaded(
+              [&](const c10::IValue& val) {
+                concrete_inputs_list[i] = val;
+                dtypes[i] = "ScalarList";
+              },
+              [&](const auto&) {}),
+          concreteInputs[i]);
+    }
+  }
+
+  return OpArgData{
+      .hasData = true,
+      .shapes = shapes,
+      .dtypes = dtypes,
+      .concreteInputs = concrete_inputs_list,
+      .shapesForKinetoEvent = shapesForKinetoEvent,
+      .strides = strides};
+}
+
 // ============================================================================
 // == PyTorch Ops =============================================================
 // ============================================================================
