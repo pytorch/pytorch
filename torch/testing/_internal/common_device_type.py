@@ -13,7 +13,7 @@ from collections import namedtuple
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, ClassVar, Optional, Type, TypeVar
+from typing import Any, ClassVar, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -1095,13 +1095,13 @@ def get_desired_device_type_test_bases(
 # See note "Writing Test Templates"
 # TODO: remove "allow_xpu" option after Intel GPU support all test case instantiate by this function.
 def instantiate_device_type_tests(
-    generic_test_class: Type[TestCase],
+    generic_test_class: type[TestCase],
     scope: dict,
-    except_for: Optional[Iterable] = None,
-    only_for: Optional[Iterable] = None,
+    except_for: Iterable | None = None,
+    only_for: Iterable | None = None,
     include_lazy: bool = False,
-    allow_mps: Optional[bool] = None,
-    allow_xpu: Optional[bool] = None,
+    allow_mps: bool | None = None,
+    allow_xpu: bool | None = None,
 ):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
