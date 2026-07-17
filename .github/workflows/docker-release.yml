@@ -109,7 +109,7 @@ jobs:
           # Generate PyTorch version to use
           {
             echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py --no-build-suffix)";
-            echo "STABLE_CUDA_VERSION=$(python3 .github/scripts/get_ci_variable.py --stable-cuda-version)"
+            echo "STABLE_CUDA_VERSION=$(python3 .github/scripts/get_ci_variable.py --cuda-stable-version)"
           } >> "${GITHUB_ENV}"
       - name: Setup test specific variables
         if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
