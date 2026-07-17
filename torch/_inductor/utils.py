@@ -40,6 +40,7 @@ from typing import (
     Concatenate,
     Generic,
     Literal,
+    NamedTuple,
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
