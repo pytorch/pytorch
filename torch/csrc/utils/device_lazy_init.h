@@ -8,11 +8,13 @@
 namespace torch::utils {
 
 /**
- * This mechanism of lazy initialization is designed for each device backend.
- * Currently, CUDA and XPU follow this design. This function `device_lazy_init`
- * MUST be called before you attempt to access any Type(CUDA or XPU) object
- * from ATen, in any way. It guarantees that the device runtime status is lazily
- * initialized when the first runtime API is requested.
+ * Note: [Lazy initialization of device runtime]
+ *
+ * This lazy initialization mechanism is designed per device backend.
+ * Currently, the backends listed in `is_device_lazy_init_supported` follow
+ * this design. `device_lazy_init` MUST be called before you access any
+ * device-related object from ATen, in any way. It guarantees that the
+ * device runtime is lazily initialized on the first runtime API request.
  *
  * Here are some common ways that a device object may be retrieved:
  *   - You call getNonVariableType or getNonVariableTypeOpt
@@ -23,7 +25,13 @@ namespace torch::utils {
  * ATen_cuda library" or "Cannot initialize XPU without ATen_xpu library" if you
  * try to use CUDA or XPU functionality from a CPU-only build, which is not good
  * UX.
+ *
+ * Lazy-init backends register the fork handler as part of `device_lazy_init`,
+ * via `_lazy_init` in their Python module. Backends that don't support lazy
+ * init (such as MPS) must register it explicitly via
+ * `register_fork_handler_for_device_init`.
  */
+
 TORCH_PYTHON_API void device_lazy_init(at::DeviceType device_type);
 TORCH_PYTHON_API void set_requires_device_init(
     at::DeviceType device_type,
