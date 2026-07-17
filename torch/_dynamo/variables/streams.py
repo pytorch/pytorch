@@ -633,7 +633,7 @@ class EventVariable(VariableTracker):
         return object_richcompare(self, tx, other, op)
 
     def python_type(self) -> type:
-        return torch.Event
+        return type(self.value)
 
     def get_real_python_backed_value(self) -> object:
         return self.value
