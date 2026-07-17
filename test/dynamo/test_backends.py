@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import importlib.machinery
 import importlib.util
 import sys
 import unittest
@@ -255,6 +256,30 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
                 self.assertIs(tvm_backend.tvm(gm, [torch.randn(2)]), sentinel)
             relax.assert_called_once()
             relay.assert_called_once()
+
+    def test_tvm_dynamic_shapes_error(self, device):
+        def fn(x):
+            return x.view(x.size(0), -1) + 1
+
+        x = torch.randn(2, 3, device=device)
+        compiled = torch.compile(fn, backend="tvm", dynamic=True)
+        # stub tvm imports; the error fires before any tvm API is used.
+        # find_spec() reads __spec__ off modules already in sys.modules, so
+        # the relay stub needs a real ModuleSpec to route to the relay path.
+        relay_stub = MagicMock()
+        relay_stub.__spec__ = importlib.machinery.ModuleSpec("tvm.relay", None)
+        stubs = {
+            "tvm": MagicMock(),
+            "tvm.contrib": MagicMock(),
+            "tvm.relay": relay_stub,
+        }
+        with patch.dict(sys.modules, stubs):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "does not support dynamic shapes",
+            ):
+                compiled(x)
+        torch._dynamo.reset()
 
     @onlyHPU
     def test_intel_gaudi_backend(self, device):
