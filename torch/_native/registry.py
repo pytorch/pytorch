@@ -899,6 +899,7 @@ def _register_overrides_from_graph(
     if not cond_impl:
         if overload is not None:
             _native_decomp_overrides.pop(overload, None)
+        _sync_auxiliary_overrides(graph)
         return
 
     # Capture the prior kernel at this (op, dispatch_key) *before* we install
@@ -973,6 +974,17 @@ def _register_overrides_from_graph(
     # comment on `_native_decomp_overrides` for why).
     if overload is not None:
         _native_decomp_overrides[overload] = compile_router
+    _sync_auxiliary_overrides(graph)
+
+
+def _sync_auxiliary_overrides(graph: list[_OverrideNode]) -> None:
+    from .dsl_registry import dsl_registry
+
+    for dsl_name in {node.dsl_name for node in graph}:
+        dsl_module = dsl_registry.get_dsl_module(dsl_name)
+        sync = getattr(dsl_module, "_sync_auxiliary_overrides", None)
+        if sync is not None:
+            sync()
 
 
 def _register_all_overrides() -> None:
