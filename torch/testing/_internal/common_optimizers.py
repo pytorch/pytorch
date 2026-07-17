@@ -1942,7 +1942,7 @@ optim_db: list[OptimizerInfo] = [
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1.3e-6)}),
                 "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
+                "test_state_dict_cross_device",
                 device_type="xpu",
             ),
         ),
