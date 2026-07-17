@@ -5769,7 +5769,7 @@ class TestLinalg(TestCase):
         # scaled_residual = ||PLU - A|| / (||A|| * n * eps)
         # Netlib uses 1-norm, while MAGMA uses Frobenius norm.
         # NOTE: n <= 1024 decides between two panel factorization kernels
-        if dtype in (torch.float, torch.double):
+        if not dtype.is_complex:
             compute_dtype = torch.double
         else:
             compute_dtype = torch.cdouble
@@ -5835,7 +5835,7 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     def test_linalg_batched_lu_edge_cases(self, device, dtype):
         # Test the register-resident kernel for shapes n == i (mod 32)
-        if dtype in (torch.float, torch.double):
+        if not dtype.is_complex:
             compute_dtype = torch.double
         else:
             compute_dtype = torch.cdouble
