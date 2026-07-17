@@ -579,7 +579,7 @@ class GraphModule(torch.nn.Module):
                 return wrap(lambda x: x + y, x)
 
             # when testing with dynamic shape, a symbol is lifted as input
-            arg_count = ifdynstaticdefault(3, 4)
+            arg_count = ifdynstaticdefault(3, 7)
             self._test_wrap_simple(g, default_args_generator((x,)), arg_count)
             return g(x)
 

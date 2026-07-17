@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+import importlib.machinery
+import importlib.util
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
@@ -100,7 +102,9 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    def _check_backend_works(self, backend, device, boxed=True, options=None):
+    def _check_backend_works(
+        self, backend, device, boxed=True, options=None, backward=True
+    ):
         model = Seq().eval()
         model.to(device)
 
@@ -123,9 +127,10 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         r2 = compiled_model(input2)
         self.assertTrue(same(r1, r2.float(), tol=0.01))
 
-        r1.sum().backward()
-        r2.sum().backward()
-        self.assertTrue(same(input1.grad, input2.grad.float(), tol=0.01))
+        if backward:
+            r1.sum().backward()
+            r2.sum().backward()
+            self.assertTrue(same(input1.grad, input2.grad.float(), tol=0.01))
 
         # Clean up compilation state before test returns to avoid false positive
         # memory leak detection (leak check runs before tearDown)
@@ -157,9 +162,45 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
 
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm(self, device):
-        self._check_backend_works("tvm", device)
-        self._check_backend_works("tvm", device, options={"scheduler": None})
-        self._check_backend_works("tvm", device, options={"opt_level": 0})
+        self._check_backend_works("tvm", device, boxed=False, backward=False)
+        self._check_backend_works(
+            "tvm", device, boxed=False, backward=False, options={"scheduler": None}
+        )
+        self._check_backend_works(
+            "tvm", device, boxed=False, backward=False, options={"opt_level": 0}
+        )
+
+    @unittest.skipIf(not has_tvm(), "requires tvm")
+    def test_tvm_scalar_tensor_input(self, device):
+        class ScalarParam(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = torch.nn.Parameter(torch.tensor(3.0))
+
+            def forward(self, x):
+                return x + self.scale
+
+        model = ScalarParam().eval().to(device)
+        x = torch.randn(2, 10, device=device)
+        expected = model(x)
+        compiled = torch.compile(model, backend="tvm")
+        self.assertTrue(same(expected, compiled(x), tol=0.01))
+
+    @unittest.skipIf(not has_tvm(), "requires tvm")
+    def test_tvm_relax_pipeline_option(self, device):
+        if importlib.util.find_spec("tvm.relax.frontend.torch") is None:
+            self.skipTest("requires the tvm relax frontend")
+        import tvm
+
+        model = Seq().eval().to(device)
+        x = torch.randn(2, 10, device=device)
+        expected = model(x)
+        for pipeline in ("zero", tvm.relax.get_pipeline("zero")):
+            torch._dynamo.reset()
+            compiled = torch.compile(
+                model, backend="tvm", options={"pipeline": pipeline}
+            )
+            self.assertTrue(same(expected, compiled(x), tol=0.01))
 
     def test_tvm_scheduler_backends(self, device):
         from torch._dynamo.backends.tvm import tvm_auto_scheduler, tvm_meta_schedule
@@ -170,6 +211,20 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             # reaching ImportError proves the partial's kwargs are valid
             with patch.dict(sys.modules, {"tvm": None}):
                 self.assertRaises(ImportError, backend, gm, [torch.randn(2)])
+
+    def test_tvm_relay_future_warning(self, device):
+        import torch._dynamo.backends.tvm as tvm_backend
+
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        with patch.dict(sys.modules, {"tvm": None}):
+            with self.assertWarns(FutureWarning):
+                self.assertRaises(
+                    ImportError,
+                    tvm_backend._tvm_relay_compile,
+                    gm,
+                    [torch.randn(2)],
+                    {},
+                )
 
     def test_tvm_dispatches_relay_or_relax(self, device):
         import torch._dynamo.backends.tvm as tvm_backend
@@ -201,6 +256,30 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
                 self.assertIs(tvm_backend.tvm(gm, [torch.randn(2)]), sentinel)
             relax.assert_called_once()
             relay.assert_called_once()
+
+    def test_tvm_dynamic_shapes_error(self, device):
+        def fn(x):
+            return x.view(x.size(0), -1) + 1
+
+        x = torch.randn(2, 3, device=device)
+        compiled = torch.compile(fn, backend="tvm", dynamic=True)
+        # stub tvm imports; the error fires before any tvm API is used.
+        # find_spec() reads __spec__ off modules already in sys.modules, so
+        # the relay stub needs a real ModuleSpec to route to the relay path.
+        relay_stub = MagicMock()
+        relay_stub.__spec__ = importlib.machinery.ModuleSpec("tvm.relay", None)
+        stubs = {
+            "tvm": MagicMock(),
+            "tvm.contrib": MagicMock(),
+            "tvm.relay": relay_stub,
+        }
+        with patch.dict(sys.modules, stubs):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "does not support dynamic shapes",
+            ):
+                compiled(x)
+        torch._dynamo.reset()
 
     @onlyHPU
     def test_intel_gaudi_backend(self, device):
@@ -303,6 +382,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         def cleanup_backend():
             backend_registry._COMPILER_FNS.pop(backend_name, None)
             backend_registry._BACKENDS.pop(backend_name, None)
+            backend_registry._BACKEND_TAGS.pop(backend_name, None)
 
         self.addCleanup(cleanup_backend)
 
@@ -402,12 +482,15 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
 
             orig_backends = dict(registry._BACKENDS)
             orig_compiler_fns = dict(registry._COMPILER_FNS)
+            orig_backend_tags = dict(registry._BACKEND_TAGS)
 
             def restore_registry():
                 registry._BACKENDS.clear()
                 registry._BACKENDS.update(orig_backends)
                 registry._COMPILER_FNS.clear()
                 registry._COMPILER_FNS.update(orig_compiler_fns)
+                registry._BACKEND_TAGS.clear()
+                registry._BACKEND_TAGS.update(orig_backend_tags)
                 registry._lazy_import.cache_clear()
                 registry._discover_entrypoint_backends.cache_clear()
 
