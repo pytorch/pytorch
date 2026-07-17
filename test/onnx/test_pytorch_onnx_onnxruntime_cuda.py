@@ -16,7 +16,6 @@ from test_pytorch_onnx_onnxruntime import _parameterized_class_attrs_and_values
 
 import torch
 from torch.cuda.amp import autocast
-from torch.onnx._internal.torchscript_exporter.verification import OnnxBackend
 from torch.testing._internal import common_utils
 
 
@@ -27,15 +26,13 @@ from torch.testing._internal import common_utils
     class_name_func=onnx_test_common.parameterize_class_name,
 )
 class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
-    ort_backend = OnnxBackend.ONNX_RUNTIME_CUDA
+    ort_backend = "CUDAExecutionProvider"
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        if "CUDAExecutionProvider" not in onnxruntime.get_available_providers():
-            raise unittest.SkipTest(
-                "onnxruntime CUDAExecutionProvider is not available"
-            )
+        if cls.ort_backend not in onnxruntime.get_available_providers():
+            raise unittest.SkipTest(f"onnxruntime {cls.ort_backend} is not available")
 
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipIfNoCuda
