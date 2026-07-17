@@ -91,10 +91,11 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     if flamegraph_script is None:
         cache_dir = os.path.expanduser("~/.cache/")
         os.makedirs(cache_dir, exist_ok=True)
-        flamegraph_script = f"{cache_dir}/flamegraph.pl"
+        flamegraph_script = os.path.join(cache_dir, "flamegraph.pl")
     if not os.path.exists(flamegraph_script):
         import tempfile
         import urllib.request
+        import shutil
 
         print(f"Downloading flamegraph.pl to: {flamegraph_script}")
         with tempfile.NamedTemporaryFile(mode="wb", suffix=".pl") as f:
@@ -103,8 +104,8 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
                 f.name,
             )
             try:
-                os.chmod(f.name, 0o755)
-                os.rename(f.name, flamegraph_script)
+                shutil.copyfile(f.name, flamegraph_script)
+                os.chmod(flamegraph_script, 0o755)
             except OSError:
                 # Ok to skip, the file will be removed by tempfile
                 pass
