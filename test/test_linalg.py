@@ -5847,7 +5847,7 @@ class TestLinalg(TestCase):
         # shape that dispatches to the register-resident kernel
         b = 4  # batch
         n = 256  # shape
-        r = 32  #  testing shapes n + i such that n == i (mod r)
+        r = 32  # testing shapes n + i such that n == i (mod r)
         buffer = make_input(b, n + r, n + r)
 
         for i in range(1, r):
