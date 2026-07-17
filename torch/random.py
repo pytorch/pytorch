@@ -69,7 +69,15 @@ def _manual_seed_impl(seed: int) -> torch._C.Generator:
     import torch.accelerator
 
     if not torch._C._accelerator_isInBadFork():
-        torch.accelerator.random.manual_seed_all(seed)
+        acc = torch.accelerator.current_accelerator()
+        if acc and acc.type == "mps":
+            # MPS does not support lazy init, so seed its default generator
+            # directly. Going through `manual_seed_all` would call `device_count()`,
+            # which eagerly initializes the runtime and crashes in a forked
+            # child (e.g. a "fork" DataLoader worker) on macOS.
+            torch.mps.manual_seed(seed)
+        else:
+            torch.accelerator.random.manual_seed_all(seed)
 
     return default_generator.manual_seed(seed)
 
@@ -83,11 +91,7 @@ def seed() -> int:
         For the accelerator only, use :func:`torch.accelerator.random.manual_seed_all`.
     """
     seed = default_generator.seed()
-
-    import torch.accelerator
-
-    if not torch._C._accelerator_isInBadFork():
-        torch.accelerator.random.manual_seed_all(seed)
+    _manual_seed_impl(seed)
 
     return seed
 

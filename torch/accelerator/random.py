@@ -66,8 +66,8 @@ def set_rng_state(new_state: Tensor, device: _device_t = None) -> None:
             If not given, uses :func:`torch.accelerator.current_device_index` by default.
 
     .. note::
-        If the accelerator runtime is not yet initialized, the state is deferred
-        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, the state is deferred
+        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
     if not torch._C._accelerator_isInitialized():
         with torch._C._DisableFuncTorch():
@@ -94,8 +94,8 @@ def set_rng_state_all(new_states: Iterable[Tensor]) -> None:
         new_states (Iterable of :class:`torch.Tensor`): The desired RNG states for each device, each tensor of dtype `torch.uint8`.
 
     .. note::
-        If the accelerator runtime is not yet initialized, the state is deferred
-        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, the state is deferred
+        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
     for i, state in enumerate(new_states):
         set_rng_state(state, i)
@@ -115,8 +115,8 @@ def manual_seed(seed: int, device: _device_t = None) -> None:
         to get determinism. To seed all devices, use :func:`manual_seed_all`.
 
     .. note::
-        If the accelerator runtime is not yet initialized, the state is deferred
-        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, the state is deferred
+        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
     device_index = _get_device_index(device) if device is not None else None
 
@@ -139,8 +139,8 @@ def manual_seed_all(seed: int) -> None:
         seed (int): The desired seed.
 
     .. note::
-        If the accelerator runtime is not yet initialized, the state is deferred
-        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, the state is deferred
+        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
 
     def cb() -> None:
@@ -164,8 +164,8 @@ def seed(device: _device_t = None, /) -> None:
         to get determinism. To seed all devices, use :func:`seed_all`.
 
     .. note::
-        If the accelerator runtime is not yet initialized, the state is deferred
-        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, the state is deferred
+        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
     device_index = _get_device_index(device) if device is not None else None
 
@@ -185,8 +185,8 @@ def seed_all() -> None:
     r"""Set the same random seed across all devices of the current :ref:`accelerator<accelerators>`.
 
     .. note::
-        If the accelerator runtime is not yet initialized, the state is deferred
-        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, the state is deferred
+        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
 
     def cb() -> None:
