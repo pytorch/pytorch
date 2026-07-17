@@ -4847,6 +4847,10 @@ def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(4, 2))
     yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(4, 2), create_tensor(4))
 
+    # in_features == 0, used to abort the process on MPS, see https://github.com/pytorch/pytorch/issues/190050
+    yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0))
+    yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0), create_tensor(5))
+
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
     batch_options: list[list[int]] = [

@@ -130,7 +130,8 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     } else {
       output.zero_();
     }
-    return output;
+    // Squeeze last dim of 1D linear
+    return weight_arg.dim() != 1 ? output : output.squeeze(-1);
   }
 
   const bool is_complex = input.is_complex() || weight.is_complex() || (is_bias_defined && bias.is_complex());
@@ -250,9 +251,10 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
   TORCH_CHECK(output.is_mps());
   // output.numel() == 0 covers in_features == 0, where grad_output is
   // non-empty but the grad-input is empty and the graph cannot take a
-  // zero-length dimension.
+  // zero-length dimension. When grad_output is empty but grad-input is not
+  // (out_features == 0), grad-input is all zeros.
   if (grad_output.numel() == 0 || output.numel() == 0) {
-    return output;
+    return output.zero_();
   }
 
   MPSStream* stream = getCurrentMPSStream();
