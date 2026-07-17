@@ -136,6 +136,8 @@ torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @boh
 # AOTAutograd
 torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
 torch/_functorch/aot_autograd.py @bdhirsh @aorenste
+torch/csrc/functorch/python_aot_autograd.cpp @aorenste
+torch/csrc/functorch/python_aot_autograd.h @aorenste
 
 # FakeTensor
 torch/_subclasses/fake_tensor.py @aorenste

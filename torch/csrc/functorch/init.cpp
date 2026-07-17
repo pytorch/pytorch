@@ -8,6 +8,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/functorch/init.h>
+#include <torch/csrc/functorch/python_aot_autograd.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/python.h>
@@ -559,6 +560,10 @@ static PyMethodDef unwrapDeadWrappersDef = {
     nullptr};
 
 void initFuncTorchBindings(PyObject* module) {
+  TORCH_CHECK(
+      InitializeAOTAutogradHelpers(module),
+      "failed to initialize AOTAutograd helper bindings");
+
   auto _C = py::handle(module).cast<py::module>();
   auto m = _C.def_submodule("_functorch");
 
