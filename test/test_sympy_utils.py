@@ -367,6 +367,42 @@ class TestValueRanges(TestCase):
                 else:
                     self.assertEqual(len(unique), 2)
 
+    def test_bool_minimum_maximum(self):
+        vals = [sympy.false, sympy.true]
+        for fn in ("minimum", "maximum"):
+            for a, b in itertools.product(generate_range(vals), repeat=2):
+                with self.subTest(fn=fn, a=a, b=b):
+                    ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
+                    self.assertTrue(ref_r.is_bool)
+                    unique = set()
+                    for a0, b0 in itertools.product(vals, repeat=2):
+                        if a0 not in a or b0 not in b:
+                            continue
+                        if fn == "minimum":
+                            expected = bool(a0) and bool(b0)
+                        else:
+                            expected = bool(a0) or bool(b0)
+                        r = sympy.true if expected else sympy.false
+                        self.assertIn(r, ref_r)
+                        unique.add(r)
+                    if ref_r.lower == ref_r.upper:
+                        self.assertEqual(len(unique), 1)
+                    else:
+                        self.assertEqual(len(unique), 2)
+
+    def test_bool_minimum_maximum_mixed_raises(self):
+        # min/max require both operands to be boolean or both non-boolean;
+        # a mixed boolean/non-boolean pair must raise.
+        bool_range = ValueRanges(sympy.false, sympy.true)
+        int_range = ValueRanges(sympy.Integer(0), sympy.Integer(4))
+        for fn in ("minimum", "maximum"):
+            for a, b in ((bool_range, int_range), (int_range, bool_range)):
+                with self.subTest(fn=fn, a=a, b=b):
+                    with self.assertRaisesRegex(
+                        AssertionError, "operands must both be boolean"
+                    ):
+                        getattr(ValueRangeAnalysis, fn)(a, b)
+
     @parametrize("fn", UNARY_OPS)
     def test_unary_ref_range(self, fn):
         # TODO: bring back sympy.oo testing for float unary fns

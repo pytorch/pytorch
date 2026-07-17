@@ -591,6 +591,7 @@ class IRNode:
 
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
     _current_stream_idx: ClassVar[int | None] = None
+    _current_mempool: ClassVar[tuple[int, int] | None] = None
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
@@ -601,6 +602,8 @@ class IRNode:
     annotations: dict[str, object] = dataclasses.field(init=False)
     # User-annotated stream index from FX node metadata (set during lowering)
     stream_idx: int | None = dataclasses.field(init=False)
+    # User-annotated CUDA MemPool from FX node metadata (set during lowering)
+    mempool: tuple[int, int] | None = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -623,6 +626,18 @@ class IRNode:
             yield
         finally:
             IRNode._current_stream_idx = old
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_mempool(
+        mempool: tuple[int, int] | None,
+    ) -> Generator[None, None, None]:
+        old = IRNode._current_mempool
+        IRNode._current_mempool = mempool
+        try:
+            yield
+        finally:
+            IRNode._current_mempool = old
 
     @staticmethod
     def is_realized_node(node: IRNode) -> bool:
@@ -656,6 +671,7 @@ class IRNode:
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self._post_init_setattr("annotations", {})
         self._post_init_setattr("stream_idx", self._current_stream_idx)
+        self._post_init_setattr("mempool", self._current_mempool)
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -954,6 +970,11 @@ class Operation:
         if not hasattr(self, "stream_idx"):
             raise AssertionError('Expected hasattr(self, "stream_idx")')
         return self.stream_idx
+
+    def get_mempool(self) -> tuple[int, int] | None:
+        if not hasattr(self, "mempool"):
+            raise AssertionError('Expected hasattr(self, "mempool")')
+        return self.mempool
 
     def get_operation_name(self) -> str:
         if self.operation_name is None:
@@ -1268,6 +1289,7 @@ class Scatter(Pointwise):
 REDUCTION_COMBINE_FN: dict[str, Callable[..., OpsValue]] = {
     "any": ops_wrapper("logical_or"),
     "max": ops_wrapper("maximum"),
+    "fmax": ops_wrapper("fmaximum"),
     "min": ops_wrapper("minimum"),
     "prod": ops_wrapper("mul"),
     "sum": ops_wrapper("add"),
@@ -1918,7 +1940,13 @@ class Reduction(Loops):
     def default_accumulator(
         reduction_type: str, dtype: torch.dtype
     ) -> _NumLike | Sequence[_NumLike]:
-        if reduction_type in ("max", "argmax", "argmax_value", "argmax_with_value"):
+        if reduction_type in (
+            "max",
+            "fmax",
+            "argmax",
+            "argmax_value",
+            "argmax_with_value",
+        ):
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
@@ -6346,7 +6374,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
         assert isinstance(caller, NVUniversalGemmCaller), type(caller)  # noqa: S101
-        assert self.layout == caller.layout  # noqa: S101 # noqa: S101
+        assert self.layout == caller.layout  # noqa: S101
 
         render = self.make_kernel_render
         prev_kind = self._render_kind
@@ -6482,7 +6510,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
     Buffer for NVIDIA Universal GEMM kernels.
 
     Unlike CuteDSL templates which use Jinja templates, this generates
-    simpler Python code that directly calls the cutlass_api library.
+    simpler Python code that directly calls the cutlass.operators library.
     """
 
     def __init__(
@@ -6498,6 +6526,8 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         swizzle_type_a: Any | None = None,
         swizzle_type_b: Any | None = None,
         supports_epilogue_fusion: bool = False,
+        swap_ab: bool = False,
+        bias_node: Buffer | None = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6511,10 +6541,14 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.swizzle_type_a = swizzle_type_a
         self.swizzle_type_b = swizzle_type_b
         self.supports_epilogue_fusion = supports_epilogue_fusion
+        self.swap_ab = swap_ab
+        # When set, the last entry of `inputs` is an addmm bias consumed as a
+        # fixed bias-add epilogue; the GEMM operands are the remaining inputs.
+        self.bias_node = bias_node
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
-            "kernel_name": kernel.metadata.kernel_name,
-            "min_cc": kernel.metadata.min_cc,
+            "kernel_name": kernel.metadata.operator_name,
+            "min_cc": kernel.designed_for_min_cc,
         }
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
@@ -6561,6 +6595,13 @@ class NVUniversalGemmBuffer(TemplateBuffer):
                 inp = inp.data
             input_nodes.append(inp)
 
+        # For a baked addmm bias, the bias is the last input and is consumed by
+        # the epilogue, not as a GEMM operand.
+        bias_node = None
+        if self.bias_node is not None:
+            bias_node = input_nodes[-1]
+            input_nodes = input_nodes[:-1]
+
         kernel_name = str(Placeholder.KERNEL_NAME)
 
         render_kernel = NVUniversalGemmKernel(
@@ -6579,6 +6620,8 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             epilogue_reads=epilogue_reads,
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
+            swap_ab=self.swap_ab,
+            bias_node=bias_node,
         )
 
         def render():
@@ -7208,12 +7251,16 @@ class ExternKernel(InputsKernel):
                     args_flat_is_tensor.append(False)
                     non_tensor_args.append(arg)
                     device_index = arg.device.index
-                    if not (arg.device.type == "cuda" and device_index is not None):
+                    if not (
+                        arg.device.type in ["cuda", "xpu"] and device_index is not None
+                    ):
                         raise AssertionError(
-                            'Expected arg.device.type == "cuda" and device_index is not None'
+                            'Expected arg.device.type in ["cuda", "xpu"] and device_index is not None'
                         )
                     real_non_tensor_args.append(
-                        torch.cuda.default_generators[device_index].clone_state()
+                        torch._C._accelerator_getDefaultGenerator(
+                            device_index
+                        ).clone_state()
                     )
 
                 case OpaqueObjectState():
@@ -7278,12 +7325,14 @@ class ExternKernel(InputsKernel):
                 example_args.append(x.opaque_example_value)
             elif isinstance(x, torch._inductor.ir.GeneratorState):
                 device_index = x.device.index
-                if not (x.device.type == "cuda" and device_index is not None):
+                if not (x.device.type in ["cuda", "xpu"] and device_index is not None):
                     raise AssertionError(
-                        'Expected x.device.type == "cuda" and device_index is not None'
+                        'Expected x.device.type in ["cuda", "xpu"] and device_index is not None'
                     )
                 example_args.append(
-                    torch.cuda.default_generators[device_index].clone_state()
+                    torch._C._accelerator_getDefaultGenerator(
+                        device_index
+                    ).clone_state()
                 )
             else:
                 example_args.append(ir_node_to_tensor(x))
@@ -7302,6 +7351,7 @@ class ExternKernel(InputsKernel):
             ctx: AbstractContextManager[None] = nullcontext()
             if V.current_node.target is torch._higher_order_ops.effects.with_effects:
                 # remove the first effect token in meta["val"] and meta["unbacked_bindings"]
+                # pyrefly: ignore[unsupported-operation]
                 node_meta_val = node_meta_val[1]
                 ctx = _remove_effect_token_unbacked_bindings(V.current_node)
 
@@ -7616,18 +7666,43 @@ class ExternKernel(InputsKernel):
             for dim in expanded_dims:
                 x = torch._inductor.lowering.slice_(x, dim, 0, 1)
 
-        # Although this is a clone, inductor is good about fusing clones into previous
-        # operations if they weren't realized and their layouts were flexible.
-        x = cls.copy_input(x)
+        if x.get_dtype().is_complex:
+            # Triton signature codegen has no complex pointer dtype, so avoid
+            # materializing complex layout constraints through a pointwise copy.
+            if exact_strides is not None:
+                layout = FlexibleLayout(
+                    x.get_device_or_error(), x.get_dtype(), x.get_size()
+                ).as_exact_strides(exact_strides, allow_padding=allow_padding)
+            else:
+                if order is None:
+                    raise AssertionError(
+                        "Expected order is not None when exact_strides is None"
+                    )
+                layout = FlexibleLayout(
+                    x.get_device_or_error(), x.get_dtype(), x.get_size()
+                ).as_stride_order(order, allow_padding=allow_padding)
 
-        as_storage_and_layout(
-            x,
-            freeze=True,
-            want_contiguous=False,
-            stride_order=order,
-            allow_padding=allow_padding,
-            exact_strides=exact_strides,
-        )
+            src = x
+            x = torch._inductor.lowering.empty_strided(
+                x.get_size(),
+                layout.stride,
+                dtype=x.get_dtype(),
+                device=x.get_device_or_error(),
+            )
+            InplaceCopyFallback.create(x, src)
+        else:
+            # Although this is a clone, inductor is good about fusing clones into previous
+            # operations if they weren't realized and their layouts were flexible.
+            x = cls.copy_input(x)
+
+            as_storage_and_layout(
+                x,
+                freeze=True,
+                want_contiguous=False,
+                stride_order=order,
+                allow_padding=allow_padding,
+                exact_strides=exact_strides,
+            )
         if (
             order
             and not free_unbacked_symbols(x.get_size())
@@ -9306,6 +9381,9 @@ class FallbackKernel(ExternKernelAlloc):
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
             self.mutation_names.append(tensor_args[0].get_name())
+            # Record aliasing relationship so memory planning doesn't wrongly
+            # reuse its storage.
+            self.alias_names.append(tensor_args[0].get_name())
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
@@ -9393,8 +9471,17 @@ class FallbackKernel(ExternKernelAlloc):
 
     def codegen_unbacked_symbol_defs(self, wrapper: PythonWrapperCodegen) -> None:
         return wrapper.codegen_unbacked_symbol_defs_for_outputs(
-            self.get_name(), self.outputs, getattr(self, "unbacked_bindings", None)
+            self.get_name(),
+            self.codegen_outputs(),
+            getattr(self, "unbacked_bindings", None),
         )
+
+    def codegen_outputs(self) -> Sequence[Any]:
+        if self.outputs:
+            return self.outputs
+        if isinstance(self.layout, Layout):
+            return [self]
+        return self.mutation_outputs
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
@@ -9604,7 +9691,7 @@ class FallbackKernel(ExternKernelAlloc):
         if len(returns) == 1:
             # NOTE: [special handling of all_reduce_coalesced_'s return value]
             # all_reduce_coalesced_ return a list of tensors via self.mutation_outputs
-            outputs = self.outputs if self.outputs else self.mutation_outputs
+            outputs = self.codegen_outputs()
             return_type = returns[0].real_type
             output_arguments = [handle_single_output(return_type, outputs)]
         else:
@@ -9721,16 +9808,19 @@ class FallbackKernel(ExternKernelAlloc):
                 self.op_overload,
                 exported_args,
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
-                self.outputs if self.outputs else self.mutation_outputs,
+                self.codegen_outputs(),
             )
         else:
             wrapper.generate_fallback_kernel(self)
-            if isinstance(self.layout, Layout):
-                self.codegen_size_asserts(wrapper)
-                self.codegen_alignment_asserts(wrapper)
-                self.codegen_memory_tracking(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
+        # AOT runtime dispatch assertions are emitted by the proxy executor path.
+        if not (self.use_runtime_dispatch and V.graph.aot_mode) and isinstance(
+            self.layout, Layout
+        ):
+            self.codegen_size_asserts(wrapper)
+            self.codegen_alignment_asserts(wrapper)
+            self.codegen_memory_tracking(wrapper)
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor) -> FixedLayout:
@@ -9864,6 +9954,26 @@ class FallbackKernel(ExternKernelAlloc):
         ):
             device = torch.device("cpu")
 
+        def create_direct_output(output: torch.Tensor) -> FallbackKernel:
+            if not device:
+                raise AssertionError("Not sure where to find device info")
+            packed = cls(
+                cls.tensor_to_layout(output),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                kwargs=kwargs,
+                unbacked_bindings=unbacked_bindings,
+            )
+            if (
+                config.assume_unaligned_fallback_output
+                or has_unaligned_input
+                or not tensor_is_aligned(output)
+            ):
+                V.graph.unaligned_buffers.add(packed.get_name())
+            return packed
+
         # Try multi-output .out() lowering for custom ops with the out tag.
         if (
             isinstance(kernel, torch._ops.OpOverload)
@@ -9895,6 +10005,9 @@ class FallbackKernel(ExternKernelAlloc):
                 kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
+
+        elif isinstance(example_output, torch.Tensor):
+            return create_direct_output(example_output)
 
         else:
             if not device:
@@ -10485,6 +10598,7 @@ class StorageBox(MutableBox):
         self.data.origin_node = origin_node
         self.data.traceback = traceback
         self.data.stream_idx = self.data.data.stream_idx
+        self.data.mempool = self.data.data.mempool
         return self.data.name
 
     def realize_hint(self) -> None:
