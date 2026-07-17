@@ -848,23 +848,61 @@ def _is_blockwise128x128_scaling(
 ) -> bool:
     # Triton expects [out_blocks, k_blocks] (output blocks as rows, K blocks as cols).
     # cuBLAS produces transposed+padded [k_blocks_padded_to_4, out_blocks] for 128x128.
-    # Accept both; lowering normalizes cuBLAS -> Triton before kernel launch.
     if transpose:
         out_blocks = ceildiv(tensor_sz[1], 128)  # N/128
         k_blocks = ceildiv(tensor_sz[0], 128)  # K/128
     else:
         out_blocks = ceildiv(tensor_sz[0], 128)  # M/128
         k_blocks = ceildiv(tensor_sz[1], 128)  # K/128
+    k_blocks_padded = ceildiv(k_blocks, 4) * 4
     sizevars = V.graph.sizevars
-    # Case 1: Triton layout [out_blocks, k_blocks] (with possible padding on k_blocks)
+    # Case 1: Triton layout [out_blocks, k_blocks]
     triton_out_ok = sizevars.statically_known_equals(sz[0], out_blocks)
-    triton_k_ok = sizevars.statically_known_geq(sz[1], k_blocks)
+    triton_k_ok = sizevars.statically_known_equals(sz[1], k_blocks)
     triton_ok = triton_out_ok and triton_k_ok
-    # Case 2: cuBLAS transposed layout [k_blocks_padded, out_blocks]
+    # Case 2: cuBLAS transposed layout [k_blocks_padded_to_4, out_blocks]
     cublas_out_ok = sizevars.statically_known_equals(sz[1], out_blocks)
-    cublas_k_ok = sizevars.statically_known_geq(sz[0], k_blocks)
+    cublas_k_ok = sizevars.statically_known_equals(sz[0], k_blocks_padded)
     cublas_ok = cublas_out_ok and cublas_k_ok
     return triton_ok or cublas_ok
+
+
+def _uses_cublas_blockwise128x128_layout(
+    scale: Any,
+    mat: Any,
+    scale_option: ScalingType,
+    transpose: bool = False,
+) -> bool:
+    if scale_option != ScalingType.BlockWise128x128:
+        return False
+    tensor_sz = mat.get_size()
+    if transpose:
+        out_blocks = ceildiv(tensor_sz[1], 128)
+        k_blocks = ceildiv(tensor_sz[0], 128)
+    else:
+        out_blocks = ceildiv(tensor_sz[0], 128)
+        k_blocks = ceildiv(tensor_sz[1], 128)
+    k_blocks_padded = ceildiv(k_blocks, 4) * 4
+    sizevars = V.graph.sizevars
+    scale_sz = scale.get_size()
+    cublas_layout = sizevars.statically_known_equals(
+        scale_sz[0], k_blocks_padded
+    ) and sizevars.statically_known_equals(scale_sz[1], out_blocks)
+    if not cublas_layout:
+        return False
+
+    triton_layout = sizevars.statically_known_equals(
+        scale_sz[0], out_blocks
+    ) and sizevars.statically_known_equals(scale_sz[1], k_blocks)
+    if not triton_layout:
+        return True
+
+    scale_stride = scale.maybe_get_stride()
+    if scale_stride is None:
+        return False
+    return sizevars.statically_known_equals(
+        scale_stride[0], 1
+    ) and sizevars.statically_known_equals(scale_stride[1], k_blocks_padded)
 
 
 def is_desired_scaling(
@@ -1003,6 +1041,19 @@ def tuned_scaled_mm_v2(
         recipe_b
     )
 
+    # Note: No NVFP4 support at this point - can ignore swizzling, and take only the
+    #       first scale types passed.
+    scale_option_a, scale_option_b = (
+        ScalingType(recipe_a[0]),
+        ScalingType(recipe_b[0]),
+    )
+    scale_a_uses_cublas_128x128_layout = _uses_cublas_blockwise128x128_layout(
+        scale_a[0], mat_a, scale_option_a
+    )
+    scale_b_uses_cublas_128x128_layout = _uses_cublas_blockwise128x128_layout(
+        scale_b[0], mat_b, scale_option_b, transpose=True
+    )
+
     # Only handle single-level scales (no MX/NV)
     scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
 
@@ -1043,13 +1094,6 @@ def tuned_scaled_mm_v2(
     ):
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
 
-        # Note: No NVFP4 support at this point - can ignore swizzling, and take only the
-        #       first scale types passed.
-        scale_option_a, scale_option_b = (
-            ScalingType(recipe_a[0]),
-            ScalingType(recipe_b[0]),
-        )
-
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if (
@@ -1069,12 +1113,19 @@ def tuned_scaled_mm_v2(
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
-                overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
-                overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+                main_loop_overriders = dict(overriders)
+                main_loop_overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
+                main_loop_overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+                main_loop_overriders["SCALE_A_128X128_USES_CUBLAS_LAYOUT"] = (
+                    scale_a_uses_cublas_128x128_layout
+                )
+                main_loop_overriders["SCALE_B_128X128_USES_CUBLAS_LAYOUT"] = (
+                    scale_b_uses_cublas_128x128_layout
+                )
 
                 templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    overriders
+                    main_loop_overriders
                 )
             else:
                 raise AssertionError(
@@ -1235,6 +1286,12 @@ def tuned_scaled_mm(
         scale_option_a, scale_option_b = get_scaling_options(
             mat_a, mat_b, scale_a_size, scale_b_size
         )
+        scale_a_uses_cublas_128x128_layout = _uses_cublas_blockwise128x128_layout(
+            scale_a, mat_a, scale_option_a
+        )
+        scale_b_uses_cublas_128x128_layout = _uses_cublas_blockwise128x128_layout(
+            scale_b, mat_b, scale_option_b, transpose=True
+        )
 
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
@@ -1255,12 +1312,19 @@ def tuned_scaled_mm(
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
-                overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
-                overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+                main_loop_overriders = dict(overriders)
+                main_loop_overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
+                main_loop_overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+                main_loop_overriders["SCALE_A_128X128_USES_CUBLAS_LAYOUT"] = (
+                    scale_a_uses_cublas_128x128_layout
+                )
+                main_loop_overriders["SCALE_B_128X128_USES_CUBLAS_LAYOUT"] = (
+                    scale_b_uses_cublas_128x128_layout
+                )
 
                 templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    overriders
+                    main_loop_overriders
                 )
             else:
                 raise AssertionError(
