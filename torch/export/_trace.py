@@ -115,6 +115,8 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     GuardOnDataDependentSymNode,
     ShapeEnv,
+    statically_known_true,
+    sym_eq,
 )
 from torch.fx.graph import _PyTreeInfo
 from torch.utils._pytree import TreeSpec
@@ -651,12 +653,14 @@ def _remove_extra_duplicate_user_inputs(
                 if _compatible_tensor_values(
                     base_node.meta.get("val"), node.meta.get("val")
                 ) and (
-                    node_source is None
-                    or node_source == base_source
+                    (node_source is not None and node_source == base_source)
                     or _same_tensor_value_or_source(
                         base_node.meta.get("val"),
                         node.meta.get("val"),
                         node_source,
+                    )
+                    or _same_tracked_tensor_source(
+                        base_node.meta.get("val"), node.meta.get("val")
                     )
                 ):
                     node.replace_all_uses_with(base_node)
@@ -798,9 +802,8 @@ def _compatible_tensor_values(lhs: Any, rhs: Any) -> bool:
         if len(lhs_dims) != len(rhs_dims):
             return False
         for lhs_dim, rhs_dim in zip(lhs_dims, rhs_dims):
-            if isinstance(lhs_dim, int) and isinstance(rhs_dim, int):
-                if lhs_dim != rhs_dim:
-                    return False
+            if not statically_known_true(sym_eq(lhs_dim, rhs_dim)):
+                return False
         return True
 
     return (
@@ -809,6 +812,7 @@ def _compatible_tensor_values(lhs: Any, rhs: Any) -> bool:
         and lhs.layout == rhs.layout
         and compatible_dims(lhs.shape, rhs.shape)
         and compatible_dims(lhs.stride(), rhs.stride())
+        and statically_known_true(sym_eq(lhs.storage_offset(), rhs.storage_offset()))
     )
 
 
@@ -845,14 +849,37 @@ def _same_tensor_value_or_source(
     ) and _source_key(_tracked_fake_source_for_value(rhs)) == _source_key(source)
 
 
-def _source_from_public_input_path(path) -> Source | None:
-    if not path or not isinstance(path[0], pytree.MappingKey):
-        return None
-    if not isinstance(path[0].key, str):
-        return None
+def _same_tracked_tensor_source(lhs: Any, rhs: Any) -> bool:
+    lhs_source = _source_key(_tracked_fake_source_for_value(lhs))
+    if lhs_source is None:
+        return False
+    return lhs_source == _source_key(_tracked_fake_source_for_value(rhs))
 
-    source: Source = LocalSource(path[0].key, is_input=True)
-    for key in path[1:]:
+
+def _source_from_public_input_path(
+    path,
+    *,
+    base_source: Source | None = None,
+    var_keyword_name: str | None = None,
+    explicit_input_names: set[str] | None = None,
+) -> Source | None:
+    if base_source is None:
+        if not path or not isinstance(path[0], pytree.MappingKey):
+            return None
+        if not isinstance(path[0].key, str):
+            return None
+
+        explicit_input_names = explicit_input_names or set()
+        if var_keyword_name is not None and path[0].key not in explicit_input_names:
+            source: Source = DictGetItemSource(
+                LocalSource(var_keyword_name, is_input=True), path[0].key
+            )
+        else:
+            source = LocalSource(path[0].key, is_input=True)
+        path = path[1:]
+    else:
+        source = base_source
+    for key in path:
         if isinstance(key, pytree.SequenceKey):
             source = GetItemSource(source, key.idx)
         elif isinstance(key, pytree.MappingKey):
@@ -868,19 +895,141 @@ def _collect_public_input_source_values(
     mod: torch.nn.Module,
     fake_args,
     fake_kwargs,
-) -> tuple[list[Source], dict[Source, Any]]:
-    combined_args = _bind_signature_to_inputs(mod, fake_args, fake_kwargs)
-    flat_args_with_path, _ = pytree.tree_flatten_with_path(combined_args)
+) -> tuple[list[Source], dict[Source, Any], dict[str, str]]:
+    try:
+        sig = inspect.signature(mod.forward)
+    except (TypeError, ValueError):
+        combined_args = _bind_signature_to_inputs(mod, fake_args, fake_kwargs)
+        flat_args_with_path, _ = pytree.tree_flatten_with_path(combined_args)
+        explicit_input_names = set(combined_args)
+        var_keyword_name = None
+        return _collect_public_input_source_values_from_flat_paths(
+            flat_args_with_path,
+            var_keyword_name=var_keyword_name,
+            explicit_input_names=explicit_input_names,
+        )
 
+    public_input_sources: list[Source] = []
+    source_to_value: dict[Source, Any] = {}
+    source_name_to_public_name: dict[str, str] = {}
+
+    def record_leaf(
+        *,
+        public_name: str,
+        base_source: Source,
+        nested_path,
+        value: Any,
+    ) -> None:
+        source = _source_from_public_input_path(
+            nested_path,
+            base_source=base_source,
+        )
+        if source is None:
+            return
+        public_input_sources.append(source)
+        source_to_value[source] = value
+        source_name_to_public_name[source.name] = f"L[{public_name!r}]" + pytree.keystr(
+            nested_path
+        )
+
+    bound_positional = sig.bind_partial(*fake_args).arguments
+    positional_names = set(bound_positional)
+    for name, value in bound_positional.items():
+        param = sig.parameters[name]
+        if param.kind is inspect.Parameter.VAR_POSITIONAL:
+            for idx, arg in enumerate(value):
+                flat_arg_with_path, _ = pytree.tree_flatten_with_path(arg)
+                for nested_path, leaf in flat_arg_with_path:
+                    record_leaf(
+                        public_name=f"{name}_{idx}",
+                        base_source=GetItemSource(
+                            LocalSource(name, is_input=True), idx
+                        ),
+                        nested_path=nested_path,
+                        value=leaf,
+                    )
+        else:
+            flat_arg_with_path, _ = pytree.tree_flatten_with_path(value)
+            for nested_path, leaf in flat_arg_with_path:
+                record_leaf(
+                    public_name=name,
+                    base_source=LocalSource(name, is_input=True),
+                    nested_path=nested_path,
+                    value=leaf,
+                )
+
+    var_keyword_name = next(
+        (
+            name
+            for name, param in sig.parameters.items()
+            if param.kind is inspect.Parameter.VAR_KEYWORD
+        ),
+        None,
+    )
+    for name, value in fake_kwargs.items():
+        param = sig.parameters.get(name)
+        if (
+            param is not None
+            and param.kind
+            in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+            and name not in positional_names
+        ):
+            base_source = LocalSource(name, is_input=True)
+        elif var_keyword_name is not None:
+            base_source = DictGetItemSource(
+                LocalSource(var_keyword_name, is_input=True), name
+            )
+        else:
+            base_source = LocalSource(name, is_input=True)
+        flat_arg_with_path, _ = pytree.tree_flatten_with_path(value)
+        for nested_path, leaf in flat_arg_with_path:
+            record_leaf(
+                public_name=name,
+                base_source=base_source,
+                nested_path=nested_path,
+                value=leaf,
+            )
+
+    return public_input_sources, source_to_value, source_name_to_public_name
+
+
+def _collect_public_input_source_values_from_flat_paths(
+    flat_args_with_path,
+    *,
+    var_keyword_name: str | None,
+    explicit_input_names: set[str],
+) -> tuple[list[Source], dict[Source, Any], dict[str, str]]:
     public_input_sources = []
     source_to_value = {}
+    source_name_to_public_name = {}
     for path, value in flat_args_with_path:
-        source = _source_from_public_input_path(path)
+        source = _source_from_public_input_path(
+            path,
+            var_keyword_name=var_keyword_name,
+            explicit_input_names=explicit_input_names,
+        )
         if source is None:
             continue
         public_input_sources.append(source)
         source_to_value[source] = value
-    return public_input_sources, source_to_value
+        source_name_to_public_name[source.name] = "L" + pytree.keystr(path)
+    return public_input_sources, source_to_value, source_name_to_public_name
+
+
+def _attach_public_source_name_mapping(
+    gm: torch.fx.GraphModule,
+    mod: torch.nn.Module,
+    fake_args,
+    fake_kwargs,
+) -> None:
+    _, _, source_name_to_public_name = _collect_public_input_source_values(
+        mod, fake_args, fake_kwargs
+    )
+    if source_name_to_public_name:
+        gm.meta["dynamo_source_to_public_source_name"] = source_name_to_public_name
 
 
 def _has_tensor_outside_fake_mode(value: Any, fake_mode: FakeTensorMode) -> bool:
@@ -2670,10 +2819,16 @@ def _strict_export(
                     prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
                     source_is_input=True,
                 )
-            public_input_sources, source_to_public_input_value = (
+            public_input_sources, source_to_public_input_value, _ = (
                 _collect_public_input_source_values(
                     mod, public_fake_args, public_fake_kwargs
                 )
+            )
+            _attach_public_source_name_mapping(
+                gm_torch_level,
+                mod,
+                public_fake_args,
+                public_fake_kwargs,
             )
             default_unlift_node_meta = {
                 "nn_module_stack": _root_nn_module_stack(mod),
@@ -3257,6 +3412,10 @@ def _non_strict_export(
                 fqn: map_fake_to_real[obj] if isinstance(obj, FakeScriptObject) else obj
                 for fqn, obj in aten_export_artifact.constants.items()
             }
+
+    _attach_public_source_name_mapping(
+        aten_export_artifact.gm, mod, fake_args, fake_kwargs
+    )
 
     _move_non_persistent_buffers_to_tensor_constants(
         mod, aten_export_artifact.sig, aten_export_artifact.constants

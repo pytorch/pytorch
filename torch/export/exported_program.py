@@ -1806,8 +1806,23 @@ def _convert_guards_to_code(graph_module):
             for source in sources
         )
     }
+    source_name_to_public_name = graph_module.meta.get(
+        "dynamo_source_to_public_source_name", {}
+    )
+
+    def public_source_name(source):
+        name = source.name
+        for old_name, new_name in sorted(
+            source_name_to_public_name.items(),
+            key=lambda item: len(item[0]),
+            reverse=True,
+        ):
+            if name == old_name or name.startswith(f"{old_name}."):
+                return f"{new_name}{name[len(old_name) :]}"
+        return name
+
     py_printer = torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter(
-        shape_env.var_to_sources, lambda s: s.name, shape_env.var_to_sources
+        shape_env.var_to_sources, public_source_name, shape_env.var_to_sources
     )
     ret = [
         py_printer.doprint(guard.expr)

@@ -7144,6 +7144,75 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 inputs2 = {**inputs, "z": torch.rand(6, 4)}
                 self.assertTrue(torch.allclose(m(**inputs2), epm(**inputs2)))
 
+    def test_dynamic_shapes_kwargs_call_like_shared_dim(self):
+        class KwargsModel(torch.nn.Module):
+            def forward(self, *, x, y, **kwargs):
+                return x.sum() * 2 - y.sum() + kwargs["z"].sum()
+
+        inputs = {
+            "z": torch.rand(3, 4),
+            "y": torch.randn(3, 4),
+            "x": torch.randn(2, 4),
+        }
+        shared = torch.export.Dim("shared", min=2, max=8)
+        dynamic_shapes = {
+            "z": {0: shared, 1: torch.export.Dim.AUTO},
+            "y": {0: shared, 1: torch.export.Dim.AUTO},
+            "x": {0: torch.export.Dim.AUTO, 1: torch.export.Dim.AUTO},
+        }
+        m = KwargsModel()
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                epm = export(
+                    m, (), kwargs=inputs, dynamic_shapes=dynamic_shapes, strict=strict
+                ).module()
+                self.assertTrue(torch.allclose(m(**inputs), epm(**inputs)))
+                inputs2 = {
+                    **inputs,
+                    "z": torch.rand(5, 4),
+                    "y": torch.randn(5, 4),
+                }
+                self.assertTrue(torch.allclose(m(**inputs2), epm(**inputs2)))
+
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceabilityNonStrict
+    def test_dynamic_shapes_nested_kwargs_overlapping_source_names(self):
+        class KwargsModel(torch.nn.Module):
+            def forward(self, **kwargs):
+                a = kwargs["a"]
+                nested = kwargs["kwargs"]["a"]
+                return a.reshape(nested.shape[0], -1).sum() + nested.sum()
+
+        inputs = {
+            "a": torch.randn(2, 6),
+            "kwargs": {"a": torch.rand(3, 4)},
+        }
+        dynamic_shapes = {
+            "a": {0: torch.export.Dim.STATIC, 1: torch.export.Dim.STATIC},
+            "kwargs": {
+                "kwargs": {"a": {0: torch.export.Dim.AUTO, 1: torch.export.Dim.AUTO}}
+            },
+        }
+        m = KwargsModel()
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                ep = export(
+                    m, (), kwargs=inputs, dynamic_shapes=dynamic_shapes, strict=strict
+                )
+                self.assertTrue(
+                    any(
+                        "L['kwargs']['a'].size()[0]" in guard
+                        for guard in ep._guards_code
+                    )
+                )
+                epm = ep.module()
+                self.assertTrue(torch.allclose(m(**inputs), epm(**inputs)))
+                inputs2 = {
+                    "a": torch.randn(2, 6),
+                    "kwargs": {"a": torch.rand(4, 3)},
+                }
+                self.assertTrue(torch.allclose(m(**inputs2), epm(**inputs2)))
+
     def test_dynamic_shapes_kwargs_nested(self):
         class KwargsModel(torch.nn.Module):
             def forward(self, *, x, y, **kwargs):
@@ -7224,6 +7293,33 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                         },
                         strict=strict,
                     )
+
+    def test_dynamic_shapes_varargs_kwargs_same_name_shared_dim(self):
+        class ArgsKwargsModel(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                return args[0].sum() * 2 - kwargs["args"].sum()
+
+        args = (torch.randn(3, 4),)
+        kwargs = {"args": torch.rand(3, 4)}
+        shared = torch.export.Dim("shared", min=2, max=8)
+        dynamic_shapes = {
+            "args": ({0: shared, 1: torch.export.Dim.AUTO},),
+            "kwargs": {"args": {0: shared, 1: torch.export.Dim.AUTO}},
+        }
+        m = ArgsKwargsModel()
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                epm = export(
+                    m, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes, strict=strict
+                ).module()
+                self.assertTrue(
+                    torch.allclose(m(*args, **kwargs), epm(*args, **kwargs))
+                )
+                args2 = (torch.randn(5, 4),)
+                kwargs2 = {"args": torch.rand(5, 4)}
+                self.assertTrue(
+                    torch.allclose(m(*args2, **kwargs2), epm(*args2, **kwargs2))
+                )
 
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
