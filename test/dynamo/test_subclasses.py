@@ -1122,7 +1122,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         inp = torch.ones(4, 4)
         x = inp.as_subclass(TestTensor)
         torch._dynamo.mark_dynamic(x, 0)
-        compiled_fn = torch.compile(fn, fullgraph=True)
+        compiled_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         out = compiled_fn(x)
         self.assertEqual(out, torch.ones(4, 4) * 2)
 
