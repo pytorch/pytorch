@@ -4960,7 +4960,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
             raise AssertionError("_base_vt must not be None for defaultdict repr")
         return VariableTracker.build(
             tx,
-            f"defaultdict({tracked_repr(tx, self.default_factory)}, "
+            f"{self.python_type_name()}({tracked_repr(tx, self.default_factory)}, "
             f"{tracked_repr(tx, self._base_vt)})",
         )
 
