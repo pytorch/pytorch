@@ -7,11 +7,6 @@
 #include <ATen/ops/linear_backward_native.h>
 #include <ATen/ops/linear_native.h>
 
-// MTLGPUFamilyApple10 is only defined in the macOS 26+ SDK.
-#if !defined(__MAC_26_0)
-static constexpr auto MTLGPUFamilyApple10 = static_cast<MTLGPUFamily>(1010);
-#endif
-
 namespace at::native {
 
 using namespace mps;
@@ -20,7 +15,7 @@ using namespace mps;
 // non-deterministic results for >2D fp16/bf16 inputs on Apple M5+ (Apple10 GPU family).
 // Flatten to 2D to work around the issue (See https://github.com/pytorch/pytorch/issues/180776 )
 static bool needs_nd_workaround(const Tensor& input) {
-  static const bool is_m5_or_newer = [MPSDevice::getInstance()->device() supportsFamily:MTLGPUFamilyApple10];
+  static const bool is_m5_or_newer = is_apple_family_or_newer(AppleGPUFamily::APPLE_10_PLUS);
   return input.dim() > 2 && is_m5_or_newer && (input.scalar_type() == kHalf || input.scalar_type() == kBFloat16);
 }
 
@@ -160,29 +155,38 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     MPSGraphTensor* outputTensor_ = nil;
   };
 
+  // Flatten the input's batch dims to 2D on the tensor side rather than with an in-graph
+  // flatten2DTensor. MPSGraph's canonicalizer fuses a flatten2D -> matmul chain and
+  // miscomputes the output shape, aborting during MLIR compilation for complex inputs on
+  // macOS 27 (see agent_space/mm_complex_broadcast_crash.swift). A pre-flattened 2D input
+  // keeps the fused pattern from forming; the output reshape stays in-graph (it does not
+  // trigger the bug and lets the Placeholder honor non-contiguous output strides). This
+  // also covers the original reasons for reshaping: the 5D matmul crash (#114942) and the
+  // >2D fp16/bf16 non-determinism on Apple10+.
+  bool needs_flatten = input.dim() > 4;
+  if (!needs_flatten && is_bias_defined) {
+    // improves performance with 3D+ inputs
+    needs_flatten =
+        input_size.size() > 2 && input_size[0] > 1 && input_size[1] >= 1 && input_size[1] <= 32 && bias.dim() <= 1;
+  }
+  if (!needs_flatten) {
+    needs_flatten = needs_nd_workaround(input);
+  }
+  const Tensor linear_input = needs_flatten ? input.reshape({-1, input.size(-1)}) : input;
+
   @autoreleasepool {
+    // Key on the original input: two inputs that flatten to the same 2D shape can still
+    // need different output reshapes (e.g. (6,K) vs (2,3,K)), so they must not share a graph.
     std::string key = "mps_linear" + getTensorsStringKey({input, weight, bias});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, linear_input);
       MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight);
 
       MPSGraphTensor* weightTransposeTensor = [mpsGraph transposeTensor:weightTensor
                                                               dimension:-1
                                                           withDimension:-2
                                                                    name:nil];
-      // matrixMultiplicationWithPrimary crashes for 5D tensors, see https://github.com/pytorch/pytorch/issues/114942
-      bool doReshape = input.dim() > 4;
-      if (!doReshape && is_bias_defined) {
-        // workaround to improve the performance with 3D+ inputs
-        doReshape =
-            input_size.size() > 2 && input_size[0] > 1 && input_size[1] >= 1 && input_size[1] <= 32 && bias.dim() <= 1;
-      }
-      // Non-deterministic results for >2D fp16/bf16 on Apple10+
-      if (!doReshape) {
-        doReshape = needs_nd_workaround(input);
-      }
-      auto inputFlattened = doReshape ? [mpsGraph flatten2DTensor:inputTensor axis:-1 name:nil] : inputTensor;
-      auto outputTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:inputFlattened
+      auto outputTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:inputTensor
                                                           secondaryTensor:weightTransposeTensor
                                                                      name:nil];
 
@@ -192,7 +196,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
                                            secondaryTensor:newCachedGraph->biasTensor_
                                                       name:nil];
       }
-      if (doReshape) {
+      if (needs_flatten) {
         outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:getMPSShape(output_size) name:nil];
       }
 
@@ -201,7 +205,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
+    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, linear_input);
     Placeholder weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight);
     Placeholder biasPlaceholder = Placeholder();
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);

@@ -18,6 +18,12 @@ models on various hardware backends. This module enables:
 
 The backend can be used with torch.compile():
     model = torch.compile(model, backend="tvm")
+
+The scheduler/trials options only apply to the legacy relay frontend
+(removed in TVM 0.20). With the relax frontend, pass a TVM pipeline instead:
+
+    pipeline = tvm.relax.get_pipeline("static_shape_tuning", target="llvm", total_trials=2000)
+    model = torch.compile(model, backend="tvm", options={"pipeline": pipeline})
 """
 
 import functools
@@ -26,6 +32,7 @@ import logging
 import os
 import sys
 import tempfile
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 from types import MappingProxyType
@@ -85,7 +92,7 @@ def _tvm_relax_compile(
             "falling back to the default relax pipeline.",
             scheduler,
         )
-    return relax_dynamo()(gm, example_inputs)
+    return relax_dynamo(pipeline=options.get("pipeline", None))(gm, example_inputs)
 
 
 def _tvm_relay_compile(
@@ -93,10 +100,26 @@ def _tvm_relay_compile(
     example_inputs: list[torch.Tensor],
     options: MappingProxyType[str, Any],
 ) -> Callable[..., Any]:
+    warnings.warn(
+        "The tvm backend's relay path is deprecated and will be removed; "
+        "install a recent apache-tvm to use the relax frontend instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
     import tvm  # type: ignore[import]
     from tvm import relay  # type: ignore[import]
     from tvm.contrib import graph_executor  # type: ignore[import]
 
+    if any(
+        isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool))
+        for x in example_inputs
+    ):
+        raise RuntimeError(
+            "The TVM (relay) backend does not support dynamic shapes: got symbolic "
+            "scalar graph inputs. Either compile with dynamic=False or use TVM's "
+            "relax frontend instead: from tvm.relax.frontend.torch import relax_dynamo; "
+            "torch.compile(model, backend=relax_dynamo())."
+        )
     jit_mod = torch.jit.trace(gm, example_inputs)
     device = device_from_inputs(example_inputs)
     shape_list = [(f"inp_{idx}", i.shape) for idx, i in enumerate(example_inputs)]
@@ -198,20 +221,16 @@ def _tvm_relay_compile(
     def exec_tvm(*i_args: torch.Tensor) -> list[torch.Tensor]:
         args = [a.contiguous() for a in i_args]
         for idx, arg in enumerate(args, 0):
-            if arg.dim() != 0:
-                if arg.requires_grad:
-                    arg = arg.detach()
-                inp_name = f"inp_{idx}"
-                if inp_name not in active_inputs:
-                    log.warning(
-                        "input %s skipped as not found in tvm's runtime library",
-                        inp_name,
-                    )
-                    continue
-                m.set_input(
+            inp_name = f"inp_{idx}"
+            if inp_name not in active_inputs:
+                log.warning(
+                    "input %s skipped as not found in tvm's runtime library",
                     inp_name,
-                    to_tvm_tensor(arg),
                 )
+                continue
+            if arg.requires_grad:
+                arg = arg.detach()
+            m.set_input(inp_name, to_tvm_tensor(arg))
         m.run()
         return [to_torch_tensor(m.get_output(i)) for i in range(m.get_num_outputs())]
 
