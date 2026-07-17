@@ -75,7 +75,6 @@ if TEST_WITH_TORCHDYNAMO:
         kaiser,
         meshgrid,
         sinc,
-        trapz,
         trim_zeros,
         unique,
     )
