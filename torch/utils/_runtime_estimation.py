@@ -1,4 +1,5 @@
 import torch
+import torch.utils._pytree as pytree
 from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
 from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
 from torch.fx.experimental.symbolic_shapes import (
@@ -75,10 +76,24 @@ _CREATE_OPS = OrderedSet(
 _IGNORE_OPS = _VIEW_OPS | _CREATE_OPS
 
 
+def _get_device_from_value(value) -> torch.device | None:  # type: ignore[no-untyped-def]
+    # Runtime estimation assumes a single dominant device per op; use the
+    # first tensor device found in the nested FX metadata values.
+    flat_values, _ = pytree.tree_flatten(value)
+    for item in flat_values:
+        if isinstance(item, torch.Tensor):
+            return item.device
+    return None
+
+
 def flops_to_ns(
-    flops: float | int, dtype: "torch.dtype", gpu_type: str | None = None
+    flops: float | int,
+    dtype: "torch.dtype",
+    gpu_type: str | None = None,
+    *,
+    device: torch.device | None = None,
 ) -> float:
-    """Convert a FLOPs count to estimated nanoseconds on the GPU.
+    """Convert a FLOPs count to estimated nanoseconds on the current GPU.
 
     Uses 75% of theoretical peak and converts FLOPs to MACs (divide by 2).
 
@@ -88,16 +103,22 @@ def flops_to_ns(
     """
     if gpu_type is not None:
         is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
-        tflops = datasheet_tops(dtype, is_tf32=is_tf32, device_name=gpu_type)
-        if tflops is None:
+        device_tflops = datasheet_tops(
+            dtype,
+            is_tf32=is_tf32,
+            device_name=gpu_type,
+        )
+        if device_tflops is None:
             raise ValueError(
                 f"gpu_type {gpu_type!r} has no datasheet entry for {dtype}"
             )
     else:
-        tflops = get_device_tflops(dtype)
-    peak_gpu_flops = tflops * 1e12
-    if peak_gpu_flops == 0:
+        device_tflops = get_device_tflops(dtype, device=device)
+
+    if device_tflops == 0:
         return 0.0
+
+    peak_gpu_flops = device_tflops * 1e12
     macs = flops / 2
     return (macs / (0.75 * peak_gpu_flops)) * 1e9
 
@@ -134,7 +155,14 @@ def get_compute_time(
         if node_meta is not None:
             extra_kwargs["_node_meta"] = node_meta
         flop_count = flop_count_func(*args, **kwargs, out_val=out, **extra_kwargs)
-        return flops_to_ns(flop_count, dtype, gpu_type=gpu_type)
+
+        device = _get_device_from_value(out)
+        return flops_to_ns(
+            flop_count,
+            dtype,
+            gpu_type=gpu_type,
+            device=device,
+        )
     return 0.0
 
 
@@ -175,7 +203,11 @@ def get_transfer_time(flat_args_kwargs, flat_outs, gpu_type=None) -> float:  # t
         if gpu_memory_bandwidth is None:
             raise ValueError(f"gpu_type {gpu_type!r} not found in datasheet")
     else:
-        gpu_memory_bandwidth = get_gpu_dram_gbps()
+        device = _get_device_from_value((flat_args_kwargs, flat_outs))
+        gpu_memory_bandwidth = get_gpu_dram_gbps(device=device)
+    if gpu_memory_bandwidth <= 0:
+        return 0.0
+
     read_bytes = sum(
         get_num_bytes(t) for t in flat_args_kwargs if isinstance(t, torch.Tensor)
     )
@@ -183,6 +215,6 @@ def get_transfer_time(flat_args_kwargs, flat_outs, gpu_type=None) -> float:  # t
         get_num_bytes(t) for t in flat_outs if isinstance(t, torch.Tensor)
     )
     counted_bytes = read_bytes + write_bytes
-    # The GPU memory bandwidth is in GB/s so the transfer time is in nanoseconds
-    transfer_time = counted_bytes / gpu_memory_bandwidth
-    return transfer_time
+
+    # gpu_memory_bandwidth is GB/s. bytes / GB/s gives nanoseconds.
+    return counted_bytes / gpu_memory_bandwidth
