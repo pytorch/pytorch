@@ -3679,7 +3679,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return True
 
     def should_use_persistent_reduction(self) -> bool:
-        return self.inside_reduction and V.choices.should_use_persistent_reduction(
+        if not self.inside_reduction:
+            return False
+        # ops.sort requires persistent reduction (TritonKernel.sort asserts it), so the
+        # heuristic must never say otherwise. Enforcing it here covers every construction
+        # path, including ones that don't apply apply_feature_required_overrides.
+        if self.features.contains_op("sort") and self.has_persistent_RBLOCK(
+            self.features.reduction_numel
+        ):
+            return True
+        return V.choices.should_use_persistent_reduction(
             self.features, self.cooperative_reduction
         )
 
@@ -7909,9 +7918,18 @@ class TritonScheduling(SIMDScheduling):
         )
 
     def benchmark_codegened_module(
-        self, mod, n_spills_threshold=8, node_names: OrderedSet[str] | None = None
+        self,
+        mod,
+        n_spills_threshold=8,
+        node_names: OrderedSet[str] | None = None,
+        skip_perf_cache: bool = False,
     ) -> tuple[float, str]:
-        """Benchmark an already compiled module"""
+        """Benchmark an already compiled module.
+
+        skip_perf_cache: don't serve the result from the .kernel_perf memo. Callers that
+        need the autotuned winner in mod.triton_.launchers (not just the timing) must set
+        this, since a perf-cache hit returns before the autotuner ever runs.
+        """
         device_interface = get_interface_for_device(V.graph.device_type)
         with (
             preserve_rng_state(),
@@ -7943,9 +7961,10 @@ class TritonScheduling(SIMDScheduling):
                 node_names,
                 mod.__file__,
             )
-            ms = load_cache()
-            if ms is not None:
-                return ms, mod.__file__
+            if not skip_perf_cache:
+                ms = load_cache()
+                if ms is not None:
+                    return ms, mod.__file__
 
             args = mod.get_args()
             call = mod.call

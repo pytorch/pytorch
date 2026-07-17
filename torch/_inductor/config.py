@@ -1086,7 +1086,24 @@ combo_kernel_max_num_nodes = 8
 # When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
-combo_kernel_per_subkernel_blocks = False
+combo_kernel_per_subkernel_blocks: bool = Config(
+    justknob="pytorch/inductor:combo_kernel_per_subkernel_blocks",
+    env_name_force="TORCHINDUCTOR_COMBO_KERNEL_PER_SUBKERNEL_BLOCKS",
+    default=True,
+)
+# When True, each combo sub-kernel autotunes its block sizes standalone at compile time; the
+# winning per-subkernel blocks are stitched into the combo kernel and passed as args (the combo
+# then autotunes num_warps/num_stages over the winners). Requires
+# combo_kernel_per_subkernel_blocks.
+combo_kernel_compile_time_autotune = False
+# Register-pressure guard for compile-time-autotuned combo kernels. A sub-kernel is
+# excluded from the combo (emitted standalone instead) when its own register-limited
+# occupancy -- computed from its autotuned n_regs and num_warps against the device
+# register file -- falls below this fraction. Fusing register-bound sub-kernels unions
+# their register footprints into one CTA body, driving the combo toward the ISA register
+# cap and degrading ptxas codegen for the whole launch; run such a sub-kernel standalone
+# (its faster non-combo form) instead. Set to 0.0 to disable the guard.
+combo_kernel_register_pressure_ratio: float = 0.2
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
 combo_kernel_autotune_grouping = True
@@ -1105,6 +1122,12 @@ combo_kernel_peak_memory_pct_threshold: float | None = 0.05
 # sub-windows. Set to -1 (or any negative value) to disable splitting
 # and treat each parallel group as one window.
 combo_kernel_max_distance: int = -1
+
+# Keep data-independent producers (no reads, e.g. iota-derived causal masks) out
+# of combo fusion when they feed a memory-bound extern (e.g. SDPA attention):
+# combo would hoist the mask to the graph front and it gets evicted before the
+# extern reads it. Cheap to recompute per consumer, so no benefit lost.
+combo_kernels_skip_data_independent: bool = True
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
