@@ -719,14 +719,17 @@ magma_trans_t to_magma(TransposeType trans) {
 
 namespace {
 
-void _warn_once_magma_deprecation(const std::string& op_name) {
+void _warn_once_magma_deprecation(const std::string& op_name, bool force_cusolver = true) {
   if (at::globalContext().linalgPreferredBackend() == at::LinalgBackend::Magma) {
+    std::string warn_force_cusolver = force_cusolver
+      ? " " + op_name + " will try dispatching to cuSOLVER instead. " +
+        "If you see any error messages, please, file an issue on GitHub."
+      : "";
     TORCH_WARN_ONCE(
       op_name, ": ",
       "MAGMA, as a linear algebra backend, is deprecated and will be removed ",
-      "in future releases. ",
-      op_name, " will try dispatching to cuSOLVER instead. "
-      "If you see any error messages, please, file an issue on GitHub."
+      "in future releases.",
+      warn_force_cusolver
     );
   }
 }
@@ -1347,7 +1350,7 @@ void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool u
     } else {
       triangular_solve_batched_magma(A, B, left, upper, transpose, unitriangular);
     }
-#endif // AT_MAGMA_ENABLED() || !defined(USE_ROCM)
+#endif // !AT_MAGMA_ENABLED() || !defined(USE_ROCM)
   }
 }
 
@@ -1543,6 +1546,7 @@ This is an in-place routine, content of 'input', 'values', 'vectors' is overwrit
 'infos' is an int Tensor containing error codes for each matrix in the batched input.
 For more information see MAGMA's documentation for GEEV routine.
 */
+#if !(defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) && !(defined(USE_ROCM) && ROCM_VERSION >= 71400)
 template <typename scalar_t>
 void apply_magma_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
 #if !AT_MAGMA_ENABLED()
@@ -1620,25 +1624,21 @@ void linalg_eig_magma(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, 
   eigenvectors.copy_(eigenvectors_cpu);
   infos.copy_(infos_cpu);
 }
+#endif // !(defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) && !(defined(USE_ROCM) && ROCM_VERSION >= 71400)
+
 void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
   // This function calculates the non-symmetric eigendecomposition in-place
   // tensors should be in batched column major memory format
   // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_magma' or
   // 'linalg_eig_cusolver_xgeev' both geev routines modify the provided input matrix in-place, therefore we need a copy
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
-#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
-  auto preferred_backend = at::globalContext().linalgPreferredBackend();
-  switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-    default:
-      linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
-      return;
-    case at::LinalgBackend::Magma:
-      break; // MAGMA path handled below
-  }
-#endif
+#if (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || (defined(USE_ROCM) && ROCM_VERSION >= 71400)
+  _warn_once_magma_deprecation("linalg.eig");
+  linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
+#else
+  // hipSolver < 3.5.0 does not have `geev`
+  _warn_once_magma_deprecation("linalg.eig", /*force_cusolver=*/false);
   linalg_eig_magma(eigenvalues, eigenvectors, infos, input, compute_eigenvectors);
+#endif
 }
 
 REGISTER_CUDA_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)
