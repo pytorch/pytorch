@@ -12,6 +12,7 @@ import torch.distributed as dist
 from torch.distributed.checkpoint.default_planner import _EmptyStateDictLoadPlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.nn.modules.module import _IncompatibleKeys
 
 from ._storage_utils import _storage_setup
 from .default_planner import DefaultLoadPlanner
@@ -65,7 +66,8 @@ def load(
     planner: LoadPlanner | None = None,
     process_group: dist.ProcessGroup | None = None,
     no_dist: bool = False,
-) -> None:
+    strict: bool = True,
+) -> _IncompatibleKeys:
     """
     Load a checkpoint into a distributed state dict in SPMD style.
 
@@ -124,8 +126,21 @@ def load(
             (Default: ``None``)
         no_dist (bool): If ``True``, this function will assume the intent is to load
             a checkpoint without using cross-rank synchronization. (Default: ``False``)
+        strict (bool): If ``True`` (the default), raise a ``RuntimeError`` when a key
+            present in ``state_dict`` is missing from the checkpoint, preserving the
+            historical behavior. If ``False``, keys that are missing from the checkpoint
+            are skipped (left untouched in ``state_dict``) and keys present in the
+            checkpoint but absent from ``state_dict`` are ignored, mirroring
+            ``torch.nn.Module.load_state_dict(strict=False)``. (Default: ``True``)
     Returns:
-        None.
+        ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields, matching
+        the return value of ``torch.nn.Module.load_state_dict``:
+            * **missing_keys** is a list of str containing the keys in ``state_dict``
+              that were not found in the checkpoint.
+            * **unexpected_keys** is a list of str containing the keys in the
+              checkpoint that are not present in ``state_dict``.
+        When a custom ``planner`` that does not track these keys is supplied, both
+        lists are empty.
 
     Examples
         >>> # xdoctest: +SKIP
@@ -180,12 +195,13 @@ def load(
             elem = state_dict[key]
             stateful_sd[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
 
-        _load_state_dict(
+        result = _load_state_dict(
             state_dict=stateful_sd,
             storage_reader=storage_reader,
             process_group=process_group,
             no_dist=no_dist,
             planner=planner,
+            strict=strict,
         )
         for key in keys:
             if key not in state_dict:
@@ -199,6 +215,8 @@ def load(
                 # Otherwise, replace the state_dict with the loaded state_dict.
                 state_dict[key] = stateful_sd[key]
 
+        return result
+
 
 def _load_state_dict(
     state_dict: dict[str, Any],
@@ -207,12 +225,17 @@ def _load_state_dict(
     coordinator_rank: int = 0,
     no_dist: bool = False,
     planner: LoadPlanner | None = None,
-) -> None:
+    strict: bool = True,
+) -> _IncompatibleKeys:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.load_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
-        planner = DefaultLoadPlanner()
+        planner = DefaultLoadPlanner(allow_partial_load=not strict)
+    elif not strict and hasattr(planner, "allow_partial_load"):
+        # Honor strict=False for planners (e.g. DefaultLoadPlanner subclasses)
+        # that gate the missing-key check on allow_partial_load.
+        planner.allow_partial_load = True
 
     ckpt_kwargs = {}
     if (ckpt_id := getattr(storage_reader, "checkpoint_id", None)) is not None:
@@ -315,6 +338,13 @@ def _load_state_dict(
     else:
         read_data()
         distW.barrier()
+
+    # missing_keys / unexpected_keys are computed identically on every rank
+    # (all ranks share the same keys and metadata), so no collective is needed.
+    return _IncompatibleKeys(
+        list(getattr(planner, "missing_keys", [])),
+        list(getattr(planner, "unexpected_keys", [])),
+    )
 
 
 def _load_state_dict_from_keys(

@@ -314,6 +314,12 @@ class DefaultLoadPlanner(LoadPlanner):
         self.original_state_dict = {}
         self.mappings = {}
         self.allow_partial_load = allow_partial_load
+        # Populated by create_local_plan. missing_keys are keys present in the
+        # state_dict being loaded into but absent from the checkpoint;
+        # unexpected_keys are keys present in the checkpoint but absent from the
+        # state_dict. Mirrors torch.nn.Module.load_state_dict semantics.
+        self.missing_keys: list[str] = []
+        self.unexpected_keys: list[str] = []
 
     def set_up_planner(
         self,
@@ -369,6 +375,11 @@ class DefaultLoadPlanner(LoadPlanner):
                 # _derived_version is only used by flatten_state_dict now.
                 # Set it back to None so that later we can save to a new version.
                 _version._derived_version = None
+
+        current_keys = set(self.state_dict.keys())
+        checkpoint_keys = set(self.metadata.state_dict_metadata.keys())
+        self.missing_keys = sorted(current_keys - checkpoint_keys)
+        self.unexpected_keys = sorted(checkpoint_keys - current_keys)
 
         return create_default_local_load_plan(
             self.state_dict, self.metadata, not self.allow_partial_load

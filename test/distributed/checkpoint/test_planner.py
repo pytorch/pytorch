@@ -760,6 +760,79 @@ class TestLoadPlanner(TestCase):
             )
 
     @with_temp_dir
+    def test_load_strict_true_default_raises(self):
+        # strict defaults to True, so a key present in the state_dict but absent
+        # from the checkpoint must still raise, preserving historical behavior.
+        original_module = nn.Linear(2, 2)
+        dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
+
+        new_module = nn.Linear(2, 2)
+        new_module.extra_param = nn.Parameter(torch.randn(2, 2))
+        with self.assertRaisesRegex(CheckpointException, "Missing key in checkpoint"):
+            dcp.load(
+                state_dict={"module": new_module},
+                checkpoint_id=self.temp_dir,
+            )
+
+    @with_temp_dir
+    def test_load_strict_false_reports_missing_keys(self):
+        # A key in the state_dict but not in the checkpoint is reported as a
+        # missing key and left untouched instead of raising.
+        original_module = nn.Linear(2, 2)
+        dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
+
+        new_module = nn.Linear(2, 2)
+        new_module.extra_param = nn.Parameter(torch.randn(2, 2))
+        result = dcp.load(
+            state_dict={"module": new_module},
+            checkpoint_id=self.temp_dir,
+            strict=False,
+        )
+
+        self.assertEqual(result.missing_keys, ["module.extra_param"])
+        self.assertEqual(result.unexpected_keys, [])
+        # The overlapping parameters are still loaded.
+        self.assertEqual(new_module.weight, original_module.weight)
+        self.assertEqual(new_module.bias, original_module.bias)
+
+    @with_temp_dir
+    def test_load_strict_false_reports_unexpected_keys(self):
+        # A key in the checkpoint but not in the state_dict is reported as an
+        # unexpected key and silently ignored.
+        original_module = nn.Linear(2, 2)
+        original_module.extra_param = nn.Parameter(torch.randn(2, 2))
+        dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
+
+        new_module = nn.Linear(2, 2)
+        result = dcp.load(
+            state_dict={"module": new_module},
+            checkpoint_id=self.temp_dir,
+            strict=False,
+        )
+
+        self.assertEqual(result.missing_keys, [])
+        self.assertEqual(result.unexpected_keys, ["module.extra_param"])
+        self.assertEqual(new_module.weight, original_module.weight)
+        self.assertEqual(new_module.bias, original_module.bias)
+
+    @with_temp_dir
+    def test_load_returns_empty_incompatible_keys_on_exact_match(self):
+        # When state_dict and checkpoint match exactly, both lists are empty
+        # regardless of the strict flag.
+        original_module = nn.Linear(2, 2)
+        dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
+
+        for strict in (True, False):
+            new_module = nn.Linear(2, 2)
+            result = dcp.load(
+                state_dict={"module": new_module},
+                checkpoint_id=self.temp_dir,
+                strict=strict,
+            )
+            self.assertEqual(result.missing_keys, [])
+            self.assertEqual(result.unexpected_keys, [])
+
+    @with_temp_dir
     def test_load_different_sizes_throws(self):
         original_module = nn.Linear(2, 2)
         dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
