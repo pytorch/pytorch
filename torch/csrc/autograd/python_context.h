@@ -1,13 +1,12 @@
 #pragma once
 
-#include <ATen/ThreadLocalPythonObjects.h>
+#include <ATen/ThreadLocalState.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/utils/python_numbers.h>
 
-#include <cstdint>
+#include <memory>
 #include <utility>
 
 namespace torch::autograd {
@@ -18,50 +17,31 @@ inline void throw_persisted_python_error() {
   throw std::move(err);
 }
 
-inline bool is_context_origin_thread() {
-  if (!at::impl::ThreadLocalPythonObjects::contains(
-          "context_origin_thread_id")) {
-    return false;
+inline std::shared_ptr<c10::SafePyObject> copy_current_py_context() {
+  THPObjectPtr context(PyContext_CopyCurrent());
+  if (!context) {
+    throw_persisted_python_error();
   }
-
-  auto origin_thread_id =
-      at::impl::ThreadLocalPythonObjects::get("context_origin_thread_id");
-  auto* py_origin_thread_id = origin_thread_id->ptr(getPyInterpreter());
-  if (Py_IsNone(py_origin_thread_id)) {
-    return false;
-  }
-
-  uint64_t origin_id = 0;
-  try {
-    origin_id = THPUtils_unpackUInt64(py_origin_thread_id);
-  } catch (python_error& err) {
-    err.persist();
-    throw;
-  }
-  return origin_id == static_cast<uint64_t>(PyThread_get_thread_ident());
+  return std::make_shared<c10::SafePyObject>(
+      context.release(), getPyInterpreter());
 }
 
 inline THPObjectPtr call_with_context(PyObject* callable, PyObject* args) {
-  if (!at::impl::ThreadLocalPythonObjects::contains("context")) {
+  const auto& context = at::ThreadLocalState::get_python_context();
+  if (!context) {
     return THPObjectPtr(PyObject_CallObject(callable, args));
   }
-
-  auto context = at::impl::ThreadLocalPythonObjects::get("context");
   auto* py_context = context->ptr(getPyInterpreter());
   if (Py_IsNone(py_context)) {
     return THPObjectPtr(PyObject_CallObject(callable, args));
   }
-  if (is_context_origin_thread()) {
+  if (at::ThreadLocalState::is_python_context_origin_thread()) {
     return THPObjectPtr(PyObject_CallObject(callable, args));
   }
 
   // Context objects cannot be entered concurrently, so give each Python
   // autograd callback its own copy of the backward-launch context.
-  THPObjectPtr copy_fn(PyObject_GetAttrString(py_context, "copy"));
-  if (!copy_fn) {
-    throw_persisted_python_error();
-  }
-  THPObjectPtr py_context_copy(PyObject_CallNoArgs(copy_fn));
+  THPObjectPtr py_context_copy(PyContext_Copy(py_context));
   if (!py_context_copy) {
     throw_persisted_python_error();
   }

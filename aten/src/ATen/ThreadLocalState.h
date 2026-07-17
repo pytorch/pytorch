@@ -13,6 +13,9 @@
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
+#include <memory>
+#include <thread>
+
 namespace at {
 
 // Thread local state contains values that are preserved across
@@ -38,6 +41,10 @@ class TORCH_API ThreadLocalState {
   // Sets thread local variables in the current thread,
   // according to the thread boundary specified
   static void setThreadLocalState(const ThreadLocalState& state);
+
+  void set_python_context(std::shared_ptr<c10::SafePyObject> context);
+  static const std::shared_ptr<c10::SafePyObject>& get_python_context();
+  static bool is_python_context_origin_thread();
 
  private:
   c10::impl::LocalDispatchKeySet dispatch_key_;
@@ -80,6 +87,10 @@ class TORCH_API ThreadLocalState {
   // TLS for arbitrary python objects that is registered via hooks
   at::impl::ThreadLocalPythonObjects saved_objects_;
 
+  std::shared_ptr<c10::SafePyObject> python_context_;
+
+  std::thread::id python_context_origin_thread_id_;
+
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && \
     !defined(BUILD_LITE_INTERPRETER)
   // TLS for autocast dtypes
@@ -103,6 +114,7 @@ class TORCH_API ThreadLocalStateGuard {
   ThreadLocalStateGuard& operator=(const ThreadLocalStateGuard&) = delete;
   ThreadLocalStateGuard& operator=(ThreadLocalStateGuard&&) = delete;
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~ThreadLocalStateGuard() {
     // restore previously set variables
     ThreadLocalState::setThreadLocalState(prev_state_);

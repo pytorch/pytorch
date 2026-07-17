@@ -350,6 +350,11 @@ static PyObject* THPEngine_run_backward(
 
   variable_list outputs;
   {
+    // Seed ThreadLocalState with the current Python context before the engine
+    // snapshots and propagates it to autograd worker threads.
+    at::ThreadLocalState thread_locals;
+    thread_locals.set_python_context(copy_current_py_context());
+    at::ThreadLocalStateGuard tls_guard(thread_locals);
     pybind11::gil_scoped_release no_gil;
     auto& engine = python::PythonEngine::get_python_engine();
     outputs = engine.execute(

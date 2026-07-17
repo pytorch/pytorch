@@ -1,6 +1,5 @@
 import abc
 import contextlib
-import contextvars
 import functools
 import logging
 import threading
@@ -972,20 +971,6 @@ def _engine_run_backward(
     if attach_logging_hooks:
         unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
 
-    # Need to save the context so compiler config will be visible in device
-    # threads. The origin thread id lets same-thread callbacks keep normal
-    # ContextVar mutation semantics.
-    had_context = torch._C._is_key_in_tls("context")
-    previous_context = torch._C._get_obj_in_tls("context") if had_context else None
-    had_context_origin_thread_id = torch._C._is_key_in_tls("context_origin_thread_id")
-    previous_context_origin_thread_id = (
-        torch._C._get_obj_in_tls("context_origin_thread_id")
-        if had_context_origin_thread_id
-        else None
-    )
-    torch._C._stash_obj_in_tls("context", contextvars.copy_context())
-    torch._C._stash_obj_in_tls("context_origin_thread_id", threading.get_ident())
-
     try:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, *args, **kwargs
@@ -993,17 +978,3 @@ def _engine_run_backward(
     finally:
         if attach_logging_hooks:
             unregister_hooks()  # type: ignore[possibly-undefined]
-        # Erase rather than overwrite-with-None so the thread_local map is
-        # truly empty.  SafePyObject's destructor needs the GIL; if a thread
-        # exits while a SafePyObject is still in its thread_local,
-        # __call_tls_dtors fires the destructor → take_gil → deadlock.
-        if had_context:
-            torch._C._stash_obj_in_tls("context", previous_context)
-        else:
-            torch._C._remove_obj_from_tls("context")
-        if had_context_origin_thread_id:
-            torch._C._stash_obj_in_tls(
-                "context_origin_thread_id", previous_context_origin_thread_id
-            )
-        else:
-            torch._C._remove_obj_from_tls("context_origin_thread_id")
