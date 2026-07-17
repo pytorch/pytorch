@@ -6,6 +6,7 @@ from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
 import torch.distributed as c10d
 from torch.testing._internal.common_distributed import requires_ucc, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
@@ -22,6 +23,8 @@ NO_UCC = not hasattr(c10d, "ProcessGroupUCC")
 if not TEST_WITH_DEV_DBG_ASAN:
 
     class TestDistributedNNFunctionsUcc(TestDistributedNNFunctions):
+        hw_classification = HardwareClassification.CUDA
+
         # Test Common Ops First.
         @requires_ucc()
         @skip_if_lt_x_gpu(2)
