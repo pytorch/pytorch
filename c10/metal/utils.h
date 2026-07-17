@@ -173,6 +173,11 @@ using opmath_t = typename detail::OpMathType<T>::type;
 template <typename T>
 using accum_t = typename detail::AccumulationType<T>::type;
 
+template <typename T, int N>
+struct alignas(sizeof(T) * N) aligned_vector {
+  T v[N];
+};
+
 // TODO: Move it to type_traits header may be
 template <typename F, typename... Args>
 using result_of = decltype(::metal::declval<F>()(::metal::declval<Args>()...));
