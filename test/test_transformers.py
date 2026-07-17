@@ -3664,6 +3664,7 @@ class TestSDPACudaOnly(NNTestCase):
         ):
             self.assertEqual(actual, expected)
 
+    @skipIfXpu(msg="Not target, torch-xpu-ops/issues/4117")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
     def test_singelton_head_dim_stride_ne_1(self, device):
         query = torch.tensor([[[[1, 2]]]], dtype=torch.float16, device=device)
