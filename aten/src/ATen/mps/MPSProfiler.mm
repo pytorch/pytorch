@@ -42,7 +42,7 @@ std::string BaseInfo::buildTensorString(const Tensor& tensor, bool includeBuffer
       tensorStr << "(buf#" << (getIMPSAllocator()->getBufferId(buffer)) << ':' << buffer.retainCount << ')';
     }
     tensorStr << ':' << tensor.scalar_type() << tensor.sizes();
-    return tensorStr.str();
+    return std::move(tensorStr).str();
   } else {
     return "undefined";
   }

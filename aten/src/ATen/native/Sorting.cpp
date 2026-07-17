@@ -3,7 +3,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
@@ -85,8 +84,8 @@ TORCH_META_FUNC2(sort, stable)
       ? self.strides().vec()
       : at::infer_dense_strides(self.sizes(), self.strides());
 
-  set_output_raw_strided(0, self.sizes(), strides, self.options(), {});
-  set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(kLong), {});
+  set_output_raw_strided(0, self.sizes(), strides, self.options());
+  set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(kLong));
 }
 
 } // namespace at::meta
@@ -286,17 +285,35 @@ Tensor quantile_compute(
   in_shape[in_shape.size() - 1] = sorted.sym_size(-1);
   sorted = sorted.view_symint(in_shape);
 
-  // Ensure converting from int64_t to double won't overflow
+  // quantile maps q to ranks via q * (size - 1), rounded to gather indices, so
+  // size must be exactly representable in the rank dtype. float32 reaches only
+  // 2^24, so ranks use double (exact to 2^53) where it exists; MPS has no
+  // double, so float32 there keeps float32 ranks and the 2^24 cap.
+  TORCH_INTERNAL_ASSERT(
+      self.scalar_type() == kFloat || self.scalar_type() == kDouble,
+      "quantile() rank computation assumes a float or double input");
+  const bool double_ranks =
+      self.scalar_type() == kDouble || self.device().type() != kMPS;
+  const auto rank_dtype = double_ranks ? kDouble : self.scalar_type();
+  const int64_t max_size = double_ranks
+      ? (1LL << std::numeric_limits<double>::digits)
+      : (1LL << std::numeric_limits<float>::digits);
   TORCH_SYM_CHECK(
-      sorted.sym_size(-1).sym_le(1 << 24),
-      "quantile() input tensor is too large");
+      sorted.sym_size(-1).sym_le(max_size),
+      "quantile() input tensor is too large for ",
+      self.scalar_type(),
+      " dtype: the dimension being reduced has ",
+      sorted.sym_size(-1),
+      " elements but at most ",
+      max_size,
+      " are supported");
 
   // Convert q in [0, 1] to ranks in [0, reduction_size)
   Tensor ranks;
   if (ignore_nan) {
     // For nanquantile, compute ranks based on number of non-nan values.
     // If all values are nan, set rank to 0 so the quantile computed is nan.
-    ranks = q * (sorted.isnan().logical_not_().sum(-1, true) - 1);
+    ranks = q.to(rank_dtype) * (sorted.isnan().logical_not_().sum(-1, true) - 1);
     // For Composite Compliance,
     // if `ranks` is `CCT` but it's tangent is a regular Tensor,
     // then while computing jvp, we end calling `masked_fill_`
@@ -311,8 +328,8 @@ Tensor quantile_compute(
     // For quantile, compute ranks based on reduction size. If there is nan
     // set rank to last index so the quantile computed will be nan.
     auto last_index = sorted.sym_size(-1) - 1;
-    std::vector<Tensor> tl =
-        at::broadcast_tensors({q * last_index, sorted.isnan().any(-1, true)});
+    std::vector<Tensor> tl = at::broadcast_tensors(
+        {q.to(rank_dtype) * last_index, sorted.isnan().any(-1, true)});
     ranks = at::masked_fill(tl[0], tl[1], last_index);
   }
 
@@ -332,9 +349,11 @@ Tensor quantile_compute(
   if (interpolation == QUANTILE_INTERPOLATION_MODE::LINEAR ||
       interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT) {
     // calculate weights for linear and midpoint
+    // ranks may be double while values stay float32; the lerp weight must match
+    // the value dtype or the interpolation upcasts the output.
     Tensor weights = interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT
-        ? at::full_like(ranks, 0.5)
-        : ranks - ranks_below;
+        ? at::full_like(ranks, 0.5, self.options())
+        : (ranks - ranks_below).to(self.scalar_type());
 
     // Interpolate to compute quantiles and store in values_below
     Tensor ranks_above = ranks.ceil_().toType(kLong);
@@ -608,7 +627,6 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
 
 // Computes the median of all values in the input
 Tensor median_impl(const Tensor& self, bool ignore_nan) {
-  NoNamesGuard guard;
   const int64_t size = self.numel();
 
   // Return nan for empty tensors
@@ -787,23 +805,9 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
     Tensor& values,
     Tensor& indices) {
   auto result = [&]() {
-    NoNamesGuard guard;
     return kthvalue_out_impl_cpu(values, indices, self, k, dim, keepdim);
   }();
-  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
   return result;
-}
-
-std::tuple<Tensor&, Tensor&> kthvalue_out(
-    const Tensor& self,
-    int64_t k,
-    Dimname dim,
-    bool keepdim,
-    Tensor& values,
-    Tensor& indices) {
-  return at::kthvalue_out(
-      values, indices, self, k, dimname_to_position(self, dim), keepdim);
 }
 
 std::tuple<Tensor, Tensor> kthvalue(
@@ -815,14 +819,6 @@ std::tuple<Tensor, Tensor> kthvalue(
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::kthvalue_out(values, indices, self, k, dim, keepdim);
   return std::make_tuple(std::move(values), std::move(indices));
-}
-
-std::tuple<Tensor, Tensor> kthvalue(
-    const Tensor& self,
-    int64_t k,
-    Dimname dim,
-    bool keepdim) {
-  return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
 }
 
 TORCH_IMPL_FUNC(topk_out_cpu)
@@ -853,23 +849,10 @@ std::tuple<Tensor&, Tensor&> median_out_cpu(
     Tensor& values,
     Tensor& indices) {
   auto result = [&]() {
-    NoNamesGuard guard;
     return median_with_indices_impl(
         values, indices, self, dim, keepdim, /*ignore_nan=*/false);
   }();
-  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
   return result;
-}
-
-std::tuple<Tensor&, Tensor&> median_out(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim,
-    Tensor& values,
-    Tensor& indices) {
-  return at::median_out(
-      values, indices, self, dimname_to_position(self, dim), keepdim);
 }
 
 std::tuple<Tensor, Tensor> median(
@@ -880,13 +863,6 @@ std::tuple<Tensor, Tensor> median(
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::median_out(values, indices, self, dim, keepdim);
   return std::make_tuple(std::move(values), std::move(indices));
-}
-
-std::tuple<Tensor, Tensor> median(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim) {
-  return at::median(self, dimname_to_position(self, dim), keepdim);
 }
 
 Tensor median_cpu(const Tensor& self) {
@@ -900,23 +876,10 @@ std::tuple<Tensor&, Tensor&> nanmedian_out_cpu(
     Tensor& values,
     Tensor& indices) {
   auto result = [&]() {
-    NoNamesGuard guard;
     return median_with_indices_impl(
         values, indices, self, dim, keepdim, /*ignore_nan=*/true);
   }();
-  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
   return result;
-}
-
-std::tuple<Tensor&, Tensor&> nanmedian_out(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim,
-    Tensor& values,
-    Tensor& indices) {
-  return at::nanmedian_out(
-      values, indices, self, dimname_to_position(self, dim), keepdim);
 }
 
 std::tuple<Tensor, Tensor> nanmedian(
@@ -927,13 +890,6 @@ std::tuple<Tensor, Tensor> nanmedian(
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::nanmedian_out(values, indices, self, dim, keepdim);
   return std::make_tuple(std::move(values), std::move(indices));
-}
-
-std::tuple<Tensor, Tensor> nanmedian(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim) {
-  return at::nanmedian(self, dimname_to_position(self, dim), keepdim);
 }
 
 Tensor nanmedian_cpu(const Tensor& self) {
@@ -996,6 +952,5 @@ Tensor& argsort_out(const Tensor & self, bool stable, int64_t dim, bool descendi
   at::sort_outf(self, stable, dim, descending, values, out);
   return out;
 }
-
 
 } // namespace at::native

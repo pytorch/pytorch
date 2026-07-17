@@ -1272,7 +1272,7 @@ def dropout(input: Tensor, p: float, train: bool | None):
     if train and p != 0:
         return aten.native_dropout(input, p, train)[0]
     else:
-        return input.clone()
+        return input
 
 
 @register_decomposition(aten.native_dropout)
@@ -1682,10 +1682,8 @@ def _addmm_activation(
     return aten.relu(out)
 
 
-@register_decomposition(aten.addmv)
-@out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
-def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+def _addmv_impl(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)
         alpha = int(alpha)
@@ -1695,6 +1693,16 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     if out.numel() == 0:  # handle empty matrix
         return beta * self
     return out + beta * self
+
+
+@register_decomposition(aten.addmv)
+@out_wrapper(exact_dtype=True)
+def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+    torch._check(
+        self.dtype == mat1.dtype and mat1.dtype == vec.dtype,
+        lambda: f"addmv input tensors must have the same dtype, but got {self.dtype}, {mat1.dtype}, and {vec.dtype}",
+    )
+    return _addmv_impl(self, mat1, vec, beta, alpha)
 
 
 @register_decomposition(aten.native_group_norm_backward.default)
@@ -2423,15 +2431,19 @@ def _batch_norm_no_update(
 
 @register_decomposition(aten._fused_dropout)
 @out_wrapper("out0", "out1")
-@pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
     if generator is not None:
         raise AssertionError(
             f"generator must be None for _fused_dropout decomposition, got {generator}"
         )
-    mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
-    res = mask.type_as(input) * input * (1.0 / p)
-    return (res, mask)
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        input, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    input_acc = input.to(computation_dtype)
+    mask = (torch.rand_like(input_acc) < p).to(dtype=torch.uint8)
+    scale = torch.scalar_tensor(1.0, dtype=computation_dtype, device=input.device) / p
+    res = mask.to(computation_dtype) * input_acc * scale
+    return (res.to(result_dtype), mask)
 
 
 @register_decomposition(aten._to_copy)
@@ -3055,6 +3067,111 @@ def max_pool3d_with_indices(
     )
 
 
+@register_decomposition(aten.adaptive_max_pool2d)
+@out_wrapper("out", "indices")
+def adaptive_max_pool2d(
+    input: Tensor,
+    output_size: tuple[int, int],
+) -> tuple[Tensor, Tensor]:
+    ndim = input.ndim
+    torch._check(
+        ndim in (3, 4),
+        lambda: f"adaptive_max_pool2d(): Expected 3D or 4D tensor, but got {ndim}D",
+    )
+    for i in range(1, ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                "adaptive_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
+                f"but input has sizes {input.shape} with dimension {i} being empty"
+            ),
+        )
+
+    h_in = input.shape[-2]
+    w_in = input.shape[-1]
+    h_out, w_out = output_size
+
+    # Case 1: empty output
+    if h_out == 0 or w_out == 0:
+        output_shape = list(input.shape[:-2]) + [h_out, w_out]
+        return (
+            input.new_empty(output_shape),
+            input.new_empty(output_shape, dtype=torch.int64),
+        )
+
+    # Case 2: global pooling (output_size == (1, 1))
+    # Equivalent to amax over spatial dims. argmax on the flattened spatial
+    # plane produces flat indices encoded as ih*W+iw.
+    if h_out == 1 and w_out == 1:
+        values = torch.amax(input, dim=(-2, -1), keepdim=True)
+        indices = torch.argmax(input.flatten(-2), dim=-1).unsqueeze(-1).unsqueeze(-1)
+        return values, indices
+
+    # Case 3: evenly divisible -- delegate to max_pool2d_with_indices
+    if h_in % h_out == 0 and w_in % w_out == 0:
+        kernel_size = [h_in // h_out, w_in // w_out]
+        return aten.max_pool2d_with_indices(input, kernel_size)
+
+    # Case 4: general (non-evenly-divisible, output_size > 1)
+    return NotImplemented
+
+
+@register_decomposition(aten.adaptive_max_pool3d)
+@out_wrapper("out", "indices")
+def adaptive_max_pool3d(
+    input: Tensor,
+    output_size: tuple[int, int, int],
+) -> tuple[Tensor, Tensor]:
+    ndim = input.ndim
+    torch._check(
+        ndim in (4, 5),
+        lambda: f"adaptive_max_pool3d(): Expected 4D or 5D tensor, but got {ndim}D",
+    )
+    for i in range(1, ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                "adaptive_max_pool3d(): Expected input to have non-zero size for non-batch dimensions, "
+                f"but input has sizes {input.shape} with dimension {i} being empty"
+            ),
+        )
+
+    d_in = input.shape[-3]
+    h_in = input.shape[-2]
+    w_in = input.shape[-1]
+    d_out, h_out, w_out = output_size
+
+    # Case 1: empty output
+    if d_out == 0 or h_out == 0 or w_out == 0:
+        output_shape = list(input.shape[:-3]) + [d_out, h_out, w_out]
+        return (
+            input.new_empty(output_shape),
+            input.new_empty(output_shape, dtype=torch.int64),
+        )
+
+    # Case 2: global pooling (output_size == (1, 1, 1))
+    # Equivalent to amax over spatial dims. argmax on the flattened spatial
+    # volume produces flat indices encoded as
+    # id*H*W + ih*W + iw.
+    if d_out == 1 and h_out == 1 and w_out == 1:
+        values = torch.amax(input, dim=(-3, -2, -1), keepdim=True)
+        indices = (
+            torch.argmax(input.flatten(-3), dim=-1)
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+        )
+        return values, indices
+
+    # Case 3: evenly divisible -- delegate to max_pool3d_with_indices
+    if d_in % d_out == 0 and h_in % h_out == 0 and w_in % w_out == 0:
+        kernel_size = [d_in // d_out, h_in // h_out, w_in // w_out]
+        return aten.max_pool3d_with_indices(input, kernel_size)
+
+    # Case 4: general (non-evenly-divisible, output_size > 1)
+    return NotImplemented
+
+
 def _max_unpoolnd(
     self: TensorLike, indices: TensorLike, output_size: list[int], dim: int
 ):
@@ -3065,9 +3182,28 @@ def _max_unpoolnd(
     # equal. If this condition is not satisfied, the operation is
     # non-deterministic as one of the different values in `self` 'wins'.
     utils.alert_not_deterministic(f"max_unpooling{dim}d_forward_out")
+    for i, size in enumerate(output_size):
+        torch._check(
+            size >= 0,
+            lambda i=i, size=size: (
+                f"max_unpooling{dim}d(): output_size must contain non-negative "
+                f"spatial dimensions, but got output_size[{i}]={size}"
+            ),
+        )
+
+    # The native CPU kernel preserves the input's memory format
+    # (aten/src/ATen/native/MaxUnpooling.cpp uses suggest_memory_format),
+    # while the CUDA kernel and the 3d kernels always return contiguous output.
+    def _restride(t: TensorLike) -> TensorLike:
+        if dim == 2 and self.device.type == "cpu":
+            return t.contiguous(memory_format=utils.suggest_memory_format(self))
+        return t
+
     output_shape = list(self.shape[:-dim]) + list(output_size)
     if any(s == 0 for s in output_shape):
-        return self.new_zeros(output_shape)
+        # The native CPU kernel still applies the memory format to the empty
+        # output (resize_ runs before the numel()==0 guard); mirror it here.
+        return _restride(self.new_zeros(output_shape))
     nc = reduce(operator.mul, self.shape[:-dim])
     hw = reduce(operator.mul, output_size)
     indices_nc_shape = [1] * self.ndim
@@ -3077,9 +3213,21 @@ def _max_unpoolnd(
     ).reshape(-1)
 
     output = self.new_zeros(output_shape)
-    return aten._unsafe_index_put(
+    result = aten._unsafe_index_put(
         output.reshape(-1), [indices_flat], self.reshape(-1), accumulate=False
     ).view(output.shape)
+    return _restride(result)
+
+    # Match the CPU max_unpool2d layout behavior: the native 4D path resizes
+    # the output with self.suggest_memory_format(), preserving channels-last.
+    # The 3D path uses the default contiguous layout.
+    # For compile, FakeTensor preserves the real device here.
+    # The only edge-case we see is direct meta calls, which follow meta strides
+    # and may differ from CPU eager layout.
+    if dim == 2 and self.ndim == 4 and self.device.type == "cpu":
+        result = result.contiguous(memory_format=utils.suggest_memory_format(self))
+
+    return result
 
 
 @register_decomposition(aten.max_unpool2d)
@@ -3270,7 +3418,9 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     sequences_size = len(sequences)
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
-    max_len = max(x.size(0) for x in sequences)
+    # Fold with sym_max (not Python max, which does pairwise `>` comparisons)
+    # so symbolic/unbacked sequence lengths don't trigger a data-dependent guard.
+    max_len = reduce(torch.sym_max, (x.size(0) for x in sequences))
     if batch_first:
         out_dims = (sequences_size, max_len)
     else:
@@ -4043,7 +4193,7 @@ def one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
 
     out = torch.cat(step_output, 0)
 
-    return out, (hx.squeeze(1), cx.squeeze(1))
+    return out, (hx.squeeze(0), cx.squeeze(0))
 
 
 def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=False):
@@ -4885,7 +5035,7 @@ def _grid_sampler_2d(
 
     if _expand_grid:
         # Let's expand grid to [N, C, oH, oW, 2]
-        # This allows to generate a single triton cuda kernel instead of two kernels.
+        # This allows generating a single triton cuda kernel instead of two kernels.
         # Two kernels are due source indices, weights have shape (N, 1, oH, oW), xnumel=N*oH*oW
         # and output has shape (N, C, oH, oW), xnumel=N*C*oH*oW
         # Expanding grid to (N, C, oH, oW, two) unifies xnumel to N*C*oH*oW
@@ -5484,7 +5634,7 @@ def _reflection_pad_backward(grad_output, x, padding):
 
 
 @register_decomposition(aten.aminmax)
-@out_wrapper("min", "max")
+@out_wrapper("min", "max", exact_dtype=True)
 def aminmax(self, *, dim=None, keepdim=False):
     # pyrefly: ignore [bad-argument-type]
     amin = torch.amin(self, dim=dim, keepdim=keepdim)
@@ -5566,13 +5716,16 @@ def multi_margin_loss(
             weight.ndim == 1 and weight.numel() == dim,  # type: ignore[union-attr]
             lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",  # type: ignore[union-attr]
         )
+    # Keep 1D target for weight indexing
+    target_1d = target
     target = target.unsqueeze(1)
     u = torch.gather(input, dim=1, index=target)
     z = margin - u + input
     z = z.clamp_min(0)
     z = z if p == 1 else z * z
     if weight is not None:
-        z = z * weight[target]
+        # Use 1D indexing to avoid issues with advanced indexing in inductor
+        z = z * weight[target_1d].unsqueeze(1)
     idx = torch.arange(dim, device=input.device)
     z = torch.where(idx != target, z, 0)
     if reduction == Reduction.MEAN.value:
@@ -5622,6 +5775,8 @@ def multilabel_margin_loss_forward(
     z = z / dim
     # masks loss
     z = torch.where(is_target, 0, z)
+    # drops contributions from padded target slots (positions at/after the first -1)
+    z = torch.where(target_mask.T.unsqueeze(dim=-1), z, 0)
     # reduction
     if reduction == Reduction.MEAN.value:
         z = z.sum(dim=(0, -1)).mean()
