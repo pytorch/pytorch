@@ -3,6 +3,7 @@
 r"""This file is allowed to initialize CUDA context when imported."""
 
 import functools
+import threading
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
@@ -262,6 +263,8 @@ def evaluate_platform_supports_mx_gemm():
                 return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 14))
         else:
             return SM100OrLater
+    if torch.xpu.is_available():
+        return True
     return False
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
@@ -315,18 +318,40 @@ def initialize_cuda_context_rng():
         __cuda_ctx_rng_initialized = True
 
 
+_tf32_off_lock = threading.Lock()
+_tf32_off_depth = 0
+_tf32_off_saved_precision = None
+_tf32_off_cudnn_ctx = None
+
+
 @contextlib.contextmanager
 def tf32_off():
-    # Snapshot fp32_precision (a string), not allow_tf32 (a bool): writing
-    # allow_tf32 back can't reproduce the "none" default (it yields "ieee"),
-    # which the TestCase precision-leak detector would flag on ROCm.
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
+    # First-in saves state and disables tf32; last-out restores. Multithreaded
+    # test runners (e.g. MultiThreadedTestCase) enter this context once per
+    # rank thread over the same process-global flags, so per-entry
+    # save/restore can interleave and leak a modified state past the last
+    # exit, which the TestCase fp32 precision leak detector then flags.
+    global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx
+    with _tf32_off_lock:
+        if _tf32_off_depth == 0:
+            # Snapshot fp32_precision (a string), not allow_tf32 (a bool):
+            # writing allow_tf32 back can't reproduce the "none" default (it
+            # yields "ieee"), which the leak detector would flag on ROCm.
+            _tf32_off_saved_precision = torch.backends.cuda.matmul.fp32_precision
+            torch.backends.cuda.matmul.allow_tf32 = False
+            _tf32_off_cudnn_ctx = torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False)
+            _tf32_off_cudnn_ctx.__enter__()
+        _tf32_off_depth += 1
     try:
-        torch.backends.cuda.matmul.allow_tf32 = False
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
-            yield
+        yield
     finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
+        with _tf32_off_lock:
+            _tf32_off_depth -= 1
+            if _tf32_off_depth == 0:
+                _tf32_off_cudnn_ctx.__exit__(None, None, None)
+                _tf32_off_cudnn_ctx = None
+                torch.backends.cuda.matmul.fp32_precision = _tf32_off_saved_precision
+                _tf32_off_saved_precision = None
 
 
 @contextlib.contextmanager
