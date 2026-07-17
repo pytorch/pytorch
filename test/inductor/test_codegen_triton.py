@@ -153,11 +153,23 @@ class TestCodegenTriton(InductorTestCase):
                 r_index + 128 * flat_x, 1, 512
             )
 
-            # Record the first split, leave another split alone, and rewrite flat.
-            self.assertEqual(
-                kernel._reuse_load_index_basis("in_ptr", split_index),
-                split_index,
-            )
+            # A first or repeated identical load does no range-tree analysis.
+            with patch.object(
+                kernel,
+                "_load_index_split_basis",
+                wraps=kernel._load_index_split_basis,
+            ) as find_basis:
+                self.assertEqual(
+                    kernel._reuse_load_index_basis("in_ptr", split_index),
+                    split_index,
+                )
+                self.assertEqual(
+                    kernel._reuse_load_index_basis("in_ptr", split_index),
+                    split_index,
+                )
+                find_basis.assert_not_called()
+
+            # A distinct live load discovers the split; only flat is rewritten.
             self.assertEqual(
                 kernel._reuse_load_index_basis("in_ptr", alternate_index),
                 alternate_index,

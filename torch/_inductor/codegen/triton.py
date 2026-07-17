@@ -2804,7 +2804,18 @@ class FixedTritonConfig:
         return item in self.config
 
 
-class TritonCSE(CSE[TritonCSEVariable, str | tuple[str, str]]):
+TritonCSEKey = str | tuple[str, str]
+LoadIndexBasis = tuple[IterationRangesEntry, ...]
+
+
+@dataclasses.dataclass
+class _LoadIndexState:
+    index: sympy.Expr
+    result: sympy.Expr
+    bases: list[LoadIndexBasis | None] | None = None
+
+
+class TritonCSE(CSE[TritonCSEVariable, TritonCSEKey]):
     """
     Subclasses CSE to apply the current load mask to the cache key to avoid CSEing
     variables across separate masked blocks.
@@ -2812,17 +2823,13 @@ class TritonCSE(CSE[TritonCSEVariable, str | tuple[str, str]]):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Split bases are valid only while the corresponding load CSE is visible.
-        self._load_index_bases: dict[
-            tuple[str, str | None],
-            list[tuple[IterationRangesEntry, ...] | None],
-        ] = {}
+        self._load_index_states: dict[TritonCSEKey, _LoadIndexState] = {}
 
     def invalidate(self, keep_vars: OrderedSet[CSEVariable]) -> None:
         super().invalidate(keep_vars)
-        self._load_index_bases.clear()
+        self._load_index_states.clear()
 
-    def augment_key(self, cache_key: str) -> str | tuple[str, str]:
+    def augment_key(self, cache_key: str) -> TritonCSEKey:
         if mask := V.kernel._load_mask:
             return (cache_key, mask.name)
         else:
@@ -4208,8 +4215,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def _load_index_split_basis(
         self, index: sympy.Expr, tree: IterationRangesRoot
-    ) -> tuple[IterationRangesEntry, ...] | None:
-        """Find a nontrivial, full-covering split basis used by ``index``."""
+    ) -> LoadIndexBasis | None:
+        """Find a full-covering basis with at least two non-unit entries."""
         sizevars = V.graph.sizevars
         remaining: list[IterationRangesEntry] = []
         for symbol in index.free_symbols:
@@ -4244,9 +4251,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """Rewrite a full-range load coordinate to an observed split basis.
 
         Persistent-reduction bodies can use split coordinates while their
-        epilogues use one flattened coordinate for the same range root. Derived
-        iteration families and TritonKernel subclasses have separate codegen
-        scopes and are excluded.
+        epilogues use one flattened coordinate for the same range root. This is
+        limited to persistent reductions because looped reductions can define
+        body coordinates inside a loop that does not contain the epilogue.
+
+        TritonKernel subclasses and derived iteration families may use separate
+        codegen scopes. An ``isinstance`` check would include those subclasses,
+        so only the base kernel and its base range trees are accepted here.
         """
         if (
             self.__class__ is not TritonKernel
@@ -4258,19 +4269,36 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         ):
             return index
 
-        mask_name = str(self._load_mask) if self._load_mask else None
         cse = cast(TritonCSE, self.cse)
-        empty_bases: list[tuple[IterationRangesEntry, ...] | None] = [None] * len(
-            self.range_trees
-        )
-        bases = cse._load_index_bases.setdefault((name, mask_name), empty_bases)
+        # Use the exact buffer/mask scope already defined by TritonCSE.
+        cache_key = cse.augment_key(name)
+        state = cse._load_index_states.get(cache_key)
+        if state is None:
+            # Defer range-tree analysis until another live load from this CSE
+            # scope uses the same buffer with a different index.
+            cse._load_index_states[cache_key] = _LoadIndexState(index, index)
+            return index
+        if state.index == index:
+            return state.result
+
+        if state.bases is None:
+            # A distinct prior load is still in the CSE scope. Discover which
+            # range trees it addressed with complete split coordinates.
+            state.bases = [
+                self._load_index_split_basis(state.index, tree)
+                for tree in self.range_trees
+            ]
+
         replacements: dict[sympy.Symbol, sympy.Expr] = {}
         sizevars = V.graph.sizevars
-        for i, tree in enumerate(self.range_trees):
-            basis = bases[i]
+        for i, (tree, basis) in enumerate(
+            zip(self.range_trees, state.bases, strict=True)
+        ):
             if basis is None:
+                # The current load may establish a basis for later loads even
+                # when the prior load did not split this range tree.
                 basis = self._load_index_split_basis(index, tree)
-                bases[i] = basis
+                state.bases[i] = basis
             if basis is None:
                 continue
 
@@ -4290,11 +4318,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if is_full_range:
                     replacements[symbol] = split_index
 
-        if not replacements:
-            return index
-        return sizevars.simplify_with_ranges(
-            sympy_subs(index, replacements), self.var_ranges()
-        )
+        result = index
+        if replacements:
+            result = sizevars.simplify_with_ranges(
+                sympy_subs(index, replacements), self.var_ranges()
+            )
+        state.index = index
+        state.result = result
+        return result
 
     def partial_accumulate(
         self, name: str, reduction_type, val, extra_meta: dict[str, Any]
