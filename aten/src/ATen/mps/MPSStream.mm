@@ -4,6 +4,11 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
 #include <c10/metal/error.h>
+#include <c10/util/CallOnce.h>
+#include <c10/util/irange.h>
+
+#include <array>
+#include <atomic>
 
 @interface MPSGraphExecutionDescriptor ()
 @property(readwrite, atomic) BOOL enableCommitAndContinue;
@@ -280,12 +285,44 @@ MPSStream* MPSStreamImpl::getInstance() {
 
 MPSStreamImpl::MPSStreamImpl() {}
 
+namespace {
+thread_local MPSStream* current_stream = nullptr;
+} // namespace
+
 MPSStream* getCurrentMPSStream() {
-  return getDefaultMPSStream();
+  return current_stream ? current_stream : getDefaultMPSStream();
+}
+
+void setCurrentMPSStream(MPSStream* stream) {
+  current_stream = stream;
 }
 
 MPSStream* getDefaultMPSStream() {
   return MPSStreamImpl::getInstance();
+}
+
+//-----------------------------------------------------------------
+//  MPS stream pool
+//-----------------------------------------------------------------
+
+namespace {
+constexpr int kMPSStreamsPerPool = 32;
+
+std::array<MPSStream*, kMPSStreamsPerPool> stream_pool{};
+c10::once_flag stream_pool_flag;
+std::atomic<uint32_t> stream_pool_counter{0};
+
+void initStreamPool() {
+  // Pool ids start at 1; id 0 is reserved for the default stream.
+  for (const auto i : c10::irange(kMPSStreamsPerPool)) {
+    stream_pool[i] = new MPSStream(Stream(Stream::UNSAFE, c10::Device(DeviceType::MPS, 0), i + 1));
+  }
+}
+} // namespace
+
+MPSStream* getStreamFromPool() {
+  c10::call_once(stream_pool_flag, initStreamPool);
+  return stream_pool[stream_pool_counter++ % kMPSStreamsPerPool];
 }
 
 // Helper methods
