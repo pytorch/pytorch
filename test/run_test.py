@@ -115,7 +115,6 @@ RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1
 NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
-IS_SLOW = "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT
 IS_S390X = platform.machine() == "s390x"
 
 
@@ -371,10 +370,6 @@ CORE_TEST_LIST = [
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
-
-DYNAMO_WRAPPED_TIMEOUT_MULTIPLIER_OVERRIDE: dict[str, int] = {
-    "test_nn": 6,
-}
 
 DISTRIBUTED_TESTS_CONFIG = {}
 
@@ -656,24 +651,7 @@ def run_test(
         and not is_cpp_test
         and "-n" not in command
     )
-    timeout_multiplier = (
-        DYNAMO_WRAPPED_TIMEOUT_MULTIPLIER_OVERRIDE.get(test_file, 3)
-        if options.dynamo
-        else 3
-    )
-    timeout = (
-        None
-        if not options.enable_timeout
-        else THRESHOLD * 6
-        if IS_SLOW
-        else THRESHOLD * timeout_multiplier
-        if should_retry
-        and isinstance(test_module, ShardedTest)
-        and test_module.time is not None
-        else THRESHOLD * 3
-        if is_cpp_test
-        else None
-    )
+    timeout = THRESHOLD if options.enable_timeout else None
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
 
     with ExitStack() as stack:
@@ -788,14 +766,14 @@ def run_test_retries(
     # If continue through error is not set, then we fail fast.
     #
     # If continue through error is set, then we skip that test, and keep going.
-    # Basically if the same test fails 3 times in a row, skip the test on the
-    # next run, but still fail in the end. I take advantage of the value saved
-    # in stepcurrent to keep track of the most recently run test (which is the
-    # one that failed if there was a failure).
+    # If a test fails, skip it on the next run, but still fail in the end. I take
+    # advantage of the value saved in stepcurrent to keep track of the most
+    # recently run test (which is the one that failed if there was a failure).
 
     def print_to_file(s):
         print(s, file=output, flush=True)
 
+    failure_threshold = 1
     num_failures = defaultdict(int)
 
     def read_pytest_cache(key: str) -> Any:
@@ -851,7 +829,7 @@ def run_test_retries(
             print_to_file(
                 "Test succeeded in new process, continuing with the rest of the tests"
             )
-        elif num_failures[current_failure] >= 3:
+        elif num_failures[current_failure] >= failure_threshold:
             # This is for log classifier so it can prioritize consistently
             # failing tests instead of reruns. [1:-1] to remove quotes
             print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
@@ -876,8 +854,12 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
-    consistent_failures = [x[1:-1] for x in num_failures if num_failures[x] >= 3]
-    flaky_failures = [x[1:-1] for x in num_failures if 0 < num_failures[x] < 3]
+    consistent_failures = [
+        x[1:-1] for x in num_failures if num_failures[x] >= failure_threshold
+    ]
+    flaky_failures = [
+        x[1:-1] for x in num_failures if 0 < num_failures[x] < failure_threshold
+    ]
     if len(flaky_failures) > 0:
         print_to_file(
             "The following tests failed and then succeeded when run in a new process"
@@ -2125,6 +2107,7 @@ def run_tests(
     conftest_files = [
         "conftest.py",
         "pytest_shard_custom.py",
+        "td_tracer.py",
     ]
     for conftest_file in conftest_files:
         cpp_file = os.path.join(CPP_TESTS_DIR, conftest_file)
@@ -2243,6 +2226,10 @@ def main():
     check_pip_packages()
 
     options = parse_args()
+    options.additional_args.append(f"--td-tracer={REPO_ROOT / 'td_result.json'}")
+    from td_tracer import ensure_td_tracer_run_id
+
+    ensure_td_tracer_run_id()
     tests_to_include_env = os.environ.get("TESTS_TO_INCLUDE", "").strip()
     if tests_to_include_env:
         # Parse env var tests to module names (strips .py suffix and ::method)

@@ -19,16 +19,16 @@ from _pytest.stash import StashKey
 from _pytest.terminal import _get_raw_skip_reason
 
 from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
+from td_tracer import td_tracer_arguments, TD_TRACER_OPTION_NAME, TDTracer
 
 
-try:
-    from torch.testing._internal.common_utils import parse_cmd_line_args
-except ImportError:
-    # Temporary workaround needed until parse_cmd_line_args makes it into a nightlye because
-    # main / PR's tests are sometimes run against the previous day's nightly which won't
-    # have this function.
-    def parse_cmd_line_args():
-        pass
+def _parse_cmd_line_args() -> None:
+    try:
+        from torch.testing._internal.common_utils import parse_cmd_line_args
+    except ImportError:
+        # Some tests run against a nightly that predates parse_cmd_line_args.
+        return
+    parse_cmd_line_args()
 
 
 if TYPE_CHECKING:
@@ -104,6 +104,7 @@ def pytest_addoption(parser: Parser) -> None:
         help="filter tests by hardware classification categories (e.g., GENERIC ACCELERATOR CPU CUDA MPS XPU)",
     )
     shard_addoptions(parser)
+    td_tracer_arguments(parser)
 
 
 class HardwareClassificationPytestPlugin:
@@ -136,7 +137,9 @@ class HardwareClassificationPytestPlugin:
 
 
 def pytest_configure(config: Config) -> None:
-    parse_cmd_line_args()
+    if config.getoption(TD_TRACER_OPTION_NAME):
+        config.pluginmanager.register(TDTracer(config), "pytesttraceplugin")
+    _parse_cmd_line_args()
 
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
