@@ -11309,6 +11309,7 @@ class GraphModule(torch.nn.Module):
         compiled = torch.compile(f, backend=backend, dynamic=True, fullgraph=True)
         self.assertEqual(compiled(5, 1000), f(5, 1000))
 
+        # differing sizes still fail on inductor (#189528), hence eager/aot_eager only
         def g(rows: int, cols: int):
             pred = torch.tensor(True)
 
