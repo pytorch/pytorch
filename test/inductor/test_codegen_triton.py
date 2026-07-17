@@ -137,10 +137,7 @@ class TestCodegenTriton(InductorTestCase):
             override_persistent_reduction=False,
             override_cooperative_reduction=False,
         )
-        with (
-            patch.object(kernel, "persistent_reduction", True),
-            V.set_kernel_handler(kernel),
-        ):
+        with V.set_kernel_handler(kernel):
             split_x, (r_index,) = kernel.set_ranges([2, 3, 4], [128])
             alternate_x, _ = kernel.set_ranges([6, 4], [128])
             (flat_x,), _ = kernel.set_ranges([24], [128])
@@ -196,6 +193,17 @@ class TestCodegenTriton(InductorTestCase):
             self.assertEqual(
                 kernel._reuse_load_index_basis("in_ptr", flat_index), flat_index
             )
+
+            # Cooperative reductions are outside the supported execution model.
+            with patch.object(kernel, "cooperative_reduction", True):
+                self.assertEqual(
+                    kernel._reuse_load_index_basis("cooperative_ptr", split_index),
+                    split_index,
+                )
+                self.assertEqual(
+                    kernel._reuse_load_index_basis("cooperative_ptr", flat_index),
+                    flat_index,
+                )
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):

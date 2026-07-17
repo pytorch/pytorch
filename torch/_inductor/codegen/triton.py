@@ -4216,7 +4216,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def _load_index_split_basis(
         self, index: sympy.Expr, tree: IterationRangesRoot
     ) -> LoadIndexBasis | None:
-        """Find a full-covering basis with at least two non-unit entries."""
+        """Find split digits that reconstruct a range tree's flat index.
+
+        Each entry is one digit in a mixed-radix index. A complete basis has at
+        least two non-unit digits, starts at divisor 1, and forms a contiguous
+        divisor chain whose total extent equals the root's numel.
+
+        Symbolic lengths are supported when size analysis can prove those
+        identities without guards; otherwise this conservatively returns None.
+        """
         sizevars = V.graph.sizevars
         remaining: list[IterationRangesEntry] = []
         for symbol in index.free_symbols:
@@ -4247,26 +4255,79 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return None
         return tuple(basis)
 
-    def _reuse_load_index_basis(self, name: str, index: sympy.Expr) -> sympy.Expr:
-        """Rewrite a full-range load coordinate to an observed split basis.
-
-        Persistent-reduction bodies can use split coordinates while their
-        epilogues use one flattened coordinate for the same range root. This is
-        limited to persistent reductions because looped reductions can define
-        body coordinates inside a loop that does not contain the epilogue.
-
-        TritonKernel subclasses and derived iteration families may use separate
-        codegen scopes. An ``isinstance`` check would include those subclasses,
-        so only the base kernel and its base range trees are accepted here.
-        """
-        if (
-            self.__class__ is not TritonKernel
-            or not self.persistent_reduction
-            or any(
+    def _supports_load_index_basis_reuse(self) -> bool:
+        """Whether this kernel uses a supported shared coordinate scope."""
+        return (
+            self.__class__ is TritonKernel
+            and self.features.is_reduction()
+            and not self.cooperative_reduction
+            and not any(
                 isinstance(tree, DerivedIterationRangesRoot)
                 for tree in self.range_trees
             )
-        ):
+        )
+
+    def _get_load_index_bases(
+        self, state: _LoadIndexState, index: sympy.Expr
+    ) -> list[LoadIndexBasis | None]:
+        """Learn per-tree split bases from two distinct live loads."""
+        bases = state.bases
+        if bases is None:
+            # A distinct prior load is still in the CSE scope. Discover which
+            # range trees it addressed with complete split coordinates.
+            bases = [
+                self._load_index_split_basis(state.index, tree)
+                for tree in self.range_trees
+            ]
+            state.bases = bases
+
+        for i, (tree, basis) in enumerate(zip(self.range_trees, bases, strict=True)):
+            if basis is None:
+                # The current load may establish a basis for later loads even
+                # when the prior load did not split this range tree.
+                bases[i] = self._load_index_split_basis(index, tree)
+        return bases
+
+    def _rewrite_full_range_with_basis(
+        self,
+        index: sympy.Expr,
+        tree: IterationRangesRoot,
+        basis: LoadIndexBasis,
+    ) -> sympy.Expr:
+        """Replace a tree's flat symbol with its exact split-coordinate sum."""
+        split_index = sum(
+            (entry.symbol() * entry.divisor for entry in basis), sympy.S.Zero
+        )
+        basis_symbols = OrderedSet([entry.symbol() for entry in basis])
+        replacements: dict[sympy.Symbol, sympy.Expr] = {}
+        sizevars = V.graph.sizevars
+        for symbol in index.free_symbols - basis_symbols:
+            entry = self.range_tree_nodes.get(symbol)
+            # Leave alternate splits alone; only the unsplit full range has
+            # the direct coordinate identity represented by split_index.
+            if entry is None or entry.root is not tree:
+                continue
+            is_full_range = sizevars.statically_known_equals(
+                entry.divisor, sympy.S.One
+            ) and sizevars.statically_known_equals(entry.length, tree.numel)
+            if is_full_range:
+                replacements[symbol] = split_index
+        return sympy_subs(index, replacements) if replacements else index
+
+    def _reuse_load_index_basis(self, name: str, index: sympy.Expr) -> sympy.Expr:
+        """Rewrite a full-range load coordinate to an observed split basis.
+
+        Reduction bodies can use split coordinates while later pointwise work
+        uses one flattened coordinate for the same range root. Looped reductions
+        may reuse a basis within their body; closing the loop invalidates CSE and
+        clears the basis before codegen enters a different scope.
+
+        TritonKernel subclasses and derived iteration families may use separate
+        codegen scopes. Cooperative reductions also use an untested partitioned
+        execution model. Only the base, non-cooperative kernel with base range
+        trees is accepted here.
+        """
+        if not self._supports_load_index_basis_reuse():
             return index
 
         cse = cast(TritonCSE, self.cse)
@@ -4281,48 +4342,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if state.index == index:
             return state.result
 
-        if state.bases is None:
-            # A distinct prior load is still in the CSE scope. Discover which
-            # range trees it addressed with complete split coordinates.
-            state.bases = [
-                self._load_index_split_basis(state.index, tree)
-                for tree in self.range_trees
-            ]
-
-        replacements: dict[sympy.Symbol, sympy.Expr] = {}
-        sizevars = V.graph.sizevars
-        for i, (tree, basis) in enumerate(
-            zip(self.range_trees, state.bases, strict=True)
-        ):
-            if basis is None:
-                # The current load may establish a basis for later loads even
-                # when the prior load did not split this range tree.
-                basis = self._load_index_split_basis(index, tree)
-                state.bases[i] = basis
-            if basis is None:
-                continue
-
-            split_index = sum(
-                (entry.symbol() * entry.divisor for entry in basis), sympy.S.Zero
-            )
-            basis_symbols = OrderedSet([entry.symbol() for entry in basis])
-            for symbol in index.free_symbols - basis_symbols:
-                entry = self.range_tree_nodes.get(symbol)
-                # Leave alternate splits alone; only the unsplit full range has
-                # the direct coordinate identity represented by split_index.
-                if entry is None or entry.root is not tree:
-                    continue
-                is_full_range = sizevars.statically_known_equals(
-                    entry.divisor, sympy.S.One
-                ) and sizevars.statically_known_equals(entry.length, tree.numel)
-                if is_full_range:
-                    replacements[symbol] = split_index
-
+        bases = self._get_load_index_bases(state, index)
         result = index
-        if replacements:
-            result = sizevars.simplify_with_ranges(
-                sympy_subs(index, replacements), self.var_ranges()
-            )
+        for tree, basis in zip(self.range_trees, bases, strict=True):
+            if basis is not None:
+                result = self._rewrite_full_range_with_basis(result, tree, basis)
+        if result != index:
+            result = V.graph.sizevars.simplify_with_ranges(result, self.var_ranges())
         state.index = index
         state.result = result
         return result

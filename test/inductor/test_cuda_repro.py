@@ -2289,6 +2289,7 @@ class CudaReproTests(TestCase):
         self.assertNotIn("for roffset", persistent_code)
 
     @parametrize("use_block_ptr", [False, True])
+    @parametrize("dynamic_batch", [False, True])
     @config.patch(
         {
             "triton.multi_kernel": 0,
@@ -2298,7 +2299,9 @@ class CudaReproTests(TestCase):
             "split_reductions": False,
         }
     )
-    def test_persistent_reduction_cse_reindexed_epilogue(self, use_block_ptr):
+    def test_persistent_reduction_cse_reindexed_epilogue(
+        self, use_block_ptr, dynamic_batch
+    ):
         if device_type != "cuda":
             raise unittest.SkipTest("requires CUDA")
 
@@ -2331,14 +2334,28 @@ class CudaReproTests(TestCase):
         scale_ub = torch.tensor(1e6, device=device_type)
 
         fn(expected_out, x, expected_scales, scale_ub)
+        if dynamic_batch:
+            for tensor in (x, out, scales_out):
+                torch._dynamo.mark_dynamic(tensor, 0)
         with config.patch("triton.use_block_ptr", use_block_ptr):
+            compiled_fn = torch.compile(fn, fullgraph=True)
             _, code = run_and_get_code(
-                torch.compile(fn, fullgraph=True),
+                compiled_fn,
                 out,
                 x,
                 scales_out,
                 scale_ub,
             )
+            if dynamic_batch:
+                x2 = torch.randn(7, 512, device=device_type, dtype=torch.bfloat16)
+                out2 = torch.empty(7, 256, device=device_type, dtype=out_dtype)
+                scales_out2 = torch.empty(7, 2, device=device_type)
+                expected_out2 = torch.empty_like(out2)
+                expected_scales2 = torch.empty_like(scales_out2)
+                fn(expected_out2, x2, expected_scales2, scale_ub)
+                compiled_fn(out2, x2, scales_out2, scale_ub)
+                self.assertEqual(expected_out2, out2)
+                self.assertEqual(expected_scales2, scales_out2)
         self.assertEqual(expected_out, out)
         self.assertEqual(expected_scales, scales_out)
 
