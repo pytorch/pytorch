@@ -5365,6 +5365,17 @@
       ]
     }
   ],
+  "GB2902": [
+    {
+      "Gb_type": "sourceless scalar tensor dropout probability",
+      "Context": "aten.dropout p argument has no guardable source",
+      "Explanation": "Dynamo can compile scalar tensor dropout probabilities only when it can guard on the tensor item value.",
+      "Hints": [
+        "Pass the scalar tensor directly to dropout.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9203": [
     {
       "Gb_type": "torch.switch: differing branch outputs",
@@ -5795,6 +5806,17 @@
       "Context": "repr() on defaultdict with non-constant default_factory or values",
       "Explanation": "Dynamo could not safely evaluate repr() for this defaultdict because its default_factory or contents are not Python constants.",
       "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7883": [
+    {
+      "Gb_type": "mutated scalar tensor dropout probability",
+      "Context": "aten.dropout p argument was mutated before use",
+      "Explanation": "Dynamo can compile scalar tensor dropout probabilities only when it can guard on the tensor item value at the dropout call.",
+      "Hints": [
+        "Avoid mutating the scalar tensor before passing it to dropout.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

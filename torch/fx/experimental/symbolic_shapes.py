@@ -9147,7 +9147,153 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         """
         from torch._guards import detect_fake_mode
 
-        result = super().run_node(n)
+        old_values = []
+        proxy_replacements: dict[torch.fx.Node, torch.fx.Node] = {}
+        proxy_mode = None
+        if overrides := n.meta.get("unbacked_scalar_arg_overrides"):
+            # Some torch.ops bindings parse one-element Tensor arguments as
+            # Python float scalars. Dynamo keeps the runtime .item() in the
+            # graph, but fake-only interpreters need the concrete scalar to
+            # avoid guarding on the unbacked item() result while replaying the
+            # schema parser.
+            from torch.fx.experimental.proxy_tensor import (
+                get_proxy_mode,
+                get_proxy_slot,
+            )
+
+            proxy_mode = get_proxy_mode()
+
+            def override_arg(arg: torch.fx.Node) -> torch.fx.node.Argument:
+                if (
+                    isinstance(arg, torch.fx.Node)
+                    and arg.name in overrides
+                    and arg in self.env
+                ):
+                    if proxy_mode is not None:
+                        proxy_replacements[arg] = (
+                            get_proxy_slot(self.env[arg], proxy_mode.tracer)
+                            .force()
+                            .node
+                        )
+                    old_values.append((arg, self.env[arg]))
+                    self.env[arg] = overrides[arg.name]
+                return arg
+
+            torch.fx.node.map_arg((n.args, n.kwargs), override_arg)
+
+        old_proxy_nodes = (
+            set(proxy_mode.tracer.graph.nodes)
+            if proxy_replacements and proxy_mode is not None
+            else None
+        )
+
+        def restore_proxy_arg_edges() -> None:
+            if old_proxy_nodes is None or proxy_mode is None:
+                return
+            current_overrides = cast(dict[str, float], overrides)
+            specializations = set(n.meta.get("unbacked_scalar_arg_specializations", ()))
+            restored_replacements: set[torch.fx.Node] = set()
+
+            def matches_override_value(traced_arg: object, override: float) -> bool:
+                return isinstance(traced_arg, float) and (
+                    traced_arg == override
+                    or (math.isnan(traced_arg) and math.isnan(override))
+                )
+
+            for proxy_node in proxy_mode.tracer.graph.nodes:
+                if proxy_node not in old_proxy_nodes:
+                    restored_overrides: dict[str, float] = {}
+                    restored_specializations: set[str] = set()
+
+                    def restore_arg_edges(
+                        original_arg: torch.fx.node.Argument,
+                        traced_arg: torch.fx.node.Argument,
+                    ) -> torch.fx.node.Argument:
+                        if (
+                            isinstance(original_arg, torch.fx.Node)
+                            and original_arg in proxy_replacements
+                            and matches_override_value(
+                                traced_arg, current_overrides[original_arg.name]
+                            )
+                        ):
+                            replacement = proxy_replacements[original_arg]
+                            restored_replacements.add(original_arg)
+                            restored_overrides[replacement.name] = current_overrides[
+                                original_arg.name
+                            ]
+                            if original_arg.name in specializations:
+                                restored_specializations.add(replacement.name)
+                            return replacement
+                        if isinstance(original_arg, tuple) and isinstance(
+                            traced_arg, tuple
+                        ):
+                            restored_args = [
+                                restore_arg_edges(original, traced)
+                                for original, traced in zip(original_arg, traced_arg)
+                            ]
+                            restored_args.extend(traced_arg[len(restored_args) :])
+                            return tuple(restored_args)
+                        if isinstance(original_arg, list) and isinstance(
+                            traced_arg, list
+                        ):
+                            restored_args = [
+                                restore_arg_edges(original, traced)
+                                for original, traced in zip(original_arg, traced_arg)
+                            ]
+                            restored_args.extend(traced_arg[len(restored_args) :])
+                            return restored_args
+                        if isinstance(original_arg, dict) and isinstance(
+                            traced_arg, dict
+                        ):
+                            return {
+                                key: restore_arg_edges(
+                                    original_arg[key], traced_arg[key]
+                                )
+                                if key in original_arg
+                                else traced_arg[key]
+                                for key in traced_arg
+                            }
+                        return traced_arg
+
+                    proxy_node.args = restore_arg_edges(n.args, proxy_node.args)
+                    proxy_node.kwargs = restore_arg_edges(n.kwargs, proxy_node.kwargs)
+                    if restored_overrides:
+                        proxy_node.meta.setdefault(
+                            "unbacked_scalar_arg_overrides", {}
+                        ).update(restored_overrides)
+                    if restored_specializations:
+                        proxy_node.meta["unbacked_scalar_arg_specializations"] = tuple(
+                            sorted(
+                                set(
+                                    proxy_node.meta.get(
+                                        "unbacked_scalar_arg_specializations", ()
+                                    )
+                                )
+                                | restored_specializations
+                            )
+                        )
+
+            missing_replacements = {
+                node
+                for node in set(proxy_replacements) - restored_replacements
+                if node.name not in specializations
+            }
+            if missing_replacements:
+                missing_names = ", ".join(
+                    sorted(node.name for node in missing_replacements)
+                )
+                raise AssertionError(
+                    "Expected torch.ops scalar tensor override(s) to be restored "
+                    f"during recapture: {missing_names}. Allowlisted ops must "
+                    "forward metadata-independent float tensor args unchanged."
+                )
+
+        try:
+            result = super().run_node(n)
+            restore_proxy_arg_edges()
+        finally:
+            for node, value in old_values:
+                self.env[node] = value
         fake_mode = detect_fake_mode()
         if fake_mode is None:
             raise AssertionError("fake_mode must not be None")
