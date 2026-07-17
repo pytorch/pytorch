@@ -1405,7 +1405,7 @@ class TestDistributions(DistributionsTestCase):
                 sample = dist.sample()
                 self.assertFalse(
                     sample.requires_grad,
-                    msg=f"{Dist.__name__} example {i + 1}/{len(params)}, .sample() is not detached",
+                    msg=lambda msg: f"{msg}\n{Dist.__name__} example {i + 1}/{len(params)}, .sample() is not detached",
                 )
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
@@ -1420,7 +1420,7 @@ class TestDistributions(DistributionsTestCase):
                 sample = dist.rsample()
                 self.assertTrue(
                     sample.requires_grad,
-                    msg=f"{Dist.__name__} example {i + 1}/{len(params)}, .rsample() does not require grad",
+                    msg=lambda msg: f"{msg}\n{Dist.__name__} example {i + 1}/{len(params)}, .rsample() does not require grad",
                 )
 
     @expectedFailureMPS
@@ -1431,10 +1431,13 @@ class TestDistributions(DistributionsTestCase):
                 try:
                     self.assertTrue(
                         type(dist.sample()) is type(dist.enumerate_support()),
-                        msg=(
-                            "{} example {}/{}, return type mismatch between "
-                            + "sample and enumerate_support."
-                        ).format(Dist.__name__, i + 1, len(params)),
+                        msg=lambda msg: f"{msg}\n"
+                        + (
+                            (
+                                "{} example {}/{}, return type mismatch between "
+                                + "sample and enumerate_support."
+                            ).format(Dist.__name__, i + 1, len(params))
+                        ),
                     )
                 except NotImplementedError:
                     pass
@@ -1476,7 +1479,7 @@ class TestDistributions(DistributionsTestCase):
                 self.assertIn(
                     Dist,
                     distributions_with_examples,
-                    f"Please add {Dist.__name__} to the _get_examples list in test_distributions.py",
+                    lambda msg: f"{msg}\nPlease add {Dist.__name__} to the _get_examples list in test_distributions.py",
                 )
 
     def test_support_attributes(self):
@@ -3827,7 +3830,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertLess(
                 max_error,
                 0.01,
-                f"Kumaraswamy example {i + 1}/{len(cases)}, incorrect .mean",
+                lambda msg: f"{msg}\nKumaraswamy example {i + 1}/{len(cases)}, incorrect .mean",
             )
             expected = samples.var(0)
             actual = m.variance
@@ -3836,7 +3839,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertLess(
                 max_error,
                 0.01,
-                f"Kumaraswamy example {i + 1}/{len(cases)}, incorrect .variance",
+                lambda msg: f"{msg}\nKumaraswamy example {i + 1}/{len(cases)}, incorrect .variance",
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -4072,7 +4075,10 @@ class TestDistributions(DistributionsTestCase):
         # Check that small alphas do not cause NANs.
         for Tensor in [torch.FloatTensor, torch.DoubleTensor]:
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
-            self.assertTrue(np.isfinite(x) and x > 0, f"Invalid Beta.sample(): {x}")
+            self.assertTrue(
+                np.isfinite(x) and x > 0,
+                lambda msg: f"{msg}\nInvalid Beta.sample(): {x}",
+            )
 
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float)
@@ -6135,7 +6141,7 @@ class TestKL(DistributionsTestCase):
         for p, q in self.infinite_examples:
             self.assertTrue(
                 (kl_divergence(p, q) == inf).all(),
-                f"Incorrect KL({type(p).__name__}, {type(q).__name__})",
+                lambda msg: f"{msg}\nIncorrect KL({type(p).__name__}, {type(q).__name__})",
             )
 
     def test_kl_edgecases(self):

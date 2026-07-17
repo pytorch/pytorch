@@ -159,9 +159,9 @@ INNER_REDUCTION_RATIO_THRESHOLD = 8
 
 
 def get_triton_reduction_function(reduction_type):
-    use_helper = reduction_type in ("any", "max", "min", "prod")
+    use_helper = reduction_type in ("any", "max", "min", "prod", "fmax")
     module = "triton_helpers" if use_helper else "tl"
-    if reduction_type in ("max", "min"):
+    if reduction_type in ("max", "min", "fmax"):
         return f"{module}.{reduction_type}2"
     else:
         return f"{module}.{reduction_type}"
@@ -632,7 +632,9 @@ class BlockDescriptorOptions:
 
     def has_rindex(self) -> bool:
         return any(
-            TritonSymbols.has_reduction_index_symbol(V.kernel, expr)
+            TritonSymbols.has_reduction_index_symbol(
+                cast("TritonKernel", V.kernel), expr
+            )
             for expr in self.block_shape
         )
 
@@ -1253,7 +1255,9 @@ class TritonCSEVariable(CSEVariable):
                 # however, when index vars are used to compute indices for indirect reads
                 # those reads should subsequently be masked,
                 if (
-                    mask_name := TritonSymbols.mask_name_for_symbol(V.kernel, arg)
+                    mask_name := TritonSymbols.mask_name_for_symbol(
+                        cast("TritonKernel", V.kernel), arg
+                    )
                 ) is not None:
                     self.mask_vars.add(mask_name)
 
@@ -1590,6 +1594,11 @@ class TritonOverrides(OpOverrides):
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
         return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def fmaximum(a, b):
+        return f"tl.maximum({a}, {b})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -2534,7 +2543,15 @@ class TritonKernelOverrides(TritonOverrides):
         # operator to save the branching cost.
         for node in nodes:
             for arg in node.args:
-                if arg.target != "load" or should_unwrap_unspec_arg(arg.args[1]):
+                if (
+                    arg.target != "load"
+                    or should_unwrap_unspec_arg(arg.args[1])
+                    # A load whose producer is fused into this kernel is
+                    # served from the CSE store cache and emits no tl.load,
+                    # so the masked-load `other` would be silently dropped;
+                    # fall back to an explicit tl.where.
+                    or arg.args[1] in V.kernel.cse.store_cache
+                ):
                     need_where = True
                     break
 
@@ -4301,17 +4318,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.block_ptr_to_buffer[block_descriptor] = name
 
                     # Generate block pointer advancements, for later use.
+                    # We record the entry for every level, even when the
+                    # per-level offset is zero. The outer-loop suffix computes
+                    # a rewind as `outer_step - inner_step * inner_num_iter`;
+                    # if a pointer's outer entry is absent, no rewind is
+                    # emitted and its SSA value (in scf.for-based backends
+                    # such as Triton-MTIA) retains the accumulated inner
+                    # advances across outer iterations, silently loading
+                    # out-of-bounds. The emit site below drops pure no-op
+                    # advances so this does not add codegen noise for
+                    # pointers that are truly constant across all levels.
                     for symt in TritonSymbols.reduction_types:
                         advance_offsets = indexing.advance_roffset(symt)
-
-                        # Ignore identity advancements.
-                        if all(
-                            V.graph.sizevars.statically_known_equals(
-                                offset, sympy.Integer(0)
-                            )
-                            for offset in advance_offsets
-                        ):
-                            continue
 
                         advancements = self.pointer_advancements[symt]
                         if block_descriptor in advancements:
@@ -4483,6 +4501,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def matching_dep(dep):
             if prev_node is None:
                 raise AssertionError("prev_node must not be None")
+            if current_node is None:
+                raise AssertionError("current_node must not be None")
             prev_deps = prev_node.read_writes.writes
             if consider_reads:
                 prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
@@ -6399,8 +6419,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                             prev_advancements = self.pointer_advancements[
                                 prev_tree.symt
                             ]
-                            # block_ptr may not exist in the inner loop's advancements
-                            # if its advancement was identity (zero) and was skipped
                             if block_ptr in prev_advancements:
                                 prev_advancement = prev_advancements[block_ptr]
                                 prev_block = TritonSymbols.get_block_size(prev_tree)
@@ -6409,6 +6427,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                                     cur - prev * prev_num_iter
                                     for cur, prev in zip(advancement, prev_advancement)
                                 ]
+
+                        # Drop pure no-op advances to avoid emitting
+                        # `tl.advance(ptr, [0, 0, ...])` for pointers that
+                        # are constant across every level.
+                        if all(
+                            V.graph.sizevars.statically_known_equals(
+                                offset, sympy.Integer(0)
+                            )
+                            for offset in advancement
+                        ):
+                            continue
 
                         self.body.writeline(
                             DeferredLine(

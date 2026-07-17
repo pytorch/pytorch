@@ -63,6 +63,7 @@ from .dicts import (
     DunderDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedItemsDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
@@ -129,6 +130,7 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
+    AttributeErrorVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     CallMethodVariable,
@@ -138,12 +140,14 @@ from .misc import (
     ExceptionVariable,
     GetAttrVariable,
     LambdaVariable,
+    NameErrorVariable,
     NewGlobalVariable,
     NumpyVariable,
     ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
+    StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
     TracebackVariable,
@@ -207,6 +211,7 @@ from .user_defined import (
 
 __all__ = [
     "AcceleratorDeviceIndexVariable",
+    "AttributeErrorVariable",
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BackwardHookVariable",
@@ -251,6 +256,7 @@ __all__ = [
     "ListIteratorVariable",
     "ListVariable",
     "MappingProxyVariable",
+    "NameErrorVariable",
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "NewGlobalVariable",
@@ -259,6 +265,7 @@ __all__ = [
     "NumpyVariable",
     "OptimizerVariable",
     "OrderedDictVariable",
+    "OrderedItemsDictVariable",
     "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
@@ -269,6 +276,7 @@ __all__ = [
     "SetAttrBuiltinVariable",
     "SkipFunctionVariable",
     "SliceVariable",
+    "StopIterationVariable",
     "StringFormatVariable",
     "StructSequenceVariable",
     "SuperVariable",
