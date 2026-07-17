@@ -144,6 +144,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <cudnn.h>
 
+#include <cstdlib>
 #include <iostream>
 
 namespace at::native {
@@ -347,6 +348,43 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
   }
 };
 
+// Optional cap on the number of distinct cuDNN execution plans that a single
+// (thread-local, see getMHAGraphCache_ below) MHAGraphCache will retain.
+//
+// Each cache entry keeps a compiled fe::graph::Graph -- and the cuDNN-side
+// execution-plan/workspace-sizing state that comes with it -- alive for the
+// lifetime of the owning thread, since the cache is never evicted by default.
+// A long-running, multi-threaded server (e.g. one dispatching each request's
+// SDPA calls onto a different worker thread, as Python's
+// `asyncio.to_thread`/ThreadPoolExecutor does) can therefore end up with as
+// many independent, ever-growing caches as it has worker threads, each
+// keyed on every distinct (batch, heads, seqlen, ...) shape it happens to
+// see. That is a real, measurable, unbounded memory-growth risk independent
+// of any specific correctness bug.
+//
+// Setting TORCH_CUDNN_SDPA_CACHE_MAX_SIZE to a positive integer bounds the
+// number of entries retained per thread; the default (0, or unset) preserves
+// the historical unbounded behavior so this is strictly opt-in.
+size_t get_mha_graph_cache_max_size() {
+  static size_t size = []() -> size_t {
+    const char* raw = std::getenv("TORCH_CUDNN_SDPA_CACHE_MAX_SIZE");
+    if (!raw || !*raw) {
+      return 0;
+    }
+    try {
+      long parsed = std::stol(raw);
+      return parsed > 0 ? static_cast<size_t>(parsed) : 0;
+    } catch (const std::exception&) {
+      TORCH_WARN(
+          "Ignoring unparseable TORCH_CUDNN_SDPA_CACHE_MAX_SIZE='",
+          raw,
+          "'; expected a positive integer.");
+      return 0;
+    }
+  }();
+  return size;
+}
+
 struct MHAGraphCache {
   using KeyType = MHACacheKeyWrapper;
   using ValueType = std::unique_ptr<fe::graph::Graph>;
@@ -358,6 +396,7 @@ struct MHAGraphCache {
   MapType engine_cache;
   int count = 0;
   int hits = 0;
+  int evictions = 0;
 
   // no mutexes here as caches are now thread local for v8, can also return a
   // pointer to the Execution Plan if we know it will not be invalidated by
@@ -371,7 +410,9 @@ struct MHAGraphCache {
           count,
           " times. Hit rate: ",
           100 * hits / count,
-          "%");
+          "%. Evictions: ",
+          evictions,
+          ".");
     }
     count++;
     auto it = engine_cache.find(key);
@@ -387,6 +428,24 @@ struct MHAGraphCache {
 
   template <typename... Args>
   std::pair<iterator, bool> try_emplace(const KeyType& key, Args&&... args) {
+    size_t limit = get_mha_graph_cache_max_size();
+    if (limit > 0 && engine_cache.size() >= limit &&
+        engine_cache.find(key) == engine_cache.end()) {
+      // Bound otherwise-unbounded per-thread growth (see comment above): once
+      // this thread's cache would exceed the configured cap, do a bulk
+      // eviction rather than tracking per-entry recency/LRU order. This is
+      // intentionally simple: it trades a burst of plan-rebuild cost for a
+      // hard ceiling on retained cuDNN plan/workspace-sizing state.
+      TORCH_WARN_ONCE(
+          "cuDNN SDPA plan cache on this thread hit "
+          "TORCH_CUDNN_SDPA_CACHE_MAX_SIZE=",
+          limit,
+          " entries; evicting all cached plans on this thread. Increase the "
+          "limit, or leave TORCH_CUDNN_SDPA_CACHE_MAX_SIZE unset (default) "
+          "to disable this bound.");
+      engine_cache.clear();
+      evictions++;
+    }
     return engine_cache.try_emplace(key, std::forward<Args>(args)...);
   }
 };
@@ -395,6 +454,10 @@ struct MHAGraphCache {
 // be thread safe across all engines see Limitations in
 // https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html
 // We also leak the caches to workaround potential teardown race issues.
+//
+// The caches are unbounded by default; set TORCH_CUDNN_SDPA_CACHE_MAX_SIZE to
+// cap the number of distinct execution plans retained per thread (see
+// get_mha_graph_cache_max_size above).
 
 MHAGraphCache& getMHAGraphCache_() {
   thread_local MHAGraphCache* instance{new MHAGraphCache()};
