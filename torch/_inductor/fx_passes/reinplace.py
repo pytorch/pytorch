@@ -529,8 +529,8 @@ def _get_scatter_view_copy_back_info(
     if src_base.target is not triton_kernel_wrapper_functional:
         return None
 
-    key = scatter_src.args[1]
-    kwargs = src_base.kwargs["kwargs"]
+    key = cast(str, scatter_src.args[1])
+    kwargs = cast(dict[str, Any], src_base.kwargs["kwargs"])
     mutated_arg = kwargs.get(key)
     if not isinstance(mutated_arg, torch.fx.Node) or not _is_scatter_view_copy_back(
         dst, src, mutated_arg, src_base
@@ -572,6 +572,12 @@ def _is_control_deps_ordering_only_use(
     return view in additional_deps and view not in pass_through
 
 
+@dataclass
+class ScatterViewCopyBackPattern:
+    scatter_node: torch.fx.Node
+    scatter_is_redundant: bool
+
+
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
     Reinplaces in-placeable operations.
@@ -597,7 +603,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     # maps (view_arg, inplaceable_op_node) to copy_ nodes that copy a view of
     # the op result back into the graph input that view_arg aliases.
     copy_args_to_copy_nodes_via_views = {}
-    copy_args_to_redundant_scatter_nodes = {}
+    copy_args_to_scatter_view_copy_back_patterns: dict[
+        tuple[torch.fx.Node, torch.fx.Node], ScatterViewCopyBackPattern
+    ] = {}
     mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(list)
     node_order: dict[Any, int] = {}
@@ -651,10 +659,14 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     scatter_copy_back_info
                 )
                 copy_args_to_copy_nodes_via_views[(mutated_arg, src_base)] = node
-                if only_user_is_given_copy_node:
-                    copy_args_to_redundant_scatter_nodes[(mutated_arg, src_base)] = src
+                copy_args_to_scatter_view_copy_back_patterns[(mutated_arg, src_base)] = (
+                    ScatterViewCopyBackPattern(
+                        scatter_node=src,
+                        scatter_is_redundant=only_user_is_given_copy_node,
+                    )
+                )
 
-    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node, mutated_arg):
+    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node, mutated_arg, ignored_users=None):
         node_loc = node_order[node]
         copy_node_loc = node_order[copy_node] if copy_node is not None else None
 
@@ -673,11 +685,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # has already been mutated anyway
                 if copy_node_loc is not None and copy_node_loc <= user_loc:
                     continue
-                # Ignore the node constructing the source for the copy_
-                # epilogue. For view copy-back patterns this source may read the
-                # input being mutated only to describe where the result is
-                # written back.
-                if copy_node is not None and user is copy_node.args[1]:
+                if ignored_users and user in ignored_users:
                     continue
                 # Reinplacing does not change shape metadata
                 if is_meta_only_user(user):
@@ -765,11 +773,16 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             ):
                 return False
 
+            ignored_users = set()
+            if pattern := copy_args_to_scatter_view_copy_back_patterns.get((mutated_arg, node)):
+                ignored_users.add(pattern.scatter_node)
+
             if any_use_of_views_after_node(
                 node,
                 shared_view_nodes,
                 copy_node=copy_node,
                 mutated_arg=mutated_arg_base,
+                ignored_users=ignored_users,
             ):
                 return False
             return True
@@ -886,10 +899,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
-                    if redundant_scatter := copy_args_to_redundant_scatter_nodes.get(
-                        (mutated_arg, node)
-                    ):
-                        replace_dict[redundant_scatter] = copy_node.args[0]
+                    if (
+                        pattern := copy_args_to_scatter_view_copy_back_patterns.get(
+                            (mutated_arg, node)
+                        )
+                    ) and pattern.scatter_is_redundant:
+                        replace_dict[pattern.scatter_node] = copy_node.args[0]
                 if trigger != ReInplaceTrigger.AUTO_FUNC_V2:
                     for user in node.users:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
