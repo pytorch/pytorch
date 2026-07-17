@@ -1,8 +1,11 @@
 #pragma once
 
-#include <ATen/mps/MPSStream.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/python_headers.h>
+
+namespace at::mps {
+class MPSStream;
+} // namespace at::mps
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPMPSStream : THPStream {
