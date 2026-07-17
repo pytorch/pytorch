@@ -16,7 +16,8 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -44,6 +45,8 @@ c10d_ops = torch.ops.c10d
 
 
 class DTensorAPITest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         # hard code world size to 4 as we need to test
@@ -445,6 +448,8 @@ class DTensorAPITest(DTensorTestBase):
 DTensorAPITestWithLocalTensor = create_local_tensor_test_class(
     DTensorAPITest, skipped_tests=["test_checkpoint_apis_check_partial_placement"]
 )
+
+instantiate_device_type_tests(DTensorAPITest, globals())
 
 if __name__ == "__main__":
     run_tests()
