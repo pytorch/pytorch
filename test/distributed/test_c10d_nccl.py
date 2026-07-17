@@ -732,11 +732,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
                 dist.gather_into_tensor(good_input, bad_dtype, dst=0)
         dist.barrier()
 
-        # NOTE: NCCL CI runs against >= 2.28.3, so the tests above exercise the
-        # native ncclGather path. The < 2.28.3 fallback reuses the shared
-        # torch::cuda::nccl::gather send/recv helper (covered by dist.gather
-        # tests) rather than hand-written send/recv, so it is not separately
-        # exercised here.
+        # NOTE: on NVIDIA (NCCL >= 2.28.3) this exercises the native ncclGather
+        # path; on ROCm (RCCL, which lacks ncclGather) it exercises the < 2.28.3
+        # send/recv fallback, so both code paths are covered across CI.
 
         c10d.destroy_process_group()
 

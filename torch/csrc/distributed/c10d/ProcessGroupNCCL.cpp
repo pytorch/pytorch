@@ -5785,10 +5785,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_into_tensor(
             comm,
             stream.stream());
 #else
-        // Fallback for NCCL < 2.28.3: reuse the shared send/recv gather helper,
-        // pointing its per-rank outputs at contiguous slices of the flat output
-        // buffer so there is still no extra copy. The helper's group-end check
-        // is non-blocking-communicator aware.
+        // Fallback for NCCL < 2.28.3 (e.g. RCCL, which lacks ncclGather):
+        // reuse the shared send/recv gather helper, pointing its per-rank
+        // outputs at contiguous slices of the flat output buffer so there is
+        // still no extra copy. The helper's group-end check is
+        // non-blocking-communicator aware. Flatten the input so the helper's
+        // root self-copy (outputs[root].copy_(input)) is a flat-to-flat copy
+        // and does not try to broadcast a multi-dim input onto a 1-D slice.
+        auto flatInput = input.view(-1);
         std::vector<at::Tensor> outputViews;
         if (isRoot) {
           auto flat = output.view(-1);
@@ -5797,7 +5801,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_into_tensor(
             outputViews.push_back(flat.narrow(0, r * count, count));
           }
         }
-        torch::cuda::nccl::gather(input, outputViews, comm, stream, root);
+        torch::cuda::nccl::gather(flatInput, outputViews, comm, stream, root);
         return ncclSuccess;
 #endif
       },
