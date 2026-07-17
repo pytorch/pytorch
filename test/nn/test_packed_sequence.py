@@ -264,10 +264,13 @@ class PackedSequenceTest(TestCase):
             padded_sequences = rnn_utils.pad_sequence(
                 sequences, batch_first=batch_first
             )
+            padded_before = padded_sequences.clone()
             unpadded_sequences = rnn_utils.unpad_sequence(
                 padded_sequences, lengths, batch_first=batch_first
             )
             self.assertEqual(sequences, unpadded_sequences)
+            # unpad_sequence must not modify its input in place (gh-98499)
+            self.assertEqual(padded_sequences, padded_before)
 
         # more dimensions
         maxlen = 9
