@@ -13,6 +13,7 @@ Key components:
 - CompilerFn: Type for backend compiler functions that transform FX graphs
 - _BACKENDS: Registry mapping backend names to entry points
 - _COMPILER_FNS: Registry mapping backend names to loaded compiler functions
+- _BACKEND_TAGS: Registry mapping backend names to their tags
 
 Example usage:
     @register_backend
@@ -79,6 +80,7 @@ CompilerFn = Callable[[fx.GraphModule, list[torch.Tensor]], CompiledFn]
 
 _BACKENDS: dict[str, EntryPoint | None] = {}
 _COMPILER_FNS: dict[str, CompilerFn] = {}
+_BACKEND_TAGS: dict[str, tuple[str, ...]] = {}
 _default_backend: str | CompilerFn = "inductor"
 
 
@@ -106,10 +108,10 @@ def register_backend(
     name = name or compiler_fn.__name__
     if name in _COMPILER_FNS:
         raise AssertionError(f"duplicate name: {name}")
-    if compiler_fn not in _BACKENDS:
+    if name not in _BACKENDS:
         _BACKENDS[name] = None
     _COMPILER_FNS[name] = compiler_fn
-    compiler_fn._tags = tuple(tags)  # type: ignore[attr-defined]
+    _BACKEND_TAGS[name] = tuple(tags)
     return compiler_fn
 
 
@@ -153,8 +155,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:  # type:
     backends = [
         name
         for name in _BACKENDS
-        if name not in _COMPILER_FNS
-        or not exclude_tags_set.intersection(_COMPILER_FNS[name]._tags)  # type: ignore[attr-defined]
+        if not exclude_tags_set.intersection(_BACKEND_TAGS.get(name, ()))
     ]
     return sorted(backends)
 

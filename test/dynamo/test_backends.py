@@ -382,6 +382,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         def cleanup_backend():
             backend_registry._COMPILER_FNS.pop(backend_name, None)
             backend_registry._BACKENDS.pop(backend_name, None)
+            backend_registry._BACKEND_TAGS.pop(backend_name, None)
 
         self.addCleanup(cleanup_backend)
 
@@ -481,12 +482,15 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
 
             orig_backends = dict(registry._BACKENDS)
             orig_compiler_fns = dict(registry._COMPILER_FNS)
+            orig_backend_tags = dict(registry._BACKEND_TAGS)
 
             def restore_registry():
                 registry._BACKENDS.clear()
                 registry._BACKENDS.update(orig_backends)
                 registry._COMPILER_FNS.clear()
                 registry._COMPILER_FNS.update(orig_compiler_fns)
+                registry._BACKEND_TAGS.clear()
+                registry._BACKEND_TAGS.update(orig_backend_tags)
                 registry._lazy_import.cache_clear()
                 registry._discover_entrypoint_backends.cache_clear()
 
