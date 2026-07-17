@@ -137,10 +137,10 @@ def _loss_fn(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return (output - target).pow(2).mean()
 
 
-def _requires_multi_gpu(func):
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+def _requires_multi_accelerator(func):
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 4+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 4+ accelerators"
     )
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -165,8 +165,8 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     def init_pg(self) -> None:
-        if device_type == "cuda":
-            torch.cuda.set_device(self.device)
+        if torch.accelerator.is_available():
+            torch.accelerator.set_device_index(self.device)
 
     def _make_mesh(self) -> DeviceMesh:
         return init_device_mesh(device_type, (2, 2), mesh_dim_names=("pp", "tp"))
@@ -666,7 +666,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
 
 
 class TestDTensorPPModes(DTensorPPIntegrationBase):
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_static_mode_replicate(self):
         self._run_training_correctness(
             Schedule1F1B,
@@ -674,7 +674,7 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             [Replicate()],
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_static_mode_none_grad_slots_replicate(self):
         self._run_training_correctness(
             Schedule1F1B,
@@ -683,7 +683,7 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             null_boundary_grads=True,
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_static_mode_none_grad_slots_shard(self):
         self._run_training_correctness(
             Schedule1F1B,
@@ -692,7 +692,7 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             null_boundary_grads=True,
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_static_mode_shard(self):
         self._run_training_correctness(
             Schedule1F1B,
@@ -700,14 +700,14 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             [Shard(1)],
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_dynamic_mode_inference_only_replicate(self):
         self._run_inference_only_equivalence(
             apply_tp_replicate,
             [Replicate()],
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_static_mode_inference_only_replicate(self):
         self._run_inference_only_equivalence(
             apply_tp_replicate,
@@ -715,14 +715,14 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             use_static_metadata=True,
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_dynamic_mode_inference_only_shard(self):
         self._run_inference_only_equivalence(
             apply_tp_shard,
             [Shard(1)],
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_static_mode_inference_only_shard(self):
         self._run_inference_only_equivalence(
             apply_tp_shard,
@@ -730,7 +730,7 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             use_static_metadata=True,
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_dynamic_mode_replicate(self):
         self._run_training_correctness(
             Schedule1F1B,
@@ -739,7 +739,7 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             use_static_metadata=False,
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_dynamic_mode_shard(self):
         self._run_training_correctness(
             Schedule1F1B,
@@ -748,7 +748,7 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             use_static_metadata=False,
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_static_mode_interleaved1f1b_replicate(self):
         self._run_training_correctness(
             ScheduleInterleaved1F1B,
@@ -756,7 +756,7 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             [Replicate()],
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_static_mode_zbv_zero_bubble_replicate(self):
         self._run_training_correctness(
             ScheduleZBVZeroBubble,
@@ -764,7 +764,7 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             [Replicate()],
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_static_mode_dualpipev_replicate(self):
         self._run_training_correctness(
             ScheduleDualPipeV,
@@ -772,7 +772,7 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             [Replicate()],
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_dynamic_mode_interleaved1f1b_shard(self):
         self._run_training_correctness(
             ScheduleInterleaved1F1B,
@@ -781,7 +781,7 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             use_static_metadata=False,
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_dynamic_mode_zbv_zero_bubble_shard(self):
         self._run_training_correctness(
             ScheduleZBVZeroBubble,
@@ -790,7 +790,7 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             use_static_metadata=False,
         )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_dynamic_mode_dualpipev_shard(self):
         self._run_training_correctness(
             ScheduleDualPipeV,
