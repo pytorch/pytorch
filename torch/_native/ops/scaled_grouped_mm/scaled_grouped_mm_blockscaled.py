@@ -712,7 +712,7 @@ def _compile_scaled_grouped_mm_blockscaled(
             options="--enable-assertions --enable-tvm-ffi",
         )
     )
-    return compiled, grouped_gemm.cluster_tile_shape_mnk
+    return compiled
 
 
 @functools.lru_cache(maxsize=1)
@@ -1014,19 +1014,17 @@ def scaled_grouped_mm_blockscaled(
         cluster_tile_n=cluster_tile_n,
     )
 
-    scaled_grouped_mm_blockscaled_compiled, cluster_tile_shape_mnk = (
-        _compile_scaled_grouped_mm_blockscaled(
-            sm_count,
-            max_active_clusters,
-            b_is_2d,
-            config.mma_tile_mn,
-            config.cluster_shape_mn,
-            config.transpose_ab,
-            fmt.cutlass_ab_dtype_name,
-            fmt.cutlass_scale_ab_dtype_name,
-            fmt.scale_ab_vec_size,
-            _TORCH_TO_CUTLASS_DTYPE_NAME[requested_out_dtype],
-        )
+    scaled_grouped_mm_blockscaled_compiled = _compile_scaled_grouped_mm_blockscaled(
+        sm_count,
+        max_active_clusters,
+        b_is_2d,
+        config.mma_tile_mn,
+        config.cluster_shape_mn,
+        config.transpose_ab,
+        fmt.cutlass_ab_dtype_name,
+        fmt.cutlass_scale_ab_dtype_name,
+        fmt.scale_ab_vec_size,
+        _TORCH_TO_CUTLASS_DTYPE_NAME[requested_out_dtype],
     )
 
     (
@@ -1038,13 +1036,6 @@ def scaled_grouped_mm_blockscaled(
         total_num_clusters,
     ) = _get_aux_tensors(ngroups, device)
 
-    try:
-        cluster_tile_m = int(cluster_tile_shape_mnk[0])
-        cluster_tile_n = int(cluster_tile_shape_mnk[1])
-    except Exception:
-        cluster_tile_m, cluster_tile_n = _get_cluster_tile_shape_mn(
-            config.mma_tile_mn, config.cluster_shape_mn
-        )
     scale_a0 = scale_a[0]
     scale_b0 = scale_b[0]
     mat_a_element_size = mat_a.element_size()

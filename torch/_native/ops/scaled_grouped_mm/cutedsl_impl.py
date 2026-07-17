@@ -9,10 +9,6 @@ from torch._C import (
 )
 
 from ... import cutedsl_utils as cu
-from .scaled_grouped_mm_blockscaled import (
-    _should_use_cutedsl_scaled_grouped_mm_blockscaled,
-    scaled_grouped_mm_blockscaled,
-)
 
 
 def _cond(
@@ -30,6 +26,10 @@ def _cond(
     contraction_dim: object = (),
     use_fast_accum: object = False,
 ) -> bool:
+    from .scaled_grouped_mm_blockscaled import (
+        _should_use_cutedsl_scaled_grouped_mm_blockscaled,
+    )
+
     return _should_use_cutedsl_scaled_grouped_mm_blockscaled(
         mat_a,
         mat_b,
@@ -62,6 +62,8 @@ def _impl(
     contraction_dim: Sequence[int] = (),
     use_fast_accum: bool = False,
 ) -> Tensor:
+    from .scaled_grouped_mm_blockscaled import scaled_grouped_mm_blockscaled
+
     cutedsl_call = scaled_grouped_mm_blockscaled
     if torch.compiler.is_compiling():
         import torch._dynamo as torch_dynamo
