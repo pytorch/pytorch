@@ -204,16 +204,18 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
       ++b->gc_count;
     }
   }
-  auto no_larger_it = pool.available_buffers.lower_bound(&params.search_key);
-  // No cached buffer is >= the request size when this is true; used below to
-  // detect a buffer that grows by a small amount on every step.
-  const bool no_larger_buffer = (no_larger_it == pool.available_buffers.end());
-
   MPSStream* current_stream = getCurrentMPSStream();
   auto stream_pool_it = pool.available_buffers_by_stream.find(current_stream);
+  bool no_larger_buffer = true;
+
   if (stream_pool_it != pool.available_buffers_by_stream.end()) {
     auto& stream_buffers = stream_pool_it->second;
     auto it = stream_buffers.lower_bound(&params.search_key);
+
+    // No cached buffer is >= the request size when this is true; used below to
+    // detect a buffer that grows by a small amount on every step.
+    no_larger_buffer = (it == stream_buffers.end());
+
     if (it != stream_buffers.end()) {
       BufferBlock* buffer_block = *it;
 
@@ -253,9 +255,10 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
     // buffers. Release the largest one within kNearFitReuseDenom (1/8) of the
     // request to free its heap. The tolerance is kept wider than a bucket so the
     // stranded near-fit is caught anywhere in the power-of-two band.
-    if (no_larger_buffer && !(pool.usage & UsageFlags::SMALL) && !pool.available_buffers.empty()) {
+    if (no_larger_buffer && !(pool.usage & UsageFlags::SMALL) &&
+        stream_pool_it != pool.available_buffers_by_stream.end() && !stream_pool_it->second.empty()) {
       constexpr size_t kNearFitReuseDenom = 8;
-      BufferBlock* nearest = *pool.available_buffers.rbegin();
+      BufferBlock* nearest = *stream_pool_it->second.rbegin();
       if (nearest->size >= params.size() - params.size() / kNearFitReuseDenom && nearest->retainCount() <= 1) {
         release_buffer(nearest, /*remove_empty_heap=*/true);
       }

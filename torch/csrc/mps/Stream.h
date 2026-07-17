@@ -5,14 +5,14 @@
 #include <torch/csrc/python_headers.h>
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-struct THMPStream : THPStream {
+struct THPMPSStream : THPStream {
   // Non-owning pointer to one of the streams in the MPS stream pool
   at::mps::MPSStream* mps_stream;
 };
-extern PyObject* THMPStreamClass;
+extern PyObject* THPMPSStreamClass;
 
-void THMPStream_init(PyObject* module);
+void THPMPSStream_init(PyObject* module);
 
-inline bool THMPStream_Check(PyObject* obj) {
-  return THMPStreamClass && PyObject_IsInstance(obj, THMPStreamClass);
+inline bool THPMPSStream_Check(PyObject* obj) {
+  return THPMPSStreamClass && PyObject_IsInstance(obj, THPMPSStreamClass);
 }

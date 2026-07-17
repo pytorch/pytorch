@@ -951,6 +951,36 @@ class TestMPS(TestCaseMPS):
             s2.synchronize()
             torch.mps.empty_cache()
 
+    def test_buffer_reuse_per_stream(self):
+        def make_and_free_get_ptr(stream):
+            torch._C._mps_setStream(stream)
+            t = torch.randn(1 << 16, device='mps')
+            stream.synchronize()
+            ptr = t.data_ptr()
+            del t
+            stream.synchronize()
+            return ptr
+
+        s1 = torch._C._MPSStreamBase()
+        s2 = torch._C._MPSStreamBase()
+
+        try:
+            # Same stream: the exact same buffer should be reused
+            ptr_s1_first = make_and_free_get_ptr(s1)
+            ptr_s1_second = make_and_free_get_ptr(s1)
+            self.assertEqual(ptr_s1_second, ptr_s1_first)
+
+            # Different stream: must not reuse s1's freed buffer
+            ptr_s2 = make_and_free_get_ptr(s2)
+            self.assertNotEqual(ptr_s2, ptr_s1_second)
+
+        finally:
+            torch._C._mps_setStream(None)
+            torch.mps.synchronize()
+            s1.synchronize()
+            s2.synchronize()
+            torch.mps.empty_cache()
+
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi

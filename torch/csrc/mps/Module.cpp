@@ -229,18 +229,20 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
   END_HANDLE_TH_ERRORS
 }
 
+#ifdef USE_MPS
 static PyObject* MPSModule_setStream(PyObject* _unused, PyObject* stream) {
   HANDLE_TH_ERRORS
   at::mps::MPSStream* mps_stream = nullptr;
   if (stream != Py_None) {
     TORCH_CHECK(
-        THMPStream_Check(stream), "invalid stream argument to setStream");
-    mps_stream = reinterpret_cast<THMPStream*>(stream)->mps_stream;
+        THPMPSStream_Check(stream), "invalid stream argument to setStream");
+    mps_stream = reinterpret_cast<THPMPSStream*>(stream)->mps_stream;
   }
   at::mps::setCurrentMPSStream(mps_stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
+#endif /* USE_MPS */
 
 // NOLINTNEXTLINE(*-c-arrays, *-global-variables)
 static struct PyMethodDef _MPSModule_methods[] = {
@@ -291,7 +293,9 @@ static struct PyMethodDef _MPSModule_methods[] = {
      MPSModule_elapsedTimeOfEvents,
      METH_VARARGS,
      nullptr},
+#ifdef USE_MPS
     {"_mps_setStream", MPSModule_setStream, METH_O, nullptr},
+#endif /* USE_MPS */
     {nullptr}};
 
 PyMethodDef* python_functions() {

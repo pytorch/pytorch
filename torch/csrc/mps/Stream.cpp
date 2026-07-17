@@ -2,14 +2,13 @@
 #include <torch/csrc/mps/Stream.h>
 
 #ifdef USE_MPS
-// #include <torch/csrc/Device.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <structmember.h>
 
-PyObject* THMPStreamClass = nullptr;
+PyObject* THPMPSStreamClass = nullptr;
 
-static PyObject* THMPStream_pynew(
+static PyObject* THPMPSStream_pynew(
     PyTypeObject* type,
     PyObject* args,
     PyObject* kwargs) {
@@ -34,7 +33,7 @@ static PyObject* THMPStream_pynew(
   at::mps::MPSStream* stream = at::mps::getStreamFromPool();
   c10::Stream unwrapped = stream->unwrap();
 
-  THMPStream* self = (THMPStream*)ptr.get();
+  THPMPSStream* self = (THPMPSStream*)ptr.get();
   self->stream_id = static_cast<int64_t>(unwrapped.id());
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(unwrapped.device_index());
@@ -45,16 +44,16 @@ static PyObject* THMPStream_pynew(
   END_HANDLE_TH_ERRORS
 }
 
-static void THMPStream_dealloc(THMPStream* self) {
+static void THPMPSStream_dealloc(THPMPSStream* self) {
   // Only the Python object needs to be deleted, not `self->mps_stream`, the
   // underlying MPSStream, since that is kept alive in the pool.
   THPStream_dealloc_common(reinterpret_cast<THPStream*>(self));
 }
 
-static PyObject* THMPStream_synchronize(PyObject* _self, PyObject* noargs) {
+static PyObject* THPMPSStream_synchronize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
-    auto self = (THMPStream*)_self;
+    auto self = (THPMPSStream*)_self;
     self->mps_stream->synchronize(at::mps::SyncType::COMMIT_AND_WAIT);
   }
   Py_RETURN_NONE;
@@ -62,22 +61,22 @@ static PyObject* THMPStream_synchronize(PyObject* _self, PyObject* noargs) {
 }
 
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
-static struct PyMemberDef THMPStream_members[] = {{nullptr}};
+static struct PyMemberDef THPMPSStream_members[] = {{nullptr}};
 
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
-static struct PyGetSetDef THMPStream_properties[] = {{nullptr}};
+static struct PyGetSetDef THPMPSStream_properties[] = {{nullptr}};
 
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
-static PyMethodDef THMPStream_methods[] = {
-    {"synchronize", THMPStream_synchronize, METH_NOARGS, nullptr},
+static PyMethodDef THPMPSStream_methods[] = {
+    {"synchronize", THPMPSStream_synchronize, METH_NOARGS, nullptr},
     {nullptr}};
 
-PyTypeObject THMPStreamType = {
+PyTypeObject THPMPSStreamType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._MPSStreamBase", /* tp_name */
-    sizeof(THMPStream), /* tp_basicsize */
+    sizeof(THPMPSStream), /* tp_basicsize */
     0, /* tp_itemsize */
-    (destructor)THMPStream_dealloc, /* tp_dealloc */
+    (destructor)THPMPSStream_dealloc, /* tp_dealloc */
     0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
@@ -100,9 +99,9 @@ PyTypeObject THMPStreamType = {
     0, /* tp_weaklistoffset (inherited from THPStreamType via tp_base) */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THMPStream_methods, /* tp_methods */
-    THMPStream_members, /* tp_members */
-    THMPStream_properties, /* tp_getset */
+    THPMPSStream_methods, /* tp_methods */
+    THPMPSStream_members, /* tp_members */
+    THPMPSStream_properties, /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */
@@ -110,19 +109,19 @@ PyTypeObject THMPStreamType = {
     0, /* tp_dictoffset */
     nullptr, /* tp_init */
     nullptr, /* tp_alloc */
-    THMPStream_pynew, /* tp_new */
+    THPMPSStream_pynew, /* tp_new */
 };
 
-void THMPStream_init(PyObject* module) {
+void THPMPSStream_init(PyObject* module) {
   Py_INCREF(THPStreamClass);
-  THMPStreamType.tp_base = THPStreamClass;
-  THMPStreamClass = (PyObject*)&THMPStreamType;
-  if (PyType_Ready(&THMPStreamType) < 0) {
+  THPMPSStreamType.tp_base = THPStreamClass;
+  THPMPSStreamClass = (PyObject*)&THPMPSStreamType;
+  if (PyType_Ready(&THPMPSStreamType) < 0) {
     throw python_error(); // @allow-raw-throw
   }
-  Py_INCREF(&THMPStreamType);
-  if (PyModule_AddObject(module, "_MPSStreamBase", (PyObject*)&THMPStreamType) <
-      0) {
+  Py_INCREF(&THPMPSStreamType);
+  if (PyModule_AddObject(
+          module, "_MPSStreamBase", (PyObject*)&THPMPSStreamType) < 0) {
     throw python_error(); // @allow-raw-throw
   }
 }
