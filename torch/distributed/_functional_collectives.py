@@ -3,7 +3,7 @@ import contextlib
 import math
 import sys
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
@@ -2003,7 +2003,7 @@ traceable_collective_remaps = {
 
 def _remap_traceable_collective(
     func: Callable[..., Any],
-    args: tuple[Any, ...],
+    args: Sequence[Any],
     kwargs: dict[str, Any] | None,
 ) -> tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]] | None:
     """Redirect a legacy ``torch.distributed`` collective to its functional
