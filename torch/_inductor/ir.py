@@ -7317,6 +7317,36 @@ class ExternKernel(InputsKernel):
                 example_args.append(ir_node_to_tensor(x))
 
         new_args, new_kwargs = unflatten_args(example_args, real_non_tensor_args)
+        if overrides := V.current_node.meta.get("unbacked_scalar_arg_overrides"):
+            # Keep symbolic scalar args in the generated fallback call, but use
+            # the concrete fake-only values when running the kernel here to
+            # infer output metadata.
+            def override_example_arg(original_arg: Any, example_arg: _T) -> Any:
+                if (
+                    isinstance(original_arg, torch.fx.Node)
+                    and original_arg.name in overrides
+                ):
+                    return overrides[original_arg.name]
+                if isinstance(original_arg, (tuple, list)) and isinstance(
+                    example_arg, (tuple, list)
+                ):
+                    restored_args = [
+                        override_example_arg(original, example)
+                        for original, example in zip(original_arg, example_arg)
+                    ]
+                    restored_args.extend(example_arg[len(restored_args) :])
+                    return type(example_arg)(restored_args)
+                if isinstance(original_arg, dict) and isinstance(example_arg, dict):
+                    return {
+                        key: override_example_arg(original_arg[key], example_arg[key])
+                        if key in original_arg
+                        else example_arg[key]
+                        for key in example_arg
+                    }
+                return example_arg
+
+            new_args = list(override_example_arg(V.current_node.args, tuple(new_args)))
+            new_kwargs = override_example_arg(V.current_node.kwargs, new_kwargs)
         shape_env = V.fake_mode.shape_env
         with (
             enable_python_dispatcher(),

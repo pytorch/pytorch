@@ -1405,6 +1405,36 @@ class FxGraphHashDetails:
                     return True
         return False
 
+    @staticmethod
+    def _specialized_scalar_overrides(
+        gm: torch.fx.GraphModule | None,
+    ) -> tuple[tuple[str, tuple[tuple[str, float], ...]], ...]:
+        if gm is None:
+            return ()
+
+        overrides = []
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                specializations = node.meta.get("unbacked_scalar_arg_specializations")
+                if not specializations:
+                    continue
+                node_overrides = node.meta.get("unbacked_scalar_arg_overrides", {})
+                if not isinstance(node_overrides, dict):
+                    raise BypassFxGraphCache(
+                        "Specialized scalar override metadata is malformed"
+                    )
+                scalar_overrides = []
+                for name in sorted(specializations):
+                    if name not in node_overrides:
+                        raise BypassFxGraphCache(
+                            "Specialized scalar override missing override value"
+                        )
+                    scalar_overrides.append((name, node_overrides[name]))
+                overrides.append((node.name, tuple(scalar_overrides)))
+        return tuple(overrides)
+
     def __init__(
         self,
         gm: torch.fx.GraphModule | None,
@@ -1427,6 +1457,7 @@ class FxGraphHashDetails:
                 processed_inputs.append(inp)
         self.example_inputs = processed_inputs
         self.cache_key_tag = cconfig.cache_key_tag
+        self.specialized_scalar_overrides = self._specialized_scalar_overrides(gm)
 
         # Order kwargs so hashing is stable to changes in kwarg order. Although
         # it's technically a _CompileFxKwargs we don't actually need it typed as
