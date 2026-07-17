@@ -123,7 +123,7 @@ class RuntimeEstimator(TorchDispatchMode):
         """
         # these should all be supported, just to be safe
         # avoid fallback for operators which inplace modify metadata
-        # because the input fake tensors would be umodified
+        # because the input fake tensors would be unmodified
         if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
             raise orig_not_implemented_exception
 

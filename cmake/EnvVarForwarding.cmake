@@ -160,18 +160,20 @@ if(Python_EXECUTABLE)
   endif()
 endif()
 
-# BUILD_PYTHON_ONLY implies BUILD_LIBTORCHLESS=ON. This matches setup.py
-# behavior where BUILD_PYTHON_ONLY unconditionally forces BUILD_LIBTORCHLESS.
+# BUILD_PYTHON_ONLY implies BUILD_LIBTORCHLESS=ON.
 if(BUILD_PYTHON_ONLY)
   set(BUILD_LIBTORCHLESS ON CACHE BOOL "Build without libtorch" FORCE)
 endif()
 
-# USE_NIGHTLY bypasses the build entirely and downloads a pre-built wheel.
-# This is not supported via CMake -- use the standalone script instead.
+# Installing pre-built nightly binaries instead of building is handled by
+# tools/nightly.py, not by the build: a PEP 517 build cannot skip itself.
+# Fail loudly rather than let USE_NIGHTLY be silently ignored.
 if(USE_NIGHTLY)
   message(FATAL_ERROR
     "USE_NIGHTLY is not supported with the scikit-build-core build system. "
-    "Use 'python tools/nightly_wheel.py' instead, or install directly with pip: "
+    "Use 'python tools/nightly.py checkout' instead (it checks out the nightly "
+    "commit and installs matching pre-built binaries; see --help), or install "
+    "a nightly wheel directly: "
     "pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu"
   )
 endif()
