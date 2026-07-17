@@ -66,7 +66,7 @@ test_failures = {
     # TypeError: cannot pickle 'generator' object
     "test_layer_norm": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_remove_noop_slice": TestFailure(
-        ("xpu", "cuda"),
+        ("cuda",),
         is_skip=(TEST_WITH_ROCM and isRocmArchAnyOf(MI350_ARCH)) or not TEST_WITH_ROCM,
     ),
     "test_remove_noop_slice1": TestFailure(("xpu"), is_skip=True),
@@ -82,11 +82,6 @@ test_failures = {
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
 }
-
-if TEST_WITH_ROCM and not torch.cuda.has_magma:
-    test_failures["test_linalg_eig_stride_consistency"] = TestFailure(
-        ("cuda",), is_skip=True
-    )
 
 
 class TestSubprocess(TestCase):
