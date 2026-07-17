@@ -496,11 +496,15 @@ class StreamVariable(StreamContextVariable):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
-        tx.output.check_event_record_after_input_mutation(id(self.value))
         if args and isinstance(args[0], EventVariable):
             event_var = args[0]
             event = event_var.value
             event_index = event_var.user_object_index
+            tx.output.check_event_record_after_input_mutation(
+                id(self.value),
+                event_value=event,
+                event_has_source=event_var.source is not None,
+            )
         else:
             event = self.value.record_event()
             event_index = register_graph_created_object(
@@ -508,6 +512,11 @@ class StreamVariable(StreamContextVariable):
                 EventVariable.make_construct_in_graph_event_fn(
                     TupleVariable([]), ConstDictVariable({})
                 ),
+            )
+            # Freshly constructed during tracing: defer the mutation
+            # check to escape analysis.
+            tx.output.check_event_record_after_input_mutation(
+                id(self.value), event_value=event, event_has_source=False
             )
         tx.output.create_proxy(
             "call_function",
@@ -696,7 +705,11 @@ class EventVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         stream_arg, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
-        tx.output.check_event_record_after_input_mutation(id(stream_arg.value))
+        tx.output.check_event_record_after_input_mutation(
+            id(stream_arg.value),
+            event_value=self.value,
+            event_has_source=self.source is not None,
+        )
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.record_event,

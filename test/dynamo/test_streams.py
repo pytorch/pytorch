@@ -2123,6 +2123,57 @@ class GraphModule(torch.nn.Module):
                 torch.Event(device=device),
             )
 
+    def test_event_record_after_input_mutation_non_escaping_no_error(self, device):
+        # The record-after-mutation hazard needs an observer outside the
+        # compiled region; an event created during tracing that never
+        # escapes (not returned, not stored) cannot have one, so this
+        # must compile.
+        def fn(x):
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+                e.wait()
+            return x + 1
+
+        torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.ones(2, 2, device=device)
+        )
+
+    def test_event_record_after_input_mutation_escapes_via_list(self, device):
+        def fn(x, holder):
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+            holder.append(e)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device=device), []
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_attr(self, device):
+        class Holder:
+            pass
+
+        def fn(x, h):
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+            h.evt = e
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device=device), Holder()
+            )
+
     def test_event_record_before_input_mutation_no_error(self, device):
         def fn(x):
             s = torch.Stream(device=device)
@@ -2152,6 +2203,9 @@ class GraphModule(torch.nn.Module):
         )
 
     def test_event_not_returned_no_error(self, device):
+        # The event is created during tracing and never escapes the
+        # compiled region, so no observer outside the graph can wait on
+        # it: the record-after-mutation error must not fire.
         def fn(x):
             s = torch.Stream(device=device)
             e = torch.Event(device=device)
@@ -2160,10 +2214,9 @@ class GraphModule(torch.nn.Module):
                 e.record()
             return x
 
-        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device=device)
-            )
+        torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.ones(2, 2, device=device)
+        )
 
     @unittest.skipIf(
         IS_LINUX or IS_MACOS or TEST_WITH_ROCM or IS_WINDOWS,
