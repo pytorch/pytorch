@@ -122,9 +122,7 @@ class TestCodegenTriton(InductorTestCase):
         with V.set_choices_handler(CustomChoices()):
             kernel = TritonKernel(
                 {"x": sympy.Integer(4), "r0_": sympy.Integer(512)},
-                features=SIMDKernelFeatures(
-                    [], sympy.Integer(4), sympy.Integer(512)
-                ),
+                features=SIMDKernelFeatures([], sympy.Integer(4), sympy.Integer(512)),
                 tiling_scores=tiling_scores,
                 override_cooperative_reduction=False,
             )
@@ -139,23 +137,23 @@ class TestCodegenTriton(InductorTestCase):
             override_persistent_reduction=False,
             override_cooperative_reduction=False,
         )
-        with V.set_kernel_handler(kernel):
+        with (
+            patch.object(kernel, "persistent_reduction", True),
+            V.set_kernel_handler(kernel),
+        ):
             split_x, (r_index,) = kernel.set_ranges([2, 3, 4], [128])
             alternate_x, _ = kernel.set_ranges([6, 4], [128])
             (flat_x,), _ = kernel.set_ranges([24], [128])
 
             split_index = (
-                r_index
-                + 128 * split_x[2]
-                + 512 * split_x[1]
-                + 1536 * split_x[0]
+                r_index + 128 * split_x[2] + 512 * split_x[1] + 1536 * split_x[0]
             )
-            alternate_index = (
-                r_index + 128 * alternate_x[1] + 512 * alternate_x[0]
-            )
+            alternate_index = r_index + 128 * alternate_x[1] + 512 * alternate_x[0]
             flat_index = 512 * FloorDiv(flat_x, 4) + ModularIndexing(
                 r_index + 128 * flat_x, 1, 512
             )
+
+            # Record the first split, leave another split alone, and rewrite flat.
             self.assertEqual(
                 kernel._reuse_load_index_basis("in_ptr", split_index),
                 split_index,
@@ -167,6 +165,8 @@ class TestCodegenTriton(InductorTestCase):
             self.assertEqual(
                 kernel._reuse_load_index_basis("in_ptr", flat_index), split_index
             )
+
+            # Each buffer must observe its own split before a flat index is rewritten.
             self.assertEqual(
                 kernel._reuse_load_index_basis("reverse_ptr", flat_index),
                 flat_index,
@@ -178,6 +178,8 @@ class TestCodegenTriton(InductorTestCase):
             self.assertEqual(
                 kernel._reuse_load_index_basis("reverse_ptr", flat_index), split_index
             )
+
+            # Invalidating load CSE also invalidates its observed split bases.
             kernel.cse.invalidate(OrderedSet())
             self.assertEqual(
                 kernel._reuse_load_index_basis("in_ptr", flat_index), flat_index

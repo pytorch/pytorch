@@ -112,6 +112,7 @@ from .common import (
 )
 from .simd import (
     constant_repr,
+    DerivedIterationRangesRoot,
     IterationRanges,
     IterationRangesEntry,
     IterationRangesRoot,
@@ -2811,6 +2812,7 @@ class TritonCSE(CSE[TritonCSEVariable, str | tuple[str, str]]):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Split bases are valid only while the corresponding load CSE is visible.
         self._load_index_bases: dict[
             tuple[str, str | None],
             list[tuple[IterationRangesEntry, ...] | None],
@@ -4207,6 +4209,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def _load_index_split_basis(
         self, index: sympy.Expr, tree: IterationRangesRoot
     ) -> tuple[IterationRangesEntry, ...] | None:
+        """Find a nontrivial, full-covering split basis used by ``index``."""
         sizevars = V.graph.sizevars
         remaining: list[IterationRangesEntry] = []
         for symbol in index.free_symbols:
@@ -4222,6 +4225,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         basis: list[IterationRangesEntry] = []
         divisor = sympy.S.One
+        # Divisors may be symbolic, so follow the mixed-radix chain with
+        # guarded equality instead of sorting them.
         while remaining:
             for i, entry in enumerate(remaining):
                 if sizevars.statically_known_equals(entry.divisor, divisor):
@@ -4235,13 +4240,30 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return None
         return tuple(basis)
 
-    def _reuse_load_index_basis(
-        self, name: str, index: sympy.Expr
-    ) -> sympy.Expr:
-        mask_name = self._load_mask.name if self._load_mask else None
-        bases = self.cse._load_index_bases.setdefault(
-            (name, mask_name), [None] * len(self.range_trees)
+    def _reuse_load_index_basis(self, name: str, index: sympy.Expr) -> sympy.Expr:
+        """Rewrite a full-range load coordinate to an observed split basis.
+
+        Persistent-reduction bodies can use split coordinates while their
+        epilogues use one flattened coordinate for the same range root. Derived
+        iteration families and TritonKernel subclasses have separate codegen
+        scopes and are excluded.
+        """
+        if (
+            self.__class__ is not TritonKernel
+            or not self.persistent_reduction
+            or any(
+                isinstance(tree, DerivedIterationRangesRoot)
+                for tree in self.range_trees
+            )
+        ):
+            return index
+
+        mask_name = str(self._load_mask) if self._load_mask else None
+        cse = cast(TritonCSE, self.cse)
+        empty_bases: list[tuple[IterationRangesEntry, ...] | None] = [None] * len(
+            self.range_trees
         )
+        bases = cse._load_index_bases.setdefault((name, mask_name), empty_bases)
         replacements: dict[sympy.Symbol, sympy.Expr] = {}
         sizevars = V.graph.sizevars
         for i, tree in enumerate(self.range_trees):
@@ -4255,13 +4277,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             split_index = sum(
                 (entry.symbol() * entry.divisor for entry in basis), sympy.S.Zero
             )
-            basis_symbols = {entry.symbol() for entry in basis}
+            basis_symbols = OrderedSet([entry.symbol() for entry in basis])
             for symbol in index.free_symbols - basis_symbols:
                 entry = self.range_tree_nodes.get(symbol)
-                if entry is not None and entry.root is tree and (
-                    sizevars.statically_known_equals(entry.divisor, sympy.S.One)
-                    and sizevars.statically_known_equals(entry.length, tree.numel)
-                ):
+                # Leave alternate splits alone; only the unsplit full range has
+                # the direct coordinate identity represented by split_index.
+                if entry is None or entry.root is not tree:
+                    continue
+                is_full_range = sizevars.statically_known_equals(
+                    entry.divisor, sympy.S.One
+                ) and sizevars.statically_known_equals(entry.length, tree.numel)
+                if is_full_range:
                     replacements[symbol] = split_index
 
         if not replacements:
@@ -4285,11 +4311,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         load_counts = self._load_counts
         load_counts[name] += 1
         make_line: Callable[[str], str | DelayReplaceLine] = identity
-        # Subclasses and derived range trees have independent indexing scopes.
-        if self.persistent_reduction and type(self) is TritonKernel and all(
-            type(tree) is IterationRangesRoot for tree in self.range_trees
-        ):
-            index = self._reuse_load_index_basis(name, index)
+        # Align a flat epilogue load with split coordinates already used in the body.
+        index = self._reuse_load_index_basis(name, index)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
         dtype = V.graph.get_dtype(name)
