@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
-     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCUDA,
+     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, onlyAccelerator, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest,
      e4m3_type, e5m2_type)
 from torch.testing import make_tensor
@@ -41,7 +41,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
+from torch.testing._internal.common_cuda import CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
@@ -128,12 +128,15 @@ def get_tunableop_untuned_filename():
 class TestLinalg(TestCase):
     def setUp(self):
         super().setUp()
+        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
+        # writing allow_tf32 back can't always reproduce the original
+        # fp32_precision value (e.g. the "none" default).
+        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
         if torch.cuda.is_available():
             torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
-        if torch.cuda.is_available():
-            torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
         super().tearDown()
 
     def _get_other_device(self, dtype=None):
@@ -697,7 +700,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.cholesky(A, out=out)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_ex(self, device, dtype):
@@ -2371,7 +2374,7 @@ class TestLinalg(TestCase):
         # Valid if (vals[0]=λ AND vals[1]=λ*) OR (vals[0]=λ* AND vals[1]=λ)
         self.assertTrue(
             (match_0_pos and match_1_neg) or (match_0_neg and match_1_pos),
-            f"Expected conjugate pair {{λ, λ*}}, got {vals_complex[0]}, {vals_complex[1]}"
+            lambda msg: f"{msg}\nExpected conjugate pair {{λ, λ*}}, got {vals_complex[0]}, {vals_complex[1]}"
         )
 
         # Verify output is complex type
@@ -3307,7 +3310,6 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
-    @skipIfRocm(msg="Skipping test for ROCm due to HipBlas error.")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
@@ -4264,6 +4266,13 @@ class TestLinalg(TestCase):
         if torch.device(device).type != "cuda":
             self.skipTest("cuSOLVER Xpolar path is CUDA-only")
         from torch._native.ops.polar import nvmath_impl as nv
+        from torch._native.ops.polar.impl import _check_nvmath
+
+        # The test invokes the Xpolar kernel directly, bypassing the override's
+        # runtime gate/fallback, so skip when the loaded cuSOLVER does not expose
+        # Xpolar (e.g. a CUDA runtime older than the version that added it).
+        if not _check_nvmath():
+            self.skipTest("cuSOLVER runtime does not expose Xpolar")
 
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
         A = make_fullrank(32, 16, device=device, dtype=dtype)
@@ -8045,7 +8054,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             # slogdet implementations when det is near zero due to precision
             # issues.
             if sdet.item() < 0:
-                self.assertTrue(logdet.item() != logdet.item(), f'{desc} (logdet negative case)')
+                self.assertTrue(logdet.item() != logdet.item(), lambda msg: f'{msg}\n{desc} (logdet negative case)')
             else:
                 self.assertEqual(logdet.exp(), target_logabsdet.exp(),
                                  atol=1e-6, rtol=0, msg=lambda msg: f'{msg}\n{desc} (logdet non-negative case)')
@@ -9165,10 +9174,14 @@ class TestLinalgCudaOnly(TestCase):
         super().setUp()
         if not torch.cuda.is_available():
             self.skipTest("CUDA required")
+        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
+        # writing allow_tf32 back can't always reproduce the original
+        # fp32_precision value (e.g. the "none" default).
+        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
         torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
-        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
         super().tearDown()
 
     def check_single_matmul(self, x, y):
@@ -10388,9 +10401,8 @@ class TestLinalgCudaOnly(TestCase):
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_tunableop(self, device, dtype):
-        try:
+        with tf32_enabled():
             with self._tunableop_ctx():
-                torch.backends.cuda.matmul.allow_tf32 = True
                 torch.cuda.tunable.set_rotating_buffer_size(0)
 
                 # Reference number of results
@@ -10440,19 +10452,14 @@ class TestLinalgCudaOnly(TestCase):
                                                      'nn_37_37_37_ld_37_37_37')
                 self.assertTrue(found_result is not None)
 
-        finally:
-            # Disable TF32
-            torch.backends.cuda.matmul.allow_tf32 = False
-
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_offline_tunableop(self, device, dtype):
         # This test is the offline version of test_tf32_tunableop
         import os
 
-        try:
+        with tf32_enabled():
             with self._tunableop_ctx():
-                torch.backends.cuda.matmul.allow_tf32 = True
                 ordinal = torch.cuda.current_device()
                 torch.cuda.tunable.set_rotating_buffer_size(0)
 
@@ -10508,10 +10515,6 @@ class TestLinalgCudaOnly(TestCase):
                 # Compare Param Signature of untuned and tuned results
                 ok = self._compare_untuned_tuned_entries()
                 self.assertTrue(ok)
-
-        finally:
-            # Disable TF32
-            torch.backends.cuda.matmul.allow_tf32 = False
 
     @dtypes(torch.float16)
     def test_blaslog_tunableop(self, device, dtype):
@@ -10594,7 +10597,6 @@ class TestLinalgCudaOnly(TestCase):
                 # BLAS PARAMS
                 self.assertTrue("{ function:" in first_row[4])
 
-    # Fails with triton 3.7
     @dtypes(torch.float)
     def test_mm_submatrix_offline_tunableop(self, device, dtype):
         import os
@@ -10737,6 +10739,57 @@ class TestLinalgCudaOnly(TestCase):
 
 
             # Compare Param Signature of untuned and tuned results
+            ok = self._compare_untuned_tuned_entries()
+            self.assertTrue(ok)
+
+    @dtypes(torch.float)
+    def test_mm_submatrix_leading_dim_alias_offline_tunableop(self, device, dtype):
+        # Regression test for https://github.com/ROCm/TheRock/issues/5553
+        # When a sub-matrix's leading dimension coincides with one of the GEMM
+        # dimensions (m, n, k), offline tuning used to misclassify it as a tight
+        # (non-sub) matrix and silently tuned the wrong shape, dropping the
+        # padded leading dimension. Here lda (== n == 6) is padded and differs
+        # from its tight value (m == 4), so the recorded and tuned param
+        # signatures must match (nt_6_4_2_ld_6_6_6). Before the fix the tuned
+        # entry drifted to nt_6_4_2_ld_6_4_6 and this comparison failed.
+        import os
+
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            # record a sub-matrix GEMM whose leading dim aliases a GEMM dim
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+            self.assertTrue(torch.cuda.tunable.record_untuned_is_enabled())
+
+            # n > m so the padded lda (== n) differs from the tight lda (== m)
+            n = 6
+            m = 4
+            k = 2
+
+            # 'NT' -> records GemmTunableOp_<dtype>_NT, nt_6_4_2_ld_6_6_6
+            matA = torch.rand(n, n, dtype=dtype, device=device).t()
+            matB = torch.rand(n, n, dtype=dtype, device=device)
+            subA = matA[:m, :k]
+            subB = matB[:k, :n]
+            torch.mm(subA, subB)
+
+            untuned_filename = get_tunableop_untuned_filename()
+
+            # tune the recorded GEMM
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.record_untuned_enable(False)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
+
+            results_filename = torch.cuda.tunable.get_filename()
+            self.assertTrue(os.path.exists(results_filename))
+
+            # Every recorded Op+Param signature must appear in the tuned results.
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
