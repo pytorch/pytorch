@@ -202,12 +202,8 @@ static at::Tensor& mul_out(
       self.is_contiguous() ? at::OptionalIntArrayRef(std::nullopt)
                            : self.strides());
 
-  // kBool is included so torch.export'ed graphs that do `bool_tensor * scalar`
-  // (e.g. `aten.gt(...) * 38` to lift mask values into the int range) dispatch
-  // cleanly. Bool participates in PyTorch's type promotion and is allowed by
-  // upstream `aten::mul`, so the kernel should follow suit.
-  AT_DISPATCH_ALL_TYPES_AND3(
-      kHalf, kBFloat16, kBool, t_output, "mul_Scalar_out", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(
+      kHalf, kBFloat16, t_output, "mul_Scalar_out", [&]() {
         using output_t = scalar_t;
         output_t* output_ptr = output.mutable_data_ptr<output_t>();
 
@@ -216,22 +212,16 @@ static at::Tensor& mul_out(
 
         at::parallel_for(0, num_elements, 1, [&](int64_t start, int64_t end) {
           for (int64_t i = start; i < end; ++i) {
-            AT_DISPATCH_ALL_TYPES_AND3(
-                kHalf,
-                kBFloat16,
-                kBool,
-                other.type(),
-                "mul_Scalar_other",
-                [&]() {
+            AT_DISPATCH_ALL_TYPES_AND2(
+                kHalf, kBFloat16, other.type(), "mul_Scalar_other", [&]() {
                   using other_t = scalar_t;
 
                   output_t other_casted = static_cast<output_t>(
                       reinterpret_cast<const other_t*>(other.data_ptr())[0]);
 
-                  AT_DISPATCH_ALL_TYPES_AND3(
+                  AT_DISPATCH_ALL_TYPES_AND2(
                       kHalf,
                       kBFloat16,
-                      kBool,
                       self.scalar_type(),
                       "mul_Scalar_self",
                       [&]() {

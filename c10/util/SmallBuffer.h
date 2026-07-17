@@ -55,31 +55,31 @@ class SmallBuffer {
       delete[] data_;
     }
   }
-  [[nodiscard]] T& operator[](size_t idx) {
+  T& operator[](size_t idx) {
     return data()[idx];
   }
-  [[nodiscard]] const T& operator[](size_t idx) const {
+  const T& operator[](size_t idx) const {
     return data()[idx];
   }
-  [[nodiscard]] T* data() {
+  T* data() {
     return data_;
   }
-  [[nodiscard]] const T* data() const {
+  const T* data() const {
     return data_;
   }
-  [[nodiscard]] size_t size() const {
+  size_t size() const {
     return size_;
   }
-  [[nodiscard]] T* begin() {
+  T* begin() {
     return data_;
   }
-  [[nodiscard]] const T* begin() const {
+  const T* begin() const {
     return data_;
   }
-  [[nodiscard]] T* end() {
+  T* end() {
     return data_ + size_;
   }
-  [[nodiscard]] const T* end() const {
+  const T* end() const {
     return data_ + size_;
   }
 };

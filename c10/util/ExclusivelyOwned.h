@@ -101,39 +101,38 @@ class ExclusivelyOwned {
   // undefined Tensor as its null state.
   explicit operator bool() const noexcept = delete;
 
-  [[nodiscard]] operator T() && {
+  operator T() && {
     return take();
   }
 
   // NOTE: the equivalent operation on MaybeOwned is a moving
   // operator*. For ExclusivelyOwned, take() and operator*() may well
   // have different return types, so they are different functions.
-  [[nodiscard]] T take() && {
+  T take() && {
     return EOT::take(repr_);
   }
 
-  [[nodiscard]] typename EOT::const_pointer_type operator->() const {
+  typename EOT::const_pointer_type operator->() const {
     return get();
   }
 
-  [[nodiscard]] typename EOT::const_pointer_type get() const {
+  typename EOT::const_pointer_type get() const {
     return EOT::getImpl(repr_);
   }
 
-  [[nodiscard]] typename EOT::pointer_type operator->() {
+  typename EOT::pointer_type operator->() {
     return get();
   }
 
-  [[nodiscard]] typename EOT::pointer_type get() {
+  typename EOT::pointer_type get() {
     return EOT::getImpl(repr_);
   }
 
-  [[nodiscard]] std::remove_pointer_t<typename EOT::const_pointer_type>&
-  operator*() const {
+  std::remove_pointer_t<typename EOT::const_pointer_type>& operator*() const {
     return *get();
   }
 
-  [[nodiscard]] std::remove_pointer_t<typename EOT::pointer_type>& operator*() {
+  std::remove_pointer_t<typename EOT::pointer_type>& operator*() {
     return *get();
   }
 };
