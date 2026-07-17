@@ -1978,6 +1978,7 @@ def cudagraphify(
     mutated_input_idxs: tuple[int, ...] = (),
     kernel_free_cudagraph: bool = False,
     user_visible_output_idxs: tuple[int, ...] = (),
+    device_type: str = "cuda",
 ) -> Callable[..., Any]:
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -2047,10 +2048,15 @@ def cudagraphify_impl(
     static_input_idxs: Sequence[int] = (),
     *,
     kernel_free_cudagraph: bool = False,
+    device_type: str = "cuda",
 ) -> Callable[[list[InputType]], Any]:
     """
-    Assumes inputs[static_input_idxs[i]] are always the same memory address
+    Assumes inputs[static_input_idxs[i]] are always the same memory address.
+    Only used when cudagraph_trees is disabled; tree-based path handles device dispatch.
     """
+    if device_type != "cuda":
+        # Non-CUDA backends should use the tree-based cudagraph path
+        return model
     if kernel_free_cudagraph:
         return model
 

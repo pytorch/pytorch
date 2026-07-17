@@ -4135,6 +4135,20 @@ def get_op_names(op: torch._ops.OperatorBase) -> tuple[str, str]:
     return op_overload_packet_name, op_overload_name
 
 
+_cudagraph_unsafe_checks: list[Callable[[torch.fx.Node], bool]] = []
+
+
+def register_cudagraph_unsafe_check(fn: Callable[[torch.fx.Node], bool]) -> None:
+    """
+    Register a custom check for cudagraph-unsafe FX nodes.
+
+    Registered callbacks are invoked after the built-in checks in
+    ``_fx_node_is_input_dependent_cudagraph_unsafe``. If any callback
+    returns True, the node is considered cudagraph-unsafe.
+    """
+    _cudagraph_unsafe_checks.append(fn)
+
+
 def _fx_node_is_input_dependent_cudagraph_unsafe(fx_node: torch.fx.Node) -> bool:
     """
     Check if an FX node is cudagraph-unsafe based on its input arguments.
@@ -4167,6 +4181,10 @@ def _fx_node_is_input_dependent_cudagraph_unsafe(fx_node: torch.fx.Node) -> bool
                     torch.uint8,
                 ):
                     return True
+
+    for check_fn in _cudagraph_unsafe_checks:
+        if check_fn(fx_node):
+            return True
 
     return False
 

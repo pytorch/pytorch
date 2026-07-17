@@ -13,7 +13,7 @@ from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
-from .utils import is_using_cudagraph_partition
+from .utils import GPU_TYPES, is_using_cudagraph_partition
 
 
 if TYPE_CHECKING:
@@ -360,7 +360,7 @@ def check_multiple_devices_or_any_cpu_nodes(
 
     if (
         len(device_node_mapping) == 1
-        and next(iter(device_node_mapping.keys())).type == "cuda"
+        and next(iter(device_node_mapping.keys())).type in GPU_TYPES
     ):
         return None
 

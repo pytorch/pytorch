@@ -196,8 +196,12 @@ def maybe_handle_backward_generation(
             raise AssertionError("boxed_forward_device_index.value must not be None")
         compiled_graph_callable = compiled_graph.current_callable
 
+        gpu_types = [d for d in compiled_graph.device_types if is_gpu(d)]
+        mgr_device_type = gpu_types[0] if gpu_types else "cuda"
         manager = torch._inductor.cudagraph_trees.get_manager(
-            boxed_forward_device_index.value, create_if_none_exists=False
+            boxed_forward_device_index.value,
+            create_if_none_exists=False,
+            device_type=mgr_device_type,
         )
         # should already exist from forward
         if manager is None:
@@ -282,8 +286,11 @@ def cudagraph_post_compile(
         }
 
         device_index = next(iter(compiled_graph.device_idxs))
+        gpu_types = [d for d in compiled_graph.device_types if is_gpu(d)]
+        device_type = gpu_types[0] if gpu_types else "cuda"
         cudagraphify_kwargs = dict(
             device_index=device_index,
+            device_type=device_type,
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
