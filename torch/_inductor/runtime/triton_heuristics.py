@@ -346,8 +346,50 @@ def _dump_launch_tensors(args, kernel_path, kernel_hash, kernel_name):
         torch.save(tensor, f"{directory_path}/tensor_{index}.pt")
 
 
+def _combo_has_reduction_subkernel(inductor_meta: InductorMeta) -> bool:
+    combo_meta = inductor_meta.get("combo_grid_meta")
+    if combo_meta is None or "heuristic_0" not in combo_meta:
+        return False
+    # No-bench stitched combos use a single fixed config and don't autotune;
+    # don't add scaling candidates for them.
+    if "stitched_num_warps" in combo_meta:
+        return False
+    return any(
+        combo_meta.get(f"heuristic_{i}") == "reduction"
+        for i in range(combo_meta["num_kernels"])
+    )
+
+
+def _could_dynamic_scale_rblock(
+    *,
+    size_hints: list[int] | None,
+    heuristic_type: HeuristicType,
+    device_prop: DeviceProperties | None,
+    inductor_meta: InductorMeta,
+) -> bool:
+    return (
+        device_prop is not None
+        and not inductor_meta.get("deterministic", False)
+        and inductor_meta.get("dynamic_scale_rblock", True)
+        and not inductor_meta.get("persistent_reduction")
+        and heuristic_type == HeuristicType.REDUCTION
+        # Combo kernels with per-subkernel blocks set size_hints=None but
+        # carry per-subkernel size hints in combo_grid_meta.
+        and (size_hints is not None or _combo_has_reduction_subkernel(inductor_meta))
+        # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
+        and device_prop.type in ["cuda", "hip"]
+        and bool(device_prop.major)
+        and (device_prop.major >= 8 or torch.version.hip)
+        and device_prop.regs_per_multiprocessor is not None
+        and device_prop.warp_size is not None
+    )
+
+
 def check_autotune_cache(
-    configs: list[Config], filename: str | None, inductor_meta: InductorMeta
+    configs: list[Config],
+    filename: str | None,
+    inductor_meta: InductorMeta,
+    dynamic_scale_rblock_eligible: bool = False,
 ) -> tuple[list[Config], AutotuneCache | None, dict[str, Any]]:
     """
     Given a list of configs, checks autotune cache and return metadata
@@ -358,7 +400,11 @@ def check_autotune_cache(
     if (
         not disabled
         and filename is not None
-        and (len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning"))
+        and (
+            len(configs) > 1
+            or inductor_meta.get("coordinate_descent_tuning")
+            or dynamic_scale_rblock_eligible
+        )
         and os.environ.get("TRITON_INTERPRET", "0") != "1"
     ):
         configs_hash = hash_configs(configs)
@@ -683,7 +729,10 @@ class CachingAutotuner(KernelInterface):
         configs = [result.config for result in self.compile_results]
 
         (cached_configs, _, autotune_cache_info) = check_autotune_cache(
-            configs, self.filename, self.inductor_meta
+            configs,
+            self.filename,
+            self.inductor_meta,
+            dynamic_scale_rblock_eligible=self._could_rblock_scale,
         )
         self.autotune_cache_info = autotune_cache_info
         # I.e. there was an autotune cache hit
@@ -773,38 +822,18 @@ class CachingAutotuner(KernelInterface):
         """Whether ``_dynamic_scale_rblock`` should attempt occupancy-
         driven rblock halving for this autotuner.
         """
-        device_prop = self.device_props
-        return (
-            not self.deterministic_mode
-            and self.inductor_meta.get("dynamic_scale_rblock", True)
-            and not self.inductor_meta.get("persistent_reduction")
-            and self.heuristic_type == HeuristicType.REDUCTION
-            # Combo kernels with per-subkernel blocks set size_hints=None but
-            # carry per-subkernel size hints in combo_grid_meta.
-            and (self.size_hints is not None or self._combo_has_reduction_subkernel)
-            # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
-            and device_prop.type in ["cuda", "hip"]
-            and bool(device_prop.major)
-            and (device_prop.major >= 8 or torch.version.hip)
-            and device_prop.regs_per_multiprocessor is not None
-            and device_prop.warp_size is not None
+        return _could_dynamic_scale_rblock(
+            size_hints=self.size_hints,
+            heuristic_type=self.heuristic_type,
+            device_prop=self.device_props,
+            inductor_meta=self.inductor_meta,
         )
 
     @functools.cached_property
     def _combo_has_reduction_subkernel(self) -> bool:
         """True for a combo kernel (per-subkernel blocks) with a non-persistent
         reduction sub-kernel; these carry size_hints=None at the autotuner level."""
-        combo_meta = self.inductor_meta.get("combo_grid_meta")
-        if combo_meta is None or "heuristic_0" not in combo_meta:
-            return False
-        # No-bench stitched combos use a single fixed config and don't autotune;
-        # don't add scaling candidates for them.
-        if "stitched_num_warps" in combo_meta:
-            return False
-        return any(
-            combo_meta.get(f"heuristic_{i}") == "reduction"
-            for i in range(combo_meta["num_kernels"])
-        )
+        return _combo_has_reduction_subkernel(self.inductor_meta)
 
     def _iter_rblock_scale_candidates(self):
         """Yield new configs with halved rblock for occupancy improvement.
@@ -3450,8 +3479,20 @@ def cached_autotune(
     if len(configs) != 1 and not filename:
         raise AssertionError("filename required when multiple configs are provided")
 
+    device_prop = triton_meta.get("device")
+    if not isinstance(device_prop, DeviceProperties):
+        device_prop = None
+    dynamic_scale_rblock_eligible = _could_dynamic_scale_rblock(
+        size_hints=size_hints,
+        heuristic_type=heuristic_type,
+        device_prop=device_prop,
+        inductor_meta=inductor_meta,
+    )
     configs, autotune_cache, autotune_cache_info = check_autotune_cache(
-        configs, filename, inductor_meta
+        configs,
+        filename,
+        inductor_meta,
+        dynamic_scale_rblock_eligible=dynamic_scale_rblock_eligible,
     )
     mutated_arg_names = cast("list[str]", inductor_meta.pop("mutated_arg_names", ()))
     optimize_mem = inductor_meta.pop("optimize_mem", True)
