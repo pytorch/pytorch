@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import copy
 import os
+import types
 import unittest
 from collections.abc import Callable
 
@@ -1590,6 +1591,35 @@ class TestPatternMatcher(TestCase):
         actual, (code) = run_and_get_code(torch.compile(mod), args[0], args[1])
         self.assertEqual(actual, mod(*args))
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_addmm_fusion_extra_check_without_beta_kwarg(self):
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("inp")
+        mat1 = graph.placeholder("mat1")
+        mat2 = graph.placeholder("mat2")
+        mm = graph.call_function(torch.ops.aten.mm.default, (mat1, mat2))
+        mm_plus_inp = graph.call_function(torch.ops.aten.add.Tensor, (mm, inp))
+        graph.call_function(torch.ops.aten.relu.default, (mm_plus_inp,))
+        inp_plus_mm = graph.call_function(torch.ops.aten.add.Tensor, (inp, mm))
+        graph.call_function(torch.ops.aten.relu.default, (inp_plus_mm,))
+
+        mps_device = torch.device("mps")
+        with torch._subclasses.FakeTensorMode():
+            inp.meta["val"] = torch.empty(10, 20, device=mps_device)
+            mat1.meta["val"] = torch.empty(10, 15, device=mps_device)
+            mat2.meta["val"] = torch.empty(15, 20, device=mps_device)
+            mm_plus_inp.meta["val"] = torch.empty(10, 20, device=mps_device)
+            inp_plus_mm.meta["val"] = torch.empty(10, 20, device=mps_device)
+
+        for output in (mm_plus_inp, inp_plus_mm):
+            match = types.SimpleNamespace(
+                args=[mat1, mat2],
+                kwargs={"inp": inp},
+                output_node=lambda output=output: output,
+            )
+            self.assertTrue(
+                torch._inductor.fx_passes.post_grad.should_prefer_unfused_addmm(match)
+            )
 
     def test_unfuse_expanded_bias_addmm(self):
         args = [
