@@ -215,6 +215,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void eagerConnectSingleDevice(at::Device device) override;
   void shutdown() override;
   void abort() override;
+  bool supportsErrorTracking() const override {
+    return true;
+  }
+
   ::c10d::ErrorType getError() override;
 
   // Memory offload API (see Backend.hpp): suspend() releases NCCL's dynamic

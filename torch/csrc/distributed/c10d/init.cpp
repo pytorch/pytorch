@@ -3024,6 +3024,10 @@ Arguments:
               "supports_reconfigure",
               &::c10d::Backend::supportsReconfigure,
               "(test whether the backend supports reconfigure for fault tolerance)")
+          .def_property_readonly(
+              "supports_error_tracking",
+              &::c10d::Backend::supportsErrorTracking,
+              "(test whether the backend supports error tracking)")
           .def(
               "set_timeout",
               &::c10d::Backend::setTimeout,

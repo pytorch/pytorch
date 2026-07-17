@@ -371,6 +371,11 @@ class PyBackend : public Backend {
     return getPropertyOverride("supports_window", Backend::supportsWindow());
   }
 
+  bool supportsErrorTracking() const override {
+    return getPropertyOverride(
+        "supports_error_tracking", Backend::supportsErrorTracking());
+  }
+
   bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override {
     pybind11::gil_scoped_acquire gil;
     pybind11::function override = pybind11::get_override(

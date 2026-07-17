@@ -650,6 +650,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     bound_device_id_ = device;
   }
 
+  virtual bool supportsErrorTracking() const {
+    return false;
+  }
+
   virtual ErrorType getError() {
     TORCH_CHECK(
         false,

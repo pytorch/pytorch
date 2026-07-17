@@ -248,6 +248,9 @@ class LazyBackend : public Backend {
       channel->abort();
     }
   }
+  bool supportsErrorTracking() const override {
+    return primary_->supportsErrorTracking();
+  }
   ErrorType getError() override {
     return primary_->getError();
   }

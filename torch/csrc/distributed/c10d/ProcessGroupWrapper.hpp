@@ -169,6 +169,10 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   void resume() override;
   std::unordered_map<std::string, uint64_t> getMemoryStats() override;
 
+  bool supportsErrorTracking() const override {
+    return backend_->supportsErrorTracking();
+  }
+
   ErrorType getError() override;
   void eagerConnectSingleDevice(at::Device device) override;
 

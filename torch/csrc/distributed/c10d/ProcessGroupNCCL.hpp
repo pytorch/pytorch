@@ -986,6 +986,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // If all comms on this PG are fully initialized, return true.
   bool isInitialized();
 
+  bool supportsErrorTracking() const override {
+    return true;
+  }
+
   ErrorType getError() override;
 
   bool supportsShrinking() const override {
