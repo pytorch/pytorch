@@ -1165,6 +1165,21 @@ def _dump_snapshot(filename="dump_snapshot.pickle", augment_with_fx_traces=False
         pickle.dump(s, f)
 
 
+def _memory_metadata_supported() -> bool:
+    """
+    Return whether the active CUDA allocator backend records memory metadata.
+
+    Only the native caching allocator supports :func:`_set_memory_metadata`.
+    With other backends (e.g. ``cudaMallocAsync`` or a pluggable allocator),
+    :func:`_set_memory_metadata` is a no-op and :func:`_get_memory_metadata`
+    always returns the empty string. Callers doing best-effort labeling can
+    check this before setting metadata to avoid the one-time warning emitted on
+    unsupported backends.
+    """
+    # pyrefly: ignore [missing-attribute]
+    return torch._C._cuda_memoryMetadataSupported()
+
+
 def _set_memory_metadata(metadata: str):
     """
     Set custom metadata to be recorded on memory history trace entries.

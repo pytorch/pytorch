@@ -44,10 +44,10 @@ class _BaseSetTests(torch._dynamo.test_case.TestCase):
         return super().tearDown()
 
     def assertEqual(self, a, b):
-        return self.assertTrue(a == b, f"{a} != {b}")
+        return self.assertTrue(a == b, lambda msg: f"{msg}\n{a} != {b}")
 
     def assertNotEqual(self, a, b):
-        return self.assertTrue(a != b, f"{a} == {b}")
+        return self.assertTrue(a != b, lambda msg: f"{msg}\n{a} == {b}")
 
 
 class CustomSetTests(_BaseSetTests):
