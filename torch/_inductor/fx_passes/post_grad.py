@@ -1809,7 +1809,8 @@ def should_prefer_unfused_addmm(match):
         return False
     if inp_val.device != mat1_val.device or inp_val.device != mat2_val.device:
         return False
-    if inp_val.device.type != "cuda" and match.kwargs["beta"] == 0:
+    beta = match.kwargs.get("beta", 1)
+    if inp_val.device.type != "cuda" and beta == 0:
         mm_shape = mat1_val.shape[0], mat2_val.shape[1]
         if not is_expandable_to(inp_val.shape, mm_shape):
             return False
