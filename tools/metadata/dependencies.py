@@ -1,9 +1,8 @@
 """Dynamic-metadata provider for the dependencies field.
 
-Replicates the old setup.py logic that reads PYTORCH_EXTRA_INSTALL_REQUIREMENTS
-(pipe-separated PEP 508 dependency strings) and appends them to the base
-dependency list.  Also handles BUILD_PYTHON_ONLY which adds a dependency on
-the libtorch wheel package.
+Reads PYTORCH_EXTRA_INSTALL_REQUIREMENTS (pipe-separated PEP 508 dependency
+strings) and appends them to the base dependency list.  Also handles
+BUILD_PYTHON_ONLY which adds a dependency on the libtorch wheel package.
 
 The dynamic_wheel hook marks dependencies as Dynamic in the sdist PKG-INFO:
 the env vars above can legitimately differ between the sdist build and a
