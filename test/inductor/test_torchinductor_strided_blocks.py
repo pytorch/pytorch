@@ -59,7 +59,7 @@ def _get_no_split_threshold() -> int:
     if torch.cuda.is_available():
         props = torch.cuda.get_device_properties(torch.cuda.current_device())
         # These tests reduce the whole view to one output, so xnumel is 1.
-        return InductorChoices._inner_reduction_no_split_threshold(
+        return V.choices._inner_reduction_no_split_threshold(
             props, xnumel=1, num_sm=props.multi_processor_count
         )
     return 8192

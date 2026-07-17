@@ -498,8 +498,8 @@ class InductorChoices:
             features.reduction_numel, threshold
         )  # type: ignore[arg-types]
 
-    @staticmethod
     def _inner_reduction_no_split_threshold(
+        self,
         props: DeviceProperties,
         xnumel: int,
         num_sm: int,
@@ -521,8 +521,8 @@ class InductorChoices:
             return 40960
         return 8192
 
-    @staticmethod
     def reduction_split_factor(
+        self,
         device: torch.device,
         reduction_numel_hint: int,
         numel_hint: int,
@@ -552,7 +552,7 @@ class InductorChoices:
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
             if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
                 return 1
-            no_split_threshold = InductorChoices._inner_reduction_no_split_threshold(
+            no_split_threshold = self._inner_reduction_no_split_threshold(
                 props, numel_hint, num_sm
             )
             if reduction_numel_hint <= no_split_threshold:
