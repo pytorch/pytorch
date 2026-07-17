@@ -101,9 +101,19 @@ struct sigmoid_functor {
 };
 
 struct abs_functor {
-  template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
+  // precise:: has only float candidates, so bfloat converts unambiguously
+  // (unqualified abs is ambiguous for bfloat: float vs half), and abs is
+  // exact under the round trip. Integers must not take this path: the float
+  // conversion rounds above 2^24.
+  template <
+      typename T,
+      enable_if_t<!is_complex_v<T> && !is_scalar_integral_v<T>, bool> = true>
   inline T operator()(const T x) {
     return static_cast<T>(precise::abs(x));
+  }
+  template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return ::metal::abs(x);
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {

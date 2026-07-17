@@ -2046,6 +2046,13 @@ def get_cpp_torch_device_options(
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
+    # cpp_extension resolves CUDA_HOME into a module-level global at import time,
+    # so an fbcode process that imported it before the env var above was written
+    # caches None; refresh the global here so the just-set CUDA_HOME env actually
+    # takes effect for include_paths/library_paths below.
+    if cpp_extension.CUDA_HOME is None and os.environ.get("CUDA_HOME"):
+        cpp_extension.CUDA_HOME = os.environ["CUDA_HOME"]
+
     include_dirs = cpp_extension.include_paths(
         device_type, config.aot_inductor.link_libtorch is None
     )
@@ -2498,16 +2505,31 @@ class CppBuilder:
         if not (config.is_fbcode() and self._use_relative_path):
             return args
         rewritten = []
+        rpath_dirs: OrderedSet[str] = OrderedSet()
         for arg in args:
             tokens = shlex.split(arg)
             new_tokens = []
             for tok in tokens:
                 if os.path.isabs(tok) and os.path.isfile(tok):
                     self._orig_source_paths.append(tok)
+                    # Rewriting the absolute path to a basename makes the
+                    # linker record a bare-basename DT_NEEDED entry, because
+                    # the staged kernel .so files carry no DT_SONAME. That
+                    # basename is unresolvable when the wrapper .so is later
+                    # dlopen'd, so add rpath entries the runtime loader can
+                    # search: $ORIGIN for a kernel .so co-staged next to the
+                    # wrapper, and the kernel .so's original directory as a
+                    # fallback when it is loaded from its cache location.
+                    if self._do_link and tok.endswith(".so"):
+                        rpath_dirs.add(os.path.dirname(tok))
                     new_tokens.append(os.path.basename(tok))
                 else:
                     new_tokens.append(tok)
             rewritten.append(" ".join(shlex.quote(t) for t in new_tokens))
+        if rpath_dirs:
+            rewritten.append("-Wl,-rpath," + shlex.quote("$ORIGIN"))
+            for rpath_dir in rpath_dirs:
+                rewritten.append(f"-Wl,-rpath,{shlex.quote(rpath_dir)}")
         return rewritten
 
     def build_fbcode_re(
