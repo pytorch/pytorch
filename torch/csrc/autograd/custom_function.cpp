@@ -1,9 +1,7 @@
-#include <c10/core/AutogradState.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/custom_function.h>
-#include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
 #include <utility>
@@ -37,11 +35,6 @@ static variable_list call_jvp(
     owned.emplace_back(*input);
   }
   return jvp_user_function(std::move(owned), std::move(input_grads));
-}
-
-static bool is_forward_ad_active() {
-  return ForwardADLevel::has_any_level() &&
-      c10::AutogradState::get_tls_state().get_fw_grad_mode();
 }
 
 // This function has two main goals:
@@ -525,16 +518,14 @@ static optional_variable_list _wrap_outputs_impl(
 
   // This must happen after the backward processing as we expect the
   // computations happening here to track backward mode gradients.
-  if (is_forward_ad_active()) {
-    _process_forward_mode_AD(
-        input_vars,
-        std::move(inputs_mapping),
-        raw_outputs,
-        outputs,
-        non_differentiable,
-        dirty_inputs,
-        jvp_user_function);
-  }
+  _process_forward_mode_AD(
+      input_vars,
+      std::move(inputs_mapping),
+      raw_outputs,
+      outputs,
+      non_differentiable,
+      dirty_inputs,
+      jvp_user_function);
 
   return outputs;
 }
