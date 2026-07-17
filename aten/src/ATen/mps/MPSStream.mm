@@ -2,6 +2,7 @@
 
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#import <ATen/mps/MPSRecordingEncoder.h>
 #include <ATen/mps/MPSStream.h>
 #include <c10/metal/error.h>
 
@@ -37,6 +38,9 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
 }
 
 MPSStream::~MPSStream() {
+  for (auto& step : _capturedSteps) {
+    MPSStream::releaseCapturedStep(step);
+  }
   [_commandQueue release];
   _commandQueue = nil;
   [_executionDescriptor release];
@@ -46,7 +50,7 @@ MPSStream::~MPSStream() {
   _errorBuffer = nil;
   _compilationDescriptor = nil;
 
-  assert(_commandBuffer == nil);
+  TORCH_INTERNAL_ASSERT(_commandBuffer == nil);
 }
 
 MPSCommandBuffer* MPSStream::commandBuffer() {
@@ -65,7 +69,12 @@ id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
   if (!_commandEncoder) {
     _commandEncoder = [commandBuffer() computeCommandEncoder].retain;
   }
-
+  if (_captureMode.load(std::memory_order_acquire)) {
+    if (!_recordingEncoder) {
+      _recordingEncoder = [[MPSRecordingEncoder alloc] initWithEncoder:_commandEncoder stream:this];
+    }
+    return (id<MTLComputeCommandEncoder>)_recordingEncoder;
+  }
   return _commandEncoder;
 }
 
@@ -132,6 +141,9 @@ void MPSStream::endKernelCoalescing() {
     [_commandEncoder endEncoding];
     [_commandEncoder release];
     _commandEncoder = nil;
+    // Recording encoder wraps the now-stale inner encoder; release it.
+    [_recordingEncoder release];
+    _recordingEncoder = nil;
   }
 }
 
@@ -187,6 +199,23 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
       }
       [blitEncoder endEncoding];
 
+      // Record the blit so replay() re-issues it. Ops like cat (contiguous) and
+      // copy_ encode through here rather than executeMPSGraph or the recording
+      // compute encoder, so without this they would be silently dropped on
+      // replay. Buffers are retained here and released in releaseCapturedStep().
+      if (_captureMode) {
+        CapturedStep step;
+        step.kind = CapturedStep::Kind::BlitCopy;
+        step.blitSrc = (__bridge void*)srcBuffer;
+        step.blitDst = (__bridge void*)dstBuffer;
+        [srcBuffer retain];
+        [dstBuffer retain];
+        step.blitLength = length;
+        step.blitSrcOffset = srcOffset;
+        step.blitDstOffset = dstOffset;
+        _capturedSteps.push_back(std::move(step));
+      }
+
       // profilerId has a value only if copy profiling is enabled
       if (profileId) {
         getMPSProfiler().endProfileCopy(profileId, syncType);
@@ -220,16 +249,65 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
   dispatch_sync_with_rethrow(_serialQueue, ^() {
     endKernelCoalescing();
     if (isGraphProfilingEnabled) {
-      // this function call is only relevant for interval-based Signposts
-      // which exclude schedule time (only includes GPU run time)
       profiler.beginProfileGPUInterval(mpsGraph);
     }
-    // note: CommitAndContinue feature is enabled/disabled via "_executionDescriptor"
-    [mpsGraph encodeToCommandBuffer:commandBuffer()
-                              feeds:feeds
-                   targetOperations:nil
-                  resultsDictionary:results
-                executionDescriptor:_executionDescriptor];
+
+    if (_captureMode) {
+      // Capture: compile the graph into an MPSGraphExecutable, encode it, and
+      // record the step so replay() can re-encode it in a single dispatch. The
+      // executable is owned by the CapturedStep and released on
+      // captureReset()/~MPSStream() -- it is scoped to the capture, not cached
+      // persistently. (Capture rejects profiling in captureBegin(), so the
+      // profiler branch never overlaps this path.)
+      NSMutableDictionary<MPSGraphTensor*, MPSGraphShapedType*>* feedShapes =
+          [[NSMutableDictionary alloc] initWithCapacity:[feeds count]];
+      for (MPSGraphTensor* t in feeds) {
+        MPSGraphTensorData* tdata = (MPSGraphTensorData*)feeds[t];
+        feedShapes[t] = [[[MPSGraphShapedType alloc] initWithShape:tdata.shape dataType:tdata.dataType] autorelease];
+      }
+      MPSGraphExecutable* exe = [[mpsGraph compileWithDevice:[MPSGraphDevice deviceWithMTLDevice:device()]
+                                                       feeds:feedShapes
+                                               targetTensors:[results allKeys]
+                                            targetOperations:nil
+                                       compilationDescriptor:_compilationDescriptor] retain];
+      [feedShapes release];
+
+      // Build ordered input/output arrays using the stable ordering from the executable.
+      NSArray<MPSGraphTensor*>* feedTensors = exe.feedTensors;
+      NSArray<MPSGraphTensor*>* targetTensors = exe.targetTensors;
+      NSMutableArray<MPSGraphTensorData*>* inputsArray = [[NSMutableArray alloc] initWithCapacity:feedTensors.count];
+      for (MPSGraphTensor* t in feedTensors) {
+        [inputsArray addObject:(MPSGraphTensorData*)feeds[t]];
+      }
+      NSMutableArray<MPSGraphTensorData*>* resultsArray = [[NSMutableArray alloc] initWithCapacity:targetTensors.count];
+      for (MPSGraphTensor* t in targetTensors) {
+        [resultsArray addObject:(MPSGraphTensorData*)results[t]];
+      }
+
+      [exe encodeToCommandBuffer:commandBuffer()
+                     inputsArray:inputsArray
+                    resultsArray:resultsArray
+             executionDescriptor:nil];
+
+      CapturedStep step;
+      step.kind = CapturedStep::Kind::MPSGraph;
+      step.exe = (__bridge void*)exe; // owned by the step
+      step.inputsArray = [inputsArray retain];
+      step.resultsArray = [resultsArray retain];
+      _capturedSteps.push_back(std::move(step));
+
+      [inputsArray release];
+      [resultsArray release];
+    } else {
+      // Normal path: encode the graph directly. No persistent executable cache;
+      // the compiled-executable path is used only during capture (above).
+      // note: CommitAndContinue feature is enabled/disabled via "_executionDescriptor"
+      [mpsGraph encodeToCommandBuffer:commandBuffer()
+                                feeds:feeds
+                     targetOperations:nil
+                    resultsDictionary:results
+                  executionDescriptor:_executionDescriptor];
+    }
 
     SyncType _syncType = syncType;
     // if commitAndContinue is disabled, we need to always commit manually after encoding
@@ -249,6 +327,142 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
 
 id<MTLBuffer> MPSStream::getErrorBuffer() {
   return _errorBuffer;
+}
+
+void MPSStream::captureBegin() {
+  TORCH_CHECK(!_captureMode, "MPS graph capture already in progress");
+  TORCH_CHECK(!getMPSProfiler().isOperationProfilingEnabled(),
+              "MPS graph capture requires MPSProfiler operation profiling to be disabled. "
+              "Disable operation profiling before calling metal_graph_capture().");
+  // Release any steps from a previous capture.
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
+    for (auto& step : _capturedSteps) {
+      releaseCapturedStep(step);
+    }
+    _capturedSteps.clear();
+    [_recordingEncoder release];
+    _recordingEncoder = nil;
+    _captureMode.store(true, std::memory_order_release);
+  });
+}
+
+void MPSStream::captureEnd() {
+  TORCH_CHECK(_captureMode, "captureEnd() called without a matching captureBegin()");
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
+    _captureMode.store(false, std::memory_order_release);
+    [_recordingEncoder release];
+    _recordingEncoder = nil;
+  });
+}
+
+void MPSStream::captureReset() {
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
+    _captureMode.store(false, std::memory_order_release);
+    for (auto& step : _capturedSteps) {
+      releaseCapturedStep(step);
+    }
+    _capturedSteps.clear();
+    [_recordingEncoder release];
+    _recordingEncoder = nil;
+  });
+}
+
+void MPSStream::releaseCapturedStep(CapturedStep& step) {
+  if (step.kind == CapturedStep::Kind::MPSGraph) {
+    [(__bridge MPSGraphExecutable*)step.exe release];
+    [(__bridge NSArray*)step.inputsArray release];
+    [(__bridge NSArray*)step.resultsArray release];
+  } else if (step.kind == CapturedStep::Kind::BlitCopy) {
+    [(__bridge id<MTLBuffer>)step.blitSrc release];
+    [(__bridge id<MTLBuffer>)step.blitDst release];
+  } else if (step.metalKernel) {
+    for (auto& b : step.metalKernel->buffers) {
+      [(__bridge id<MTLBuffer>)b.buffer release];
+    }
+    [(__bridge id<MTLComputePipelineState>)step.metalKernel->pso release];
+  }
+}
+
+void MPSStream::pushCapturedMetalKernel(std::unique_ptr<CapturedMetalKernel> kernel) {
+  TORCH_INTERNAL_ASSERT(_captureMode.load(std::memory_order_acquire),
+                        "pushCapturedMetalKernel called outside capture mode");
+  CapturedStep step;
+  step.kind = CapturedStep::Kind::MetalKernel;
+  step.metalKernel = std::move(kernel);
+  _capturedSteps.push_back(std::move(step));
+}
+
+void MPSStream::replay() {
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
+    if (_capturedSteps.empty()) {
+      TORCH_WARN(
+          "torch.mps.metal_graph_replay() called with no captured steps. "
+          "Did the capture block contain any MPS ops?");
+      return;
+    }
+    endKernelCoalescing();
+    for (auto& step : _capturedSteps) {
+      if (step.kind == CapturedStep::Kind::MPSGraph) {
+        endKernelCoalescing(); // End compute encoder before MPSGraph encoding
+        MPSGraphExecutable* exe = (__bridge MPSGraphExecutable*)step.exe;
+        NSArray<MPSGraphTensorData*>* ins = (__bridge NSArray*)step.inputsArray;
+        NSArray<MPSGraphTensorData*>* outs = (__bridge NSArray*)step.resultsArray;
+        [exe encodeToCommandBuffer:commandBuffer() inputsArray:ins resultsArray:outs executionDescriptor:nil];
+      } else if (step.kind == CapturedStep::Kind::BlitCopy) {
+        endKernelCoalescing(); // End compute encoder before blit encoding
+        id<MTLBuffer> srcBuffer = (__bridge id<MTLBuffer>)step.blitSrc;
+        id<MTLBuffer> dstBuffer = (__bridge id<MTLBuffer>)step.blitDst;
+        id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
+        // Match the 2GB-chunked copy in MPSStream::copy (see #124335).
+        constexpr size_t max_copy_size = 0x80000000; // 2GB
+        size_t bytes_copied = 0;
+        size_t bytes_remains = step.blitLength;
+        while (bytes_remains > 0) {
+          NSUInteger bytes_to_copy = std::min(max_copy_size, bytes_remains);
+          [blitEncoder copyFromBuffer:srcBuffer
+                         sourceOffset:(NSUInteger)step.blitSrcOffset + bytes_copied
+                             toBuffer:dstBuffer
+                    destinationOffset:(NSUInteger)step.blitDstOffset + bytes_copied
+                                 size:bytes_to_copy];
+          bytes_copied += bytes_to_copy;
+          bytes_remains -= bytes_to_copy;
+        }
+        [blitEncoder endEncoding];
+      } else {
+        auto& mk = *step.metalKernel;
+        auto enc = commandEncoder();
+        id<MTLComputePipelineState> pso = (__bridge id<MTLComputePipelineState>)mk.pso;
+        [enc setComputePipelineState:pso];
+        for (auto& b : mk.buffers) {
+          auto mtlBuf = (__bridge id<MTLBuffer>)b.buffer;
+          TORCH_CHECK(mtlBuf.length == b.bufferLength,
+                      "Graph replay: buffer at index ",
+                      b.index,
+                      " changed size from ",
+                      b.bufferLength,
+                      " to ",
+                      mtlBuf.length,
+                      ". Tensor storage was reallocated between capture and replay. "
+                      "Use .copy_() to update tensor data in-place.");
+          [enc setBuffer:mtlBuf offset:b.offset atIndex:b.index];
+        }
+        for (auto& b : mk.bytes) {
+          [enc setBytes:b.data.data() length:b.data.size() atIndex:b.index];
+        }
+        for (auto& tm : mk.threadgroupMemory) {
+          [enc setThreadgroupMemoryLength:tm.length atIndex:tm.index];
+        }
+        auto gridSize = MTLSizeMake(mk.gridX, mk.gridY, mk.gridZ);
+        auto tgSize = MTLSizeMake(mk.tgX, mk.tgY, mk.tgZ);
+        if (mk.useThreadgroups) {
+          [enc dispatchThreadgroups:gridSize threadsPerThreadgroup:tgSize];
+        } else {
+          [enc dispatchThreads:gridSize threadsPerThreadgroup:tgSize];
+        }
+      }
+    }
+    synchronize(SyncType::COMMIT_ADAPTIVE);
+  });
 }
 
 void MPSStream::checkLastError() {

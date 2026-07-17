@@ -231,6 +231,66 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
     return torch._C._mps_host_alias_storage(storage)
 
 
+from contextlib import contextmanager
+
+
+@contextmanager
+def metal_graph_capture():
+    r"""Context manager that records a sequence of MPS operations
+    for later replay via :func:`metal_graph_replay`.
+
+    On entry the stream begins recording; every op executed inside
+    the block is encoded normally (outputs are valid) and its executable +
+    buffer bindings are saved. On exit recording stops.
+
+    Subsequent calls to :func:`metal_graph_replay` re-encode all saved ops in a
+    single ``dispatch_sync`` block, collapsing N per-op dispatches to one and
+    eliminating their CPU overhead.
+
+    Constraints (identical to ``torch.cuda.graph``):
+
+    * Tensor shapes must not change between the capture pass and replays.
+    * Input data must be updated **in-place** via ``.copy_()`` before each
+      replay - do **not** create new tensors or reassign variables. This only
+      propagates for buffer-backed inputs; scalar / 0-dim tensor inputs are
+      encoded via ``setBytes`` at capture time and are **frozen** on replay.
+      Materialize scalars as 1-element tensors to make them buffer-backed if
+      you need to vary them across replays.
+    * MPS profiling must be disabled during capture.
+    * Only one capture may be active on the stream at a time; the state is
+      stream-scoped rather than per-object, so :func:`metal_graph_replay`
+      always replays whatever was captured most recently.
+
+    Example::
+
+        model.eval()
+        x = torch.randn(batch, seq, d_model, device="mps")
+
+        with torch.mps.metal_graph_capture():
+            out = model(x)  # runs once; ops recorded
+
+        for batch_data in loader:
+            x.copy_(batch_data)  # update input in-place
+            torch.mps.metal_graph_replay()
+            results.append(out.cpu())
+    """
+    torch._C._mps_metalGraphCaptureBegin()
+    try:
+        yield
+    finally:
+        torch._C._mps_metalGraphCaptureEnd()
+
+
+def metal_graph_replay() -> None:
+    r"""Replays the ops recorded by the most recent :func:`metal_graph_capture` block.
+
+    All captured ops are encoded to the command buffer inside a single
+    ``dispatch_sync``, eliminating per-op dispatch overhead. Input tensors must
+    have been updated in-place before calling this function.
+    """
+    torch._C._mps_metalGraphReplay()
+
+
 from . import profiler
 from .event import Event
 
@@ -240,6 +300,8 @@ __all__ = [
     "load_metallib",
     "device_count",
     "get_rng_state",
+    "metal_graph_capture",
+    "metal_graph_replay",
     "manual_seed",
     "seed",
     "set_rng_state",
