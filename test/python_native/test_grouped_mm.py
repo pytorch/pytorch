@@ -1,6 +1,7 @@
 # Owner(s): ["module: dsl-native-ops"]
 
 import unittest
+from unittest import mock
 
 import torch
 from torch._native.common_utils import check_native_jit_disabled
@@ -62,6 +63,56 @@ def _assert_quack_path_supported(
     from torch._native.ops.grouped_mm.impl import _grouped_mm_sm12x_cond
 
     test.assertTrue(_grouped_mm_sm12x_cond(mat_a, mat_b, offs=offs))
+
+
+@unittest.skipIf(TEST_WITH_ROCM, "QuACK grouped_mm is CUDA-only")
+@unittest.skipUnless(TEST_CUDA, "CUDA required")
+class TestGroupedMmCond(TestCase):
+    def test_sm120_cond_rejects_invalid_native_override_inputs(self):
+        from torch._native.ops.grouped_mm.impl import _grouped_mm_sm12x_cond
+
+        mat_a, mat_b, offs = _make_grouped_mm_inputs(torch.float16, True)
+        mat_a_3d_case, mat_b_3d, offs_3d = _make_grouped_mm_inputs(torch.float16, False)
+        mat_a_bf16, _, _ = _make_grouped_mm_inputs(torch.bfloat16, True)
+        mat_a_fp32, mat_b_fp32, _ = _make_grouped_mm_inputs(torch.float32, True)
+        strided_offs = torch.empty(
+            offs.numel() * 2, device="cuda", dtype=torch.int32
+        ).as_strided((offs.numel(),), (2,))
+        invalid_stride_mat_a = torch.empty(
+            1024, device="cuda", dtype=torch.float16
+        ).as_strided((16, 16), (2, 3))
+        invalid_stride_mat_b = torch.empty(
+            1024, device="cuda", dtype=torch.float16
+        ).as_strided((16, 16), (2, 3))
+
+        with mock.patch("torch.cuda.get_device_capability", return_value=(12, 0)):
+            self.assertTrue(_grouped_mm_sm12x_cond(mat_a, mat_b, offs=offs))
+            self.assertTrue(
+                _grouped_mm_sm12x_cond(mat_a_3d_case, mat_b_3d, offs=offs_3d)
+            )
+
+            for name, kwargs in (
+                ("mismatched_input_dtypes", {"self": mat_a_bf16}),
+                ("float32_input_dtype", {"self": mat_a_fp32, "mat2": mat_b_fp32}),
+                ("out_dtype_mismatch", {"out_dtype": torch.float32}),
+                ("offs_none", {"offs": None}),
+                ("bias_not_none", {"bias": torch.empty_like(mat_b)}),
+                ("offs_wrong_numel", {"mat2": mat_b_3d, "offs": offs_3d[:-1]}),
+                ("offs_dim_gt_one", {"offs": offs.reshape(2, 2)}),
+                ("offs_stride_gt_one", {"offs": strided_offs}),
+                ("offs_no_elements", {"offs": offs[:0]}),
+                ("zero_dim_mat_a", {"self": mat_a[0, 0]}),
+                ("three_dim_mat_a", {"self": mat_a.unsqueeze(0)}),
+                ("zero_dim_mat_b", {"mat2": mat_b[0, 0]}),
+                ("one_dim_mat_b", {"mat2": mat_b[:, 0]}),
+                ("four_dim_mat_b", {"mat2": mat_b_3d.unsqueeze(0)}),
+                ("invalid_stride_mat_a", {"self": invalid_stride_mat_a}),
+                ("invalid_stride_mat_b", {"mat2": invalid_stride_mat_b}),
+            ):
+                with self.subTest(name=name):
+                    args = {"self": mat_a, "mat2": mat_b, "offs": offs}
+                    args.update(kwargs)
+                    self.assertFalse(_grouped_mm_sm12x_cond(**args))
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "QuACK grouped_mm is CUDA-only")

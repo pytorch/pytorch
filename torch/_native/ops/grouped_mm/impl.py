@@ -47,18 +47,18 @@ def _grouped_mm_sm12x_cond(
     is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
     if is_cow(self) or is_cow(mat2) or is_cow(offs):
         return False
-    if not _valid_2d_or_3d_strides(self) or not _valid_2d_or_3d_strides(mat2):
-        return False
     major, _ = torch.cuda.get_device_capability(self.device)
     if major != 12:
         return False
-
-    # QuACK's varlen-M GEMM maps the common grouped forward form:
-    #   self: (total_m, k), mat2: (groups, k, n), offs: (groups,)
-    # Its varlen-K path maps:
-    #   self: (m, total_k), mat2: (total_k, n), offs: (groups,)
+    # QuACK only supports 2D/2D and 2D/3D grouped GEMM
     if self.dim() != 2:
         return False
+    if mat2.dim() != 2 and mat2.dim() != 3:
+        return False
+    if not _valid_2d_or_3d_strides(self) or not _valid_2d_or_3d_strides(mat2):
+        return False
+    # varlen-M (2D/3D):
+    #   self: (total_m, k), mat2: (groups, k, n), offs: (groups,)
     if mat2.dim() == 3:
         if offs.numel() != mat2.size(0):
             return False
@@ -71,7 +71,8 @@ def _grouped_mm_sm12x_cond(
             or mat2.size(2) == 0
         ):
             return False
-        return True
+    # varlen-K (2D/2D):
+    #   self: (m, total_k), mat2: (total_k, n), offs: (groups,)
     if mat2.dim() == 2:
         if self.size(1) != mat2.size(0):
             return False
@@ -82,10 +83,10 @@ def _grouped_mm_sm12x_cond(
             or offs.numel() == 0
         ):
             return False
+        # QuACK varlen-K path requires M/N-major layouts
         if self.stride(0) != 1 or mat2.stride(1) != 1:
             return False
-        return True
-    return False
+    return True
 
 
 def _grouped_mm_sm12x_impl(
