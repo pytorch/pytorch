@@ -1099,7 +1099,7 @@ def instantiate_device_type_tests(
     scope:dict,
     except_for:Optional[Iterable]=None,
     only_for:Optional[Iterable]=None,
-    include_lazy=False,
+    include_lazy:bool=False,
     allow_mps:Optional[bool]=None,
     allow_xpu:Optional[bool]=None,
 ):
