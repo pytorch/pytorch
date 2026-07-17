@@ -304,7 +304,7 @@ class TensorShelf {
 //   ProcessGroupNCCL pg(store, rank, size);
 //   std::shared_ptr<WorkNCCL> work = pg.allreduce(tensors);
 //
-//   // At this point, NCCL kernel has already by queued successfully
+//   // At this point, NCCL kernel has already been queued successfully
 //   // Now, let current stream wait for the NCCL to finish, this function is
 //   // async operation as well
 //
@@ -527,10 +527,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
 
-#ifdef NCCL_HAS_CONFIG
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-#endif
 
     // Optional "parent" backend and color to create communicators from
     // via `ncclCommSplit`
@@ -546,14 +544,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // must be within the numerical range of C++ int. Otherwise, Python will
     // raise a RuntimeError saying type is incompatible. See also
     // `_process_group_color` in `distributed_c10d.py`.
-#ifdef NCCL_HAS_COMM_SPLIT
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
-#else
-    // [Note 3]: for older NCCL versions, NCCL_SPLIT_NOCOLOR is not defined. But
-    // `split_color` is pybinded to Python, so we need to define it. So we use
-    // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
-    int split_color{-2};
-#endif
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -870,7 +861,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<Work> _allgather_base(
+  c10::intrusive_ptr<Work> all_gather_single(
       at::Tensor& outputbuffer,
       at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -880,7 +871,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+  c10::intrusive_ptr<Work> all_gather_single_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -890,12 +881,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> _reduce_scatter_base(
+  c10::intrusive_ptr<Work> reduce_scatter_single(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+  c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
@@ -903,7 +894,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  c10::intrusive_ptr<Work> alltoall_base(
+  c10::intrusive_ptr<Work> all_to_all_single(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
@@ -947,10 +938,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
-
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store.
-  void setSequenceNumberForGroup() override;
 
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it
@@ -1101,7 +1088,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<NCCLComm>& ncclComm);
 
-  // Ensure thaht if record is True, the work obj will be enqueued via
+  // Ensure that if record is True, the work obj will be enqueued via
   // workEnqueue
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,

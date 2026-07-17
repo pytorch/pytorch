@@ -27,9 +27,171 @@ bool isSymbolicOutput(torch::_export::Argument::Tag t) {
     case torch::_export::Argument::Tag::AS_SYM_FLOAT:
     case torch::_export::Argument::Tag::AS_SYM_FLOATS:
     case torch::_export::Argument::Tag::AS_CUSTOM_OBJ:
+    case torch::_export::Argument::Tag::AS_TUPLE:
       return true;
     default:
       return false;
+  }
+}
+
+bool hasSymbolicElement(const torch::_export::Argument& arg) {
+  if (arg.tag() != torch::_export::Argument::Tag::AS_TUPLE) {
+    return isSymbolicOutput(arg.tag());
+  }
+  for (const auto& element : arg.get_as_tuple()) {
+    if (hasSymbolicElement(*element)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void appendUserInputNames(
+    const torch::_export::Argument& userInputArg,
+    std::vector<std::string>& userInputs) {
+  switch (userInputArg.tag()) {
+    case torch::_export::Argument::Tag::AS_TENSOR:
+      userInputs.emplace_back(userInputArg.get_as_tensor().get_name());
+      break;
+    case torch::_export::Argument::Tag::AS_CUSTOM_OBJ:
+      userInputs.emplace_back(userInputArg.get_as_custom_obj().get_name());
+      break;
+    case torch::_export::Argument::Tag::AS_TENSORS:
+      for (const auto& tensor : userInputArg.get_as_tensors()) {
+        userInputs.emplace_back(tensor.get_name());
+      }
+      break;
+    case torch::_export::Argument::Tag::AS_OPTIONAL_TENSORS:
+      for (const auto& optTensor : userInputArg.get_as_optional_tensors()) {
+        if (optTensor.tag() ==
+            torch::_export::OptionalTensorArgument::Tag::AS_TENSOR) {
+          userInputs.emplace_back(optTensor.get_as_tensor().get_name());
+        }
+      }
+      break;
+    case torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR: {
+      const auto& optTensor = userInputArg.get_as_optional_tensor();
+      if (optTensor.tag() ==
+          torch::_export::OptionalTensorArgument::Tag::AS_TENSOR) {
+        userInputs.emplace_back(optTensor.get_as_tensor().get_name());
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_INT: {
+      const auto& symInt = userInputArg.get_as_sym_int();
+      if (symInt.tag() == torch::_export::SymIntArgument::Tag::AS_NAME) {
+        userInputs.emplace_back(symInt.get_as_name());
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_INTS:
+      for (const auto& symInt : userInputArg.get_as_sym_ints()) {
+        if (symInt.tag() == torch::_export::SymIntArgument::Tag::AS_NAME) {
+          userInputs.emplace_back(symInt.get_as_name());
+        }
+      }
+      break;
+    case torch::_export::Argument::Tag::AS_SYM_BOOL: {
+      const auto& symBool = userInputArg.get_as_sym_bool();
+      if (symBool.tag() == torch::_export::SymBoolArgument::Tag::AS_NAME) {
+        userInputs.emplace_back(symBool.get_as_name());
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_BOOLS:
+      for (const auto& symBool : userInputArg.get_as_sym_bools()) {
+        if (symBool.tag() == torch::_export::SymBoolArgument::Tag::AS_NAME) {
+          userInputs.emplace_back(symBool.get_as_name());
+        }
+      }
+      break;
+    case torch::_export::Argument::Tag::AS_TUPLE:
+      for (const auto& element : userInputArg.get_as_tuple()) {
+        if (hasSymbolicElement(*element)) {
+          appendUserInputNames(*element, userInputs);
+        }
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+void appendUserOutputNames(
+    const torch::_export::Argument& userOutputArg,
+    std::vector<std::optional<std::string>>& userOutputs) {
+  switch (userOutputArg.tag()) {
+    case torch::_export::Argument::Tag::AS_TENSOR:
+      userOutputs.emplace_back(userOutputArg.get_as_tensor().get_name());
+      break;
+    case torch::_export::Argument::Tag::AS_TENSORS:
+      for (const auto& tensor : userOutputArg.get_as_tensors()) {
+        userOutputs.emplace_back(tensor.get_name());
+      }
+      break;
+    case torch::_export::Argument::Tag::AS_OPTIONAL_TENSORS:
+      for (const auto& optTensor : userOutputArg.get_as_optional_tensors()) {
+        if (optTensor.tag() ==
+            torch::_export::OptionalTensorArgument::Tag::AS_TENSOR) {
+          userOutputs.emplace_back(optTensor.get_as_tensor().get_name());
+        } else {
+          userOutputs.emplace_back(std::nullopt);
+        }
+      }
+      break;
+    case torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR: {
+      const auto& optTensor = userOutputArg.get_as_optional_tensor();
+      if (optTensor.tag() ==
+          torch::_export::OptionalTensorArgument::Tag::AS_TENSOR) {
+        userOutputs.emplace_back(optTensor.get_as_tensor().get_name());
+      } else {
+        userOutputs.emplace_back(std::nullopt);
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_CUSTOM_OBJ:
+      userOutputs.emplace_back(userOutputArg.get_as_custom_obj().get_name());
+      break;
+    case torch::_export::Argument::Tag::AS_SYM_INT:
+      userOutputs.emplace_back(userOutputArg.get_as_sym_int().get_as_name());
+      break;
+    case torch::_export::Argument::Tag::AS_SYM_INTS:
+      for (const auto& symInt : userOutputArg.get_as_sym_ints()) {
+        if (symInt.tag() == torch::_export::SymIntArgument::Tag::AS_NAME) {
+          userOutputs.emplace_back(symInt.get_as_name());
+        }
+      }
+      break;
+    case torch::_export::Argument::Tag::AS_SYM_BOOL:
+      userOutputs.emplace_back(userOutputArg.get_as_sym_bool().get_as_name());
+      break;
+    case torch::_export::Argument::Tag::AS_SYM_BOOLS:
+      for (const auto& symBool : userOutputArg.get_as_sym_bools()) {
+        if (symBool.tag() == torch::_export::SymBoolArgument::Tag::AS_NAME) {
+          userOutputs.emplace_back(symBool.get_as_name());
+        }
+      }
+      break;
+    case torch::_export::Argument::Tag::AS_SYM_FLOAT:
+      userOutputs.emplace_back(std::nullopt);
+      break;
+    case torch::_export::Argument::Tag::AS_SYM_FLOATS:
+      for (size_t i = 0; i < userOutputArg.get_as_sym_floats().size(); ++i) {
+        userOutputs.emplace_back(std::nullopt);
+      }
+      break;
+    case torch::_export::Argument::Tag::AS_TUPLE:
+      if (hasSymbolicElement(userOutputArg)) {
+        for (const auto& element : userOutputArg.get_as_tuple()) {
+          appendUserOutputNames(*element, userOutputs);
+        }
+      } else {
+        userOutputs.emplace_back(std::nullopt);
+      }
+      break;
+    default:
+      userOutputs.emplace_back(std::nullopt);
+      break;
   }
 }
 
@@ -243,6 +405,9 @@ GraphSignature::GraphSignature(const torch::_export::GraphSignature& storage) {
             // Skip AS_INT (constant) symints
           }
         } else if (
+            userInputArg.tag() == torch::_export::Argument::Tag::AS_TUPLE) {
+          appendUserInputNames(userInputArg, userInputs_);
+        } else if (
             userInputArg.tag() == torch::_export::Argument::Tag::AS_NONE ||
             userInputArg.tag() == torch::_export::Argument::Tag::AS_INT ||
             userInputArg.tag() == torch::_export::Argument::Tag::AS_INTS ||
@@ -419,6 +584,10 @@ GraphSignature::GraphSignature(const torch::_export::GraphSignature& storage) {
                    ++i) {
                 userOutputs_.emplace_back(std::nullopt);
               }
+              break;
+            }
+            case torch::_export::Argument::Tag::AS_TUPLE: {
+              appendUserOutputNames(userOutputArg, userOutputs_);
               break;
             }
             default: {

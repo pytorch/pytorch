@@ -99,6 +99,9 @@ using Constant = std::variant<
     bool,
     std::vector<bool>,
     std::vector<std::string>,
+    // Represents heterogeneous or otherwise tuple-only constants. Homogeneous
+    // tuple constants continue to use the typed vector alternatives above.
+    std::vector<c10::IValue>,
     std::vector<std::vector<int64_t>>,
     std::vector<std::vector<double>>,
     std::unique_ptr<Graph>>;
@@ -315,7 +318,7 @@ class Node : public c10::IntrusiveListHook {
   std::string toString() const {
     std::stringstream ss;
     ss << *this;
-    return ss.str();
+    return std::move(ss).str();
   }
 
   void updateInputName(std::string_view oldName, std::string_view newName) {
@@ -633,7 +636,7 @@ class Graph {
   std::string toString() const {
     std::stringstream ss;
     ss << *this;
-    return ss.str();
+    return std::move(ss).str();
   }
 
   /* Reassigns IDs to every Value in this Graph so that they are contiguous from

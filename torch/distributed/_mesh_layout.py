@@ -31,7 +31,7 @@ class _FlatLayout:
     A canonical CuTe layout for a single dimension of a DeviceMesh
 
     Utility class for representing an integer layout by borrowing ideas from CuTe Layout Algebra.
-    See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_layout_algebra.html for more details.
+    See https://github.com/NVIDIA/cutlass/blob/main/media/docs/cpp/cute/02_layout_algebra.md for more details.
 
     Each layout is represented as a list of sizes and strides. We use it as a way for mechanical bookkeeping
     of the integers such as ranks in a SPMD mesh, and the transformation on top of it.

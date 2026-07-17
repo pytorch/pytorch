@@ -32,6 +32,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
+from torch.utils._typing_utils import not_none
 from torch.utils.flop_counter import flop_registry
 
 from .virtualized import V
@@ -129,7 +130,7 @@ def _is_fake_tensor_same(
 
         if isinstance(new, torch.types.py_sym_types):
             return (
-                new.node.shape_env._maybe_evaluate_static(
+                not_none(new.node.shape_env)._maybe_evaluate_static(
                     sympy.Eq(new.node.expr, old.node.expr)
                 )
                 == sympy.true
@@ -236,6 +237,17 @@ def _extract_subgraphs_and_args(
 
     If the second yielded value is None, this function was unable to determine what args
     to pass to the subgraph."""
+
+    def get_subgraph_args(
+        subgraph: torch.fx.GraphModule,
+    ) -> tuple[torch.Tensor, ...]:
+        return tuple(
+            get_fake(n, subgraph) for n in subgraph.graph.find_nodes(op="placeholder")
+        )
+
+    def is_integer(d: torch.dtype) -> bool:
+        return not d.is_floating_point and not d.is_complex
+
     if node.target is torch.ops.higher_order.associative_scan:
         # Associative scan operates on slices of xs (see: scan), but multiple slices.
         # Use the same slice twice to account for cases where only a single slice is
@@ -255,17 +267,6 @@ def _extract_subgraphs_and_args(
         # the only inputs we may need to update are the optional additional tensors. See
         # torch._higher_order_ops.flex_attention._math_attention_inner for more details.
 
-        def get_subgraph_args(
-            subgraph: torch.fx.GraphModule,
-        ) -> tuple[torch.Tensor, ...]:
-            return tuple(
-                get_fake(n, subgraph)
-                for n in subgraph.graph.find_nodes(op="placeholder")
-            )
-
-        def is_integer(d: torch.dtype) -> bool:
-            return not d.is_floating_point and not d.is_complex
-
         score_subgraph: torch.fx.GraphModule = args[3]
         score_subgraph_args = get_subgraph_args(score_subgraph)
         mask_subgraph = args[4][-1]
@@ -274,7 +275,7 @@ def _extract_subgraphs_and_args(
         integer_arg_dtypes = OrderedSet[torch.dtype](
             a.dtype for a in chain(score_subgraph_args[1:5], mask_subgraph_args[:4])
         )
-        assert (
+        if not (
             score_subgraph_args[0].dtype == args[0].dtype
             and len(integer_arg_dtypes) == 1
             and is_integer(integer_arg_dtypes.pop())
@@ -282,10 +283,51 @@ def _extract_subgraphs_and_args(
                 len(a.size()) == 0
                 for a in chain(score_subgraph_args[:5], mask_subgraph_args[:4])
             )
-        ), "flex_attention subgraph arg format has changed!"
+        ):
+            raise AssertionError("flex_attention subgraph arg format has changed!")
 
         yield score_subgraph, (*score_subgraph_args[:5], *args[7])
         yield args[4][-1], (*mask_subgraph_args[:4], *args[8])
+    elif node.target is torch.ops.higher_order.flex_attention_backward:
+        fw_subgraph = args[7]
+        fw_subgraph_args = get_subgraph_args(fw_subgraph)
+        joint_subgraph = args[8]
+        joint_subgraph_args = get_subgraph_args(joint_subgraph)
+        mask_subgraph = args[9][-1]
+        mask_subgraph_args = get_subgraph_args(mask_subgraph)
+
+        integer_arg_dtypes = OrderedSet[torch.dtype](
+            a.dtype
+            for a in chain(
+                fw_subgraph_args[1:5],
+                joint_subgraph_args[1:5],
+                mask_subgraph_args[:4],
+            )
+        )
+        if not (
+            fw_subgraph_args[0].dtype == args[0].dtype
+            and joint_subgraph_args[0].dtype == args[0].dtype
+            and len(integer_arg_dtypes) == 1
+            and is_integer(integer_arg_dtypes.pop())
+            and all(
+                len(a.size()) == 0
+                for a in chain(
+                    fw_subgraph_args[:5],
+                    joint_subgraph_args[:6],
+                    mask_subgraph_args[:4],
+                )
+            )
+        ):
+            raise AssertionError(
+                "flex_attention_backward subgraph arg format has changed!"
+            )
+
+        if fw_subgraph in valid_subgraphs:
+            yield fw_subgraph, (*fw_subgraph_args[:5], *args[12])
+        if joint_subgraph in valid_subgraphs:
+            yield joint_subgraph, (*joint_subgraph_args[:6], *args[12])
+        if mask_subgraph in valid_subgraphs:
+            yield mask_subgraph, (*mask_subgraph_args[:4], *args[13])
     elif node.target in (
         torch.ops.higher_order.foreach_map,
         torch.ops.higher_order.invoke_quant_packed,
@@ -309,11 +351,52 @@ def _extract_subgraphs_and_args(
         yield args[0], subgraph_args
         yield args[1], subgraph_args
     elif node.target is control_deps:
-        assert not kwargs, (
-            "Subgraph arguments can be renamed, so we cannot consistently "
-            "handle kwargs at this point in the stack."
-        )
-        yield args[1], tuple(args[2:])
+        if kwargs:
+            raise AssertionError(
+                "Subgraph arguments can be renamed, so we cannot consistently "
+                "handle kwargs at this point in the stack."
+            )
+        control_deps_subgraph = args[1]
+        control_deps_args = tuple(args[2:])
+        if control_deps_subgraph in valid_subgraphs:
+            yield control_deps_subgraph, control_deps_args
+        if isinstance(
+            control_deps_subgraph, torch.fx.GraphModule
+        ) and pytree.tree_any_only(
+            torch.fx.GraphModule,
+            lambda subgraph: subgraph in valid_subgraphs,
+            control_deps_args,
+        ):
+            placeholder_to_arg = dict(
+                zip(
+                    control_deps_subgraph.graph.find_nodes(op="placeholder"),
+                    control_deps_args,
+                    strict=True,
+                )
+            )
+            wrapped_nodes = [
+                n for n in control_deps_subgraph.graph.nodes if n.op == "call_function"
+            ]
+            if len(wrapped_nodes) != 1:
+                raise AssertionError(
+                    f"expected exactly 1 wrapped call_function node, got {len(wrapped_nodes)}"
+                )
+            wrapped_node = wrapped_nodes[0]
+
+            def replace_placeholder(item: Any) -> Any:
+                if isinstance(item, torch.fx.Node):
+                    return placeholder_to_arg.get(item, item)
+                return item
+
+            wrapped_args, wrapped_kwargs = pytree.tree_map(
+                replace_placeholder,
+                (wrapped_node.args, wrapped_node.kwargs),
+            )
+            yield from _extract_subgraphs_and_args(
+                wrapped_node, valid_subgraphs, *wrapped_args, **wrapped_kwargs
+            )
+    elif node.target is torch.ops.higher_order.flex_gemm:
+        yield args[1], tuple(args[2])
     else:
         warnings.warn(
             f"Please add support for subgraph args to function {node.target}!"
@@ -476,6 +559,12 @@ class FakeTensorUpdater:
                         "_inductor_lowering_output_metadata_ignores_input_storage",
                         False,
                     )
+                    and getattr(
+                        user.target,
+                        "_inductor_lowering_output_metadata_is_input",
+                        None,
+                    )
+                    is None
                 )
             )
 
@@ -530,6 +619,25 @@ class FakeTensorUpdater:
             if hasattr(node.target, "_inductor_lowering_function") and (
                 node_hash not in self.processed_hashes or id(node) in to_process
             ):
+                if metadata_fn := getattr(
+                    node.target,
+                    "_inductor_lowering_output_metadata_fn",
+                    None,
+                ):
+                    is_valid, args, kwargs = get_fake_args_kwargs(node, self.gm)
+                    if not is_valid:
+                        raise RuntimeError(
+                            "FakeTensorUpdater cannot update "
+                            "_inductor_lowering_function metadata because the "
+                            "metadata provider inputs are unavailable. "
+                            f"Encountered node: {node.format_node()}"
+                        )
+                    with V.fake_mode, enable_python_dispatcher():
+                        new_fake_tensor = metadata_fn(*args, **kwargs)
+                    if update_node_fake_tensor(node, new_fake_tensor):
+                        nodes_updated += 1
+                    self.tracked_node_ids.add(id(node))
+                    continue
                 if (
                     metadata_input := getattr(
                         node.target,
@@ -618,22 +726,24 @@ class FakeTensorUpdater:
                                 existing_storages,
                                 check_storage=False,
                             ):
-                                assert update_subgraph, (
-                                    "subgraph args must have consistent values!"
-                                )
+                                if not update_subgraph:
+                                    raise AssertionError(
+                                        "subgraph args must have consistent values!"
+                                    )
                                 # Check that only the stride has changed.  Other changes
                                 # cannot be handled without manual intervention.
-                                assert _is_fake_tensor_same(
+                                if not _is_fake_tensor_same(
                                     a,
                                     p_fake,
                                     existing_storages,
                                     check_strides=False,
                                     check_storage=False,
-                                ), (
-                                    "A subgraph argument other than striding has been "
-                                    "modified; FakeTensorUpdater cannot update this "
-                                    "argument!"
-                                )
+                                ):
+                                    raise AssertionError(
+                                        "A subgraph argument other than striding has been "
+                                        "modified; FakeTensorUpdater cannot update this "
+                                        "argument!"
+                                    )
 
                                 p.meta["val"] = a
                                 nodes_updated += 1
@@ -790,7 +900,8 @@ def countable_fx(node: torch.fx.Node) -> bool:
     """
     Whether or not we can count the flops of an FX node.
     """
-    assert isinstance(node, torch.fx.Node)
+    if not isinstance(node, torch.fx.Node):
+        raise AssertionError(f"expected torch.fx.Node, got {type(node)}")
     if not hasattr(node, "target"):
         return False
     target = node.target

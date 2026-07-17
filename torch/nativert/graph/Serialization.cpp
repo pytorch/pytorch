@@ -1,6 +1,7 @@
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 #include <torch/nativert/graph/Serialization.h>
+#include <algorithm>
 #include <limits>
 namespace torch::nativert {
 
@@ -10,6 +11,128 @@ std::unique_ptr<Graph> jsonToSubgraph(
     const torch::_export::Graph& jsonGraph,
     const torch::_export::GraphSignature* signature,
     bool loadNodeMetadata);
+
+bool isEmptyTuple(const torch::_export::Argument& arg) {
+  return arg.tag() == torch::_export::Argument::Tag::AS_TUPLE &&
+      arg.get_as_tuple().empty();
+}
+
+bool isHigherOrderTarget(std::string_view target) {
+  return target.rfind("torch.ops.higher_order.", 0) == 0;
+}
+
+bool isSymIntTupleElement(const torch::_export::Argument& arg) {
+  return arg.tag() == torch::_export::Argument::Tag::AS_SYM_INT ||
+      arg.tag() == torch::_export::Argument::Tag::AS_INT;
+}
+
+bool isOptionalTensorTupleElement(const torch::_export::Argument& arg) {
+  return arg.tag() == torch::_export::Argument::Tag::AS_TENSOR ||
+      arg.tag() == torch::_export::Argument::Tag::AS_NONE ||
+      arg.tag() == torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR;
+}
+
+Value* symIntArgumentToValue(
+    const torch::_export::SymIntArgument& symInt,
+    Graph& graph) {
+  switch (symInt.tag()) {
+    case torch::_export::SymIntArgument::Tag::AS_NAME:
+      return graph.getValue(symInt.get_as_name());
+    case torch::_export::SymIntArgument::Tag::AS_INT: {
+      int64_t value = symInt.get_as_int();
+      TORCH_CHECK(
+          value >= std::numeric_limits<int>::min() &&
+          value <= std::numeric_limits<int>::max());
+      return graph.createConstantSymIntValue(static_cast<int>(value));
+    }
+    default:
+      TORCH_CHECK(
+          false,
+          fmt::format(
+              "Unknown SymIntArgument type: {}",
+              torch::_export::printEnum(symInt.tag())));
+  }
+}
+
+Value* symIntTupleElementToValue(
+    const torch::_export::Argument& arg,
+    Graph& graph) {
+  switch (arg.tag()) {
+    case torch::_export::Argument::Tag::AS_SYM_INT:
+      return symIntArgumentToValue(arg.get_as_sym_int(), graph);
+    case torch::_export::Argument::Tag::AS_INT: {
+      int64_t value = arg.get_as_int();
+      TORCH_CHECK(
+          value >= std::numeric_limits<int>::min() &&
+          value <= std::numeric_limits<int>::max());
+      return graph.createConstantSymIntValue(static_cast<int>(value));
+    }
+    default:
+      TORCH_CHECK(
+          false,
+          fmt::format(
+              "Expected a SymInt tuple element, got {}",
+              torch::_export::printEnum(arg.tag())));
+  }
+}
+
+Value* optionalTensorTupleElementToValue(
+    const torch::_export::Argument& arg,
+    Graph& graph) {
+  switch (arg.tag()) {
+    case torch::_export::Argument::Tag::AS_TENSOR:
+      return graph.getValue(arg.get_as_tensor().get_name());
+    case torch::_export::Argument::Tag::AS_NONE:
+      return graph.addValue(std::nullopt, Type::Kind::None, nullptr);
+    case torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR: {
+      const auto& optionalTensor = arg.get_as_optional_tensor();
+      switch (optionalTensor.tag()) {
+        case torch::_export::OptionalTensorArgument::Tag::AS_TENSOR:
+          return graph.getValue(optionalTensor.get_as_tensor().get_name());
+        case torch::_export::OptionalTensorArgument::Tag::AS_NONE:
+          return graph.addValue(std::nullopt, Type::Kind::None, nullptr);
+        default:
+          TORCH_CHECK(
+              false,
+              fmt::format(
+                  "Unknown OptionalTensorArgument type: {}",
+                  torch::_export::printEnum(optionalTensor.tag())));
+      }
+    }
+    default:
+      TORCH_CHECK(
+          false,
+          fmt::format(
+              "Expected an optional tensor tuple element, got {}",
+              torch::_export::printEnum(arg.tag())));
+  }
+}
+
+bool tupleElementsAreSymInts(
+    const std::vector<torch::_export::ForwardRef<torch::_export::Argument>>&
+        elements) {
+  return std::all_of(elements.begin(), elements.end(), [](const auto& element) {
+    return isSymIntTupleElement(*element);
+  });
+}
+
+bool tupleElementsHaveTag(
+    const std::vector<torch::_export::ForwardRef<torch::_export::Argument>>&
+        elements,
+    torch::_export::Argument::Tag tag) {
+  return std::all_of(
+      elements.begin(), elements.end(), [tag](const auto& element) {
+        return element->tag() == tag;
+      });
+}
+
+bool tupleElementsAreOptionalTensors(
+    const std::vector<torch::_export::ForwardRef<torch::_export::Argument>>&
+        elements) {
+  return std::all_of(elements.begin(), elements.end(), [](const auto& element) {
+    return isOptionalTensorTupleElement(*element);
+  });
+}
 
 Value* symbolicToValue(
     const torch::_export::Argument& arg,
@@ -47,6 +170,59 @@ Value* symbolicToValue(
           std::move(outerListValues), Type::Kind::TensorList);
       return graph.insertBefore(outerListPack, insertBefore)->outputs()[0];
     }
+    case torch::_export::Argument::Tag::AS_TUPLE: {
+      const auto& tupleElements = arg.get_as_tuple();
+      if (tupleElements.empty()) {
+        auto listPack = graph.createListPack({}, Type::Kind::Tensor);
+        return graph.insertBefore(listPack, insertBefore)->outputs()[0];
+      }
+
+      std::vector<Value*> listValue;
+      if (tupleElementsHaveTag(
+              tupleElements, torch::_export::Argument::Tag::AS_TENSOR)) {
+        for (const auto& element : tupleElements) {
+          listValue.push_back(
+              graph.getValue(element->get_as_tensor().get_name()));
+        }
+        auto listPack =
+            graph.createListPack(std::move(listValue), Type::Kind::Tensor);
+        return graph.insertBefore(listPack, insertBefore)->outputs()[0];
+      }
+
+      if (tupleElementsAreSymInts(tupleElements)) {
+        for (const auto& element : tupleElements) {
+          listValue.push_back(symIntTupleElementToValue(*element, graph));
+        }
+        auto listPack =
+            graph.createListPack(std::move(listValue), Type::Kind::SymInt);
+        return graph.insertBefore(listPack, insertBefore)->outputs()[0];
+      }
+
+      if (tupleElementsHaveTag(
+              tupleElements, torch::_export::Argument::Tag::AS_TENSORS)) {
+        for (const auto& element : tupleElements) {
+          listValue.push_back(symbolicToValue(*element, graph, insertBefore));
+        }
+        auto listPack =
+            graph.createListPack(std::move(listValue), Type::Kind::TensorList);
+        return graph.insertBefore(listPack, insertBefore)->outputs()[0];
+      }
+
+      if (tupleElementsAreOptionalTensors(tupleElements)) {
+        for (const auto& element : tupleElements) {
+          listValue.push_back(
+              optionalTensorTupleElementToValue(*element, graph));
+        }
+        auto listPack = graph.createOptionalListPack(std::move(listValue));
+        return graph.insertBefore(listPack, insertBefore)->outputs()[0];
+      }
+
+      TORCH_CHECK(
+          false,
+          fmt::format(
+              "Unsupported symbolic tuple element type: {}",
+              torch::_export::printEnum(tupleElements.front()->tag())));
+    }
     case torch::_export::Argument::Tag::AS_OPTIONAL_TENSORS: {
       // Need to insert a list pack node
       std::vector<Value*> listValue;
@@ -80,31 +256,7 @@ Value* symbolicToValue(
       // Need to insert a list pack node
       std::vector<Value*> listValue;
       for (const auto& listEl : arg.get_as_sym_ints()) {
-        switch (listEl.tag()) {
-          case torch::_export::SymIntArgument::Tag::AS_NAME: {
-            listValue.push_back(graph.getValue(listEl.get_as_name()));
-            break;
-          }
-          case torch::_export::SymIntArgument::Tag::AS_INT: {
-            // These are concrete int values in the SymIntList, e.g [s0, 8]
-            // We convert them into a constant Value in graph. These values
-            // don't have producer node
-            int64_t value = listEl.get_as_int();
-            TORCH_CHECK(
-                value >= std::numeric_limits<int>::min() &&
-                value <= std::numeric_limits<int>::max());
-            Value* symintValue =
-                graph.createConstantSymIntValue(static_cast<int>(value));
-            listValue.push_back(symintValue);
-            break;
-          }
-          default:
-            TORCH_CHECK(
-                false,
-                fmt::format(
-                    "Unknown SymIntArgument type: {}",
-                    torch::_export::printEnum(listEl.tag())));
-        }
+        listValue.push_back(symIntArgumentToValue(listEl, graph));
       }
       auto listPack =
           graph.createListPack(std::move(listValue), Type::Kind::SymInt);
@@ -190,6 +342,286 @@ enforceInputOrder(
   return {std::move(reorderedInputSpecs), std::move(reorderedGraphInputs)};
 }
 
+void addGraphInputsForArgument(
+    const torch::_export::Argument& input,
+    Graph& graph) {
+  switch (input.tag()) {
+    case torch::_export::Argument::Tag::AS_TENSOR: {
+      const auto& asTensor = input.get_as_tensor();
+      const auto& name = asTensor.get_name();
+      graph.addInput(name, Type::Kind::Tensor);
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_TENSORS: {
+      for (const auto& tensor : input.get_as_tensors()) {
+        graph.addInput(tensor.get_name(), Type::Kind::Tensor);
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR: {
+      const auto& optTensor = input.get_as_optional_tensor();
+      if (optTensor.tag() ==
+          torch::_export::OptionalTensorArgument::Tag::AS_TENSOR) {
+        graph.addInput(
+            optTensor.get_as_tensor().get_name(), Type::Kind::Tensor);
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_OPTIONAL_TENSORS: {
+      for (const auto& optTensor : input.get_as_optional_tensors()) {
+        if (optTensor.tag() ==
+            torch::_export::OptionalTensorArgument::Tag::AS_TENSOR) {
+          graph.addInput(
+              optTensor.get_as_tensor().get_name(), Type::Kind::Tensor);
+        }
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_INT: {
+      const auto& symInt = input.get_as_sym_int();
+      if (symInt.tag() == torch::_export::SymIntArgument::Tag::AS_NAME) {
+        graph.addInput(symInt.get_as_name(), Type::Kind::SymInt);
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_INTS: {
+      for (const auto& symInt : input.get_as_sym_ints()) {
+        if (symInt.tag() == torch::_export::SymIntArgument::Tag::AS_NAME) {
+          graph.addInput(symInt.get_as_name(), Type::Kind::SymInt);
+        }
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_BOOL: {
+      const auto& symBool = input.get_as_sym_bool();
+      if (symBool.tag() == torch::_export::SymBoolArgument::Tag::AS_NAME) {
+        graph.addInput(symBool.get_as_name(), Type::Kind::SymBool);
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_BOOLS: {
+      for (const auto& symBool : input.get_as_sym_bools()) {
+        if (symBool.tag() == torch::_export::SymBoolArgument::Tag::AS_NAME) {
+          graph.addInput(symBool.get_as_name(), Type::Kind::SymBool);
+        }
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_FLOAT: {
+      graph.addInput(
+          fmt::format("sym_float_{}", graph.numValues()), Type::Kind::SymFloat);
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_FLOATS: {
+      for (size_t i = 0; i < input.get_as_sym_floats().size(); ++i) {
+        graph.addInput(
+            fmt::format("sym_float_{}_{}", graph.numValues(), i),
+            Type::Kind::SymFloat);
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_CUSTOM_OBJ: {
+      const auto& asCustomObj = input.get_as_custom_obj();
+      graph.addInput(
+          asCustomObj.get_name(),
+          Type(Type::Kind::CustomObj, asCustomObj.get_class_fqn()));
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_TUPLE: {
+      for (const auto& element : input.get_as_tuple()) {
+        if (isSymbolic(*element)) {
+          addGraphInputsForArgument(*element, graph);
+        }
+      }
+      break;
+    }
+    default:
+      TORCH_CHECK(
+          false,
+          fmt::format(
+              "Unsupported symbolic graph input type: {}",
+              torch::_export::printEnum(input.tag())));
+  }
+}
+
+void addNodeOutputsForArgument(
+    Node* node,
+    Graph& graph,
+    const torch::_export::Argument& output) {
+  switch (output.tag()) {
+    case torch::_export::Argument::Tag::AS_NONE: {
+      node->addOutput(Type::Kind::None);
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_TENSOR: {
+      const auto name = output.get_as_tensor().get_name();
+      node->addOutput(name, Type::Kind::Tensor);
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_TENSORS: {
+      auto outputValue =
+          node->addOutput(graph.getUniqueValueName(), Type::Kind::TensorList);
+
+      Node* listUnpack =
+          graph.insertNode("prim.ListUnpack", {{"input", outputValue}});
+      for (const auto& arg : output.get_as_tensors()) {
+        listUnpack->addOutput(arg.get_name(), Type::Kind::Tensor);
+      }
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_INT: {
+      const auto name = output.get_as_sym_int().get_as_name();
+      node->addOutput(name, Type::Kind::SymInt);
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_INTS: {
+      TORCH_CHECK(
+          false,
+          "SymInts NYI. We currently don't have ops that produce SymInts as output");
+    }
+    case torch::_export::Argument::Tag::AS_SYM_BOOL: {
+      const auto name = output.get_as_sym_bool().get_as_name();
+      node->addOutput(name, Type::Kind::SymBool);
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_BOOLS: {
+      TORCH_CHECK(
+          false,
+          "SymBools NYI. We currently don't have ops that produce SymBools as output");
+    }
+    case torch::_export::Argument::Tag::AS_SYM_FLOAT: {
+      const auto name = output.get_as_sym_float().get_as_name();
+      node->addOutput(name, Type::Kind::SymFloat);
+      break;
+    }
+    case torch::_export::Argument::Tag::AS_SYM_FLOATS: {
+      TORCH_CHECK(
+          false,
+          "SymFloats NYI. We currently doesn't have op that produces SymFloats as output");
+    }
+    case torch::_export::Argument::Tag::AS_TUPLE: {
+      for (const auto& element : output.get_as_tuple()) {
+        TORCH_CHECK(
+            isSymbolic(*element),
+            fmt::format(
+                "Unsupported constant tuple element {} in node output",
+                torch::_export::printEnum(element->tag())));
+        addNodeOutputsForArgument(node, graph, *element);
+      }
+      break;
+    }
+    default:
+      TORCH_CHECK(
+          false,
+          fmt::format(
+              "Unsupported graph output type: {}",
+              torch::_export::printEnum(output.tag())));
+  }
+}
+
+void addGraphOutputsForArgument(
+    Graph& graph,
+    const torch::_export::Argument& output,
+    bool loadNodeMetadata) {
+  if (output.tag() == torch::_export::Argument::Tag::AS_TUPLE &&
+      isSymbolic(output)) {
+    for (const auto& element : output.get_as_tuple()) {
+      addGraphOutputsForArgument(graph, *element, loadNodeMetadata);
+    }
+    return;
+  }
+
+  if (isSymbolic(output)) {
+    switch (output.tag()) {
+      case torch::_export::Argument::Tag::AS_TENSOR: {
+        const auto& asTensor = output.get_as_tensor();
+        Value* outputValue = graph.getValue(asTensor.get_name());
+        graph.addOutput(outputValue);
+        break;
+      }
+      case torch::_export::Argument::Tag::AS_TENSORS: {
+        for (const auto& tensor : output.get_as_tensors()) {
+          Value* outputValue = graph.getValue(tensor.get_name());
+          graph.addOutput(outputValue);
+        }
+        break;
+      }
+      case torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR: {
+        const auto& optTensor = output.get_as_optional_tensor();
+        if (optTensor.tag() ==
+            torch::_export::OptionalTensorArgument::Tag::AS_TENSOR) {
+          graph.addOutput(graph.getValue(optTensor.get_as_tensor().get_name()));
+        }
+        break;
+      }
+      case torch::_export::Argument::Tag::AS_OPTIONAL_TENSORS: {
+        for (const auto& optTensor : output.get_as_optional_tensors()) {
+          if (optTensor.tag() ==
+              torch::_export::OptionalTensorArgument::Tag::AS_TENSOR) {
+            graph.addOutput(
+                graph.getValue(optTensor.get_as_tensor().get_name()));
+          }
+        }
+        break;
+      }
+      case torch::_export::Argument::Tag::AS_SYM_INT: {
+        const auto& asSymInt = output.get_as_sym_int();
+        TORCH_CHECK(
+            asSymInt.tag() == torch::_export::SymIntArgument::Tag::AS_NAME);
+        graph.addOutput(graph.getValue(asSymInt.get_as_name()));
+        break;
+      }
+      case torch::_export::Argument::Tag::AS_SYM_INTS: {
+        for (const auto& symInt : output.get_as_sym_ints()) {
+          if (symInt.tag() == torch::_export::SymIntArgument::Tag::AS_NAME) {
+            graph.addOutput(graph.getValue(symInt.get_as_name()));
+          }
+        }
+        break;
+      }
+      case torch::_export::Argument::Tag::AS_SYM_BOOL: {
+        const auto& symBool = output.get_as_sym_bool();
+        if (symBool.tag() == torch::_export::SymBoolArgument::Tag::AS_NAME) {
+          graph.addOutput(graph.getValue(symBool.get_as_name()));
+        }
+        break;
+      }
+      case torch::_export::Argument::Tag::AS_SYM_BOOLS: {
+        for (const auto& symBool : output.get_as_sym_bools()) {
+          if (symBool.tag() == torch::_export::SymBoolArgument::Tag::AS_NAME) {
+            graph.addOutput(graph.getValue(symBool.get_as_name()));
+          }
+        }
+        break;
+      }
+      case torch::_export::Argument::Tag::AS_SYM_FLOAT: {
+        const auto& symFloat = output.get_as_sym_float();
+        graph.addOutput(graph.getValue(symFloat.get_as_name()));
+        break;
+      }
+      case torch::_export::Argument::Tag::AS_SYM_FLOATS: {
+        for (const auto& symFloat : output.get_as_sym_floats()) {
+          graph.addOutput(graph.getValue(symFloat.get_as_name()));
+        }
+        break;
+      }
+      case torch::_export::Argument::Tag::AS_CUSTOM_OBJ: {
+        const auto& asCustomObj = output.get_as_custom_obj();
+        graph.addOutput(graph.getValue(asCustomObj.get_name()));
+        break;
+      }
+      default:
+        TORCH_CHECK(
+            false,
+            fmt::format(
+                "Unsupported graph output type: {}",
+                torch::_export::printEnum(output.tag())));
+    }
+  } else {
+    graph.addConstantOutput(constantToValue(output, loadNodeMetadata));
+  }
+}
+
 std::unique_ptr<Graph> jsonToSubgraph(
     const torch::_export::Graph& jsonGraph,
     const torch::_export::GraphSignature* signature,
@@ -212,114 +644,15 @@ std::unique_ptr<Graph> jsonToSubgraph(
 
   for (const auto& input : graphInputs) {
     if (isSymbolic(input)) {
-      switch (input.tag()) {
-        case torch::_export::Argument::Tag::AS_TENSOR: {
-          const auto& asTensor = input.get_as_tensor();
-          const auto& name = asTensor.get_name();
-          graph->addInput(name, Type::Kind::Tensor);
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_TENSORS: {
-          // Handle list of tensors - each tensor becomes a separate input
-          for (const auto& tensor : input.get_as_tensors()) {
-            graph->addInput(tensor.get_name(), Type::Kind::Tensor);
-          }
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR: {
-          // Handle single optional tensor
-          const auto& optTensor = input.get_as_optional_tensor();
-          if (optTensor.tag() ==
-              torch::_export::OptionalTensorArgument::Tag::AS_TENSOR) {
-            graph->addInput(
-                optTensor.get_as_tensor().get_name(), Type::Kind::Tensor);
-          }
-          // Skip if None
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_OPTIONAL_TENSORS: {
-          // Handle list of optional tensors
-          for (const auto& optTensor : input.get_as_optional_tensors()) {
-            if (optTensor.tag() ==
-                torch::_export::OptionalTensorArgument::Tag::AS_TENSOR) {
-              graph->addInput(
-                  optTensor.get_as_tensor().get_name(), Type::Kind::Tensor);
-            }
-            // Skip None tensors
-          }
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_INT: {
-          const auto& symInt = input.get_as_sym_int();
-          if (symInt.tag() == torch::_export::SymIntArgument::Tag::AS_NAME) {
-            graph->addInput(symInt.get_as_name(), Type::Kind::SymInt);
-          }
-          // Skip constant symints
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_INTS: {
-          for (const auto& symInt : input.get_as_sym_ints()) {
-            if (symInt.tag() == torch::_export::SymIntArgument::Tag::AS_NAME) {
-              graph->addInput(symInt.get_as_name(), Type::Kind::SymInt);
-            }
-            // Skip constant symints
-          }
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_BOOL: {
-          const auto& symBool = input.get_as_sym_bool();
-          if (symBool.tag() == torch::_export::SymBoolArgument::Tag::AS_NAME) {
-            graph->addInput(symBool.get_as_name(), Type::Kind::SymBool);
-          }
-          // Skip constant symbools
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_BOOLS: {
-          for (const auto& symBool : input.get_as_sym_bools()) {
-            if (symBool.tag() ==
-                torch::_export::SymBoolArgument::Tag::AS_NAME) {
-              graph->addInput(symBool.get_as_name(), Type::Kind::SymBool);
-            }
-            // Skip constant symbools
-          }
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_FLOAT: {
-          // SymFloat inputs - add as SymFloat type
-          graph->addInput(
-              fmt::format("sym_float_{}", graph->numValues()),
-              Type::Kind::SymFloat);
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_FLOATS: {
-          for (size_t i = 0; i < input.get_as_sym_floats().size(); ++i) {
-            graph->addInput(
-                fmt::format("sym_float_{}_{}", graph->numValues(), i),
-                Type::Kind::SymFloat);
-          }
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_CUSTOM_OBJ: {
-          const auto& asCustomObj = input.get_as_custom_obj();
-          const std::string& name = asCustomObj.get_name();
-          const std::string& classFqn = asCustomObj.get_class_fqn();
-          graph->addInput(name, Type(Type::Kind::CustomObj, classFqn));
-          break;
-        }
-        default:
-          TORCH_CHECK(
-              false,
-              fmt::format(
-                  "Unsupported symbolic graph input type: {}",
-                  torch::_export::printEnum(input.tag())));
-      }
+      addGraphInputsForArgument(input, *graph);
     } else {
       switch (input.tag()) {
         case torch::_export::Argument::Tag::AS_INT:
         case torch::_export::Argument::Tag::AS_FLOAT:
         case torch::_export::Argument::Tag::AS_STRING:
         case torch::_export::Argument::Tag::AS_BOOL:
-        case torch::_export::Argument::Tag::AS_NONE: {
+        case torch::_export::Argument::Tag::AS_NONE:
+        case torch::_export::Argument::Tag::AS_TUPLE: {
           // Constant graph inputs are specialized in the graph, here we simply
           // add a nullptr of Value to the graph input node.
           graph->addInput();
@@ -347,7 +680,9 @@ std::unique_ptr<Graph> jsonToSubgraph(
     for (const auto& input : jsonNode.get_inputs()) {
       // We handle constants and symbolic inputs differently.
       const auto& arg = input.get_arg();
-      if (isSymbolic(arg)) {
+      const bool symbolicEmptyTuple =
+          isEmptyTuple(arg) && isHigherOrderTarget(jsonNode.get_target());
+      if (isSymbolic(arg) || symbolicEmptyTuple) {
         // Symbolic values are made part of the inputs to the node
         node->addInput(NamedArgument{
             input.get_name(), symbolicToValue(input.get_arg(), *graph, node)});
@@ -366,177 +701,12 @@ std::unique_ptr<Graph> jsonToSubgraph(
     std::vector<Value*> outputs;
     std::vector<Value*> listUnpacksToCreate;
     for (const auto& output : jsonNode.get_outputs()) {
-      switch (output.tag()) {
-        case torch::_export::Argument::Tag::AS_NONE: {
-          node->addOutput(Type::Kind::None);
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_TENSOR: {
-          const auto name = output.get_as_tensor().get_name();
-          node->addOutput(name, Type::Kind::Tensor);
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_TENSORS: {
-          auto outputValue = node->addOutput(
-              graph->getUniqueValueName(), Type::Kind::TensorList);
-
-          Node* listUnpack =
-              graph->insertNode("prim.ListUnpack", {{"input", outputValue}});
-          for (const auto& arg : output.get_as_tensors()) {
-            listUnpack->addOutput(arg.get_name(), Type::Kind::Tensor);
-          }
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_INT: {
-          const auto name = output.get_as_sym_int().get_as_name();
-          node->addOutput(name, Type::Kind::SymInt);
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_INTS: {
-          TORCH_CHECK(
-              false,
-              "SymInts NYI. We currently don't have ops that produce SymInts as output");
-        }
-        case torch::_export::Argument::Tag::AS_SYM_BOOL: {
-          const auto name = output.get_as_sym_bool().get_as_name();
-          node->addOutput(name, Type::Kind::SymBool);
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_BOOLS: {
-          TORCH_CHECK(
-              false,
-              "SymBools NYI. We currently don't have ops that produce SymBools as output");
-        }
-        case torch::_export::Argument::Tag::AS_SYM_FLOAT: {
-          const auto name = output.get_as_sym_float().get_as_name();
-          node->addOutput(name, Type::Kind::SymFloat);
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_FLOATS: {
-          TORCH_CHECK(
-              false,
-              "SymFloats NYI. We currently doesn't have op that produces SymFloats as output");
-        }
-        default:
-          TORCH_CHECK(
-              false,
-              fmt::format(
-                  "Unsupported graph output type: {}",
-                  torch::_export::printEnum(output.tag())));
-      }
+      addNodeOutputsForArgument(node, *graph, output);
     }
   }
 
   for (const auto& output : jsonGraph.get_outputs()) {
-    // handle symbolic outputs and constant outputs differently
-    if (isSymbolic(output)) {
-      switch (output.tag()) {
-        case torch::_export::Argument::Tag::AS_TENSOR: {
-          const auto& asTensor = output.get_as_tensor();
-          const auto& name = asTensor.get_name();
-          Value* outputValue = graph->getValue(name);
-          graph->addOutput(outputValue);
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_TENSORS: {
-          // Handle list of tensors - each tensor becomes a separate output
-          for (const auto& tensor : output.get_as_tensors()) {
-            Value* outputValue = graph->getValue(tensor.get_name());
-            graph->addOutput(outputValue);
-          }
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR: {
-          // Handle single optional tensor
-          const auto& optTensor = output.get_as_optional_tensor();
-          if (optTensor.tag() ==
-              torch::_export::OptionalTensorArgument::Tag::AS_TENSOR) {
-            Value* outputValue =
-                graph->getValue(optTensor.get_as_tensor().get_name());
-            graph->addOutput(outputValue);
-          }
-          // Skip None tensors
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_OPTIONAL_TENSORS: {
-          // Handle list of optional tensors
-          for (const auto& optTensor : output.get_as_optional_tensors()) {
-            if (optTensor.tag() ==
-                torch::_export::OptionalTensorArgument::Tag::AS_TENSOR) {
-              Value* outputValue =
-                  graph->getValue(optTensor.get_as_tensor().get_name());
-              graph->addOutput(outputValue);
-            }
-            // Skip None tensors
-          }
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_INT: {
-          const auto& asSymInt = output.get_as_sym_int();
-          TORCH_CHECK(
-              asSymInt.tag() == torch::_export::SymIntArgument::Tag::AS_NAME);
-          const auto& name = asSymInt.get_as_name();
-          Value* outputValue = graph->getValue(name);
-          graph->addOutput(outputValue);
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_INTS: {
-          for (const auto& symInt : output.get_as_sym_ints()) {
-            if (symInt.tag() == torch::_export::SymIntArgument::Tag::AS_NAME) {
-              Value* outputValue = graph->getValue(symInt.get_as_name());
-              graph->addOutput(outputValue);
-            }
-          }
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_BOOL: {
-          const auto& symBool = output.get_as_sym_bool();
-          if (symBool.tag() == torch::_export::SymBoolArgument::Tag::AS_NAME) {
-            Value* outputValue = graph->getValue(symBool.get_as_name());
-            graph->addOutput(outputValue);
-          }
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_BOOLS: {
-          for (const auto& symBool : output.get_as_sym_bools()) {
-            if (symBool.tag() ==
-                torch::_export::SymBoolArgument::Tag::AS_NAME) {
-              Value* outputValue = graph->getValue(symBool.get_as_name());
-              graph->addOutput(outputValue);
-            }
-          }
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_FLOAT: {
-          const auto& symFloat = output.get_as_sym_float();
-          Value* outputValue = graph->getValue(symFloat.get_as_name());
-          graph->addOutput(outputValue);
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_SYM_FLOATS: {
-          for (const auto& symFloat : output.get_as_sym_floats()) {
-            Value* outputValue = graph->getValue(symFloat.get_as_name());
-            graph->addOutput(outputValue);
-          }
-          break;
-        }
-        case torch::_export::Argument::Tag::AS_CUSTOM_OBJ: {
-          const auto& asCustomObj = output.get_as_custom_obj();
-          Value* outputValue = graph->getValue(asCustomObj.get_name());
-          graph->addOutput(outputValue);
-          break;
-        }
-        default:
-          TORCH_CHECK(
-              false,
-              fmt::format(
-                  "Unsupported graph output type: {}",
-                  torch::_export::printEnum(output.tag())));
-      }
-    } else {
-      Constant constValue = constantToValue(output, loadNodeMetadata);
-      graph->addConstantOutput(std::move(constValue));
-    }
+    addGraphOutputsForArgument(*graph, output, loadNodeMetadata);
   }
 
   auto jsonTensorValue = jsonGraph.get_tensor_values();
@@ -638,6 +808,11 @@ bool isSymbolic(const torch::_export::Argument& arg) {
     case torch::_export::Argument::Tag::AS_CUSTOM_OBJ:
     case torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR:
       return true;
+    case torch::_export::Argument::Tag::AS_TUPLE:
+      return std::any_of(
+          arg.get_as_tuple().begin(),
+          arg.get_as_tuple().end(),
+          [](const auto& element) { return isSymbolic(*element); });
     default:
       return false;
   }
@@ -692,6 +867,69 @@ Constant constantToValue(
         ret.push_back(arg);
       }
       return ret;
+    }
+    case torch::_export::Argument::Tag::AS_TUPLE: {
+      std::vector<Constant> values;
+      values.reserve(jsonArg.get_as_tuple().size());
+      for (const auto& arg : jsonArg.get_as_tuple()) {
+        TORCH_CHECK(
+            !isSymbolic(*arg),
+            fmt::format(
+                "Symbolic tuple element {} cannot be converted to a constant",
+                torch::_export::printEnum(arg->tag())));
+        values.emplace_back(constantToValue(*arg, loadNodeMetadata));
+      }
+
+      if (values.empty()) {
+        return std::vector<c10::IValue>{};
+      }
+      if (std::all_of(values.begin(), values.end(), [](const Constant& value) {
+            return std::holds_alternative<int64_t>(value);
+          })) {
+        std::vector<int64_t> ret;
+        ret.reserve(values.size());
+        for (const auto& value : values) {
+          ret.push_back(std::get<int64_t>(value));
+        }
+        return ret;
+      }
+      if (std::all_of(values.begin(), values.end(), [](const Constant& value) {
+            return std::holds_alternative<double>(value);
+          })) {
+        std::vector<double> ret;
+        ret.reserve(values.size());
+        for (const auto& value : values) {
+          ret.push_back(std::get<double>(value));
+        }
+        return ret;
+      }
+      if (std::all_of(values.begin(), values.end(), [](const Constant& value) {
+            return std::holds_alternative<bool>(value);
+          })) {
+        std::vector<bool> ret;
+        ret.reserve(values.size());
+        for (const auto& value : values) {
+          ret.push_back(std::get<bool>(value));
+        }
+        return ret;
+      }
+      if (std::all_of(values.begin(), values.end(), [](const Constant& value) {
+            return std::holds_alternative<std::string>(value);
+          })) {
+        std::vector<std::string> ret;
+        ret.reserve(values.size());
+        for (const auto& value : values) {
+          ret.push_back(std::get<std::string>(value));
+        }
+        return ret;
+      }
+
+      std::vector<c10::IValue> tupleValues;
+      tupleValues.reserve(values.size());
+      for (const auto& value : values) {
+        tupleValues.push_back(constantToIValue(value));
+      }
+      return tupleValues;
     }
     case torch::_export::Argument::Tag::AS_GRAPH: {
       return jsonToSubgraph(

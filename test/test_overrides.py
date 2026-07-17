@@ -943,10 +943,6 @@ def generate_tensor_like_override_tests(cls):
                 return 3.5
             elif arg_type == "bool":
                 return False
-            elif arg_type == "Dimname":
-                return ""
-            elif arg_type == "DimnameList":
-                return [""]
             elif arg_type.startswith("int"):
                 return 0
             elif arg_type == "Stream":
@@ -1414,7 +1410,7 @@ class TestResolveName(TestCase):
                 self.assertEqual(
                     eval(torch.overrides.resolve_name(c)),
                     c,
-                    msg=f"{c}, {torch.overrides.resolve_name(c)}"
+                    msg=lambda msg: f"{msg}\n{c}, {torch.overrides.resolve_name(c)}"
                 )
 
 class TestTorchFunctionWarning(TestCase):
