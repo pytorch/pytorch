@@ -627,11 +627,7 @@ print(t.is_pinned())
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
     def test_out_of_memory(self):
-        if (
-            TEST_WITH_ROCM
-            and getRocmVersion() >= (7, 14)
-            and EXPANDABLE_SEGMENTS
-        ):
+        if TEST_WITH_ROCM and getRocmVersion() >= (7, 14) and EXPANDABLE_SEGMENTS:
             self.skipTest(
                 "TestCuda.test_out_of_memory: OOM tensor flag is False on ROCm "
                 "expandable segments (7.14+)"
