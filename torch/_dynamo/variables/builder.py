@@ -317,6 +317,7 @@ from .torch_function import (
 )
 from .user_defined import (
     DefaultDictVariable,
+    EnvironVariable,
     FrozenDataClassVariable,
     InspectVariable,
     IntWrapperVariable,
@@ -2271,7 +2272,10 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = MutableMappingVariable(value, source=self.source)
+            if EnvironVariable.is_matching_object(value):
+                result = EnvironVariable(value, source=self.source)
+            else:
+                result = MutableMappingVariable(value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif is_frozen_dataclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)

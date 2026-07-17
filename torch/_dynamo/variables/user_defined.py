@@ -29,6 +29,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import os
 import random
 import sys
 import threading
@@ -65,6 +66,7 @@ from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
     DictGetItemSource,
+    EnvVarSource,
     EphemeralSource,
     GetItemSource,
     RandomValueSource,
@@ -5632,6 +5634,81 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         if self._maybe_get_baseclass_method("__len__") in dict_methods:
             return VariableTracker.build(tx, len(self.value))  # type: ignore[bad-argument-type]
         return super().mp_length(tx)
+
+
+class EnvironVariable(MutableMappingVariable):
+    """Handles the ``os.environ`` singleton.
+
+    Reads with constant string keys (``get``, ``__getitem__``,
+    ``__contains__``) are constant-folded at trace time and guarded by the
+    ambient ``GuardBuilder.ENV_MATCH`` guard (via ``EnvVarSource``) so that a
+    runtime change to the variable triggers a recompile. Reads funnel through
+    three hooks: subscript via ``mp_subscript_impl``, ``in`` via
+    ``sq_contains``, and ``environ.get``/``environ.__getitem__`` attribute
+    calls (including ``os.getenv``, which inlines ``environ.get``) via
+    ``getattro_impl``.
+
+    Anything else (mutation, iteration, non-constant keys) falls back to
+    regular ``MutableMappingVariable`` tracing of ``os._Environ``.
+    """
+
+    @staticmethod
+    def is_matching_object(obj: object) -> bool:
+        return obj is os.environ
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[Any],
+        kwargs: dict[str, Any],
+    ) -> VariableTracker:
+        from .constant import ConstantVariable
+
+        if (
+            name in ("get", "__getitem__")
+            and not kwargs
+            and (len(args) == 1 or (name == "get" and len(args) == 2))
+            and args[0].is_python_constant()
+            and isinstance(args[0].as_python_constant(), str)
+        ):
+            key = args[0].as_python_constant()
+            value = os.environ.get(key)
+            install_guard(EnvVarSource(key, value).make_guard(GuardBuilder.ENV_MATCH))
+            if value is not None:
+                return ConstantVariable.create(value)
+            if name == "get":
+                return args[1] if len(args) == 2 else ConstantVariable.create(None)
+            # Missing key: the guard installed above forces a recompile if the
+            # variable appears later; for now raise like ``dict.__getitem__``.
+            raise_observed_exception(KeyError, tx, args=[key])
+        return super().call_method(tx, name, args, kwargs)
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name in ("get", "__getitem__"):
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: self.call_method(tx, name, list(args), kwargs)
+            )
+        return super().getattro_impl(tx, name)
+
+    def mp_subscript_impl(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker:
+        return self.call_method(tx, "__getitem__", [key], {})
+
+    def sq_contains(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker:
+        from .constant import ConstantVariable
+
+        if item.is_python_constant() and isinstance(item.as_python_constant(), str):
+            key = item.as_python_constant()
+            value = os.environ.get(key)
+            install_guard(EnvVarSource(key, value).make_guard(GuardBuilder.ENV_MATCH))
+            return ConstantVariable.create(value is not None)
+        return super().sq_contains(tx, item)
 
 
 class RandomVariable(UserDefinedObjectVariable):
