@@ -6796,7 +6796,6 @@ class AOTInductorTestsTemplate:
         self.check_model(sin_triton, none_inputs)
         self.check_model(sin_triton, not_none_inputs)
 
-    @skipIfRocm  # RoCM does not support the config block size in test suite.
     @skipIfXpu(
         msg="SYCL work-item index overflow issue when block sizes are used in this test."
     )
@@ -6812,13 +6811,17 @@ class AOTInductorTestsTemplate:
             n_elements,
             BLOCK_SIZE: "tl.constexpr",
         ):
-            pid = tl.program_id(axis=0).to(tl.int64)
-            block_start = pid * BLOCK_SIZE
+            pid0 = tl.program_id(axis=0).to(tl.int64)
+            pid1 = tl.program_id(axis=1).to(tl.int64)
+            grid0 = tl.num_programs(axis=0).to(tl.int64)
+            block_id = pid1 * grid0 + pid0
+            block_start = block_id * BLOCK_SIZE
             offsets = block_start + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
+            s = x.to(tl.int32) + y.to(tl.int32)
+            output = (s & 0xFF).to(tl.int8)
             tl.store(out_ptr + offsets, output, mask=mask)
 
         @torch.library.triton_op("mylib::add", mutates_args=())
@@ -6827,9 +6830,15 @@ class AOTInductorTestsTemplate:
             n_elements = output.numel()
 
             def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+                num_blocks = triton.cdiv(n_elements, meta["BLOCK_SIZE"])
+                # 2D split to respect the 65535 grid-x limit. Use cdiv-by-constant
+                # rather than min(num_blocks, 65535): a symbolic min introduces an
+                # inequality guard that AOTInductor dynamic-shape export rejects.
+                grid1 = triton.cdiv(num_blocks, 65535)
+                grid0 = triton.cdiv(num_blocks, grid1)
+                return (grid0, grid1)
 
-            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 256)
             return output
 
         class Model(torch.nn.Module):
