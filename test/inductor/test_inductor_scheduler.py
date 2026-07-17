@@ -18,6 +18,7 @@ from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
+    ForeachKernelSchedulerNode,
     NestedReduction,
     Scheduler,
 )
@@ -34,7 +35,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
-    skipIfXpu,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -93,6 +93,18 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def _mock_base_snode(self, name, device=None):
+        node = Mock()
+        node.get_name.return_value = name
+        node.get_first_name.return_value = name
+        node.get_device.return_value = device
+        node.get_nodes.return_value = [node]
+        node.get_buffer_names.return_value = OrderedSet()
+        node.used_buffer_names.return_value = OrderedSet()
+        node.is_template.return_value = False
+        node.is_reduction.return_value = False
+        return node
+
     def _extern_snode_for_op(self, op_overload, python_kernel_name):
         node = object.__new__(ir.ExternKernel)
         node.op_overload = op_overload
@@ -128,6 +140,64 @@ class TestScheduler(TestCase):
                     torch.ops.aten.relu.out, "extern_kernels.relu"
                 )
             )
+        )
+
+    def test_fuse_two_nodes_propagates_mempool(self):
+        scheduler = object.__new__(Scheduler)
+        device = torch.device("cuda", 0)
+        node1 = self._mock_base_snode("node1", device)
+        node2 = self._mock_base_snode("node2", device)
+        node3 = self._mock_base_snode("node3", device)
+        node3.get_nodes.return_value = [node1, node2]
+        backend = Mock()
+        backend.fuse.return_value = node3
+        scheduler.get_backend = Mock(return_value=backend)
+        scheduler.node_to_stream = {node1: 0, node2: 0}
+        scheduler.node_to_mempool = {node1: (7, 0), node2: (7, 0)}
+        scheduler.name_to_fused_node = {}
+        fused_nodes = OrderedSet([node1, node2])
+
+        self.assertIs(
+            Scheduler.fuse_two_nodes(scheduler, node1, node2, fused_nodes), node3
+        )
+
+        self.assertEqual(scheduler.node_to_mempool[node3], (7, 0))
+        self.assertEqual(scheduler.node_to_stream[node3], 0)
+        self.assertIn(node3, fused_nodes)
+        self.assertNotIn(node1, fused_nodes)
+        self.assertNotIn(node2, fused_nodes)
+
+    @inductor_config.patch(combo_kernel_max_num_nodes=16)
+    def test_combo_kernel_grouping_respects_mempool(self):
+        scheduler = Mock()
+        device = torch.device("cuda", 0)
+        pool_node1 = self._mock_base_snode("pool_node1", device)
+        pool_node2 = self._mock_base_snode("pool_node2", device)
+        default_node = self._mock_base_snode("default_node", device)
+        other_pool_node = self._mock_base_snode("other_pool_node", device)
+        scheduler._topological_sort_nodes.return_value = [
+            [pool_node1, default_node, pool_node2, other_pool_node]
+        ]
+        scheduler.node_to_stream = {
+            pool_node1: 0,
+            pool_node2: 0,
+            default_node: 0,
+            other_pool_node: 0,
+        }
+        scheduler.get_node_stream.side_effect = scheduler.node_to_stream.__getitem__
+        scheduler.node_to_mempool = {
+            pool_node1: (7, 0),
+            pool_node2: (7, 0),
+            default_node: None,
+            other_pool_node: (8, 0),
+        }
+
+        groups = ForeachKernelSchedulerNode._default_group_nodes_for_combo_kernels(
+            scheduler
+        )
+
+        self.assertEqual(
+            groups, [[pool_node1, pool_node2], [default_node], [other_pool_node]]
         )
 
     def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
@@ -532,10 +602,6 @@ class TestScheduler(TestCase):
         torch._logging.set_logs()
 
     @xfailIfNoAcceleratorTriton
-    @skipIfXpu(
-        msg="InvalidModule: Invalid SPIR-V module, "
-        "https://github.com/intel/torch-xpu-ops/issues/2329"
-    )
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize(
@@ -704,6 +770,8 @@ class TestScheduler(TestCase):
             scheduler = Scheduler.__new__(Scheduler)
             scheduler.mutation_renames = {}
             scheduler._has_multi_stream_nodes = Mock(return_value=False)
+            scheduler._mempool_nodes = False
+            scheduler.node_to_mempool = {}
             scheduler._nested_index_equivalent_dep_names = Mock(
                 return_value=OrderedSet()
             )
@@ -774,7 +842,7 @@ class TestScheduler(TestCase):
         # Verify results match (no fusion bug)
         self.assertTrue(
             torch.allclose(eager_result, compiled_result, rtol=1e-4, atol=1e-4),
-            msg=f"index_add_ fusion bug detected: "
+            msg=lambda msg: f"{msg}\nindex_add_ fusion bug detected: "
             f"eager={eager_result.mean().item():.6f}, "
             f"compiled={compiled_result.mean().item():.6f}",
         )
@@ -807,7 +875,7 @@ class TestScheduler(TestCase):
         # This test will FAIL without the fusion prevention fix
         self.assertTrue(
             torch.allclose(expected, result),
-            msg=f"Fusion bug detected! Expected {expected}, got {result}",
+            msg=lambda msg: f"{msg}\nFusion bug detected! Expected {expected}, got {result}",
         )
 
     @xfailIfNoAcceleratorTriton
