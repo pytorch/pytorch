@@ -2206,6 +2206,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         # usable selection, so restrict origami to fully static problems and let
         # symbolic shapes fall through to the regular config generator below.
         mnk_static = all(not getattr(x, "free_symbols", None) for x in (m, n, k))
+        if origami is not None and not mnk_static:
+            log.debug("Origami skipped: symbolic m/n/k, using regular config generator")
         # `origami is not None` encodes the module-load gate (see top of file);
         # only DEFAULT search space is supported here.
         if (
