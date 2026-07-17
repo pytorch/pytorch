@@ -92,7 +92,7 @@ from .dicts import (
 )
 from .hashable import is_hashable
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
-from .misc import NullVariable, StringFormatVariable
+from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
     _NO_DEFAULT,
     binary_iop,
@@ -1469,12 +1469,18 @@ class BuiltinVariable(BaseBuiltinVariable):
         from .builder import VariableBuilder
 
         frame_local_names = set(tx.f_code.co_varnames) | set(tx.cell_and_freevars())
-        cell_and_freevars = set(tx.cell_and_freevars())
         frame_locals = {}
-        for name, value in tx.symbolic_locals.items():
+        # symbolic_cellvars registers all of the frame's cells; listing it
+        # second makes cell contents take precedence over a (shadowing)
+        # colliding fast local of the same name.
+        for name, value in itertools.chain(
+            tx.symbolic_locals.items(), tx.symbolic_cellvars.items()
+        ):
             if name not in frame_local_names:
                 continue
-            if name in cell_and_freevars:
+            # Match on CellVariable, not name: a colliding fast local shares a
+            # cell's name but is not itself a cell.
+            if type.__instancecheck__(CellVariable, value):
                 value = tx.output.side_effects.load_cell(value)
             if type.__instancecheck__(NullVariable, value) or isinstance(
                 value, variables.DeletedVariable
