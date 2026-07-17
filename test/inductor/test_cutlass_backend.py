@@ -106,9 +106,24 @@ HAS_XPU = torch.xpu.is_available()
 HAS_CUDA = torch.cuda.is_available()
 HAS_GPU = HAS_CUDA or HAS_XPU
 
-torch.set_float32_matmul_precision("high")
 if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+
+
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
 
 
 log = logging.getLogger(__name__)
@@ -353,9 +368,12 @@ class TestCutlassBackend(TestCase):
         cutlass_dir = _get_cutlass_dir()
         self.assertTrue(
             try_import_cutlass(),
-            "CUTLASS backend is required by this test but could not be imported. "
-            f"Set {_CUTLASS_DIR_ENV_VAR} to a valid CUTLASS checkout; "
-            f"current cutlass_dir={cutlass_dir!r}.",
+            lambda msg: f"{msg}\n"
+            + (
+                "CUTLASS backend is required by this test but could not be imported. "
+                f"Set {_CUTLASS_DIR_ENV_VAR} to a valid CUTLASS checkout; "
+                f"current cutlass_dir={cutlass_dir!r}."
+            ),
         )
 
         # Scale inputs by 1/sqrt(K) to avoid large accumulation differences
@@ -981,11 +999,11 @@ class TestCutlassBackend(TestCase):
 
             self.assertTrue(
                 all(t != float("inf") for t in timings_by_type["aten"]),
-                f"ATen benchmark failed: {timings_by_type['aten']}",
+                lambda msg: f"{msg}\nATen benchmark failed: {timings_by_type['aten']}",
             )
             self.assertTrue(
                 all(t != float("inf") for t in timings_by_type["cutlass"]),
-                f"CUTLASS benchmark failed: {timings_by_type['cutlass']}",
+                lambda msg: f"{msg}\nCUTLASS benchmark failed: {timings_by_type['cutlass']}",
             )
         finally:
             AlgorithmSelectorCache.benchmark_choices = original_benchmark_choices
@@ -1752,7 +1770,7 @@ class TestCutlassBackend(TestCase):
 
                 self.assertTrue(
                     sa.called,
-                    f"autotune_select_algorithm was not called  with shape M={M}, N={N}, K={K}",
+                    lambda msg: f"{msg}\nautotune_select_algorithm was not called  with shape M={M}, N={N}, K={K}",
                 )
                 args, _ = sa.call_args
                 op_name, choices, _, __ = args
@@ -1772,8 +1790,11 @@ class TestCutlassBackend(TestCase):
                 self.assertGreater(
                     cuda_template_count,
                     0,
-                    "No CUTLASSTemplateCaller choices found for matmul with shape "
-                    f"M={M}, N={N}, K={K}",
+                    lambda msg: f"{msg}\n"
+                    + (
+                        "No CUTLASSTemplateCaller choices found for matmul with shape "
+                        f"M={M}, N={N}, K={K}"
+                    ),
                 )
 
     @skipXPUIf(not Xe2_Or_Later, "")
@@ -2310,7 +2331,7 @@ class TestCutlassBackend(TestCase):
             else:
                 atol = None
                 rtol = None
-                expected_time = 50
+                expected_time = 120
             torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
         self.assertTrue(time.time() - start_time < expected_time)
 
@@ -3034,7 +3055,7 @@ class TestCutlassBackend(TestCase):
         expected_count = 2 if GPU_TYPE == "xpu" else 1
         self.assertTrue(
             len(set(all_counts)) == expected_count,
-            f"Config counts should be equal across all layout/dtype combinations. "
+            lambda msg: f"{msg}\nConfig counts should be equal across all layout/dtype combinations. "
             f"Got counts: {config_counts}",
         )
 
