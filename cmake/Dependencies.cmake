@@ -1107,9 +1107,12 @@ if(USE_ROCM)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::hipsparselt
       )
-      if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
-          set(CAFFE2_USE_HIPSPARSELT ON)
-      endif()
+    endif()
+    set(CAFFE2_USE_HIPSPARSELT OFF)
+    if(hipsparselt_FOUND AND USE_HIPSPARSELT AND ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
+      set(CAFFE2_USE_HIPSPARSELT ON)
+    elseif(USE_HIPSPARSELT)
+      caffe2_update_option(USE_HIPSPARSELT OFF)
     endif()
 
     # ROCM-SMI needed to support symmetric memory
@@ -1130,6 +1133,8 @@ if(USE_ROCM)
 
   else()
     caffe2_update_option(USE_ROCM OFF)
+    caffe2_update_option(USE_HIPSPARSELT OFF)
+    set(CAFFE2_USE_HIPSPARSELT OFF)
   endif()
 
   # Add ROCm includes as SYSTEM includes (lower priority than regular includes).
