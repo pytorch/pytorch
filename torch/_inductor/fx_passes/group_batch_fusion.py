@@ -1310,7 +1310,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
 
 class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     """
-    Batch simple match related ops such as nan_to_num in pre grad pass.
+    Batch simple math related ops such as nan_to_num in pre grad pass.
     """
 
     def __init__(self, op, **kwargs):
