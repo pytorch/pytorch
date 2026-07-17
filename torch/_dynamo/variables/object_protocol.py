@@ -1007,6 +1007,8 @@ NB_SLOT_MAPPING = {
     "nb_inplace_add": PyNumberSlots.NB_INPLACE_ADD,
     "nb_multiply": PyNumberSlots.NB_MULTIPLY,
     "nb_inplace_multiply": PyNumberSlots.NB_INPLACE_MULTIPLY,
+    "nb_matrix_multiply": PyNumberSlots.NB_MATRIX_MULTIPLY,
+    "nb_inplace_matrix_multiply": PyNumberSlots.NB_INPLACE_MATRIX_MULTIPLY,
     "nb_and": PyNumberSlots.NB_AND,
     "nb_inplace_and": PyNumberSlots.NB_INPLACE_AND,
     "nb_xor": PyNumberSlots.NB_XOR,
@@ -1439,6 +1441,31 @@ def generic_inplace_multiply(
         tx,
         f"unsupported operand type(s) for *=: "
         f"'{v.python_type_name()}' and '{w.python_type_name()}'",
+    )
+
+
+def generic_matmul(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyNumber_MatrixMultiply."""
+    return binary_op(tx, v, w, "nb_matrix_multiply", "@")
+
+
+def generic_inplace_matmul(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyNumber_InPlaceMatrixMultiply."""
+    return binary_iop(
+        tx,
+        v,
+        w,
+        "nb_inplace_matrix_multiply",
+        "nb_matrix_multiply",
+        "@=",
     )
 
 
