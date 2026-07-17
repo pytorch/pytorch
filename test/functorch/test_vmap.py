@@ -36,6 +36,7 @@ from functorch_additional_op_db import additional_op_db
 
 import functorch
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
 from functorch.experimental import chunk_vmap
@@ -4150,6 +4151,85 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         _ = vjp(gy[0])
         result = vmap(vjp)(gy)
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
+
+    @parametrize(
+        "name, model_fn, input_shape",
+        [
+            (
+                "batch_norm1d",
+                lambda: nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2)),
+                (2, 2),
+            ),
+            (
+                "batch_norm2d",
+                lambda: nn.Sequential(nn.Linear(2, 2), nn.BatchNorm2d(2)),
+                (2, 2, 2, 2),
+            ),
+            (
+                "batch_norm3d",
+                lambda: nn.Sequential(nn.Linear(2, 2), nn.BatchNorm3d(2)),
+                (2, 2, 2, 2, 2),
+            ),
+            (
+                "instance_norm1d",
+                lambda: nn.Sequential(
+                    nn.Linear(2, 2), nn.InstanceNorm1d(2, affine=True)
+                ),
+                (2, 2, 2),
+            ),
+            (
+                "instance_norm2d",
+                lambda: nn.Sequential(
+                    nn.Linear(2, 2), nn.InstanceNorm2d(2, affine=True)
+                ),
+                (2, 2, 2, 2),
+            ),
+            (
+                "instance_norm3d",
+                lambda: nn.Sequential(
+                    nn.Linear(2, 2), nn.InstanceNorm3d(2, affine=True)
+                ),
+                (2, 2, 2, 2, 2),
+            ),
+            (
+                "layer_norm",
+                lambda: nn.Sequential(nn.Linear(2, 2), nn.LayerNorm(2)),
+                (2, 2),
+            ),
+            (
+                "rms_norm",
+                lambda: nn.Sequential(nn.Linear(2, 2), nn.RMSNorm(2)),
+                (2, 2),
+            ),
+            (
+                "group_norm",
+                lambda: nn.Sequential(nn.Linear(2, 2), nn.GroupNorm(2, 2)),
+                (2, 2),
+            ),
+        ],
+        name_fn=lambda name, model_fn, input_shape: name,
+    )
+    def test_autocast(self, device, name, model_fn, input_shape):
+        # Test that batched gradients can be computed with vmap on the output of
+        # models with normalization layers and run with autocast.
+
+        torch.manual_seed(0)
+        model = model_fn().to(device)
+        with torch.autocast(device, dtype=torch.float16):
+            output = model(torch.randn(input_shape, device=device)).flatten(1).sum(-1)
+        params = list(model.parameters())
+        grad_outputs = torch.eye(input_shape[0], device=device)
+
+        def get_vjp(v):
+            return torch.autograd.grad(
+                output, params, grad_outputs=v, retain_graph=True
+            )
+
+        # Precision changes only affects this test. It's required because some
+        # operations are made in float16.
+        self.precision = 5e-3
+        self.rel_tol = 5e-3
+        self._vmap_test(get_vjp, (grad_outputs,), check_propagates_grad=False)
 
 
 def discover_variants(opinfo):
