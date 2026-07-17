@@ -1753,6 +1753,25 @@ def cat_splitwithsizes_replace(match, input_):
     return input_
 
 
+# reciprocal(sqrt(x)) -> rsqrt(x): an unconditional algebraic identity
+# (1 / sqrt(x) == rsqrt(x)) that saves one op per element in the generated kernel.
+@register_graph_pattern(
+    CallFunction(
+        aten.reciprocal.default,
+        CallFunction(aten.sqrt.default, KeywordArg("x")),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+)
+def reciprocal_sqrt_to_rsqrt(match: Match, x):
+    """reciprocal(sqrt(x)) -> rsqrt(x)"""
+
+    def repl(x):
+        return aten.rsqrt(x)
+
+    match.replace_by_example(repl, [x])
+
+
 def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
