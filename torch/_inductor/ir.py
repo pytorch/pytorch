@@ -591,6 +591,7 @@ class IRNode:
 
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
     _current_stream_idx: ClassVar[int | None] = None
+    _current_mempool: ClassVar[tuple[int, int] | None] = None
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
@@ -601,6 +602,8 @@ class IRNode:
     annotations: dict[str, object] = dataclasses.field(init=False)
     # User-annotated stream index from FX node metadata (set during lowering)
     stream_idx: int | None = dataclasses.field(init=False)
+    # User-annotated CUDA MemPool from FX node metadata (set during lowering)
+    mempool: tuple[int, int] | None = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -623,6 +626,18 @@ class IRNode:
             yield
         finally:
             IRNode._current_stream_idx = old
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_mempool(
+        mempool: tuple[int, int] | None,
+    ) -> Generator[None, None, None]:
+        old = IRNode._current_mempool
+        IRNode._current_mempool = mempool
+        try:
+            yield
+        finally:
+            IRNode._current_mempool = old
 
     @staticmethod
     def is_realized_node(node: IRNode) -> bool:
@@ -656,6 +671,7 @@ class IRNode:
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self._post_init_setattr("annotations", {})
         self._post_init_setattr("stream_idx", self._current_stream_idx)
+        self._post_init_setattr("mempool", self._current_mempool)
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -954,6 +970,11 @@ class Operation:
         if not hasattr(self, "stream_idx"):
             raise AssertionError('Expected hasattr(self, "stream_idx")')
         return self.stream_idx
+
+    def get_mempool(self) -> tuple[int, int] | None:
+        if not hasattr(self, "mempool"):
+            raise AssertionError('Expected hasattr(self, "mempool")')
+        return self.mempool
 
     def get_operation_name(self) -> str:
         if self.operation_name is None:
@@ -6353,7 +6374,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
         assert isinstance(caller, NVUniversalGemmCaller), type(caller)  # noqa: S101
-        assert self.layout == caller.layout  # noqa: S101 # noqa: S101
+        assert self.layout == caller.layout  # noqa: S101
 
         render = self.make_kernel_render
         prev_kind = self._render_kind
@@ -6506,6 +6527,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         swizzle_type_b: Any | None = None,
         supports_epilogue_fusion: bool = False,
         swap_ab: bool = False,
+        bias_node: Buffer | None = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6520,6 +6542,9 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.swizzle_type_b = swizzle_type_b
         self.supports_epilogue_fusion = supports_epilogue_fusion
         self.swap_ab = swap_ab
+        # When set, the last entry of `inputs` is an addmm bias consumed as a
+        # fixed bias-add epilogue; the GEMM operands are the remaining inputs.
+        self.bias_node = bias_node
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.operator_name,
@@ -6570,6 +6595,13 @@ class NVUniversalGemmBuffer(TemplateBuffer):
                 inp = inp.data
             input_nodes.append(inp)
 
+        # For a baked addmm bias, the bias is the last input and is consumed by
+        # the epilogue, not as a GEMM operand.
+        bias_node = None
+        if self.bias_node is not None:
+            bias_node = input_nodes[-1]
+            input_nodes = input_nodes[:-1]
+
         kernel_name = str(Placeholder.KERNEL_NAME)
 
         render_kernel = NVUniversalGemmKernel(
@@ -6589,6 +6621,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
             swap_ab=self.swap_ab,
+            bias_node=bias_node,
         )
 
         def render():
@@ -10565,6 +10598,7 @@ class StorageBox(MutableBox):
         self.data.origin_node = origin_node
         self.data.traceback = traceback
         self.data.stream_idx = self.data.data.stream_idx
+        self.data.mempool = self.data.data.mempool
         return self.data.name
 
     def realize_hint(self) -> None:
