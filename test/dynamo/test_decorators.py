@@ -117,6 +117,51 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertEqual(inner(x), x + 1)
             self.assertEqual(inner(x), x + 1)
 
+    def test_call_with_disable(self):
+        from torch._C._dynamo.eval_frame import (
+            call_with_disable,
+            get_eval_frame_callback,
+            set_eval_frame,
+        )
+
+        def g(a, b, *, c):
+            return a + b + c
+
+        x = torch.randn(3)
+        # forwards positional and keyword args, returns the callee's result
+        self.assertEqual(call_with_disable(g, x, x, c=x), g(x, x, c=x))
+
+        # the eval-frame callback is unchanged across the call
+        cb = get_eval_frame_callback()
+        call_with_disable(g, x, x, c=x)
+        self.assertIs(get_eval_frame_callback(), cb)
+
+        # exceptions propagate and the callback is still restored
+        def boom(a):
+            raise ValueError("boom")
+
+        with self.assertRaises(ValueError):
+            call_with_disable(boom, x)
+        self.assertIs(get_eval_frame_callback(), cb)
+
+        # Exercise the prior-is-not-None restore branch: run-only mode (False) is
+        # a non-None callback, so call_with_disable must restore it (on both the
+        # normal and exception paths) rather than leave the handler cleared. Use
+        # run-only rather than a real callback so no compilation is triggered.
+        prev = set_eval_frame(False)
+        try:
+            self.assertEqual(call_with_disable(g, x, x, c=x), g(x, x, c=x))
+            self.assertIs(get_eval_frame_callback(), False)
+            with self.assertRaises(ValueError):
+                call_with_disable(boom, x)
+            self.assertIs(get_eval_frame_callback(), False)
+        finally:
+            set_eval_frame(prev)
+
+        # a callable is required (and must be passed positionally)
+        with self.assertRaises(TypeError):
+            call_with_disable()
+
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
             pass
