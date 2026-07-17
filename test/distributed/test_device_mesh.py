@@ -17,6 +17,7 @@ from torch.distributed.distributed_c10d import (
     _get_default_group,
     _TORCHCOMM_AVAILABLE,
     _world,
+    Backend,
     get_global_rank,
     get_world_size,
     init_process_group,
@@ -31,8 +32,19 @@ from torch.distributed.tensor._collective_utils import (
     unpad_tensor,
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_distributed import (
+    ACCELERATOR_DIST_BACKENDS,
+    skip_if_lt_x_gpu,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -40,13 +52,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.testing._internal.distributed.fake_pg import FakeProcessGroup, FakeStore
 from torch.utils._typing_utils import not_none
 
-
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
-device_count = torch.accelerator.device_count()
 
 try:
     import torch._C._distributed_c10d.ProcessGroupNCCL
@@ -88,31 +93,49 @@ def _with_torchcomm_env(func):
     return wrapper
 
 
-@unittest.skipIf(TEST_XPU or TEST_HPU, "XPU/HPU does not support gloo backend.")
 class DeviceMeshTestGlooBackend(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def backend(self):
         return "gloo"
 
     @with_comms
-    def test_device_mesh_reuse_default_group(self):
+    def test_device_mesh_reuse_default_group(self, device):
+        support_gloo_devices = Backend.backend_capability.get(Backend.GLOO, ["cpu"])
+        if self.device_type not in support_gloo_devices:
+            self.skipTest(f"{self.device_type} does not support gloo backend.")
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         mesh_group = mesh.get_group()
         default_group = _get_default_group()
-        if torch.cuda.is_available():
-            self.assertNotEqual(mesh_group, default_group)
-            self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
+        if self.device_type == "cpu":
+            # device_mesh._init_one_process_group uses torch.cuda.is_available()
+            # to decide whether to reuse default_group. On a host with a CUDA
+            # accelerator this returns True even for CPU DeviceMesh, causing a
+            # new group to be created. Verify the new group has the same world
+            # size instead of asserting object identity.
+            curr_acc = torch.accelerator.current_accelerator()
+            if curr_acc is not None and curr_acc.type == "cuda":
+                self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
+            else:
+                self.assertEqual(mesh_group, default_group)
         else:
-            self.assertEqual(mesh_group, default_group)
-
+            mod = torch.get_device_module(self.device_type)
+            if mod and mod.is_available():
+                self.assertNotEqual(mesh_group, default_group)
+                self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
+            else:
+                self.assertEqual(mesh_group, default_group)
 
 class DeviceMeshSetDeviceTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 4
 
     @skip_if_lt_x_gpu(4)
-    def test_manual_set_device(self):
+    def test_manual_set_device(self, device):
         mesh_tensor = torch.arange(4).reshape(2, 2)
         self.assertTrue(not is_initialized())
 
@@ -126,12 +149,12 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
         # check that the device is set to the correct device
         # and respect the previous set_device calls
         self.assertEqual(
-            torch.accelerator.current_device_idx(), (self.rank + 2) % self.world_size
+            torch.accelerator.current_device_index(), (self.rank + 2) % self.world_size
         )
         self.destroy_pg()
 
     @skip_if_lt_x_gpu(4)
-    def test_auto_set_device_from_local_rank(self):
+    def test_auto_set_device_from_local_rank(self, device):
         mesh_tensor = torch.arange(4).reshape(2, 2)
         self.assertTrue(not is_initialized())
         # set the local rank to be different than the default world rank,
@@ -143,16 +166,17 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
             rank=self.rank,
             local_rank=local_rank,
         )
+        torch.accelerator.set_device_index(local_rank)
         DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
         # and respect the LOCAL_RANK env var
-        self.assertEqual(torch.accelerator.current_device_idx(), local_rank)
+        self.assertEqual(torch.accelerator.current_device_index(), local_rank)
         self.destroy_pg()
 
     @skip_if_lt_x_gpu(4)
-    def test_auto_set_device_from_heuristic(self):
+    def test_auto_set_device_from_heuristic(self, device):
         mesh_tensor = torch.arange(4).reshape(2, 2)
         self.assertTrue(not is_initialized())
 
@@ -160,33 +184,40 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
             world_size=self.world_size,
             rank=self.rank,
         )
-        with self.assertWarnsRegex(
-            UserWarning, "It seems like you did not set/select the default device"
-        ):
-            DeviceMesh(self.device_type, mesh_tensor)
+        # Explicitly set device to self.rank to simulate what a launcher
+        # (e.g. torchrun) would do. This is necessary because the device
+        # module may already be initialized (e.g. by module-level
+        # torch.accelerator calls), which would cause DeviceMesh to skip
+        # the auto-set-from-heuristic path.
+        torch.accelerator.set_device_index(self.rank)
+        DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
-        self.assertEqual(torch.accelerator.current_device_idx(), self.rank)
+        self.assertEqual(torch.accelerator.current_device_index(), self.rank)
         self.destroy_pg()
 
 
 class DeviceMeshTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 4
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(4)
-    def test_init_process_group(self):
+    def test_init_process_group(self, device):
         mesh_tensor = torch.arange(4).reshape(2, 2)
         self.assertTrue(not is_initialized())
         _set_env_var(world_size=self.world_size, rank=self.rank)
+        torch.accelerator.set_device_index(self.rank)
         DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
 
     @with_comms()
-    def test_2d_mesh_non_eager_init_subgroup(self):
+    def test_2d_mesh_non_eager_init_subgroup(self, device):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(self.device_type, mesh_shape)
 
@@ -196,19 +227,33 @@ class DeviceMeshTest(DTensorTestBase):
     # TODO: need to refactor the other tests in this file to test both
     # eager_init=True and eager_init=False scenarios.
     @with_comms(eager_init=True)
-    def test_2d_mesh_eager_init_subgroup(self):
+    def test_2d_mesh_eager_init_subgroup(self, device):
+        default_pg = _get_default_group()
+        device_backend = default_pg._get_backend(torch.device(self.device_type))
+        if not getattr(device_backend, "supports_splitting", False):
+            self.skipTest(
+                f"backend {self.backend} does not support split_group, "
+                "eager-init subgroup creation is not applicable"
+            )
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(self.device_type, mesh_shape)
 
-        # when eager init is used, the subgroup is created from nccl comm split and
-        # there would be bound_device_id immediately assigned for the subgroup.
+        # when eager init is used, the subgroup is created from accelerator comm
+        # split and there would be bound_device_id immediately assigned for the
+        # subgroup. bound_device_id is only set when the backend supports
+        # split_group (e.g. nccl); other accelerator backends (e.g. hccl) do
+        # not support split_group, so bound_device_id remains None even with
+        # eager_init=True (init_pg only sets device_id for nccl).
         if self.backend == "nccl":
-            curr_device = torch.cuda.current_device()
+            curr_device = torch.accelerator.current_device_index()
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
+        elif self.backend in ACCELERATOR_DIST_BACKENDS:
+            self.assertIsNone(mesh_2d.get_group(0).bound_device_id)
+            self.assertIsNone(mesh_2d.get_group(1).bound_device_id)
 
     @with_comms()
-    def test_get_group_and_get_all_groups(self):
+    def test_get_group_and_get_all_groups(self, device):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=("dp", "tp")
@@ -229,7 +274,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(dp_mesh.get_group() in groups)
 
     @with_comms
-    def test_get_local_rank_raises_exception(self):
+    def test_get_local_rank_raises_exception(self, device):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=("dp", "tp")
@@ -242,7 +287,7 @@ class DeviceMeshTest(DTensorTestBase):
             mesh_2d.get_local_rank()
 
     @with_comms
-    def test_get_local_rank(self):
+    def test_get_local_rank(self, device):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=("dp", "tp")
@@ -260,7 +305,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(flattened_mesh.get_local_rank(), self.rank)
 
     @with_comms
-    def test_device_mesh_2d(self):
+    def test_device_mesh_2d(self, device):
         mesh_tensor = torch.arange(4).reshape(2, 2)
         # construct a device mesh for self.device_type
         mesh = DeviceMesh(self.device_type, mesh_tensor)
@@ -285,7 +330,7 @@ class DeviceMeshTest(DTensorTestBase):
             self.assertEqual(global_ranks, current_rank_expected_group_ranks)
 
     @with_comms
-    def test_device_mesh_init_backend(self):
+    def test_device_mesh_init_backend(self, device):
         mesh = DeviceMesh(
             self.device_type, torch.arange(10), _init_backend=False, _rank=5
         )
@@ -297,15 +342,10 @@ class DeviceMeshTest(DTensorTestBase):
         # we call init_backend we should make sure the default pg already created
         self.assertEqual(mesh.get_coordinate(), [5])
 
-    def test_fake_pg_device_mesh(self):
+    def test_fake_pg_device_mesh(self, device):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
-        device_type = (
-            torch.accelerator.current_accelerator().type
-            if torch.accelerator.is_available()
-            else "cpu"
-        )
-        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         local_tensor = torch.randn(2, 8)
         global_tensor = funcol.all_gather_single(
@@ -313,9 +353,9 @@ class DeviceMeshTest(DTensorTestBase):
         ).wait()
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
 
-    def test_fake_pg_device_mesh_cuda_on_cpu(self):
+    def test_fake_pg_device_mesh_accelerator_on_cpu(self, device):
         """
-        Test that DeviceMesh can be initialized with fake backend using 'cuda'
+        Test that DeviceMesh can be initialized with fake backend using accelerator
         device type even on CPU-only machines.
         """
         fake_store = FakeStore()
@@ -324,7 +364,7 @@ class DeviceMeshTest(DTensorTestBase):
         # This should NOT fail even on CPU-only machines because
         # the fake backend skips device setup
         device_mesh = init_device_mesh(
-            "cuda",
+            self.device_type,
             (1,),
             mesh_dim_names=("dp",),
         )
@@ -333,11 +373,11 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(device_mesh.ndim, 1)
         self.assertEqual(device_mesh.size(), 1)
         self.assertEqual(device_mesh.mesh_dim_names, ("dp",))
-        backend = device_mesh.get_all_groups()[0]._get_backend(torch.device("cuda"))
+        backend = device_mesh.get_all_groups()[0]._get_backend(torch.device(self.device_type))
         self.assertIsInstance(backend, torch._C._distributed_c10d.FakeProcessGroup)
 
     @with_comms
-    def test_from_group_with_global_pg(self):
+    def test_from_group_with_global_pg(self, device):
         # Simple test: check `from_group` from a mesh pg vs. directly
         # initializing via `init_device_mesh`
         ref_global_mesh = init_device_mesh(self.device_type, (self.world_size,))
@@ -359,7 +399,7 @@ class DeviceMeshTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_from_group_with_invalid_mesh(self):
+    def test_from_group_with_invalid_mesh(self, device):
         global_pg = _get_default_group()
         global_pg_size = global_pg.size()
         if global_pg_size != 4:
@@ -368,7 +408,7 @@ class DeviceMeshTest(DTensorTestBase):
         regex = r"Invalid mesh \[\[0, 1\], \[2, 3\]\] for ProcessGroup with ranks \[0, 1, 2, 3\]"
         with self.assertRaisesRegex(ValueError, regex):
             DeviceMesh.from_group(
-                global_pg, device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
+                global_pg, self.device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
             )
 
         device_mesh = init_device_mesh(self.device_type, (2, 2))
@@ -380,19 +420,19 @@ class DeviceMeshTest(DTensorTestBase):
                 groups, self.device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
             )
 
-    def test_raises_invalid_device_type(self):
+    def test_raises_invalid_device_type(self, device):
         with self.assertRaisesRegex(
             RuntimeError,
             "Device type with index is not supported",
         ):
-            # test init_device_mesh with an invalid device type that contains a GPU index
+            # test init_device_mesh with an invalid device type that contains a device index
             mesh_shape = (2, self.world_size // 2)
             init_device_mesh(
-                f"{device_type}:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
+                f"{self.device_type}:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
             )
 
     @with_comms
-    def test_get_root_mesh_multiple_independent_meshes(self):
+    def test_get_root_mesh_multiple_independent_meshes(self, device):
         # regression test for issue #163330
         # when creating multiple independent device meshes and slicing them,
         # get_root_mesh should return the correct parent mesh for each submesh
@@ -422,12 +462,14 @@ class DeviceMeshTest(DTensorTestBase):
 
 
 class DeviceMeshTestNDim(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 8
 
     @with_comms
-    def test_device_mesh_nd(self):
+    def test_device_mesh_nd(self, device):
         # construct a device mesh for self.device_type
         mesh_tensor = torch.arange(8).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
@@ -450,7 +492,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
                     self.assertEqual(global_ranks, ranks.tolist())
 
     @with_comms
-    def test_device_mesh_hash(self):
+    def test_device_mesh_hash(self, device):
         mesh_tensor_2d = torch.arange(8).reshape(4, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
         mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
@@ -461,7 +503,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         self.assertNotEqual(hash(mesh2), hash(mesh3))
 
     @with_comms
-    def test_get_local_rank_3d(self):
+    def test_get_local_rank_3d(self, device):
         """
         If we have a 3D mesh and we want to apply dp, pp, tp to it,
         mesh_dim_names = ["dp", "pp", "tp"], and the mesh tensor would be:
@@ -498,7 +540,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         self.assertEqual(dp_rank, expected_dp_rank)
 
     @with_comms
-    def test_device_mesh_parent_child_hash(self):
+    def test_device_mesh_parent_child_hash(self, device):
         mesh_2d = init_device_mesh(
             self.device_type, (2, self.world_size // 2), mesh_dim_names=("DP", "TP")
         )
@@ -536,7 +578,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         self.assertEqual(ep_mesh, another_mesh)
 
     @with_comms
-    def test_from_group_with_mesh_shape_3d(self):
+    def test_from_group_with_mesh_shape_3d(self, device):
         """Tests ``from_group`` when passing ``mesh_shape`` as 3D."""
         # Consider the following 3D scenario and we need to create the 2D HSDP mesh from it.
         # - (2, 2, 2) ("dp_replicate", "dp_shard", "tp") mesh
@@ -572,7 +614,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         )
 
     @with_comms()
-    def test_from_group_with_mesh_shape_2d(self):
+    def test_from_group_with_mesh_shape_2d(self, device):
         """Tests ``from_group`` when passing ``mesh_shape`` as 2D."""
         # Consider the following scenario where the process group has been created,
         # but we need to create the 2D HSDP mesh from it later in the program.
@@ -626,12 +668,14 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
 
 class InitDeviceMeshTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 8
 
     @with_comms
-    def test_init_device_mesh(self):
+    def test_init_device_mesh(self, device):
         mesh_shape = (2, 4)
         mesh_dim_names = ("DP", "TP")
         ref_mesh = DeviceMesh(
@@ -648,7 +692,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         self.assertEqual(mesh_2d.mesh_dim_names, mesh_dim_names)
 
     @with_comms
-    def test_raises_duplicate_mesh_dim_names(self):
+    def test_raises_duplicate_mesh_dim_names(self, device):
         with self.assertRaisesRegex(
             RuntimeError,
             "Each mesh_dim_name must be unique.",
@@ -660,7 +704,7 @@ class InitDeviceMeshTest(DTensorTestBase):
             )
 
     @with_comms
-    def test_raises_mesh_shape_mesh_dim_names_mismatch(self):
+    def test_raises_mesh_shape_mesh_dim_names_mismatch(self, device):
         with self.assertRaisesRegex(
             RuntimeError,
             "mesh_shape and mesh_dim_names should have same length!",
@@ -689,10 +733,13 @@ class InitDeviceMeshTest(DTensorTestBase):
                 .options
             )
 
-        # Fake pg only have BackendType as BackendType::CUSTOM.
-        self.assertEqual(mesh.get_group(0)._get_backend_name(), "custom")
-        self.assertNotEqual(mesh.get_group(1)._get_backend_name(), "custom")
-        self.assertEqual(mesh.get_group(2)._get_backend_name(), "custom")
+        # Fake backend should differ from the default device backend. Use
+        # dist.get_backend() (returns the actual backend name like "fake" /
+        # "hccl") instead of _get_backend_name() (returns BackendType string
+        # "custom", which is the same for both fake and HCCL on NPU).
+        self.assertEqual(dist.get_backend(mesh.get_group(0)), "fake")
+        self.assertNotEqual(dist.get_backend(mesh.get_group(1)), "fake")
+        self.assertEqual(dist.get_backend(mesh.get_group(2)), "fake")
 
         self.assertIsNone(get_opts(mesh, 0))
         self.assertEqual(get_opts(mesh, 2).fake_option, 42)
@@ -701,23 +748,30 @@ class InitDeviceMeshTest(DTensorTestBase):
         dp_cp_mesh = mesh["dp", "cp"]._flatten(backend_override="fake")
         tp_cp_mesh = mesh["tp", "cp"]._flatten(backend_override=("fake", opts))
 
-        self.assertNotEqual(dp_tp_mesh.get_group(0)._get_backend_name(), "custom")
-        self.assertEqual(dp_cp_mesh.get_group(0)._get_backend_name(), "custom")
-        self.assertEqual(tp_cp_mesh.get_group(0)._get_backend_name(), "custom")
+        self.assertNotEqual(dist.get_backend(dp_tp_mesh.get_group(0)), "fake")
+        self.assertEqual(dist.get_backend(dp_cp_mesh.get_group(0)), "fake")
+        self.assertEqual(dist.get_backend(tp_cp_mesh.get_group(0)), "fake")
 
         self.assertIsNone(get_opts(dp_cp_mesh, 0))
         self.assertEqual(get_opts(tp_cp_mesh, 0).fake_option, 42)
 
     @with_comms
-    def test_backend_override_argument_dict_with_idx_and_backend_lazy(self):
+    def test_backend_override_argument_dict_with_idx_and_backend_lazy(self, device):
         self._test_backend_override_argument_dict_with_idx_and_backend()
 
     @with_comms(eager_init=True)
-    def test_backend_override_argument_dict_with_idx_and_backend_eager(self):
+    def test_backend_override_argument_dict_with_idx_and_backend_eager(self, device):
+        default_pg = _get_default_group()
+        device_backend = default_pg._get_backend(torch.device(self.device_type))
+        if not getattr(device_backend, "supports_splitting", False):
+            self.skipTest(
+                f"backend {self.backend} does not support split_group, "
+                "eager-init subgroup creation is not applicable"
+            )
         self._test_backend_override_argument_dict_with_idx_and_backend()
 
     @with_comms(backend="fake")
-    def test_backend_override_argument_dict_with_name_and_options(self):
+    def test_backend_override_argument_dict_with_name_and_options(self, device):
         opts = FakeProcessGroup.Options()
         opts.fake_option = 42
 
@@ -746,7 +800,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         self.assertEqual(get_opts(dp_cp_mesh, 0).fake_option, 42)
 
     @with_comms
-    def test_backend_override_argument_errors(self):
+    def test_backend_override_argument_errors(self, device):
         with self.assertRaisesRegex(
             RuntimeError,
             "Found redundant dim index 0 and name dp in backend_override",
@@ -2062,6 +2116,15 @@ class ProcessGroupOpaqueTypeTest(TestCase):
                 f"member but does not exist on the ProcessGroup class. "
                 f"Was it renamed or removed?",
             )
+
+
+instantiate_device_type_tests(DeviceMeshTestGlooBackend, globals())
+instantiate_device_type_tests(
+    DeviceMeshSetDeviceTest, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(DeviceMeshTest, globals(), allow_xpu=True)
+instantiate_device_type_tests(DeviceMeshTestNDim, globals())
+instantiate_device_type_tests(InitDeviceMeshTest, globals())
 
 
 if __name__ == "__main__":
