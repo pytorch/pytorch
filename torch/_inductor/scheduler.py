@@ -5885,7 +5885,7 @@ class Scheduler:
 
                         is_nvgemm_choice = isinstance(choice, NVUniversalGemmCaller)
                         if is_nvgemm_choice and fusible_choice:
-                            # NVGEMM register allocations are fixed by cutlass_api;
+                            # NVGEMM register allocations are fixed by cutlass.operators;
                             # Triton's n_regs/n_spills heuristic doesn't apply.
                             ms_fused_choice = choice
                             break

@@ -122,7 +122,7 @@ def graph_desc(fn):
 class TestAutograd(TestCase):
     def tearDown(self):
         torch.autograd._force_original_view_tracking(False)
-        super(TestCase, self).tearDown()
+        super().tearDown()
 
     def test_copy_slices_graph_task_updates(self):
         def f1(x, y):
@@ -2288,6 +2288,31 @@ class TestAutograd(TestCase):
         sum(rx, ry).sum().backward()
         self.assertTrue(was_called[0])
 
+    def test_needs_input_grad_setter_roundtrip(self):
+        sentinel = ([False, True],)
+
+        class NeedsInputGradSetter(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x + y
+
+            @staticmethod
+            def backward(ctx, grad):
+                original = ctx.needs_input_grad
+                self.assertEqual(original, (True, False))
+                ctx.needs_input_grad = sentinel
+                self.assertIs(ctx.needs_input_grad, sentinel)
+                ctx.needs_input_grad = None
+                self.assertIsNone(ctx.needs_input_grad)
+                ctx.needs_input_grad = original
+                self.assertIs(ctx.needs_input_grad, original)
+                return grad, None
+
+        x = torch.randn((), requires_grad=True)
+        y = torch.randn(())
+        NeedsInputGradSetter.apply(x, y).backward()
+        self.assertEqual(x.grad, torch.ones_like(x))
+
     def test_retain_grad(self):
         input = torch.rand(1, 3, requires_grad=True)
         h1 = input * 3
@@ -4355,6 +4380,10 @@ class TestAutograd(TestCase):
             torch._dynamo.reset()
 
             prev = torch.get_default_device()
+            had_default_device = (
+                getattr(torch._GLOBAL_DEVICE_CONTEXT, "device_context", None)
+                is not None
+            )
             try:
                 # Using torch.device("cuda") directly doesn't work here because
                 # it has some issues. In particular, unlike set_default_device or
@@ -4365,7 +4394,8 @@ class TestAutograd(TestCase):
                 out = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
                 out.sum().backward()
             finally:
-                torch.set_default_device(prev)
+                # None clears the DeviceContext mode; "cpu" would leak it.
+                torch.set_default_device(prev if had_default_device else None)
 
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             if expect_fail:
@@ -4378,12 +4408,17 @@ class TestAutograd(TestCase):
     def test_checkpoint_device_context_fn(self):
         @contextlib.contextmanager
         def apply_device(device):
+            prev = torch.get_default_device()
+            had_default_device = (
+                getattr(torch._GLOBAL_DEVICE_CONTEXT, "device_context", None)
+                is not None
+            )
             try:
-                prev = torch.get_default_device()
                 torch.set_default_device(device)
                 yield
             finally:
-                torch.set_default_device(prev)
+                # None clears the DeviceContext mode; "cpu" would leak it.
+                torch.set_default_device(prev if had_default_device else None)
 
         def context_fn():
             return contextlib.nullcontext(), apply_device("cuda")

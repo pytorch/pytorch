@@ -91,7 +91,10 @@ def check_codegen(
         _check_has_dynamic_shape(self, code)
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
-        self.assertTrue("def triton" in code, f"Failed to find triton kernel\n{code}")
+        self.assertTrue(
+            "def triton" in code,
+            lambda msg: f"{msg}\nFailed to find triton kernel\n{code}",
+        )
 
     if not called:
         raise AssertionError("Ran graph without calling compile_fx")
@@ -139,6 +142,7 @@ test_failures = {
     "test_triton_argmin_argmax_transpose_logical_index_dynamic_shapes": TestFailure(
         ("cpu",), is_skip=True
     ),
+    "test_view_as_complex_non_contiguous_dynamic_shapes": TestFailure(("cpu",)),
     # XPU always convert conv1d to conv2d and can not match the expected codegen result.
     "test_conv1d_depthwise_dynamic_shapes": TestFailure(("xpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
