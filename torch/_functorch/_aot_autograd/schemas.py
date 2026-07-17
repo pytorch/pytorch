@@ -516,6 +516,9 @@ class ViewAndMutationMeta:
 
     # Number of opaque objects saved for backward
     num_opaque_objects_saved_for_bw: int | None = None
+
+    # Whether each saved tensor is also a graph input.
+    saved_tensor_is_graph_input: list[bool] = field(default_factory=list)
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with

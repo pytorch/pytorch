@@ -241,7 +241,7 @@ index 2d83846f77a..c40382b93a1 100644
 -
 +
  from torch import Tensor
-+from torch._subclasses.fake_tensor import FakeTensor
++from torch._subclasses.fake_tensor import is_fake_tensor
 -
 +
  import cutlass
@@ -287,7 +287,7 @@ index 2d83846f77a..c40382b93a1 100644
 +            divisibility = min(
 +                divisibility, power_of_2_divisibility(stride, max_divisibility)
 +            )
-+    if isinstance(tensor, FakeTensor) or tensor.is_meta:
++    if is_fake_tensor(tensor) or tensor.is_meta:
 +        # AOT inputs have no real pointer; reuse this contract only when the
 +        # runtime tensor has the allocator-backed base alignment assumed here.
 +        return divisibility
