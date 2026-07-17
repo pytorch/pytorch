@@ -654,6 +654,47 @@ class LoopOrderingTest(TestCase):
         # variance reduction + block reduction = 2 kernels
         self.assertEqual(2, metrics.generated_kernel_count)
 
+    @inductor_config.patch(
+        {
+            "assert_indirect_indexing": False,
+            "benchmark_kernel": False,
+            "fx_graph_cache": False,
+            "loop_index_inversion_in_fusion": True,
+            "loop_ordering_after_fusion": False,
+            "loop_reindexing_after_fusion": False,
+        }
+    )
+    def test_rejected_index_inversion_rollback(self):
+        from torch._inductor.choices import InductorChoices
+
+        class RejectInvertedFusion(InductorChoices):
+            def __init__(self):
+                self.rejected_inversion = False
+
+            def can_fuse(self, scheduler, node1, node2, shared_data_score):
+                if any(not write.is_contiguous() for write in node2.read_writes.writes):
+                    self.rejected_inversion = True
+                    return False
+                return InductorChoices.can_fuse(
+                    scheduler, node1, node2, shared_data_score
+                )
+
+        def f(x):
+            y = realize(x + 1)
+            p = torch.arange(8, device=x.device)
+            z = realize(y[4 * (p % 2) + p // 2])
+            return z * 3
+
+        x = torch.arange(8, device=self.device, dtype=torch.float32)
+        choices = RejectInvertedFusion()
+
+        with V.set_choices_handler(choices):
+            actual = torch.compile(f, fullgraph=True)(x)
+
+        self.assertTrue(choices.rejected_inversion)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+        self.assertEqual(actual, f(x))
+
     def test_reshape_reindexing_fused_pointwise(self):
         """
         Redecomposition where the pointwise side is a FusedSchedulerNode.
@@ -1943,6 +1984,34 @@ class TestIndexInversion(TestCase):
             (4 * p, False, 64),  # expr and inverse not bijections
             # when sorted, invertible
             (ModularIndexing(p, 1, 10) + 10 * ModularIndexing(p, 10, 10), True, None),
+            (
+                4 * FloorDiv(p, 512)
+                + ModularIndexing(p, 1, 4)
+                + 4096 * ModularIndexing(p, 4, 4)
+                + 128 * ModularIndexing(p, 16, 32),
+                False,
+                None,
+            ),
+            # Missing the source chunk ModularIndexing(p, 4, 4).
+            (
+                4 * FloorDiv(p, 512)
+                + ModularIndexing(p, 1, 4)
+                + 128 * ModularIndexing(p, 16, 32),
+                False,
+                None,
+            ),
+            (
+                4 * FloorDiv(p, 4)
+                + 2 * FloorDiv(ModularIndexing(p, 1, 5), 2)
+                + ModularIndexing(p, 1, 2),
+                False,
+                None,
+            ),
+            (
+                4 * FloorDiv(p, 4) + ModularIndexing(p, 1, 4) + 100,
+                False,
+                None,
+            ),
             # Wrong coefficient ratios: 4 ≠ 1×2
             (4 * ModularIndexing(p, 1, 8) + ModularIndexing(p, 8, 2), False, None),
             (
@@ -1969,6 +2038,36 @@ class TestIndexInversion(TestCase):
                     reconstruction,
                     lambda msg: f"{msg}\nExpected non-invertible: {expr}",
                 )
+
+        bounded_expr = (
+            4 * FloorDiv(p, 512)
+            + ModularIndexing(p, 1, 4)
+            + 4096 * ModularIndexing(p, 4, 4)
+            + 128 * ModularIndexing(p, 16, 32)
+        )
+        self.assertIsNone(generate_inverse_formula(bounded_expr, p))
+        self.assertEqual(
+            generate_inverse_formula(bounded_expr, p, 16384),
+            4 * FloorDiv(p, 4096)
+            + ModularIndexing(p, 1, 4)
+            + 512 * ModularIndexing(p, 4, 32)
+            + 16 * ModularIndexing(p, 128, 32),
+        )
+        self.assertIsNone(generate_inverse_formula(bounded_expr, p, 4096))
+        self.assertIsNone(generate_inverse_formula(bounded_expr, p, 32768))
+
+        overlapping_floors = (
+            ModularIndexing(p, 1, 2) + 2 * FloorDiv(p, 2) + 4 * FloorDiv(p, 4)
+        )
+        self.assertIsNone(generate_inverse_formula(overlapping_floors, p, 8))
+
+        blockwise_expr = (
+            100 * FloorDiv(p, 100)
+            + 10 * ModularIndexing(p, 1, 10)
+            + FloorDiv(ModularIndexing(p, 1, 100), 10)
+        )
+        self.assertIsNone(generate_inverse_formula(blockwise_expr, p, 15))
+        self.assertIsNotNone(generate_inverse_formula(blockwise_expr, p, 100))
 
 
 if __name__ == "__main__":

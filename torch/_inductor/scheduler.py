@@ -2326,6 +2326,7 @@ class SchedulerNode(BaseSchedulerNode):
         in sync with those methods and restore_loop_state."""
         return (
             self._body,
+            self._body.indexing_exprs.copy(),
             self._sizes,
             self.group,
             self.read_writes,
@@ -2336,11 +2337,13 @@ class SchedulerNode(BaseSchedulerNode):
         """Restore state from snapshot_loop_state."""
         (
             self._body,
+            indexing_exprs,
             self._sizes,
             self.group,
             self.read_writes,
             self.unmet_dependencies,
         ) = state
+        self._body.indexing_exprs = indexing_exprs
         self.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
 
     def _before_loop_state_mutation(self) -> None:
@@ -7038,6 +7041,8 @@ class Scheduler:
 
         if any(n.is_cpu() for n in [node1, node2]):
             return -1
+        if not isinstance(node2, SchedulerNode):
+            return -1
 
         # Check for shared buffers between nodes
         node1_buffer_names = node1.read_writes.buffer_names()
@@ -7137,7 +7142,9 @@ class Scheduler:
             )
         simplified_read_expr = sum(simplified_terms)
 
-        inverse_formula = generate_inverse_formula(simplified_read_expr, index_vars[0])
+        inverse_formula = generate_inverse_formula(
+            simplified_read_expr, index_vars[0], node2_read.size[0]
+        )
 
         # formula is not invertible
         if inverse_formula is None:
@@ -7146,6 +7153,7 @@ class Scheduler:
         # === Apply Inversion ===
 
         # Swap the indexing expressions using the inverse formula
+        node2._before_loop_state_mutation()
         node2._body.indexing_exprs[read_expr_index] = node2._body.indexing_exprs[  # type: ignore[attr-defined]
             write_expr_index
         ]
@@ -7156,6 +7164,8 @@ class Scheduler:
         score = self.score_fusion_memory(node1, node2)
         if not isinstance(score, int):
             raise AssertionError("expected score to be an int")
+        if score == 0:
+            score = self._score_fusion_memory_by_fusable_read_write(node1, node2)
 
         fusion_log.info("Shared memory after inversion: %d", score)
         return score
