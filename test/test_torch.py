@@ -862,6 +862,8 @@ class TestTorchDeviceType(TestCase):
             warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
             # ignore all deprecation warnings
             warnings.filterwarnings("ignore", category=DeprecationWarning)
+            # torch.jit.script emits a visible FutureWarning; ignore it too
+            warnings.filterwarnings("ignore", category=FutureWarning)
             scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
             scripted_cpp_warn_fn()
             warning = w[0]
@@ -886,6 +888,8 @@ class TestTorchDeviceType(TestCase):
             warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
             # ignore all deprecation warnings
             warnings.filterwarnings("ignore", category=DeprecationWarning)
+            # torch.jit.script emits a visible FutureWarning; ignore it too
+            warnings.filterwarnings("ignore", category=FutureWarning)
             scripted_warn_fn = torch.jit.script(warn_fn)
             scripted_warn_fn()
             frameinfo = inspect.getframeinfo(inspect.currentframe())
@@ -894,7 +898,7 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(re.search('Warning!', str(warning.message)) is not None)
 
             # Checks the Python features of the warning
-            self.assertEqual(frameinfo.lineno - 10, warning.lineno)
+            self.assertEqual(frameinfo.lineno - 12, warning.lineno)
             self.assertEqual(len(w), 1)
 
     # FIXME: move to test_testing
@@ -2076,6 +2080,7 @@ class TestTorchDeviceType(TestCase):
                           lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
                           lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
                           lambda: torch.any(y),
+                          lambda: torch.combinations(x, r=2),
                           lambda: torch.normal(x, x))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
@@ -10942,6 +10947,61 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
                 torch.utils.swap_tensors(t1, t2)
 
+    def test_swap_allows_tensor_weakref(self):
+        from torch.utils.weak import TensorWeakRef
+
+        t1 = torch.nn.Parameter(torch.zeros(2))
+        t2 = torch.nn.Parameter(torch.ones(2))
+        t2.foo = "bar"
+
+        t1_ref = TensorWeakRef(t1)
+        t2_ref = TensorWeakRef(t2)
+        t1_ref.extra = "still settable"
+        self.assertEqual(t1_ref.extra, "still settable")
+        self.assertIs(t1_ref(), t1)
+        self.assertIs(t2_ref(), t2)
+        t1_weakrefs = weakref.getweakrefs(t1)
+        t2_weakrefs = weakref.getweakrefs(t2)
+        self.assertEqual(len(t1_weakrefs), 1)
+        self.assertEqual(len(t2_weakrefs), 1)
+        self.assertIs(t1_weakrefs[0], t1_ref.ref)
+        self.assertIs(t2_weakrefs[0], t2_ref.ref)
+
+        torch.utils.swap_tensors(t1, t2)
+
+        self.assertIs(t1_ref(), t1)
+        self.assertIs(t2_ref(), t2)
+        self.assertEqual(t1, torch.ones(2))
+        self.assertEqual(t2, torch.zeros(2))
+        self.assertEqual(t1.foo, "bar")
+
+        _wr = weakref.ref(t1)
+        self.assertIs(_wr(), t1)
+        with self.assertRaisesRegex(RuntimeError, "has weakref"):
+            torch.utils.swap_tensors(t1, t2)
+
+        t3 = torch.nn.Parameter(torch.zeros(2))
+        t4 = torch.nn.Parameter(torch.ones(2))
+        _ = TensorWeakRef(t3)
+        _ = TensorWeakRef(t4)
+        _wr = weakref.ref(t4)
+        self.assertIs(_wr(), t4)
+        with self.assertRaisesRegex(RuntimeError, "has weakref"):
+            torch.utils.swap_tensors(t3, t4)
+
+    def test_tensor_weakref_bc_behavior(self):
+        from torch.utils.weak import TensorWeakRef, WeakIdRef
+
+        t = torch.zeros(3)
+        tensor_ref = TensorWeakRef(t)
+        plain_ref = weakref.ref(t)
+
+        tensor_ref.extra = "still settable"
+        self.assertEqual(tensor_ref.extra, "still settable")
+        self.assertIs(tensor_ref(), t)
+        self.assertFalse(tensor_ref == plain_ref)
+        self.assertTrue(bool(TensorWeakRef(t) == WeakIdRef(t)))
+        self.assertFalse(bool(tensor_ref == plain_ref))
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_fail_slots(self):
