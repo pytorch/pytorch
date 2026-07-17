@@ -13,8 +13,8 @@ requires = [
     # `python -m torchgen.gen`, and torchgen/utils.py uses `Self` /
     # `assert_never`). Currently also pulled in transitively through
     # scikit-build-core, but list it explicitly as a direct build-time
-    # dep. Lower bound matches the legacy pin; the CI Docker image ships
-    # 4.12.2 on Python <3.14, so do not raise this without bumping CI.
+    # dep. The CI Docker image ships 4.12.2 on Python <3.14, so do not
+    # raise the lower bound without bumping CI.
     "typing-extensions>=4.10.0",
     # Dependency chain: NNPACK -> PeachPy -> six. PeachPy emits NNPACK's hot
     # assembly loops at build time and does `import six`. NNPACK is on by
@@ -30,14 +30,14 @@ minimum-version = "build-system.requires"
 build-dir = "build"
 
 [tool.scikit-build.env]
-# MAX_JOBS is PyTorch's historical umbrella parallelism knob (also read by
+# MAX_JOBS is PyTorch's umbrella parallelism knob (also read by
 # linters, cpp_extension JIT, nccl/MKLDNN sub-builds); alias it to the
 # variable CMake natively honors for `cmake --build`. setdefault semantics:
 # a user-set CMAKE_BUILD_PARALLEL_LEVEL always wins.
 CMAKE_BUILD_PARALLEL_LEVEL = { env = "MAX_JOBS" }
 # Listing CC/CXX here opts out of scikit-build-core's sysconfig-compiler
-# injection (a documented env-table behavior), so CMake detects from PATH as
-# setup.py did -- avoids the conda compiler_compat / stale-venv-gcc probe breaks.
+# injection (a documented env-table behavior), so CMake detects the compiler
+# from PATH -- avoids the conda compiler_compat / stale-venv-gcc probe breaks.
 # An ambient CC/CXX is still respected.
 CC = { env = "CC" }
 CXX = { env = "CXX" }
@@ -45,8 +45,8 @@ CXX = { env = "CXX" }
 # cmake.build-type is deliberately not set: it defaults to Release, and
 # leaving it unconfigured lets scikit-build-core honor a CMAKE_BUILD_TYPE
 # set in the environment (.ci/pytorch/build.sh exports RelWithAssert for
-# *-debug CI images). The overrides below map PyTorch's historical DEBUG
-# and REL_WITH_DEB_INFO env vars, mirroring the old setup.py behavior; on
+# *-debug CI images). The overrides below map PyTorch's DEBUG and
+# REL_WITH_DEB_INFO env vars to the corresponding build types; on
 # multi-config generators (Visual Studio) the resolved type is passed as
 # --config to cmake --build and cmake --install, ensuring they match.
 [[tool.scikit-build.overrides]]
@@ -62,8 +62,8 @@ cmake.build-type = "RelWithDebInfo"
 # the Visual Studio (multi-config) generator, under which the oneDNN-XPU
 # ExternalProject's -DCMAKE_CXX_COMPILER=icx is ignored (VS picks the compiler by
 # toolset), so oneDNN configures with MSVC and fails its -fsycl driver check.
-# setup.py used Ninja whenever it was on PATH; 1.0's generator resolution honors
-# cmake.define.CMAKE_GENERATOR, so this lives here as the single source of truth
+# Generator resolution honors cmake.define.CMAKE_GENERATOR, so this lives
+# here as the single source of truth
 # (and covers plain non-CI editable builds too) instead of a CI-exported env var.
 #
 # Under Ninja, CMake does not default to MSVC: with the Intel oneAPI environment
@@ -338,6 +338,7 @@ mpi = "torch.distributed.distributed_c10d:_register_builtin_mpi_backend"
 gloo = "torch.distributed.distributed_c10d:_register_builtin_gloo_backend"
 nccl = "torch.distributed.distributed_c10d:_register_builtin_nccl_backend"
 nccl2 = "torch.distributed.distributed_c10d:_register_builtin_nccl2_backend"
+"nccl-lazy" = "torch.distributed.distributed_c10d:_register_builtin_nccl_lazy_backend"
 ucc = "torch.distributed.distributed_c10d:_register_builtin_ucc_backend"
 xccl = "torch.distributed.distributed_c10d:_register_builtin_xccl_backend"
 

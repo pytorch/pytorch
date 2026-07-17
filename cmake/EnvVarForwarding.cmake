@@ -1,9 +1,5 @@
 # Forward environment variables to CMake variables.
 #
-# This replicates the behavior of setup.py / tools/setup_helpers/cmake.py which
-# passes all BUILD_*, USE_*, and CMAKE_* environment variables as -D flags, plus
-# a set of additional variables that don't follow the prefix convention.
-#
 # Forwarding rule: an environment variable reaches CMake (as a cache variable of
 # the same name) if it (a) starts with BUILD_, USE_, or CMAKE_, (b) ends with
 # EXITCODE or EXITCODE__TRYRUN_OUTPUT, or (c) appears in the _ENV_ALIASES /
@@ -11,10 +7,23 @@
 # forwarded -- set it as a CMake option with -D / cmake.define instead.
 #
 # ============================================================================
-# Build environment variable reference (previously the top-of-file comment in
-# setup.py). Vars below that match the forwarding rule are passed through by
-# this module; the rest are handled where noted.
+# Build environment variable reference. Vars below that match the forwarding
+# rule are passed through by this module; the rest are handled where noted.
+# See CONTRIBUTING.md for the recommended developer setup.
 # ============================================================================
+#
+# Everyday knobs:
+#   DEBUG=1                  build with -O0 -g; mapped to the CMake build type
+#                            by [[tool.scikit-build.overrides]] in pyproject.toml
+#   REL_WITH_DEB_INFO=1      optimized build with -g, same mechanism as DEBUG
+#   MAX_JOBS                 compile parallelism; aliased to
+#                            CMAKE_BUILD_PARALLEL_LEVEL by [tool.scikit-build.env]
+#                            in pyproject.toml
+#   CC / CXX / CFLAGS        compiler and flags; read by CMake / scikit-build-core
+#                            directly (CFLAGS also applies to C++ unless CXXFLAGS
+#                            is set)
+#   USE_CUDA=0, BUILD_TEST=0, ...   feature toggles, next section
+#   TORCH_CUDA_ARCH_LIST     CUDA arches to build for, e.g. "8.0;9.0"
 #
 # Feature toggles (USE_*/BUILD_*, forwarded by prefix):
 #   USE_CUDA=0                disables CUDA build
@@ -84,18 +93,10 @@
 #                            cmake/Modules/FindACL.cmake)
 #   LIBRARY_PATH / LD_LIBRARY_PATH   searched for libraries (compiler/linker native)
 #
-# Handled outside this module (NOT forwarded here):
-#   DEBUG / REL_WITH_DEB_INFO   build with -O0 -g / optimized + -g; mapped to the
-#                            CMake build type by [[tool.scikit-build.overrides]]
-#                            in pyproject.toml
-#   MAX_JOBS                 compile parallelism; aliased to
-#                            CMAKE_BUILD_PARALLEL_LEVEL by the build backend
-#                            (tools/build_backend/pytorch_build_backend.py)
+# Handled outside this module (NOT forwarded here; see also the everyday knobs
+# above, which are all handled via pyproject.toml or natively):
 #   PYTORCH_BUILD_VERSION / PYTORCH_BUILD_NUMBER   wheel version; consumed by the
 #                            version metadata provider (tools/metadata)
-#   CC / CXX / CFLAGS        compiler and flags; read by CMake / scikit-build-core
-#                            directly (CFLAGS also applies to C++ unless CXXFLAGS
-#                            is set, matching the historical setup.py quirk)
 #
 # CMake options, set with -D / cmake.define (NOT environment variables):
 #   DEBUG_CUDA               when compiling DEBUG, also build CUDA kernels with
@@ -265,18 +266,20 @@ if(Python_EXECUTABLE)
   endif()
 endif()
 
-# BUILD_PYTHON_ONLY implies BUILD_LIBTORCHLESS=ON. This matches setup.py
-# behavior where BUILD_PYTHON_ONLY unconditionally forces BUILD_LIBTORCHLESS.
+# BUILD_PYTHON_ONLY implies BUILD_LIBTORCHLESS=ON.
 if(BUILD_PYTHON_ONLY)
   set(BUILD_LIBTORCHLESS ON CACHE BOOL "Build without libtorch" FORCE)
 endif()
 
-# USE_NIGHTLY bypasses the build entirely and downloads a pre-built wheel.
-# This is not supported via CMake -- use the standalone script instead.
+# Installing pre-built nightly binaries instead of building is handled by
+# tools/nightly.py, not by the build: a PEP 517 build cannot skip itself.
+# Fail loudly rather than let USE_NIGHTLY be silently ignored.
 if(USE_NIGHTLY)
   message(FATAL_ERROR
     "USE_NIGHTLY is not supported with the scikit-build-core build system. "
-    "Use 'python tools/nightly_wheel.py' instead, or install directly with pip: "
+    "Use 'python tools/nightly.py checkout' instead (it checks out the nightly "
+    "commit and installs matching pre-built binaries; see --help), or install "
+    "a nightly wheel directly: "
     "pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu"
   )
 endif()
