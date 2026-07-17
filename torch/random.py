@@ -64,36 +64,90 @@ def manual_seed(seed: int) -> torch._C.Generator:
     return _manual_seed_impl(seed)
 
 
-def _manual_seed_impl(seed: int) -> torch._C.Generator:
+def _manual_seed_impl(seed) -> torch._C.Generator:
     seed = int(seed)
-    import torch.accelerator
+    import torch.cuda
 
-    if not torch._C._accelerator_isInBadFork():
-        acc = torch.accelerator.current_accelerator()
-        if acc and acc.type == "mps":
-            # MPS does not support lazy init, so seed its default generator
-            # directly. Going through `manual_seed_all` would call `device_count()`,
-            # which eagerly initializes the runtime and crashes in a forked
-            # child (e.g. a "fork" DataLoader worker) on macOS.
-            torch.mps.manual_seed(seed)
-        else:
-            torch.accelerator.random.manual_seed_all(seed)
+    if not torch.cuda._is_in_bad_fork():
+        torch.cuda.manual_seed_all(seed)
+
+    import torch.mps
+
+    if not torch.mps._is_in_bad_fork():
+        torch.mps.manual_seed(seed)
+
+    import torch.xpu
+
+    if not torch.xpu._is_in_bad_fork():
+        torch.xpu.manual_seed_all(seed)
+
+    import torch.mtia
+
+    if not torch.mtia._is_in_bad_fork():
+        torch.mtia.manual_seed_all(seed)
+
+    _seed_custom_device(seed)
 
     return default_generator.manual_seed(seed)
 
 
 def seed() -> int:
     r"""Sets the seed for generating random numbers to a non-deterministic
-    random number on all devices. Returns a 64-bit number used to seed the RNG.
+    random number on all devices. Returns a 64 bit number used to seed the RNG.
 
     .. note:: This function generates a non-deterministic seed on CPU, then uses
         it to seed all :ref:`accelerators<accelerators>`.
         For the accelerator only, use :func:`torch.accelerator.random.manual_seed_all`.
     """
     seed = default_generator.seed()
-    _manual_seed_impl(seed)
+    import torch.cuda
+
+    if not torch.cuda._is_in_bad_fork():
+        torch.cuda.manual_seed_all(seed)
+
+    import torch.mps
+
+    if not torch.mps._is_in_bad_fork():
+        torch.mps.manual_seed(seed)
+
+    import torch.xpu
+
+    if not torch.xpu._is_in_bad_fork():
+        torch.xpu.manual_seed_all(seed)
+
+    import torch.mtia
+
+    if not torch.mtia._is_in_bad_fork():
+        torch.mtia.manual_seed_all(seed)
+
+    _seed_custom_device(seed)
 
     return seed
+
+
+def _seed_custom_device(seed) -> None:
+    r"""Sets the seed to generate random numbers for custom device.
+
+    Args:
+        seed (int): The desired seed.
+
+    See [Note: support the custom device with privateuse1]
+    """
+    seed = int(seed)
+    custom_backend_name = torch._C._get_privateuse1_backend_name()
+    if hasattr(torch, custom_backend_name):
+        custom_device_mod = getattr(torch, custom_backend_name)
+        _bad_fork_name = "_is_in_bad_fork"
+        _seed_all_name = "manual_seed_all"
+        if hasattr(custom_device_mod, _bad_fork_name) and hasattr(
+            custom_device_mod, _seed_all_name
+        ):
+            if not getattr(custom_device_mod, _bad_fork_name)():
+                getattr(custom_device_mod, _seed_all_name)(seed)
+        else:
+            message = f"Set seed for `{custom_backend_name}` device does not take effect, please add API's "
+            message += f"`{_bad_fork_name}` and `{_seed_all_name}` to `{custom_backend_name}` device module."
+            warnings.warn(message, UserWarning, stacklevel=3)
 
 
 def initial_seed() -> int:
@@ -180,7 +234,7 @@ def fork_rng(
                 f"set {acc_type}_VISIBLE_DEVICES= or devices=[]; if you are using device 0 only, "
                 f"set {acc_type}_VISIBLE_DEVICES=0 or devices=[0].  To initialize all devices "
                 f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
-                f"`range(torch.accelerator.device_count())`."
+                f"`range(torch.{acc_type}.device_count())`."
             )
             warnings.warn(message, stacklevel=2)
             _fork_rng_warned_already = True
