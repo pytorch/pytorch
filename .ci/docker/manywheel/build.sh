@@ -113,24 +113,24 @@ esac
 if [[ -n ${MANY_LINUX_VERSION} && -z ${DOCKERFILE_SUFFIX} ]]; then
     DOCKERFILE_SUFFIX=_${MANY_LINUX_VERSION}
 fi
-# Only activate this if in CI
-if [ "$(uname -m)" != "s390x" ] && [ -v CI ]; then
-    # TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
-    # is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
-    sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
-    sudo systemctl daemon-reload
-    sudo systemctl restart docker
+# Remote BuildKit (OSDC) pushes straight to the registry on WITH_PUSH; the local
+# path (s390x) loads the built image so its workflow can tag and push it.
+if [[ -n "${REMOTE_BUILDKIT:-}" && "${WITH_PUSH:-false}" == "true" ]]; then
+    output_flag="--push"
+elif [[ -z "${REMOTE_BUILDKIT:-}" ]]; then
+    output_flag="--load"
+else
+    output_flag=""
 fi
 
-tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
-
-DOCKER_BUILDKIT=1 docker build  \
+docker buildx build \
     ${DOCKER_GPU_BUILD_ARG} \
     --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
     --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
     --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
     --target "${TARGET}" \
-    -t "${tmp_tag}" \
-    $@ \
+    --progress plain \
+    ${output_flag} \
+    "$@" \
     -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
     "${TOPDIR}/.ci/docker/"

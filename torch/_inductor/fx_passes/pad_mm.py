@@ -22,7 +22,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     pad_mm_precondition,
 )
 from torch._inductor.runtime.caching import encoders, memoizers
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.utils._mode_utils import no_dispatch
 
 from ...utils._triton import has_triton
@@ -535,7 +535,7 @@ def _should_pad(
             return cached_pad
 
         def realize_tensor(t):
-            if isinstance(t, FakeTensor):
+            if is_fake_tensor(t):
                 size_hints = hint_symbols(t.size())
                 # pyrefly: ignore [bad-argument-type]
                 stride_hint = hint_symbols(t.stride())
