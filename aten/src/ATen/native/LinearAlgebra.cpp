@@ -97,6 +97,7 @@
 #include <ATen/ops/linalg_matrix_power_native.h>
 #include <ATen/ops/linalg_matrix_rank.h>
 #include <ATen/ops/linalg_matrix_rank_native.h>
+#include <ATen/ops/linalg_matrix_sqrth_native.h>
 #include <ATen/ops/linalg_multi_dot_native.h>
 #include <ATen/ops/linalg_norm.h>
 #include <ATen/ops/linalg_norm_native.h>
@@ -2304,11 +2305,12 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
   }
 }
 
-inline Tensor _move_memory_if_cuda_input(
+inline Tensor _move_memory_if_cuda_or_mps_input(
   const Tensor& mem,
   const Tensor& in
 ) {
-  return (in.device().type() == at::kCUDA)
+  const auto device_type = in.device().type();
+  return (device_type == at::kCUDA || device_type == at::kMPS)
     ? mem.to(at::device_of(in).value())
     : mem;
 }
@@ -2328,7 +2330,7 @@ inline Tensor _blob_to_Tensor(
   // be used in _compute_linear_combination
   auto tensor = at::from_blob((void*)blob.begin(), blob.size(),
     c10::toRealValueType(in.scalar_type())).unsqueeze(0);
-  return _move_memory_if_cuda_input(tensor, in);
+  return _move_memory_if_cuda_or_mps_input(tensor, in);
 }
 
 template <typename scalar_t>
@@ -2477,7 +2479,7 @@ Tensor compute_T12(const Tensor& A) {
     {num_prods, 1},
     c10::toRealValueType(A.scalar_type())
   );
-  bs = _move_memory_if_cuda_input(bs, A);
+  bs = _move_memory_if_cuda_or_mps_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
@@ -2549,7 +2551,7 @@ Tensor compute_T18(const Tensor& A) {
     {num_prods, 1},
     c10::toRealValueType(A.scalar_type())
   );
-  bs = _move_memory_if_cuda_input(bs, A);
+  bs = _move_memory_if_cuda_or_mps_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
@@ -2663,10 +2665,11 @@ Tensor mexp_impl(
                              at::MemoryFormat::Contiguous);
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
-    // It requires moving data back and forth between devices when `a` is on CUDA,
-    // but at the cost of only one single CPU-CUDA synchronization (instead of 6),
-    // and better performance overall (benchmarked).
-    const auto norm_cpu = (a.device().type() == at::kCUDA)
+    // It requires moving data back and forth between devices when `a` is on an
+    // accelerator (CUDA/MPS), but at the cost of only one single synchronization
+    // (instead of 6), and better performance overall (benchmarked).
+    const auto device_type = a.device().type();
+    const auto norm_cpu = (device_type == at::kCUDA || device_type == at::kMPS)
       ? norm.to(at::kCPU) : norm;
 
     constexpr std::array<
@@ -2686,7 +2689,7 @@ Tensor mexp_impl(
       ).nonzero().squeeze(-1);
 
       if (idx_curr_norm_interval.numel()) {
-        auto idx_to_device = _move_memory_if_cuda_input(
+        auto idx_to_device = _move_memory_if_cuda_or_mps_input(
           idx_curr_norm_interval, a
         );
         auto sub_a = at::index_select(a, 0, idx_to_device);
@@ -2699,7 +2702,7 @@ Tensor mexp_impl(
       .nonzero().squeeze(-1);
 
     if (idx_large_norm.numel()) {
-      auto idx_to_device = _move_memory_if_cuda_input(
+      auto idx_to_device = _move_memory_if_cuda_or_mps_input(
         idx_large_norm, a
       );
       auto a_large_norm = at::index_select(a, 0, idx_to_device);
@@ -2789,6 +2792,13 @@ Tensor linalg_matrix_exp(const Tensor& a) {
   squareCheckInputs(a, "linalg.matrix_exp");
   checkFloatingOrComplex(a, "linalg.matrix_exp");
 
+  // MPSGraph complex matmul is numerically unreliable before macOS 15, which
+  // breaks the scale-and-square recurrence this op relies on.
+  TORCH_CHECK(
+      a.device().type() != at::kMPS ||
+          at::detail::getMPSHooks().isOnMacOSorNewer(15, 0),
+      "linalg.matrix_exp on MPS requires macOS 15.0 or newer");
+
   NoTF32Guard disable_tf32;
 
   // Trivial cases
@@ -2805,6 +2815,33 @@ Tensor linalg_matrix_exp(const Tensor& a) {
 // Alias
 Tensor matrix_exp(const Tensor& a) {
   return at::linalg_matrix_exp(a);
+}
+
+// Principal square root of a symmetric/Hermitian positive-definite matrix.
+// Computed from the eigendecomposition A = Q diag(lambda) Q^H as
+// A^{1/2} = Q diag(sqrt(lambda)) Q^H. Only the lower triangle of `a` is read
+// (via linalg_eigh, UPLO="L"); `a` is assumed Hermitian. The custom backward in
+// FunctionsManual.cpp (linalg_matrix_sqrth_differential) uses the Daleckii-Krein
+// formula, whose denominator sqrt(lambda_i) + sqrt(lambda_j) stays well-defined
+// even at degenerate eigenvalues.
+Tensor linalg_matrix_sqrth(const Tensor& a) {
+  squareCheckInputs(a, "linalg.matrix_sqrth");
+  checkFloatingOrComplex(
+      a, "linalg.matrix_sqrth", /*allow_low_precision_dtypes=*/false);
+
+  NoTF32Guard disable_tf32;
+
+  if (a.sym_size(-1) == 0) {
+    return a.clone();
+  }
+  auto [eigvals, eigvecs] = at::linalg_eigh(a);
+
+  // PSD input may still show small eigenvalues due to roundoff.
+  // The clamp_min zeroes them.
+  auto sqrt_eigvals = eigvals.clamp_min(0).sqrt();
+  auto result = at::matmul(eigvecs * sqrt_eigvals.unsqueeze(-2), eigvecs.mH());
+  // The reconstruction is Hermitian up to roundoff; symmetrize to enforce it.
+  return 0.5 * (result + result.mH());
 }
 
 // TODO This should be deprecated in favor of linalg_matrix_exp_differential
@@ -3279,12 +3316,14 @@ static Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtyp
 static void _linalg_cond_check_ord(std::variant<Scalar, std::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = std::get_if<Scalar>(&ord_variant);
+    TORCH_CHECK_VALUE(!at::isComplexType(ord->type()),
+      "linalg.cond: Expected a non-complex scalar as the order of norm.");
     double abs_ord = std::abs(ord->toDouble());
-    TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
+    TORCH_CHECK_VALUE(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
       "linalg.cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
     std::string_view* ord = std::get_if<std::string_view>(&ord_variant);
-    TORCH_CHECK(*ord == "fro" || *ord == "nuc",
+    TORCH_CHECK_VALUE(*ord == "fro" || *ord == "nuc",
       "linalg.cond got an invalid norm type: ", *ord);
   } else {
     TORCH_CHECK(false,
@@ -3351,7 +3390,7 @@ Tensor linalg_cond(const Tensor& self, std::string_view ord) {
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
-  if (self.numel() == 0) {
+  if (self.sym_numel() == 0) {
     return _linalg_cond_empty_matrix(self, self.scalar_type());
   }
 

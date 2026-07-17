@@ -80,7 +80,7 @@ endif()
 
 # This define is needed to preserve behavior given anticpated changes to
 # cccl/thrust
-# https://nvidia.github.io/cccl/libcudacxx/standard_api/numerics_library/complex.html
+# https://github.com/NVIDIA/cccl/blob/main/docs/libcudacxx/standard_api/numerics_library/complex.rst
 string(APPEND CMAKE_CUDA_FLAGS
        " -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
 

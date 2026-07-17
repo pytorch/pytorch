@@ -12,7 +12,6 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -20,7 +19,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     requires_gpu,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 importlib.import_module("filelock")
@@ -135,7 +133,6 @@ class CodegenInductorTest(InductorTestCase):
         x = torch.randn((4, 65536), device=torch.device(GPU_TYPE))
         config_patches = {
             "mtia.disable_welford_reduction": disable_welford_reduction,
-            "triton.two_pass_variance_l2_fraction": 0.0,
         }
         _, code = self.run_and_compare(
             func,
@@ -150,46 +147,6 @@ class CodegenInductorTest(InductorTestCase):
             self.assertEqual(welford_count, 0)
         else:
             self.assertGreater(welford_count, 0)
-
-    @requires_cuda_and_triton
-    @skipIfRocm
-    @parametrize(
-        "two_pass_variance_l2_fraction, expect_welford",
-        [(0.0, True), (1e-12, True), (1.0, False)],
-    )
-    def test_l2_cache_aware_two_step_variance(
-        self, two_pass_variance_l2_fraction: float, expect_welford: bool
-    ):
-        def func(x):
-            return torch.var_mean(x, dim=1)
-
-        device = torch.device(GPU_TYPE)
-        device_props = torch.cuda.get_device_properties(device)
-        outer_dim = max(1024, device_props.multi_processor_count * 2 * 32)
-        min_reduction_dim = 64
-        max_l2_reduction_dim = device_props.L2_cache_size // (
-            outer_dim * torch.empty((), dtype=torch.float32).element_size()
-        )
-        if max_l2_reduction_dim < min_reduction_dim:
-            self.skipTest("CUDA device L2 is too small for a non-split Welford test")
-        reduction_dim = min(2048, max_l2_reduction_dim)
-        x = torch.randn((outer_dim, reduction_dim), device=device)
-        config_patches = {
-            "triton.two_pass_variance_l2_fraction": two_pass_variance_l2_fraction,
-        }
-        _, code = self.run_and_compare(
-            func,
-            x,
-            config_patches=config_patches,
-            atol=1e-2,
-            rtol=1e-4,
-        )
-
-        welford_count = sum(prog.count("triton_helpers.welford") for prog in code)
-        if expect_welford:
-            self.assertGreater(welford_count, 0)
-        else:
-            self.assertEqual(welford_count, 0)
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
