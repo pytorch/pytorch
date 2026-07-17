@@ -1083,12 +1083,16 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             opt_fn(torch.randn(2, 3))
 
     def test_fake_tensor_runtime_error_non_string_arg(self):
-        str_calls = []
+        format_calls = []
 
         class Arg:
             def __str__(self):
-                str_calls.append("called")
+                format_calls.append("__str__")
                 return "1"
+
+            def __repr__(self):
+                format_calls.append("__repr__")
+                return "Arg()"
 
         @torch.library.custom_op(
             "test_dynamo::runtime_error_non_string", mutates_args=()
@@ -1098,6 +1102,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         @runtime_error_non_string.register_fake
         def _(t):
+            # The fake RuntimeError args should not be stringified while tracing.
             raise RuntimeError(Arg())
 
         def fn(t):
@@ -1107,12 +1112,23 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 return t.sin()
             return t.cos()
 
+        def caught_fn(t):
+            try:
+                runtime_error_non_string(t)
+            except RuntimeError:
+                return t.sin()
+            return t.cos()
+
+        t = torch.randn(2, 3)
+        opt_caught_fn = torch.compile(caught_fn, backend="eager", fullgraph=True)
+        self.assertEqual(caught_fn(t), opt_caught_fn(t))
+
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(
             TorchRuntimeError, "RuntimeError when making fake tensor call"
         ):
-            opt_fn(torch.randn(2, 3))
-        self.assertEqual(str_calls, [])
+            opt_fn(t)
+        self.assertEqual(format_calls, [])
 
     def test_fake_tensor_runtime_error_in_with_cleanup(self):
         class SwallowRuntimeError:
@@ -1136,6 +1152,25 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         node_targets = [node.target for node in backend.graphs[0].graph.nodes]
         self.assertNotIn("expand_as", node_targets)
         self.assertIn("cos", node_targets)
+
+    def test_fake_tensor_runtime_error_with_exit_traceback_inspection(self):
+        class InspectTraceback:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, typ, exc, tb):
+                if tb is not None:
+                    return tb.tb_lineno > 0
+                return False
+
+        def fn(t):
+            with InspectTraceback():
+                t.expand_as(torch.randn(2))
+            return t.cos()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
 
     def test_fake_tensor_runtime_error_in_with_inside_try_except(self):
         backend = EagerAndRecordGraphs()

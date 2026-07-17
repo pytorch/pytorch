@@ -147,7 +147,6 @@ from .utils import (
     _get_error_on_graph_break,
     counters,
     FrameState,
-    get_concrete_sizes_from_symints,
     get_fake_value,
     get_instruction_source_311,
     get_metrics_context,
@@ -190,7 +189,6 @@ from .variables.lists import (
 )
 from .variables.misc import (
     CellVariable,
-    ExceptionVariable,
     NullVariable,
     PythonModuleVariable,
     TracebackVariable,
@@ -1636,7 +1634,7 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
-        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):
+        if is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(
@@ -2668,39 +2666,25 @@ class InstructionTranslatorBase(
     def _attach_traceback_to_exception(self, exc: ExceptionVals) -> None:
         # based on CPython's PyTraceBack_Here impl
         frame_summary = self.frame_summary()
-        if isinstance(exc, (ExceptionVariable, UserDefinedExceptionObjectVariable)):
-            tb = exc.get_internal_traceback()
-        else:
-            tb = exc.var_getattr(
-                # pyrefly: ignore [bad-argument-type]
-                self,
-                "__traceback__",
-            )
+        tb = exc.get_internal_traceback()
         if not isinstance(tb, (ConstantVariable, TracebackVariable)):
             raise AssertionError(
                 "expected isinstance( tb, (ConstantVariable, TracebackVariable) ) to be true"
             )  # make pyrefly happy
         new_tb = TracebackVariable.from_frame_summary(frame_summary, tb)
-        if isinstance(exc, (ExceptionVariable, UserDefinedExceptionObjectVariable)):
-            exc.set_internal_traceback(new_tb)
-        else:
-            exc.call_method(
-                self,  # type: ignore[bad-argument-type]
-                "__setattr__",
-                [VariableTracker.build(self, "__traceback__"), new_tb],
-                {},
-            )
+        exc.set_internal_traceback(new_tb)
 
     def _raise_observed_exception(self, exc_: ExceptionVals) -> NoReturn:
         # Propagate `exc_` as an ObservedException to unwind the tracer to the
         # handler, preserving the original raise location via python_stack.
         python_stack = getattr(exc_, "python_stack", None)
-        if isinstance(exc_, ExceptionVariable) and exc_.fake_tensor_error is not None:
+        if exc_.fake_tensor_error is not None:
             raise FakeTensorObservedException(
                 f"raised exception {exc_.debug_repr()}",
                 real_stack=python_stack,
                 fake_tensor_error=exc_.fake_tensor_error,
                 fake_mode=exc_.fake_mode,
+                fake_tensor_explanation=exc_.fake_tensor_explanation,
             )
         observed_exception_type = get_dynamo_observed_exception(exc_.exc_type)  # type: ignore[attr-defined, union-attr]
         raise observed_exception_type(
@@ -2853,14 +2837,7 @@ class InstructionTranslatorBase(
                     "expected _exception_instance_check(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            if isinstance(val, (ExceptionVariable, UserDefinedExceptionObjectVariable)):
-                tb = val.get_internal_traceback()
-            else:
-                tb = val.var_getattr(
-                    # pyrefly: ignore[bad-argument-type]
-                    self,
-                    "__traceback__",
-                )
+            tb = val.get_user_traceback()
             if sys.version_info >= (3, 14):
                 if not isinstance(self.stack[-4], NullVariable):
                     args.append(self.stack[-4])
@@ -2874,11 +2851,7 @@ class InstructionTranslatorBase(
                     "expected _exception_instance_check(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
-
-            if isinstance(val, (ExceptionVariable, UserDefinedExceptionObjectVariable)):
-                tb = val.get_internal_traceback()
-            else:
-                tb = val.var_getattr(self, "__traceback__")
+            tb = val.get_user_traceback()
 
         args += [typ, val, tb]
         self.call_function(fn, args, {})
@@ -2892,23 +2865,10 @@ class InstructionTranslatorBase(
         def bubble_exception_to_interpreter() -> None:
             # Bubble the exception to the interpreter
             if isinstance(raised_exception, FakeTensorObservedException):
-                fake_error = raised_exception.fake_tensor_error
-                raw_msg = ""
-                if fake_error is not None:
-                    if len(fake_error.args) == 1 and isinstance(
-                        fake_error.args[0], str
-                    ):
-                        raw_msg = get_concrete_sizes_from_symints(
-                            fake_error.args[0], raised_exception.fake_mode
-                        )
-                    elif not fake_error.args:
-                        raw_msg = ""
-                    else:
-                        raw_msg = "<non-string RuntimeError args>"
                 msg = format_graph_break_message(
                     "RuntimeError when making fake tensor call",
                     "",
-                    raw_msg,
+                    raised_exception.fake_tensor_explanation,
                     [*graph_break_hints.USER_ERROR],
                 )
                 e = exc.TorchRuntimeError(msg, raised_exception.real_stack)
@@ -2980,14 +2940,19 @@ class InstructionTranslatorBase(
                         # instruction translator.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
-                            unimplemented(
-                                gb_type="Observed exception (EXCEPT_HANDLER)",
-                                context=str(raised_exception),
-                                explanation=observed_exn_gb_explanation
-                                + " This graph break is unexpected.",
-                                hints=[*graph_break_hints.DYNAMO_BUG],
-                                from_exc=raised_exception,
-                            )
+                            if isinstance(
+                                raised_exception, FakeTensorObservedException
+                            ):
+                                bubble_exception_to_interpreter()
+                            else:
+                                unimplemented(
+                                    gb_type="Observed exception (EXCEPT_HANDLER)",
+                                    context=str(raised_exception),
+                                    explanation=observed_exn_gb_explanation
+                                    + " This graph break is unexpected.",
+                                    hints=[*graph_break_hints.DYNAMO_BUG],
+                                    from_exc=raised_exception,
+                                )
 
                         raise raised_exception
                     block_stack_entry = self.block_stack.pop()
@@ -6240,43 +6205,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         log.debug("DONE INLINING %s", code)
         self.output.tracing_context.traced_code.append(code)
 
-        if config.enable_faithful_generator_behavior or (
-            isinstance(self, InliningGeneratorInstructionTranslator)
-            and self.is_generator_from_ctx_manager
+        if (
+            is_generator(code)
+            and isinstance(self, InliningGeneratorInstructionTranslator)
+            and self.frame_state == FrameState.FRAME_CLEARED
         ):
-            if (
-                is_generator(code)
-                and isinstance(self, InliningGeneratorInstructionTranslator)
-                and self.frame_state == FrameState.FRAME_CLEARED
-            ):
-                if not isinstance(self, InliningGeneratorInstructionTranslator):
-                    raise AssertionError(
-                        "expected isinstance(self, InliningGeneratorInstructionTranslator) to be true"
-                    )
-                # When the generator returns None, we raise StopIteration
-                # pyrefly: ignore [implicit-any]
-                args = []
-                if not self.symbolic_result.is_constant_none():
-                    args = [self.symbolic_result]
-                exc.raise_observed_exception(StopIteration, self, args=args)
-            else:
-                return self.symbolic_result
+            # When the generator returns None, we raise StopIteration
+            # pyrefly: ignore [implicit-any]
+            args = []
+            if not self.symbolic_result.is_constant_none():
+                args = [self.symbolic_result]
+            exc.raise_observed_exception(StopIteration, self, args=args)
         else:
-            if is_generator(code):
-                if not isinstance(self, InliningGeneratorInstructionTranslator):
-                    raise AssertionError(
-                        "expected isinstance(self, InliningGeneratorInstructionTranslator) to be true"
-                    )
-                if not self.symbolic_result.is_constant_none():
-                    raise AssertionError(
-                        "expected self.symbolic_result.is_constant_none() to be true"
-                    )
-                return ListIteratorVariable(
-                    self.generated_items,
-                    mutation_type=ValueMutationNew(),
-                )
-            else:
-                return self.symbolic_result
+            return self.symbolic_result
 
     def __init__(
         self,
@@ -6485,12 +6426,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: list[VariableTracker]
-    # Flag whether or not the InlineGenerator should consume the entire iterator
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
-        self.is_generator_from_ctx_manager = False
         self.frame_state = FrameState.FRAME_CREATED
         self.gi_exc_state = Segment()
 
@@ -6529,13 +6468,9 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.frame_state = FrameState.FRAME_SUSPENDED
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
-        if (
-            config.enable_faithful_generator_behavior
-            or self.is_generator_from_ctx_manager
-        ):
-            self.symbolic_result = top
-            # Stop tracing
-            raise YieldValueOp
+        self.symbolic_result = top
+        # Stop tracing
+        raise YieldValueOp
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]

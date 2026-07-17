@@ -2484,6 +2484,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             reverse=reverse,
         )
 
+    def nb_matrix_multiply_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__matmul__",
+            "__rmatmul__",
+            nb_slot=PyNumberSlots.NB_MATRIX_MULTIPLY,
+            reverse=reverse,
+        )
+
+    def nb_inplace_matrix_multiply_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__imatmul__", [other], {})
+
     def nb_lshift_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2802,19 +2824,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     tx, args[0], variables.DeletedVariable()
                 )
 
-            if torch._dynamo.config.enable_faithful_generator_behavior and isinstance(
-                self.value, types.GeneratorType
-            ):
+            if isinstance(self.value, types.GeneratorType):
                 unimplemented(
                     gb_type="call_method on generator",
                     context=f"object={self.value}, method={name}, args={args}, kwargs={kwargs}",
                     explanation="Detected a method call to a user-defined generator object. "
                     "This is not fully supported.",
-                    hints=[
-                        "Set `torch._dynamo.config.enable_faithful_generator_behavior = False`. Note that this "
-                        "may cause silent incorrectness, since we will eagerly unpack generators instead of lazily "
-                        "evaluating them.",
-                    ],
+                    hints=[*graph_break_hints.SUPPORTABLE],
                 )
 
             # torch.Generator methods like manual_seed(), get_state(), etc.
@@ -4354,9 +4370,10 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         self,
         fake_tensor_error: BaseException | None = None,
         fake_mode: Any | None = None,
+        fake_tensor_explanation: str = "",
     ) -> None:
         self._base_vt.mark_unsafe_to_inspect(  # type: ignore[missing-attribute]
-            fake_tensor_error, fake_mode
+            fake_tensor_error, fake_mode, fake_tensor_explanation
         )
 
     def check_safe_to_inspect(self) -> None:
@@ -4364,6 +4381,9 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
 
     def get_internal_traceback(self) -> VariableTracker:
         return self.exc_vt.get_internal_traceback()
+
+    def get_user_traceback(self) -> VariableTracker:
+        return self.exc_vt.get_user_traceback()
 
     def set_internal_traceback(self, traceback_vt: VariableTracker) -> None:
         self.exc_vt.set_internal_traceback(traceback_vt)
@@ -4378,6 +4398,18 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     @property
     def python_stack(self) -> traceback.StackSummary | None:
         return self._base_vt.python_stack  # type: ignore[missing-attribute]
+
+    @property
+    def fake_tensor_error(self) -> BaseException | None:
+        return self._base_vt.fake_tensor_error  # type: ignore[missing-attribute]
+
+    @property
+    def fake_mode(self) -> Any | None:
+        return self._base_vt.fake_mode  # type: ignore[missing-attribute]
+
+    @property
+    def fake_tensor_explanation(self) -> str:
+        return self._base_vt.fake_tensor_explanation  # type: ignore[missing-attribute]
 
     def debug_repr(self) -> str:
         return self.exc_vt.debug_repr()
