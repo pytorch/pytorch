@@ -193,7 +193,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             expected = torch.full_like(section, src + self.rank)
             self.assertTrue(
                 torch.equal(section, expected),
-                f"Mismatch in section from rank {src}: got {section}, expected {expected}",
+                lambda msg: f"{msg}\nMismatch in section from rank {src}: got {section}, expected {expected}",
             )
             offset += output_split_sizes[src]
 

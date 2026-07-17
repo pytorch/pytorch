@@ -86,6 +86,7 @@ from torch.utils._sympy.functions import (
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Max,
+    Min,
     Mod,
     PythonMod,
     TruncToInt,
@@ -1335,9 +1336,9 @@ def _free_unbacked_symbols_with_path(
         and not is_batchedtensor(a)
         and not is_gradtrackingtensor(a)
     ):
-        from torch._subclasses.fake_tensor import FakeTensor, maybe_get_real_tensor
+        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_real_tensor
 
-        if not isinstance(a, FakeTensor):
+        if not is_fake_tensor(a):
             raise AssertionError(f"Expected FakeTensor, got {type(a)}")
         match_tensor(a, maybe_get_real_tensor(a))
     elif (
@@ -7411,29 +7412,172 @@ class ShapeEnv:
         expr = safe_expand(expr)
         expr = self.replace(expr)
 
-        # Simplify max(0/1, x) to x when x >= 0/1. max(1, x) is a commonly introduced
-        # expression when creating contiguous strides.
         if not size_oblivious:
-            min_max_replacements: dict[sympy.Basic, sympy.Basic] = {}
-            for atom in expr.atoms(Max):  # type: ignore[has-type]
-                if len(atom.args) > 2:
-                    continue
-                a, b = atom.args
-                if b == 1 or b == 0:
-                    a, b = b, a
+            range_env = (
+                self.var_to_range if var_to_range is None else dict(var_to_range)
+            )
+            le_cache: dict[tuple[sympy.Basic, sympy.Basic, bool], bool] = {}
 
-                if a == 1 and self._maybe_evaluate_static(
-                    sympy.Ge(b, 1),
-                    axioms=axioms,
-                    var_to_range=var_to_range,
-                ):
-                    min_max_replacements[atom] = b
-                if a == 0 and self._maybe_evaluate_static(
-                    sympy.Ge(b, 0),
-                    axioms=axioms,
-                    var_to_range=var_to_range,
-                ):
-                    min_max_replacements[atom] = b
+            # Keep these cheap checks ahead of bound_sympy; Min/Max
+            # simplification is hot and full interval analysis is noticeably
+            # more expensive on unprovable comparisons.
+            def is_nonnegative_value(value: sympy.Expr) -> bool:
+                try:
+                    return bool(value >= 0)
+                except TypeError:
+                    return False
+
+            def is_nonnegative_term(term: sympy.Expr) -> bool:
+                if term.is_number:
+                    return is_nonnegative_value(term)
+                if term.is_nonnegative:
+                    return True
+                if term.is_Symbol:
+                    vr = range_env.get(term)
+                    return vr is not None and is_nonnegative_value(vr.lower)
+                return False
+
+            def is_nonnegative_sum(expr: sympy.Expr) -> bool:
+                if not isinstance(expr, sympy.Add):
+                    return is_nonnegative_term(expr)
+                return all(is_nonnegative_term(term) for term in expr.args)
+
+            def lower_bound_term(term: sympy.Expr) -> sympy.Expr | None:
+                if term.is_number:
+                    return term
+
+                coeff, base = term.as_coeff_Mul()
+                if base == 1:
+                    return coeff
+                if not coeff.is_number:
+                    return None
+
+                if base.is_Symbol:
+                    vr = range_env.get(base)
+                    if vr is not None:
+                        try:
+                            if bool(coeff >= 0):
+                                return coeff * vr.lower
+                            return coeff * vr.upper
+                        except TypeError:
+                            return None
+                    if base.is_nonnegative and is_nonnegative_value(coeff):
+                        return sympy.Integer(0)
+                return None
+
+            def lower_bound(expr: sympy.Expr) -> sympy.Expr | None:
+                if not isinstance(expr, sympy.Add):
+                    return lower_bound_term(expr)
+
+                result = sympy.Integer(0)
+                for term in expr.args:
+                    term_bound = lower_bound_term(term)
+                    if term_bound is None:
+                        return None
+                    result += term_bound
+                return result
+
+            def definitely_le(
+                a: sympy.Basic,
+                b: sympy.Basic,
+                *,
+                use_static_fallback: bool = False,
+            ) -> bool:
+                cache_key = (a, b, use_static_fallback)
+                if cache_key in le_cache:
+                    return le_cache[cache_key]
+
+                if a == b:
+                    le_cache[cache_key] = True
+                    return True
+                diff = b - a  # type: ignore[operator]
+                diff_lower = lower_bound(diff)
+                if diff_lower is not None and is_nonnegative_value(diff_lower):
+                    le_cache[cache_key] = True
+                    return True
+                if is_nonnegative_sum(diff):
+                    le_cache[cache_key] = True
+                    return True
+
+                comparison_ranges = {
+                    s: vr
+                    for s in diff.free_symbols
+                    if (vr := range_env.get(s)) is not None
+                }
+                if comparison_ranges:
+                    try:
+                        diff_range = bound_sympy(safe_expand(diff), comparison_ranges)
+                        if bool(diff_range.lower >= 0):
+                            le_cache[cache_key] = True
+                            return True
+                    except (AttributeError, KeyError, NotImplementedError, TypeError):
+                        pass
+
+                if use_static_fallback:
+                    comparison = sympy.Le(a, b)
+                    if comparison is sympy.true:
+                        le_cache[cache_key] = True
+                        return True
+                    if comparison is sympy.false:
+                        le_cache[cache_key] = False
+                        return False
+
+                    result = (
+                        self._maybe_evaluate_static(
+                            comparison,
+                            axioms=axioms,
+                            var_to_range=var_to_range,
+                        )
+                        is sympy.true
+                    )
+                    le_cache[cache_key] = result
+                    return result
+
+                le_cache[cache_key] = False
+                return False
+
+            min_max_replacements: dict[sympy.Basic, sympy.Basic] = {}
+            for atom in expr.atoms(Min, Max):  # type: ignore[has-type]
+                args = list(atom.args)
+                if len(args) < 2:
+                    continue
+
+                is_min = isinstance(atom, Min)
+                use_legacy_static_fallback = not is_min and len(args) == 2
+                keep = [True] * len(args)
+                for i, a in enumerate(args):
+                    if not keep[i]:
+                        continue
+                    for j in range(i + 1, len(args)):
+                        if not keep[j]:
+                            continue
+                        b = args[j]
+                        if definitely_le(
+                            a,
+                            b,
+                            use_static_fallback=use_legacy_static_fallback
+                            and (a == 0 or a == 1),
+                        ):
+                            if is_min:
+                                keep[j] = False
+                            else:
+                                keep[i] = False
+                                break
+                        elif definitely_le(
+                            b,
+                            a,
+                            use_static_fallback=use_legacy_static_fallback
+                            and (b == 0 or b == 1),
+                        ):
+                            if is_min:
+                                keep[i] = False
+                                break
+                            else:
+                                keep[j] = False
+
+                new_args = [arg for arg, keep_arg in zip(args, keep) if keep_arg]
+                if len(new_args) != len(args):
+                    min_max_replacements[atom] = atom.func(*new_args, evaluate=False)
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
 
