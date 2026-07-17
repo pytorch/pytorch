@@ -7018,6 +7018,44 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
             0,
         )
 
+    def test_same_named_symbols_from_distinct_foreign_envs_do_not_alias(self):
+        foreign_env1 = ShapeEnv()
+        foreign_u0 = foreign_env1.create_unbacked_symint()
+        foreign_u1 = foreign_env1.create_unbacked_symint()
+        foreign_env2 = ShapeEnv()
+        other_foreign_u0 = foreign_env2.create_unbacked_symint()
+        other_foreign_u1 = foreign_env2.create_unbacked_symint()
+        self.assertEqual(foreign_u0.node.expr.name, other_foreign_u0.node.expr.name)
+        self.assertEqual(foreign_u1.node.expr.name, other_foreign_u1.node.expr.name)
+
+        local_env = ShapeEnv()
+        transferred1, _, _ = local_env.transfer_symbols_from_foreign_shape_env(
+            (foreign_u0 + foreign_u1, foreign_u0, foreign_u1),
+            (1, 1, 1),
+            0,
+            source=self._make_source("foreign_env1"),
+        )
+        transferred2, _, _ = local_env.transfer_symbols_from_foreign_shape_env(
+            (other_foreign_u0 + other_foreign_u1, other_foreign_u0, other_foreign_u1),
+            (1, 1, 1),
+            0,
+            source=self._make_source("foreign_env2"),
+        )
+
+        self.assertEqual(
+            transferred1[0].node.expr,
+            transferred1[1].node.expr + transferred1[2].node.expr,
+        )
+        self.assertEqual(
+            transferred2[0].node.expr,
+            transferred2[1].node.expr + transferred2[2].node.expr,
+        )
+        self.assertTrue(
+            transferred1[0].node.expr.free_symbols.isdisjoint(
+                transferred2[0].node.expr.free_symbols
+            )
+        )
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_flex_attention_foreign_fake_e2e(self):
         """E2E test: trace flex_attention with BlockMask containing unbacked dims

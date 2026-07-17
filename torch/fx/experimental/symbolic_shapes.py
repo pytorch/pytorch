@@ -4913,7 +4913,9 @@ class ShapeEnv:
                 key = (env_id, foreign_sym)
                 local_sym = cache.get(key)
                 if local_sym is None:
-                    leaf_source = EphemeralSource(f"foreign_leaf:{foreign_sym.name}")
+                    leaf_source = EphemeralSource(
+                        f"foreign_leaf:{env_id}:{foreign_sym.name}"
+                    )
                     with self.ignore_fresh_unbacked_symbols():
                         local_symint = self.create_unbacked_symint(leaf_source)
                     local_sym = local_symint.node.expr
