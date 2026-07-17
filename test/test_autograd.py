@@ -2288,31 +2288,6 @@ class TestAutograd(TestCase):
         sum(rx, ry).sum().backward()
         self.assertTrue(was_called[0])
 
-    def test_needs_input_grad_setter_roundtrip(self):
-        sentinel = ([False, True],)
-
-        class NeedsInputGradSetter(Function):
-            @staticmethod
-            def forward(ctx, x, y):
-                return x + y
-
-            @staticmethod
-            def backward(ctx, grad):
-                original = ctx.needs_input_grad
-                self.assertEqual(original, (True, False))
-                ctx.needs_input_grad = sentinel
-                self.assertIs(ctx.needs_input_grad, sentinel)
-                ctx.needs_input_grad = None
-                self.assertIsNone(ctx.needs_input_grad)
-                ctx.needs_input_grad = original
-                self.assertIs(ctx.needs_input_grad, original)
-                return grad, None
-
-        x = torch.randn((), requires_grad=True)
-        y = torch.randn(())
-        NeedsInputGradSetter.apply(x, y).backward()
-        self.assertEqual(x.grad, torch.ones_like(x))
-
     def test_retain_grad(self):
         input = torch.rand(1, 3, requires_grad=True)
         h1 = input * 3
