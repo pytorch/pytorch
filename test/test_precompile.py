@@ -59,6 +59,16 @@ def _strip_artifact(cache: bytes) -> bytes:
     return buf.getvalue()
 
 
+def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
+    """Yield (label, loaded_fn) for the load paths a backend exposes: the default
+    (cache-primed) path always, plus -- on inductor only -- the inlined path that
+    strips the artifact to force JIT from python_code. The eager backend has a single
+    driver, so it yields the default path alone."""
+    yield "default", torch.compiler.precompile.load(code, cache)
+    if backend == "inductor":
+        yield "inlined", torch.compiler.precompile.load(code, _strip_artifact(cache))
+
+
 # precompile drives make_fx internally, which cannot symbolically trace a
 # dynamo-optimized function; the whole suite is therefore incompatible with
 # PYTORCH_TEST_WITH_DYNAMO (dynamo_wrapped CI), so skip it there.
@@ -1713,14 +1723,18 @@ class TestPrecompile(TestCase):
         xt = torch.randn(8, 4)
         self.assertEqual(f_c(m, xt), m(xt))
 
+    @unittest.skipUnless(TEST_CUDA, "functionalize_rng_ops seeds via CUDA rng state")
     def test_functionalized_rng_matches_eager_cpu(self):
         # Under functionalized RNG the dropout draw is seeded from the global generator,
         # so seeding torch.manual_seed identically before the artifact run and before eager
         # makes both draw the SAME dropout mask: the artifact output is numerically EQUAL
-        # to eager (a stronger check than structure-only). This holds on CPU; the CUDA
-        # functionalized path uses different Philox offset bookkeeping than eager, so this
-        # equivalence is CPU-only (see test_functionalized_rng_supported for the
-        # device-generic structural check).
+        # to eager (a stronger check than structure-only). This runs on CPU tensors, but
+        # functionalize_rng_ops still seeds via CUDARngStateHelper.get_torch_state_as_tuple,
+        # which raises unless CUDA is available, so the whole test is gated on TEST_CUDA
+        # (mirroring test_functionalized_rng_supported). The CUDA functionalized path uses
+        # different Philox offset bookkeeping than eager, so this numeric equivalence is
+        # CPU-tensor-only (see test_functionalized_rng_supported for the device-generic
+        # structural check).
         import torch._functorch.config as functorch_config
 
         x = torch.randn(64)
@@ -1752,16 +1766,7 @@ class TestPrecompile(TestCase):
         )
         bad = torch.nn.Linear(4, 7).eval()  # K = 7 != 3, same param names
 
-        def loaders():
-            yield "default", torch.compiler.precompile.load(code, cache)
-            if backend == "inductor":
-                # Strip the artifact to force the inlined driver.
-                yield (
-                    "inlined",
-                    torch.compiler.precompile.load(code, _strip_artifact(cache)),
-                )
-
-        for label, f_c in loaders():
+        for label, f_c in _default_and_inlined_loaders(code, cache, backend):
             with self.subTest(path=label):
                 with self.assertRaisesRegex(PrecompileError, "weight.*shape"):
                     f_c(bad, x)
@@ -1782,16 +1787,7 @@ class TestPrecompile(TestCase):
         )
         bad = torch.nn.Linear(4, 3).eval().half()  # same shape, different dtype
 
-        def loaders():
-            yield "default", torch.compiler.precompile.load(code, cache)
-            if backend == "inductor":
-                # Strip the artifact to force the inlined driver.
-                yield (
-                    "inlined",
-                    torch.compiler.precompile.load(code, _strip_artifact(cache)),
-                )
-
-        for label, f_c in loaders():
+        for label, f_c in _default_and_inlined_loaders(code, cache, backend):
             with self.subTest(path=label):
                 with self.assertRaisesRegex(PrecompileError, "weight.*dtype"):
                     f_c(bad, x)
@@ -1825,16 +1821,7 @@ class TestPrecompile(TestCase):
         bad_shape = WithBuf(5, torch.float32).eval()
         bad_dtype = WithBuf(3, torch.float64).eval()
 
-        def loaders():
-            yield "default", torch.compiler.precompile.load(code, cache)
-            if backend == "inductor":
-                # Strip the artifact to force the inlined driver.
-                yield (
-                    "inlined",
-                    torch.compiler.precompile.load(code, _strip_artifact(cache)),
-                )
-
-        for label, f_c in loaders():
+        for label, f_c in _default_and_inlined_loaders(code, cache, backend):
             with self.subTest(path=label):
                 with self.assertRaisesRegex(PrecompileError, r"'b'.*shape"):
                     f_c(bad_shape, x)
