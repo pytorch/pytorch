@@ -202,6 +202,7 @@ bin_ops = (
     operator.ne,
     operator.eq,
     operator.sub,
+    operator.concat,
     operator.ipow,
     operator.imul,
     operator.imatmul,
@@ -210,6 +211,7 @@ bin_ops = (
     operator.imod,
     operator.iadd,
     operator.isub,
+    operator.iconcat,
 )
 
 bin_int_ops = (
