@@ -165,7 +165,7 @@ class TorchTensor(ir.Tensor):
             # Disable any fake mode so calling detach() etc. will return a real tensor
             tensor = self.raw.detach().cpu().contiguous()
 
-        if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
+        if torch._subclasses.fake_tensor.is_fake_tensor(tensor):
             raise TypeError(
                 f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
                 "with a tensor backed by real data using ONNXProgram.apply_weights() "
