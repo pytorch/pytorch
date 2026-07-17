@@ -198,11 +198,11 @@ jobs:
             freethreaded: true
             build_name: wheel-py3_14t-cpu
           - desired_python: "3.15"
-            setup_python_version: "3.15.4"
+            setup_python_version: "3.15"
             freethreaded: false
             build_name: wheel-py3_15-cpu
           - desired_python: "3.15t"
-            setup_python_version: "3.15.4"
+            setup_python_version: "3.15"
             freethreaded: true
             build_name: wheel-py3_15t-cpu
     uses: ./.github/workflows/_binary-test-macos.yml
