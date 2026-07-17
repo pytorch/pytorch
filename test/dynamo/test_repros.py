@@ -2403,6 +2403,136 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             check(torch.ops.aten.dropout.default, p)
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_torch_ops_scalar_tensor_float_arg_aot_backends(self):
+        def fn(x, p):
+            return torch.ops.aten.dropout(x, p, True)
+
+        x = torch.arange(1, 9, dtype=torch.float32)
+        for backend in ("aot_eager", "inductor"):
+            cm = fresh_cache() if backend == "inductor" else contextlib.nullcontext()
+            with cm:
+                torch._dynamo.reset()
+                compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+                for p in (
+                    torch.tensor(0.25, dtype=torch.float64),
+                    torch.tensor(0.5, dtype=torch.float64),
+                    torch.tensor(0.25, dtype=torch.float64),
+                ):
+                    torch.manual_seed(123)
+                    actual = compiled_fn(x, p)
+                    if backend == "inductor":
+                        kept = actual != 0
+                        self.assertGreater(kept.sum().item(), 0)
+                        self.assertEqual(
+                            actual[kept] / x[kept],
+                            torch.full_like(actual[kept], 1.0 / (1.0 - p.item())),
+                        )
+                    else:
+                        torch.manual_seed(123)
+                        expected = fn(x, p)
+                        self.assertEqual(actual, expected)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_torch_ops_scalar_tensor_float_arg_sourceless_dropout(self):
+        def fn(x, p):
+            return torch.ops.aten.dropout(x, p + 0, True)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "sourceless scalar tensor dropout probability",
+        ):
+            compiled_fn(torch.randn(8), torch.tensor(0.5, dtype=torch.float64))
+
+        def fn_with_side_effect(x, p):
+            return torch.ops.aten.dropout(x, p.add_(1), True)
+
+        p = torch.tensor(-0.5, dtype=torch.float64)
+        compiled_fn = torch.compile(
+            fn_with_side_effect, backend="eager", fullgraph=True
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "sourceless scalar tensor dropout probability",
+        ):
+            compiled_fn(torch.randn(8), p)
+        self.assertEqual(p, torch.tensor(-0.5, dtype=torch.float64))
+
+        x = torch.ones(8)
+        eager_p = torch.tensor(-0.5, dtype=torch.float64)
+        compiled_p = torch.tensor(-0.5, dtype=torch.float64)
+        compiled_fn = torch.compile(fn_with_side_effect, backend="eager")
+        torch.manual_seed(123)
+        expected = fn_with_side_effect(x, eager_p)
+        torch.manual_seed(123)
+        actual = compiled_fn(x, compiled_p)
+        self.assertEqual(actual, expected)
+        self.assertEqual(compiled_p, eager_p)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_torch_ops_scalar_tensor_float_arg_mutated_dropout(self):
+        @torch._dynamo.allow_in_graph
+        def opaque_identity(p):
+            return p
+
+        @torch._dynamo.allow_in_graph
+        def opaque_mutate(p):
+            p.add_(1)
+            return p
+
+        def direct_mutation(x, p):
+            p.add_(1)
+            return torch.ops.aten.dropout(x, p, True)
+
+        def view_alias_mutation(x, p):
+            q = p.view(())
+            q.add_(1)
+            return torch.ops.aten.dropout(x, p, True)
+
+        def setitem_mutation(x, p):
+            p[()] = 1
+            return torch.ops.aten.dropout(x, p, True)
+
+        def out_mutation(x, p):
+            torch.add(torch.zeros(()), torch.ones(()), out=p)
+            return torch.ops.aten.dropout(x, p, True)
+
+        def opaque_mutation(x, p):
+            opaque_mutate(p)
+            return torch.ops.aten.dropout(x, p, True)
+
+        for backend in ("aot_eager", "inductor"):
+            for fn in (
+                direct_mutation,
+                view_alias_mutation,
+                setitem_mutation,
+                out_mutation,
+                opaque_mutation,
+            ):
+                with self.subTest(backend=backend, fn=fn.__name__):
+                    torch._dynamo.reset()
+                    compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+                    with self.assertRaisesRegex(
+                        torch._dynamo.exc.Unsupported,
+                        "mutated scalar tensor dropout probability",
+                    ):
+                        compiled_fn(
+                            torch.randn(8), torch.tensor(0.0, dtype=torch.float64)
+                        )
+
+            def opaque_identity_use(x, p):
+                opaque_identity(p)
+                return torch.ops.aten.dropout(x, p, True)
+
+            torch._dynamo.reset()
+            compiled_fn = torch.compile(
+                opaque_identity_use, backend=backend, fullgraph=True
+            )
+            x = torch.ones(8)
+            p = torch.tensor(0.0, dtype=torch.float64)
+            self.assertEqual(compiled_fn(x, p), opaque_identity_use(x, p))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_torch_ops_scalar_tensor_optional_float_arg(self):
         def check(scale):
             backend = EagerAndRecordGraphs()
@@ -2446,11 +2576,32 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 torch.tensor(0.5, dtype=torch.float64),
                 torch.tensor(1.5, dtype=torch.float64),
                 torch.tensor([0.25], dtype=torch.float64),
+                torch.tensor(float("nan"), dtype=torch.float64),
             ):
                 self.assertEqual(
                     compiled_fn(query, key, value, scale),
                     fn(query, key, value, scale),
                 )
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_torch_ops_scalar_tensor_optional_float_arg_side_effect(self):
+        def fn(query, key, value, scale):
+            return torch.ops.aten._scaled_dot_product_flash_attention_for_cpu(
+                query, key, value, scale=scale.add_(1)
+            )[0]
+
+        query = torch.randn(1, 2, 4, 8)
+        key = torch.randn(1, 2, 4, 8)
+        value = torch.randn(1, 2, 4, 8)
+        for backend in ("eager", "aot_eager", "inductor"):
+            torch._dynamo.reset()
+            eager_scale = torch.tensor(0.5, dtype=torch.float64)
+            compiled_scale = torch.tensor(0.5, dtype=torch.float64)
+            expected = fn(query, key, value, eager_scale)
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            actual = compiled_fn(query, key, value, compiled_scale)
+            self.assertEqual(actual, expected)
+            self.assertEqual(compiled_scale, eager_scale)
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_torch_ops_scalar_tensor_int_arg_not_concretized(self):
@@ -9856,6 +10007,32 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             torch.bfloat16,
             "expected scalar type BFloat16 but found Long",
         )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_device_context_matmul_avoids_native_bmm_router_graph_break(self):
+        torch._dynamo.utils.counters.clear()
+
+        @torch.compile(backend="inductor", dynamic=False)
+        def fn(q, k):
+            with torch.device("cuda"):
+                a = torch.reshape(q, [-1, 8, 1, 32])
+                return torch.matmul(a, k)
+
+        q = torch.randn(64, 8 * 32, device="cuda", dtype=torch.float16)
+        k = torch.randn(1, 8, 32, 128, device="cuda", dtype=torch.float16)
+
+        out = fn(q, k)
+        torch.cuda.synchronize()
+        self.assertEqual(out.shape, (64, 8, 1, 128))
+
+        graph_break_reasons = "\n".join(
+            torch._dynamo.utils.counters["graph_break"].keys()
+        )
+        # The native router should not run trace-unsafe eager predicates here.
+        # If it does, the COW probe on the reshaped operand graph-breaks before
+        # it can fold or install a guard.
+        self.assertNotIn("_is_cow_tensor", graph_break_reasons)
+        self.assertNotIn("call_boxed", graph_break_reasons)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")

@@ -9191,10 +9191,19 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
             if old_proxy_nodes is None or proxy_mode is None:
                 return
             current_overrides = cast(dict[str, float], overrides)
+            specializations = set(n.meta.get("unbacked_scalar_arg_specializations", ()))
+            restored_replacements: set[torch.fx.Node] = set()
+
+            def matches_override_value(traced_arg: object, override: float) -> bool:
+                return isinstance(traced_arg, float) and (
+                    traced_arg == override
+                    or (math.isnan(traced_arg) and math.isnan(override))
+                )
 
             for proxy_node in proxy_mode.tracer.graph.nodes:
                 if proxy_node not in old_proxy_nodes:
                     restored_overrides: dict[str, float] = {}
+                    restored_specializations: set[str] = set()
 
                     def restore_arg_edges(
                         original_arg: torch.fx.node.Argument,
@@ -9203,13 +9212,17 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
                         if (
                             isinstance(original_arg, torch.fx.Node)
                             and original_arg in proxy_replacements
-                            and isinstance(traced_arg, float)
-                            and traced_arg == current_overrides[original_arg.name]
+                            and matches_override_value(
+                                traced_arg, current_overrides[original_arg.name]
+                            )
                         ):
                             replacement = proxy_replacements[original_arg]
+                            restored_replacements.add(original_arg)
                             restored_overrides[replacement.name] = current_overrides[
                                 original_arg.name
                             ]
+                            if original_arg.name in specializations:
+                                restored_specializations.add(replacement.name)
                             return replacement
                         if isinstance(original_arg, tuple) and isinstance(
                             traced_arg, tuple
@@ -9248,6 +9261,32 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
                         proxy_node.meta.setdefault(
                             "unbacked_scalar_arg_overrides", {}
                         ).update(restored_overrides)
+                    if restored_specializations:
+                        proxy_node.meta["unbacked_scalar_arg_specializations"] = tuple(
+                            sorted(
+                                set(
+                                    proxy_node.meta.get(
+                                        "unbacked_scalar_arg_specializations", ()
+                                    )
+                                )
+                                | restored_specializations
+                            )
+                        )
+
+            missing_replacements = {
+                node
+                for node in set(proxy_replacements) - restored_replacements
+                if node.name not in specializations
+            }
+            if missing_replacements:
+                missing_names = ", ".join(
+                    sorted(node.name for node in missing_replacements)
+                )
+                raise AssertionError(
+                    "Expected torch.ops scalar tensor override(s) to be restored "
+                    f"during recapture: {missing_names}. Allowlisted ops must "
+                    "forward metadata-independent float tensor args unchanged."
+                )
 
         try:
             result = super().run_node(n)

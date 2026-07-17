@@ -30,10 +30,11 @@ import functools
 import inspect
 import logging
 import math
+import operator
 import re
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager, nullcontext
-from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 import torch._C
@@ -66,10 +67,16 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import (
+    _COW_TENSOR_UNSUPPORTED,
+    _try_is_cow_tensor,
+    GuardBuilder,
+    install_guard,
+)
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
+    CallMethodItemSource,
     GlobalStateSource,
     ImportSource,
     SyntheticLocalSource,
@@ -333,10 +340,15 @@ def _schema_arg_by_name(schema: torch._C.FunctionSchema, name: str) -> Any | Non
     return None
 
 
+# Allowed ops must use float tensor args only for data computation, not output
+# metadata. Unguarded args must pass those floats through unchanged when
+# recaptured so the runtime .item() edge can be restored instead of baking a
+# trace-time constant.
 _metadata_independent_float_tensor_ops = {
     "aten::_scaled_dot_product_flash_attention_for_cpu",
     "aten::dropout",
 }
+_UNSPECIALIZED_FAKE_SCALAR_ARG_VALUE = 1.0
 
 
 def _can_coerce_float_tensor_args(fn: Callable[..., Any]) -> bool:
@@ -345,6 +357,14 @@ def _can_coerce_float_tensor_args(fn: Callable[..., Any]) -> bool:
     if isinstance(fn, torch._ops.OpOverloadPacket):
         return fn._qualified_op_name in _metadata_independent_float_tensor_ops
     return False
+
+
+def _torch_op_name(fn: Callable[..., Any]) -> str | None:
+    if isinstance(fn, torch._ops.OpOverload):
+        return fn._schema.name
+    if isinstance(fn, torch._ops.OpOverloadPacket):
+        return fn._qualified_op_name
+    return None
 
 
 def _unwrap_optional_type(schema_type: Any) -> Any:
@@ -393,8 +413,218 @@ def _should_coerce_float_tensor_arg(
     return has_float_schema
 
 
-def _coerced_scalar_fake_value(arg: VariableTracker) -> float:
-    return float(arg.get_real_value().item())  # type: ignore[attr-defined]
+def _should_specialize_float_tensor_arg(
+    fn: Callable[..., Any],
+    schema_args: Iterable[Any | None],
+) -> bool:
+    # Inductor's native_dropout decomposition currently specializes the scale
+    # factor, so guard p instead of treating it as a fully dynamic scalar.
+    return _torch_op_name(fn) == "aten::dropout" and any(
+        schema_arg is not None and schema_arg.name == "p" for schema_arg in schema_args
+    )
+
+
+def _node_tensor_examples(node: torch.fx.Node) -> list[torch.Tensor]:
+    example_value = node.meta.get("example_value")
+    if example_value is None:
+        return []
+    return [
+        value
+        for value in _pytree.tree_leaves(example_value)
+        if isinstance(value, torch.Tensor)
+    ]
+
+
+def _fake_tensors_alias(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    if lhs is rhs:
+        return True
+    try:
+        return torch._C._overlaps(lhs, rhs)
+    except RuntimeError:
+        return False
+
+
+def _node_aliases_any(node: torch.fx.Node, alias_nodes: set[torch.fx.Node]) -> bool:
+    node_examples = _node_tensor_examples(node)
+    if not node_examples:
+        return False
+
+    for alias_node in alias_nodes:
+        for node_example in node_examples:
+            if any(
+                _fake_tensors_alias(node_example, alias_example)
+                for alias_example in _node_tensor_examples(alias_node)
+            ):
+                return True
+    return False
+
+
+def _contains_alias_node(value: Any, alias_nodes: set[torch.fx.Node]) -> bool:
+    if isinstance(value, torch.fx.Node):
+        return value in alias_nodes or _node_aliases_any(value, alias_nodes)
+    if isinstance(value, (list, tuple)):
+        return any(_contains_alias_node(item, alias_nodes) for item in value)
+    if isinstance(value, dict):
+        return any(_contains_alias_node(item, alias_nodes) for item in value.values())
+    return False
+
+
+def _aten_packet_by_name(name: str) -> Any | None:
+    try:
+        return getattr(torch.ops.aten, name)
+    except AttributeError:
+        return None
+
+
+def _node_schemas(node: torch.fx.Node) -> list[torch._C.FunctionSchema]:
+    target = node.target
+    if isinstance(target, torch._ops.OpOverload):
+        return [target._schema]
+
+    packet = None
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        packet = target
+    elif node.op == "call_method" and isinstance(target, str):
+        packet = _aten_packet_by_name(target)
+    elif node.op == "call_function":
+        name = getattr(target, "__name__", None)
+        if name is not None:
+            packet = _aten_packet_by_name(name)
+
+    if isinstance(packet, torch._ops.OpOverloadPacket):
+        return [getattr(packet, overload)._schema for overload in packet.overloads()]
+    return []
+
+
+def _schema_writes_alias(node: torch.fx.Node, alias_nodes: set[torch.fx.Node]) -> bool:
+    for schema in _node_schemas(node):
+        positional_index = 0
+        for schema_arg in schema.arguments:
+            arg_value = None
+            if schema_arg.name in node.kwargs:
+                arg_value = node.kwargs[schema_arg.name]
+            elif not schema_arg.kwarg_only:
+                if positional_index < len(node.args):
+                    arg_value = node.args[positional_index]
+
+            if (
+                schema_arg.alias_info is not None
+                and schema_arg.alias_info.is_write
+                and _contains_alias_node(arg_value, alias_nodes)
+            ):
+                return True
+            if not schema_arg.kwarg_only:
+                positional_index += 1
+    return False
+
+
+def _is_inplace_mutation_node(node: torch.fx.Node) -> bool:
+    if node.op == "call_method":
+        return isinstance(node.target, str) and node.target.endswith("_")
+    if node.op == "call_function":
+        target = node.target
+        if isinstance(target, torch._ops.OpOverload):
+            return target._schema.name.rsplit("::", 1)[-1].endswith("_")
+        return callable(target) and getattr(target, "__name__", "").endswith("_")
+    return False
+
+
+def _node_writes_alias(node: torch.fx.Node, alias_nodes: set[torch.fx.Node]) -> bool:
+    if node.op not in ("call_function", "call_method"):
+        return False
+    if node.target is operator.setitem:
+        return bool(node.args) and _contains_alias_node(node.args[0], alias_nodes)
+    if _contains_alias_node(node.kwargs.get("out"), alias_nodes):
+        return True
+    if _schema_writes_alias(node, alias_nodes):
+        return True
+    return (
+        _is_inplace_mutation_node(node)
+        and bool(node.args)
+        and _contains_alias_node(node.args[0], alias_nodes)
+    )
+
+
+def _alias_version_changed(alias_nodes: set[torch.fx.Node]) -> bool:
+    return any(
+        getattr(example, "_version", 0) > 0
+        for node in alias_nodes
+        for example in _node_tensor_examples(node)
+    )
+
+
+def _opaque_node_consumes_alias(
+    node: torch.fx.Node, alias_nodes: set[torch.fx.Node]
+) -> bool:
+    if node.op not in ("call_function", "call_method"):
+        return False
+    if _node_schemas(node):
+        return False
+    return _contains_alias_node((node.args, node.kwargs), alias_nodes)
+
+
+def _has_prior_inplace_mutation(
+    tx: "InstructionTranslatorBase", arg: VariableTracker
+) -> bool:
+    arg_node = arg.as_proxy().node
+    alias_nodes = {arg_node}
+    for node in tx.output.graph.nodes:
+        if node is arg_node:
+            continue
+        if _node_writes_alias(node, alias_nodes):
+            return True
+        # Opaque graph calls have no schema. If FakeTensor observed an alias
+        # version bump, treat prior opaque consumers as possible writers.
+        if _opaque_node_consumes_alias(node, alias_nodes) and _alias_version_changed(
+            alias_nodes
+        ):
+            return True
+        if _node_aliases_any(node, alias_nodes):
+            alias_nodes.add(node)
+    return False
+
+
+def _coerced_scalar_fake_value(
+    tx: "InstructionTranslatorBase",
+    fn: Callable[..., Any],
+    arg: VariableTracker,
+    schema_args: Iterable[Any | None],
+) -> tuple[float, bool]:
+    if _should_specialize_float_tensor_arg(fn, schema_args):
+        if arg.source is None:
+            unimplemented(
+                gb_type="sourceless scalar tensor dropout probability",
+                context="aten.dropout p argument has no guardable source",
+                explanation=(
+                    "Dynamo can compile scalar tensor dropout probabilities only "
+                    "when it can guard on the tensor item value."
+                ),
+                hints=[
+                    "Pass the scalar tensor directly to dropout.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        if _has_prior_inplace_mutation(tx, arg):
+            unimplemented(
+                gb_type="mutated scalar tensor dropout probability",
+                context="aten.dropout p argument was mutated before use",
+                explanation=(
+                    "Dynamo can compile scalar tensor dropout probabilities only "
+                    "when it can guard on the tensor item value at the dropout call."
+                ),
+                hints=[
+                    "Avoid mutating the scalar tensor before passing it to dropout.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        install_guard(
+            CallMethodItemSource(arg.source).make_guard(GuardBuilder.EQUALS_MATCH)
+        )
+        value = float(arg.get_real_value().item())  # type: ignore[attr-defined]
+        return value, True
+    # The real value is metadata-independent for unguarded args and will be
+    # restored to the runtime item() proxy during recapture.
+    return _UNSPECIALIZED_FAKE_SCALAR_ARG_VALUE, False
 
 
 @contextmanager
@@ -421,13 +651,14 @@ def _coerce_torch_op_scalar_tensor_args(
     list[VariableTracker],
     dict[str, VariableTracker],
     list[tuple[torch.fx.Node, float]],
+    set[str],
 ]:
     if not config.capture_scalar_outputs or not isinstance(
         fn, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
     ):
-        return args, kwargs, []
+        return args, kwargs, [], set()
     if not _can_coerce_float_tensor_args(fn):
-        return args, kwargs, []
+        return args, kwargs, [], set()
 
     if isinstance(fn, torch._ops.OpOverload):
         schemas = [fn._schema]
@@ -435,6 +666,7 @@ def _coerce_torch_op_scalar_tensor_args(
         schemas = [getattr(fn, overload)._schema for overload in fn.overloads()]
 
     fake_scalar_overrides = []
+    specialized_fake_scalars = set()
     new_args = args
     for i, arg in enumerate(args):
         schema_args = [_schema_arg_at_pos(schema, i) for schema in schemas]
@@ -443,9 +675,13 @@ def _coerce_torch_op_scalar_tensor_args(
                 new_args = list(args)
             item = arg.call_method(tx, "item", [], {})
             new_args[i] = item
-            fake_scalar_overrides.append(
-                (item.as_proxy().node, _coerced_scalar_fake_value(arg))
+            fake_value, specialized = _coerced_scalar_fake_value(
+                tx, fn, arg, schema_args
             )
+            item_node = item.as_proxy().node
+            fake_scalar_overrides.append((item_node, fake_value))
+            if specialized:
+                specialized_fake_scalars.add(item_node.name)
 
     new_kwargs = kwargs
     for name, arg in kwargs.items():
@@ -455,11 +691,15 @@ def _coerce_torch_op_scalar_tensor_args(
                 new_kwargs = dict(kwargs)
             item = arg.call_method(tx, "item", [], {})
             new_kwargs[name] = item
-            fake_scalar_overrides.append(
-                (item.as_proxy().node, _coerced_scalar_fake_value(arg))
+            fake_value, specialized = _coerced_scalar_fake_value(
+                tx, fn, arg, schema_args
             )
+            item_node = item.as_proxy().node
+            fake_scalar_overrides.append((item_node, fake_value))
+            if specialized:
+                specialized_fake_scalars.add(item_node.name)
 
-    return new_args, new_kwargs, fake_scalar_overrides
+    return new_args, new_kwargs, fake_scalar_overrides, specialized_fake_scalars
 
 
 @functools.cache
@@ -1485,6 +1725,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return ConstantVariable.create(None)
 
+        @register(torch.set_autocast_dtype)
+        def handle_set_autocast_dtype(
+            self,
+            tx: "InstructionTranslatorBase",
+            device_type: VariableTracker,
+            dtype: VariableTracker,
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function",
+                torch.set_autocast_dtype,
+                (device_type.as_proxy(), dtype.as_proxy()),
+            )
+            dev_py_const = device_type.as_python_constant()
+            prev = torch.get_autocast_dtype(dev_py_const)
+            torch.set_autocast_dtype(dev_py_const, dtype.as_python_constant())
+            tx.output.add_cleanup_hook(
+                lambda: torch.set_autocast_dtype(dev_py_const, prev)
+            )
+            return ConstantVariable.create(None)
+
         @register(torch.set_autocast_cache_enabled)
         def handle_set_autocast_cache_enabled(
             self, tx: "InstructionTranslatorBase", enabled: VariableTracker
@@ -1622,6 +1882,113 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return VariableTracker.build(
                 tx, tx.symbolic_torch_function_state.torch_function_subclass_enabled
             )
+
+        @register(torch._C._is_cow_tensor)  # pyrefly: ignore[missing-attribute]
+        def handle_is_cow_tensor(
+            self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        ) -> ConstantVariable:
+            if not arg.is_tensor():
+                raise AssertionError(
+                    f"_is_cow_tensor expects a tensor, got {arg.python_type_name()}"
+                )
+
+            def has_prior_cow_state_changing_op() -> bool:
+                if not isinstance(arg, TensorVariable):
+                    return False
+                graph = arg.as_proxy().node.graph
+                return any(
+                    (node.op == "call_method" and node.target == "_lazy_clone")
+                    or (node.op == "call_function" and node.target is torch._lazy_clone)
+                    for node in graph.nodes
+                )
+
+            if arg.source is None:
+                unimplemented(
+                    gb_type="source-less COW tensor check",
+                    context="torch._C._is_cow_tensor on source-less tensor",
+                    explanation=(
+                        "Dynamo cannot safely guard COW state for an intermediate "
+                        "tensor without a source."
+                    ),
+                    hints=[
+                        "Avoid checking COW state on intermediate tensors inside "
+                        "torch.compile regions.",
+                    ],
+                )
+            if tx.output.current_tracer.is_export or torch.compiler._is_exporting_flag:
+                unimplemented(
+                    gb_type="COW tensor check during export",
+                    context="torch._C._is_cow_tensor during export",
+                    explanation=(
+                        "Dynamo cannot safely export COW-state-dependent "
+                        "control flow because COW state is not represented in "
+                        "the exported graph."
+                    ),
+                    hints=[
+                        "Avoid checking COW state inside torch.export regions.",
+                    ],
+                )
+            fake_version = arg._get_fake_version()  # pyrefly: ignore[missing-attribute]
+            if fake_version is not None and fake_version > 0:
+                unimplemented(
+                    gb_type="COW tensor check after mutation",
+                    context="torch._C._is_cow_tensor after tensor mutation",
+                    explanation=(
+                        "Dynamo cannot safely fold a COW state check after "
+                        "the tensor's state may have changed inside the "
+                        "compiled frame."
+                    ),
+                    hints=[
+                        "Move the COW state check before tensor mutations or "
+                        "outside the torch.compile region.",
+                    ],
+                )
+            if has_prior_cow_state_changing_op():
+                unimplemented(
+                    gb_type="COW tensor check after COW-state-changing op",
+                    context="torch._C._is_cow_tensor after _lazy_clone",
+                    explanation=(
+                        "Dynamo cannot safely fold a COW state check after "
+                        "an op in the current graph may have changed that "
+                        "tensor's COW state."
+                    ),
+                    hints=[
+                        "Move the COW state check before _lazy_clone or outside "
+                        "the torch.compile region.",
+                    ],
+                )
+            real_value = arg.get_real_value()  # pyrefly: ignore[missing-attribute]
+            if is_fake_tensor(real_value):
+                unimplemented(
+                    gb_type="COW tensor check on FakeTensor",
+                    context="torch._C._is_cow_tensor on FakeTensor",
+                    explanation=(
+                        "Dynamo cannot safely evaluate COW state from a "
+                        "FakeTensor because COW state is not represented in "
+                        "FakeTensor metadata."
+                    ),
+                    hints=[
+                        "Avoid checking COW state on FakeTensors inside "
+                        "torch.compile regions.",
+                    ],
+                )
+            cow_state = _try_is_cow_tensor(real_value)
+            if cow_state is _COW_TENSOR_UNSUPPORTED:
+                unimplemented(
+                    gb_type="COW tensor check on Python tensor subclass",
+                    context="torch._C._is_cow_tensor on Python tensor subclass",
+                    explanation=(
+                        "Dynamo cannot safely evaluate COW state for Python "
+                        "tensor subclasses because their storage semantics are "
+                        "controlled by __torch_dispatch__."
+                    ),
+                    hints=[
+                        "Avoid checking COW state on tensor subclasses inside "
+                        "torch.compile regions.",
+                    ],
+                )
+            install_guard(arg.source.make_guard(GuardBuilder.COW_TENSOR_MATCH))
+            return VariableTracker.build(tx, cast(bool, cow_state))
 
         @register(torch._C._is_torch_function_all_disabled)
         def handle_is_torch_function_all_disabled(
@@ -3410,9 +3777,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if result:
                 return result
 
-        args, kwargs, fake_scalar_overrides = _coerce_torch_op_scalar_tensor_args(
-            tx, self.value, args, kwargs
-        )
+        (
+            args,
+            kwargs,
+            fake_scalar_overrides,
+            specialized_fake_scalars,
+        ) = _coerce_torch_op_scalar_tensor_args(tx, self.value, args, kwargs)
 
         any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
 
@@ -3507,6 +3877,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             proxy.node.meta["unbacked_scalar_arg_overrides"] = {
                 node.name: value for node, value in fake_scalar_overrides
             }
+        if specialized_fake_scalars:
+            proxy.node.meta["unbacked_scalar_arg_specializations"] = tuple(
+                sorted(specialized_fake_scalars)
+            )
 
         with ctx(), _temporary_example_value_overrides(fake_scalar_overrides):
             tensor_variable = wrap_fx_proxy(
