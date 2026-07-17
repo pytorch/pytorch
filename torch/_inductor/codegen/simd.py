@@ -514,6 +514,34 @@ class NodeInfo(NamedTuple):
     is_persistent_reduction: bool
 
 
+class SubkernelTune(NamedTuple):
+    """Compile-time autotune result for a single combo sub-kernel."""
+
+    config: Any
+    # Register-limited occupancy of the sub-kernel run standalone (blocks_per_sm capped by
+    # the register file), or None when it could not be computed (no compiled launcher /
+    # missing device props). register_bound is True when occupancy is below the guard ratio.
+    reg_occupancy: float | None
+    register_bound: bool
+
+
+def _register_limited_occupancy(n_regs, num_warps, device_props) -> float | None:
+    """Fraction of an SM's threads a kernel can occupy given its per-thread register use.
+
+    Mirrors the register term of _occupancy_before_and_after_fusion (scheduler.py): the
+    register file caps blocks-per-SM, which caps occupancy. Returns None when the inputs or
+    device props are unavailable so the caller treats the sub-kernel as not register-bound.
+    """
+    regs_per_sm = device_props.regs_per_multiprocessor
+    warp_size = device_props.warp_size
+    max_threads_per_sm = device_props.max_threads_per_multi_processor
+    if not (n_regs and num_warps and regs_per_sm and warp_size and max_threads_per_sm):
+        return None
+    threads_per_block = num_warps * warp_size
+    blocks_per_sm = regs_per_sm // (n_regs * threads_per_block)
+    return (blocks_per_sm * threads_per_block) / max_threads_per_sm
+
+
 class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     """
     Common base class for Triton/Halide codegen which both use flattened indexing rather than loop nests.
@@ -3673,26 +3701,28 @@ class SIMDScheduling(BaseScheduling):
 
     def _autotune_subkernels_compile_time(
         self, group: list[Any], node_schedule_map: dict[Any, NodeInfo]
-    ) -> list[Any | None]:
+    ) -> list[SubkernelTune]:
         """Autotune each combo subkernel standalone at compile time and read back its winning
-        config (None for a subkernel whose compile or benchmark failed, which the caller
-        carves out to run standalone instead of failing the compile).
+        config (plus its register-limited occupancy, for the register-pressure guard).
 
         Triton precompiles are submitted to the async compile pool as each subkernel is codegened.
         The subkernels are then benchmarked in compile-completion order through the standard
         benchmark_codegened_module path, so device benchmarking overlaps the remaining precompiles
         while retaining preserve_rng_state, argument cloning and the n_spills guard. Subkernels
         with a single candidate config (unless coordinate descent tuning is on) or an autotune
-        cache hit are taken directly with no benchmark.
+        cache hit are taken directly with no benchmark. A subkernel whose compile or benchmark
+        fails is marked register_bound so the caller carves it out to run standalone instead of
+        failing the compile.
         """
         from concurrent.futures import as_completed
 
         from ..async_compile import AsyncCompile
         from ..codecache import CodeCacheFuture
 
+        ratio = config.combo_kernel_register_pressure_ratio
         async_compile = AsyncCompile()
         use_process_pool = async_compile.use_process_pool()
-        work: list[tuple[Any, Any, bool, bool, Any]] = []
+        work: list[tuple[Any, NodeInfo, Any, bool, bool, Any]] = []
         futures_by_autotuner: dict[int, Any] = {}
         seen_autotuners: OrderedSet[int] = OrderedSet()
 
@@ -3731,7 +3761,12 @@ class SIMDScheduling(BaseScheduling):
             duplicate = autotuner_id in seen_autotuners
             seen_autotuners.add(autotuner_id)
             future = futures_by_autotuner.get(autotuner_id)
-            if not already_tuned and not duplicate and not single and use_process_pool:
+            needs_precompile = (
+                not already_tuned
+                and not duplicate
+                and (not single or (ratio > 0 and node_info.features.is_reduction()))
+            )
+            if needs_precompile and use_process_pool:
                 # triton() may compile synchronously and return a raw autotuner
                 # (e.g. TRITON_INTERPRET=1) despite use_process_pool being True.
                 maybe_future = async_compile.triton("triton_", src_code)
@@ -3739,19 +3774,27 @@ class SIMDScheduling(BaseScheduling):
                     maybe_future if isinstance(maybe_future, CodeCacheFuture) else None
                 )
                 futures_by_autotuner[autotuner_id] = future
-            work.append((pn, mod, already_tuned or duplicate, single, future))
+            work.append(
+                (
+                    pn,
+                    node_info,
+                    mod,
+                    already_tuned or duplicate,
+                    single,
+                    future,
+                )
+            )
         metrics.generated_kernel_count = old_kernel_count
 
-        winners: list[Any | None] = [None] * len(work)
-        failed: OrderedSet[int] = OrderedSet()
+        winners: list[SubkernelTune | None] = [None] * len(work)
 
         def fallback(index: int, pn: Any) -> None:
             counters["inductor"]["combo_subkernel_autotune_fallback"] += 1
             log.warning("combo compile-time autotune failed for %s; carving out", pn)
-            failed.add(index)
+            winners[index] = SubkernelTune(None, None, True)
 
         def benchmark(index: int) -> None:
-            pn, mod, already_tuned, single, _ = work[index]
+            pn, node_info, mod, already_tuned, single, _ = work[index]
             autotuner = mod.triton_
             configs = autotuner.configs
             benchmark_failed = False
@@ -3769,6 +3812,23 @@ class SIMDScheduling(BaseScheduling):
                 benchmark_failed = (
                     math.isinf(ms) and len(autotuner.launchers) != 1
                 ) or len(autotuner.launchers) > 1
+            elif (
+                ratio > 0
+                and not autotuner.launchers
+                and node_info.features.is_reduction()
+            ):
+                # Single-config reduction sub-kernel: no benchmark ran, so nothing is compiled
+                # and n_regs is unknown. Register pressure is reduction-dominated, so compile it
+                # (no benchmark) just to read n_regs for the guard; pointwise sub-kernels are
+                # register-light and skip this extra compile.
+                try:
+                    autotuner.precompile()
+                except Exception:
+                    log.debug(
+                        "combo register guard: precompile failed for %s",
+                        pn,
+                        exc_info=True,
+                    )
             if benchmark_failed:
                 fallback(index, pn)
                 return
@@ -3787,12 +3847,21 @@ class SIMDScheduling(BaseScheduling):
                 else "combo_subkernel_autotune"
             ] += 1
             if launchers:
-                winners[index] = launchers[0].config
+                win_config = launchers[0].config
             elif configs:
-                winners[index] = configs[0]
+                win_config = configs[0]
             else:
                 # configs is None after a precompile that failed to produce launchers.
                 fallback(index, pn)
+                return
+            reg_occ = None
+            if ratio > 0 and launchers:
+                reg_occ = _register_limited_occupancy(
+                    launchers[0].n_regs, win_config.num_warps, autotuner.device_props
+                )
+            winners[index] = SubkernelTune(
+                win_config, reg_occ, reg_occ is not None and reg_occ < ratio
+            )
 
         pending: dict[Any, list[int]] = {}
         ready: list[int] = []
@@ -3830,9 +3899,9 @@ class SIMDScheduling(BaseScheduling):
         for raw_future in as_completed(pending):
             resolve_and_benchmark(raw_future, pending[raw_future])
 
-        if any(w is None for i, w in enumerate(winners) if i not in failed):
+        if any(winner is None for winner in winners):
             raise AssertionError("expected all combo subkernels to be autotuned")
-        return winners
+        return [winner for winner in winners if winner is not None]
 
     def _build_combo_kernel(
         self,
@@ -3995,13 +4064,29 @@ class SIMDScheduling(BaseScheduling):
                     tuned = self._autotune_subkernels_compile_time(
                         group, node_schedule_map
                     )
-                    # A None winner means its compile/benchmark failed; carve it out to
-                    # run standalone rather than stitch a bogus config or fail compile.
-                    fusable = [(pn, w) for pn, w in zip(group, tuned) if w is not None]
-                    carve_out = [pn for pn, w in zip(group, tuned) if w is None]
+                    # Register-pressure guard: a register-bound sub-kernel unions its register
+                    # footprint into the combo body, pushing the whole launch toward the ISA
+                    # register cap; carve it out to run standalone (its faster non-combo form).
+                    fusable = [
+                        (pn, t.config)
+                        for pn, t in zip(group, tuned)
+                        if not t.register_bound
+                    ]
+                    carve_out = [pn for pn, t in zip(group, tuned) if t.register_bound]
+                    if carve_out:
+                        counters["inductor"]["combo_register_bound_carveout"] += len(
+                            carve_out
+                        )
+                        log.debug(
+                            "ComboKernel register guard: carving out %d/%d register-bound "
+                            "sub-kernel(s) (occupancy < %s)",
+                            len(carve_out),
+                            len(group),
+                            config.combo_kernel_register_pressure_ratio,
+                        )
                     if len(fusable) >= 2:
                         fusable_pns = [pn for pn, _ in fusable]
-                        winners = [w for _, w in fusable]
+                        winners = [cfg for _, cfg in fusable]
                         kernel = self._build_combo_kernel(
                             fusable_pns,
                             node_schedule_map,
@@ -4024,7 +4109,7 @@ class SIMDScheduling(BaseScheduling):
                         # pyrefly: ignore [bad-argument-type]
                         kernel_code_list.append((src_code, kernel, fusable_pns))
                     else:
-                        # Fewer than two tunable sub-kernels: emit them all standalone.
+                        # Fewer than two fusable sub-kernels remain: emit them standalone too.
                         carve_out = list(group)
                     for pn in carve_out:
                         co_src, co_kernel = self._codegen_standalone_kernel(
