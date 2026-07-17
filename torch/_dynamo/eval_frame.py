@@ -1177,14 +1177,15 @@ class _TorchDynamoContext:
                 saved_dynamic_layer_stack_depth = (
                     torch._C._functorch.get_dynamic_layer_stack_depth()
                 )
-                saved_include_set = torch._C._dispatch_tls_local_include_set()
-                saved_exclude_set = torch._C._dispatch_tls_local_exclude_set()
 
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
-                with torch._C._ForceDispatchKeyGuard(
-                    saved_include_set, saved_exclude_set
-                ):
+                # _PreserveDispatchKeyGuard snapshots the local dispatch key set
+                # on construction and restores it on destruction, entirely in
+                # C++. This avoids materializing the include/exclude
+                # DispatchKeySets as (registered) pybind11 instances on every
+                # compiled call, which showed up as measurable per-call overhead.
+                with torch._C._PreserveDispatchKeyGuard():
                     call_succeeded = False
                     try:
                         result = fn(*args, **kwargs)
