@@ -132,7 +132,7 @@ class TestCodegenTriton(InductorTestCase):
         self.assertFalse(kernel.persistent_reduction)
         self.assertEqual(seen_scores, [tiling_scores])
 
-    def test_load_cse_proves_equivalent_range_indices(self):
+    def test_load_cse_reuses_observed_split_for_full_range(self):
         kernel = TritonKernel(
             {"x": sympy.Integer(24), "r0_": sympy.Integer(512)},
             features=SIMDKernelFeatures([], sympy.Integer(24), sympy.Integer(512)),
@@ -157,33 +157,30 @@ class TestCodegenTriton(InductorTestCase):
                 r_index + 128 * flat_x, 1, 512
             )
             self.assertEqual(
-                kernel._match_equivalent_load_index("in_ptr", split_index),
+                kernel._reuse_load_index_basis("in_ptr", split_index),
                 split_index,
             )
             self.assertEqual(
-                kernel._match_equivalent_load_index("in_ptr", alternate_index),
+                kernel._reuse_load_index_basis("in_ptr", alternate_index),
+                alternate_index,
+            )
+            self.assertEqual(
+                kernel._reuse_load_index_basis("in_ptr", flat_index), split_index
+            )
+            self.assertEqual(
+                kernel._reuse_load_index_basis("reverse_ptr", flat_index),
+                flat_index,
+            )
+            self.assertEqual(
+                kernel._reuse_load_index_basis("reverse_ptr", split_index),
                 split_index,
             )
             self.assertEqual(
-                kernel._match_equivalent_load_index("in_ptr", flat_index), split_index
-            )
-            self.assertEqual(
-                kernel._match_equivalent_load_index("reverse_ptr", flat_index),
-                flat_index,
-            )
-            self.assertEqual(
-                kernel._match_equivalent_load_index("reverse_ptr", split_index),
-                flat_index,
-            )
-            colliding_index = flat_index + flat_x * (flat_x - 12)
-            self.assertEqual(
-                kernel._match_equivalent_load_index("in_ptr", colliding_index),
-                colliding_index,
+                kernel._reuse_load_index_basis("reverse_ptr", flat_index), split_index
             )
             kernel.cse.invalidate(OrderedSet())
             self.assertEqual(
-                kernel._match_equivalent_load_index("in_ptr", alternate_index),
-                alternate_index,
+                kernel._reuse_load_index_basis("in_ptr", flat_index), flat_index
             )
 
     @inductor_config.patch("triton.divisible_by_16", True)

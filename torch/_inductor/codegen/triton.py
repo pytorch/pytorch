@@ -2811,27 +2811,14 @@ class TritonCSE(CSE[TritonCSEVariable, str | tuple[str, str]]):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.load_index_candidates: dict[str, list[sympy.Expr]] = (
-            collections.defaultdict(list)
-        )
-        self.load_index_matches: dict[tuple[str, sympy.Expr], sympy.Expr] = {}
-        self.load_index_fingerprints: dict[
-            sympy.Expr,
-            tuple[
-                frozenset[int],
-                frozenset[sympy.Symbol],
-                tuple[sympy.Expr, ...],
-            ],
+        self._load_index_bases: dict[
+            tuple[str, str | None],
+            list[tuple[IterationRangesEntry, ...] | None],
         ] = {}
-
-    def clear_load_index_cache(self) -> None:
-        self.load_index_candidates.clear()
-        self.load_index_matches.clear()
-        self.load_index_fingerprints.clear()
 
     def invalidate(self, keep_vars: OrderedSet[CSEVariable]) -> None:
         super().invalidate(keep_vars)
-        self.clear_load_index_cache()
+        self._load_index_bases.clear()
 
     def augment_key(self, cache_key: str) -> str | tuple[str, str]:
         if mask := V.kernel._load_mask:
@@ -4217,121 +4204,71 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             new_lines.append(l)
         code._lines = new_lines
 
-    def _load_index_range_basis(
+    def _load_index_split_basis(
         self, index: sympy.Expr, tree: IterationRangesRoot
     ) -> tuple[IterationRangesEntry, ...] | None:
-        if not any(symbol in tree.var_list for symbol in index.free_symbols):
+        sizevars = V.graph.sizevars
+        remaining: list[IterationRangesEntry] = []
+        for symbol in index.free_symbols:
+            entry = self.range_tree_nodes.get(symbol)
+            if (
+                entry is not None
+                and entry.root is tree
+                and not sizevars.statically_known_equals(entry.length, sympy.S.One)
+            ):
+                remaining.append(entry)
+        if len(remaining) <= 1:
             return None
-        symbols, _ = tree.vars_and_sizes(index)
-        if len(symbols) <= 1:
-            return None
-        return tuple(self.range_tree_nodes[symbol] for symbol in symbols)
 
-    def _equivalent_load_indices(
-        self, left: sympy.Expr, right: sympy.Expr
-    ) -> bool:
+        basis: list[IterationRangesEntry] = []
+        divisor = sympy.S.One
+        while remaining:
+            for i, entry in enumerate(remaining):
+                if sizevars.statically_known_equals(entry.divisor, divisor):
+                    basis.append(entry)
+                    divisor *= entry.length
+                    remaining.pop(i)
+                    break
+            else:
+                return None
+        if not sizevars.statically_known_equals(divisor, tree.numel):
+            return None
+        return tuple(basis)
+
+    def _reuse_load_index_basis(
+        self, name: str, index: sympy.Expr
+    ) -> sympy.Expr:
+        mask_name = self._load_mask.name if self._load_mask else None
+        bases = self.cse._load_index_bases.setdefault(
+            (name, mask_name), [None] * len(self.range_trees)
+        )
         replacements: dict[sympy.Symbol, sympy.Expr] = {}
-        left_symbols = left.free_symbols
-        right_symbols = right.free_symbols
-        used_symbols = left_symbols | right_symbols
-        for tree in self.range_trees:
-            left_tree_symbols = left_symbols.intersection(tree.var_list)
-            right_tree_symbols = right_symbols.intersection(tree.var_list)
-            if left_tree_symbols == right_tree_symbols:
-                continue
-            basis = self._load_index_range_basis(
-                left, tree
-            ) or self._load_index_range_basis(right, tree)
+        sizevars = V.graph.sizevars
+        for i, tree in enumerate(self.range_trees):
+            basis = bases[i]
+            if basis is None:
+                basis = self._load_index_split_basis(index, tree)
+                bases[i] = basis
             if basis is None:
                 continue
-            flat_index = sum(
+
+            split_index = sum(
                 (entry.symbol() * entry.divisor for entry in basis), sympy.S.Zero
             )
             basis_symbols = {entry.symbol() for entry in basis}
-            for symbol in used_symbols - basis_symbols:
+            for symbol in index.free_symbols - basis_symbols:
                 entry = self.range_tree_nodes.get(symbol)
-                if entry is None or entry.root is not tree:
-                    continue
-                replacements[symbol] = sympy_subs(
-                    entry.expr, {tree.index_sym(): flat_index}
-                )
+                if entry is not None and entry.root is tree and (
+                    sizevars.statically_known_equals(entry.divisor, sympy.S.One)
+                    and sizevars.statically_known_equals(entry.length, tree.numel)
+                ):
+                    replacements[symbol] = split_index
 
         if not replacements:
-            return False
-        sizevars = V.graph.sizevars
-        ranges = self.var_ranges()
-        left = sizevars.simplify_with_ranges(sympy_subs(left, replacements), ranges)
-        right = sizevars.simplify_with_ranges(
-            sympy_subs(right, replacements), ranges
-        )
-        return left == right
-
-    def _load_index_fingerprint(self, index: sympy.Expr):
-        if index in self.cse.load_index_fingerprints:
-            return self.cse.load_index_fingerprints[index]
-
-        roots = set()
-        other_symbols = set()
-        entry_replacements = {}
-        for symbol in index.free_symbols:
-            entry = self.range_tree_nodes.get(symbol)
-            if entry is None:
-                other_symbols.add(symbol)
-                continue
-            for root_position, tree in enumerate(self.range_trees):
-                if tree is entry.root:
-                    roots.add(root_position)
-                    entry_replacements[symbol] = entry.expr
-                    break
-            else:
-                other_symbols.add(symbol)
-        expanded = sympy_subs(index, entry_replacements)
-        sizevars = V.graph.sizevars
-        hints = [
-            max(sizevars.optimization_hint(tree.numel, fallback=2), 1)
-            for tree in self.range_trees
-        ]
-        samples = tuple(
-            sympy_subs(
-                expanded,
-                {
-                    tree.index_sym(): value
-                    for tree, value in zip(self.range_trees, values)
-                },
-            )
-            for values in ([0] * len(hints), [hint // 2 for hint in hints])
-        )
-        fingerprint = frozenset(roots), frozenset(other_symbols), samples
-        self.cse.load_index_fingerprints[index] = fingerprint
-        return fingerprint
-
-    def _match_equivalent_load_index(
-        self, name: str, index: sympy.Expr
-    ) -> sympy.Expr:
-        key = name, index
-        if key in self.cse.load_index_matches:
-            return self.cse.load_index_matches[key]
-
-        candidates = self.cse.load_index_candidates[name]
-        if not candidates:
-            candidates.append(index)
-            self.cse.load_index_matches[key] = index
             return index
-
-        fingerprint = None
-        for candidate in candidates:
-            if fingerprint is None:
-                fingerprint = self._load_index_fingerprint(index)
-            if self._load_index_fingerprint(candidate) != fingerprint:
-                continue
-            # Samples only filter candidates; reuse requires an exact symbolic proof.
-            if self._equivalent_load_indices(candidate, index):
-                self.cse.load_index_matches[key] = candidate
-                return candidate
-
-        candidates.append(index)
-        self.cse.load_index_matches[key] = index
-        return index
+        return sizevars.simplify_with_ranges(
+            sympy_subs(index, replacements), self.var_ranges()
+        )
 
     def partial_accumulate(
         self, name: str, reduction_type, val, extra_meta: dict[str, Any]
@@ -4352,7 +4289,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.persistent_reduction and type(self) is TritonKernel and all(
             type(tree) is IterationRangesRoot for tree in self.range_trees
         ):
-            index = self._match_equivalent_load_index(name, index)
+            index = self._reuse_load_index_basis(name, index)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
         dtype = V.graph.get_dtype(name)
