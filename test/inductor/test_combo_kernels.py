@@ -1534,6 +1534,64 @@ class ComboKernelBenchmarkTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
+    @requires_gpu_and_triton
+    def test_graph_state_restored_on_swallowed_compilation_error(self):
+        # speedup_by_combo_kernel swallows Loop-carried-variable CompilationError
+        # and keeps compiling; benchmark_combo_kernel must restore the original
+        # V.graph.removed_buffers/inplaced_to_remove on that path, not leak the
+        # throwaway copies it benchmarks with.
+        from triton.compiler.errors import CompilationError
+
+        from torch._inductor.codegen.simd import SIMDScheduling
+        from torch._inductor.scheduler import Scheduler
+
+        class FakeCompilationError(CompilationError):
+            def __init__(self, msg):
+                Exception.__init__(self, msg)
+                self.msg = msg
+
+            def __str__(self):
+                return self.msg
+
+        def fn(a, b, c):
+            return a * 2.0, b + 1.0, c - 1.0
+
+        inps = [torch.rand(64, device=GPU_TYPE) for _ in range(3)]
+
+        captured = {}
+        orig_speedup = Scheduler.speedup_by_combo_kernel
+        orig_generate = SIMDScheduling.generate_combo_kernel_code
+
+        def speedup_capturing_restore(sched, nodes):
+            before = V.graph.removed_buffers
+            result = orig_speedup(sched, nodes)
+            captured["result"] = result
+            captured["restored"] = V.graph.removed_buffers is before
+            return result
+
+        def mutate_then_raise(self, *args, **kwargs):
+            # Real codegen (only_gen_src_code=False) must keep working; only
+            # the benchmark's throwaway codegen simulates mutate-then-fail.
+            if not kwargs.get("only_gen_src_code"):
+                return orig_generate(self, *args, **kwargs)
+            V.graph.removed_buffers.add("throwaway_buf")
+            raise FakeCompilationError("Loop-carried variable")
+
+        with (
+            patch.object(
+                Scheduler, "speedup_by_combo_kernel", speedup_capturing_restore
+            ),
+            patch.object(
+                SIMDScheduling, "generate_combo_kernel_code", mutate_then_raise
+            ),
+            fresh_cache(),
+        ):
+            out_compiled = torch.compile(fn)(*inps)
+
+        self.assertEqual(fn(*inps), out_compiled)
+        self.assertTrue(captured["result"])
+        self.assertTrue(captured["restored"])
+
 
 class ComboKernelDynamicShapesTests(TestCase):
     check_model_gpu = check_model_gpu
