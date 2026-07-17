@@ -34,7 +34,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
-    skipIfXpu,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -532,10 +531,6 @@ class TestScheduler(TestCase):
         torch._logging.set_logs()
 
     @xfailIfNoAcceleratorTriton
-    @skipIfXpu(
-        msg="InvalidModule: Invalid SPIR-V module, "
-        "https://github.com/intel/torch-xpu-ops/issues/2329"
-    )
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize(
@@ -774,7 +769,7 @@ class TestScheduler(TestCase):
         # Verify results match (no fusion bug)
         self.assertTrue(
             torch.allclose(eager_result, compiled_result, rtol=1e-4, atol=1e-4),
-            msg=f"index_add_ fusion bug detected: "
+            msg=lambda msg: f"{msg}\nindex_add_ fusion bug detected: "
             f"eager={eager_result.mean().item():.6f}, "
             f"compiled={compiled_result.mean().item():.6f}",
         )
@@ -807,7 +802,7 @@ class TestScheduler(TestCase):
         # This test will FAIL without the fusion prevention fix
         self.assertTrue(
             torch.allclose(expected, result),
-            msg=f"Fusion bug detected! Expected {expected}, got {result}",
+            msg=lambda msg: f"{msg}\nFusion bug detected! Expected {expected}, got {result}",
         )
 
     @xfailIfNoAcceleratorTriton

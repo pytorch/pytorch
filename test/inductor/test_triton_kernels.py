@@ -3396,9 +3396,9 @@ def forward(self, arg0_1, arg1_1):
             return y
 
         # make sure FLOAT_CONSTANT_C is NOT annotated
-        self.assertFalse("FLOAT_CONSTANT_C" in globals().get("__annotations__", {}))
+        self.assertFalse("FLOAT_CONSTANT_C" in sys.modules[__name__].__annotations__)
         # sanity check: STRING_CONSTANT_C _should_ be annotated
-        self.assertTrue("STRING_CONSTANT_C" in globals().get("__annotations__", {}))
+        self.assertTrue("STRING_CONSTANT_C" in sys.modules[__name__].__annotations__)
 
         x = torch.randn(512, device=GPU_TYPE)
         expected = x + 3.14
@@ -4285,7 +4285,6 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["O_ptr"],
         )
 
-    @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
     @make_mutation_test
     def test_for_loop_arg_2():
         @triton.jit
@@ -4346,7 +4345,6 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["o_ptr"],
         )
 
-    @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
     @make_mutation_test
     def test_while_loop():
         @triton.jit
