@@ -33,7 +33,7 @@ def _sm120_default_config() -> GemmConfig:
         tile_n=128,
         cluster_m=1,
         cluster_n=1,
-        pingpong=True,
+        pingpong=False,
         is_dynamic_persistent=True,
         device_capacity=12,
         use_tma_gather=False,
