@@ -884,6 +884,10 @@ cache_sdpa_constraint = (
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
 
+# Whether view outputs must match eager strides exactly instead of only matching
+# their stride order. Exact matching can introduce additional copy kernels.
+strict_output_strides = False
+
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging
 # since kernel with mixed layout inputs may run much slower then one whose inputs
