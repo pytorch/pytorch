@@ -143,6 +143,8 @@ quote-style = "double"
 [tool.ruff.lint]
 # NOTE: Synchronize the ignores with .flake8
 external = [
+    # lintrunner grep-linter codes (see .lintrunner.toml) suppressed via `# noqa:`.
+    "ISINSTANCE_FAKE_TENSOR",
     # Codes from flake8-only plugins that ruff doesn't implement.
     "P201",
     "P204",

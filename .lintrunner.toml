@@ -718,6 +718,31 @@ command = [
 ]
 
 [[linter]]
+code = 'ISINSTANCE_FAKE_TENSOR'
+include_patterns = ['torch/**/*.py']
+exclude_patterns = [
+    '**/fb/**',
+    'torch/testing/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=isinstance\([^)]*\bFakeTensor\b',
+    '--line-allowlist-pattern=noqa: ISINSTANCE_FAKE_TENSOR',
+    '--linter-name=ISINSTANCE_FAKE_TENSOR',
+    '--error-name=isinstance(x, FakeTensor)',
+    """--error-description=\
+        Do not use isinstance(x, FakeTensor) because it only matches \
+        Python FakeTensors and misses C++ FakeTensors. \
+        Use is_fake_tensor(x) for a leaf fake check. \
+        If you must match only a Python FakeTensor instance, keep isinstance \
+        and add a `# noqa: ISINSTANCE_FAKE_TENSOR` comment to the line.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'PYBIND11_SPECIALIZATION'
 include_patterns = [
     '**/*.cpp',
@@ -1937,4 +1962,16 @@ command = [
     'tools/linter/adapters/generated_shims_version_linter.py',
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'UNSPECIFIED_BACKEND'
+include_patterns = [
+    'test/dynamo/**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/unspecified_backend_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
 ]
