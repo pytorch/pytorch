@@ -216,6 +216,5 @@ sycl::event scaled_matmul(
     at::blas::ScalingType scaling_choice_b,
     const std::optional<at::Tensor>& bias,
     const std::optional<at::Tensor>& scale_result,
-    bool use_fast_accum,
-    const std::optional<at::Tensor>& alpha = std::nullopt);
+    bool use_fast_accum);
 } // namespace at::native::onednn
