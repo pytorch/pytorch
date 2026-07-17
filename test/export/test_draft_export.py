@@ -12,6 +12,7 @@ from torch.export import Dim, draft_export, export
 from torch.export._draft_export import DraftExportReport, FailureReport, FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
@@ -285,7 +286,6 @@ class TestDraftExport(TestCase):
                 ):
                     torch.ops.mylib.foo8(*inp)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
     def test_missing_meta_kernel_guard(self):
         with torch.library._scoped_library("mylib", "FRAGMENT"):
 
@@ -315,13 +315,6 @@ class TestDraftExport(TestCase):
             inp = (torch.randn(2, 3), torch.randn(2, 3))
             self.assertEqual(ep.module()(*inp), M()(*inp))
             m = ep.module()
-            with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
-                bad_device_inps = (
-                    torch.randn(2, 3, device=torch.device("cuda")),
-                    torch.randn(2, 3, device=torch.device("cuda")),
-                )
-                m(*bad_device_inps)
-
             with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
                 bad_dtype_inps = (
                     torch.randn(2, 3, dtype=torch.float16),
@@ -796,6 +789,39 @@ class TestDraftExport(TestCase):
         # right now it's actually exactly 4x;
         # I guess original tensor, 2 tensors per add op, 1 for clone stored in node.meta["val"]
         self.assertTrue((peak_mem_usage - base_usage) <= (x_usage - base_usage) * 4.0)
+
+
+class TestDraftExportDeviceGuard(TestCase):
+    def test_missing_meta_kernel_device_mismatch(self, device):
+        with torch.library._scoped_library("mylib", "FRAGMENT"):
+
+            @torch.library.custom_op("mylib::foo4", mutates_args={})
+            def foo4_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                return a + b
+
+            class M(torch.nn.Module):
+                def forward(self, a, b):
+                    res1 = torch.ops.mylib.foo4(a, b)
+                    return res1
+
+            ep = draft_export(
+                M(),
+                (torch.ones(3, 4), torch.ones(3, 4)),
+                dynamic_shapes={
+                    "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                    "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                },
+            )
+            m = ep.module()
+            with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
+                bad_device_inps = (
+                    torch.randn(2, 3, device=device),
+                    torch.randn(2, 3, device=device),
+                )
+                m(*bad_device_inps)
+
+
+instantiate_device_type_tests(TestDraftExportDeviceGuard, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
