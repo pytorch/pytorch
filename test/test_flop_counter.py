@@ -7,13 +7,13 @@ import torch
 import torch.nn.functional as F
 import torch.utils.flop_counter
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_CUDNN_ATTENTION
+from torch.testing._internal.common_device_type import e4m3_type
+from torch.testing._internal.common_gpu import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
-from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,

@@ -29,11 +29,11 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
-    PLATFORM_SUPPORTS_FP8,
     SM90OrLater,
 )
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
