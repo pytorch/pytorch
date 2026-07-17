@@ -67,6 +67,7 @@
                 BLOCK_K,
                 MIN_BLOCK_TILE_AM,
                 MIN_BLOCK_TILE_AK,
+                SCALE_A_128X128_USES_CUBLAS_LAYOUT,
             )
             {%- else %}  # ScalingType.Blockwise1xTILESIZE
             scale_a_block = blockwise1xTILESIZE_scaling(
@@ -94,6 +95,7 @@
                 BLOCK_K,
                 MIN_BLOCK_TILE_BN,
                 MIN_BLOCK_TILE_BK,
+                SCALE_B_128X128_USES_CUBLAS_LAYOUT,
             )
             {%- else %}  # ScalingType.Blockwise1xTILESIZE
             scale_b_block = blockwise1xTILESIZE_scaling(
@@ -170,10 +172,14 @@ def blockwise128x128_scaling(
     BLOCK_K: tl.constexpr,
     MIN_BLOCK_TILE_lhs: tl.constexpr,
     MIN_BLOCK_TILE_K: tl.constexpr,
+    USE_CUBLAS_LAYOUT: tl.constexpr,
 ):
     row_offs_scale = pid * tl.cdiv(BLOCK_lhs, 128) + tl.arange(0, (BLOCK_lhs + 128 - 1) // 128)
     col_offs_scale = ki * tl.cdiv(BLOCK_K, 128) + tl.arange(0, (BLOCK_K + 128 - 1) // 128)
-    ptrs = scale + row_offs_scale[:, None] * k_blocks + col_offs_scale[None, :]
+    if USE_CUBLAS_LAYOUT:
+        ptrs = scale + col_offs_scale[None, :] * lhs_blocks + row_offs_scale[:, None]
+    else:
+        ptrs = scale + row_offs_scale[:, None] * k_blocks + col_offs_scale[None, :]
     mask = (row_offs_scale[:, None] < lhs_blocks) & (col_offs_scale[None, :] < k_blocks)
     scale_block = tl.load(ptrs, mask=mask, other=1.0)
 
