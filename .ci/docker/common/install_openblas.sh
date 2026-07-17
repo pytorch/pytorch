@@ -9,7 +9,7 @@ OPENBLAS_CHECKOUT_DIR="OpenBLAS"
 if [[ "$(uname -m)" == "aarch64" ]]; then
   OPENBLAS_TARGET="ARMV8"
 elif [[ "$(uname -m)" == "riscv64" ]]; then
-  # FIXME: Depends on https://github.com/OpenMathLib/OpenBLAS/commit/c8dbfd74e2aa40563b11989d16aeb9b3828c16f4 getting released
+  # FIXME: zvfbfwma (vector bfloat16 instructions) support has been added in GCC 15
   OPENBLAS_BUILD_BFLOAT16=0
 fi
 
