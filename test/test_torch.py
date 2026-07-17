@@ -6818,6 +6818,7 @@ class TestTorchDeviceType(TestCase):
                 index = (torch.ones(256) * 257).to(dtype=torch.long)
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
 
+    # FIXME: resolve comment below and move this to indexing test suite
     # add coverage for issue with atomic add that appeared only for
     # specific dtypes on cuda:
     # https://github.com/pytorch/pytorch/issues/29153
@@ -7399,9 +7400,6 @@ class TestTorch(TestCase):
         t1.set_(t2)
         self.assertEqual(t1.storage()._cdata, t2.storage()._cdata)
 
-    # FIXME: move this test test_testing.py (along with allclose testing)
-    # NOTE: test_equal will be deprecated in favor of torch.testing.assert_close
-    #   once torch.testing is out of beta
     def test_element_size(self):
         byte = torch.ByteStorage().element_size()
         char = torch.CharStorage().element_size()
