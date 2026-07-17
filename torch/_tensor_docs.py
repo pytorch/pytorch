@@ -1160,6 +1160,13 @@ Args:
     non_blocking (bool, optional): if ``True`` and this copy is between CPU and GPU,
         the copy may occur asynchronously with respect to the host. For other
         cases, this argument has no effect. Default: ``False``
+
+.. note::
+
+    When :attr:`non_blocking` is ``True`` and the copy is issued on a
+    non-default CUDA stream, the caller is responsible for proper
+    cross-stream synchronization. See :ref:`cuda-stream-semantics` for
+    the required pattern.
 """,
 )
 
@@ -5175,6 +5182,13 @@ Here are the ways to call ``to``:
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
 
+.. note::
+
+    When :attr:`non_blocking` is ``True`` and the conversion is issued on
+    a non-default CUDA stream, the caller is responsible for proper
+    cross-stream synchronization. See :ref:`cuda-stream-semantics` for
+    the required pattern.
+
 Example::
 
     >>> tensor = torch.randn(2, 2)  # Initially dtype=float32, device=cpu
@@ -6761,7 +6775,7 @@ If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 
 .. warning::
-    The use of :func:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
+    The use of :attr:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
     is deprecated and it will throw an error in a future release. Consider :attr:`~.Tensor.mT`
     to transpose batches of matrices or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse
     the dimensions of a tensor.

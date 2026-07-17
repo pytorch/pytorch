@@ -1476,7 +1476,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         return OpsWrapper._unwrap((mean, m2, rnumel))
 
     def prepare_softmax_twopass_fallback(self, dtype, value):
-        vmax = ops.reduction(dtype, dtype, "max", value)
+        vmax = ops.reduction(dtype, dtype, "fmax", value)
         sub = ops.sub(value, vmax)
         exp = ops.exp(sub)
         vsum = ops.reduction(dtype, dtype, "sum", exp)
