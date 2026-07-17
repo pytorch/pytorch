@@ -53,6 +53,16 @@ def _strip_artifact(cache: bytes) -> bytes:
     return buf.getvalue()
 
 
+def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
+    """Yield (label, loaded_fn) for the load paths a backend exposes: the default
+    (cache-primed) path always, plus -- on inductor only -- the inlined path that
+    strips the artifact to force JIT from python_code. The eager backend has a single
+    driver, so it yields the default path alone."""
+    yield "default", torch.compiler.precompile.load(code, cache)
+    if backend == "inductor":
+        yield "inlined", torch.compiler.precompile.load(code, _strip_artifact(cache))
+
+
 # precompile drives make_fx internally, which cannot symbolically trace a
 # dynamo-optimized function; the whole suite is therefore incompatible with
 # PYTORCH_TEST_WITH_DYNAMO (dynamo_wrapped CI), so skip it there.
@@ -1324,16 +1334,7 @@ class TestPrecompile(TestCase):
         )
         bad = torch.nn.Linear(4, 7).eval()  # K = 7 != 3, same param names
 
-        def loaders():
-            yield "default", torch.compiler.precompile.load(code, cache)
-            if backend == "inductor":
-                # Strip the artifact to force the inlined driver.
-                yield (
-                    "inlined",
-                    torch.compiler.precompile.load(code, _strip_artifact(cache)),
-                )
-
-        for label, f_c in loaders():
+        for label, f_c in _default_and_inlined_loaders(code, cache, backend):
             with self.subTest(path=label):
                 with self.assertRaisesRegex(PrecompileError, "weight.*shape"):
                     f_c(bad, x)
@@ -1354,16 +1355,7 @@ class TestPrecompile(TestCase):
         )
         bad = torch.nn.Linear(4, 3).eval().half()  # same shape, different dtype
 
-        def loaders():
-            yield "default", torch.compiler.precompile.load(code, cache)
-            if backend == "inductor":
-                # Strip the artifact to force the inlined driver.
-                yield (
-                    "inlined",
-                    torch.compiler.precompile.load(code, _strip_artifact(cache)),
-                )
-
-        for label, f_c in loaders():
+        for label, f_c in _default_and_inlined_loaders(code, cache, backend):
             with self.subTest(path=label):
                 with self.assertRaisesRegex(PrecompileError, "weight.*dtype"):
                     f_c(bad, x)
@@ -1397,16 +1389,7 @@ class TestPrecompile(TestCase):
         bad_shape = WithBuf(5, torch.float32).eval()
         bad_dtype = WithBuf(3, torch.float64).eval()
 
-        def loaders():
-            yield "default", torch.compiler.precompile.load(code, cache)
-            if backend == "inductor":
-                # Strip the artifact to force the inlined driver.
-                yield (
-                    "inlined",
-                    torch.compiler.precompile.load(code, _strip_artifact(cache)),
-                )
-
-        for label, f_c in loaders():
+        for label, f_c in _default_and_inlined_loaders(code, cache, backend):
             with self.subTest(path=label):
                 with self.assertRaisesRegex(PrecompileError, r"'b'.*shape"):
                     f_c(bad_shape, x)
