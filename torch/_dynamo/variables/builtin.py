@@ -264,6 +264,43 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # opt-out).
 _MISSING_SENTINEL = object()
 
+# Ops whose result type depends only on operand types (excludes pow: 2**-1 is a float)
+_COMPUTED_LAZY_CONSTANT_OPS: frozenset[Callable[..., Any]] = frozenset(
+    [
+        operator.add,
+        operator.sub,
+        operator.mul,
+        operator.truediv,
+        operator.floordiv,
+        operator.mod,
+    ]
+)
+
+
+def _try_computed_lazy_constant(
+    fn: Callable[..., Any], args: list[VariableTracker]
+) -> VariableTracker | None:
+    """Build a ComputedLazyConstantVariable for fn(*args), or None to fall back."""
+    from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
+
+    if fn not in _COMPUTED_LAZY_CONSTANT_OPS or len(args) != 2:
+        return None
+    any_unrealized = False
+    for arg in args:
+        if (
+            isinstance(arg, (LazyConstantVariable, ComputedLazyConstantVariable))
+            and not arg.is_realized()
+        ):
+            any_unrealized = True
+        elif not isinstance(arg, ConstantVariable):
+            return None
+    if not any_unrealized:
+        return None
+    try:
+        return ComputedLazyConstantVariable.create(fn, args)
+    except (TypeError, ArithmeticError):
+        return None
+
 
 def populate_builtin_to_tensor_fn_map() -> None:
     global BUILTIN_TO_TENSOR_FN_MAP
@@ -1076,30 +1113,35 @@ class BuiltinVariable(BaseBuiltinVariable):
         ],
         VariableTracker | None,
     ]:
-        from .lazy import LazyConstantVariable, LazyVariableTracker
+        from .lazy import (
+            ComputedLazyConstantVariable,
+            LazyConstantVariable,
+            LazyVariableTracker,
+        )
 
         obj = BuiltinVariable(fn)
         handlers: list[_HandlerCallback] = []
 
+        lazy_constant_types = (LazyConstantVariable, ComputedLazyConstantVariable)
         lazy_types = [t for t in arg_types if issubclass(t, LazyVariableTracker)]
         if lazy_types:
-            if not all(issubclass(t, LazyConstantVariable) for t in lazy_types):
+            if not all(issubclass(t, lazy_constant_types) for t in lazy_types):
                 # Realize non-constant lazy args and re-dispatch.  Any
-                # LazyConstantVariable args are kept and handled on the
+                # lazy constant args are kept and handled on the
                 # second dispatch through the branch below.
                 return lambda tx, args, kwargs: obj.call_function(
                     tx,
                     [
                         a.realize()
                         if isinstance(a, LazyVariableTracker)
-                        and not isinstance(a, LazyConstantVariable)
+                        and not isinstance(a, lazy_constant_types)
                         else a
                         for a in args
                     ],
                     kwargs,
                 )
 
-            # Only LazyConstantVariable lazy types.  Install type guards
+            # Only lazy constant types.  Install type guards
             # and resolve the dispatch type.  If the resolved type is
             # ConstantVariable (the common case), delegate to a handler
             # built for ConstantVariable.  Otherwise (e.g. specialize_int=
@@ -1108,7 +1150,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             inner_handler = BuiltinVariable._make_handler(
                 fn,
                 [
-                    ConstantVariable if issubclass(t, LazyConstantVariable) else t
+                    ConstantVariable if issubclass(t, lazy_constant_types) else t
                     for t in arg_types
                 ],
                 has_kwargs,
@@ -1119,14 +1161,18 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker | None:
+                if not kwargs:
+                    result = _try_computed_lazy_constant(fn, args)
+                    if result is not None:
+                        return result
                 for a in args:
-                    if isinstance(a, LazyConstantVariable):
+                    if isinstance(a, lazy_constant_types):
                         if a.get_handler_type_for_dispatch() is not ConstantVariable:
                             return obj.call_function(
                                 tx,
                                 [
                                     v.realize()
-                                    if isinstance(v, LazyConstantVariable)
+                                    if isinstance(v, lazy_constant_types)
                                     else v
                                     for v in args
                                 ],
