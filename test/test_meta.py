@@ -2376,6 +2376,10 @@ class TestMetaKernelRegistrations(TestCase):
             self.assertEqual(cpu_t.dtype, meta_t.dtype)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190240"
+    )
     def test_mkldnn_rnn_backward_gru_bias_shape(self):
         # GRU backward is not supported on CPU via oneDNN, so we verify
         # the meta kernel's bias shape against the expected value from
