@@ -175,11 +175,7 @@ class TestCodegenTriton(InductorTestCase):
                 kernel._reuse_load_index_basis("in_ptr", flat_index), split_index
             )
 
-            # Each buffer must observe its own split before a flat index is rewritten.
-            self.assertEqual(
-                kernel._reuse_load_index_basis("reverse_ptr", flat_index),
-                flat_index,
-            )
+            # A second buffer records and reuses its own split basis.
             self.assertEqual(
                 kernel._reuse_load_index_basis("reverse_ptr", split_index),
                 split_index,

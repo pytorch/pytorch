@@ -4267,10 +4267,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         )
 
-    def _get_load_index_bases(
-        self, state: _LoadIndexState, index: sympy.Expr
+    def _get_prior_load_index_bases(
+        self, state: _LoadIndexState
     ) -> list[LoadIndexBasis | None]:
-        """Learn per-tree split bases from two distinct live loads."""
+        """Return split bases discovered from the prior live load."""
         bases = state.bases
         if bases is None:
             # A distinct prior load is still in the CSE scope. Discover which
@@ -4281,11 +4281,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ]
             state.bases = bases
 
-        for i, (tree, basis) in enumerate(zip(self.range_trees, bases, strict=True)):
-            if basis is None:
-                # The current load may establish a basis for later loads even
-                # when the prior load did not split this range tree.
-                bases[i] = self._load_index_split_basis(index, tree)
         return bases
 
     def _rewrite_full_range_with_basis(
@@ -4342,7 +4337,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if state.index == index:
             return state.result
 
-        bases = self._get_load_index_bases(state, index)
+        bases = self._get_prior_load_index_bases(state)
         result = index
         for tree, basis in zip(self.range_trees, bases, strict=True):
             if basis is not None:
