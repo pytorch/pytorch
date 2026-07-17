@@ -350,6 +350,9 @@ class MemoryTracker:
         self.alias_tracker = GraphAliasTracker(self.nodes)
         self.current_live_storages: OrderedSet[StorageKey] = OrderedSet()
         self.current_memory_bytes = 0
+        # Memory after the most recently scheduled node's fresh allocations,
+        # before freeing inputs whose last use is this node.
+        self.last_node_peak_memory = 0
         self.is_releasable = _is_releasable if is_releasable is None else is_releasable
 
         # Initialize live storages with placeholders and get_attr nodes
@@ -362,6 +365,7 @@ class MemoryTracker:
                         self.current_memory_bytes += self._get_storage_size(storage_key)
 
         self.peak_memory = self.current_memory_bytes
+        self.last_node_peak_memory = self.current_memory_bytes
 
         log.debug(
             "Memory tracker initialized with initial memory: %d MB",
@@ -418,6 +422,7 @@ class MemoryTracker:
     def _update_memory_for_node(self, node: fx.Node) -> None:
         """Update memory tracking when a node is scheduled."""
         if node.op in ("placeholder", "get_attr", "output"):
+            self.last_node_peak_memory = self.current_memory_bytes
             return
 
         # Add fresh allocations
@@ -433,7 +438,9 @@ class MemoryTracker:
                 self.current_memory_bytes += size
                 alloc_bytes += size
 
-        self.peak_memory = max(self.current_memory_bytes, self.peak_memory)
+        # Record the node-local transient peak before last-use frees below.
+        self.last_node_peak_memory = self.current_memory_bytes
+        self.peak_memory = max(self.last_node_peak_memory, self.peak_memory)
 
         # Remove storages that are no longer used
         storages_to_free = self._get_storages_freed_by_node(node)
