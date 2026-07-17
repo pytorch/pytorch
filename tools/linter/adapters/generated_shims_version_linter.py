@@ -122,9 +122,7 @@ def _read_at_merge_base(filename: str) -> str | None:
         ["git", "show", f"{merge_base}:{rel_path}"],
         capture_output=True,
         text=True,
-        # On a blobless partial clone (CI), the blob at merge-base is not local
-        # and git lazily fetches it over the network, which can exceed a few s.
-        timeout=60,
+        timeout=5,
     )
     if result.returncode != 0:
         # File didn't exist at merge-base; treat all current entries as new.
