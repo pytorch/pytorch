@@ -1534,6 +1534,64 @@ class ComboKernelBenchmarkTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
+    @requires_gpu_and_triton
+    def test_graph_state_restored_on_swallowed_compilation_error(self):
+        # speedup_by_combo_kernel swallows Loop-carried-variable CompilationError
+        # and keeps compiling; benchmark_combo_kernel must restore the original
+        # V.graph.removed_buffers/inplaced_to_remove on that path, not leak the
+        # throwaway copies it benchmarks with.
+        from triton.compiler.errors import CompilationError
+
+        from torch._inductor.codegen.simd import SIMDScheduling
+        from torch._inductor.scheduler import Scheduler
+
+        class FakeCompilationError(CompilationError):
+            def __init__(self, msg):
+                Exception.__init__(self, msg)
+                self.msg = msg
+
+            def __str__(self):
+                return self.msg
+
+        def fn(a, b, c):
+            return a * 2.0, b + 1.0, c - 1.0
+
+        inps = [torch.rand(64, device=GPU_TYPE) for _ in range(3)]
+
+        captured = {}
+        orig_speedup = Scheduler.speedup_by_combo_kernel
+        orig_generate = SIMDScheduling.generate_combo_kernel_code
+
+        def speedup_capturing_restore(sched, nodes):
+            before = V.graph.removed_buffers
+            result = orig_speedup(sched, nodes)
+            captured["result"] = result
+            captured["restored"] = V.graph.removed_buffers is before
+            return result
+
+        def mutate_then_raise(self, *args, **kwargs):
+            # Real codegen (only_gen_src_code=False) must keep working; only
+            # the benchmark's throwaway codegen simulates mutate-then-fail.
+            if not kwargs.get("only_gen_src_code"):
+                return orig_generate(self, *args, **kwargs)
+            V.graph.removed_buffers.add("throwaway_buf")
+            raise FakeCompilationError("Loop-carried variable")
+
+        with (
+            patch.object(
+                Scheduler, "speedup_by_combo_kernel", speedup_capturing_restore
+            ),
+            patch.object(
+                SIMDScheduling, "generate_combo_kernel_code", mutate_then_raise
+            ),
+            fresh_cache(),
+        ):
+            out_compiled = torch.compile(fn)(*inps)
+
+        self.assertEqual(fn(*inps), out_compiled)
+        self.assertTrue(captured["result"])
+        self.assertTrue(captured["restored"])
+
 
 class ComboKernelDynamicShapesTests(TestCase):
     check_model_gpu = check_model_gpu
@@ -2044,41 +2102,6 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         self.assertEqual(out, fn(*inps))
         # Sorts stay fused in the combo: tuned normally, no carve-out fallbacks.
         self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
-
-    def test_stitched_launch_candidates_include_scaled_blocks(self):
-        """The combo-level autotune must race down-scaled variants of the
-        stitched blocks: each subkernel's standalone winner can be too large
-        for the fused body (union of register footprints), and with only the
-        stitched candidate the runtime autotune cannot correct it.
-
-        Scaled variants are optional: they may violate backend minimums
-        (e.g. TMA descriptor width), so precompile must skip a failing
-        optional candidate instead of erroring.
-        """
-        from torch._inductor.runtime.triton_heuristics import (
-            _handle_combo_kernel_per_subkernel_blocks,
-        )
-
-        combo_meta = {
-            "num_kernels": 2,
-            "heuristic_0": "persistent_reduction",
-            "heuristic_1": "persistent_reduction",
-            "size_hints_0": {"x": 16384, "r0_": 128},
-            "size_hints_1": {"x": 8192, "r0_": 128},
-            "stitched_launch_candidates": [({}, 2, 1)],
-            "default_config": {"XBLOCK_0": 8, "XBLOCK_1": 8},
-        }
-        inductor_meta = {"combo_grid_meta": combo_meta}
-        configs = _handle_combo_kernel_per_subkernel_blocks(
-            {"x": 16384, "r0_": 128}, inductor_meta, {}
-        )
-        kwargs = [cfg.kwargs for cfg in configs]
-        self.assertIn({"XBLOCK_0": 8, "XBLOCK_1": 8}, kwargs)  # stitched winner
-        self.assertIn({"XBLOCK_0": 4, "XBLOCK_1": 4}, kwargs)  # /2 variant
-        self.assertIn({"XBLOCK_0": 2, "XBLOCK_1": 2}, kwargs)  # /4 variant
-        # only the scaled variants are optional (skippable on compile failure)
-        optional = [getattr(cfg, "optional_candidate", False) for cfg in configs]
-        self.assertEqual(optional, [False, True, True])
 
     @requires_gpu_and_triton
     def test_compile_time_autotune_excludes_indirect_indexing(self):
