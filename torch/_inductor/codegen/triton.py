@@ -2810,17 +2810,23 @@ LoadIndexBases = tuple[LoadIndexBasis | None, ...]
 
 
 @dataclasses.dataclass(frozen=True)
-class _LoadIndexState:
-    """Last load result and any split bases resolved from an earlier load.
-
-    ``bases`` remains None after the first load so identical loads avoid range
-    analysis. A distinct load resolves it, and the resulting bases remain
-    available after subsequent raw indices no longer expose the split symbols.
-    """
+class _UnresolvedLoadIndexState:
+    """First live load, recorded without performing range analysis."""
 
     index: sympy.Expr
     result: sympy.Expr
-    bases: LoadIndexBases | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class _ResolvedLoadIndexState:
+    """Last load result plus split bases resolved from an earlier live load."""
+
+    index: sympy.Expr
+    result: sympy.Expr
+    bases: LoadIndexBases
+
+
+LoadIndexState = _UnresolvedLoadIndexState | _ResolvedLoadIndexState
 
 
 class TritonCSE(CSE[TritonCSEVariable, TritonCSEKey]):
@@ -2831,7 +2837,7 @@ class TritonCSE(CSE[TritonCSEVariable, TritonCSEKey]):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._load_index_states: dict[TritonCSEKey, _LoadIndexState] = {}
+        self._load_index_states: dict[TritonCSEKey, LoadIndexState] = {}
 
     def invalidate(self, keep_vars: OrderedSet[CSEVariable]) -> None:
         super().invalidate(keep_vars)
@@ -4275,9 +4281,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         )
 
-    def _resolve_load_index_bases(self, state: _LoadIndexState) -> LoadIndexBases:
+    def _resolve_load_index_bases(self, state: LoadIndexState) -> LoadIndexBases:
         """Return cached bases or derive them from the prior live load."""
-        if state.bases is not None:
+        if isinstance(state, _ResolvedLoadIndexState):
             return state.bases
         # A distinct prior load is still in the CSE scope. Discover which
         # range trees it addressed with complete split coordinates.
@@ -4334,7 +4340,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if state is None:
             # Defer range-tree analysis until another live load from this CSE
             # scope uses the same buffer with a different index.
-            cse._load_index_states[cache_key] = _LoadIndexState(index, index)
+            cse._load_index_states[cache_key] = _UnresolvedLoadIndexState(index, index)
             return index
         if state.index == index:
             return state.result
@@ -4346,7 +4352,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result = self._rewrite_full_range_with_basis(result, tree, basis)
         if result != index:
             result = V.graph.sizevars.simplify_with_ranges(result, self.var_ranges())
-        cse._load_index_states[cache_key] = _LoadIndexState(index, result, bases)
+        cse._load_index_states[cache_key] = _ResolvedLoadIndexState(
+            index, result, bases
+        )
         return result
 
     def partial_accumulate(
