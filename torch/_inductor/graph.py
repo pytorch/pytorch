@@ -805,10 +805,7 @@ class GraphLowering(torch.fx.Interpreter):
             if n.target is torch.ops.aten.convolution.default
             or (
                 n.target is torch.ops.aten.convolution_backward.default
-                and any(
-                    n.args[idx].meta["val"].device.type == "xpu"
-                    for idx in [0, 1]
-                )
+                and any(n.args[idx].meta["val"].device.type == "xpu" for idx in [0, 1])
             )
         ]
 
