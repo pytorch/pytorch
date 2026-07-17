@@ -225,6 +225,11 @@ class ComboKernelMemoryContext:
     # are evaluated independently, so a window's entry memory is the
     # precomputed baseline live-in at `region_start`.
     baseline_live_before: list[int] = dataclasses.field(default_factory=list)
+    # Per-step live-byte delta added by earlier accepted combos (lifetime
+    # extensions from hoisting members to the window start). Later windows
+    # add this to their entry/per-step memory so overlapping extensions
+    # from many accepts cannot each pass the gate as if independent.
+    accepted_live_delta: list[int] = dataclasses.field(default_factory=list)
 
 
 def _is_gpu_triton_backend(
@@ -6639,6 +6644,7 @@ class Scheduler:
             baseline_peak=baseline_peak,
             running_peak=baseline_peak,
             baseline_live_before=baseline_live_before,
+            accepted_live_delta=[0] * (len(self.nodes) + 1),
         )
 
     def _try_combo_with_memory_check(
@@ -6727,17 +6733,25 @@ class Scheduler:
                 return new_step[node]
             return node_to_idx[node]
 
-        # Combo windows are evaluated independently. The entry live set is
-        # therefore the original-schedule live memory before this region starts.
-        cur_memory = mem_ctx.baseline_live_before[region_start]
+        # Entry live set = original-schedule live memory before this region,
+        # plus the live-byte extensions earlier accepted combos added here.
+        cur_memory = (
+            mem_ctx.baseline_live_before[region_start]
+            + mem_ctx.accepted_live_delta[region_start]
+        )
+        extra_live_before = [
+            mem_ctx.accepted_live_delta[i] - mem_ctx.accepted_live_delta[region_start]
+            for i in range(region_start, region_end + 1)
+        ]
 
-        region_peak = estimate_region_peak_memory(
+        region_peak, region_live_before = estimate_region_peak_memory(
             local_nodes,
             region_start=region_start,
             region_end=region_end,
             step_of=step_of,
             graph_outputs=mem_ctx.graph_outputs,
             cur_memory=cur_memory,
+            extra_live_before=extra_live_before,
         )
 
         # Compare against the *original* baseline peak (not the running
@@ -6773,6 +6787,16 @@ class Scheduler:
             pct,
         )
         mem_ctx.running_peak = new_peak
+        # Record this accept's per-step live-byte extension (rewrite liveness
+        # minus baseline liveness) so later windows account for it. The walk's
+        # live_before already includes the entry-time prior-accept delta, so
+        # subtract it to keep only this window's own contribution.
+        prior_entry_delta = mem_ctx.accepted_live_delta[region_start]
+        for i, live in enumerate(region_live_before):
+            step = region_start + i
+            own_delta = live - prior_entry_delta - mem_ctx.baseline_live_before[step]
+            if own_delta > 0:
+                mem_ctx.accepted_live_delta[step] += own_delta
         return combo_node, combo_step
 
     def _try_combo_with_halving(
