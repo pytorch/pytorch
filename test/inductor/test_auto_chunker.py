@@ -84,7 +84,9 @@ class AutoChunkerTest(TestCase):
 
         print(f"Peak memory {peak_memory / 10**9:.6f} GB")
 
-        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
+        self.assertTrue(
+            same(expect, actual, tol=1e-3), lambda msg: f"{msg}\n{expect=}\n{actual=}"
+        )
 
         # When the model is too trivial without softmax, no chunking happens because chunking
         # metadata propagation can not reach the backward.
@@ -98,7 +100,7 @@ class AutoChunkerTest(TestCase):
             expected_bound = M * N * dtype.itemsize
             self.assertTrue(
                 peak_memory < expected_bound,
-                f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
+                lambda msg: f"{msg}\nActual peak_memory {peak_memory}, expected bound {expected_bound}",
             )
 
     def test_matmul_trivial(self):
@@ -154,7 +156,9 @@ class AutoChunkerTest(TestCase):
         peak_memory = torch.cuda.max_memory_allocated()
         print(f"Peak memory {peak_memory / 10**9:.6f} GB")
 
-        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
+        self.assertTrue(
+            same(expect, actual, tol=1e-3), lambda msg: f"{msg}\n{expect=}\n{actual=}"
+        )
 
         if DO_PERF_TEST:
             from triton.testing import do_bench
@@ -177,7 +181,7 @@ class AutoChunkerTest(TestCase):
         expected_bound = B * T * V * x.dtype.itemsize
         self.assertTrue(
             peak_memory < expected_bound,
-            f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
+            lambda msg: f"{msg}\nActual peak_memory {peak_memory}, expected bound {expected_bound}",
         )
 
     @config.patch("auto_chunker.num_chunk", config.auto_chunker.num_chunk or 16)
@@ -238,13 +242,15 @@ class AutoChunkerTest(TestCase):
         peak_memory = torch.cuda.max_memory_allocated()
         print(f"Peak memory {peak_memory / 10**9:.6f} GB")
 
-        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
+        self.assertTrue(
+            same(expect, actual, tol=1e-3), lambda msg: f"{msg}\n{expect=}\n{actual=}"
+        )
 
         self.assertEqual(metrics.num_auto_chunking, 1)
         expected_bound = B * T * V * xs[0].dtype.itemsize
         self.assertTrue(
             peak_memory < expected_bound,
-            f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
+            lambda msg: f"{msg}\nActual peak_memory {peak_memory}, expected bound {expected_bound}",
         )
 
     @config.patch("auto_chunker.output_size_threshold", 1024)

@@ -987,7 +987,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 self.assertGreater(
                     delta.norm().item(),
                     0.0,
-                    f"chunk {i} did not contribute to head.weight.grad",
+                    lambda msg: f"{msg}\nchunk {i} did not contribute to head.weight.grad",
                 )
             h.backward(torch.cat(h_grads, dim=1).to(h.dtype))
             return total_loss, per_chunk_head_grads[-1]
@@ -1124,7 +1124,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         self.assertEqual(out.dtype, torch.bfloat16)
         out.sum().backward()
         for name, p in model.named_parameters():
-            self.assertIsNotNone(p.grad, f"grad None for {name}")
+            self.assertIsNotNone(p.grad, lambda msg: f"{msg}\ngrad None for {name}")
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_partial_group_forward_grad_accum_chunked(self):
@@ -1243,7 +1243,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 # pre_forward would re-all-gather — defeats the toggle.
                 self.assertTrue(
                     param_group.is_unsharded,
-                    f"head group resharded mid-chunk at iter {iter_idx}",
+                    lambda msg: f"{msg}\nhead group resharded mid-chunk at iter {iter_idx}",
                 )
             # Restore + explicit reshard (matches ChunkedCELoss exit).
             model.head.set_reshard_after_forward(True)
@@ -1251,11 +1251,11 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             model.head.reshard()
             self.assertFalse(
                 param_group.is_unsharded,
-                f"head.reshard() did not reshard at iter {iter_idx}",
+                lambda msg: f"{msg}\nhead.reshard() did not reshard at iter {iter_idx}",
             )
             h.backward(torch.cat(h_grads, dim=1).to(h.dtype))
             for name, p in model.named_parameters():
-                self.assertIsNotNone(p.grad, f"grad None for {name}")
+                self.assertIsNotNone(p.grad, lambda msg: f"{msg}\ngrad None for {name}")
             optim.step()
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
 
@@ -1297,7 +1297,9 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         # Proves the reset is real: the next iteration completes cleanly.
         model(tokens).sum().backward()
         for name, param in model.named_parameters():
-            self.assertIsNotNone(param.grad, f"grad None for {name} after reset")
+            self.assertIsNotNone(
+                param.grad, lambda msg: f"{msg}\ngrad None for {name} after reset"
+            )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_double_forward_with_nested_fsdp_and_checkpoint(self):
@@ -1391,13 +1393,15 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         # in both forwards so its grad stays None.
         for name in ("embed.weight", "norm.weight"):
             param = dict(model.named_parameters())[name]
-            self.assertIsNotNone(param.grad, f"grad is None for {name}")
+            self.assertIsNotNone(
+                param.grad, lambda msg: f"{msg}\ngrad is None for {name}"
+            )
             local = (
                 param.grad.to_local() if isinstance(param.grad, DTensor) else param.grad
             )
             self.assertTrue(
                 torch.isfinite(local).all().item(),
-                f"non-finite grad for {name}",
+                lambda msg: f"{msg}\nnon-finite grad for {name}",
             )
         self.assertIsNone(
             model.head.weight.grad,
@@ -1610,7 +1614,7 @@ class TestFullyShardSharedParams(FSDPTest):
         for row in range(vocab_size):
             self.assertFalse(
                 torch.equal(initial_weight[row], final_weight[row]),
-                f"Row {row} was not updated after training",
+                lambda msg: f"{msg}\nRow {row} was not updated after training",
             )
         model.tok_embeddings.reshard()
 

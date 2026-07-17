@@ -1587,7 +1587,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     1
                 ),
             )
-            example_inputs[0].get_device()
             m = Mod(
                 lambda x, y: x.add_(y),
             ).eval()
