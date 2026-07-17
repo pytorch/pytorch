@@ -38,9 +38,7 @@ bool is_supported_onednn_dtype(const at::Tensor& tensor);
 dnnl::memory::dims get_onednn_dims(const at::Tensor& tensor);
 
 dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor);
-dnnl::memory::desc get_onednn_md(
-    const at::Tensor& tensor,
-    std::optional<int> packed_dim = std::nullopt);
+dnnl::memory::desc get_onednn_md(const at::Tensor& tensor);
 
 bool onednn_strides_check(const at::Tensor& src);
 bool is_broadcast(const at::Tensor& t);

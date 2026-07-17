@@ -1453,7 +1453,7 @@ class TestTemplateRender(TestCase):
             # Verify template kernel was used
             self.assertIn("_mock_inner_add", code)
             # Verify epilogue fusion: relu fused via hook
-            self.assertIn("maximum", code)
+            self.assertIn("triton_helpers.maximum", code)
             # Verify prologue fusion: sigmoid fused via hook
             self.assertIn("tl.sigmoid", code)
 
