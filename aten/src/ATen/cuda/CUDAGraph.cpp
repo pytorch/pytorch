@@ -167,29 +167,43 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
-  // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
-  // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
-  // due to the capture status being updated _after_ a capture had already started.
-  c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-      capture_dev_, mempool_id_, create_allocate_filter<cudaStream_t>());
-  record_retained_pool(mempool_id_);
+  try {
+    // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
+    // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
+    // due to the capture status being updated _after_ a capture had already started.
+    c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+        capture_dev_, mempool_id_, create_allocate_filter<cudaStream_t>());
+    record_retained_pool(mempool_id_);
+    dev_pool_routing_active_ = true;
 
-  at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, create_allocate_filter<c10::Stream>());
+    at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, create_allocate_filter<c10::Stream>());
+    host_pool_routing_active_ = true;
+    host_pool_refed_ = true;
 
-  // cudaStreamCaptureModeGlobal is the most conservative option to
-  // prevent potentially unsafe CUDA API calls during capture.  See
-  // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
-  AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
-  c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
+    // cudaStreamCaptureModeGlobal is the most conservative option to
+    // prevent potentially unsafe CUDA API calls during capture.  See
+    // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
+    AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
+    stream_capture_active_ = true;
+    c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
+    capture_marked_ = true;
 
-  auto capture_id_opt = c10::cuda::captureIdMayInitCtx(stream);
-  TORCH_INTERNAL_ASSERT(capture_id_opt.has_value(),
-      "Stream should be actively capturing after cudaStreamBeginCapture");
-  capture_id_ = capture_id_opt.value();
+    auto capture_id_opt = c10::cuda::captureIdMayInitCtx(stream);
+    TORCH_INTERNAL_ASSERT(capture_id_opt.has_value(),
+        "Stream should be actively capturing after cudaStreamBeginCapture");
+    capture_id_ = capture_id_opt.value();
 
-  {
-    std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
-    _currently_capturing_graphs.emplace(capture_id_, this);
+    {
+      std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
+      _currently_capturing_graphs.emplace(capture_id_, this);
+    }
+  } catch (...) {
+    // Close the capture window before propagating so a failed
+    // capture_begin doesn't leave a process-wide capture active until this
+    // graph is destroyed. The pool references stay recorded; reset() (or
+    // the destructor) releases them.
+    unwind_partial_capture();
+    throw;
   }
 }
 
@@ -210,7 +224,16 @@ void CUDAGraph::capture_end_pre() {
   // Clear bookkeeping before propagating the return status so watchdog-side
   // checks cannot observe stale "capture active" state on error paths.
   cudaError_t endCaptureErr = cudaStreamEndCapture(capture_stream_, &graph_);
-  c10::cuda::CUDACachingAllocator::markCaptureEnd(capture_dev_);
+  if (endCaptureErr == cudaSuccess ||
+      endCaptureErr == cudaErrorStreamCaptureInvalidated) {
+    // Any other error (e.g. cudaErrorStreamCaptureWrongThread) means the
+    // capture is still live; leave the flag set so reset() can retry.
+    stream_capture_active_ = false;
+  }
+  if (capture_marked_) {
+    c10::cuda::CUDACachingAllocator::markCaptureEnd(capture_dev_);
+    capture_marked_ = false;
+  }
   {
     std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
     TORCH_CHECK(
@@ -225,7 +248,9 @@ void CUDAGraph::capture_end_pre() {
   // safe regardless of whether the capture succeeded — they simply
   // remove the pool routing entry added by beginAllocateToPool.
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  dev_pool_routing_active_ = false;
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+  host_pool_routing_active_ = false;
   AT_CUDA_CHECK(endCaptureErr);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
@@ -336,6 +361,97 @@ cudaGraphExec_t CUDAGraph::raw_cuda_graph_exec() {
   return graph_exec_;
 }
 
+// Note [Abandoned graph capture]
+// If an exception fires between capture_begin() and a successful
+// capture_end(), the capture is abandoned with some capture-window state
+// still live: the stream may still be capturing, the allocators still
+// routing into the private pool, the device still marked as capturing.
+// Undo the pieces whose teardown in capture_end_pre did not run, each
+// gated on its own flag, so this is idempotent and never over-decrements.
+// Completes #180395, which covered failures once capture_end() is
+// reached. Pool references are NOT dropped here — reset() does that
+// right after this unwind, and only if the window actually closed
+// (gh-188439).
+//
+// Returns false when the capture could not be ended (e.g.
+// cudaErrorStreamCaptureWrongThread: in Global/ThreadLocal capture modes
+// only the capturing thread may end a capture). The remaining state is
+// left in place — a later call from the right thread can still unwind it
+// — and the caller must not release the pool out from under the live
+// capture. Child captures inside conditional nodes are not unwound
+// (pre-existing gap; their extra pool references are also unaccounted).
+bool CUDAGraph::unwind_partial_capture() {
+  if (!stream_capture_active_ && !capture_marked_ &&
+      !dev_pool_routing_active_ && !host_pool_routing_active_) {
+    return true;
+  }
+
+  // The teardown below assumes the capture stream/device are current — in
+  // particular the cudaMallocAsync allocator's endAllocateToPool records
+  // cross-stream dependencies against the current stream.
+  at::cuda::CUDAStreamGuard stream_guard(capture_stream_);
+
+  if (stream_capture_active_) {
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+    if (!conditional_graph_capture_ids_.empty()) {
+      TORCH_WARN(
+          "CUDAGraph::reset() on a capture abandoned inside a conditional "
+          "node; child capture state is not unwound.");
+    }
+#endif
+    cudaGraph_t abandoned_graph = nullptr;
+    const cudaError_t err =
+        cudaStreamEndCapture(capture_stream_, &abandoned_graph);
+    if (err != cudaSuccess) {
+      (void)cudaGetLastError(); // clear the sticky error
+      // cudaErrorStreamCaptureInvalidated is the expected outcome for a
+      // capture that failed partway; the capture is over either way. Any
+      // other error means the capture may still be live.
+      if (err != cudaErrorStreamCaptureInvalidated) {
+        TORCH_WARN(
+            "CUDAGraph::reset() could not end an in-flight capture (",
+            cudaGetErrorString(err),
+            "); its capture state and memory pool are left in place.");
+        return false;
+      }
+    }
+    if (abandoned_graph != nullptr) {
+      C10_CUDA_CHECK_WARN(cudaGraphDestroy(abandoned_graph));
+    }
+    stream_capture_active_ = false;
+  }
+
+  // reset() runs from the destructor and must not throw; downgrade any
+  // teardown failure to a warning.
+  auto warn_on_throw = [](const char* what, auto&& fn) {
+    try {
+      fn();
+    } catch (const std::exception& e) {
+      TORCH_WARN("CUDAGraph::reset(): ", what, " failed: ", e.what());
+    }
+  };
+  if (capture_marked_) {
+    warn_on_throw("markCaptureEnd", [&] {
+      c10::cuda::CUDACachingAllocator::markCaptureEnd(capture_dev_);
+    });
+    capture_marked_ = false;
+  }
+  if (dev_pool_routing_active_) {
+    warn_on_throw("endAllocateToPool", [&] {
+      c10::cuda::CUDACachingAllocator::endAllocateToPool(
+          capture_dev_, mempool_id_);
+    });
+    dev_pool_routing_active_ = false;
+  }
+  if (host_pool_routing_active_) {
+    warn_on_throw("host end_allocate_to_pool", [&] {
+      at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+    });
+    host_pool_routing_active_ = false;
+  }
+  return true;
+}
+
 void CUDAGraph::reset() {
   // I'd prefer these checks throw exceptions, not print warnings,
   // but the destructor calls reset(), and at least one CI build
@@ -357,6 +473,11 @@ void CUDAGraph::reset() {
   // If the user catches the failure exception in a script, or is running in REPL or (god forbid)
   // a Jupyter notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
 
+  // Phase 1: close the capture window if capture_end_pre never did.
+  // See Note [Abandoned graph capture] above unwind_partial_capture().
+  const bool capture_window_closed = unwind_partial_capture();
+
+  // Phase 2: generator and capture-registration cleanup.
   // See Note [RNG state tensor lifetime and recordStream] in
   // CUDAGeneratorImpl.cpp — recordStream in setup_for_replay ensures the
   // allocator won't recycle these tensors until in-flight replays finish.
@@ -373,19 +494,32 @@ void CUDAGraph::reset() {
     capture_id_ = 0;
   }
 
-  if (capture_ended_) {
-    // Clean up cuBLAS workspaces allocated on the capture stream, otherwise live allocations prevent
-    // private pool cleanup
-    clearCublasWorkspacesForStream(capture_stream_.stream());
+  // Phase 3: drop the pool references taken during capture. Ownership
+  // records (non-empty retained_mempool_ids_ / host_pool_refed_), NOT
+  // capture_ended_, are the release conditions, so abandoned captures also
+  // drop their references — see Note [Abandoned graph capture]. Skipped if
+  // the capture window could not be closed: a live capture may still be
+  // routing allocations into the pool.
+  if (capture_window_closed) {
+    if (!retained_mempool_ids_.empty()) {
+      // Clean up cuBLAS workspaces allocated on the capture stream, otherwise live allocations prevent
+      // private pool cleanup
+      clearCublasWorkspacesForStream(capture_stream_.stream());
 
-    // notifyCaptureDestroy may throw. How should we handle this?
-    for (const auto& pool : retained_mempool_ids_) {
-      c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, pool);
+      // notifyCaptureDestroy may throw. How should we handle this?
+      for (const auto& pool : retained_mempool_ids_) {
+        c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, pool);
+      }
+      retained_mempool_ids_.clear();
     }
-    retained_mempool_ids_.clear();
-    at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
-    capture_ended_ = false;
+    if (host_pool_refed_) {
+      at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
+      host_pool_refed_ = false;
+    }
   }
+  capture_ended_ = false;
+
+  // Phase 4: destroy the graph artifacts.
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
     has_graph_ = false;

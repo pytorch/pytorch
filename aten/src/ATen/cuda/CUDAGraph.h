@@ -113,6 +113,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
   void record_retained_pool(MempoolId_t pool);
   bool has_retained_pool(MempoolId_t pool) const;
+  // Returns false if the capture window could not be closed (the capture
+  // may still be live); see Note [Abandoned graph capture] in CUDAGraph.cpp.
+  bool unwind_partial_capture();
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   void begin_capture_to_conditional_node(
       const Tensor& scalar_cuda_pred_tensor,
@@ -123,20 +126,54 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
 
-  // internal states so reset() can do its best cleaning up
+  // ---------------------------------------------------------------------
+  // Lifecycle state, in acquisition order. Each field records one thing a
+  // capture acquired and is cleared by the matching teardown; reset()
+  // undoes whatever is still live, so an abandoned capture (exception in
+  // capture_begin, the captured region, or capture_end) unwinds cleanly.
+  // See Note [Abandoned graph capture] in CUDAGraph.cpp.
+  //
+  // Three lifetime classes:
+  //   Capture window — opened by capture_begin, closed by capture_end_pre
+  //     even if cudaStreamEndCapture failed (#180395).
+  //   Pool references — held past capture_end (replay needs the pool);
+  //     dropped only by reset().
+  //   Graph artifacts — created by capture_end_pre / instantiate,
+  //     destroyed by capture_end_post / reset().
+  // ---------------------------------------------------------------------
 
-  // Set to true in capture_end if cudaStreamEndCapture succeeded
-  // Set back to false after instantiate() unless keep_graph=True or
-  // enable_debug_mode() was called on any CUDAGraph instance.
-  bool has_graph_ = false;
-  // Set to true in capture_end if cudaStreamEndCapture succeeded
-  bool capture_ended_ = false;
-  // Set to true in capture_end if cudaGraphInstantiate succeeded
-  bool has_graph_exec_ = false;
-
-  // the ID assigned by cuda during graph capture,
-  // used to identify when a stream is participating in capture
+  // Capture window: device allocator routes allocations into the private
+  // pool (beginAllocateToPool .. endAllocateToPool). The use_count
+  // reference it also takes lives in retained_mempool_ids_.
+  bool dev_pool_routing_active_ = false;
+  // Capture window: host (pinned) allocator routes into the pool
+  // (begin_allocate_to_pool .. end_allocate_to_pool).
+  bool host_pool_routing_active_ = false;
+  // Pool reference: one host-pool use_count ref, taken by the same
+  // begin_allocate_to_pool call.
+  bool host_pool_refed_ = false;
+  // Capture window: stream capture in flight
+  // (cudaStreamBeginCapture .. cudaStreamEndCapture, either outcome).
+  bool stream_capture_active_ = false;
+  // Capture window: counted in the allocator's active-capture count
+  // (markCaptureBegin .. markCaptureEnd).
+  bool capture_marked_ = false;
+  // Capture identity: the ID CUDA assigned to this capture. Nonzero from
+  // capture_begin until reset() — it outlives the capture window (replay()
+  // uses it); keys the entry in _currently_capturing_graphs and the
+  // per-capture RNG generator state.
   CaptureId_t capture_id_ = 0;
+
+  // Phase marker, not a resource: capture_end_pre completed successfully.
+  // Gates pool()/pools()/instantiate(). Deliberately NOT the gate for
+  // releasing pool references — abandoned captures must release those too.
+  bool capture_ended_ = false;
+
+  // Graph artifact: graph_ holds a live cudaGraph_t. capture_end_post
+  // destroys the template unless keep_graph_ (enable_debug_mode() sets it).
+  bool has_graph_ = false;
+  // Graph artifact: graph_exec_ holds a live cudaGraphExec_t.
+  bool has_graph_exec_ = false;
 
   // uuid used to request a particular private mempool from CUDACachingAllocator.
   // By default, this will be set to {id_, 0}.
@@ -151,6 +188,11 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // Sharing a mempool across graphs saves memory, and it's safe if you
   // know you'll replay those graphs in the same order you captured them.
   MempoolId_t mempool_id_;
+  // Pool references: device-pool use_count refs this graph owns — one for
+  // mempool_id_ (beginAllocateToPool), plus one per retain_pool() call.
+  // reset() releases one reference per entry. (Conditional-node capture
+  // takes additional increfs that are not recorded here — pre-existing
+  // gap.)
   std::vector<MempoolId_t> retained_mempool_ids_;
 
   // Stream on which capture began
