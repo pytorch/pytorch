@@ -184,13 +184,13 @@ case "$tag" in
       INDUCTOR_BENCHMARKS=yes
     fi
     ;;
-  pytorch-linux-noble-rocm-nightly-py3)
+  pytorch-linux-noble-rocm-preview-py3)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
-    ROCM_VERSION=nightly
+    ROCM_VERSION=preview
     TRITON=yes
     KATEX=yes
-    PYTORCH_ROCM_ARCH="gfx942"
+    PYTORCH_ROCM_ARCH="gfx942;gfx950"
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
