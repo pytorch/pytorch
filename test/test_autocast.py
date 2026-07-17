@@ -1,11 +1,15 @@
 # Owner(s): ["module: unknown"]
 
-import unittest
 
 import torch
 from torch.testing._internal.autocast_test_lists import (
     AutocastCPUTestLists,
     TestAutocast,
+)
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    onlyMPS,
 )
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -197,7 +201,7 @@ class CustomLinear(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         x, w_t = ctx.saved_tensors
-        with torch.autocast(device_type="cuda"):
+        with torch.autocast(device_type=x.device.type):
             dL_dX = torch.matmul(grad_output, w_t)
             dL_dW = torch.matmul(x.transpose(0, 1), grad_output).transpose(0, 1)
         return dL_dX, dL_dW
@@ -228,9 +232,9 @@ class WeightDTypeCastCounterMode(TorchDispatchMode):
         return super().__exit__(exc_type, exc_val, exc_tb)
 
 
-@unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-class TestAutocastGPU(TestCase):
-    def test_cast_cache_is_global(self):
+class TestAutocastDevice(TestCase):
+    @onlyAccelerator
+    def test_cast_cache_is_global(self, device):
         """
         Verifies that the autocast cache is global. This is done by
         mocking out cache clearing at the end of the forward pass,
@@ -238,27 +242,28 @@ class TestAutocastGPU(TestCase):
         backward, and verifying that the weight only get cast to float16 once.
         """
 
-        data = torch.randn(2, 3).cuda()
-        weight = torch.nn.Parameter(torch.randn(4, 3).cuda())
+        data = torch.randn(2, 3).to(device)
+        weight = torch.nn.Parameter(torch.randn(4, 3).to(device))
 
         with WeightDTypeCastCounterMode(weight) as mode:
-            with torch.autocast(device_type="cuda"):
+            with torch.autocast(device_type=device):
                 output = CustomLinear.apply(data, weight)
                 s = output.sum()
             s.backward()
 
         self.assertEqual(mode.dtype_cast_counter, 1)
 
-    def test_cache_disabled(self):
-        data = torch.randn(2, 3).cuda()
-        weight = torch.nn.Parameter(torch.randn(4, 3).cuda())
+    @onlyAccelerator
+    def test_cache_disabled(self, device):
+        data = torch.randn(2, 3).to(device)
+        weight = torch.nn.Parameter(torch.randn(4, 3).to(device))
 
         try:
             torch._C._set_cached_tensors_enabled(True)
             torch._C._add_cached_tensor(weight)
 
             with WeightDTypeCastCounterMode(weight) as mode:
-                with torch.autocast(device_type="cuda"):
+                with torch.autocast(device_type=device):
                     output = CustomLinear.apply(data, weight)
                     s = output.sum()
                 s.backward()
@@ -279,8 +284,8 @@ class TestAutocastGPU(TestCase):
     # and due to the multi-threaded nature of the autograd, the forward pass is being run in bfloat16, while the backward
     # pass defaults to float16. The dtype mismatch leads to the error in the policy, as the criteria (3) is not satisfied.
     # For more info see https://github.com/pytorch/pytorch/issues/132715.
-    def test_autocast_prioritize(self):
-        device = "cuda"
+    @onlyAccelerator
+    def test_autocast_prioritize(self, device):
         dtype = torch.bfloat16
 
         with torch.autocast(device_type=device, enabled=True, dtype=dtype):
@@ -295,56 +300,8 @@ class TestAutocastGPU(TestCase):
             loss = res.mean()
             loss.backward()
 
-
-@unittest.skipIf(not torch.backends.mps.is_available(), "requires mps")
-class TestAutocastMPS(TestCase):
-    def test_cast_cache_is_global(self):
-        class CustomLinear(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x, w_t):
-                ctx.save_for_backward(x, w_t)
-                return torch.nn.functional.linear(x, w_t)
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                x, w_t = ctx.saved_tensors
-                with torch.autocast(device_type="mps"):
-                    dL_dX = torch.matmul(grad_output, w_t)
-                    dL_dW = torch.matmul(x.transpose(0, 1), grad_output).transpose(0, 1)
-                return dL_dX, dL_dW
-
-        data = torch.randn(2, 3).to("mps")
-        weight = torch.nn.Parameter(torch.randn(4, 3).to("mps"))
-        weight_dtype_cast_counter = 0
-
-        class WeightDTypeCastCounterMode(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if (
-                    func is torch.ops.aten._to_copy.default
-                    and args[0] is weight
-                    and kwargs["dtype"] is torch.float16
-                ):
-                    nonlocal weight_dtype_cast_counter
-                    weight_dtype_cast_counter += 1
-                return func(*args, **kwargs)
-
-            def __enter__(self):
-                # self.old_clear_cache = torch.clear_autocast_cache
-                # torch.clear_autocast_cache = lambda: None
-                return super().__enter__()
-
-            def __exit__(self, exc_type, exc_val, exc_tb):
-                # torch.clear_autocast_cache = self.old_clear_cache
-                return super().__exit__(exc_type, exc_val, exc_tb)
-
-        with WeightDTypeCastCounterMode():
-            with torch.autocast(device_type="mps"):
-                output = CustomLinear.apply(data, weight)
-                s = output.sum()
-            s.backward()
-        self.assertEqual(weight_dtype_cast_counter, 2)
-
-    def test_mps_autocast_error_message(self):
+    @onlyMPS
+    def test_mps_autocast_error_message(self, device):
         with self.assertWarnsRegex(
             UserWarning,
             "MPS Autocast only supports dtypes of torch.bfloat16, torch.float16 currently.",
@@ -352,10 +309,11 @@ class TestAutocastMPS(TestCase):
             with torch.autocast(device_type="mps", dtype=torch.float32):
                 _ = torch.ones(10)
 
-    def test_mps_autocast_bfloat16_supported(self):
+    @onlyMPS
+    def test_mps_autocast_bfloat16_supported(self, device):
         with torch.amp.autocast(device_type="mps", dtype=torch.bfloat16):
-            x = torch.randn(2, 3, device="mps")
-            y = torch.randn(3, 3, device="mps")
+            x = torch.randn(2, 3, device=device)
+            y = torch.randn(3, 3, device=device)
             result = torch.mm(x, y)
             self.assertEqual(result.dtype, torch.bfloat16)
 
@@ -384,10 +342,17 @@ class TestTorchAutocast(TestCase):
         with self.assertRaisesRegex(expected_exception=ValueError, expected_regex=msg):
             torch.autocast(device_type=dev)
 
-    def _test_autocast_nograd_caching_issue_158232_impl(self, device, dtype):
-        """
-        Regression test for issue #158232: autocast + no_grad incompatibility
-        """
+    def test_autocast_called_with_non_callable(self):
+        """Test that autocast gives a clear error when misused as a function wrapper"""
+        x = torch.randn(2, 3)
+        msg = r"autocast\(\)\(func\) requires a callable, but got Tensor"
+        with self.assertRaisesRegex(TypeError, msg):
+            torch.autocast(device_type="cpu")(x)
+
+
+class TestTorchAutocastDevice(TestCase):
+    def test_autocast_nograd_caching_issue_158232(self, device):
+        dtype = torch.get_autocast_dtype(device_type=device)
         model = torch.nn.Linear(2, 2).to(device)
         inp = torch.randn(8, 2, device=device)
 
@@ -417,19 +382,8 @@ class TestTorchAutocast(TestCase):
         self.assertIsNotNone(model.weight.grad)
         self.assertIsNotNone(model.bias.grad)
 
-    def test_autocast_nograd_caching_issue_158232_cpu(self):
-        """Regression test for issue #158232 on CPU"""
-        self._test_autocast_nograd_caching_issue_158232_impl("cpu", torch.bfloat16)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_autocast_nograd_caching_issue_158232_cuda(self):
-        """Regression test for issue #158232 on CUDA"""
-        self._test_autocast_nograd_caching_issue_158232_impl("cuda", torch.float16)
-
-    def _test_autocast_inference_mode_interaction_impl(self, device, dtype):
-        """
-        Test that autocast works correctly with torch.inference_mode()
-        """
+    def test_autocast_inference_mode_interaction(self, device):
+        dtype = torch.get_autocast_dtype(device_type=device)
         model = torch.nn.Linear(2, 2).to(device)
         inp = torch.randn(8, 2, device=device)
 
@@ -453,19 +407,8 @@ class TestTorchAutocast(TestCase):
                 self.assertFalse(out.requires_grad)
                 self.assertEqual(out.dtype, dtype)
 
-    def test_autocast_inference_mode_interaction_cpu(self):
-        """Test autocast + inference_mode interaction on CPU"""
-        self._test_autocast_inference_mode_interaction_impl("cpu", torch.bfloat16)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_autocast_inference_mode_interaction_cuda(self):
-        """Test autocast + inference_mode interaction on CUDA"""
-        self._test_autocast_inference_mode_interaction_impl("cuda", torch.float16)
-
-    def _test_autocast_caching_still_works_with_gradients_impl(self, device, dtype):
-        """
-        Verify that autocast caching still functions correctly when gradients ARE enabled.
-        """
+    def test_autocast_caching_still_works_with_gradients(self, device):
+        dtype = torch.get_autocast_dtype(device_type=device)
         model = torch.nn.Linear(2, 2).to(device)
         inp = torch.randn(8, 2, device=device)
 
@@ -490,23 +433,8 @@ class TestTorchAutocast(TestCase):
             out2.mean().backward(retain_graph=True)
             out3.mean().backward()
 
-    def test_autocast_caching_still_works_with_gradients_cpu(self):
-        """Test caching with gradients on CPU"""
-        self._test_autocast_caching_still_works_with_gradients_impl(
-            "cpu", torch.bfloat16
-        )
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_autocast_caching_still_works_with_gradients_cuda(self):
-        """Test caching with gradients on CUDA"""
-        self._test_autocast_caching_still_works_with_gradients_impl(
-            "cuda", torch.float16
-        )
-
-    def _test_autocast_mixed_grad_contexts_impl(self, device, dtype):
-        """
-        Test complex nesting of gradient contexts within autocast.
-        """
+    def test_autocast_mixed_grad_contexts(self, device):
+        dtype = torch.get_autocast_dtype(device_type=device)
         model = torch.nn.Linear(2, 2).to(device)
         inp = torch.randn(8, 2, device=device)
 
@@ -532,22 +460,9 @@ class TestTorchAutocast(TestCase):
             # Backward on gradient-enabled outputs
             (out2.mean() + out4.mean()).backward()
 
-    def test_autocast_mixed_grad_contexts_cpu(self):
-        """Test mixed grad contexts on CPU"""
-        self._test_autocast_mixed_grad_contexts_impl("cpu", torch.bfloat16)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_autocast_mixed_grad_contexts_cuda(self):
-        """Test mixed grad contexts on CUDA"""
-        self._test_autocast_mixed_grad_contexts_impl("cuda", torch.float16)
-
-    def test_autocast_called_with_non_callable(self):
-        """Test that autocast gives a clear error when misused as a function wrapper"""
-        x = torch.randn(2, 3)
-        msg = r"autocast\(\)\(func\) requires a callable, but got Tensor"
-        with self.assertRaisesRegex(TypeError, msg):
-            torch.autocast(device_type="cpu")(x)
-
+instantiate_device_type_tests(TestAutocastDevice, globals(), allow_mps=True)
+instantiate_device_type_tests(TestTorchAutocastDevice, globals())
 
 if __name__ == "__main__":
     run_tests()
