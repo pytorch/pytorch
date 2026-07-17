@@ -1095,7 +1095,11 @@ combo_kernel_per_subkernel_blocks: bool = Config(
 # winning per-subkernel blocks are stitched into the combo kernel and passed as args (the combo
 # then autotunes num_warps/num_stages over the winners). Requires
 # combo_kernel_per_subkernel_blocks.
-combo_kernel_compile_time_autotune = True
+combo_kernel_compile_time_autotune: bool = Config(
+    justknob="pytorch/inductor:combo_kernel_compile_time_autotune",
+    env_name_force="TORCHINDUCTOR_COMBO_KERNEL_COMPILE_TIME_AUTOTUNE",
+    default=True,
+)
 # Register-pressure guard for compile-time-autotuned combo kernels. A sub-kernel is
 # excluded from the combo (emitted standalone instead) when its own register-limited
 # occupancy -- computed from its autotuned n_regs and num_warps against the device
