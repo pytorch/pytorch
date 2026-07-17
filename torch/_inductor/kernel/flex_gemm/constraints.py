@@ -20,16 +20,21 @@ LOCAL_REDUCE_COMBINE_KEY_SUFFIX: Final = ":local_reduce_combine"
 LOCAL_REDUCE_FINALIZE_KEY_SUFFIX: Final = ":local_reduce_finalize"
 
 
-# Feed-main currently reduces only within one lane-layout M group; cross-warp M
-# stitching needs the two-phase/replay path used by compressed aux reductions.
-MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP = 16
-MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS = 32
+# The physical feed-main path currently reduces only within one lane-layout M
+# group; cross-warp M stitching needs the two-phase/replay path used by
+# compressed aux reductions. Axis-1 feeds whose groups fit in one TensorSSA
+# fragment lower as plain generated TensorSSA without a feed plan.
+LOCAL_REDUCE_FRAGMENT_WIDTH = 32
 LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only axis 0"
 )
 LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only same-warp axis-0 "
-    f"groups <= {MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP}"
+    f"groups <= {LOCAL_REDUCE_FRAGMENT_WIDTH}"
+)
+LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR = (
+    "FlexGEMM local-reduce feed-main for axis-1 groups larger than one "
+    "TensorSSA fragment is not supported yet"
 )
 LOCAL_REDUCE_DIVISIBLE_SHAPE_ERROR = (
     "local_reduce_group must divide the selected FlexGEMM output dimension"
@@ -70,10 +75,6 @@ LOCAL_REDUCE_AUX_TENSORSSA_ERROR = (
 LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR = (
     "FlexGEMM does not support this aux output shape yet. Please file an issue "
     "with the FlexGEMM epilogue expression."
-)
-LOCAL_REDUCE_AUX_OUT_COMPOSITION_ERROR = (
-    "FlexGEMM local-reduce aux outputs cannot be combined with same-shape aux "
-    "outputs yet"
 )
 LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR = (
     "FlexGEMM local-reduce broadcast values support one generated physical reduction"
@@ -225,26 +226,27 @@ def validate_local_reduce_selected_dim_divisible(
 
 
 def validate_local_reduce_tensorssa_group_size(axis: int, group: int) -> None:
-    """Mirror the initial one-fragment TensorSSA tiling constraint.
+    """Mirror the TensorSSA fragment tiling constraints used by QuACK.
 
-    At this layer in the stack, grouped reductions must fit in one 32-lane
-    TensorSSA fragment, and the group size must divide that fragment width so
-    the generated TensorSSA reshape is exact.
+    Groups within one fragment must divide the 32-lane TensorSSA width. Larger
+    groups are handled as 32-lane TensorSSA partials plus physical combine, so
+    they must be exact multiples of that fragment width.
     """
     if group <= 1:
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_GROUP_SIZE_ERROR)
     validate_local_reduce_group_axis(group, axis)
-    if group > 32:
+    if group > LOCAL_REDUCE_FRAGMENT_WIDTH and group % LOCAL_REDUCE_FRAGMENT_WIDTH != 0:
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_FRAGMENT_MULTIPLE_ERROR)
-    if 32 % group != 0:
+    if (
+        group <= LOCAL_REDUCE_FRAGMENT_WIDTH
+        and LOCAL_REDUCE_FRAGMENT_WIDTH % group != 0
+    ):
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_FRAGMENT_DIVISIBLE_ERROR)
 
 
 def local_reduce_needs_physical_callbacks(axis: int, group: int) -> bool:
     """Return whether QuACK must merge TensorSSA partials outside the fragment path."""
-    return (
-        axis == 0 or group > MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS
-    )
+    return axis == 0 or group > LOCAL_REDUCE_FRAGMENT_WIDTH
 
 
 def validate_local_reduce_runtime_dense_mm(ndim: int) -> None:
@@ -285,7 +287,7 @@ def validate_local_reduce_feed_main_capability(axis: int, group: int) -> None:
     """
     if axis != 0:
         raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR)
-    if group > MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP:
+    if group > LOCAL_REDUCE_FRAGMENT_WIDTH:
         raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR)
 
 
@@ -307,16 +309,12 @@ def validate_local_reduce_no_c_alpha_beta(
         raise NotImplementedError(LOCAL_REDUCE_C_ALPHA_BETA_ERROR)
 
 
-def validate_local_reduce_no_aux_out_composition(aux_out: Any | None) -> None:
-    """Reject mixing compressed local-reduce aux stores with same-shape aux stores."""
-    if aux_out is not None:
-        raise NotImplementedError(LOCAL_REDUCE_AUX_OUT_COMPOSITION_ERROR)
-
-
 def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -> bool:
     """Return whether a QuACK config can keep grouped reductions inside one CTA.
 
     This host gate covers tile and cluster fields available on ``GemmConfig``.
+    SM100 128x128 two-CTA configs expose only 16 contiguous N values per
+    epilogue fragment; other accepted configs expose the full 32-wide fragment.
     Lane/warp ownership is derived later from QuACK's tiled-copy layout, where
     ``GroupedLocalReduce`` asserts the remaining lane-count, divisibility, and
     stride invariants. Forced-config tests cover the accepted SM100 extremes.
@@ -334,12 +332,20 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
         return False
     if tile % group != 0:
         return False
+    fragment_width = LOCAL_REDUCE_FRAGMENT_WIDTH
+    if (
+        axis == 1
+        and config.tile_m == 128
+        and config.tile_n == 128
+        and config.cluster_m > 1
+    ):
+        fragment_width //= 2
     match group:
-        case _ if group <= 32:
-            return 32 % group == 0 and group < tile
+        case _ if group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+            return fragment_width % group == 0 and group < tile
         case _:
             return (
-                group % 32 == 0
+                group % LOCAL_REDUCE_FRAGMENT_WIDTH == 0
                 and group <= tile
                 and config.tile_m == 128
                 and config.cluster_m == 1
