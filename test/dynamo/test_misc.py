@@ -426,6 +426,32 @@ graph():
             with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
                 torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
 
+    def test_dispatch_key_set_preserved_across_compile(self):
+        # compile_wrapper snapshots and restores the local dispatch key set
+        # around every compiled call. Make sure cache-hit calls, and a call that
+        # raises a user error, leave the include/exclude sets unchanged.
+        def f(x):
+            return x + 1
+
+        cf = torch.compile(f, backend="eager")
+        x = torch.randn(3)
+        cf(x)  # warm up / compile
+
+        include = torch._C._dispatch_tls_local_include_set()
+        exclude = torch._C._dispatch_tls_local_exclude_set()
+        for _ in range(5):
+            cf(x)
+        self.assertEqual(include, torch._C._dispatch_tls_local_include_set())
+        self.assertEqual(exclude, torch._C._dispatch_tls_local_exclude_set())
+
+        def raises(x):
+            raise ValueError("boom")
+
+        with self.assertRaises(ValueError):
+            torch.compile(raises, backend="eager")(x)
+        self.assertEqual(include, torch._C._dispatch_tls_local_include_set())
+        self.assertEqual(exclude, torch._C._dispatch_tls_local_exclude_set())
+
     def test_compile_non_infra_empty_with_disalloed_dispatch_mode(self):
         from torch.utils._python_dispatch import TorchDispatchMode
 

@@ -19,22 +19,27 @@ def bench(name, fn, requires_grad):
     end = time.perf_counter()
 
     results = timeit.repeat(lambda: fn(x), number=1000, repeat=1000)
-    print(f"{name} {np.median(results) * 1000:.1f}us (warmup={end - start:.1f}s)")
+    median_us = np.median(results) * 1000
+    print(f"{name} {median_us:.1f}us (warmup={end - start:.1f}s)")
+    return median_us
+
+
+def bench_overhead(label, requires_grad):
+    print(label)
+    eager_us = bench("eager   ", add1, requires_grad)
+    compiled_us = bench("compiled", torch.compile(add1), requires_grad)
+    # Steady-state per-call cost torch.compile adds on top of eager for a cache
+    # hit: eval-frame interception, cache lookup, guard check, and the
+    # compile_wrapper prologue/epilogue that saves and restores global state.
+    print(f"overhead {compiled_us - eager_us:.1f}us")
+    print()
 
 
 def main():
-    print("requires_grad=False")
-    bench("eager   ", add1, False)
-    bench("compiled", torch.compile(add1), False)
-    print()
-    print("requires_grad=True")
-    bench("eager   ", add1, True)
-    bench("compiled", torch.compile(add1), True)
-    print()
-    print("inference_mode()")
+    bench_overhead("requires_grad=False", False)
+    bench_overhead("requires_grad=True", True)
     with torch.inference_mode():
-        bench("eager   ", add1, False)
-        bench("compiled", torch.compile(add1), False)
+        bench_overhead("inference_mode()", False)
 
 
 if __name__ == "__main__":
