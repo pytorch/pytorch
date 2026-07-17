@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import cast, TYPE_CHECKING
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -501,9 +501,6 @@ def _multi_tensor_adafactor(
         if eps1 is None:
             eps_dtype = dtype if dtype is not None else device_params[0].dtype
             eps1 = torch.finfo(eps_dtype).eps
-
-        if TYPE_CHECKING:
-            assert device_state_steps[0] is not None
 
         if maximize:
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]

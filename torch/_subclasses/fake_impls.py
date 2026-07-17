@@ -2079,7 +2079,7 @@ def conv(
     )
 
     def expect_fake_tensor(name: str, value: object) -> FakeTensor:
-        if not isinstance(value, FakeTensor):
+        if not isinstance(value, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             raise AssertionError(
                 "Expected fake convolution tensor arguments to be FakeTensors, "
                 f"but {name} was {type(value).__name__}"
