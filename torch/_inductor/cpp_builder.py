@@ -2046,6 +2046,13 @@ def get_cpp_torch_device_options(
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
+    # cpp_extension resolves CUDA_HOME into a module-level global at import time,
+    # so an fbcode process that imported it before the env var above was written
+    # caches None; refresh the global here so the just-set CUDA_HOME env actually
+    # takes effect for include_paths/library_paths below.
+    if cpp_extension.CUDA_HOME is None and os.environ.get("CUDA_HOME"):
+        cpp_extension.CUDA_HOME = os.environ["CUDA_HOME"]
+
     include_dirs = cpp_extension.include_paths(
         device_type, config.aot_inductor.link_libtorch is None
     )

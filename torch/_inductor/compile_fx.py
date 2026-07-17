@@ -3259,6 +3259,7 @@ def make_graph_return_tuple(
     with gm.graph.inserting_before(node):
         gm.graph.output(rv)
     gm.graph.erase_node(node)
+    gm.recompile()
     if not graph_returns_tuple(gm):
         raise AssertionError("Expected graph to return a tuple")
 
