@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
-     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCUDA,
+     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, onlyAccelerator, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest,
      e4m3_type, e5m2_type)
 from torch.testing import make_tensor
@@ -700,7 +700,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.cholesky(A, out=out)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_ex(self, device, dtype):
@@ -3310,7 +3310,6 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
-    @skipIfRocm(msg="Skipping test for ROCm due to HipBlas error.")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
@@ -10598,7 +10597,6 @@ class TestLinalgCudaOnly(TestCase):
                 # BLAS PARAMS
                 self.assertTrue("{ function:" in first_row[4])
 
-    # Fails with triton 3.7
     @dtypes(torch.float)
     def test_mm_submatrix_offline_tunableop(self, device, dtype):
         import os
@@ -10741,6 +10739,57 @@ class TestLinalgCudaOnly(TestCase):
 
 
             # Compare Param Signature of untuned and tuned results
+            ok = self._compare_untuned_tuned_entries()
+            self.assertTrue(ok)
+
+    @dtypes(torch.float)
+    def test_mm_submatrix_leading_dim_alias_offline_tunableop(self, device, dtype):
+        # Regression test for https://github.com/ROCm/TheRock/issues/5553
+        # When a sub-matrix's leading dimension coincides with one of the GEMM
+        # dimensions (m, n, k), offline tuning used to misclassify it as a tight
+        # (non-sub) matrix and silently tuned the wrong shape, dropping the
+        # padded leading dimension. Here lda (== n == 6) is padded and differs
+        # from its tight value (m == 4), so the recorded and tuned param
+        # signatures must match (nt_6_4_2_ld_6_6_6). Before the fix the tuned
+        # entry drifted to nt_6_4_2_ld_6_4_6 and this comparison failed.
+        import os
+
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            # record a sub-matrix GEMM whose leading dim aliases a GEMM dim
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+            self.assertTrue(torch.cuda.tunable.record_untuned_is_enabled())
+
+            # n > m so the padded lda (== n) differs from the tight lda (== m)
+            n = 6
+            m = 4
+            k = 2
+
+            # 'NT' -> records GemmTunableOp_<dtype>_NT, nt_6_4_2_ld_6_6_6
+            matA = torch.rand(n, n, dtype=dtype, device=device).t()
+            matB = torch.rand(n, n, dtype=dtype, device=device)
+            subA = matA[:m, :k]
+            subB = matB[:k, :n]
+            torch.mm(subA, subB)
+
+            untuned_filename = get_tunableop_untuned_filename()
+
+            # tune the recorded GEMM
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.record_untuned_enable(False)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
+
+            results_filename = torch.cuda.tunable.get_filename()
+            self.assertTrue(os.path.exists(results_filename))
+
+            # Every recorded Op+Param signature must appear in the tuned results.
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
