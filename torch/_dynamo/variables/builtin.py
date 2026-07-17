@@ -104,10 +104,12 @@ from .object_protocol import (
     generic_getiter,
     generic_hash,
     generic_inplace_add,
+    generic_inplace_matmul,
     generic_inplace_multiply,
     generic_int,
     generic_invert,
     generic_len,
+    generic_matmul,
     generic_multiply,
     generic_neg,
     generic_pos,
@@ -2789,6 +2791,16 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return generic_inplace_multiply(tx, a, b)
+
+    def call_matmul(
+        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return generic_matmul(tx, a, b)
+
+    def call_imatmul(
+        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return generic_inplace_matmul(tx, a, b)
 
     def call_sub(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
