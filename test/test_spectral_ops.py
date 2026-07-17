@@ -2,7 +2,6 @@
 # ruff: noqa: F841
 
 import torch
-import torch._dynamo.config
 import unittest
 import math
 from contextlib import contextmanager
@@ -16,7 +15,7 @@ from torch.testing._internal.common_utils import \
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, toleranceOverride, tol)
+     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch._prims_common import corresponding_complex_dtype
@@ -315,17 +314,27 @@ class TestFFT(TestCase):
                 torch.half: torch.complex32,
                 torch.float: torch.complex64,
                 torch.double: torch.complex128,
+                # bfloat16 is promoted to float32 on CUDA/XPU, yielding complex64
+                torch.bfloat16: torch.complex64,
             }
-            C = torch.fft.rfft(t)
-            self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
+            device_type = torch.device(device).type
+            if dtype is torch.bfloat16 and device_type not in ('cuda', 'xpu'):
+                pass  # bfloat16 FFT only supported on CUDA/XPU, skip on CPU
+            elif dtype in PROMOTION_MAP_R2C:
+                C = torch.fft.rfft(t)
+                self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
 
     @onlyNativeDeviceTypes
     @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
          allowed_dtypes=[torch.half, torch.bfloat16])
     def test_fft_half_and_bfloat16_errors(self, device, dtype, op):
         # TODO: Remove torch.half error when complex32 is fully implemented
-        sample = first_sample(self, op.sample_inputs(device, dtype))
+        # bfloat16 is supported on CUDA/XPU via promotion to float32, so
+        # only expect an error on other device types (e.g. CPU, ROCm).
         device_type = torch.device(device).type
+        if dtype is torch.bfloat16 and device_type in ('cuda', 'xpu') and not TEST_WITH_ROCM:
+            return
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         default_msg = "Unsupported dtype"
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
             err_msg = default_msg
@@ -333,6 +342,24 @@ class TestFFT(TestCase):
             err_msg = default_msg
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
+
+    @onlyOn(["cuda", "xpu"])
+    @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
+         allowed_dtypes=[torch.bfloat16])
+    def test_fft_bfloat16_promoted_on_cuda(self, device, dtype, op):
+        # bfloat16 inputs should be silently promoted to float32 on CUDA/XPU,
+        # producing complex64 output without raising an error.
+        # ROCm/hipFFT does not support bfloat16, so skip this test on ROCm.
+        # See: promote_type_fft() in SpectralOps.cpp
+        if TEST_WITH_ROCM:
+            self.skipTest("bfloat16 FFT not supported on ROCm")
+        sample = first_sample(self, op.sample_inputs(device, dtype))
+        result = op(sample.input, *sample.args, **sample.kwargs)
+        # Output must be complex64 (bfloat16 -> float32 -> complex64)
+        self.assertTrue(
+            result.dtype in (torch.complex64, torch.float32),
+            f"Expected complex64 or float32 output for bfloat16 input, got {result.dtype}"
+        )
 
     @onlyNativeDeviceTypes
     @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.chalf))
@@ -387,7 +414,6 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expected, exact_dtype=exact_dtype)
 
     @skipCPUIfNoFFT
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @onlyNativeDeviceTypes
     @toleranceOverride({
         torch.half : tol(1e-2, 1e-2),
@@ -621,7 +647,6 @@ class TestFFT(TestCase):
                     actual = fn(input, s, dim, norm)
                     self.assertEqual(actual, expected)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.complex64)
@@ -1178,7 +1203,6 @@ class TestFFT(TestCase):
                                 center=center, normalized=normalized)
             self.assertEqual(expected, actual)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @skipCPUIfNoFFT
     @dtypes(torch.cdouble)
     def test_complex_istft_real_equiv(self, device, dtype):

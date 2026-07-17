@@ -1575,7 +1575,9 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 with ThreadPoolExecutor(max_workers=num_threads) as pool:
                     list(pool.map(write_to_cache, range(num_threads)))
 
-                self.assertEqual(errors, [], f"Concurrent writes failed: {errors}")
+                self.assertEqual(
+                    errors, [], lambda msg: f"{msg}\nConcurrent writes failed: {errors}"
+                )
 
                 # Verify the file is valid by loading it
                 fresh_mem: dict = {}

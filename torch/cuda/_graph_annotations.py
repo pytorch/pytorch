@@ -3,8 +3,8 @@
 During CUDA graph capture, ``mark_kernels`` records the current capture
 frontier and the direct dependents already attached to that frontier.
 On scope exit it walks only the newly added dependent edges to find the
-nodes created within the scope. Each kernel or memcpy node found is
-annotated by its ``toolsId`` so it can later be matched to profiler
+nodes created within the scope. Each kernel, memcpy, or memset node found
+is annotated by its ``toolsId`` so it can later be matched to profiler
 trace events.
 
 ``mark_kernels`` now snapshots capture state from whatever stream is
@@ -36,11 +36,17 @@ Usage during capture::
     annotations = get_kernel_annotations()
 """
 
+from __future__ import annotations
+
 import importlib.metadata
 from collections import defaultdict
 from contextlib import contextmanager
 from logging import getLogger
-from typing import Any, TypeAlias
+from typing import Any, TYPE_CHECKING, TypeAlias
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 import torch
 from torch.cuda._utils import (
@@ -131,6 +137,22 @@ def _is_tools_id_unavailable() -> bool:
         return not _tools_id_available
     _tools_id_available = _probe_tools_id()
     return not _tools_id_available
+
+
+def is_available() -> bool:
+    r"""is_available() -> bool
+
+    Return whether CUDA graph annotation recording is supported.
+
+    Requires a CUDA device, the ``cuda-bindings`` package, and a driver
+    that supports ``cudaGraphNodeGetToolsId`` (CUDA >= 13.1 or an
+    equivalent cuda-compat package). When this returns ``False``,
+    :func:`mark_kernels` is a silent no-op and no annotations are
+    recorded.
+
+    The first call may probe the CUDA driver; the result is cached.
+    """
+    return torch.cuda.is_available() and not _is_tools_id_unavailable()
 
 
 def _get_capture_state(stream: Any) -> _CaptureState | None:
@@ -233,9 +255,9 @@ def _collect_descendants(
 # toolsId -> list of annotation objects.
 _kernel_annotations: defaultdict[int, list[Any]] = defaultdict(list)
 
-# Node types we annotate (kernels, memcpys, and batch mem ops), as driver
-# node-type enums. Initialized lazily to avoid touching cuda.bindings at import
-# time.
+# Node types we annotate (kernels, memcpys, memsets, and batch mem ops), as
+# driver node-type enums. Initialized lazily to avoid touching cuda.bindings at
+# import time.
 _ANNOTATABLE_TYPES: set[Any] | None = None
 
 
@@ -246,6 +268,7 @@ def _get_annotatable_types() -> set[Any]:
         _ANNOTATABLE_TYPES = {
             node_types.CU_GRAPH_NODE_TYPE_KERNEL,
             node_types.CU_GRAPH_NODE_TYPE_MEMCPY,
+            node_types.CU_GRAPH_NODE_TYPE_MEMSET,
             node_types.CU_GRAPH_NODE_TYPE_BATCH_MEM_OP,
         }
     return _ANNOTATABLE_TYPES
@@ -257,33 +280,55 @@ _pending_scopes: list[tuple[Any, list[int]]] = []
 
 @contextmanager  # type: ignore[arg-type]
 def mark_kernels(annotation: str | dict[str, Any]):
-    """Context manager that records new scope nodes for later annotation.
+    r"""mark_kernels(annotation)
 
-    During capture, records the current stream frontier and its existing
-    direct dependents on entry. On scope exit, traces only the dependent
-    nodes added since entry. After capture, ``resolve_pending_annotations``
-    merges overlapping scopes and stores the final toolsId annotations.
-    If the scope is the first captured work, the entry frontier is empty,
-    so ``mark_kernels`` falls back to the newly created graph roots.
+    Context manager that annotates GPU work captured within its scope.
 
-    Must be called inside an active ``torch.cuda.graph()`` capture. The
-    nodes you expect to annotate must be reachable from the stream frontier
-    that is current on entry. If work runs on a different already-capturing
-    branch, it must first be synchronized with the current stream so that
-    branch becomes reachable from the entry frontier. If the current stream
-    is not capturing, or if ``cudaGraphNodeGetToolsId`` is not available,
-    the context manager is a no-op.
+    Must be used inside an active :class:`torch.cuda.graph` capture with
+    ``enable_annotations=True``. Every kernel, memcpy, and memset node the
+    capture adds within the scope is tagged with :attr:`annotation`. Outside
+    a capture, with annotations disabled, or when :func:`is_available` is
+    ``False``, the context manager is a no-op.
+
+    When scopes overlap on the same node (e.g. nested scopes), their
+    annotation dicts are merged key-by-key with the inner scope winning
+    common keys.
+
+    Implementation: on entry, records the current stream's capture frontier
+    and its existing direct dependents; on scope exit, walks only the
+    dependent nodes added since entry (falling back to newly created graph
+    roots when the scope is the first captured work).
 
     Args:
-        annotation: Arbitrary object appended to the annotation list for
-            every kernel/memcpy node captured within this scope.
+        annotation (str or dict): Metadata to attach to each captured node.
+            A string ``s`` is recorded as ``{"name": s}``. Dict values must
+            be picklable. The key ``"name"`` names the region in trace
+            tooling; ``"stream"`` is reserved for stream-lane assignment.
+
+    .. note::
+        The nodes to annotate must be reachable from the capture frontier of
+        the stream that is current on scope entry. Work on a different
+        already-capturing stream must be synchronized with the current
+        stream first.
+
+    .. warning::
+        This API is in prototype and may change in future releases.
+
+    Example::
+
+        >>> # xdoctest: +SKIP("requires cuda-bindings and driver >= 13.1")
+        >>> g = torch.cuda.CUDAGraph()
+        >>> x = torch.randn(8, device="cuda")
+        >>> with torch.cuda.graph(g, enable_annotations=True):
+        ...     with torch.cuda.graph_annotations.mark_kernels("phase_A"):
+        ...         y = x + 1
     """
     if not _annotations_enabled or _is_tools_id_unavailable():
         yield
         return
 
     if isinstance(annotation, str):
-        annotation = {"str": annotation}
+        annotation = {"name": annotation}
 
     stream = _cuda_runtime.cudaStream_t(  # pyrefly: ignore[missing-attribute]
         init_value=torch.cuda.current_stream().cuda_stream
@@ -374,13 +419,13 @@ def resolve_pending_annotations() -> None:
             for tools_id in tools_ids:
                 per_tools_id[tools_id].append(annotation)
 
-        for tools_id, annotations in per_tools_id.items():
-            if len(annotations) == 1:
-                _kernel_annotations[tools_id].append(annotations[0])
+        for tools_id, ann_list in per_tools_id.items():
+            if len(ann_list) == 1:
+                _kernel_annotations[tools_id].append(ann_list[0])
                 continue
 
             merged: dict[str, Any] = {}
-            for annotation in annotations:
+            for annotation in ann_list:
                 if isinstance(annotation, dict):
                     for key, value in annotation.items():
                         merged.setdefault(key, value)
@@ -467,13 +512,49 @@ def _rekey_annotations(
     return remapped
 
 
-def get_kernel_annotations() -> dict[int, list[Any]]:
-    """Return the current kernel annotation map (toolsId -> annotations)."""
+def get_kernel_annotations() -> Mapping[int, list[Any]]:
+    r"""get_kernel_annotations() -> Mapping[int, list]
+
+    Return the live registry of recorded kernel annotations.
+
+    Keys are opaque integers matching the ``graph node id`` field that
+    CUPTI-based profilers attach to kernel events; values are the lists of
+    annotation dicts recorded for that node. The registry accumulates
+    across captures and is global to the process.
+
+    The returned mapping is a **live view**: it is updated in place when a
+    graph is instantiated (annotation keys are rekeyed to the executable
+    graph's ids), so a reference obtained early stays current. Keys are
+    valid for joining against a profiler trace once the corresponding
+    graphs have been instantiated. Treat the mapping as read-only; snapshot
+    it with ``dict(...)`` if isolation is needed.
+
+    .. warning::
+        This API is in prototype and may change in future releases.
+
+    Example::
+
+        >>> # xdoctest: +SKIP("requires cuda-bindings and driver >= 13.1")
+        >>> annotations = torch.cuda.graph_annotations.get_kernel_annotations()
+        >>> with open("annotations.pkl", "wb") as f:
+        ...     pickle.dump(dict(annotations), f)
+    """
     return _kernel_annotations
 
 
 def clear_kernel_annotations() -> None:
-    """Clear all recorded kernel annotations and pending scopes."""
+    r"""clear_kernel_annotations() -> None
+
+    Clear all recorded kernel annotations.
+
+    The annotation registry is process-global and accumulates across
+    captures; long-running workloads that capture many graphs should clear
+    it once recorded annotations have been consumed (e.g. after saving
+    them alongside a profiler trace).
+
+    .. warning::
+        This API is in prototype and may change in future releases.
+    """
     _kernel_annotations.clear()
     _pending_scopes.clear()
 
@@ -526,7 +607,7 @@ def mark_stream(stream: torch.cuda.Stream, annotation: str | dict[str, Any]):
             yield
     else:
         if isinstance(annotation, str):
-            annotation = {"str": annotation}
+            annotation = {"name": annotation}
         if isinstance(annotation, dict):
             annotation["stream"] = _get_stream_id(stream)
         with mark_kernels(annotation):

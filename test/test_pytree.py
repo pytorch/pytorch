@@ -16,7 +16,6 @@ from enum import auto
 from typing import Any, NamedTuple
 
 import torch
-import torch._dynamo.config
 import torch.utils._pytree as python_pytree
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.testing._internal.common_utils import (
@@ -153,7 +152,7 @@ class TestGenericPytree(TestCase):
                                 str(python_param.annotation),
                             ),
                             msg=(
-                                f"C++ parameter {cxx_param} "
+                                lambda msg: f"{msg}\nC++ parameter {cxx_param} "
                                 f"does not match Python parameter {python_param} "
                                 f"for API `{name}`"
                             ),
@@ -163,7 +162,7 @@ class TestGenericPytree(TestCase):
                             cxx_param.annotation,
                             python_param.annotation,
                             msg=(
-                                f"C++ parameter {cxx_param} "
+                                lambda msg: f"{msg}\nC++ parameter {cxx_param} "
                                 f"does not match Python parameter {python_param} "
                                 f"for API `{name}`"
                             ),
@@ -202,7 +201,6 @@ class TestGenericPytree(TestCase):
                 lambda values, keys: MyDict(zip(keys, values)),
             )
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @parametrize_pytree_module
     def test_flatten_unflatten_leaf(self, pytree):
         def run_test_with_leaf(leaf):
@@ -625,12 +623,12 @@ class TestGenericPytree(TestCase):
             self.assertEqual(
                 list(result.keys()),
                 list(tree.keys()),
-                msg=f"Dictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
+                msg=lambda msg: f"{msg}\nDictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
             )
             self.assertEqual(
                 list(result.values()),
                 list(tree.values()),
-                msg=f"Dictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
+                msg=lambda msg: f"{msg}\nDictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
             )
 
     @parametrize_pytree_module

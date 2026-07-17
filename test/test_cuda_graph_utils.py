@@ -6,14 +6,19 @@ import unittest
 
 import torch
 from torch.cuda._graph_annotations import (
+    _get_node_type,
     _get_stream_id,
     _is_tools_id_unavailable,
     _rekey_annotations,
-    clear_kernel_annotations,
-    get_kernel_annotations,
-    mark_kernels,
     mark_stream,
     resolve_pending_annotations,
+)
+from torch.cuda._utils import _check_cuda_bindings
+from torch.cuda.graph_annotations import (
+    clear_kernel_annotations,
+    get_kernel_annotations,
+    is_available,
+    mark_kernels,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -59,6 +64,51 @@ class TestMarkKernels(TestCase):
             _ = x + 1
         self.assertEqual(len(get_kernel_annotations()), 0)
 
+    def test_memset_nodes_are_annotated(self):
+        """Memset graph nodes get annotated, not just kernels and memcpys.
+
+        A large reduction emits a ``cudaMemset`` node (zeroing the multi-block
+        reduction semaphores) alongside the reduction kernel. ``keep_graph=True``
+        retains the captured cudaGraph so its nodes can be classified, and defers
+        the remap so node toolsIds stay keyed to the capture graph.
+        """
+        from cuda.bindings import driver, runtime as cuda_runtime
+
+        memset_type = driver.CUgraphNodeType.CU_GRAPH_NODE_TYPE_MEMSET
+        big = torch.randn(8192, 8192, device="cuda")
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("reduction"):
+                _ = torch.sum(big)
+
+        raw_graph = graph.raw_cuda_graph()
+        _, num_nodes = _check_cuda_bindings(cuda_runtime.cudaGraphGetNodes(raw_graph))
+        nodes, _ = _check_cuda_bindings(
+            cuda_runtime.cudaGraphGetNodes(raw_graph, numNodes=num_nodes)
+        )
+
+        annotations = get_kernel_annotations()
+        memset_tools_ids = [
+            _check_cuda_bindings(cuda_runtime.cudaGraphNodeGetToolsId(node))
+            for node in nodes[:num_nodes]
+            if _get_node_type(node) == memset_type
+        ]
+
+        self.assertGreater(
+            len(memset_tools_ids),
+            0,
+            "expected the reduction to emit at least one memset node; "
+            "did the reduction lowering change?",
+        )
+        for tools_id in memset_tools_ids:
+            self.assertIn(
+                tools_id,
+                annotations,
+                lambda msg: f"{msg}\nmemset toolsId {hex(tools_id)} was not annotated",
+            )
+            self.assertEqual(annotations[tools_id], [{"name": "reduction"}])
+
     def test_single_scope_at_capture_start_uses_root_fallback(self):
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
@@ -74,7 +124,7 @@ class TestMarkKernels(TestCase):
         self.assertGreater(len(annotations), 0)
         for anns in annotations.values():
             for ann in anns:
-                self.assertEqual(ann, {"str": "phase_a"})
+                self.assertEqual(ann, {"name": "phase_a"})
 
     def test_multiple_scopes_no_overlap(self):
         graph = torch.cuda.CUDAGraph()
@@ -91,9 +141,9 @@ class TestMarkKernels(TestCase):
         scope_2_ids = set()
         for tid, anns in annotations.items():
             self.assertEqual(len(anns), 1)
-            if anns[0] == {"str": "scope_1"}:
+            if anns[0] == {"name": "scope_1"}:
                 scope_1_ids.add(tid)
-            elif anns[0] == {"str": "scope_2"}:
+            elif anns[0] == {"name": "scope_2"}:
                 scope_2_ids.add(tid)
 
         self.assertGreater(len(scope_1_ids), 0)
@@ -161,7 +211,7 @@ class TestMarkKernels(TestCase):
         self.assertGreater(total_annotated, 0)
         for anns in annotations.values():
             for ann in anns:
-                self.assertEqual(ann, {"str": "tagged"})
+                self.assertEqual(ann, {"name": "tagged"})
 
     def test_nested_scopes_innermost_wins(self):
         """With nested string scopes, the innermost name wins."""
@@ -180,13 +230,15 @@ class TestMarkKernels(TestCase):
         inner_ids = set()
         for tid, anns in annotations.items():
             self.assertEqual(
-                len(anns), 1, f"toolsId {hex(tid)} has {len(anns)} annotations"
+                len(anns),
+                1,
+                lambda msg: f"{msg}\ntoolsId {hex(tid)} has {len(anns)} annotations",
             )
             ann = anns[0]
             self.assertIsInstance(ann, dict)
-            if ann["str"] == "outer":
+            if ann["name"] == "outer":
                 outer_ids.add(tid)
-            elif ann["str"] == "inner":
+            elif ann["name"] == "inner":
                 inner_ids.add(tid)
 
         self.assertGreater(len(outer_ids), 0, "Should have outer-only kernels")
@@ -267,6 +319,28 @@ class TestMarkKernels(TestCase):
             self.assertEqual(ann["In msg nelems"], 1024)
             self.assertEqual(ann["dtype"], "bfloat16")
 
+    def test_string_scope_in_dict_scope_contends_for_name(self):
+        """A string annotation wraps to {"name": ...}, so a string scope
+        nested inside a dict scope with a "name" key contends for the same
+        slot; the inner scope wins. This pins the wrapped-string format and
+        the merge ordering as observable pickle-format behavior."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda")
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels({"name": "outer", "dtype": "bfloat16"}):
+                with mark_kernels("inner"):
+                    _ = x + 1
+
+        annotations = get_kernel_annotations()
+        self.assertGreater(len(annotations), 0)
+        for anns in annotations.values():
+            self.assertEqual(len(anns), 1)
+            ann = anns[0]
+            # Inner string scope wins the "name" slot; outer-only keys survive.
+            self.assertEqual(ann["name"], "inner")
+            self.assertEqual(ann["dtype"], "bfloat16")
+
     def test_no_enable_records_nothing(self):
         # Without enable_annotations=True the capture is un-annotated, so
         # mark_kernels is a no-op and nothing is recorded.
@@ -294,7 +368,7 @@ class TestMarkKernels(TestCase):
         self.assertGreater(len(annotations), 0)
         for anns in annotations.values():
             for ann in anns:
-                self.assertEqual(ann, {"str": "auto"})
+                self.assertEqual(ann, {"name": "auto"})
 
     def test_enable_annotations_does_not_clear(self):
         """Annotations from a previous graph survive a second capture."""
@@ -340,7 +414,7 @@ class TestMarkKernels(TestCase):
             self.assertEqual(
                 graph_id,
                 exec_graph_id,
-                f"toolsId 0x{tools_id:016x} has graph_id {graph_id}, "
+                lambda msg: f"{msg}\ntoolsId 0x{tools_id:016x} has graph_id {graph_id}, "
                 f"expected exec_graph_id {exec_graph_id}",
             )
 
@@ -446,7 +520,7 @@ class TestMarkKernels(TestCase):
         graph_ids_by_name: dict[str, set] = {}
         for tools_id, anns in get_kernel_annotations().items():
             self.assertEqual(len(anns), 1)
-            graph_ids_by_name.setdefault(anns[0]["str"], set()).add(tools_id >> 32)
+            graph_ids_by_name.setdefault(anns[0]["name"], set()).add(tools_id >> 32)
 
         self.assertIn("graph_a", graph_ids_by_name)
         self.assertIn("graph_b", graph_ids_by_name)
@@ -545,7 +619,7 @@ class TestMarkKernels(TestCase):
         annotations = get_kernel_annotations()
         self.assertEqual(len(annotations), 1)
         for anns in annotations.values():
-            self.assertEqual(anns, [{"str": "tagged"}])
+            self.assertEqual(anns, [{"name": "tagged"}])
 
 
 # cuda.bindings is NVIDIA-only; get_graph_data has no ROCm equivalent.
@@ -696,6 +770,60 @@ class TestRekeyAnnotations(TestCase):
         annotations = {self._tools_id(1, 10): original}
         _rekey_annotations(annotations, capture_graph_id=1, exec_graph_id=2)
         self.assertEqual(original, ["a"])
+
+
+# Runs everywhere (no capture): the public probe must agree with the private
+# gate that mark_kernels no-ops on, whatever this machine supports.
+class TestIsAvailable(TestCase):
+    def test_matches_private_gate(self):
+        expected = torch.cuda.is_available() and not _is_tools_id_unavailable()
+        self.assertEqual(is_available(), expected)
+
+
+# Pure trace-JSON logic, no CUDA needed. Pins the canonical annotation key
+# ("name") and reader tolerance for the two legacy pickle spellings: dicts
+# keyed "str" and bare unwrapped strings.
+class TestAnnotateTrace(TestCase):
+    @staticmethod
+    def _trace_with_kernel(graph_node_id):
+        return {
+            "traceEvents": [
+                {
+                    "ph": "X",
+                    "cat": "kernel",
+                    "name": "k",
+                    "pid": 0,
+                    "tid": 7,
+                    "ts": 100,
+                    "dur": 10,
+                    "args": {"graph node id": graph_node_id, "stream": 7},
+                }
+            ]
+        }
+
+    def _annotated_args(self, annotations):
+        from torch.cuda._annotate_cuda_graph_trace import annotate_trace
+
+        trace = self._trace_with_kernel(42)
+        count = annotate_trace(trace, annotations)
+        self.assertEqual(count, 1)
+        [event] = [e for e in trace["traceEvents"] if e.get("cat") == "kernel"]
+        return event["args"]
+
+    def test_canonical_name_key(self):
+        args = self._annotated_args({42: [{"name": "phase_a", "dtype": "bf16"}]})
+        self.assertEqual(args["name"], "phase_a")
+        self.assertEqual(args["dtype"], "bf16")
+
+    def test_legacy_str_key_maps_to_name(self):
+        args = self._annotated_args({42: [{"str": "phase_a"}]})
+        self.assertEqual(args["name"], "phase_a")
+        self.assertNotIn("str", args)
+
+    def test_legacy_bare_string_maps_to_name(self):
+        args = self._annotated_args({42: ["phase_a"]})
+        self.assertEqual(args["name"], "phase_a")
+        self.assertNotIn("annotation", args)
 
 
 if __name__ == "__main__":

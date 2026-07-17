@@ -10,7 +10,9 @@ bucket as they need (e.g. total duration per node, or kernels bucketed into trai
 steps by start time, or split per stream), staying vectorized.
 
 By default only CONCURRENT_KERNEL is timed -- the common case. Opt into MEMCPY /
-MEMSET via ``kinds`` to time those nodes too. Every kind here times the same 4
+MEMCPY2 (peer-to-peer) / MEMSET via ``kinds`` to time those nodes too. Requesting
+MEMCPY2 also enables MEMCPY implicitly (CUPTI emits no MEMCPY2 records unless
+MEMCPY is on too). Every kind here times the same 4
 fields (START, END, GRAPH_NODE_ID, STREAM_ID), so all records are one size and the
 monitor decodes them via its vectorized stride + kind-dispatch path; this observer
 just buffers the raw columns (the cost is in the monitor's decode, not here).
@@ -53,6 +55,7 @@ from torch.profiler._cupti.records import (
     ExternalCorrelation,
     Kernel,
     Memcpy,
+    Memcpy2,
     Memset,
 )
 
@@ -75,6 +78,14 @@ _TIMED_FIELDS: dict[int, tuple[int, int, int, int]] = {
         int(Memcpy.END),
         int(Memcpy.GRAPH_NODE_ID),
         int(Memcpy.STREAM_ID),
+    ),
+    # Peer-to-peer / cross-device copies. Field ids differ from MEMCPY (src/dst
+    # device fields shift correlation/graph ids), but the timed span is the same.
+    int(ActivityKind.MEMCPY2): (
+        int(Memcpy2.START),
+        int(Memcpy2.END),
+        int(Memcpy2.GRAPH_NODE_ID),
+        int(Memcpy2.STREAM_ID),
     ),
     int(ActivityKind.MEMSET): (
         int(Memset.START),
@@ -108,6 +119,12 @@ class NodeTimerObserver(CuptiMonitorObserver):
                 f"NodeTimerObserver: unsupported activity kind(s) {unknown}; "
                 f"timing supports {sorted(_TIMED_FIELDS)}"
             )
+        # CUPTI only emits MEMCPY2 (peer-to-peer) records when MEMCPY is also enabled;
+        # MEMCPY2 alone silently yields nothing. Enable MEMCPY alongside it implicitly.
+        kind_ints = {int(k) for k in self._kinds}
+        memcpy, memcpy2 = int(ActivityKind.MEMCPY), int(ActivityKind.MEMCPY2)
+        if memcpy2 in kind_ints and memcpy not in kind_ints:
+            self._kinds += (ActivityKind.MEMCPY,)
         self._lock = threading.Lock()
         # Raw span column chunks as the worker thread delivers them: each is
         # (graph_node_id, start, end, stream, correlation_id|None -- the id only when

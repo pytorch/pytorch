@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import asyncio
 import logging
 import re
 import sys
@@ -702,6 +703,15 @@ Invalid call to __build_class__
 from user code:
    File "test_error_messages.py", line N, in fn
     class Foo:""",
+        )
+
+    @skipIfNotPy312
+    def test_async_return_bytecode_exception_table(self):
+        async def fn():
+            return 1
+
+        self.assertEqual(
+            asyncio.run(torch.compile(fn, backend="eager", fullgraph=True)()), 1
         )
 
     @skipIfNotPy312
@@ -2569,12 +2579,12 @@ User code traceback:
         self.assertEqual(
             len(full_messages),
             1,
-            f"Expected 1 full graph break message, got {len(full_messages)}",
+            lambda msg: f"{msg}\nExpected 1 full graph break message, got {len(full_messages)}",
         )
         self.assertEqual(
             len(suppressed_messages),
             2,
-            f"Expected 2 suppressed messages, got {len(suppressed_messages)}",
+            lambda msg: f"{msg}\nExpected 2 suppressed messages, got {len(suppressed_messages)}",
         )
 
         self.assertExpectedInline(
@@ -2659,7 +2669,7 @@ Call to `torch._dynamo.graph_break()`
         self.assertEqual(
             len(records),
             2,
-            f"Expected 2 graph break messages (one per call site), got {len(records)}",
+            lambda msg: f"{msg}\nExpected 2 graph break messages (one per call site), got {len(records)}",
         )
 
         self.assertExpectedInline(
