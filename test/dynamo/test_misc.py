@@ -233,6 +233,34 @@ class MiscTests(torch._inductor.test_case.TestCase):
         entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
         self.assertEqual(len(entries), 0)
 
+    @torch.testing._internal.common_utils.scoped_load_inline
+    def test_pybind11_enum_conversion(self, load_inline):
+        cpp_source = """
+        #include <torch/extension.h>
+
+        enum class E { A = 0, B = 1 };
+
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+            py::enum_<E>(m, "E")
+                .value("A", E::A)
+                .value("B", E::B);
+        }
+        """
+        mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
+        e = mod.E.A
+        self.assertEqual(
+            torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
+        )
+        self.assertEqual(
+            torch.compile(lambda x: float(x), backend="eager", fullgraph=True)(e), 0.0
+        )
+        self.assertEqual(
+            torch.compile(lambda x: [10, 20][x], backend="eager", fullgraph=True)(
+                mod.E.B
+            ),
+            20,
+        )
+
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
             if flag:
