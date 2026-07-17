@@ -4621,6 +4621,8 @@ class Scheduler:
 
         if changed:
             self.nodes = self.topological_sort_schedule(self.nodes)
+            self.compute_ancestors()
+            self.compute_input_distances()
 
     def compute_dependencies(self) -> None:
         """

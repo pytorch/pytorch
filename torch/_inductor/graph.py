@@ -456,6 +456,9 @@ class GraphLowering(torch.fx.Interpreter):
         self._fx_node_to_operation_names: dict[torch.fx.Node, OrderedSet[str]] = (
             defaultdict(OrderedSet)
         )
+        self._post_fusion_overlap_dep_nodes: dict[str, OrderedSet[torch.fx.Node]] = (
+            defaultdict(OrderedSet)
+        )
         self.post_fusion_overlap_deps: dict[str, OrderedSet[str]] = defaultdict(
             OrderedSet
         )
@@ -1912,10 +1915,17 @@ class GraphLowering(torch.fx.Interpreter):
                 if origin_deps:
                     dep_nodes.update(origin_deps)
 
+            if dep_nodes:
+                self._post_fusion_overlap_dep_nodes[op.operation_name].update(dep_nodes)
+
+    def _finalize_post_fusion_overlap_deps(self) -> None:
+        self.post_fusion_overlap_deps.clear()
+        for op_name, dep_nodes in self._post_fusion_overlap_dep_nodes.items():
+            dep_op_names: OrderedSet[str] = OrderedSet()
             for dep_node in dep_nodes:
-                self.post_fusion_overlap_deps[op.operation_name].update(
-                    self._fx_node_to_operation_names.get(dep_node, ())
-                )
+                dep_op_names.update(self._fx_node_to_operation_names.get(dep_node, ()))
+            if dep_op_names:
+                self.post_fusion_overlap_deps[op_name].update(dep_op_names)
 
     def run_node(self, n: torch.fx.Node) -> object:
         """Lower and execute a single FX node into Inductor IR."""
@@ -2950,6 +2960,7 @@ class GraphLowering(torch.fx.Interpreter):
         """
         from .scheduler import Scheduler
 
+        self._finalize_post_fusion_overlap_deps()
         with config.patch("triton.store_cubin", False):
             self.scheduler = Scheduler(self.operations)
 

@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+from unittest import mock
+
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
@@ -100,6 +102,127 @@ class TestControlDeps(InductorTestCase):
         expected = fn(a, b)
         torch.testing.assert_close(result, expected)
         self.assertTrue(any(captured_deps))
+
+    @requires_gpu()
+    def test_meta_overlap_deps_resolve_late_materialized_deps(self):
+        from torch._inductor.fx_passes.control_dependencies import (
+            preserve_node_ordering_from_config,
+        )
+        from torch._inductor.virtualized import V
+        from torch.utils._ordered_set import OrderedSet
+
+        def fn(a, b):
+            x = a + 1
+            mm = b @ b
+            y = x * 2
+            return mm, y
+
+        captured_deps: list[set[str]] = []
+
+        def add_meta_deps(graph):
+            add_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.add.Tensor
+            )
+            mm_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.mm.default
+            )
+            self.assertEqual(len(add_nodes), 1)
+            self.assertEqual(len(mm_nodes), 1)
+
+            deps_map = {mm_nodes[0]: OrderedSet([add_nodes[0]])}
+            preserve_node_ordering_from_config(graph, deps_map)
+            return graph
+
+        def capture_post_fusion(nodes):
+            dep_names: set[str] = set()
+            for deps in V.graph.post_fusion_overlap_deps.values():
+                dep_names.update(deps)
+            captured_deps.append(dep_names)
+            return nodes
+
+        patches = {
+            "post_grad_custom_post_pass": add_meta_deps,
+            "_post_fusion_custom_pass": capture_post_fusion,
+            "aten_distributed_optimizations.insert_overlap_deps_impl": "meta",
+        }
+        torch._dynamo.reset()
+        with config.patch(patches):
+            a = torch.rand([32, 32], device=GPU_TYPE)
+            b = torch.rand([32, 32], device=GPU_TYPE)
+            result = torch.compile(fn)(a, b)
+
+        expected = fn(a, b)
+        torch.testing.assert_close(result, expected)
+        self.assertTrue(any(captured_deps))
+
+    @requires_gpu()
+    def test_meta_overlap_deps_refresh_scheduler_ancestors(self):
+        from torch._inductor.dependencies import WeakDep
+        from torch._inductor.fx_passes.control_dependencies import (
+            preserve_node_ordering_from_config,
+        )
+        from torch._inductor.scheduler import Scheduler
+        from torch.utils._ordered_set import OrderedSet
+
+        def fn(a, b):
+            mm = b @ b
+            x = a + 1
+            y = x * 2
+            return mm, y
+
+        saw_refreshed_ancestor: list[bool] = []
+
+        def add_meta_deps(graph):
+            mm_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.mm.default
+            )
+            mul_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.mul.Tensor
+            )
+            self.assertEqual(len(mm_nodes), 1)
+            self.assertEqual(len(mul_nodes), 1)
+
+            deps_map = {mul_nodes[0]: OrderedSet([mm_nodes[0]])}
+            preserve_node_ordering_from_config(graph, deps_map)
+            return graph
+
+        orig_apply = Scheduler._apply_post_fusion_overlap_deps
+
+        def capture_apply(scheduler):
+            before = {
+                node: OrderedSet(node.unmet_dependencies) for node in scheduler.nodes
+            }
+            orig_apply(scheduler)
+            for node in scheduler.nodes:
+                added = node.unmet_dependencies - before.get(node, OrderedSet())
+                for dep in added:
+                    if (
+                        isinstance(dep, WeakDep)
+                        and dep.is_fake
+                        and dep.name in scheduler.name_to_buf
+                    ):
+                        op_name = scheduler.name_to_buf[dep.name].defining_op_name()
+                        saw_refreshed_ancestor.append(op_name in node.ancestors)
+
+        patches = {
+            "post_grad_custom_post_pass": add_meta_deps,
+            "aten_distributed_optimizations.insert_overlap_deps_impl": "meta",
+        }
+        torch._dynamo.reset()
+        with (
+            mock.patch.object(
+                Scheduler, "_apply_post_fusion_overlap_deps", capture_apply
+            ),
+            config.patch(patches),
+        ):
+            a = torch.rand([32, 32], device=GPU_TYPE)
+            b = torch.rand([32, 32], device=GPU_TYPE)
+            result = torch.compile(fn)(a, b)
+
+        expected = fn(a, b)
+        torch.testing.assert_close(result, expected)
+        self.assertTrue(saw_refreshed_ancestor)
+        self.assertTrue(all(saw_refreshed_ancestor))
 
     @requires_gpu()
     def test_meta_overlap_deps_do_not_force_realization(self):
