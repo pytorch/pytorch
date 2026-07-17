@@ -11,7 +11,6 @@
 #include <string>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <fmt/core.h>
 #include <nccl.h>
@@ -22,24 +21,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 
 namespace c10d::nccl2 {
-
-namespace {
-
-void checkSameDtype(const at::Tensor& reference, const at::Tensor& tensor) {
-  if (reference.scalar_type() != tensor.scalar_type()) {
-    C10_THROW_ERROR(TypeError, "Tensors must have identical type");
-  }
-}
-
-void checkSameDtype(
-    const at::Tensor& reference,
-    const std::vector<at::Tensor>& tensors) {
-  for (const auto& tensor : tensors) {
-    checkSameDtype(reference, tensor);
-  }
-}
-
-} // namespace
 
 ncclResult_t NCCLException::getResult() const noexcept {
   return result_;
@@ -106,14 +87,18 @@ void ProcessGroupNCCL::init(at::Device device) {
     nccl_api_ = std::make_unique<DefaultNcclApi>();
   }
 
+  if (!cuda_api_) {
+    cuda_api_ = std::make_unique<DefaultCudaApi>();
+  }
+
   if (device_.index() == -1 || nccl_comm_ == nullptr) {
     auto bootstrap = std::make_unique<NCCLBootstrap>(
         store_,
         device_,
         getRank(),
         getSize(),
-        bootstrap_generation_++,
         nccl_api_,
+        cuda_api_,
         options_c10d_->timeout);
     device_ = bootstrap->getDevice();
 
@@ -131,22 +116,61 @@ void ProcessGroupNCCL::init(at::Device device) {
 }
 
 void ProcessGroupNCCL::initNcclResources() {
-  c10::cuda::CUDAGuard gpuGuard(device_);
+  CUDA_CHECK(
+      cuda_api_,
+      cuda_api_->setDevice(device_.index()),
+      fmt::format("Failed to set CUDA device to {}", device_.index()));
+
+  cudaDeviceProp device_prop = {};
+  CUDA_CHECK(
+      cuda_api_,
+      cuda_api_->getDeviceProperties(&device_prop, device_.index()),
+      fmt::format(
+          "Failed to get device properties for device {}", device_.index()));
+
+  size_t free_memory, total_memory;
+  CUDA_CHECK(
+      cuda_api_,
+      cuda_api_->memGetInfo(&free_memory, &total_memory),
+      fmt::format("Failed to get memory info for device {}", device_.index()));
 
   is_high_priority_stream_ = options_c10d_->is_high_priority_stream;
 
+  int stream_priority = 0;
+
+  if (is_high_priority_stream_) {
+    int leastPriority, greatestPriority;
+    CUDA_CHECK(
+        cuda_api_,
+        cuda_api_->getStreamPriorityRange(&leastPriority, &greatestPriority),
+        "Failed to get stream");
+    stream_priority = greatestPriority;
+  }
+
   if (!internal_stream_) {
-    internal_stream_.emplace(
-        at::cuda::getStreamFromPool(is_high_priority_stream_, device_.index()));
+    CUDA_CHECK(
+        cuda_api_,
+        cuda_api_->streamCreateWithPriority(
+            &internal_stream_, cudaStreamNonBlocking, stream_priority),
+        fmt::format(
+            "Failed to create internal CUDA stream on device {}",
+            device_.index()));
   }
 
   if (!dependency_event_) {
-    dependency_event_.emplace(cudaEventDisableTiming);
+    CUDA_CHECK(
+        cuda_api_,
+        cuda_api_->eventCreateWithFlags(
+            &dependency_event_, cudaEventDisableTiming),
+        fmt::format(
+            "Failed to create dependency event on device {}", device_.index()));
   }
 
   if (!barrier_buffer_) {
-    barrier_buffer_ =
-        c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
+    CUDA_CHECK(
+        cuda_api_,
+        cuda_api_->malloc(&barrier_buffer_, sizeof(float)),
+        "Failed to allocate barrier buffer");
   }
 
   max_event_pool_size_ = kDefaultMaxEventPoolSize;
@@ -272,7 +296,7 @@ void ProcessGroupNCCL::finalize() {
     throw std::runtime_error("Work timed out during finalize");
   } else if (work_status == WorkNCCL::WorkStatus::ERROR) {
     comm_state_ = CommState::ERROR;
-    ncclResult_t asyncErr{};
+    ncclResult_t asyncErr;
     NCCL_CHECK(
         nccl_api_,
         nccl_comm_,
@@ -281,21 +305,46 @@ void ProcessGroupNCCL::finalize() {
     NCCLException ncclException(
         *nccl_api_, "NCCL Async Error", asyncErr, nccl_comm_);
     abortNcclComm();
-    throw std::move(ncclException);
+    throw ncclException;
   }
 
   // Clean up event pool
   {
     std::lock_guard<std::mutex> lock(event_pool_mutex_);
     while (!event_pool_.empty()) {
+      cudaEvent_t event = event_pool_.front();
       event_pool_.pop();
+      CUDA_CHECK(
+          cuda_api_, cuda_api_->eventDestroy(event), "Failed to destroy event");
     }
   }
 
-  barrier_buffer_.clear();
+  // Free barrier buffer (errors handled by CUDA_CHECK)
+  if (barrier_buffer_) {
+    CUDA_CHECK(
+        cuda_api_,
+        cuda_api_->free(barrier_buffer_),
+        "Failed to free barrier buffer");
+    barrier_buffer_ = nullptr;
+  }
 
-  dependency_event_.reset();
-  internal_stream_.reset();
+  // Destroy dependency event
+  if (dependency_event_) {
+    CUDA_CHECK(
+        cuda_api_,
+        cuda_api_->eventDestroy(dependency_event_),
+        "Failed to destroy dependency event");
+    dependency_event_ = nullptr;
+  }
+
+  // Destroy internal stream
+  if (internal_stream_) {
+    CUDA_CHECK(
+        cuda_api_,
+        cuda_api_->streamDestroy(internal_stream_),
+        "Failed to destroy internal stream");
+    internal_stream_ = nullptr;
+  }
 
   // Destroy NCCL communicator
   // Note: If abortNcclComm() was called, nccl_comm_ is already nullptr and this
@@ -689,7 +738,6 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
 
   checkTensorDevice(tensor);
   checkTensorsDevice(tensor_list);
-  checkSameDtype(tensor, tensor_list);
 
   TracingGuard tracingGuard(
       name_, comm_size_, "all_gather", rank_, tensor_list, {tensor});
@@ -744,7 +792,6 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
   ensureTensorContiguous(input);
   checkTensorDevice(output);
   checkTensorDevice(input);
-  checkSameDtype(input, output);
 
   if (output.numel() != input.numel() * comm_size_) {
     throw std::runtime_error(
@@ -806,7 +853,6 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
 
   checkTensorsDevice(input_list);
   checkTensorDevice(output);
-  checkSameDtype(output, input_list);
 
   TracingGuard tracingGuard(
       name_, comm_size_, "reduce_scatter", rank_, input_list, {output});
@@ -823,7 +869,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
 
   for (int i = 0; i < comm_size_; ++i) {
     const auto dataType = getNcclDataType(input_list[i]);
-    ncclResult_t opResult{};
+    ncclResult_t opResult;
     if (i == rank_) {
       // This rank receives the reduced result
       opResult = nccl_api_->reduce(
@@ -879,7 +925,6 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
   ensureTensorContiguous(input);
   checkTensorDevice(output);
   checkTensorDevice(input);
-  checkSameDtype(input, output);
 
   if (input.numel() != output.numel() * comm_size_) {
     throw std::runtime_error(
@@ -930,7 +975,6 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
   ensureTensorContiguous(input);
   checkTensorDevice(output);
   checkTensorDevice(input);
-  checkSameDtype(input, output);
 
   if (input.numel() != output.numel()) {
     throw std::runtime_error(
@@ -1024,7 +1068,6 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
   ensureTensorContiguous(input);
   checkTensorDevice(output);
   checkTensorDevice(input);
-  checkSameDtype(input, output);
 
   // Validate split sizes vectors
   if (input_split_sizes.size() != static_cast<size_t>(comm_size_)) {
@@ -1161,8 +1204,6 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
   for (int i = 0; i < comm_size_; ++i) {
     ensureTensorContiguous(input_tensor_list[i]);
     ensureTensorContiguous(output_tensor_list[i]);
-    checkSameDtype(input_tensor_list[0], input_tensor_list[i]);
-    checkSameDtype(input_tensor_list[0], output_tensor_list[i]);
   }
 
   TracingGuard tracingGuard(
@@ -1241,8 +1282,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
       nccl_api_,
       nccl_comm_,
       nccl_api_->allReduce(
-          barrier_buffer_.get(),
-          barrier_buffer_.get(),
+          barrier_buffer_,
+          barrier_buffer_,
           1,
           ncclFloat32,
           ncclSum,
@@ -1280,7 +1321,6 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
 
     for (const auto& t : input_tensor_list) {
       ensureTensorContiguous(t);
-      checkSameDtype(output_tensor, t);
       if (t.numel() != output_tensor.numel()) {
         throw std::runtime_error(
             "All input tensors must have same size as output tensor");
@@ -1327,9 +1367,17 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
     NCCL_CHECK(
         nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
 
-    at::cuda::CUDAStreamGuard stream_guard(
-        at::cuda::getStreamFromExternal(stream, device_.index()));
-    output_tensor.copy_(input_tensor_list[root], true);
+    // Root copies its own data using cudaMemcpyAsync
+    CUDA_CHECK(
+        cuda_api_,
+        cuda_api_->memcpyAsync(
+            output_tensor.data_ptr(),
+            input_tensor_list[root].data_ptr(),
+            input_tensor_list[root].numel() *
+                input_tensor_list[root].element_size(),
+            cudaMemcpyDeviceToDevice,
+            stream),
+        "memcpyAsync failed");
   } else {
     // Non-root ranks receive from root
     NCCL_CHECK(
@@ -1375,7 +1423,6 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
 
     for (const auto& t : output_tensor_list) {
       ensureTensorContiguous(t);
-      checkSameDtype(input_tensor, t);
       if (t.numel() != input_tensor.numel()) {
         throw std::runtime_error(
             "All output tensors must have same size as input tensor");
@@ -1422,9 +1469,16 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
     NCCL_CHECK(
         nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
 
-    at::cuda::CUDAStreamGuard stream_guard(
-        at::cuda::getStreamFromExternal(stream, device_.index()));
-    output_tensor_list[root].copy_(input_tensor, true);
+    // Root copies its own data using cudaMemcpyAsync
+    CUDA_CHECK(
+        cuda_api_,
+        cuda_api_->memcpyAsync(
+            output_tensor_list[root].data_ptr(),
+            input_tensor.data_ptr(),
+            input_tensor.numel() * input_tensor.element_size(),
+            cudaMemcpyDeviceToDevice,
+            stream),
+        "memcpyAsync failed");
   } else {
     // Non-root ranks send to root
     NCCL_CHECK(
