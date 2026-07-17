@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     gcIfJetson,
     get_cycles_per_ms,
+    getRocmVersion,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_FBCODE,
@@ -91,6 +92,7 @@ from torch.testing._internal.common_utils import (
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfRocmVersionAtLeast,
     skipIfRocmVersionLessThan,
     slowTest,
     subtest,
@@ -625,6 +627,15 @@ print(t.is_pinned())
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
     def test_out_of_memory(self):
+        if (
+            TEST_WITH_ROCM
+            and getRocmVersion() >= (7, 14)
+            and EXPANDABLE_SEGMENTS
+        ):
+            self.skipTest(
+                "TestCuda.test_out_of_memory: OOM tensor flag is False on ROCm "
+                "expandable segments (7.14+)"
+            )
         tensor = torch.zeros(1024, device="cuda")
 
         oom_regex = (
@@ -5625,6 +5636,7 @@ with torch.cuda.graph(g):
             self.assertEqual(rc, "3")
 
     @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_hip_device_count(self):
         """Validate device_count works with both CUDA/HIP visible devices"""
         test_script = """\
@@ -6996,6 +7008,7 @@ class TestCudaAllocator(TestCase):
                 "throw_on_cudamalloc_oom:False,per_process_memory_fraction:1.0"
             )
 
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_allocator_backend(self):
         def subprocess_env():
             if IS_WINDOWS:
