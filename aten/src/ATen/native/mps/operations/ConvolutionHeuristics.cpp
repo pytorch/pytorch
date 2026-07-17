@@ -8,6 +8,8 @@
 
 namespace at::native::mps {
 
+// Estimate padded work adjusted for staging efficiency and device occupancy.
+// Lower-cost tiles do less wasted work while keeping enough threadgroups active.
 float Conv3dMppTile::cost(const Conv3DParams& params, int64_t groups, int64_t cores) const {
   constexpr float kOccupancyFill = 300.0f;
   constexpr float kSimdgroupOverhead = 8.0f;
