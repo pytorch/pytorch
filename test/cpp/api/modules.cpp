@@ -2307,8 +2307,7 @@ TEST_F(ModulesTest, CosineSimilarity) {
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
 
   // keepdim=true should preserve the reduced dimension
-  CosineSimilarity cos_keepdim(
-      CosineSimilarityOptions().dim(1).keepdim(true));
+  CosineSimilarity cos_keepdim(CosineSimilarityOptions().dim(1).keepdim(true));
   auto out_keepdim = cos_keepdim->forward(input1.detach(), input2.detach());
   ASSERT_EQ(out_keepdim.sizes(), torch::IntArrayRef({2, 1}));
   ASSERT_TRUE(out_keepdim.squeeze(1).allclose(expected, 1e-04));
