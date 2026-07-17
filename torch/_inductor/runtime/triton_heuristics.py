@@ -761,6 +761,12 @@ class CachingAutotuner(KernelInterface):
                 compile_results.append(self._precompile_config(c))
             except (OutOfResources, PTXASError, IntelGPUError) as e:
                 exc = e
+            except Exception as e:
+                # Optional candidates (e.g. down-scaled stitched combo blocks) may
+                # violate backend constraints; skip them instead of failing.
+                if not getattr(c, "optional_candidate", False):
+                    raise
+                exc = e
         if len(compile_results) == 0:
             raise NoTritonConfigsError(
                 f"No valid triton configs. {type(exc).__name__}: {exc}"
@@ -4093,10 +4099,27 @@ def _handle_combo_kernel_per_subkernel_blocks(
             field_order, field_limits = _combo_coordesc_meta(combo_meta, block_config)
             inductor_meta["combo_coordesc_field_order"] = field_order
             inductor_meta["combo_coordesc_field_limits"] = field_limits
-            return [
+            configs = [
                 triton.Config({**block_config, **kwargs}, num_warps=nw, num_stages=ns)
                 for kwargs, nw, ns in launch_candidates
             ]
+            # The stitched blocks are each subkernel's standalone winner, but the
+            # combo body unions the subkernels' register pressure, which can shift
+            # the occupancy optimum toward smaller blocks. Race halved/quartered
+            # variants so the combo-level autotune can correct the bias. Smaller
+            # blocks can violate backend minimums (e.g. TMA descriptor width), so
+            # mark them optional: precompile skips them on compile failure.
+            for scale in (2, 4):
+                scaled = {k: max(1, v // scale) for k, v in block_config.items()}
+                if scaled == block_config:
+                    break
+                for kwargs, nw, ns in launch_candidates:
+                    cfg = triton.Config(
+                        {**scaled, **kwargs}, num_warps=nw, num_stages=ns
+                    )
+                    cfg.optional_candidate = True
+                    configs.append(cfg)
+            return configs
         return [
             triton.Config(
                 combo_meta["stitched_backend_kwargs"],
