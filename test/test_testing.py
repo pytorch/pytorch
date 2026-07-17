@@ -385,7 +385,7 @@ if __name__ == '__main__':
         has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
-            f"Expected device assert error in stderr, got: {stderr}",
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
         )
         if torch.version.cuda:
             # should run only 1 test because it throws unrecoverable error.
@@ -432,7 +432,7 @@ if __name__ == '__main__':
         has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
-            f"Expected device assert error in stderr, got: {stderr}",
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
         )
         if torch.version.cuda:
             # should run only 1 test because it throws unrecoverable error.
@@ -2685,6 +2685,149 @@ class TestOpInfoSampleFunctions(TestCase):
         # Test op.error_inputs doesn't generate multiple inputs when called
         samples = op.error_inputs(device)
         self.assertIsInstance(samples, Iterator)
+
+# Tests test classification.
+class TestHardwareClassifications(TestCase):
+    def setUp(self):
+        super().setUp()
+        import torch.testing._internal.common_utils as _cu
+
+        self._cu = _cu
+
+    def _suite_test_names(self, suite) -> set[str]:
+        return {test_case.id().split(".")[-1] for test_case in self._cu.HardwareClassificationTestLoader.iter_test_cases_recursively(suite)}
+
+    def test_filter_suite(self):
+        requirement = self._cu.HardwareClassification
+
+        class GenericTest(TestCase):
+            hw_classification = requirement.GENERIC
+
+            def test_generic(self):
+                pass
+
+        class CudaTest(TestCase):
+            hw_classification = requirement.CUDA
+
+            def test_cuda(self):
+                pass
+
+        class MissingClassificationTest(TestCase):
+            def test_missing_classification(self):
+                pass
+
+        suite = unittest.TestSuite(
+            [
+                unittest.defaultTestLoader.loadTestsFromTestCase(GenericTest),
+                unittest.defaultTestLoader.loadTestsFromTestCase(CudaTest),
+                unittest.defaultTestLoader.loadTestsFromTestCase(MissingClassificationTest),
+            ]
+        )
+
+        loader = self._cu.HardwareClassificationTestLoader({self._cu.HardwareClassification.GENERIC})
+        filtered_suite = loader.get_filtered_suite(suite)
+
+        self.assertEqual(
+            self._suite_test_names(filtered_suite),
+            {"test_generic"},
+        )
+
+    def test_filter_suite_uses_inherited_metadata(self):
+        requirement = self._cu.HardwareClassification
+
+        class AcceleratorBase(TestCase):
+            hw_classification = requirement.ACCELERATOR
+
+        class AcceleratorChild(AcceleratorBase):
+            def test_inherited_classification(self):
+                pass
+
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(AcceleratorChild)
+        loader = self._cu.HardwareClassificationTestLoader({self._cu.HardwareClassification.ACCELERATOR})
+        filtered_suite = loader.get_filtered_suite(suite)
+
+        self.assertEqual(
+            self._suite_test_names(filtered_suite),
+            {"test_inherited_classification"},
+        )
+
+    def test_hw_classification_test_loader(self):
+        requirement = self._cu.HardwareClassification
+        import types
+
+        # Build a mock module with test classes
+        class GenericA(TestCase):
+            hw_classification = requirement.GENERIC
+
+            def test_a1(self):
+                pass
+
+            def test_a2(self):
+                pass
+
+        class GenericB(TestCase):
+            hw_classification = requirement.GENERIC
+
+            def test_b1(self):
+                pass
+
+        class Cuda(TestCase):
+            hw_classification = requirement.CUDA
+
+            def test_c1(self):
+                pass
+
+        mod = types.ModuleType("_test_hc_module")
+        mod.GenericA = GenericA
+        mod.GenericB = GenericB
+        mod.Cuda = Cuda
+
+        loader = self._cu.HardwareClassificationTestLoader({requirement.GENERIC})
+
+        with self.subTest(method="loadTestsFromModule"):
+            suite = loader.loadTestsFromModule(mod)
+            self.assertEqual(
+                self._suite_test_names(suite),
+                {"test_a1", "test_a2", "test_b1"},
+            )
+
+        with self.subTest(method="loadTestsFromNames"):
+            suite = loader.loadTestsFromNames(
+                ["GenericA.test_a1", "Cuda.test_c1"],
+                module=mod,
+            )
+            self.assertEqual(self._suite_test_names(suite), {"test_a1"})
+
+        with self.subTest(method="loadTestsFromName"):
+            suite = loader.loadTestsFromName(
+                "Cuda.test_c1",
+                module=mod,
+            )
+            self.assertEqual(self._suite_test_names(suite), set())
+
+    def test_hw_classification_test_loader_no_filter(self):
+        import types
+
+        class GenericA(TestCase):
+            hw_classification = self._cu.HardwareClassification.GENERIC
+
+            def test_a(self):
+                pass
+
+        class Cuda(TestCase):
+            hw_classification = self._cu.HardwareClassification.CUDA
+
+            def test_b(self):
+                pass
+
+        mod = types.ModuleType("_test_hc_module_none")
+        mod.GenericA = GenericA
+        mod.Cuda = Cuda
+
+        loader = self._cu.HardwareClassificationTestLoader(None)
+        suite = loader.loadTestsFromModule(mod)
+
+        self.assertEqual(self._suite_test_names(suite), {"test_a", "test_b"})
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
