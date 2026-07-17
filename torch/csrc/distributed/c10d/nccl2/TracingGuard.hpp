@@ -2,6 +2,8 @@
 
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <ATen/core/ivalue.h>
 #include <string_view>
 #include <vector>
@@ -79,3 +81,5 @@ class TracingGuard {
 };
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL
