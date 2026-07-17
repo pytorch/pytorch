@@ -66,8 +66,8 @@ def set_rng_state(new_state: Tensor, device: _device_t = None) -> None:
             If not given, uses :func:`torch.accelerator.current_device_index` by default.
 
     .. note::
-        If the accelerator runtime is not yet initialized, the state is deferred
-        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, the state is deferred
+        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
     if not torch._C._accelerator_isInitialized():
         with torch._C._DisableFuncTorch():
@@ -94,8 +94,8 @@ def set_rng_state_all(new_states: Iterable[Tensor]) -> None:
         new_states (Iterable of :class:`torch.Tensor`): The desired RNG states for each device, each tensor of dtype `torch.uint8`.
 
     .. note::
-        If the accelerator runtime is not yet initialized, the state is deferred
-        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, the state is deferred
+        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
     for i, state in enumerate(new_states):
         set_rng_state(state, i)
