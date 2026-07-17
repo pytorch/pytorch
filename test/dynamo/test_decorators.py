@@ -81,6 +81,87 @@ class DecoratorTests(PytreeRegisteringTestCase):
             finally:
                 torch.ops.foo.custom = orig_custom
 
+    def test_disable_not_traced_and_correct(self):
+        # torch._dynamo.disable must prevent Dynamo from tracing into the
+        # function and return correct results. Exercises the non-export hot
+        # path of DisableContext._fn, where the fn_name/is_exporting annotation
+        # work is skipped.
+        @torch._dynamo.disable
+        def inner(x):
+            return x + 1
+
+        def fn(x):
+            return torch.cos(inner(torch.sin(x)))
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        res = torch.compile(fn, backend=cnts)(x)
+        self.assertEqual(ref, res)
+        # inner is disabled -> graph break around it -> two compiled frames.
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_disable_under_eager_on_recompile_stance(self):
+        # DisableContext no longer sets the stance-derived callback while running
+        # the disabled body. Under set_stance("eager_on_recompile") the old code
+        # ran the body in run-only mode (callback False); now it runs fully eager
+        # (callback None), i.e. Dynamo is off for the body and its callees. Pin
+        # that a disabled function still returns correct results under the stance.
+        @torch._dynamo.disable
+        def inner(x):
+            return x + 1
+
+        x = torch.randn(4)
+        with torch.compiler.set_stance("eager_on_recompile"):
+            self.assertEqual(inner(x), x + 1)
+            self.assertEqual(inner(x), x + 1)
+
+    def test_call_with_disable(self):
+        from torch._C._dynamo.eval_frame import (
+            call_with_disable,
+            get_eval_frame_callback,
+            set_eval_frame,
+        )
+
+        def g(a, b, *, c):
+            return a + b + c
+
+        x = torch.randn(3)
+        # forwards positional and keyword args, returns the callee's result
+        self.assertEqual(call_with_disable(g, x, x, c=x), g(x, x, c=x))
+
+        # the eval-frame callback is unchanged across the call
+        cb = get_eval_frame_callback()
+        call_with_disable(g, x, x, c=x)
+        self.assertIs(get_eval_frame_callback(), cb)
+
+        # exceptions propagate and the callback is still restored
+        def boom(a):
+            raise ValueError("boom")
+
+        with self.assertRaises(ValueError):
+            call_with_disable(boom, x)
+        self.assertIs(get_eval_frame_callback(), cb)
+
+        # Exercise the prior-is-not-None restore branch: run-only mode (False) is
+        # a non-None callback, so call_with_disable must restore it (on both the
+        # normal and exception paths) rather than leave the handler cleared. Use
+        # run-only rather than a real callback so no compilation is triggered.
+        prev = set_eval_frame(False)
+        try:
+            self.assertEqual(call_with_disable(g, x, x, c=x), g(x, x, c=x))
+            self.assertIs(get_eval_frame_callback(), False)
+            with self.assertRaises(ValueError):
+                call_with_disable(boom, x)
+            self.assertIs(get_eval_frame_callback(), False)
+        finally:
+            set_eval_frame(prev)
+
+        # a callable is required (and must be passed positionally)
+        with self.assertRaises(TypeError):
+            call_with_disable()
+
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
             pass
