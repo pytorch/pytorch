@@ -1095,13 +1095,13 @@ def get_desired_device_type_test_bases(
 # See note "Writing Test Templates"
 # TODO: remove "allow_xpu" option after Intel GPU support all test case instantiate by this function.
 def instantiate_device_type_tests(
-    generic_test_class:Type[TestCase],
-    scope:dict,
-    except_for:Optional[Iterable]=None,
-    only_for:Optional[Iterable]=None,
-    include_lazy:bool=False,
-    allow_mps:Optional[bool]=None,
-    allow_xpu:Optional[bool]=None,
+    generic_test_class: Type[TestCase],
+    scope: dict,
+    except_for: Optional[Iterable] = None,
+    only_for: Optional[Iterable] = None,
+    include_lazy: bool = False,
+    allow_mps: Optional[bool] = None,
+    allow_xpu: Optional[bool] = None,
 ):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
