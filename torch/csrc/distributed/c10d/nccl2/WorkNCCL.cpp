@@ -119,8 +119,6 @@ WorkNCCL::WorkStatus WorkNCCL::checkStatus() {
 
   if (end_status == cudaSuccess) {
     setStatus(WorkStatus::COMPLETED);
-    inputTensors_.clear();
-    inputTensor_.reset();
   } else if (end_status == cudaErrorNotReady) {
     auto current_time = std::chrono::steady_clock::now();
     auto elapsed_milliseconds =
