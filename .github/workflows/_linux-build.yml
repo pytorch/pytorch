@@ -60,6 +60,11 @@ on:
         required: false
         type: string
         default: ""
+      disable-test-config-filtering:
+        description: Keep the complete test matrix without applying PR labels or disabled-job filtering.
+        required: false
+        type: boolean
+        default: false
       s3-bucket:
         description: S3 bucket to download artifact
         required: false
@@ -183,6 +188,7 @@ jobs:
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
         id: filter
+        if: ${{ !inputs.disable-test-config-filtering }}
         uses: pytorch/pytorch/.github/actions/filter-test-configs@main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -193,7 +199,7 @@ jobs:
       - name: Map EC2 runners to ARC runners
         id: map-runners
         env:
-          FILTERED_TEST_MATRIX: ${{ steps.filter.outputs.test-matrix }}
+          FILTERED_TEST_MATRIX: ${{ inputs.disable-test-config-filtering && inputs.test-matrix || steps.filter.outputs.test-matrix }}
           RUNNER_PREFIX: ${{ inputs.runner_prefix }}
         shell: bash
         run: |
@@ -216,7 +222,7 @@ jobs:
           role-duration-seconds: 18000
 
       - name: Build
-        if: (steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == '') && steps.use-old-whl.outputs.reuse != 'true'
+        if: (inputs.disable-test-config-filtering || steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == '') && steps.use-old-whl.outputs.reuse != 'true'
         id: build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}

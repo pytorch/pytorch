@@ -105,6 +105,11 @@ on:
         required: false
         type: string
         default: ""
+      collect-test-dependencies:
+        description: Collect per-test Python dependencies with the TD tracer.
+        required: false
+        type: boolean
+        default: false
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -135,6 +140,10 @@ jobs:
       image: ${{ inputs.docker-image }}
       options: "--gpus all"
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      PYTORCH_TD_TRACER_DEFER_MERGE: ${{ inputs.collect-test-dependencies && '1' || '' }}
+      PYTORCH_TD_TRACER_OUTPUT: ${{ inputs.collect-test-dependencies && format('{0}/td_result.json', github.workspace) || '' }}
+      PYTORCH_TD_TRACER_RUN_ID: ${{ inputs.collect-test-dependencies && format('{0}-{1}-{2}-{3}', github.run_id, github.run_attempt, matrix.config, matrix.shard) || '' }}
     permissions:
       id-token: write
       contents: read
@@ -169,6 +178,7 @@ jobs:
           use-gha: ${{ steps.aws-creds.outcome != 'success' || inputs.use-gha }}
 
       - name: Download TD artifacts
+        if: ${{ !inputs.collect-test-dependencies }}
         continue-on-error: true
         uses: pytorch/pytorch/.github/actions/download-td-artifacts@main
         with:
@@ -215,7 +225,7 @@ jobs:
           for dll in win-torch-wheel/cudart64_*.dll; do
             if [ -f "$dll" ]; then
               mv "$dll" win-torch-wheel-extracted/bin/x64/
-              echo "Moved $(basename $dll) to win-torch-wheel-extracted/bin/x64/"
+              echo "Moved $(basename "$dll") to win-torch-wheel-extracted/bin/x64/"
             fi
           done
 
@@ -230,6 +240,7 @@ jobs:
         # checks for labels and re-enabled test issues. It does not actually do
         # any filtering.  All filtering is done in the build step.
         id: keep-going
+        if: ${{ !inputs.collect-test-dependencies }}
         uses: pytorch/pytorch/.github/actions/filter-test-configs@main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -259,6 +270,19 @@ jobs:
             echo "HF_DATASETS_OFFLINE=${OFFLINE}"
           } >> "${GITHUB_ENV}"
 
+      - name: Resolve tests to include
+        id: tests-to-include
+        shell: bash
+        env:
+          COLLECT_TEST_DEPENDENCIES: ${{ inputs.collect-test-dependencies }}
+          REQUESTED_TESTS: ${{ inputs.tests-to-include }}
+        run: |
+          if [[ "${COLLECT_TEST_DEPENDENCIES}" == "true" ]]; then
+            echo "value=" >> "${GITHUB_OUTPUT}"
+          else
+            echo "value=${REQUESTED_TESTS}" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Test
         id: test
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
@@ -282,11 +306,11 @@ jobs:
           EXTRA_FLAGS: ${{ matrix.extra_flags || '' }}
           OP_BENCHMARK_TESTS: ${{ matrix.op_benchmark_tests }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
-          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          CONTINUE_THROUGH_ERROR: ${{ inputs.collect-test-dependencies && '1' || steps.keep-going.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
-          NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
-          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
+          NO_TEST_TIMEOUT: ${{ inputs.collect-test-dependencies && '1' || steps.keep-going.outputs.ci-no-test-timeout }}
+          NO_TD: ${{ inputs.collect-test-dependencies && '1' || steps.keep-going.outputs.ci-no-td }}
           TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
@@ -295,7 +319,7 @@ jobs:
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
-          TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
+          TESTS_TO_INCLUDE: ${{ steps.tests-to-include.outputs.value }}
           TESTS_TO_EXCLUDE: ${{ inputs.tests-to-exclude }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           ENABLE_TORCH_TRACE: ${{ inputs.enable-torch-trace }}
@@ -341,9 +365,37 @@ jobs:
             cp -a /mnt/hf_cache/datasets/. "${HF_DATASETS_CACHE}/" 2>/dev/null || true
           fi
 
-          # shellcheck disable=SC2046
+          # shellcheck disable=SC2046,SC2086
           python3 -m pip install $(echo dist/*.whl)[opt-einsum]
           ${TEST_COMMAND}
+
+      - name: Finalize TD tracer shard
+        if: always() && inputs.collect-test-dependencies && matrix.config != 'pr_time_benchmarks' && steps.test.conclusion && steps.test.conclusion != 'skipped'
+        shell: bash
+        env:
+          PYTHONPATH: test
+          TEST_CONCLUSION: ${{ steps.test.conclusion }}
+        run: |
+          python3 - <<'PY'
+          import os
+
+          from td_tracer import finalize_td_tracer
+
+          finalize_td_tracer(
+              os.environ["PYTORCH_TD_TRACER_OUTPUT"],
+              os.environ["PYTORCH_TD_TRACER_RUN_ID"],
+              test_successful=os.environ["TEST_CONCLUSION"] == "success",
+          )
+          PY
+
+      - name: Upload TD tracer shard
+        if: always() && inputs.collect-test-dependencies && matrix.config != 'pr_time_benchmarks' && steps.test.conclusion && steps.test.conclusion != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: td-tracer-runattempt${{ github.run_attempt }}-${{ inputs.build-environment }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}
+          path: td_result.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Configure AWS credentials
         id: aws-creds-benchmark

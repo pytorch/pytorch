@@ -1374,9 +1374,19 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
                 self.tests.append(session.config.cwd_relative_nodeid(item.nodeid))
 
     test_collector_plugin = TestCollectorPlugin()
+    # The subprocess controller only discovers tests; child commands retain argv
+    # and own tracing.
+    discovery_argv = []
+    argv_iter = iter(argv)
+    for arg in argv_iter:
+        if arg == '--td-tracer':
+            next(argv_iter, None)
+        elif not arg.startswith('--td-tracer='):
+            discovery_argv.append(arg)
+
     import pytest
     pytest.main(
-        [arg for arg in argv if arg != '-vv'] + ['--collect-only', '-qq', '--use-main-module'],
+        [arg for arg in discovery_argv if arg != '-vv'] + ['--collect-only', '-qq', '--use-main-module'],
         plugins=[test_collector_plugin]
     )
     return test_collector_plugin.tests
