@@ -582,28 +582,27 @@ function(torch_optimize_layout_if_enabled tgt)
     endif()
   endif()
 
-  if(NOT USE_LLVM_BOLT)
-    return()
+  if(USE_LLVM_BOLT)
+    # BOLT needs --emit-relocs. This flag increases the binary size so we
+    # scope it to bolt optimized targets rather than applying globally.
+    target_link_options_if_supported(${tgt} "--emit-relocs")
+    set(_profile "${LLVM_BOLT_PROFILES_DIR}/lib${tgt}.yaml")
+    set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${_profile}")
+
+    set(_prebolt "$<TARGET_FILE_DIR:${tgt}>/prebolt/$<TARGET_FILE_NAME:${tgt}>")
+    add_custom_command(
+      TARGET ${tgt} POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${tgt}>/prebolt"
+      COMMAND "${CMAKE_COMMAND}" -E rename "$<TARGET_FILE:${tgt}>" "${_prebolt}"
+      COMMAND "${LLVM_BOLT_EXECUTABLE}" "${_prebolt}"
+              -o "$<TARGET_FILE:${tgt}>"
+              "-data=${_profile}"
+              -lite -infer-stale-profile
+              -reorder-blocks=ext-tsp -reorder-functions=hfsort
+              -split-functions -split-all-cold -split-eh -dyno-stats
+              --update-debug-sections
+      COMMENT "Optimizing $<TARGET_FILE_NAME:${tgt}> with LLVM BOLT (original kept in prebolt/)"
+      VERBATIM
+    )
   endif()
-  # BOLT needs --emit-relocs. This flag increases the binary size so we
-  # scope it to bolt optimized targets rather than applying globally.
-  target_link_options_if_supported(${tgt} "--emit-relocs")
-  set(_profile "${LLVM_BOLT_PROFILES_DIR}/lib${tgt}.yaml")
-  if(NOT EXISTS "${_profile}")
-    message(FATAL_ERROR "USE_LLVM_BOLT is on but no BOLT profile for target '${tgt}' "
-                        "at ${_profile}.")
-  endif()
-  set(_prebolt "$<TARGET_FILE_DIR:${tgt}>/prebolt/$<TARGET_FILE_NAME:${tgt}>")
-  add_custom_command(TARGET ${tgt} POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${tgt}>/prebolt"
-    COMMAND "${CMAKE_COMMAND}" -E rename "$<TARGET_FILE:${tgt}>" "${_prebolt}"
-    COMMAND "${LLVM_BOLT_EXECUTABLE}" "${_prebolt}"
-            -o "$<TARGET_FILE:${tgt}>"
-            "-data=${_profile}"
-            -lite -infer-stale-profile
-            -reorder-blocks=ext-tsp -reorder-functions=hfsort
-            -split-functions -split-all-cold -split-eh -dyno-stats
-            --update-debug-sections
-    COMMENT "Optimizing $<TARGET_FILE_NAME:${tgt}> with LLVM BOLT (original kept in prebolt/)"
-    VERBATIM)
 endfunction()
