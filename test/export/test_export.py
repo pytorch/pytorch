@@ -6764,6 +6764,112 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             torch.export.export(M(), input1, dynamic_shapes=ai)
 
+    def test_dynamic_shapes_kwargs_call_like(self):
+        class KwargsModel(torch.nn.Module):
+            def forward(self, *, x, y, **kwargs):
+                return x.sum() + y.sum() + kwargs["z"].sum()
+
+        inputs = {
+            "z": torch.rand(4, 4),
+            "y": torch.randn(3, 4),
+            "x": torch.randn(2, 4),
+        }
+        dynamic_shapes = torch.utils._pytree.tree_map_only(
+            torch.Tensor,
+            lambda t: {i: torch.export.Dim.AUTO for i in range(t.dim())},
+            inputs,
+        )
+        m = KwargsModel()
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                epm = export(
+                    m, (), kwargs=inputs, dynamic_shapes=dynamic_shapes, strict=strict
+                ).module()
+                self.assertTrue(torch.allclose(m(**inputs), epm(**inputs)))
+                inputs2 = {**inputs, "z": torch.rand(6, 4)}
+                self.assertTrue(torch.allclose(m(**inputs2), epm(**inputs2)))
+
+    def test_dynamic_shapes_kwargs_nested(self):
+        class KwargsModel(torch.nn.Module):
+            def forward(self, *, x, y, **kwargs):
+                return x.sum() + y.sum() + kwargs["z"].sum()
+
+        inputs = {
+            "z": torch.rand(4, 4),
+            "y": torch.randn(3, 4),
+            "x": torch.randn(2, 4),
+        }
+        dynamic_shapes = {
+            "x": None,
+            "y": None,
+            "kwargs": {"z": {0: torch.export.Dim("z_batch", min=2, max=8)}},
+        }
+        m = KwargsModel()
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                epm = export(
+                    m, (), kwargs=inputs, dynamic_shapes=dynamic_shapes, strict=strict
+                ).module()
+                self.assertTrue(torch.allclose(m(**inputs), epm(**inputs)))
+                inputs2 = {**inputs, "z": torch.rand(6, 4)}
+                self.assertTrue(torch.allclose(m(**inputs2), epm(**inputs2)))
+
+    def test_dynamic_shapes_kwargs_name_collision(self):
+        class ArgsKwargsModel(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                return args[0].sum() + kwargs["args_0"].sum()
+
+        class PositionalOnlyCollisionModel(torch.nn.Module):
+            def forward(self, x, /, **kwargs):
+                return x.sum() + kwargs["x"].sum()
+
+        x = torch.randn(4, 4)
+        y = torch.randn(5, 4)
+        dynamic_shapes = {
+            "args": ({0: Dim.AUTO},),
+            "args_0": {0: Dim.AUTO},
+        }
+        for strict in (False, True):
+            with self.subTest(kind="varargs", strict=strict):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.UserError,
+                    "collide with another input name",
+                ):
+                    export(
+                        ArgsKwargsModel(),
+                        (x,),
+                        kwargs={"args_0": y},
+                        dynamic_shapes=dynamic_shapes,
+                        strict=strict,
+                    )
+
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.UserError,
+                    "collide with another input name",
+                ):
+                    export(
+                        ArgsKwargsModel(),
+                        (x,),
+                        kwargs={"args_0": y},
+                        dynamic_shapes=(({0: Dim.AUTO},), {"args_0": {0: Dim.AUTO}}),
+                        strict=strict,
+                    )
+            with self.subTest(kind="positional_only", strict=strict):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.UserError,
+                    "collide with another input name",
+                ):
+                    export(
+                        PositionalOnlyCollisionModel(),
+                        (x,),
+                        kwargs={"x": y},
+                        dynamic_shapes={
+                            "x": {0: Dim.AUTO},
+                            "kwargs": {"x": {0: Dim.AUTO}},
+                        },
+                        strict=strict,
+                    )
+
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -11481,8 +11587,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             foo,
             (torch.randn(4, 4), torch.randn(4, 4)),
             {"kw2": torch.ones(4, 4), "kw1": torch.zeros(4, 4)},
-            # We are specifying dynamism on the first kwarg even though user passed in
-            # different order
+            # Tuple dynamic_shapes follows the original function signature order.
             dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
         )
 
@@ -16469,9 +16574,9 @@ graph():
     %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
     %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
     %x : [num_users=2] = placeholder[target=x]
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add), kwargs = {})
-    return (add_1,)""",
+    %add_tensor : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
+    %add_tensor_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add_tensor), kwargs = {})
+    return (add_tensor_1,)""",
             )
         else:
             self.assertExpectedInline(
@@ -19246,22 +19351,22 @@ class TestExportCustomClass(TorchTestCase):
             traced.graph_module.code,
             """\
 def forward(self, x, mask):
-    masked_select_default = torch.ops.aten.masked_select.default(x, mask);  x = mask = None
-    sym_size_int = torch.ops.aten.sym_size.int(masked_select_default, 0)
-    ge = sym_size_int >= 0
+    masked_select = torch.ops.aten.masked_select.default(x, mask);  x = mask = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(masked_select, 0)
+    ge = sym_size_int_1 >= 0
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-    le = sym_size_int <= 1188864
+    le = sym_size_int_1 <= 1188864
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 1188864 on node 'le'");  le = _assert_scalar_default_1 = None
-    mod = sym_size_int % 1548
-    eq = mod == 0;  mod = None
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(Mod(u0, 1548), 0) on node 'eq_2'");  eq = _assert_scalar_default_2 = None
-    floordiv = sym_size_int // 1548
-    mul = 1548 * floordiv;  floordiv = None
-    eq_1 = sym_size_int == mul;  sym_size_int = mul = None
-    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(eq_1, "Runtime assertion failed for expression Eq(u0, 1548*((u0//1548))) on node 'eq_3'");  eq_1 = _assert_scalar_default_3 = None
-    view_default = torch.ops.aten.view.default(masked_select_default, [-1, 1548]);  masked_select_default = None
-    add_tensor = torch.ops.aten.add.Tensor(view_default, 1);  view_default = None
-    return (add_tensor,)""",
+    mod = sym_size_int_1 % 1548
+    eq_2 = mod == 0;  mod = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(Mod(u0, 1548), 0) on node 'eq_2'");  eq_2 = _assert_scalar_default_2 = None
+    floordiv = sym_size_int_1 // 1548
+    mul_2 = 1548 * floordiv;  floordiv = None
+    eq_3 = sym_size_int_1 == mul_2;  sym_size_int_1 = mul_2 = None
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(eq_3, "Runtime assertion failed for expression Eq(u0, 1548*((u0//1548))) on node 'eq_3'");  eq_3 = _assert_scalar_default_3 = None
+    view = torch.ops.aten.view.default(masked_select, [-1, 1548]);  masked_select = None
+    add = torch.ops.aten.add.Tensor(view, 1);  view = None
+    return (add,)""",
             ignore_empty_lines=True,
         )
 
@@ -19281,9 +19386,9 @@ def forward(self, x, mask):
             traced.graph_module.code,
             """\
 def forward(self, x, y):
-    item_default = torch.ops.aten.item.default(y);  y = None
-    select_int = torch.ops.aten.select.int(x, 0, item_default);  x = item_default = None
-    return (select_int,)""",
+    item = torch.ops.aten.item.default(y);  y = None
+    select = torch.ops.aten.select.int(x, 0, item);  x = item = None
+    return (select,)""",
             ignore_empty_lines=True,
         )
 
