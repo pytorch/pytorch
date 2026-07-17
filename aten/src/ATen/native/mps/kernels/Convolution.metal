@@ -99,7 +99,7 @@ kernel void conv3d_simd(
   threadgroup T Bs[BK * LDB];
 
   const int tid = int(sgid) * 32 + int(lane);
-  const int n_tiles = (p.C_out_per_group + BN - 1) / BN;
+  const int n_tiles = p.C_out_per_group / BN + (p.C_out_per_group % BN != 0);
   const int g = int(tgid.x) / n_tiles;
   const int n_block = (int(tgid.x) % n_tiles) * BN;
   const IDX m_block = IDX(tgid.y) * BM;
@@ -310,10 +310,10 @@ kernel void conv3d_mpp(
   constexpr int SX = Stride::x, SY = Stride::y, SZ = Stride::z;
   constexpr int DX = Dilation::x, DY = Dilation::y, DZ = Dilation::z;
   constexpr int SRCC = Source::x, SRCW = Source::y, SRCH = Source::z;
-  const int h_tiles = (p.outH + BH - 1) / BH;
+  const int h_tiles = p.outH / BH + (p.outH % BH != 0);
   int o_off, o_end, c0;
   if constexpr (GROUPED) {
-    const int o_tiles = (p.C_out_per_group + BO - 1) / BO;
+    const int o_tiles = p.C_out_per_group / BO + (p.C_out_per_group % BO != 0);
     const int g = int(tgid.x) / o_tiles;
     o_off = (int(tgid.x) % o_tiles) * BO + g * p.C_out_per_group;
     o_end = g * p.C_out_per_group + p.C_out_per_group;
