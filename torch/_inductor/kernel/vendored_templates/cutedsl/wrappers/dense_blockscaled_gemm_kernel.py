@@ -6,24 +6,50 @@ import itertools
 import logging
 from collections.abc import Callable, Generator  # noqa: TC003
 
-import cutlass_api
-from cutlass_api.arguments import GemmArguments  # noqa: TC002
-from cutlass_api.artifact import CompiledArtifact
-from cutlass_api.library import ScaleMode, ScaleSwizzleMode
-from cutlass_api.metadata import (
-    DenseTensorAttributes,
+import cutlass.operators
+from cutlass.operators import ScaleMode, ScaleSwizzleMode
+from cutlass.operators.arch import TargetSm
+from cutlass.operators.arguments import GemmArguments
+from cutlass.operators.artifact import CompiledArtifact  # noqa: TC002
+from cutlass.operators.metadata import (
+    DenseTensorConstraints,
     GemmOperandsMetadata,
-    KernelMetadata,
-    ScaledTensorAttributes,
+    OperatorMetadata,
+    ScaledOperandConstraints,
     Sm100DesignMetadata,
 )
-from cutlass_api.providers.cutedsl.kernel import CuteDslKernel
-from cutlass_api.providers.cutedsl.utils import get_max_active_clusters
-from cutlass_api.status import Status
-from cutlass_api.utils import strides_to_layout_string, to_cuda_stream, tuple_to_string
+from cutlass.operators.mma import BlackwellTcgen05Mma
+from cutlass.operators.providers.cutedsl import integration_utils as cutedsl_utils
+from cutlass.operators.providers.cutedsl.operator import CuteDslOperator
+from cutlass.operators.status import Status
+from cutlass.operators.utils.common import tuple_to_string
+from cutlass.operators.utils.device import to_cuda_stream
+from cutlass.operators.utils.tensor import strides_to_layout_string
 
 
 log = logging.getLogger(__name__)
+
+
+_ONES_ALPHA: dict = {}
+
+
+def _ones_alpha():
+    """Cached per-device (4,)-ones alpha TensorWrapper (identity global scale).
+
+    The kernel always takes an alpha arg so its signature is consistent across
+    compile/run paths; when not fusing we pass ones (a no-op *1.0). Len is a
+    multiple of 4 (CuTeDSL requires the operand's last dim divisible by 4).
+    """
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    import torch
+
+    dev = torch.cuda.current_device()
+    tw = _ONES_ALPHA.get(dev)
+    if tw is None:
+        tw = TensorWrapper(torch.ones(4, dtype=torch.float32, device=f"cuda:{dev}"))
+        _ONES_ALPHA[dev] = tw
+    return tw
 
 
 try:
@@ -34,10 +60,13 @@ except ImportError:
     BlockScaledGemmKernelImpl = None  # type: ignore[misc, assignment]
 
 
-class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
+class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
     """Wrapper for vendored dense blockscaled GEMM template for SM100 GPUs."""
 
-    def __init__(self, metadata: KernelMetadata):
+    supported_args_type = GemmArguments
+    designed_for_min_cc = 100
+
+    def __init__(self, metadata: OperatorMetadata):
         super().__init__(metadata)
 
         self.sf_vec_size = metadata.operands.A.mode[-1]
@@ -47,10 +76,13 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
             metadata.design.cluster_shape[1],
         )
 
+        import os
+
         self.impl = BlockScaledGemmKernelImpl(  # pyrefly: ignore[not-callable]
             self.sf_vec_size,
             mma_tiler_mn,
             cluster_shape_mn,
+            use_prefetch=os.environ.get("TORCHINDUCTOR_NVGEMM_PREFETCH", "0") == "1",
         )
         self.cluster_shape_mn = cluster_shape_mn
 
@@ -77,14 +109,27 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
 
         return a_major_mode, b_major_mode, out_layout
 
-    def compile(self, args: GemmArguments, cc: int | None = None) -> CompiledArtifact:
+    def _compile(
+        self, args: GemmArguments, target_sm: TargetSm | None = None
+    ) -> CompiledArtifact:
         import cutlass.cute as cute
 
         stream = cute.runtime.make_fake_stream()
-        max_active_clusters = get_max_active_clusters(self.cluster_shape_mn)
+        max_active_clusters = cutedsl_utils.mma.get_max_active_clusters(
+            self.cluster_shape_mn
+        )
 
-        # pyrefly: ignore[missing-attribute]
-        compiled_kernel = self.cute_compile(
+        # Fused global scale: alpha is ALWAYS threaded as a trailing kernel arg
+        # (ones when not fusing) so the kernel signature is consistent across all
+        # compile/run paths -- a None alpha is not reliably dropped from the
+        # runtime signature. args.alpha (a TensorWrapper, len multiple-of-4) is
+        # applied elementwise in the epilogue; closure capture cannot read a
+        # runtime tensor there.
+        alpha = getattr(args, "alpha", None)
+        if alpha is None:
+            alpha = _ones_alpha()
+
+        return self.cute_compile(
             self.impl,
             args.A.tensor,
             args.B.tensor,
@@ -93,9 +138,10 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
             args.out.tensor,
             max_active_clusters,
             stream,
+            lambda v: v,
+            alpha,
+            target_sm=target_sm,
         )
-
-        return CompiledArtifact(compiled_kernel, self)
 
     def _run(
         self,
@@ -113,6 +159,11 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
         if isinstance(stream, int):
             stream = torch.cuda.ExternalStream(stream)
 
+        # Runtime arg list must match _compile: alpha always trails stream.
+        alpha = getattr(args, "alpha", None)
+        if alpha is None:
+            alpha = _ones_alpha()
+
         self.cute_run(  # pyrefly: ignore[missing-attribute]
             compiled_gemm,
             args.A.tensor,
@@ -121,55 +172,34 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
             args.B.scale.tensor,
             args.out.tensor,
             stream,
+            alpha,
         )
 
-    def get_workspace_size(self, args: GemmArguments) -> int:
-        return 0
-
-    def _supports(self, args: GemmArguments) -> Status:
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
-            cutlass_dtype_to_torch,
-        )
-        from torch._inductor.utils import _infer_scale_swizzle_impl
-
-        mat_dtype = cutlass_dtype_to_torch(args.A.element_type)
-        sf_dtype = cutlass_dtype_to_torch(args.A.scale.element_type)
-        if mat_dtype is None or sf_dtype is None:
-            return Status.fail(
-                f"Unknown dtype: mat={args.A.element_type}, sf={args.A.scale.element_type}."
-            )
+    def _supports(
+        self, args: GemmArguments, target_sm: TargetSm | None = None
+    ) -> Status:
+        # Match the upstream block-scaled operator: validate scale-factor element
+        # counts via ScaledOperand.numel_scale for the operand's mode/swizzle,
+        # rather than re-inferring the layout (the old _infer_scale_swizzle_impl
+        # check wrongly rejected valid NVFP4 args on the transposed B operand).
+        from cutlass.operators.arguments import ScaledOperand
 
         m, n = args.out.shape[-2:]
         k = args.A.shape[-1]
+        L = args.A.shape[0] if len(args.A.shape) == 3 else 1
 
-        scaling_type_a, _ = _infer_scale_swizzle_impl(
-            mat_size=(m, k),
-            scale_size=(args.A.scale.numel(),),
-            scale_numel=args.A.scale.numel(),
-            mat_dtype=mat_dtype,
-            scale_dtype=sf_dtype,
-            eq_fn=lambda a, b: a == b,
-        )
-        if scaling_type_a is None:
+        expected_sfa = ScaledOperand.numel_scale((L, m, k), args.A.mode, args.A.swizzle)
+        expected_sfb = ScaledOperand.numel_scale((L, n, k), args.B.mode, args.B.swizzle)
+        if args.A.scale.numel() != expected_sfa:
             return Status.fail(
-                f"Unrecognized scale layout for A: "
-                f"mat shape {args.A.shape}, scale numel {args.A.scale.numel()}."
+                f"Scale factor A must have {expected_sfa} elements for mat shape "
+                f"{args.A.shape}; got {args.A.scale.numel()}."
             )
-
-        scaling_type_b, _ = _infer_scale_swizzle_impl(
-            mat_size=(n, k),
-            scale_size=(args.B.scale.numel(),),
-            scale_numel=args.B.scale.numel(),
-            mat_dtype=mat_dtype,
-            scale_dtype=sf_dtype,
-            eq_fn=lambda a, b: a == b,
-        )
-        if scaling_type_b is None:
+        if args.B.scale.numel() != expected_sfb:
             return Status.fail(
-                f"Unrecognized scale layout for B: "
-                f"mat shape {args.B.shape}, scale numel {args.B.scale.numel()}."
+                f"Scale factor B must have {expected_sfb} elements for mat shape "
+                f"{args.B.shape}; got {args.B.scale.numel()}."
             )
-
         return Status.success()
 
     @staticmethod
@@ -298,13 +328,13 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
                 sf_div = alignment_bytes * 8 // sf_dtype.width
 
                 yield GemmOperandsMetadata(
-                    A=ScaledTensorAttributes(
-                        base=DenseTensorAttributes(
+                    A=ScaledOperandConstraints(
+                        quantized=DenseTensorConstraints(
                             dtype=ab_dtype,
                             stride=stride_A,
                             divisibility=ab_div,
                         ),
-                        scale=DenseTensorAttributes(
+                        scale=DenseTensorConstraints(
                             dtype=sf_dtype,
                             stride=None,
                             divisibility=sf_div,
@@ -312,13 +342,13 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
                         mode=scale_mode,
                         swizzle=ScaleSwizzleMode.Swizzle32x4x4,
                     ),
-                    B=ScaledTensorAttributes(
-                        base=DenseTensorAttributes(
+                    B=ScaledOperandConstraints(
+                        quantized=DenseTensorConstraints(
                             dtype=ab_dtype,
                             stride=stride_B,
                             divisibility=ab_div,
                         ),
-                        scale=DenseTensorAttributes(
+                        scale=DenseTensorConstraints(
                             dtype=sf_dtype,
                             stride=None,
                             divisibility=sf_div,
@@ -326,7 +356,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
                         mode=scale_mode,
                         swizzle=ScaleSwizzleMode.Swizzle32x4x4,
                     ),
-                    out=DenseTensorAttributes(
+                    out=DenseTensorConstraints(
                         dtype=out_dtype,
                         stride=stride_out,
                         divisibility=out_div,
@@ -335,7 +365,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
                 )
 
     @staticmethod
-    def _valid_metadata(metadata: KernelMetadata) -> bool:
+    def _valid_metadata(metadata: OperatorMetadata) -> bool:
         scale_vec = metadata.operands.A.mode
 
         if len(scale_vec) > 1:
@@ -378,18 +408,21 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
 
         return True
 
-    @staticmethod
-    def generate_kernels(
-        metadata_filter: Callable[[KernelMetadata], bool],
+    @classmethod
+    def _generate_operators(
+        cls,
+        metadata_filter: Callable[[OperatorMetadata], bool],
         epilogue_args=None,
-        cc: int | None = None,
+        target_sm: TargetSm | None = None,
+        args=None,
     ) -> list[VendoredDenseBlockScaledGemmKernel]:
-        if cc is not None and cc not in [100, 101, 103]:
+        if target_sm is not None and target_sm.cc not in [100, 101, 103]:
             return []
         if epilogue_args is not None:
             return []
 
         design_params = {
+            "mma_instruction_type": [BlackwellTcgen05Mma],
             "use_2cta_mma": [True],
             "tile_shape": [
                 (M, N, 256) for M in [128, 256] for N in [64, 128, 192, 256]
@@ -401,16 +434,14 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
         param_names = list(design_params.keys())
         param_values = [design_params[name] for name in param_names]
 
-        kernel_list = []
+        operator_list = []
 
-        for (
-            operands
-        ) in VendoredDenseBlockScaledGemmKernel._metadata_operand_combinations():
+        for operands in cls._metadata_operand_combinations():
             # pyrefly: ignore[no-matching-overload]
             for values in itertools.product(*param_values):
                 design = Sm100DesignMetadata(**dict(zip(param_names, values)))
 
-                kernel_name = (
+                operator_name = (
                     "inductor_vendored.DenseBlockScaledGemmKernel_sm100_"
                     "{layout}_A{A}_B{B}_out{out}_SFA{SFA}_SFB{SFB}_"
                     "acc{acc}_scale{scale_mode}_swizzle{scale_swizzle}_"
@@ -436,28 +467,28 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
                     _tma_store="_tma_store" if design.use_tma_store else "",
                 )
 
-                metadata = KernelMetadata(
+                metadata = OperatorMetadata(
                     operands=operands,
                     design=design,
-                    kernel_name=kernel_name,
-                    kernel_class=VendoredDenseBlockScaledGemmKernel,
-                    min_cc=100,
+                    operator_name=operator_name,
+                    operator_class=cls,
+                    supported_targets=TargetSm.get_supported_targets(design, operands),
                     epilogue=None,
                 )
 
-                if VendoredDenseBlockScaledGemmKernel._valid_metadata(metadata):
+                if cls._valid_metadata(metadata):
                     if metadata_filter is None or metadata_filter(metadata):
-                        kernel_list.append(VendoredDenseBlockScaledGemmKernel(metadata))
+                        operator_list.append(cls(metadata))
 
         log.debug(
             "Generated %d DenseBlockScaledGemmKernel configurations",
-            len(kernel_list),
+            len(operator_list),
         )
-        return kernel_list
+        return operator_list
 
 
 # Only register if kernel implementation is available
 if BlockScaledGemmKernelImpl is not None:
-    cutlass_api.providers.cutedsl.CuTeDSLProvider.register(
+    cutlass.operators.providers.cutedsl.CuTeDSLProvider.register(
         VendoredDenseBlockScaledGemmKernel
     )
