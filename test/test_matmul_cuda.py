@@ -27,11 +27,11 @@ from torch.testing._internal.common_cuda import (
     BF16X9_SUPPORTED,
     blas_library_context,
     IS_SM90,
-    PLATFORM_SUPPORTS_BF16,
     SM90OrLater,
     SM100OrLater,
     SM120OrLater,
 )
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_BF16
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,

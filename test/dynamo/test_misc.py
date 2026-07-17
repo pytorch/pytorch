@@ -82,7 +82,6 @@ from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     BF16X9_SUPPORTED,
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
     TEST_CUDA,
 )
@@ -91,6 +90,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     PYTORCH_CUDA_MEMCHECK,
 )
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
