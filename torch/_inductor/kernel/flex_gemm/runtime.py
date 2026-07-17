@@ -17,6 +17,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_SWAP_AB_ERROR,
     validate_local_reduce_feed_main_capability,
+    validate_local_reduce_no_aux_out_composition,
     validate_local_reduce_no_c_alpha_beta,
     validate_local_reduce_out_shape,
     validate_local_reduce_runtime_dense_mm,
@@ -225,6 +226,7 @@ def validate_runtime_local_reduce(
     plan: FlexGemmRuntimeLocalReducePlan | None,
     a: torch.Tensor,
     expected_shape: tuple[int, ...],
+    aux_outs: tuple[torch.Tensor, ...],
     effective_C: torch.Tensor | None,
     alpha: float,
     beta: float,
@@ -235,6 +237,8 @@ def validate_runtime_local_reduce(
     validate_local_reduce_runtime_dense_mm(a.ndim)
     validate_local_reduce_selected_dim_divisible(expected_shape, plan.group, plan.axis)
     validate_local_reduce_no_c_alpha_beta(effective_C, alpha, beta)
+    if plan.feeds_main:
+        validate_local_reduce_no_aux_out_composition(aux_outs or None)
     local_reduce_out = plan.out
     if local_reduce_out is None:
         return
@@ -293,7 +297,6 @@ def local_reduce_gemm_act_kwargs(
     local_reduce_combine_key, local_reduce_finalize_key = callback_keys
     return {
         "tensor_epilogue_returns_local_reduce": local_reduce_out is not None,
-        "local_reduce_feeds_main": local_reduce.feeds_main,
         "local_reduce_out": local_reduce_out,
         "local_reduce_group": local_reduce.group,
         "local_reduce_axis": local_reduce.axis,
@@ -493,6 +496,7 @@ def gemm_epilogue(
         local_reduce,
         a,
         expected_shape,
+        aux_outs,
         effective_C,
         alpha,
         beta,

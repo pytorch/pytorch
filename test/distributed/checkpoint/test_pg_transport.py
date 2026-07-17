@@ -164,7 +164,8 @@ def _test_pg_transport_with_mixed_content(self, device) -> None:
 
 
 def _test_pg_transport_with_sharded_tensor(self, device) -> None:
-    if device.type != "cpu":
+    # Set current accelerator device for NCCL/XCCL
+    if device.type == "cuda" or device.type == "xpu":
         torch.accelerator.set_device_index(device)
 
     state_dict = _create_sharded_tensor_state_dict(self.rank, self.world_size, device)

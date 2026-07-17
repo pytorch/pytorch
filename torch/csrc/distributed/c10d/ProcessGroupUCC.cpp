@@ -605,7 +605,7 @@ ProcessGroupUCC::ProcessGroupUCC(
   TORCH_UCC_LOG_INFO(
       TORCH_UCC_INIT,
       c10::str(
-          "Successfully read and set ProcessGroupUCC env. variables as follows",
+          "Successfully read and set ProcessGroupUCC env. variables as followings",
           envs));
 
   if (torch_ucc_config.enable_health_check) {
