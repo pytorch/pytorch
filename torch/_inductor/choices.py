@@ -531,7 +531,11 @@ class InductorChoices:
             # the same way -> bitwise. split = eager num_batches, but only when Inductor's equal
             # ceil(N/C) chunks match eager's fixed batch_total_elements batches (N an exact
             # multiple); else 1 (the looped kernel handles the ragged tail via zero-padding).
-            if config.numerics == "strict":
+            from torch.utils._triton import has_triton_reduction_ordering
+
+            # Only force eager's split when INNER_TREE is available (else strict codegen falls
+            # back to default, so keep the split default too). Otherwise fall through below.
+            if config.numerics == "strict" and has_triton_reduction_ordering():
                 from torch._native.ops.sum.inner_tree_plan import (
                     _K_TWO_KERNEL_THRESHOLD,
                     compute_inner_tree_params,

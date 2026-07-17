@@ -753,8 +753,7 @@ template <
     class TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>,
     class... Args>
-[[nodiscard]] inline intrusive_ptr<TTarget, NullType> make_intrusive(
-    Args&&... args) {
+inline intrusive_ptr<TTarget, NullType> make_intrusive(Args&&... args) {
   return intrusive_ptr<TTarget, NullType>::make(std::forward<Args>(args)...);
 }
 
@@ -767,49 +766,49 @@ inline void swap(
 
 // To allow intrusive_ptr inside std::map or std::set, we need operator<
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator<(
+inline bool operator<(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.get() < rhs.get();
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator==(
+inline bool operator==(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.get() == rhs.get();
 }
 
 template <class TTarget1, class NullType1>
-[[nodiscard]] inline bool operator==(
+inline bool operator==(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     std::nullptr_t) noexcept {
   return lhs.get() == nullptr;
 }
 
 template <class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator==(
+inline bool operator==(
     std::nullptr_t,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return nullptr == rhs.get();
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator!=(
+inline bool operator!=(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
 template <class TTarget1, class NullType1>
-[[nodiscard]] inline bool operator!=(
+inline bool operator!=(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     std::nullptr_t) noexcept {
   return !operator==(lhs, nullptr);
 }
 
 template <class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator!=(
+inline bool operator!=(
     std::nullptr_t,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return !operator==(nullptr, rhs);
@@ -1139,21 +1138,21 @@ inline void swap(
 
 // To allow weak_intrusive_ptr inside std::map or std::set, we need operator<
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator<(
+inline bool operator<(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.target_ < rhs.target_;
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator==(
+inline bool operator==(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.target_ == rhs.target_;
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator!=(
+inline bool operator!=(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return !operator==(lhs, rhs);
@@ -1206,7 +1205,7 @@ inline void decref(intrusive_ptr_target* self) {
 }
 
 template <typename T>
-[[nodiscard]] inline T* make_weak(T* self) {
+inline T* make_weak(T* self) {
   // NB: 'this' is a strong pointer, but we return a weak pointer
   auto ptr = c10::intrusive_ptr<T>::reclaim(self);
   c10::weak_intrusive_ptr<T> wptr(ptr);
@@ -1214,7 +1213,7 @@ template <typename T>
   return wptr.release();
 }
 
-[[nodiscard]] inline uint32_t use_count(intrusive_ptr_target* self) {
+inline uint32_t use_count(intrusive_ptr_target* self) {
   auto ptr = c10::intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   auto r = ptr.use_count();
   ptr.release();
@@ -1237,7 +1236,7 @@ inline void decref(weak_intrusive_ptr_target* self) {
 }
 
 template <typename T>
-[[nodiscard]] inline T* lock(T* self) {
+inline T* lock(T* self) {
   auto wptr = c10::weak_intrusive_ptr<T>::reclaim(self);
   auto ptr = wptr.lock();
   wptr.release();
@@ -1245,7 +1244,7 @@ template <typename T>
 }
 
 // This gives the STRONG refcount of a WEAK pointer
-[[nodiscard]] inline uint32_t use_count(weak_intrusive_ptr_target* self) {
+inline uint32_t use_count(weak_intrusive_ptr_target* self) {
   auto wptr = c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   auto r = wptr.use_count();
   wptr.release();

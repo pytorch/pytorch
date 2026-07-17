@@ -46,7 +46,7 @@ class IntrusiveListHook {
     }
   }
 
-  [[nodiscard]] bool is_linked() const {
+  bool is_linked() const {
     return next_ != this;
   }
 };
@@ -88,16 +88,16 @@ class ListIterator {
   }
 
   template <typename Q>
-  [[nodiscard]] bool operator==(const ListIterator<Q, T>& other) const {
+  bool operator==(const ListIterator<Q, T>& other) const {
     return ptr_ == other.ptr_;
   }
 
   template <typename Q>
-  [[nodiscard]] bool operator!=(const ListIterator<Q, T>& other) const {
+  bool operator!=(const ListIterator<Q, T>& other) const {
     return !(*this == other);
   }
 
-  [[nodiscard]] auto& operator*() const {
+  auto& operator*() const {
     return static_cast<reference>(*ptr_);
   }
 
@@ -113,7 +113,7 @@ class ListIterator {
     return *this;
   }
 
-  [[nodiscard]] auto* operator->() const {
+  auto* operator->() const {
     return static_cast<pointer>(ptr_);
   }
 };
@@ -142,43 +142,43 @@ class IntrusiveList {
   using iterator = ListIterator<IntrusiveListHook, T>;
   using const_iterator = ListIterator<const IntrusiveListHook, T>;
 
-  [[nodiscard]] auto begin() const {
+  auto begin() const {
     return ++const_iterator{&head_};
   }
 
-  [[nodiscard]] auto begin() {
+  auto begin() {
     return ++iterator{&head_};
   }
 
-  [[nodiscard]] auto end() const {
+  auto end() const {
     return const_iterator{&head_};
   }
 
-  [[nodiscard]] auto end() {
+  auto end() {
     return iterator{&head_};
   }
 
-  [[nodiscard]] auto rbegin() const {
+  auto rbegin() const {
     return std::reverse_iterator{end()};
   }
 
-  [[nodiscard]] auto rbegin() {
+  auto rbegin() {
     return std::reverse_iterator{end()};
   }
 
-  [[nodiscard]] auto rend() const {
+  auto rend() const {
     return std::reverse_iterator{begin()};
   }
 
-  [[nodiscard]] auto rend() {
+  auto rend() {
     return std::reverse_iterator{begin()};
   }
 
-  [[nodiscard]] auto iterator_to(const T& n) const {
+  auto iterator_to(const T& n) const {
     return const_iterator{&n};
   }
 
-  [[nodiscard]] auto iterator_to(T& n) {
+  auto iterator_to(T& n) {
     return iterator{&n};
   }
 
@@ -187,7 +187,7 @@ class IntrusiveList {
     return iterator{&n};
   }
 
-  [[nodiscard]] size_t size() const {
+  size_t size() const {
     size_t ret = 0;
     for ([[maybe_unused]] auto& _ : *this) {
       ret++;
@@ -195,7 +195,7 @@ class IntrusiveList {
     return ret;
   }
 
-  [[nodiscard]] bool empty() const {
+  bool empty() const {
     return !head_.is_linked();
   }
 

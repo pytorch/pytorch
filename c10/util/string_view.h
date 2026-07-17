@@ -30,7 +30,7 @@ class basic_string_view final : public std::basic_string_view<CharT> {
   // `using Base::Base` does not bring Base's copy/move ctors.
   /* implicit */ constexpr basic_string_view(Base sv) noexcept : Base(sv) {}
 
-  [[nodiscard]] constexpr basic_string_view substr(
+  constexpr basic_string_view substr(
       size_type pos = 0,
       size_type count = Base::npos) const {
 #if !defined(__CUDA_ARCH__)
@@ -42,7 +42,7 @@ class basic_string_view final : public std::basic_string_view<CharT> {
 #endif
   }
 
-  [[nodiscard]] constexpr explicit operator std::basic_string<CharT>() const {
+  constexpr explicit operator std::basic_string<CharT>() const {
     return std::basic_string<CharT>(static_cast<const Base&>(*this));
   }
 };
@@ -58,7 +58,7 @@ using string_view = std::string_view;
 using c10_string_view = basic_string_view<char>;
 
 // NOTE: In C++20, this function should be replaced by string_view.starts_with
-[[nodiscard]] constexpr bool starts_with(
+constexpr bool starts_with(
     const std::string_view s,
     const std::string_view prefix) noexcept {
   return (prefix.size() > s.size()) ? false
@@ -66,14 +66,14 @@ using c10_string_view = basic_string_view<char>;
 }
 
 // NOTE: In C++20, this function should be replaced by string_view.starts_with
-[[nodiscard]] constexpr bool starts_with(
+constexpr bool starts_with(
     const std::string_view s,
     const char prefix) noexcept {
   return !s.empty() && prefix == s.front();
 }
 
 // NOTE: In C++20, this function should be replaced by string_view.ends_with
-[[nodiscard]] constexpr bool ends_with(
+constexpr bool ends_with(
     const std::string_view s,
     const std::string_view suffix) noexcept {
   return (suffix.size() > s.size())
@@ -82,9 +82,7 @@ using c10_string_view = basic_string_view<char>;
 }
 
 // NOTE: In C++20, this function should be replaced by string_view.ends_with
-[[nodiscard]] constexpr bool ends_with(
-    const std::string_view s,
-    const char prefix) noexcept {
+constexpr bool ends_with(const std::string_view s, const char prefix) noexcept {
   return !s.empty() && prefix == s.back();
 }
 

@@ -1268,7 +1268,6 @@ class Scatter(Pointwise):
 REDUCTION_COMBINE_FN: dict[str, Callable[..., OpsValue]] = {
     "any": ops_wrapper("logical_or"),
     "max": ops_wrapper("maximum"),
-    "fmax": ops_wrapper("fmaximum"),
     "min": ops_wrapper("minimum"),
     "prod": ops_wrapper("mul"),
     "sum": ops_wrapper("add"),
@@ -1352,6 +1351,17 @@ def get_reduction_combine_fn(
 
     else:
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
+
+
+def _strict_sum_no_unroll(reduction_type: str) -> bool:
+    """Strict numerics: keep a strict ``sum`` as a real reduction (don't unroll to pointwise) so
+    it gets the INNER_TREE codegen -- but only when INNER_TREE is actually available (else strict
+    falls back to default codegen, so unrolling should behave as default too)."""
+    if config.numerics != "strict" or reduction_type != "sum":
+        return False
+    from torch.utils._triton import has_triton_reduction_ordering
+
+    return has_triton_reduction_ordering()
 
 
 @ir_dataclass
@@ -1778,7 +1788,7 @@ class Reduction(Loops):
             and int(reduction_numel) < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
             and reduction_type != "dot"
-            and not (config.numerics == "strict" and reduction_type == "sum")
+            and not _strict_sum_no_unroll(reduction_type)
         ):
             # When native matmul, don't unroll the dot reduction.
 
@@ -1920,13 +1930,7 @@ class Reduction(Loops):
     def default_accumulator(
         reduction_type: str, dtype: torch.dtype
     ) -> _NumLike | Sequence[_NumLike]:
-        if reduction_type in (
-            "max",
-            "fmax",
-            "argmax",
-            "argmax_value",
-            "argmax_with_value",
-        ):
+        if reduction_type in ("max", "argmax", "argmax_value", "argmax_with_value"):
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
@@ -2377,7 +2381,7 @@ class ArgReduction(MultiOutputReduction):
             isinstance(reduction_numel, Integer)
             and int(reduction_numel) < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
-            and not (config.numerics == "strict" and reduction_type == "sum")
+            and not _strict_sum_no_unroll(reduction_type)
         ):
             unrolled_fn = Reduction._unroll_reduction_fn(
                 inner_fn, reduction_ranges, reduction_type, src_dtype
@@ -6491,7 +6495,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
     Buffer for NVIDIA Universal GEMM kernels.
 
     Unlike CuteDSL templates which use Jinja templates, this generates
-    simpler Python code that directly calls the cutlass.operators library.
+    simpler Python code that directly calls the cutlass_api library.
     """
 
     def __init__(
@@ -6507,7 +6511,6 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         swizzle_type_a: Any | None = None,
         swizzle_type_b: Any | None = None,
         supports_epilogue_fusion: bool = False,
-        swap_ab: bool = False,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6521,11 +6524,10 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.swizzle_type_a = swizzle_type_a
         self.swizzle_type_b = swizzle_type_b
         self.supports_epilogue_fusion = supports_epilogue_fusion
-        self.swap_ab = swap_ab
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
-            "kernel_name": kernel.metadata.operator_name,
-            "min_cc": kernel.designed_for_min_cc,
+            "kernel_name": kernel.metadata.kernel_name,
+            "min_cc": kernel.metadata.min_cc,
         }
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
@@ -6590,7 +6592,6 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             epilogue_reads=epilogue_reads,
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
-            swap_ab=self.swap_ab,
         )
 
         def render():
@@ -7220,16 +7221,12 @@ class ExternKernel(InputsKernel):
                     args_flat_is_tensor.append(False)
                     non_tensor_args.append(arg)
                     device_index = arg.device.index
-                    if not (
-                        arg.device.type in ["cuda", "xpu"] and device_index is not None
-                    ):
+                    if not (arg.device.type == "cuda" and device_index is not None):
                         raise AssertionError(
-                            'Expected arg.device.type in ["cuda", "xpu"] and device_index is not None'
+                            'Expected arg.device.type == "cuda" and device_index is not None'
                         )
                     real_non_tensor_args.append(
-                        torch._C._accelerator_getDefaultGenerator(
-                            device_index
-                        ).clone_state()
+                        torch.cuda.default_generators[device_index].clone_state()
                     )
 
                 case OpaqueObjectState():
@@ -7294,14 +7291,12 @@ class ExternKernel(InputsKernel):
                 example_args.append(x.opaque_example_value)
             elif isinstance(x, torch._inductor.ir.GeneratorState):
                 device_index = x.device.index
-                if not (x.device.type in ["cuda", "xpu"] and device_index is not None):
+                if not (x.device.type == "cuda" and device_index is not None):
                     raise AssertionError(
-                        'Expected x.device.type in ["cuda", "xpu"] and device_index is not None'
+                        'Expected x.device.type == "cuda" and device_index is not None'
                     )
                 example_args.append(
-                    torch._C._accelerator_getDefaultGenerator(
-                        device_index
-                    ).clone_state()
+                    torch.cuda.default_generators[device_index].clone_state()
                 )
             else:
                 example_args.append(ir_node_to_tensor(x))
@@ -7320,7 +7315,6 @@ class ExternKernel(InputsKernel):
             ctx: AbstractContextManager[None] = nullcontext()
             if V.current_node.target is torch._higher_order_ops.effects.with_effects:
                 # remove the first effect token in meta["val"] and meta["unbacked_bindings"]
-                # pyrefly: ignore[unsupported-operation]
                 node_meta_val = node_meta_val[1]
                 ctx = _remove_effect_token_unbacked_bindings(V.current_node)
 
@@ -7635,43 +7629,18 @@ class ExternKernel(InputsKernel):
             for dim in expanded_dims:
                 x = torch._inductor.lowering.slice_(x, dim, 0, 1)
 
-        if x.get_dtype().is_complex:
-            # Triton signature codegen has no complex pointer dtype, so avoid
-            # materializing complex layout constraints through a pointwise copy.
-            if exact_strides is not None:
-                layout = FlexibleLayout(
-                    x.get_device_or_error(), x.get_dtype(), x.get_size()
-                ).as_exact_strides(exact_strides, allow_padding=allow_padding)
-            else:
-                if order is None:
-                    raise AssertionError(
-                        "Expected order is not None when exact_strides is None"
-                    )
-                layout = FlexibleLayout(
-                    x.get_device_or_error(), x.get_dtype(), x.get_size()
-                ).as_stride_order(order, allow_padding=allow_padding)
+        # Although this is a clone, inductor is good about fusing clones into previous
+        # operations if they weren't realized and their layouts were flexible.
+        x = cls.copy_input(x)
 
-            src = x
-            x = torch._inductor.lowering.empty_strided(
-                x.get_size(),
-                layout.stride,
-                dtype=x.get_dtype(),
-                device=x.get_device_or_error(),
-            )
-            InplaceCopyFallback.create(x, src)
-        else:
-            # Although this is a clone, inductor is good about fusing clones into previous
-            # operations if they weren't realized and their layouts were flexible.
-            x = cls.copy_input(x)
-
-            as_storage_and_layout(
-                x,
-                freeze=True,
-                want_contiguous=False,
-                stride_order=order,
-                allow_padding=allow_padding,
-                exact_strides=exact_strides,
-            )
+        as_storage_and_layout(
+            x,
+            freeze=True,
+            want_contiguous=False,
+            stride_order=order,
+            allow_padding=allow_padding,
+            exact_strides=exact_strides,
+        )
         if (
             order
             and not free_unbacked_symbols(x.get_size())
@@ -9350,9 +9319,6 @@ class FallbackKernel(ExternKernelAlloc):
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
             self.mutation_names.append(tensor_args[0].get_name())
-            # Record aliasing relationship so memory planning doesn't wrongly
-            # reuse its storage.
-            self.alias_names.append(tensor_args[0].get_name())
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:

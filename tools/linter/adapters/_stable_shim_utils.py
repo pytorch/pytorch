@@ -462,7 +462,7 @@ def merge_base_with_main() -> str:
             subprocess.run(
                 ["git", "cat-file", "-e", f"{main_sha}^{{commit}}"],
                 capture_output=True,
-                timeout=5,
+                timeout=60,
             ).returncode
             != 0
         )

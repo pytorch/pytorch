@@ -44,7 +44,6 @@ ReductionType = Literal[
     "welford_reduce",
     "welford_combine",
     "any",
-    "fmax",
     "max",
     "min",
     "prod",
@@ -360,9 +359,6 @@ class OpsHandler(Generic[T]):
         raise NotImplementedError
 
     def maximum(self, x0: T, x1: T) -> T:
-        raise NotImplementedError
-
-    def fmaximum(self, x0: T, x1: T) -> T:
         raise NotImplementedError
 
     def cos(self, x0: T) -> T:
