@@ -22,25 +22,26 @@ from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 # define TEST_ROCM before changing TEST_CUDA
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
-
-
-# Since we use a fake MTIA device backend to test generic Stream/Event, device backends are mutual exclusive to each other.
-# The test will be skipped if any of the following conditions are met:
-@unittest.skipIf(
+TEST_MTIA = not (
     IS_ARM64
     or not IS_LINUX
     or TEST_CUDA
     or TEST_XPU
     or TEST_MPS
     or TEST_PRIVATEUSE1
-    or TEST_ROCM,
+    or TEST_ROCM
+)
+
+
+# Since we use a fake MTIA device backend to test generic Stream/Event, device backends are mutual exclusive to each other.
+# The test will be skipped if any of the following conditions are met:
+@unittest.skipIf(
+    not TEST_MTIA,
     "Only on linux platform and mutual exclusive to other backends",
 )
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionStreamAndEvent(common.TestCase):
     """Tests Stream and Event with C++ extensions."""
-
-    module = None
 
     def setUp(self):
         super().setUp()
@@ -57,25 +58,6 @@ class TestCppExtensionStreamAndEvent(common.TestCase):
     @classmethod
     def tearDownClass(cls):
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
-
-    @classmethod
-    def setUpClass(cls):
-        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
-        build_dir = tempfile.mkdtemp()
-        # Load the fake device guard impl.
-        src = f"{os.path.abspath(os.path.dirname(__file__))}/cpp_extensions/mtia_extension.cpp"
-        cls.module = torch.utils.cpp_extension.load(
-            name="mtia_extension",
-            sources=[src],
-            build_directory=build_dir,
-            extra_include_paths=[
-                "cpp_extensions",
-                "path / with spaces in it",
-                "path with quote'",
-            ],
-            is_python_module=False,
-            verbose=True,
-        )
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_stream_event(self):
@@ -111,5 +93,30 @@ class TestCppExtensionStreamAndEvent(common.TestCase):
         self.assertTrue(e.event_id == old_event_id)
 
 
+def _setup_mtia_extension():
+    torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+    build_dir = tempfile.mkdtemp()
+    # Load the fake device guard/hooks impl.
+    _ = torch.utils.cpp_extension.load(
+        name="mtia_extension",
+        sources=["cpp_extensions/mtia_extension.cpp"],
+        build_directory=build_dir,
+        extra_include_paths=[
+            "cpp_extensions",
+            "path / with spaces in it",
+            "path with quote'",
+        ],
+        is_python_module=False,
+        verbose=True,
+    )
+
+
 if __name__ == "__main__":
+    # Load the MTIA cpp extension before run_tests(): run_tests() may probe the
+    # current accelerator, so the MTIA backend must already be registered by
+    # then. Doing it here (instead of setUpClass) also guarantees the extension
+    # is loaded exactly once per process, before any test discovery side
+    # effects.
+    if TEST_MTIA:
+        _setup_mtia_extension()
     common.run_tests()
