@@ -120,8 +120,6 @@ WorkNCCL::WorkStatus WorkNCCL::checkStatus() {
 
   if (end_completed) {
     setStatus(WorkStatus::COMPLETED);
-    inputTensors_.clear();
-    inputTensor_.reset();
   } else {
     auto current_time = std::chrono::steady_clock::now();
     auto elapsed_milliseconds =
