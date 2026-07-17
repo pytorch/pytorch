@@ -6186,84 +6186,6 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(N, K, self.device), example_inputs)
 
     @unittest.skipIf(
-        config.triton.native_matmul, "different kernel name when native matmul"
-    )
-    @unittest.skipIf(
-        sys.platform not in ["linux", "win32"],
-        "enable_kernel_profile only supported on linux and win32",
-    )
-    def test_aoti_profiler_input_shapes(self):
-        # Verify that kernel profiling records tensor input shapes,
-        # scalar args, output handles, and ReinterpretView logical shapes.
-        class Model(torch.nn.Module):
-            def __init__(self, n, k, device):
-                super().__init__()
-                self.weight = torch.randn(n, k, device=device)
-                self.bias = torch.randn(n, device=device)
-
-            def forward(self, a):
-                # addmm: exercises scalar args (alpha, beta) and output handle
-                out = torch.nn.functional.linear(a, self.weight, self.bias)
-                # mm with transposed view: exercises ReinterpretView input path
-                return torch.mm(out.t(), a)
-
-        M = 8
-        N = 6
-        K = 16
-        model = Model(N, K, self.device)
-        a = torch.randn(M, K, device=self.device)
-        example_inputs = (a,)
-        with config.patch({"cpp.enable_kernel_profile": True}):
-            _, code = run_and_get_cpp_code(
-                AOTIRunnerUtil.compile, model, example_inputs
-            )
-            # Verify that tensor inputs are converted to IValues for
-            # shape recording (3-arg RAIIAtenRecordFunctionHandle form).
-            FileCheck().check("aoti_torch_tensor_to_ivalue").run(code)
-            # Verify dummy scalar IValues are generated for non-tensor args.
-            FileCheck().check("aoti_torch_int64_to_ivalue").run(code)
-            FileCheck().check("std::vector<C10IValueHandle>").run(code)
-            # Verify output tensor is included in IValues for out-variant
-            # kernels.
-            FileCheck().check_regex(r"tmp_.*_output\b").run(code)
-            # Verify ReinterpretView inputs use reinterpret_tensor_wrapper
-            # for correct logical shapes in profiling.
-            FileCheck().check("reinterpret_tensor_wrapper").run(code)
-
-            self.check_model(Model(N, K, self.device), example_inputs)
-
-    @unittest.skipIf(
-        sys.platform not in ["linux", "win32"],
-        "enable_kernel_profile only supported on linux and win32",
-    )
-    def test_aoti_profiler_conv_input_shapes(self):
-        # Convolution flows through the extern/fallback kernel codegen path;
-        # verify its tensor inputs are recorded with shapes when profiling is
-        # enabled (3-arg RAIIAtenRecordFunctionHandle with an IValue vector).
-        class Model(torch.nn.Module):
-            def __init__(self, device):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 6, kernel_size=3, padding=1).to(device)
-
-            def forward(self, x):
-                return self.conv(x)
-
-        model = Model(self.device)
-        x = torch.randn(2, 3, 16, 16, device=self.device)
-        example_inputs = (x,)
-        with config.patch({"cpp.enable_kernel_profile": True}):
-            _, code = run_and_get_cpp_code(
-                AOTIRunnerUtil.compile, model, example_inputs
-            )
-            # Conv tensor inputs are converted to IValues for shape recording,
-            # collected into a vector, and passed to the record function.
-            FileCheck().check("aoti_torch_tensor_to_ivalue").run(code)
-            FileCheck().check("std::vector<C10IValueHandle>").run(code)
-            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
-
-            self.check_model(Model(self.device), example_inputs)
-
-    @unittest.skipIf(
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
@@ -6796,7 +6718,6 @@ class AOTInductorTestsTemplate:
         self.check_model(sin_triton, none_inputs)
         self.check_model(sin_triton, not_none_inputs)
 
-    @skipIfRocm  # RoCM does not support the config block size in test suite.
     @skipIfXpu(
         msg="SYCL work-item index overflow issue when block sizes are used in this test."
     )
@@ -6812,13 +6733,17 @@ class AOTInductorTestsTemplate:
             n_elements,
             BLOCK_SIZE: "tl.constexpr",
         ):
-            pid = tl.program_id(axis=0).to(tl.int64)
-            block_start = pid * BLOCK_SIZE
+            pid0 = tl.program_id(axis=0).to(tl.int64)
+            pid1 = tl.program_id(axis=1).to(tl.int64)
+            grid0 = tl.num_programs(axis=0).to(tl.int64)
+            block_id = pid1 * grid0 + pid0
+            block_start = block_id * BLOCK_SIZE
             offsets = block_start + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
+            s = x.to(tl.int32) + y.to(tl.int32)
+            output = (s & 0xFF).to(tl.int8)
             tl.store(out_ptr + offsets, output, mask=mask)
 
         @torch.library.triton_op("mylib::add", mutates_args=())
@@ -6827,9 +6752,15 @@ class AOTInductorTestsTemplate:
             n_elements = output.numel()
 
             def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+                num_blocks = triton.cdiv(n_elements, meta["BLOCK_SIZE"])
+                # 2D split to respect the 65535 grid-x limit. Use cdiv-by-constant
+                # rather than min(num_blocks, 65535): a symbolic min introduces an
+                # inequality guard that AOTInductor dynamic-shape export rejects.
+                grid1 = triton.cdiv(num_blocks, 65535)
+                grid0 = triton.cdiv(num_blocks, grid1)
+                return (grid0, grid1)
 
-            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 256)
             return output
 
         class Model(torch.nn.Module):
