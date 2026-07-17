@@ -11,7 +11,8 @@ from contextlib import redirect_stderr
 
 import torch
 from torch.testing import FileCheck, make_tensor
-from torch.testing._internal.common_cuda import (
+from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_gpu import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_BF16_ATOMICS,
     PLATFORM_SUPPORTS_HALF_ATOMICS,
