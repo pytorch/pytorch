@@ -3667,6 +3667,7 @@ class TestSDPAGpuOnly(NNTestCase):
         ):
             self.assertEqual(actual, expected)
 
+    @skipIfXpu(msg="Not target, torch-xpu-ops/issues/4117")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
     def test_singelton_head_dim_stride_ne_1(self, device):
         query = torch.tensor([[[[1, 2]]]], dtype=torch.float16, device=device)
@@ -5031,7 +5032,7 @@ class TestSDPAGpuOnly(NNTestCase):
 
 class TestSDPAXpuOnly(NNTestCase):
     """ Used to test XPU only functionality of scaled_dot_product_attention
-    Mostly migrate from TestSDPAGpuOnly in test/test_transformers.py
+    Mostly migrate from TestSDPACUDAOnly in test/test_transformers.py
     """
 
 
