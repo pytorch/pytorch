@@ -5,8 +5,74 @@ Access via ``torch.func._random``.
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import cast
 
 import torch
+from torch.utils import _pytree as pytree
+
+
+@dataclass(frozen=True)
+class RNGIndexBlock:
+    """A repeated block of logical flat indices in one random draw."""
+
+    start: int | torch.SymInt
+    block_size: int | torch.SymInt
+    block_stride: int | torch.SymInt
+    block_count: int | torch.SymInt = 1
+
+
+@dataclass(frozen=True)
+class RNGLayout:
+    """Map a local flat output to positions in a logical random draw."""
+
+    logical_numel: int | torch.SymInt
+    blocks: tuple[RNGIndexBlock, ...]
+
+
+pytree.register_dataclass(
+    RNGIndexBlock,
+    serialized_type_name="torch.func._random.RNGIndexBlock",
+)
+pytree.register_dataclass(
+    RNGLayout,
+    serialized_type_name="torch.func._random.RNGLayout",
+)
+
+
+def _validate_layout(layout: RNGLayout | None) -> RNGLayout | None:
+    if layout is not None and not isinstance(layout, RNGLayout):
+        raise TypeError(f"expected layout to be RNGLayout, got {type(layout).__name__}")
+    return layout
+
+
+def _layout_args(
+    layout: RNGLayout,
+) -> tuple[
+    int | torch.SymInt,
+    list[int | torch.SymInt],
+    list[int | torch.SymInt],
+    list[int | torch.SymInt],
+    list[int | torch.SymInt],
+]:
+    return (
+        layout.logical_numel,
+        [block.start for block in layout.blocks],
+        [block.block_size for block in layout.blocks],
+        [block.block_stride for block in layout.blocks],
+        [block.block_count for block in layout.blocks],
+    )
+
+
+ShapeArg = int | torch.SymInt | Sequence[int | torch.SymInt]
+
+
+def _normalize_output_shape(
+    shape: tuple[ShapeArg, ...],
+) -> tuple[int | torch.SymInt, ...]:
+    if len(shape) == 1 and isinstance(shape[0], Sequence):
+        return tuple(shape[0])
+    return tuple(cast(int | torch.SymInt, dim) for dim in shape)
 
 
 def key(
@@ -109,6 +175,7 @@ def normal_(
     *,
     mean: float = 0.0,
     std: float = 1.0,
+    layout: RNGLayout | None = None,
 ) -> torch.Tensor:
     r"""Fill ``result`` in-place with normal random values from a PRNG key.
 
@@ -116,9 +183,10 @@ def normal_(
     and ``std``. The output is fully determined by the key, so calling with the
     same key always produces the same result.
 
-    Supports batched keys: if ``key`` has shape ``(*batch, K)``, the leading
-    dimensions of ``result`` must be broadcastable with ``*batch`` and each key
-    independently generates its slice of the output.
+    Without a layout, batched keys are supported: if ``key`` has shape
+    ``(*batch, K)``, the leading dimensions of ``result`` must be broadcastable
+    with ``*batch`` and each key independently generates its output slice.
+    Layout-based in-place generation currently requires one unbatched key.
 
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
@@ -126,6 +194,7 @@ def normal_(
         result (Tensor): The output tensor to fill in-place.
         mean (float): Mean of the normal distribution. Default: ``0.0``.
         std (float): Standard deviation of the normal distribution. Default: ``1.0``.
+        layout (RNGLayout, optional): Logical positions to generate.
 
     Returns:
         ``result``, filled with normal random values.
@@ -136,15 +205,21 @@ def normal_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.normal_(key, result)  # doctest: +SKIP
     """
-    return torch.ops.aten._philox_normal_(result, key, mean, std)
+    layout = _validate_layout(layout)
+    if layout is None:
+        return torch.ops.aten._philox_normal_(result, key, mean, std)
+    return torch.ops.aten._philox_normal_indexed_(
+        result, key, *_layout_args(layout), mean, std
+    )
 
 
 def normal(
     key: torch.Tensor,
-    *shape: tuple[int, ...],
+    *shape: ShapeArg,
     mean: float = 0.0,
     std: float = 1.0,
     dtype: torch.dtype | None = None,
+    layout: RNGLayout | None = None,
 ) -> torch.Tensor:
     r"""Generate normally distributed random values from a PRNG key.
 
@@ -153,9 +228,8 @@ def normal(
     determined by the key, so calling with the same key always returns the same
     result. The output is placed on the same device as ``key``.
 
-    Supports batched keys: if ``key`` has shape ``(*batch, K)``, the leading
-    dimensions of ``shape`` must be broadcastable with ``*batch`` and each key
-    independently generates its slice of the output.
+    Without a layout, batched keys are supported directly. With a layout, use
+    :func:`torch.vmap` over unbatched keys sharing one static layout.
 
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
@@ -164,6 +238,7 @@ def normal(
         mean (float): Mean of the normal distribution. Default: ``0.0``.
         std (float): Standard deviation of the normal distribution. Default: ``1.0``.
         dtype (:class:`torch.dtype`, optional): The desired dtype. Default: ``torch.float32``.
+        layout (RNGLayout, optional): Logical positions to generate.
 
     Returns:
         A tensor of the given shape filled with normal random values.
@@ -173,14 +248,17 @@ def normal(
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.normal(key, (1000,))  # doctest: +SKIP
     """
-    if len(shape) == 1 and isinstance(shape[0], Sequence):
-        # pyrefly: ignore [bad-argument-type]
-        shape = tuple(shape[0])
+    output_shape = _normalize_output_shape(shape)
     if dtype is None:
         dtype = torch.float32
-    # pyrefly: ignore [no-matching-overload]
-    result = torch.empty(shape, dtype=dtype, device=key.device)
-    return normal_(key, result, mean=mean, std=std)
+    layout = _validate_layout(layout)
+    if layout is None:
+        # pyrefly: ignore [no-matching-overload]
+        result = torch.empty(output_shape, dtype=dtype, device=key.device)
+        return normal_(key, result, mean=mean, std=std)
+    # new_empty propagates a vmap batch level from key to the mutable output.
+    result = key.new_empty(output_shape, dtype=dtype)
+    return normal_(key, result, mean=mean, std=std, layout=layout)
 
 
 def uniform_(
@@ -189,6 +267,7 @@ def uniform_(
     *,
     low: float = 0.0,
     high: float = 1.0,
+    layout: RNGLayout | None = None,
 ) -> torch.Tensor:
     r"""Fill ``result`` in-place with uniform random values from a PRNG key.
 
@@ -196,9 +275,10 @@ def uniform_(
     is fully determined by the key, so calling with the same key always produces
     the same result.
 
-    Supports batched keys: if ``key`` has shape ``(*batch, K)``, the leading
-    dimensions of ``result`` must be broadcastable with ``*batch`` and each key
-    independently generates its slice of the output.
+    Without a layout, batched keys are supported: if ``key`` has shape
+    ``(*batch, K)``, the leading dimensions of ``result`` must be broadcastable
+    with ``*batch`` and each key independently generates its output slice.
+    Layout-based in-place generation currently requires one unbatched key.
 
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
@@ -206,6 +286,7 @@ def uniform_(
         result (Tensor): The output tensor to fill in-place.
         low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
         high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
+        layout (RNGLayout, optional): Logical positions to generate.
 
     Returns:
         ``result``, filled with uniform random values.
@@ -216,15 +297,21 @@ def uniform_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.uniform_(key, result)  # doctest: +SKIP
     """
-    return torch.ops.aten._philox_uniform_(result, key, low, high)
+    layout = _validate_layout(layout)
+    if layout is None:
+        return torch.ops.aten._philox_uniform_(result, key, low, high)
+    return torch.ops.aten._philox_uniform_indexed_(
+        result, key, *_layout_args(layout), low, high
+    )
 
 
 def uniform(
     key: torch.Tensor,
-    *shape: tuple[int, ...],
+    *shape: ShapeArg,
     low: float = 0.0,
     high: float = 1.0,
     dtype: torch.dtype | None = None,
+    layout: RNGLayout | None = None,
 ) -> torch.Tensor:
     r"""Generate uniformly distributed random values from a PRNG key.
 
@@ -233,9 +320,8 @@ def uniform(
     key, so calling with the same key always returns the same result. The output
     is placed on the same device as ``key``.
 
-    Supports batched keys: if ``key`` has shape ``(*batch, K)``, the leading
-    dimensions of ``shape`` must be broadcastable with ``*batch`` and each key
-    independently generates its slice of the output.
+    Without a layout, batched keys are supported directly. With a layout, use
+    :func:`torch.vmap` over unbatched keys sharing one static layout.
 
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
@@ -244,6 +330,7 @@ def uniform(
         low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
         high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
         dtype (:class:`torch.dtype`, optional): The desired dtype. Default: ``torch.float32``.
+        layout (RNGLayout, optional): Logical positions to generate.
 
     Returns:
         A tensor of the given shape filled with uniform random values.
@@ -253,11 +340,14 @@ def uniform(
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.uniform(key, (1000,))  # doctest: +SKIP
     """
-    if len(shape) == 1 and isinstance(shape[0], Sequence):
-        # pyrefly: ignore [bad-argument-type]
-        shape = tuple(shape[0])
+    output_shape = _normalize_output_shape(shape)
     if dtype is None:
         dtype = torch.float32
-    # pyrefly: ignore [no-matching-overload]
-    result = torch.empty(shape, dtype=dtype, device=key.device)
-    return uniform_(key, result, low=low, high=high)
+    layout = _validate_layout(layout)
+    if layout is None:
+        # pyrefly: ignore [no-matching-overload]
+        result = torch.empty(output_shape, dtype=dtype, device=key.device)
+        return uniform_(key, result, low=low, high=high)
+    # new_empty propagates a vmap batch level from key to the mutable output.
+    result = key.new_empty(output_shape, dtype=dtype)
+    return uniform_(key, result, low=low, high=high, layout=layout)
