@@ -382,6 +382,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         def cleanup_backend():
             backend_registry._COMPILER_FNS.pop(backend_name, None)
             backend_registry._BACKENDS.pop(backend_name, None)
+            backend_registry._BACKEND_TAGS.pop(backend_name, None)
 
         self.addCleanup(cleanup_backend)
 
@@ -417,6 +418,51 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend=my_backend)
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
+
+    def test_aot_autograd_reentrant_bw_compiler(self):
+        # re-entry with an already-wrapped bw_compiler must leave it untouched
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+
+        def my_compiler(gm, example_inputs):
+            return make_boxed_func(gm.forward)
+
+        backend = aot_autograd(fw_compiler=my_compiler)
+
+        torch.compile(lambda x: x.sin() + 1, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+        bw_compiler = backend.kwargs["bw_compiler"]
+        torch.compile(lambda x: x.cos() * 2, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+
+        self.assertIs(backend.kwargs["bw_compiler"], bw_compiler)
+        self.assertFalse(hasattr(bw_compiler, "compiler_fn"))
+
+    def test_aot_autograd_reentrant_serializable_bw_compiler(self):
+        # re-entry must not re-wrap a SerializableAOTDispatchCompiler's compiler_fn
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch._aot_autograd.schemas import (
+            SerializableAOTDispatchCompiler,
+        )
+
+        def my_compiler(gm, example_inputs):
+            return make_boxed_func(gm.forward)
+
+        bw_compiler = SerializableAOTDispatchCompiler(object, my_compiler)
+        backend = aot_autograd(fw_compiler=my_compiler, bw_compiler=bw_compiler)
+
+        torch.compile(lambda x: x.sin() + 1, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+        wrapped_fn = bw_compiler.compiler_fn
+        torch.compile(lambda x: x.cos() * 2, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+
+        self.assertIs(bw_compiler.compiler_fn, wrapped_fn)
 
     def test_lookup_backend(self):
         from torch._dynamo import lookup_backend
@@ -481,12 +527,15 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
 
             orig_backends = dict(registry._BACKENDS)
             orig_compiler_fns = dict(registry._COMPILER_FNS)
+            orig_backend_tags = dict(registry._BACKEND_TAGS)
 
             def restore_registry():
                 registry._BACKENDS.clear()
                 registry._BACKENDS.update(orig_backends)
                 registry._COMPILER_FNS.clear()
                 registry._COMPILER_FNS.update(orig_compiler_fns)
+                registry._BACKEND_TAGS.clear()
+                registry._BACKEND_TAGS.update(orig_backend_tags)
                 registry._lazy_import.cache_clear()
                 registry._discover_entrypoint_backends.cache_clear()
 
