@@ -7849,10 +7849,6 @@ for dtype in (torch.int32, torch.int64):
             reference_in_float=False,
         )
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM and not torch.cuda.has_magma,
-        "ROCm hipsolver backend does not currently support eig",
-    )
     @xfail_if_mps_unimplemented  # aten::linalg_eig not implemented for MPS
     @skipIfNoLapack
     def test_linalg_eig_stride_consistency(self):
@@ -7893,6 +7889,16 @@ for dtype in (torch.int32, torch.int64):
         o2 = torch.compile(mod)(inp)
 
         self.assertEqual(o1, o2)
+
+    def test_view_as_complex_non_contiguous(self):
+        def fn(x):
+            y = x.transpose(1, 2)
+            z = y.reshape(2, 8, 4, -1, 2)
+            return torch.view_as_complex(z)
+
+        x = torch.randn([2, 4, 8, 8], device=self.device, dtype=torch.float32)
+
+        self.common(fn, (x,), exact_stride=True, check_lowp=False)
 
     def test_view_as_real(self):
         def fn(x):
@@ -10232,6 +10238,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         fn_compiled = torch.compile(fn)
         y = fn_compiled(x)
         self.assertTrue(y is not x)
+
+    def test_constant_pad_nd_fused_with_split_reduction(self):
+        # https://github.com/pytorch/pytorch/issues/<你的issue号>
+        # The pad's fill value used to be dropped when the pad was fused with
+        # the second stage of a split reduction: the body's load is served
+        # from the CSE store cache (producer fused into the same kernel), so
+        # no tl.load is emitted and the masked-load `other` never applies.
+        def fn(mask):
+            lengths = mask.sum(dim=-1, dtype=torch.int32)
+            return F.pad(torch.cumsum(lengths, dim=0, dtype=torch.int32), (1, 0))
+
+        self.common(fn, (torch.ones(1, 16384, dtype=torch.bool),))
 
     def test_l1_loss(self):
         def fn(a, b):
@@ -17480,6 +17498,32 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         FileCheck().check(check1).check(check2).run(code)
 
+    @lowering.force_fallback(aten.add.Tensor)
+    def test_no_redundant_assignment_single_output_fallback(self):
+        @torch.compile
+        def f(x):
+            return x + 2
+
+        x = torch.randn(16, 32, device=self.device)
+        expected = x + 2
+        actual, source_codes = run_and_get_code(f, x)
+        self.assertEqual(actual, expected)
+        source_code = "\n".join(source_codes)
+        self.assertIn("torch.ops.aten.add.Tensor", source_code)
+        if config.cpp_wrapper:
+            FileCheck().check_regex(
+                r'assert_size_stride\([^,]+, \{.*\}, \{.*\}, "torch\.ops\.aten\.add\.Tensor"(, .*)?\)'
+            ).run(source_code)
+        else:
+            FileCheck().check_regex(
+                r"assert_(size_stride|tensor_metadata)\([^,]+, \(.*\), \(.*\), ([^,]+, )?'torch\.ops\.aten\.add\.Tensor'\)"
+            ).run(source_code)
+            if torch.device(self.device).type == "cuda" and config.alignment_asserts:
+                FileCheck().check_regex(
+                    r"assert_alignment\(buf\d+, \d+, 'torch.ops.aten.add.Tensor'\)"
+                ).run(source_code)
+        self.assertNotRegex(source_code, r"\bbuf\d+\s*=\s*buf\d+\b")
+
     @requires_gpu_and_triton
     @config.patch(use_fast_math=True)
     def test_prepare_softmax_with_fast_math(self):
@@ -18894,6 +18938,63 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(x_eager.device, x_compiled.device)
 
+    def test_jvp_compile_backward(self):
+        def jvp_fn(f, x):
+            return torch.func.jvp(f, (x.clone(),), (torch.ones_like(x),))[1]
+
+        def compute(f, x):
+            first, rest = x[..., :1], x[..., 1:]
+            return jvp_fn(lambda X: f(torch.cat([X, rest])), first)
+
+        in_features = 4
+        net = torch.nn.Sequential(
+            torch.nn.Linear(in_features, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 8),
+        ).to(self.device)
+
+        x = torch.rand((in_features,), device=self.device)
+
+        eager_out = compute(net, x).sum()
+        eager_out.backward()
+        eager_grads = [p.grad.clone() for p in net.parameters() if p.grad is not None]
+        net.zero_grad()
+
+        compiled = torch.compile(compute)
+        compiled_out = compiled(net, x).sum()
+        compiled_out.backward()
+        compiled_grads = [
+            p.grad.clone() for p in net.parameters() if p.grad is not None
+        ]
+
+        self.assertEqual(eager_out, compiled_out)
+        for eg, cg in zip(eager_grads, compiled_grads, strict=True):
+            self.assertEqual(eg, cg)
+
+    def test_efficient_zero_tensor_avoids_oom(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA OOM regression test")
+
+        element_size = torch.empty((), dtype=torch.float32).element_size()
+        numel = (
+            torch.cuda.get_device_properties(self.device).total_memory // element_size
+        )
+        numel += 1024
+
+        def fn():
+            return torch.ops.aten._efficientzerotensor.default(
+                [numel],
+                dtype=torch.float32,
+                layout=torch.strided,
+                device=torch.device(self.device),
+                pin_memory=False,
+            )
+
+        out = torch.compile(fn, fullgraph=True)()
+        self.assertEqual(out.size(0), numel)
+        self.assertEqual(out.stride(), (1,))
+        self.assertTrue(out._is_zerotensor())
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -19079,6 +19180,43 @@ if RUN_GPU or HAS_MPS:
                         expected = fn(x)
                         torch.testing.assert_close(actual, expected, equal_nan=True)
                         self.assertTrue(torch.isnan(actual[:3]).all())
+
+        @requires_cuda_and_triton
+        def test_complex_view_as_complex_exact_stride_copy_cuda(self):
+            def fn(x):
+                y = x.transpose(1, 2)
+                z = y.reshape(2, 8, 4, -1, 2)
+                return torch.view_as_complex(z)
+
+            x = torch.randn([2, 4, 8, 8], device=self.device, dtype=torch.float32)
+            expected = fn(x)
+            actual = torch.compile(fn, fullgraph=True)(x)
+
+            self.assertEqual(actual, expected, exact_stride=True)
+
+        @requires_cuda_and_triton
+        def test_complex_view_as_complex_expanded_exact_stride_copy_cuda(self):
+            def fn(x):
+                y = torch.view_as_complex(x)
+                return y.expand(2, 3, 4)
+
+            x = torch.randn([2, 1, 4, 2], device=self.device, dtype=torch.float32)
+            expected = fn(x)
+            actual = torch.compile(fn, fullgraph=True)(x)
+
+            self.assertEqual(actual, expected, exact_stride=True)
+
+        @requires_cuda_and_triton
+        def test_complex_copy_strided_stride_order_copy_cuda(self):
+            def fn(x):
+                y = torch.view_as_complex(x)
+                return torch.ops.prims.copy_strided.default(y, [1, 2])
+
+            x = torch.randn([2, 3, 2], device=self.device, dtype=torch.float32)
+            expected = fn(x)
+            actual = torch.compile(fn, fullgraph=True)(x)
+
+            self.assertEqual(actual, expected, exact_stride=True)
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
