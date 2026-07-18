@@ -67,7 +67,7 @@ with torch.cuda.device(1):
 
 ## TensorFloat-32 (TF32) on Ampere (and later) devices
 
-After Pytorch 2.9, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way, and
+After PyTorch 2.9, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way, and
 suggest to use the new APIs for better control.
 We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
 
@@ -1778,6 +1778,27 @@ static_in_1.copy_(real_data_1)
 static_in_2.copy_(real_data_2)
 g1.replay()
 g2.replay()
+```
+
+The `pool` argument also accepts {class}`~torch.cuda.MemPool`. If
+{func}`~torch.cuda.use_mem_pool` is used during capture, the graph retains that
+pool until the graph is reset or destroyed. {meth}`torch.cuda.CUDAGraph.pool`
+returns the primary capture pool, while `CUDAGraph.pools()` returns all pools
+retained by the graph.
+
+```python
+g_default_pool = torch.cuda.MemPool()
+g_side_pool = torch.cuda.MemPool()
+g = torch.cuda.CUDAGraph()
+
+with torch.cuda.graph(g, pool=g_default_pool):
+    y = foo(x)
+    with torch.cuda.use_mem_pool(g_side_pool):
+        tmp = baz(y)
+    z = bar(tmp)
+
+primary_pool = g.pool()
+retained_pools = g.pools()
 ```
 
 It's also safe to share a memory pool across separate graphs that do not depend

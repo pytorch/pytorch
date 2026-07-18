@@ -18,6 +18,7 @@ import dataclasses
 import dis
 import functools
 import itertools
+import re
 import sys
 import types
 import uuid
@@ -666,7 +667,7 @@ def linetable_writer(
 ) -> tuple[list[int], Callable[[int, int], None], Callable[[int], None]]:
     """
     Used to create typing.CodeType.co_linetable
-    See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
+    See https://github.com/python/cpython/blob/3.10/Objects/lnotab_notes.txt
     This is the internal format of the line number table for Python 3.10
     """
     if sys.version_info[:2] != (3, 10):
@@ -1959,6 +1960,21 @@ def unique_id(name: str, with_uuid: bool = False) -> str:
     if with_uuid:
         ret += f"_{uuid.uuid4()}".replace("-", "_")
     return ret
+
+
+COMPILED_FN_PREFIX = "__compiled_fn"
+_COMPILED_FN_NAME_RE = re.compile(
+    rf"^{COMPILED_FN_PREFIX}_\d+_"
+    r"[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12}$"
+)
+
+
+def make_compiled_fn_name() -> str:
+    return unique_id(COMPILED_FN_PREFIX, with_uuid=True)
+
+
+def is_compiled_fn_name(name: str) -> bool:
+    return _COMPILED_FN_NAME_RE.fullmatch(name) is not None
 
 
 def is_generator(code: types.CodeType) -> bool:

@@ -156,9 +156,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
         # Redirect self.prefix so the base class codegen_input_symbol_assignment
         # writes into our buffer.
+        deferred_symbol_assignments = []
         with self._target_buf("prefix", code):
             for name, value in inputs:
-                self.codegen_input_symbol_assignment(name, value, bound_vars)
+                self.codegen_input_symbol_assignment(
+                    name, value, bound_vars, deferred_symbol_assignments
+                )
+            self._retry_deferred_symbol_assignments(deferred_symbol_assignments)
 
         for _, value in inputs:
             if not isinstance(value, ir.TensorBox):
@@ -1043,7 +1047,15 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.writeline("}")
 
     def generate_c_shim_extern_kernel_call(
-        self, kernel: str, args: list[str], device: str, **_
+        self,
+        kernel: str,
+        args: list[str],
+        device: str,
+        *,
+        input_handles: list[str] | None = None,
+        num_scalars: int = 0,
+        output_handle: str | None = None,
+        **_,
     ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
@@ -1065,7 +1077,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             wrapped_args.append(arg)
 
         super().generate_c_shim_extern_kernel_call(
-            kernel, wrapped_args, device, debug_args=args
+            kernel,
+            wrapped_args,
+            device,
+            debug_args=args,
+            input_handles=input_handles,
+            num_scalars=num_scalars,
+            output_handle=output_handle,
         )
 
     def generate_scatter_fallback(self, node: ir.ScatterFallback):

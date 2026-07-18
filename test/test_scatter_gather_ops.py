@@ -16,7 +16,7 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_dtype import \
     (all_passthru_types, all_passthru_types_and, get_all_dtypes,)
 
-from torch.testing._internal.common_cuda import CDNA3OrLater, SM90OrLater
+from torch.testing._internal.common_cuda import gfx_arch_supports_opportunistic_fastatomics, SM90OrLater
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -259,7 +259,7 @@ class TestScatterGather(TestCase):
         else:
             # When we are running opportunistic_fastatomics, we will expect some floating point rounding
             # errors as the order of operation is not guaranteed.
-            if TEST_WITH_ROCM and CDNA3OrLater() \
+            if TEST_WITH_ROCM and gfx_arch_supports_opportunistic_fastatomics() \
                     and not torch.are_deterministic_algorithms_enabled():
                 self.assertEqual(actual, expected, atol=1e-9, rtol=1e-6)
             else:
@@ -773,7 +773,7 @@ class TestScatterAddOverrideConds(TestCase):
         )
         self.assertEqual(
             self._conds(self_t, idx, src), (case.expected_tma, case.expected_vec),
-            msg=f"{case.name}: expected (TMA={case.expected_tma}, vec={case.expected_vec})",
+            msg=lambda msg: f"{msg}\n{case.name}: expected (TMA={case.expected_tma}, vec={case.expected_vec})",
         )
 
     def test_out_cond_rejects_misaligned_out(self):
@@ -795,7 +795,7 @@ class TestScatterAddOverrideConds(TestCase):
         )
         self.assertNotEqual(
             out_mis.data_ptr() % 16, 0,
-            msg=f"test bug: out should be misaligned, got {out_mis.data_ptr() % 16=}",
+            msg=lambda msg: f"{msg}\ntest bug: out should be misaligned, got {out_mis.data_ptr() % 16=}",
         )
         idx = _expanded_idx(
             torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64),
@@ -926,6 +926,45 @@ class TestScatterAddOverrideCorrectness(TestCase):
         ).reshape(self_t.shape)
         tol = _override_tol(dtype)
         self.assertEqual(got, ref, atol=tol, rtol=tol)
+
+    @parametrize("path", ["tma", "vec"])
+    def test_inner_dim_change_no_recompile(self, path):
+        # The kernels take the slice extent N as a runtime arg, so a single
+        # compile must serve every inner-dim size. Call the kernel host entry
+        # at several N and assert the compile cache runs exactly one real
+        # compile (misses advances once, then only hits). We drive the host
+        # entry directly rather than through torch.scatter_add: TMA is
+        # registered first and strictly narrower, so on sm_90+ it would win
+        # every contiguous shape and the vec cache would never move.
+        from torch._native.ops.scatter_add import tma_kernel, vec_scatter_kernel
+        if path == "tma":
+            if not SM90OrLater:
+                self.skipTest("TMA path requires sm_90+")
+            compile_fn = tma_kernel._compile_tma_scatter
+            run = tma_kernel.tma_scatter_add_into
+        else:
+            compile_fn = vec_scatter_kernel._compile_vec_scatter
+            run = vec_scatter_kernel.vec_scatter_add_into
+
+        torch.manual_seed(0)
+        # Same dtype and contiguity across all sizes so only N varies.
+        Ns = [128, 256, 512, 1024, 2048]
+        compile_fn.cache_clear()
+        for N in Ns:
+            self_t, _, src, idx_1d = _make_override_triple(200, 100, (N,))
+            out = self_t.clone()
+            run(out, idx_1d, src)
+            self.assertEqual(out, _naive_scatter_add(self_t, idx_1d, src),
+                             atol=1e-4, rtol=1e-4)
+            misses = compile_fn.cache_info().misses
+            # Every N after the first must be served from cache: misses
+            # tops out at 1 (0 if the .o was already warm on disk). If N
+            # were still in the key, misses would climb with each size.
+            self.assertLessEqual(misses, 1, msg=f"recompiled at N={N}")
+        # The decisive invariant, independent of on-disk cache state: one
+        # in-memory entry serves every N. If N were in the key there'd be
+        # len(Ns) entries.
+        self.assertEqual(compile_fn.cache_info().currsize, 1)
 
     @parametrize("variant", ["functional", "out", "inplace"])
     def test_op_variants(self, variant):

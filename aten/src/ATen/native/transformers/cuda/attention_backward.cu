@@ -28,6 +28,7 @@
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/empty_permuted.h>
+#include <ATen/ops/pad.h>
 #include <ATen/ops/_cudnn_attention_backward.h>
 #include <ATen/ops/_cudnn_attention_backward_native.h>
 #include <ATen/ops/_flash_attention_backward.h>
@@ -67,6 +68,34 @@
 #endif
 
 namespace at::native {
+
+namespace {
+
+int64_t mem_eff_attention_backward_bias_alignment(const Tensor& bias) {
+  return bias.element_size() == 4 ? 4 : 8;
+}
+
+bool has_mem_eff_attention_bias_alignment(const Tensor& bias, int64_t alignment) {
+  for (const auto dim : c10::irange(bias.dim() - 1)) {
+    if (bias.stride(dim) % alignment != 0) {
+      return false;
+    }
+  }
+  return bias.stride(-1) == 1;
+}
+
+Tensor ensure_mem_eff_attention_bias_alignment(const Tensor& bias) {
+  const auto alignment = mem_eff_attention_backward_bias_alignment(bias);
+  if (bias.dim() != 4 || has_mem_eff_attention_bias_alignment(bias, alignment)) {
+    return bias;
+  }
+
+  const auto last_dim_size = bias.size(-1);
+  const auto pad_count = alignment - (last_dim_size % alignment);
+  return at::pad(bias, {0, pad_count}).slice(-1, 0, last_dim_size);
+}
+
+} // namespace
 
 std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const Tensor& grad_out,
@@ -1014,7 +1043,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   // std::optional to undefined tensor
   std::optional<Tensor> kernel_bias;
   if (attn_bias_chunk.has_value() && attn_bias_chunk.value().defined()) {
-    kernel_bias = attn_bias_chunk.value();
+    kernel_bias = ensure_mem_eff_attention_bias_alignment(attn_bias_chunk.value());
   }
   // Will add with signauter changes for dropout and bias
   // We are only handling Dense inputs, but this should be passed

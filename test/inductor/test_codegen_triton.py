@@ -1,14 +1,17 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import sympy
 
 import torch
 import torch._inductor.config as inductor_config
+from torch._inductor import ir
 from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import CSEVariable, SizeArg, TensorArg
+from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
@@ -181,6 +184,115 @@ class TestCodegenTriton(InductorTestCase):
         self.assertTrue(
             V.graph.sizevars.statically_known_multiple_of(s2, 16),
         )
+
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_config_of_skips_graph_input_tensor_divisibility_for_cpp_wrapper_jit(self):
+        from torch._inductor.utils import (
+            get_triton_attrs_descriptor_version,
+            TritonAttrsDescriptorVersion,
+        )
+
+        def _has_divisibility_16(config, idx):
+            if get_triton_attrs_descriptor_version() in {
+                TritonAttrsDescriptorVersion.V1_COMPILER,
+                TritonAttrsDescriptorVersion.V0_NO_TRITON,
+            }:
+                return idx in config.divisible_by_16
+            if get_triton_attrs_descriptor_version() in {
+                TritonAttrsDescriptorVersion.V2_BACKENDS,
+                TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+            }:
+                return idx in config.divisibility_16
+            self.assertIsInstance(config, dict)
+            return (idx,) in config and ["tt.divisibility", 16] in config[(idx,)]
+
+        input_arg = TensorArg(name="in_ptr0", buffer="arg0_1", dtype=torch.float32)
+        buffer_arg = TensorArg(name="out_ptr0", buffer="buf0", dtype=torch.float32)
+        V.graph.graph_inputs[input_arg.buffer] = object()
+
+        original_cpp_wrapper = V.graph.cpp_wrapper
+        original_aot_mode = V.graph.aot_mode
+        original_graph_input_names = list(V.graph.graph_input_names)
+        original_inputs_to_check = V.graph.inputs_to_check
+        try:
+            V.graph.graph_input_names = [input_arg.buffer]
+            with patch.object(triton_utils, "is_unaligned_buffer", return_value=False):
+
+                def _check(input_divisible, buffer_divisible, *, skip=False):
+                    triton_config = triton_utils.config_of(
+                        [input_arg, buffer_arg],
+                        skip_cpp_wrapper_input_tensor_alignment=skip,
+                    )
+                    self.assertEqual(
+                        input_divisible, _has_divisibility_16(triton_config, 0)
+                    )
+                    self.assertEqual(
+                        buffer_divisible, _has_divisibility_16(triton_config, 1)
+                    )
+
+                V.graph.cpp_wrapper = False
+                _check(True, True)
+
+                V.graph.cpp_wrapper = True
+                V.graph.aot_mode = False
+                _check(True, True)
+
+                V.graph.inputs_to_check = ()
+                _check(True, True, skip=True)
+
+                V.graph.inputs_to_check = (0,)
+                _check(False, True, skip=True)
+
+                V.graph.aot_mode = True
+                _check(True, True, skip=True)
+        finally:
+            V.graph.cpp_wrapper = original_cpp_wrapper
+            V.graph.aot_mode = original_aot_mode
+            V.graph.graph_input_names = original_graph_input_names
+            V.graph.inputs_to_check = original_inputs_to_check
+            V.graph.graph_inputs.pop(input_arg.buffer, None)
+
+    def test_cpp_wrapper_python_fallback_return_slots_skip_mutation_outputs(self):
+        original_cpp_wrapper = V.graph.cpp_wrapper
+        try:
+            V.graph.cpp_wrapper = True
+            with torch.library._scoped_library(
+                "cpp_wrapper_fallback_test", "FRAGMENT"
+            ) as m:
+                m.define(
+                    "mutate_and_return_(Tensor(a!) out, Tensor x, str tag) -> Tensor"
+                )
+
+                op_overload = (
+                    torch.ops.cpp_wrapper_fallback_test.mutate_and_return_.default
+                )
+                wrapper = CppWrapperCpu()
+                mutation_output = object.__new__(ir.MutationOutput)
+                raw_args = [
+                    SimpleNamespace(codegen_reference=lambda: "out_handle"),
+                    SimpleNamespace(codegen_reference=lambda: "x_handle"),
+                    "tag",
+                ]
+
+                wrapper.generate_fallback_kernel_with_runtime_lookup_python(
+                    "buf",
+                    "test_kernel",
+                    op_overload,
+                    raw_args=raw_args,
+                    output_args=["mutated", "actual"],
+                    raw_outputs=[mutation_output, object()],
+                )
+
+                code = "\n".join(str(line) for line in wrapper.lines)
+                self.assertIn(
+                    "actual = reinterpret_cast<AtenTensorHandle>("
+                    "PyCapsule_GetPointer(py_buf.get(), NULL));",
+                    code,
+                )
+                self.assertNotIn("PyList_GET_ITEM(py_buf.get(), 1)", code)
+                self.assertNotIn("RAIIAtenTensorHandle mutated;", code)
+        finally:
+            V.graph.cpp_wrapper = original_cpp_wrapper
 
     def test_pow_uses_active_override_constant_lowering(self):
         exponent = CSEVariable("ks0", ValueRanges.unknown(), torch.int64)
@@ -362,7 +474,9 @@ class TestCodegenTriton(InductorTestCase):
         for dtype, expected_sig in expected.items():
             arg = TensorArg(name="x", buffer="buf0", dtype=dtype)
             sig = triton_utils.signature_of(arg, size_dtype=None)
-            self.assertEqual(sig, expected_sig, f"wrong signature for {dtype}")
+            self.assertEqual(
+                sig, expected_sig, lambda msg: f"{msg}\nwrong signature for {dtype}"
+            )
 
     @unittest.skipUnless(has_triton_package(), "requires Triton package")
     def test_fp8_dtype_support_matrix(self):
