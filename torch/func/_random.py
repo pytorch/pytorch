@@ -30,6 +30,19 @@ class RNGLayout:
     blocks: tuple[RNGIndexBlock, ...]
 
 
+@dataclass(frozen=True)
+class RNGView:
+    """A shaped, non-owning view of one key's logical random draw.
+
+    An RNGView can generate values, but it is not itself a key and cannot be
+    passed to :func:`split` or :func:`fold_in`.
+    """
+
+    key: torch.Tensor
+    layout: RNGLayout
+    event_shape: tuple[int | torch.SymInt, ...]
+
+
 pytree.register_dataclass(
     RNGIndexBlock,
     serialized_type_name="torch.func._random.RNGIndexBlock",
@@ -38,12 +51,42 @@ pytree.register_dataclass(
     RNGLayout,
     serialized_type_name="torch.func._random.RNGLayout",
 )
+pytree.register_dataclass(
+    RNGView,
+    serialized_type_name="torch.func._random.RNGView",
+)
 
 
 def _validate_layout(layout: RNGLayout | None) -> RNGLayout | None:
     if layout is not None and not isinstance(layout, RNGLayout):
         raise TypeError(f"expected layout to be RNGLayout, got {type(layout).__name__}")
     return layout
+
+
+def _unwrap_key_and_layout(
+    key_or_view: torch.Tensor | RNGView,
+    layout: RNGLayout | None,
+) -> tuple[torch.Tensor, RNGLayout | None]:
+    if isinstance(key_or_view, RNGView):
+        if layout is not None:
+            raise ValueError("layout must not be specified when key is an RNGView")
+        return key_or_view.key, _validate_layout(key_or_view.layout)
+    return key_or_view, _validate_layout(layout)
+
+
+def _unwrap_inplace_key_and_layout(
+    key_or_view: torch.Tensor | RNGView,
+    result: torch.Tensor,
+    layout: RNGLayout | None,
+) -> tuple[torch.Tensor, RNGLayout | None]:
+    if isinstance(key_or_view, RNGView) and tuple(result.shape) != tuple(
+        key_or_view.event_shape
+    ):
+        raise ValueError(
+            "result shape must match RNGView event_shape: "
+            f"expected {key_or_view.event_shape}, got {tuple(result.shape)}"
+        )
+    return _unwrap_key_and_layout(key_or_view, layout)
 
 
 def _layout_args(
@@ -68,8 +111,13 @@ ShapeArg = int | torch.SymInt | Sequence[int | torch.SymInt]
 
 
 def _normalize_output_shape(
+    key_or_view: torch.Tensor | RNGView,
     shape: tuple[ShapeArg, ...],
 ) -> tuple[int | torch.SymInt, ...]:
+    if isinstance(key_or_view, RNGView):
+        if shape:
+            raise ValueError("shape must not be specified when key is an RNGView")
+        return key_or_view.event_shape
     if len(shape) == 1 and isinstance(shape[0], Sequence):
         return tuple(shape[0])
     return tuple(cast(int | torch.SymInt, dim) for dim in shape)
@@ -135,6 +183,8 @@ def split(key: torch.Tensor, num: int = 2) -> torch.Tensor:
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
         >>> k1, k2 = torch.func._random.split(key)  # doctest: +SKIP
     """
+    if isinstance(key, RNGView):
+        raise TypeError("split() expected a PRNG key, not an RNGView")
     return torch.ops.aten._philox_key_split(key, num)
 
 
@@ -166,11 +216,13 @@ def fold_in(key: torch.Tensor, data: int) -> torch.Tensor:
         >>> assert torch.equal(k0, keys[0])  # doctest: +SKIP
         >>> assert torch.equal(k1, keys[1])  # doctest: +SKIP
     """
+    if isinstance(key, RNGView):
+        raise TypeError("fold_in() expected a PRNG key, not an RNGView")
     return torch.ops.aten._philox_key_fold_in(key, data)
 
 
 def normal_(
-    key: torch.Tensor,
+    key: torch.Tensor | RNGView,
     result: torch.Tensor,
     *,
     mean: float = 0.0,
@@ -189,12 +241,13 @@ def normal_(
     Layout-based in-place generation currently requires one unbatched key.
 
     Args:
-        key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
-            :func:`fold_in`.
+        key (Tensor or RNGView): A PRNG key, or a shaped view of one logical
+            random draw.
         result (Tensor): The output tensor to fill in-place.
         mean (float): Mean of the normal distribution. Default: ``0.0``.
         std (float): Standard deviation of the normal distribution. Default: ``1.0``.
-        layout (RNGLayout, optional): Logical positions to generate.
+        layout (RNGLayout, optional): Logical positions to generate. Must be
+            omitted when ``key`` is an ``RNGView``.
 
     Returns:
         ``result``, filled with normal random values.
@@ -205,7 +258,7 @@ def normal_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.normal_(key, result)  # doctest: +SKIP
     """
-    layout = _validate_layout(layout)
+    key, layout = _unwrap_inplace_key_and_layout(key, result, layout)
     if layout is None:
         return torch.ops.aten._philox_normal_(result, key, mean, std)
     return torch.ops.aten._philox_normal_indexed_(
@@ -214,7 +267,7 @@ def normal_(
 
 
 def normal(
-    key: torch.Tensor,
+    key: torch.Tensor | RNGView,
     *shape: ShapeArg,
     mean: float = 0.0,
     std: float = 1.0,
@@ -232,13 +285,15 @@ def normal(
     :func:`torch.vmap` over unbatched keys sharing one static layout.
 
     Args:
-        key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
-            :func:`fold_in`.
-        *shape (int): The desired output shape.
+        key (Tensor or RNGView): A PRNG key, or a shaped view of one logical
+            random draw.
+        *shape (int): The desired output shape. Must be omitted when ``key``
+            is an ``RNGView``.
         mean (float): Mean of the normal distribution. Default: ``0.0``.
         std (float): Standard deviation of the normal distribution. Default: ``1.0``.
         dtype (:class:`torch.dtype`, optional): The desired dtype. Default: ``torch.float32``.
-        layout (RNGLayout, optional): Logical positions to generate.
+        layout (RNGLayout, optional): Logical positions to generate. Must be
+            omitted when ``key`` is an ``RNGView``.
 
     Returns:
         A tensor of the given shape filled with normal random values.
@@ -248,10 +303,10 @@ def normal(
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.normal(key, (1000,))  # doctest: +SKIP
     """
-    output_shape = _normalize_output_shape(shape)
+    output_shape = _normalize_output_shape(key, shape)
+    key, layout = _unwrap_key_and_layout(key, layout)
     if dtype is None:
         dtype = torch.float32
-    layout = _validate_layout(layout)
     if layout is None:
         # pyrefly: ignore [no-matching-overload]
         result = torch.empty(output_shape, dtype=dtype, device=key.device)
@@ -262,7 +317,7 @@ def normal(
 
 
 def uniform_(
-    key: torch.Tensor,
+    key: torch.Tensor | RNGView,
     result: torch.Tensor,
     *,
     low: float = 0.0,
@@ -281,12 +336,13 @@ def uniform_(
     Layout-based in-place generation currently requires one unbatched key.
 
     Args:
-        key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
-            :func:`fold_in`.
+        key (Tensor or RNGView): A PRNG key, or a shaped view of one logical
+            random draw.
         result (Tensor): The output tensor to fill in-place.
         low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
         high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
-        layout (RNGLayout, optional): Logical positions to generate.
+        layout (RNGLayout, optional): Logical positions to generate. Must be
+            omitted when ``key`` is an ``RNGView``.
 
     Returns:
         ``result``, filled with uniform random values.
@@ -297,7 +353,7 @@ def uniform_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.uniform_(key, result)  # doctest: +SKIP
     """
-    layout = _validate_layout(layout)
+    key, layout = _unwrap_inplace_key_and_layout(key, result, layout)
     if layout is None:
         return torch.ops.aten._philox_uniform_(result, key, low, high)
     return torch.ops.aten._philox_uniform_indexed_(
@@ -306,7 +362,7 @@ def uniform_(
 
 
 def uniform(
-    key: torch.Tensor,
+    key: torch.Tensor | RNGView,
     *shape: ShapeArg,
     low: float = 0.0,
     high: float = 1.0,
@@ -324,13 +380,15 @@ def uniform(
     :func:`torch.vmap` over unbatched keys sharing one static layout.
 
     Args:
-        key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
-            :func:`fold_in`.
-        *shape (int): The desired output shape.
+        key (Tensor or RNGView): A PRNG key, or a shaped view of one logical
+            random draw.
+        *shape (int): The desired output shape. Must be omitted when ``key``
+            is an ``RNGView``.
         low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
         high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
         dtype (:class:`torch.dtype`, optional): The desired dtype. Default: ``torch.float32``.
-        layout (RNGLayout, optional): Logical positions to generate.
+        layout (RNGLayout, optional): Logical positions to generate. Must be
+            omitted when ``key`` is an ``RNGView``.
 
     Returns:
         A tensor of the given shape filled with uniform random values.
@@ -340,10 +398,10 @@ def uniform(
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.uniform(key, (1000,))  # doctest: +SKIP
     """
-    output_shape = _normalize_output_shape(shape)
+    output_shape = _normalize_output_shape(key, shape)
+    key, layout = _unwrap_key_and_layout(key, layout)
     if dtype is None:
         dtype = torch.float32
-    layout = _validate_layout(layout)
     if layout is None:
         # pyrefly: ignore [no-matching-overload]
         result = torch.empty(output_shape, dtype=dtype, device=key.device)
