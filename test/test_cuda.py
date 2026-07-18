@@ -2968,7 +2968,10 @@ torch.cuda.synchronize()
             self.skipTest(
                 "ROCm expandable segments has known issue with graph capture recovery - #179911"
             )
-        torch.cuda.synchronize()
+        # Reap earlier tests' garbage first: a cycle-trapped CUDAGraph whose
+        # destructor fired mid-capture below would invalidate our captures,
+        # and freeing already-released pools now keeps cudaFree out of the
+        # capture windows.
         gc.collect()
         torch.cuda.empty_cache()
         baseline_pools = {s["segment_pool_id"] for s in torch.cuda.memory_snapshot()}
@@ -2987,12 +2990,10 @@ torch.cuda.synchronize()
         # The RNG op registers generator capture state that reset() must
         # also unwind.
         g2 = torch.cuda.CUDAGraph()
-        stream = torch.cuda.Stream()
-        with torch.cuda.stream(stream):
+        with torch.cuda.stream(torch.cuda.Stream()):
             g2.capture_begin()
             y = torch.randn(2**20, device="cuda")
             g2.reset()
-        torch.cuda.current_stream().wait_stream(stream)
 
         # Case 3: two graphs sharing a pool; the failed capture must drop
         # only its own reference, leaving the healthy graph replayable.
@@ -3006,7 +3007,6 @@ torch.cuda.synchronize()
                 z = torch.ones(2**20, device="cuda")
                 z.sum().item()  # synchronization is illegal during capture
         g_ok.replay()
-        torch.cuda.synchronize()
         self.assertEqual(ok_out.sum().item(), 128.0)
 
         del g1, g2, g_ok, g_bad, x, y, z, ok_out
