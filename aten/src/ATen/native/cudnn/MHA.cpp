@@ -382,7 +382,7 @@ size_t getMHAGraphCacheLRULimit() {
       return parsed > 0 ? static_cast<size_t>(parsed) : 0;
     } catch (const std::exception&) {
       TORCH_WARN(
-          "Ignoring unparseable TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT='",
+          "Ignoring unparsable TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT='",
           raw,
           "'; expected a positive integer.");
       return 0;
