@@ -448,6 +448,9 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "nn.functional.adaptive_max_pool1d"),
     (None, None, "nn.functional.adaptive_max_pool2d"),
     (None, None, "nn.functional.adaptive_max_pool3d"),
+    # Complex is handled by torch._subclasses.complex_tensor, not the ref decomp.
+    (None, torch.complex64, "nan_to_num"),
+    (None, torch.complex128, "nan_to_num"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
