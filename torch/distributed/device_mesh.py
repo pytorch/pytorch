@@ -744,7 +744,7 @@ else:
                 >>>
                 >>> # Initialize a 3D mesh.
                 >>> mesh_3d = init_device_mesh(device_type="cuda", (2,2,2), mesh_dim_names=("dp", "pp", "cp"))
-                >>> # The order of the mesh_dim_names provided deteremines the order of dimensions in the submesh.
+                >>> # The order of the mesh_dim_names provided determines the order of dimensions in the submesh.
                 >>> dp_cp_mesh = mesh_3d["dp", "cp"]
                 >>> cp_dp_mesh = mesh_3d["cp", "dp"]
             """
@@ -763,7 +763,7 @@ else:
                 # fail as it will require a real tensor to manipulate.
                 # `unset_fake_temporarily()` and `disable_proxy_modes_tracing()`
                 # will allow us to materialize the tensors within
-                # `_create_sub_mesh`, which should not affect modling.
+                # `_create_sub_mesh`, which should not affect modeling.
                 #
                 # Note that this should be orthogonal to torch.compile(). But whether
                 # we can compile device_mesh `slicing` (no graph break) is not verified
@@ -843,41 +843,41 @@ else:
             layout: _MeshLayout,
             submesh_dim_names: tuple[str, ...],
         ) -> "DeviceMesh":
-            root_mesh = self._get_root_mesh()
-            slice_dim_group_name = []
-            if len(self._dim_group_names) > 0:
-                if len(self._dim_group_names) != len(not_none(self._mesh_dim_names)):
-                    raise AssertionError(
-                        "The number of dim_group_names and mesh_dim_names "
-                        "should have the same length if the rank is in the mesh."
-                    )
-                for name in submesh_dim_names:
-                    if name in not_none(self._mesh_dim_names):
-                        slice_dim_group_name.append(
-                            self._dim_group_names[
-                                not_none(self._mesh_dim_names).index(name)
-                            ]
+            with torch._dynamo.disable_nested_graph_breaks():
+                root_mesh = self._get_root_mesh()
+                slice_dim_group_name = []
+                dim_names = not_none(self._mesh_dim_names)
+                if len(self._dim_group_names) > 0:
+                    if len(self._dim_group_names) != len(dim_names):
+                        raise AssertionError(
+                            "The number of dim_group_names and mesh_dim_names "
+                            "should have the same length if the rank is in the mesh."
                         )
-                    else:
-                        # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
-                        # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
-                        # we don't want to optimize the code furthermore.
-                        flatten_mesh = self._flatten_mapping[name]
-                        slice_dim_group_name.append(
-                            flatten_mesh._dim_group_names[
-                                not_none(flatten_mesh._mesh_dim_names).index(name)
-                            ]
-                        )
-            res_submesh = DeviceMesh(
-                self._device_type,
-                _layout=layout,
-                _rank_map=root_mesh._rank_map,
-                mesh_dim_names=submesh_dim_names,
-                _root_mesh=root_mesh,
-                _init_backend=False,
-            )
-            res_submesh._dim_group_names = slice_dim_group_name
-            return res_submesh
+                    for name in submesh_dim_names:
+                        if name in dim_names:
+                            slice_dim_group_name.append(
+                                self._dim_group_names[dim_names.index(name)]
+                            )
+                        else:
+                            # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
+                            # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
+                            # we don't want to optimize the code furthermore.
+                            flatten_mesh = self._flatten_mapping[name]
+                            slice_dim_group_name.append(
+                                flatten_mesh._dim_group_names[
+                                    not_none(flatten_mesh._mesh_dim_names).index(name)
+                                ]
+                            )
+                res_submesh = DeviceMesh(
+                    self._device_type,
+                    _layout=layout,
+                    _rank_map=root_mesh._rank_map,
+                    mesh_dim_names=submesh_dim_names,
+                    _root_mesh=root_mesh,
+                    _init_backend=False,
+                )
+                res_submesh._dim_group_names = slice_dim_group_name
+                return res_submesh
 
         def _create_flatten_mesh(
             self,
@@ -1441,7 +1441,7 @@ else:
                 # because the concatenated indices should be indexed by the same root mesh tensor.
                 if dm._flatten_rank_map != flatten_rank_map:
                     raise RuntimeError(
-                        "Cannot concatenate DeviceMeshes derived from different device meshs"
+                        "Cannot concatenate DeviceMeshes derived from different device meshes"
                     )
             concat_mesh_layout = _MeshLayout(concat_axes)
             if not concat_mesh_layout.collapse().check_orthogonal():

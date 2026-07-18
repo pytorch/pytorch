@@ -103,6 +103,45 @@ def fx_graph_cse(
         and StorageWeakRef(n.meta["val"].untyped_storage()) in output_storages
     }
 
+    # A node used as the mutable base of a functional-wrapper op is a distinct
+    # mutable buffer. Two identical factory ops feeding distinct bases (e.g. the
+    # forward and backward ``aten.full`` from a pair of ``ones_like`` calls) must
+    # not be CSE-merged, or the later mutation aliases a buffer that still has a
+    # live downstream view and reinplacing fails (mirrors the aten.empty
+    # exclusion below). See pytorch/pytorch#170160.
+    from torch._higher_order_ops.auto_functionalize import get_mutable_args
+    from torch._higher_order_ops.triton_kernel_wrap import (
+        triton_kernel_wrapper_functional,
+    )
+
+    def _add_base(node: Any, bases: set[fx.Node]) -> None:
+        for b in node if isinstance(node, (list, tuple)) else (node,):
+            if isinstance(b, fx.Node):
+                bases.add(b)
+
+    nodes_used_as_mutation_base: set[fx.Node] = set()
+    for n in fx_g.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
+    ):
+        # v2 lists its mutable buffers explicitly in ``_all_bases``.
+        for base in n.kwargs.get("_all_bases", ()):
+            _add_base(base, nodes_used_as_mutation_base)
+    for n in fx_g.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized
+    ):
+        # v1 has no ``_all_bases``; the mutated tensors are the args named by the
+        # wrapped op's schema (``_mutable_op`` is the first positional).
+        mutable_op = n.args[0]
+        mutable_args_names, _ = get_mutable_args(mutable_op)
+        for name in mutable_args_names:
+            _add_base(n.kwargs.get(name), nodes_used_as_mutation_base)
+    for n in fx_g.find_nodes(
+        op="call_function", target=triton_kernel_wrapper_functional
+    ):
+        inner_kwargs = n.kwargs.get("kwargs", {})
+        for name in n.kwargs.get("tensors_to_clone", ()):
+            _add_base(inner_kwargs.get(name), nodes_used_as_mutation_base)
+
     for n in fx_g.nodes:
         # The placeholder, output, and get_attr nodes are copied to the new graph without change
         # do not CSE away random operations
@@ -116,6 +155,8 @@ def fx_graph_cse(
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
             or n in nodes_that_alias_outputs
+            # Keep distinct functional-wrapper mutation bases independent.
+            or n in nodes_used_as_mutation_base
             # This CSE pass currently doesn't handle re-propagation of unbacked
             # meta where it'll sometimes eliminate a _local_scalar_dense but not
             # replace the meta of downstream users. eg. one bug we've seen is:

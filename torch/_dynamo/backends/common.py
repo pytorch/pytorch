@@ -96,12 +96,6 @@ class AotAutograd:
 
         # NB: don't delete counter increment
         counters["aot_autograd"]["total"] += 1
-        use_fallback = False
-
-        if use_fallback:
-            log.debug("Unable to use AOT Autograd because graph has mutation")
-            counters["aot_autograd"]["not_ok"] += 1
-            return gm
 
         def wrap_bw_compiler(bw_compiler_fn: Callable[P, R]) -> Callable[..., R]:
             def _wrapped_bw_compiler(*args: P.args, **kwargs: P.kwargs) -> R:

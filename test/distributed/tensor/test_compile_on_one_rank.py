@@ -208,7 +208,7 @@ class TestCompileOnOneRank(DTensorTestBase):
 
         `WorldMetaClassVariable.getattro_impl` was routing the WORLD lookup through
         `SourcelessBuilder`, dropping the source it had just constructed for the
-        guard. The resulting `TorchScriptObjectVariable` had the raw ProcessGroup
+        guard. The resulting `CustomClassObjectVariable` had the raw ProcessGroup
         as its `proxy` field and blew up later in `as_proxy()` when the PG was
         passed to `_c10d_functional.all_reduce` (which only happens with
         compile_on_one_rank=True, since otherwise the PG is converted to a
