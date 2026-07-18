@@ -363,6 +363,27 @@ def is_mkldnn_conv(node: Node) -> bool:
     return False
 
 
+def _realize_efficient_zerotensor_output(r: ir.IRNode, fx_node: object) -> ir.IRNode:
+    if (
+        isinstance(fx_node, torch.fx.Node)
+        and fx_node.target is torch.ops.aten._efficientzerotensor.default
+        and isinstance(r, (ir.TensorBox, ir.BaseView))
+    ):
+        return ir.ExternKernel.realize_input(
+            fallback_handler(
+                torch.ops.aten._efficientzerotensor.default,
+                add_to_fallback_set=False,
+            )(
+                list(r.get_size()),
+                dtype=r.get_dtype(),
+                layout=torch.strided,
+                device=r.get_device(),
+                pin_memory=False,
+            )
+        )
+    return r
+
+
 class GraphLowering(torch.fx.Interpreter):
     """Lowers an FX graph to Inductor IR and drives backend code generation.
 
@@ -965,20 +986,21 @@ class GraphLowering(torch.fx.Interpreter):
         self, symbols: Iterable[sympy.Symbol]
     ) -> OrderedSet[str]:
         sources: OrderedSet[str] = OrderedSet()
+        if not self.data_ptr_keepalive_by_symbol:
+            return sources
+
         unbacked_renamings = self.sizevars.shape_env.unbacked_renamings
         for symbol in symbols:
-            symbols_to_check = [symbol]
+            source = self.data_ptr_keepalive_by_symbol.get(symbol)
+            if source is not None:
+                sources.add(source)
             renamed = unbacked_renamings.get(symbol)
             if renamed is not None:
-                symbols_to_check.append(renamed)
-            symbols_to_check.extend(
-                original
-                for original, renamed in unbacked_renamings.items()
-                if renamed == symbol
-            )
-            for symbol_to_check in symbols_to_check:
-                source = self.data_ptr_keepalive_by_symbol.get(symbol_to_check)
+                source = self.data_ptr_keepalive_by_symbol.get(renamed)
                 if source is not None:
+                    sources.add(source)
+            for original, source in self.data_ptr_keepalive_by_symbol.items():
+                if unbacked_renamings.get(original) == symbol:
                     sources.add(source)
         return sources
 
@@ -1766,6 +1788,7 @@ class GraphLowering(torch.fx.Interpreter):
                 f"Mismatch between fx_node_args length ({len(fx_node_args)}) and result length ({len(result)})"
             )
         for r, fx_node in zip(result, fx_node_args):
+            r = _realize_efficient_zerotensor_output(r, fx_node)
             if not isinstance(r, (ir.TensorBox, ir.BaseView)):
                 result_correct_strides.append(r)
             elif isinstance(r.get_output_spec(), ir.CommBufferLayout):
@@ -2370,6 +2393,8 @@ class GraphLowering(torch.fx.Interpreter):
         # symbol is likely to hit lots of GuardOnDataDependent errors that
         # we already know facts for.
         renamed_unbacked_bindings = OrderedSet(
+            # unbacked_renamings is not declared on every ShapeEnv path
+            # pyrefly: ignore[missing-attribute]
             V.fake_mode.shape_env.unbacked_renamings.get(s, s)
             for s in unbacked_bindings
         )
@@ -2667,6 +2692,7 @@ class GraphLowering(torch.fx.Interpreter):
                         if param is not None
                     ]
                     real_inputs = [
+                        # pyrefly: ignore[bad-argument-type]
                         materialize(x)
                         for x in itertools.chain(params_flat, V.real_inputs)
                     ]
