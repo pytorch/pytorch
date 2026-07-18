@@ -104,7 +104,7 @@ bool should_use_cublaslt_grouped_gemm(
     const std::optional<Tensor>& offs,
     std::optional<c10::ScalarType> out_dtype) {
   const auto dprops = at::cuda::getCurrentDeviceProperties();
-  const bool valid_sm = 
+  const bool valid_sm =
       dprops->major >= 9 && dprops->major <= 11;
   if (!valid_sm) {
     return false;
