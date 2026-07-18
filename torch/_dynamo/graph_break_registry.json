@@ -6141,5 +6141,15 @@
         "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
       ]
     }
+  ],
+  "GB0375": [
+    {
+      "Gb_type": "Attempted to wrap a dual tensor input",
+      "Context": "",
+      "Explanation": "torch.compile does not support input tensors that carry a forward-mode AD tangent; compiled code would silently drop the tangent.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
