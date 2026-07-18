@@ -695,6 +695,93 @@ class TestStatelessRNGLayout(TestCase):
         rebuilt = pytree.tree_unflatten(leaves, spec)
         self.assertEqual(rebuilt, layout)
 
+    @parametrize("op", ["normal", "uniform"])
+    def test_views_reconstruct_logical_draw(self, device, op):
+        key = random.key(42, device=device)
+        left = random.RNGView(
+            key,
+            random.RNGLayout(12, (random.RNGIndexBlock(0, 2, 4, 3),)),
+            (3, 2),
+        )
+        right = random.RNGView(
+            key,
+            random.RNGLayout(12, (random.RNGIndexBlock(2, 2, 4, 3),)),
+            (3, 2),
+        )
+        generate = getattr(random, op)
+        actual = torch.cat((generate(left), generate(right)), dim=1).flatten()
+        self.assertEqual(actual, generate(key, (12,)))
+
+    @parametrize("op", ["normal", "uniform"])
+    def test_overlapping_views_reproduce_values(self, device, op):
+        key = random.key(42, device=device)
+        left = random.RNGView(
+            key,
+            random.RNGLayout(9, (random.RNGIndexBlock(0, 3, 4, 2),)),
+            (2, 3),
+        )
+        right = random.RNGView(
+            key,
+            random.RNGLayout(9, (random.RNGIndexBlock(2, 3, 4, 2),)),
+            (2, 3),
+        )
+        generate = getattr(random, op)
+        left_values = generate(left).flatten()
+        right_values = generate(right).flatten()
+        self.assertEqual(left_values[[2, 3, 5]], right_values[[0, 2, 3]])
+
+    def test_view_is_not_a_key(self, device):
+        key = random.key(42, device=device)
+        view = random.RNGView(key, self._layout(), (6,))
+        with self.assertRaisesRegex(TypeError, "not an RNGView"):
+            random.split(view)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(TypeError, "not an RNGView"):
+            random.fold_in(view, 1)  # type: ignore[arg-type]
+
+        bad_view = random.RNGView(key, object(), (6,))  # type: ignore[arg-type]
+        with self.assertRaisesRegex(TypeError, "expected layout to be RNGLayout"):
+            random.uniform(bad_view)
+
+    @parametrize("op", ["normal", "uniform"])
+    def test_view_owns_shape_and_layout(self, device, op):
+        key = random.key(42, device=device)
+        view = random.RNGView(key, self._layout(), (3, 2))
+        generate = getattr(random, op)
+        with self.assertRaisesRegex(ValueError, "shape must not be specified"):
+            generate(view, (3, 2))
+        with self.assertRaisesRegex(ValueError, "layout must not be specified"):
+            generate(view, layout=self._layout())
+
+        inplace = getattr(random, f"{op}_")
+        with self.assertRaisesRegex(ValueError, "result shape must match"):
+            inplace(view, torch.empty(2, 3, device=device))
+        result = torch.empty(3, 2, device=device)
+        self.assertIs(inplace(view, result), result)
+        self.assertEqual(result, generate(view))
+
+    def test_view_is_pytree(self, device):
+        key = random.key(42, device=device)
+        view = random.RNGView(key, self._layout(), (3, 2))
+        leaves, spec = pytree.tree_flatten(view)
+        rebuilt = pytree.tree_unflatten(leaves, spec)
+        self.assertTrue(any(leaf is key for leaf in leaves))
+        self.assertEqual(rebuilt.key, key)
+        self.assertEqual(rebuilt.layout, view.layout)
+        self.assertEqual(rebuilt.event_shape, view.event_shape)
+
+    @parametrize("op", ["normal", "uniform"])
+    def test_vmap_over_view_keys(self, device, op):
+        keys = random.split(random.key(42, device=device), 3)
+        layout = self._layout()
+        generate = getattr(random, op)
+        actual = torch.vmap(lambda key: generate(random.RNGView(key, layout, (6,))))(
+            keys
+        )
+        expected = torch.stack(
+            [generate(random.RNGView(key, layout, (6,))) for key in keys.unbind()]
+        )
+        self.assertEqual(actual, expected)
+
     def test_dense_and_layout_inplace_wrappers_fx_trace(self, device):
         layout = self._layout()
 
@@ -725,6 +812,22 @@ class TestStatelessRNGLayout(TestCase):
 
 
 class TestStatelessRNGCompile(TestCase):
+    @parametrize("op", ["normal", "uniform"])
+    def test_view_fullgraph(self, device, op):
+        key = random.key(42, device=device)
+        view = random.RNGView(
+            key,
+            random.RNGLayout(12, (random.RNGIndexBlock(1, 2, 4, 3),)),
+            (3, 2),
+        )
+        generate = getattr(random, op)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(view):
+            return generate(view)
+
+        self.assertEqual(f(view), generate(view))
+
     @parametrize("op", ["normal", "uniform"])
     def test_layout_fullgraph(self, device, op):
         key = random.key(42, device=device)
