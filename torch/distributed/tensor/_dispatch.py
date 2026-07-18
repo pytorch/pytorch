@@ -12,7 +12,13 @@ import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch._logging import LazyString
 from torch._prims.rng_prims import run_dtensor_rng_op
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed._local_tensor import LocalTensor
+from torch.distributed._stateful_rng import (
+    _is_supported_stateful_rng_op,
+    _run_stateful_rng_op,
+)
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._nonlinear_redux import argminmax_handler
@@ -375,7 +381,34 @@ class OpDispatcher:
                     and not first_local_arg.is_meta
                     and random._rng_tracker.distribute_region_enabled
                 ):
+                    stateful_rng_layout = None
                     if (
+                        isinstance(random._rng_tracker, random.OffsetBasedRNGTracker)
+                        and (
+                            type(first_local_arg) is torch.Tensor
+                            or isinstance(first_local_arg, (LocalTensor, FakeTensor))
+                        )
+                        and _is_supported_stateful_rng_op(op_call, first_local_arg)
+                    ):
+                        stateful_rng_layout = random._try_compute_stateful_rng_layout(
+                            first_arg._spec, first_local_arg
+                        )
+
+                    if stateful_rng_layout is not None:
+                        logical_numel, index_blocks = stateful_rng_layout
+                        stateful_rng_kwargs = dict(op_info.local_kwargs)
+                        stateful_rng_kwargs["generator"] = maybe_user_generator
+                        with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                            output_sharding.output_spec
+                        ):
+                            local_results = _run_stateful_rng_op(
+                                op_call,
+                                local_tensor_args,
+                                stateful_rng_kwargs,
+                                logical_numel,
+                                index_blocks,
+                            )
+                    elif (
                         maybe_user_generator is not None
                         or first_local_arg.device.type != "cuda"
                         or (
