@@ -15,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
 )
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.utils.hooks import RemovableHandle
 
 
@@ -1159,6 +1160,7 @@ def forward(self, L_x_ : torch.Tensor):
 
 
 class HooksTestsDevice(torch._dynamo.test_case.TestCase):
+    @skipIfRocm(msg="pytorch/pytorch/issues/190414")
     @onlyAccelerator
     def test_register_hook_on_intermediate_autograd_cache(self, device):
         from torch._dynamo.utils import counters
@@ -1178,9 +1180,7 @@ class HooksTestsDevice(torch._dynamo.test_case.TestCase):
 
             # Second compile (force recompile to test cache)
             torch._dynamo.reset()
-            x2 = torch.randn(
-                4, device=instantiate_device_type_tests, requires_grad=True
-            )
+            x2 = torch.randn(4, device=device, requires_grad=True)
             torch.compile(fn, fullgraph=True)(x2).backward()  # noqa: UNSPECIFIED_BACKEND
 
             aot_counters = counters["aot_autograd"]
@@ -1224,7 +1224,7 @@ class HooksTestsDevice(torch._dynamo.test_case.TestCase):
             torch._functorch.config.enable_autograd_cache = False
 
 
-instantiate_device_type_tests(HooksTestsDevice, globals())
+instantiate_device_type_tests(HooksTestsDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
