@@ -4851,6 +4851,15 @@ def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(4, 2))
     yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(4, 2), create_tensor(4))
 
+    # 1D weight contracts away the last input dim (out_features == 1 with the
+    # trailing output dim squeezed); its backward used to SIGABRT on MPS, see
+    # https://github.com/pytorch/pytorch/issues/187988. No bias samples: a 1D
+    # weight only takes a scalar bias, which functorch transforms reject, see
+    # https://github.com/pytorch/pytorch/issues/188891.
+    yield SampleInput(create_tensor(8, 3), create_tensor(3))
+    yield SampleInput(create_tensor(2, 3, 4), create_tensor(4))
+    yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(2))
+
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
     batch_options: list[list[int]] = [
@@ -7073,6 +7082,10 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                 linear_weight = linear_sample.args[0]
             else:
                 # skip samples with linear bias as unsupported
+                continue
+
+            if linear_weight.dim() == 1:
+                # linear_cross_entropy requires a linear weight of rank >= 2
                 continue
 
             num_classes = linear_weight.shape[0]
