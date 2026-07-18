@@ -82,10 +82,52 @@ class BenchmarkCallWithDisable(BenchmarkBase):
         self._call_with_disable(self._f, self.a)
 
 
+class BenchmarkDisableDynamo(BenchmarkBase):
+    # torch._compile._disable_dynamo is the torch-internal disable used on hot
+    # paths like torch.library.custom_op and torch.optim. It routes fully
+    # recursive, non-export calls through call_with_disable.
+    def __init__(self):
+        super().__init__(
+            category="disable_dynamo_overhead",
+            device="cpu",
+        )
+
+    def name(self):
+        return self.category()
+
+    def description(self):
+        return "per-call overhead of torch._compile._disable_dynamo"
+
+    def _prepare_once(self):
+        from torch._compile import _disable_dynamo
+
+        torch._dynamo.reset()
+
+        @_disable_dynamo
+        def f(x):
+            return x
+
+        self._fn = f
+        self.a = torch.ones(1)
+
+        # warm up (also resolves the cached fast-path hooks)
+        for _ in range(10):
+            self._work()
+
+    def _prepare(self):
+        pass
+
+    def _work(self):
+        self._fn(self.a)
+
+
 def main():
     result_path = sys.argv[1]
     Benchmark().enable_instruction_count().collect_all().append_results(result_path)
     BenchmarkCallWithDisable().enable_instruction_count().collect_all().append_results(
+        result_path
+    )
+    BenchmarkDisableDynamo().enable_instruction_count().collect_all().append_results(
         result_path
     )
 
