@@ -2014,6 +2014,12 @@ class CommonTemplate:
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
 
+    def test_index_propagation_to_dtype_inf(self):
+        def fn(x):
+            return torch.sum(torch.log(x), dtype=torch.int32).float()
+
+        self.common(fn, (torch.zeros(2),))
+
     def test_index_propagation_floordiv(self):
         def repeat_interleave(x, n):
             # e.g. x=[1, 2, 3], n=2 => returns [1, 1, 2, 2, 3, 3]

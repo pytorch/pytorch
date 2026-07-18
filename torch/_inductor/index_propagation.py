@@ -21,6 +21,7 @@ printers.
 """
 
 import itertools
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, overload, TypeAlias
@@ -108,6 +109,13 @@ class SymPyOps:
         src_dtype: torch.dtype | None = None,
         use_compute_types: bool = False,
     ) -> TypedExpr:
+        if (
+            is_integer_dtype(dtype)
+            and _is_constant(value.expr)
+            and not math.isfinite(float(value.expr))
+        ):
+            # int(inf/nan) raises; leave the cast to codegen's C++ semantics
+            return NotImplemented
         return TypedExpr(value.expr, dtype)
 
     @staticmethod
