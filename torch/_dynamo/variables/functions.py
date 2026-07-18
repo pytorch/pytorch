@@ -4528,6 +4528,21 @@ class MemberDescriptorVariable(VariableTracker):
         result_source = obj.source and AttrSource(obj.source, attr_name)
         return VariableTracker.build(tx, resolved, result_source)
 
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # Mirrors member_set (PyMember_SetOne): store into the C struct field.
+        # STORE_ATTR itself applies the descriptor, so replay via store_attr on
+        # the target (mirrors the __slots__ path in UserDefinedObjectVariable).
+        # value is None for __delete__.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L180-L196
+        stored = variables.DeletedVariable() if value is None else value
+        tx.output.side_effects.store_attr(obj, self.descriptor.__name__, stored)
+        return variables.ConstantVariable.create(None)
+
 
 class GetSetDescriptorVariable(VariableTracker):
     """C getter/setter descriptor (getset_descriptor on a type).
@@ -4733,3 +4748,15 @@ class TupleGetterVariable(VariableTracker):
         return obj.call_method(
             tx, "__getitem__", [variables.ConstantVariable.create(idx)], {}
         )
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # _tuplegetter fields are read-only; tuplegetter_descr_set always
+        # raises AttributeError for both set and delete.
+        # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2665-L2673
+        msg = "can't delete attribute" if value is None else "can't set attribute"
+        raise_observed_exception(AttributeError, tx, args=[msg])
