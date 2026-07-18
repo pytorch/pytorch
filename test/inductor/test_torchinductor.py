@@ -6148,9 +6148,6 @@ for dtype in (torch.int32, torch.int64):
         out_channels = channels_groups[1]
         groups = channels_groups[2]
 
-        if is_dynamic_shape_enabled() and (dilation != 1 or groups == 1):
-            self.skipTest("Expected codegen failure under dynamic shapes")
-
         if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
             # TODO: Remove this workaround once TF32 settings are properly passed to subprocess
             # Currently, subprocess mode starts with default TF32 settings (cudnn.allow_tf32=True)
