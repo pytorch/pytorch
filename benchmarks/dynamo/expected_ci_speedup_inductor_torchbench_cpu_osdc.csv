@@ -3,13 +3,13 @@
 phlippe_densenet,inductor,float32,static,default,1.859,0.97
 basic_gnn_edgecnn,inductor,float32,dynamic,default,1.53529
 llama_v2_7b_16h,inductor,float32,dynamic,default,1.212
-resnet50,inductor,float32,dynamic,default,1.81124,0.985
+resnet50,inductor,float32,dynamic,default,1.832,0.975
 mobilenet_v3_large,inductor,float32,static,cpp,2.980745
 functorch_maml_omniglot,inductor,float32,dynamic,cpp,1.698,0.98
-yolov3,export-aot-inductor,float32,static,default,1.556697
+yolov3,export-aot-inductor,float32,static,default,1.571,0.988
 mobilenet_v2,export-aot-inductor,float32,static,default,3.11847
 resnext50_32x4d,export-aot-inductor,float32,dynamic,default,1.93167
-resnext50_32x4d,inductor,amp,static,default,1.47023111
+resnext50_32x4d,inductor,amp,static,default,3.904
 vgg16,inductor,amp,static,default,1.2692454
 llama,inductor,amp,static,default,1.33157028
 mnasnet1_0,inductor,amp,static,cpp,2.1296814

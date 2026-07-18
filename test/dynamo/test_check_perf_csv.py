@@ -84,7 +84,7 @@ class CheckPerfCsvTest(TestCase):
 
     def _run_check_expecting_failure(self, **kwargs):
         output = io.StringIO()
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaisesRegex(SystemExit, "^1$"):
             with (
                 _perf_csv(
                     kwargs.pop("speedup"), kwargs.pop("abs_latency", 10.0)
@@ -98,7 +98,6 @@ class CheckPerfCsvTest(TestCase):
                     metric=kwargs.pop("metric", "speedup"),
                     fail_on_improvement=kwargs.pop("fail_on_improvement", True),
                 )
-        self.assertEqual(cm.exception.code, 1)
         self.assertFalse(kwargs)
         return output.getvalue()
 
