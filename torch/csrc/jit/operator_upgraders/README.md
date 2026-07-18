@@ -118,7 +118,7 @@ When making changes to the operators, the first thing to identify is if it's BC/
   //     and aten::linspace.out to error out when steps is not
   //     provided. (see: https://github.com/pytorch/pytorch/issues/55951)
   // 2) [01/30/2022]
-  //     Bump the version number to 9 to update aten::logspace and
+  //     Bump the version number to 9 to update aten::logspace
   //     and aten::logspace.out to error out when steps is not
   //     provided. (see: https://github.com/pytorch/pytorch/issues/55951)
   constexpr uint64_t kProducedFileFormatVersion = 0x9L;
