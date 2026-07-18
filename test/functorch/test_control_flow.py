@@ -11293,6 +11293,37 @@ class GraphModule(torch.nn.Module):
         )(x, y)
         self.assertEqual(compiled_out, out)
 
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_cond_branch_closure_over_int_args(self, backend):
+        def f(rows: int, cols: int):
+            pred = torch.tensor(True)
+
+            def true_fn():
+                return torch.ones(rows, cols)
+
+            def false_fn():
+                return torch.zeros(rows, cols)
+
+            return torch.cond(pred, true_fn, false_fn)
+
+        compiled = torch.compile(f, backend=backend, dynamic=True, fullgraph=True)
+        self.assertEqual(compiled(5, 1000), f(5, 1000))
+
+        # differing sizes still fail on inductor (#189528), hence eager/aot_eager only
+        def g(rows: int, cols: int):
+            pred = torch.tensor(True)
+
+            def true_fn():
+                return torch.ones(rows, cols)
+
+            def false_fn():
+                return torch.zeros(rows, cols + 1)
+
+            return torch.cond(pred, true_fn, false_fn)
+
+        compiled = torch.compile(g, backend=backend, dynamic=True, fullgraph=True)
+        self.assertEqual(compiled(5, 7), g(5, 7))
+
 
 class TestAutoFunctionalizeControlFlow(TestCase):
     def check(self, gen_fn, args, device, dynamic) -> torch.fx.GraphModule:
