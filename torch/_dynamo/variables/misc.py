@@ -908,10 +908,19 @@ class NameErrorVariable(_KwargAttrExceptionVariable):
     _kwarg_attrs = ("name",)
 
 
-def check_no_unsafe_exception_inspection(value: VariableTracker) -> None:
+def check_no_unsafe_exception_inspection(
+    value: VariableTracker, _seen: set[int] | None = None
+) -> None:
     # Container checks catch common formatting paths early; leaf exception
     # guards still enforce safety if an exception is reached through another
     # object shape.
+    if _seen is None:
+        _seen = set()
+    value_id = id(value)
+    if value_id in _seen:
+        return
+    _seen.add(value_id)
+
     if isinstance(
         value,
         (variables.ExceptionVariable, variables.UserDefinedExceptionObjectVariable),
@@ -919,14 +928,14 @@ def check_no_unsafe_exception_inspection(value: VariableTracker) -> None:
         value.check_safe_to_inspect()
     elif isinstance(value, variables.BaseListVariable):
         for item in value.items:
-            check_no_unsafe_exception_inspection(item)
+            check_no_unsafe_exception_inspection(item, _seen)
     elif isinstance(value, variables.ConstDictVariable):
         for key, item in value.items.items():
-            check_no_unsafe_exception_inspection(key.vt)
-            check_no_unsafe_exception_inspection(item)
+            check_no_unsafe_exception_inspection(key.vt, _seen)
+            check_no_unsafe_exception_inspection(item, _seen)
     elif isinstance(value, variables.SetVariable):
         for item in value.set_items:
-            check_no_unsafe_exception_inspection(item.vt)
+            check_no_unsafe_exception_inspection(item.vt, _seen)
 
 
 class UnknownVariable(VariableTracker):

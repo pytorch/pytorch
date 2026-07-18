@@ -78,6 +78,7 @@ from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
+    _get_torch_rocm_version,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
@@ -4796,6 +4797,12 @@ for dtype in (torch.int32, torch.int64):
             return torch.dot(a, b) + torch.dot(a, b)
 
         fn = torch.vmap(dot_based)
+        gcn_arch_name = (
+            torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+            if TEST_WITH_ROCM
+            else ""
+        )
+        is_gfx11_0_or_5_x = re.fullmatch(r"gfx11[05]\d", gcn_arch_name) is not None
         bmm_codegen_call = (
             "aoti_torch_cuda_bmm_out" if config.cpp_wrapper else "extern_kernels.bmm"
         )
@@ -4821,7 +4828,18 @@ for dtype in (torch.int32, torch.int64):
                     actual, code = run_and_get_code(
                         torch.compile(fn, fullgraph=True), a, b
                     )
-                    self.assertEqual(actual, expected)
+                    # Workaround bf16 accuracy issue for gfx1100 root cause is incorrect calculation
+                    # `expected` in eager mode that uses rocBLAS(rocblas_gemvtsm_kernel) on gfx11[0|5]x
+                    # in case of usage of ROCM < 7.13
+                    if (
+                        TEST_WITH_ROCM
+                        and _get_torch_rocm_version() < (7, 13)
+                        and is_gfx11_0_or_5_x
+                        and dtype == torch.bfloat16
+                    ):
+                        self.assertEqual(actual, expected, atol=0.05, rtol=0.1)
+                    else:
+                        self.assertEqual(actual, expected)
                     code_str = "\n".join(code)
                     self.assertNotIn(bmm_codegen_call, code_str)
                     self.assertNotIn(bmm_fallback_call, code_str)
@@ -8231,6 +8249,39 @@ for dtype in (torch.int32, torch.int64):
                     make_arg(16, 16, high=intmax),
                 ),
             )
+
+    @skip_if_triton_cpu
+    def test_pow_backward_dynamic_symint_exponent(self):
+        # Under dynamic=True the integer exponent becomes a symbolic scalar;
+        # pow's backward formula compared it with Scalar::equal, which was NYI
+        # for symbolic scalars. It must instead emit the general gradient and
+        # mask exponent == 0 (gradient 0) without specializing the exponent.
+        # Issue #185715.
+        def fn(x, exponent):
+            y = torch.pow(x, exponent)
+            (grad,) = torch.autograd.grad(y.sum(), x)
+            return y, grad
+
+        # base contains 0.0 so the exponent==0 path exercises the nan-avoidance
+        # mask (0 * self.pow(-1) would be nan at self == 0).
+        for exponent in (0, 1, 2, 3):
+            base = torch.tensor([0.0, 1.0, 2.5], device=self.device)
+            x = base.clone().requires_grad_(True)
+            x_c = base.clone().requires_grad_(True)
+            torch._dynamo.reset()
+            self.assertEqual(
+                fn(x, exponent), torch.compile(fn, dynamic=True)(x_c, exponent)
+            )
+
+        # The symbolic exponent must not be specialized: one graph serves all
+        # exponents, so changing it should not recompile.
+        cnts = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend=cnts, dynamic=True)
+        for exponent in (2, 3, 4, 5):
+            x = torch.ones(4, device=self.device, requires_grad=True)
+            compiled(x, exponent)
+        self.assertEqual(cnts.frame_count, 1)
 
     @xfail_if_triton_cpu
     def test_pow_symfloat(self):

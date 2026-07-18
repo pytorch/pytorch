@@ -458,8 +458,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             raise NotImplementedError(f"{self} has no type") from None
 
     def python_type_name(self) -> str:
+        """
+        Return the type name for the Python type this VariableTracker represents.
+
+        Mirrors CPython's tp_name slot (PyTypeObject.tp_name). In Python 3.10+,
+        type.__name__ matches CPython's tp_name exactly (e.g., "list", "NoneType").
+
+        Note: There are no external callers outside torch._dynamo that rely on this.
+        Internal uses should prefer this over hardcoded type name strings.
+        """
         try:
-            return self.python_type().__name__
+            name = type.__dict__["__name__"].__get__(self.python_type(), type)
+            if isinstance(name, str):
+                return name
+            return "<unknown type>"
         except NotImplementedError:
             return "<unknown type>"
 

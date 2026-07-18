@@ -2679,8 +2679,11 @@ class InstructionTranslatorBase(
         # handler, preserving the original raise location via python_stack.
         python_stack = getattr(exc_, "python_stack", None)
         if exc_.fake_tensor_error is not None:
+            exc_type_name = type.__dict__["__name__"].__get__(exc_.exc_type, type)
+            if not isinstance(exc_type_name, str):
+                exc_type_name = "<unknown type>"
             raise FakeTensorObservedException(
-                f"raised exception {exc_.debug_repr()}",
+                f"raised exception {exc_type_name}",
                 real_stack=python_stack,
                 fake_tensor_error=exc_.fake_tensor_error,
                 fake_mode=exc_.fake_mode,

@@ -826,6 +826,81 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertNotIn("expand_as", node_targets)
         self.assertIn("sin", node_targets)
 
+    def test_fake_tensor_runtime_error_in_yield_from_throw(self):
+        backend = EagerAndRecordGraphs()
+
+        def subgen(t):
+            try:
+                yield t.cos()
+            except ValueError:
+                t.expand_as(torch.randn(2))
+                yield t.tan()
+
+        def outer(t):
+            yield from subgen(t)
+            yield t + 1
+
+        def fn(t):
+            gen = outer(t)
+            first = next(gen)
+            try:
+                gen.throw(ValueError)
+            except RuntimeError:
+                caught = t.sin()
+            else:
+                caught = t.cos()
+            try:
+                after = next(gen)
+            except StopIteration:
+                after = t + 2
+            return first + caught + after
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), opt_fn(t))
+
+        self.assertEqual(len(backend.graphs), 1)
+        node_targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertNotIn("expand_as", node_targets)
+        self.assertIn("sin", node_targets)
+
+    def test_fake_tensor_runtime_error_in_yield_from_close(self):
+        backend = EagerAndRecordGraphs()
+
+        def subgen(t):
+            try:
+                yield t.cos()
+            finally:
+                t.expand_as(torch.randn(2))
+
+        def outer(t):
+            yield from subgen(t)
+            yield t + 1
+
+        def fn(t):
+            gen = outer(t)
+            first = next(gen)
+            try:
+                gen.close()
+            except RuntimeError:
+                caught = t.sin()
+            else:
+                caught = t.cos()
+            try:
+                after = next(gen)
+            except StopIteration:
+                after = t + 2
+            return first + caught + after
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), opt_fn(t))
+
+        self.assertEqual(len(backend.graphs), 1)
+        node_targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertNotIn("expand_as", node_targets)
+        self.assertIn("sin", node_targets)
+
     def test_fake_tensor_runtime_error_subclass(self):
         backend = EagerAndRecordGraphs()
 
@@ -1129,6 +1204,144 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         ):
             opt_fn(t)
         self.assertEqual(format_calls, [])
+
+    def test_fake_tensor_runtime_error_args_property_not_read(self):
+        args_calls = []
+
+        class ArgsPropertyRuntimeError(RuntimeError):
+            @property
+            def args(self):
+                args_calls.append("args")
+                raise RuntimeError("args property should not run")
+
+        @torch.library.custom_op(
+            "test_dynamo::runtime_error_args_property", mutates_args=()
+        )
+        def runtime_error_args_property(t: torch.Tensor) -> torch.Tensor:
+            raise ArgsPropertyRuntimeError("real")
+
+        @runtime_error_args_property.register_fake
+        def _(t):
+            raise ArgsPropertyRuntimeError("fake")
+
+        def fn(t):
+            try:
+                runtime_error_args_property(t)
+            except ValueError:
+                return t.sin()
+            return t.cos()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            TorchRuntimeError, "RuntimeError when making fake tensor call"
+        ):
+            opt_fn(torch.randn(2, 3))
+        self.assertEqual(args_calls, [])
+
+    def test_fake_tensor_runtime_error_metaclass_name_not_read(self):
+        name_reads = []
+
+        class NameReadingMeta(type):
+            def __getattribute__(cls, name):
+                if name == "__name__":
+                    name_reads.append(name)
+                return super().__getattribute__(name)
+
+        class MetaclassNameRuntimeError(RuntimeError, metaclass=NameReadingMeta):
+            pass
+
+        @torch.library.custom_op(
+            "test_dynamo::runtime_error_metaclass_name", mutates_args=()
+        )
+        def runtime_error_metaclass_name(t: torch.Tensor) -> torch.Tensor:
+            raise MetaclassNameRuntimeError("real")
+
+        @runtime_error_metaclass_name.register_fake
+        def _(t):
+            raise MetaclassNameRuntimeError("fake")
+
+        def fn(t):
+            try:
+                runtime_error_metaclass_name(t)
+            except RuntimeError:
+                if name_reads:
+                    return t + 2
+                return t
+            return t + 1
+
+        t = torch.randn(2, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(t), opt_fn(t))
+        self.assertEqual(name_reads, [])
+
+    def test_fake_tensor_runtime_error_metaclass_name_descriptor_not_read(self):
+        name_reads = []
+
+        class NameDescriptor:
+            def __get__(self, obj, typ=None):
+                name_reads.append("__name__")
+                raise AssertionError("__name__ descriptor should not run")
+
+        class NameDescriptorMeta(type):
+            __name__ = NameDescriptor()
+
+        class MetaclassNameDescriptorRuntimeError(
+            RuntimeError, metaclass=NameDescriptorMeta
+        ):
+            pass
+
+        @torch.library.custom_op(
+            "test_dynamo::runtime_error_metaclass_name_descriptor",
+            mutates_args=(),
+        )
+        def runtime_error_metaclass_name_descriptor(t: torch.Tensor) -> torch.Tensor:
+            raise MetaclassNameDescriptorRuntimeError("real")
+
+        @runtime_error_metaclass_name_descriptor.register_fake
+        def _(t):
+            raise MetaclassNameDescriptorRuntimeError("fake")
+
+        def fn(t):
+            try:
+                runtime_error_metaclass_name_descriptor(t)
+            except RuntimeError:
+                if name_reads:
+                    return t + 2
+                return t
+            return t + 1
+
+        t = torch.randn(2, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(t), opt_fn(t))
+        self.assertEqual(name_reads, [])
+
+    def test_fake_tensor_runtime_error_missing_op_profile_not_caught(self):
+        from torch._library.fake_profile import MissingOpProfile
+
+        @torch.library.custom_op("test_dynamo::missing_op_profile", mutates_args=())
+        def missing_op_profile(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        @missing_op_profile.register_fake
+        def _(a, b):
+            raise MissingOpProfile("missing fake profile")
+
+        def fn(a, b):
+            try:
+                missing_op_profile(a, b)
+            except RuntimeError:
+                return a.sin()
+            return a + b
+
+        a = torch.randn(2, 3)
+        b = torch.randn(2, 3)
+        self.assertEqual(fn(a, b), a + b)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            TorchRuntimeError, "RuntimeError when making fake tensor call"
+        ):
+            opt_fn(a, b)
 
     def test_fake_tensor_runtime_error_in_with_cleanup(self):
         class SwallowRuntimeError:
@@ -1839,6 +2052,16 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         y, s = opt_fn(t)
         self.assertEqual(y, t.sin())
         self.assertEqual(s, "custom str")
+        self.assertEqual(fn(t), opt_fn(t))
+
+    def test_string_format_self_referential_list(self):
+        def fn(t):
+            items = []
+            items.append(items)
+            return f"{items}", t.sin()
+
+        t = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(t), opt_fn(t))
 
     def test_str_repr_exception_multi_args(self):

@@ -3983,6 +3983,7 @@ _INTERNAL_FAKE_TENSOR_RUNTIME_ERRORS: tuple[type[BaseException], ...] = (
     # These signal fake/meta execution bookkeeping failures, not eager
     # RuntimeErrors from the user op. New fake tensor internal RuntimeError
     # subclasses must be listed here or converted to FakeTensorInternalError.
+    torch._library.fake_profile.MissingOpProfile,
     torch._subclasses.fake_tensor.DataDependentOutputException,
     torch._subclasses.fake_tensor.DynamicOutputShapeException,
     torch._subclasses.fake_tensor.FakeTensorDeviceMismatchError,
@@ -4073,7 +4074,10 @@ def _get_fake_value_impl(
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]  # type: ignore[index]
 
-        if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
+        if (
+            is_lazy_module(nnmodule)
+            and inspect.getattr_static(nnmodule, "_initialize_hook", None) is not None
+        ):
             # In the case of a lazy module, we want to run
             # the pre-hooks which initialize it.
             # Afterwards, lazy module deletes its pre-hooks
@@ -4300,13 +4304,18 @@ def run_node(
         def safe_exception_repr(e: Any) -> str:
             if not isinstance(e, BaseException):
                 return repr(e)
-            if not e.args:
+            args_descriptor = cast(Any, BaseException.__dict__["args"])
+            exception_args = args_descriptor.__get__(e, type(e))
+            if not exception_args:
                 args_repr = ""
-            elif all(type(arg) is str for arg in e.args):
-                args_repr = ", ".join(repr(arg) for arg in e.args)
+            elif all(type(arg) is str for arg in exception_args):
+                args_repr = ", ".join(repr(arg) for arg in exception_args)
             else:
                 args_repr = "<non-string args>"
-            return f"{type(e).__name__}({args_repr})"
+            type_name = type.__dict__["__name__"].__get__(type(e), type)
+            if not isinstance(type_name, str):
+                type_name = "<unknown type>"
+            return f"{type_name}({args_repr})"
 
         def make_error_message(e: Any) -> str:
             return (
