@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs, disable-error-code="attr-defined, valid-type"
 import functools
 import logging
+import os
 import random
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -20,13 +21,91 @@ from ...utils import IndentedBuffer
 log = logging.getLogger(__name__)
 
 
-def _ck_tile_universal_gemm_v2_api() -> bool:
-    # ROCm 7.14+ ck_tile headers use a simplified UniversalGemmPipelineProblem
-    # API (no has_hot_loop / tail_number template parameters).
+_CK_TILE_PIPELINE_PROBLEM_HEADER = "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
+_SCHEDULER_PARAM = "GemmPipelineScheduler Scheduler_"
+
+
+def _ck_tile_rocm_include_dir(rocm_home: str | None) -> str | None:
+    if rocm_home:
+        return os.path.join(rocm_home, "include")
+    try:
+        from torch.utils import cpp_extension
+
+        if cpp_extension.ROCM_HOME:
+            return os.path.join(cpp_extension.ROCM_HOME, "include")
+    except Exception:
+        pass
+    rocm_home = os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH")
+    if rocm_home:
+        return os.path.join(rocm_home, "include")
+    try:
+        from torch.utils.cpp_extension import _join_rocm_home
+
+        return _join_rocm_home("include")
+    except OSError:
+        return None
+
+
+def _header_has_v2_universal_gemm_pipeline(header_text: str) -> bool | None:
+    pos = header_text.find("UniversalGemmPipelineProblem")
+    if pos < 0:
+        return None
+
+    sched_pos = header_text.find(_SCHEDULER_PARAM, pos)
+    if sched_pos < 0 or sched_pos - pos > 4000:
+        return None
+
+    after_scheduler = header_text[sched_pos : sched_pos + 800]
+    elemwise_pos = after_scheduler.find("AElementWise_")
+    hotloop_pos = after_scheduler.find("HasHotLoop_")
+    if elemwise_pos >= 0 and (hotloop_pos < 0 or elemwise_pos < hotloop_pos):
+        return True
+    if hotloop_pos >= 0 and (elemwise_pos < 0 or hotloop_pos < elemwise_pos):
+        return False
+    return None
+
+
+def _rocm_version_tuple() -> tuple[int, int] | None:
+    if torch.version.hip is not None:
+        return tuple(int(v) for v in torch.version.hip.split(".")[:2])  # type: ignore[return-value]
+
+    rocm_home = _ck_tile_rocm_include_dir(None)
+    if rocm_home is not None:
+        import re
+
+        match = re.search(
+            r"rocm[-/](\d+)\.(\d+)", os.path.dirname(rocm_home), re.IGNORECASE
+        )
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    return None
+
+
+@functools.cache
+def _ck_tile_universal_gemm_v2_api(rocm_home: str | None) -> bool:
+    # ck_tile headers are resolved from $ROCM_HOME at kernel compile time, not
+    # from torch.version.hip (frozen at PyTorch build time). Probe the header
+    # hipcc will use; fall back to the HIP version string when unavailable.
     if torch.version.hip is None:
         return False
-    rocm_version = tuple(int(v) for v in torch.version.hip.split(".")[:2])
-    return rocm_version >= (7, 14)
+
+    rocm_include = _ck_tile_rocm_include_dir(rocm_home)
+    if rocm_include is not None:
+        header_path = os.path.join(rocm_include, _CK_TILE_PIPELINE_PROBLEM_HEADER)
+        try:
+            with open(header_path) as header_file:
+                header_text = header_file.read()
+            header_v2 = _header_has_v2_universal_gemm_pipeline(header_text)
+            if header_v2 is not None:
+                return header_v2
+        except OSError:
+            pass
+
+    # torch.version.hip is the HIP version, conventionally aligned with ROCm.
+    rocm_version = _rocm_version_tuple()
+    if rocm_version is not None:
+        return rocm_version >= (7, 14)
+    return False
 
 
 def is_static_int(number):
@@ -239,12 +318,7 @@ class CKTileGemmTemplate(CKTileTemplate):
     This class is used for rendering CK-Tile Universal GEMM kernels
     """
 
-    gemm_kernel_launch_v1 = r"""
-        using {{instance_namespace}}::BaseGemmPipeline;
-        using {{instance_namespace}}::TilePartitioner;
-
-        constexpr auto TileK = {{instance_namespace}}::TileK;
-
+    gemm_kernel_launch = r"""
         const auto BiasTerms = std::array<const void*, 0> ();
         const auto BiasStrides = std::array<int32_t, 0> ();
 
@@ -267,6 +341,25 @@ class CKTileGemmTemplate(CKTileTemplate):
             *workspace_size = 0;
             return 0;
         }
+
+        {% if use_v2_api %}
+        using Kernel = {{instance_namespace}}::Kernel;
+
+        if (!Kernel::IsSupportedArgument(kargs)) {
+            throw std::runtime_error("invalid argument");
+        }
+        auto stream_config = ck_tile::stream_config{stream};
+        auto grid_size = Kernel::GridSize(M, N, kBatch);
+        auto block_size = Kernel::BlockSize();
+        constexpr auto lds_bytes = 0;
+        constexpr auto kBlockPerCU = 1;
+        auto gemm = ck_tile::make_kernel<kBlockPerCU>(Kernel{}, grid_size, block_size, lds_bytes, kargs);
+        ck_tile::launch_kernel(stream_config, gemm);
+        {% else %}
+        using {{instance_namespace}}::BaseGemmPipeline;
+        using {{instance_namespace}}::TilePartitioner;
+
+        constexpr auto TileK = {{instance_namespace}}::TileK;
 
         const ck_tile::index_t k_grain     = kBatch * TileK;
         const ck_tile::index_t K_split     = (K + k_grain - 1) / k_grain * TileK;
@@ -281,6 +374,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             using Kernel = {{instance_namespace}}::Kernel<has_hot_loop_v, tail_number_v>;
 
             if (!Kernel::IsSupportedArgument(kargs)) {
+                // we do our best to statically avoid this case in filter_op
                 throw std::runtime_error("invalid argument");
             }
             auto stream_config = ck_tile::stream_config{stream};
@@ -293,42 +387,7 @@ class CKTileGemmTemplate(CKTileTemplate):
         };
 
         BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
-    """
-
-    gemm_kernel_launch_v2 = r"""
-        const auto BiasTerms = std::array<const void*, 0> ();
-        const auto BiasStrides = std::array<int32_t, 0> ();
-
-        auto kargs = ck_tile::UniversalGemmKernelArgs<> {
-           {X},
-           {W},
-           BiasTerms,
-           Y,
-           M,
-           N,
-           K,
-           {LDA},
-           {LDB},
-           BiasStrides,
-           LDC,
-           kBatch
-        };
-
-        if (workspace_size) {
-            *workspace_size = 0;
-            return 0;
-        }
-
-        using Kernel = {{instance_namespace}}::Kernel;
-
-        if (!Kernel::IsSupportedArgument(kargs)) {
-            throw std::runtime_error("invalid argument");
-        }
-        auto stream_config = ck_tile::stream_config{stream};
-        auto grid_size = Kernel::GridSize(M, N, kBatch);
-        auto block_size = Kernel::BlockSize();
-        auto gemm = ck_tile::make_kernel<1>(Kernel{}, grid_size, block_size, 0, kargs);
-        ck_tile::launch_kernel(stream_config, gemm);
+        {% endif %}
     """
 
     gemm_template = r"""{{version_comment}}
@@ -673,7 +732,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                 return r"""
             using DsDataType = ck_tile::tuple<>; // no bias terms for vanilla GEMM
             using DsLayout = ck_tile::tuple<>;
-            constexpr auto ELayout = CLayout;
+            using ELayout = CLayout;
             using CDEElementWise = ck_tile::element_wise::PassThrough; // no-op
             using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<ADataType,
                                                                      BDataType,
@@ -718,7 +777,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             using GemmPipeline = ck_tile::GemmPipelineAgBgCr{pipeline_type}<UniversalGemmProblem>;
         """
 
-        use_v2_api = _ck_tile_universal_gemm_v2_api()
+        use_v2_api = _ck_tile_universal_gemm_v2_api(config.rocm.rocm_home)
         if use_v2_api:
             rendered_pipeline_problem = ""
             rendered_universal_gemm_problem = ""
@@ -798,13 +857,11 @@ class CKTileGemmTemplate(CKTileTemplate):
 */
 """
 
-        kernel_launch_template = (
-            self.gemm_kernel_launch_v2
-            if _ck_tile_universal_gemm_v2_api()
-            else self.gemm_kernel_launch_v1
-        )
-        kernel_launch = self._template_from_string(kernel_launch_template).render(
+        use_v2_api = _ck_tile_universal_gemm_v2_api(config.rocm.rocm_home)
+
+        kernel_launch = self._template_from_string(self.gemm_kernel_launch).render(
             instance_namespace=op.name(),
+            use_v2_api=use_v2_api,
         )
 
         return self._template_from_string(self.gemm_template).render(
@@ -819,7 +876,6 @@ class CKTileGemmTemplate(CKTileTemplate):
                     f"int32_t {arg}" for arg in ["M", "N", "K", "LDA", "LDB", "LDC"]
                 ],
             ),
-            instance_namespace=op.name(),
             kernel_launch=kernel_launch,
             version_comment=version_comment,
         )
