@@ -12711,6 +12711,15 @@ def sample_inputs_abs(op_info, device, dtype, requires_grad, op_kwargs=None, **k
             dtype=dtype,
             requires_grad=requires_grad,
         ))
+    # Integer magnitudes above 2**24 lose precision if abs routes through
+    # float32, see https://github.com/pytorch/pytorch/issues/190052. Shaped 2D
+    # so it is also a valid input for the sparse-CSR unary tests.
+    large_integer_vals = {
+        torch.int32: [-(2**24 + 1), 2**24 + 1, -(2**24 + 3), -(2**31 - 1)],
+        torch.int64: [-(2**24 + 1), -(2**33 + 7), -(2**62 + 12345), -(2**63 - 1)],
+    }
+    if dtype in large_integer_vals:
+        yield SampleInput(torch.tensor([large_integer_vals[dtype]], device=device, dtype=dtype))
 
 # Operator database (sorted alphabetically)
 op_db: list[OpInfo] = [
