@@ -2610,13 +2610,13 @@ class VariableBuilder:
                 ],
             )
 
-        if getattr(value, "_is_fsdp_managed_module", False):
+        if inspect.getattr_static(value, "_is_fsdp_managed_module", False):
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
 
             # we can't do this assert inside FSDP constructor,
             # since we don't know yet whether dynamo will be used
-            if not getattr(value, "_fsdp_use_orig_params", False):
+            if not inspect.getattr_static(value, "_fsdp_use_orig_params", False):
                 unimplemented(
                     gb_type="FSDP with use_orig_params=False",
                     context="",
