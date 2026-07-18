@@ -3274,7 +3274,7 @@ def gradcheck_wrapper_triangular_input_real_positive_diagonal(
     )
 
 
-def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
+def gradcheck_wrapper_masked_operation(op, input, *args, original_op=None, **kwargs):
     """Gradcheck wrapper for masked operations.
 
     When mask is specified, replaces masked-out elements with zeros.
@@ -3283,9 +3283,10 @@ def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
     for instance, for minimum and maximum reductions.
     """
     output = op(input, *args, **kwargs)
-    mask = kwargs.get("mask")
-    if mask is not None:
-        output_mask = torch.masked._output_mask(op, input, *args, **kwargs)
+    if kwargs.get("mask") is not None:
+        output_mask = torch.masked._output_mask(
+            original_op or op, input, *args, **kwargs
+        )
         output = torch.where(output_mask, output, output.new_zeros([]))
     return output
 
