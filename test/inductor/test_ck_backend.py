@@ -569,7 +569,13 @@ class TestCKTileUniversalGemmTemplate(TestCase):
         from torch._inductor.codegen.rocm import ck_tile_universal_gemm_template
 
         self._ck_tile = ck_tile_universal_gemm_template
+        # _ck_tile_universal_gemm_v2_api is functools.cache'd on rocm_home.
         self._ck_tile._ck_tile_universal_gemm_v2_api.cache_clear()
+
+    def _sample_ck_tile_op(self):
+        ck_ops = self._ck_tile.ops()
+        self.assertTrue(len(ck_ops) > 0, "expected CK-Tile gemm ops to be defined")
+        return ck_ops[0]
 
     def _write_pipeline_header(self, rocm_home: str, body: str) -> None:
         header_dir = os.path.join(
@@ -639,7 +645,7 @@ struct UniversalGemmPipelineProblem
         with patch(
             f"{self._MODULE}._ck_tile_universal_gemm_v2_api", return_value=False
         ):
-            code = object.__new__(tmpl).emit_ck_instance(self._ck_tile.ops()[0])
+            code = object.__new__(tmpl).emit_ck_instance(self._sample_ck_tile_op())
         self.assertIn("has_hot_loop_v", code)
         self.assertIn("GemmPipelineProblem", code)
         self.assertNotIn(
@@ -652,7 +658,7 @@ struct UniversalGemmPipelineProblem
 
         tmpl = self._ck_tile.CKTileGemmTemplate
         with patch(f"{self._MODULE}._ck_tile_universal_gemm_v2_api", return_value=True):
-            code = object.__new__(tmpl).emit_ck_instance(self._ck_tile.ops()[0])
+            code = object.__new__(tmpl).emit_ck_instance(self._sample_ck_tile_op())
         self.assertNotIn("TailHandler", code)
         self.assertNotIn("has_hot_loop_v", code)
         self.assertIn(

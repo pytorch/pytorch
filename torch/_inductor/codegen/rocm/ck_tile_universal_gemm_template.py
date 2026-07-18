@@ -23,18 +23,19 @@ log = logging.getLogger(__name__)
 
 _CK_TILE_PIPELINE_PROBLEM_HEADER = "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 _SCHEDULER_PARAM = "GemmPipelineScheduler Scheduler_"
+# ck_tile headers place Scheduler_ within a few KB of UniversalGemmPipelineProblem.
+_HEADER_SCHEDULER_MAX_DISTANCE = 4000
+# Enough to cover the template parameters immediately following Scheduler_.
+_HEADER_AFTER_SCHEDULER_WINDOW = 800
 
 
 def _ck_tile_rocm_include_dir(rocm_home: str | None) -> str | None:
     if rocm_home:
         return os.path.join(rocm_home, "include")
-    try:
-        from torch.utils import cpp_extension
+    from torch.utils import cpp_extension
 
-        if cpp_extension.ROCM_HOME:
-            return os.path.join(cpp_extension.ROCM_HOME, "include")
-    except Exception:
-        pass
+    if cpp_extension.ROCM_HOME:
+        return os.path.join(cpp_extension.ROCM_HOME, "include")
     rocm_home = os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH")
     if rocm_home:
         return os.path.join(rocm_home, "include")
@@ -52,32 +53,18 @@ def _header_has_v2_universal_gemm_pipeline(header_text: str) -> bool | None:
         return None
 
     sched_pos = header_text.find(_SCHEDULER_PARAM, pos)
-    if sched_pos < 0 or sched_pos - pos > 4000:
+    if sched_pos < 0 or sched_pos - pos > _HEADER_SCHEDULER_MAX_DISTANCE:
         return None
 
-    after_scheduler = header_text[sched_pos : sched_pos + 800]
+    after_scheduler = header_text[
+        sched_pos : sched_pos + _HEADER_AFTER_SCHEDULER_WINDOW
+    ]
     elemwise_pos = after_scheduler.find("AElementWise_")
     hotloop_pos = after_scheduler.find("HasHotLoop_")
     if elemwise_pos >= 0 and (hotloop_pos < 0 or elemwise_pos < hotloop_pos):
         return True
     if hotloop_pos >= 0 and (elemwise_pos < 0 or hotloop_pos < elemwise_pos):
         return False
-    return None
-
-
-def _rocm_version_tuple() -> tuple[int, int] | None:
-    if torch.version.hip is not None:
-        return tuple(int(v) for v in torch.version.hip.split(".")[:2])  # type: ignore[return-value]
-
-    rocm_home = _ck_tile_rocm_include_dir(None)
-    if rocm_home is not None:
-        import re
-
-        match = re.search(
-            r"rocm[-/](\d+)\.(\d+)", os.path.dirname(rocm_home), re.IGNORECASE
-        )
-        if match:
-            return int(match.group(1)), int(match.group(2))
     return None
 
 
@@ -98,14 +85,17 @@ def _ck_tile_universal_gemm_v2_api(rocm_home: str | None) -> bool:
             header_v2 = _header_has_v2_universal_gemm_pipeline(header_text)
             if header_v2 is not None:
                 return header_v2
+            log.debug(
+                "Could not determine CK-Tile universal GEMM API from %s; "
+                "falling back to torch.version.hip",
+                header_path,
+            )
         except OSError:
             pass
 
     # torch.version.hip is the HIP version, conventionally aligned with ROCm.
-    rocm_version = _rocm_version_tuple()
-    if rocm_version is not None:
-        return rocm_version >= (7, 14)
-    return False
+    rocm_version = tuple(int(v) for v in torch.version.hip.split(".")[:2])
+    return rocm_version >= (7, 14)
 
 
 def is_static_int(number):
