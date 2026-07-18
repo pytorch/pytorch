@@ -4046,7 +4046,10 @@ def _get_fake_value_impl(
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]  # type: ignore[index]
 
-        if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
+        if (
+            is_lazy_module(nnmodule)
+            and inspect.getattr_static(nnmodule, "_initialize_hook", None) is not None
+        ):
             # In the case of a lazy module, we want to run
             # the pre-hooks which initialize it.
             # Afterwards, lazy module deletes its pre-hooks
