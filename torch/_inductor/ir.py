@@ -10890,6 +10890,7 @@ class Conditional(ExternKernel):
                     # merged strides can contain unbacked symbols (from mismatched
                     # branch output shapes) undefined inside the subgraph
                     if has_free_unbacked_symbols(strides):
+                        # pyrefly: ignore [missing-attribute]
                         strides = branch_fake.stride()
                     ret.append(
                         # pyrefly: ignore [bad-argument-type]
@@ -10911,7 +10912,7 @@ class Conditional(ExternKernel):
                 branch_out_args = subgraph.graph_module.graph.output_node().args[0]
                 if not isinstance(branch_out_args, Sequence):
                     raise AssertionError(type(branch_out_args))
-                branch_fakes = [
+                branch_fakes: list[Any] = [
                     a.meta["val"] if isinstance(a, Node) else a for a in branch_out_args
                 ]
                 with V.set_graph_handler(subgraph.graph):
