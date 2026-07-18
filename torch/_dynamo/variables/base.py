@@ -24,9 +24,18 @@ import textwrap
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
 from enum import Enum
-from typing import Any, NoReturn, TYPE_CHECKING
+from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING
 
-from .. import graph_break_hints, utils, variables
+from torch._C._dynamo import (
+    get_type_slots,
+    has_slot,
+    PyMappingSlots,
+    PyNumberSlots,
+    PySequenceSlots,
+    PyTypeSlots,
+)
+
+from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
 from ..exc import (
     ObservedAttributeError,
@@ -613,6 +622,16 @@ def _wrap_descr_delete(
     return func(self, tx, args[0], None)
 
 
+class SlotGroup(Enum):
+    """A CPython slot group.  The value is the group's index into
+    get_type_slots()'s 4-tuple."""
+
+    SEQUENCE = 0
+    MAPPING = 1
+    NUMBER = 2
+    TYPE = 3
+
+
 @dataclasses.dataclass(frozen=True)
 class SlotDef:
     """One slotdefs entry: dunder name -> (impl method, call wrapper).
@@ -622,11 +641,16 @@ class SlotDef:
     reflected op reuses the forward impl with ``_wrap_binaryfunc_r``; an in-place
     op is a plain binary call into its own ``nb_inplace_*`` impl -- so no
     reverse/inplace flags are needed.
+
+    ``group`` is the CPython slot group (``SlotGroup``) the entry lives in and
+    ``slot`` is the bit within it; together they decide whether a real type
+    implements the slot.
     """
 
     name: str
     impl: str
-    check: Callable[..., bool]
+    group: SlotGroup
+    slot: int
     wrapper: Callable[
         [
             VariableTracker,
@@ -650,365 +674,560 @@ class SlotDef:
         return self.wrapper(vt, tx, func, args, kwargs)
 
 
+@dataclasses.dataclass(frozen=True)
+class Slot:
+    """A live CPython type slot: the VariableTracker method implementing the slot
+    function, late-bound to the instance's class at call time.  Distinct from
+    SlotDef (a slotdefs[] dunder entry) -- e.g. the mp_length slot fn is the raw
+    ``mp_length`` getter, not ``__len__``'s ``tp_len_impl`` wrapper."""
+
+    impl: str
+
+    def __call__(
+        self,
+        tx: InstructionTranslatorBase,
+        vt: VariableTracker,
+        *args: Any,
+        **kwargs: Any,
+    ) -> VariableTracker:
+        return getattr(type(vt), self.impl)(vt, tx, *args, **kwargs)
+
+
 # The declarative slot table (mirrors CPython's static slotdefs[] array).  Each
-# entry: dunder name, impl method, ``check`` (does the real type implement the
-# slot -- reflected ops share the forward slot's check), and wrapper (call
-# shape).
+# entry: dunder name, impl method, ``group`` + ``slot`` (which slot sub-struct
+# and bit -- reflected ops share the forward slot's group/slot), and wrapper
+# (call shape).
 _SLOTDEFS: list[SlotDef] = [
     # SlotDef("__getattribute__", ),
     # SlotDef("__getattr__", ),
     # SlotDef("__setattr__", ),
     # SlotDef("__delattr__", ),
-    SlotDef("__repr__", "repr_impl", utils.type_implements_tp_repr, _wrap_unaryfunc),
-    SlotDef("__hash__", "tp_hash_impl", utils.type_implements_tp_hash, _wrap_unaryfunc),
-    SlotDef("__call__", "call_function", utils.type_implements_tp_call, wrap_call),
-    SlotDef("__str__", "str_impl", utils.type_implements_tp_str, _wrap_unaryfunc),
+    SlotDef(
+        "__repr__", "repr_impl", SlotGroup.TYPE, PyTypeSlots.TP_REPR, _wrap_unaryfunc
+    ),
+    SlotDef(
+        "__hash__", "tp_hash_impl", SlotGroup.TYPE, PyTypeSlots.TP_HASH, _wrap_unaryfunc
+    ),
+    SlotDef(
+        "__call__", "call_function", SlotGroup.TYPE, PyTypeSlots.TP_CALL, wrap_call
+    ),
+    SlotDef("__str__", "str_impl", SlotGroup.TYPE, PyTypeSlots.TP_STR, _wrap_unaryfunc),
     SlotDef(
         "__getattribute__",
         "getattro_impl",
-        utils.type_implements_tp_getattro,
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_GETATTRO,
         _wrap_getattro,
     ),
     SlotDef(
         "__getattr__",
         "getattro_impl",
-        utils.type_implements_tp_getattro,
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_GETATTRO,
         _wrap_getattro,
     ),
     SlotDef(
-        "__setattr__", "setattro_impl", utils.type_implements_tp_setattro, _wrap_setattr
+        "__setattr__",
+        "setattro_impl",
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_SETATTRO,
+        _wrap_setattr,
     ),
     SlotDef(
-        "__delattr__", "delattro_impl", utils.type_implements_tp_setattro, _wrap_delattr
+        "__delattr__",
+        "delattro_impl",
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_SETATTRO,
+        _wrap_delattr,
     ),
     SlotDef(
-        "__lt__", "richcompare_impl", utils.type_implements_tp_richcompare, richcmp_lt
+        "__lt__",
+        "richcompare_impl",
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_RICHCOMPARE,
+        richcmp_lt,
     ),
     SlotDef(
-        "__le__", "richcompare_impl", utils.type_implements_tp_richcompare, richcmp_le
+        "__le__",
+        "richcompare_impl",
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_RICHCOMPARE,
+        richcmp_le,
     ),
     SlotDef(
-        "__eq__", "richcompare_impl", utils.type_implements_tp_richcompare, richcmp_eq
+        "__eq__",
+        "richcompare_impl",
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_RICHCOMPARE,
+        richcmp_eq,
     ),
     SlotDef(
-        "__ne__", "richcompare_impl", utils.type_implements_tp_richcompare, richcmp_ne
+        "__ne__",
+        "richcompare_impl",
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_RICHCOMPARE,
+        richcmp_ne,
     ),
     SlotDef(
-        "__gt__", "richcompare_impl", utils.type_implements_tp_richcompare, richcmp_gt
+        "__gt__",
+        "richcompare_impl",
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_RICHCOMPARE,
+        richcmp_gt,
     ),
     SlotDef(
-        "__ge__", "richcompare_impl", utils.type_implements_tp_richcompare, richcmp_ge
+        "__ge__",
+        "richcompare_impl",
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_RICHCOMPARE,
+        richcmp_ge,
     ),
-    SlotDef("__iter__", "tp_iter_impl", utils.type_implements_tp_iter, _wrap_unaryfunc),
+    SlotDef(
+        "__iter__", "tp_iter_impl", SlotGroup.TYPE, PyTypeSlots.TP_ITER, _wrap_unaryfunc
+    ),
     SlotDef(
         "__next__",
         "tp_iternext_impl",
-        utils.type_implements_tp_iternext,
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_ITERNEXT,
         _wrap_unaryfunc,
     ),
     SlotDef(
         "__get__",
         "tp_descr_get_impl",
-        utils.type_implements_tp_descr_get,
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_DESCR_GET,
         _wrap_descr_get,
     ),
     SlotDef(
         "__set__",
         "tp_descr_set_impl",
-        utils.type_implements_tp_descr_set,
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_DESCR_SET,
         _wrap_descr_set,
     ),
     SlotDef(
         "__delete__",
         "tp_descr_set_impl",
-        utils.type_implements_tp_descr_set,
+        SlotGroup.TYPE,
+        PyTypeSlots.TP_DESCR_SET,
         _wrap_descr_delete,
     ),
-    SlotDef("__init__", "tp_init_impl", lambda _: True, _wrap_init),
+    SlotDef(
+        "__init__", "tp_init_impl", SlotGroup.TYPE, PyTypeSlots.TP_INIT, _wrap_init
+    ),
     # SlotDef("__new__", ...), # missing
     # Number: unary / conversion
     SlotDef(
-        "__index__", "nb_index_impl", utils.type_implements_nb_index, _wrap_unaryfunc
+        "__index__",
+        "nb_index_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INDEX,
+        _wrap_unaryfunc,
     ),
-    SlotDef("__int__", "nb_int_impl", utils.type_implements_nb_int, _wrap_unaryfunc),
     SlotDef(
-        "__float__", "nb_float_impl", utils.type_implements_nb_float, _wrap_unaryfunc
+        "__int__",
+        "nb_int_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INT,
+        _wrap_unaryfunc,
+    ),
+    SlotDef(
+        "__float__",
+        "nb_float_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_FLOAT,
+        _wrap_unaryfunc,
     ),
     SlotDef(
         "__neg__",
         "nb_negative_impl",
-        utils.type_implements_nb_negative,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_NEGATIVE,
         _wrap_unaryfunc,
     ),
     SlotDef(
         "__pos__",
         "nb_positive_impl",
-        utils.type_implements_nb_positive,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_POSITIVE,
         _wrap_unaryfunc,
     ),
     SlotDef(
         "__abs__",
         "nb_absolute_impl",
-        utils.type_implements_nb_absolute,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_ABSOLUTE,
         _wrap_unaryfunc,
     ),
     SlotDef(
-        "__invert__", "nb_invert_impl", utils.type_implements_nb_invert, _wrap_unaryfunc
+        "__invert__",
+        "nb_invert_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INVERT,
+        _wrap_unaryfunc,
     ),
     # Number: binary (forward / reflected / in-place)
-    SlotDef("__add__", "nb_add_impl", utils.type_implements_nb_add, _wrap_binaryfunc),
     SlotDef(
-        "__radd__", "nb_add_impl", utils.type_implements_nb_add, _wrap_binaryfunc_r
+        "__add__",
+        "nb_add_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_ADD,
+        _wrap_binaryfunc,
+    ),
+    SlotDef(
+        "__radd__",
+        "nb_add_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_ADD,
+        _wrap_binaryfunc_r,
     ),
     SlotDef(
         "__iadd__",
         "nb_inplace_add_impl",
-        utils.type_implements_nb_inplace_add,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INPLACE_ADD,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__sub__",
         "nb_subtract_impl",
-        utils.type_implements_nb_subtract,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_SUBTRACT,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__rsub__",
         "nb_subtract_impl",
-        utils.type_implements_nb_subtract,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_SUBTRACT,
         _wrap_binaryfunc_r,
     ),
     SlotDef(
         "__isub__",
         "nb_inplace_subtract_impl",
-        utils.type_implements_nb_inplace_subtract,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INPLACE_SUBTRACT,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__mul__",
         "nb_multiply_impl",
-        utils.type_implements_nb_multiply,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_MULTIPLY,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__rmul__",
         "nb_multiply_impl",
-        utils.type_implements_nb_multiply,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_MULTIPLY,
         _wrap_binaryfunc_r,
     ),
     SlotDef(
         "__imul__",
         "nb_inplace_multiply_impl",
-        utils.type_implements_nb_inplace_multiply,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INPLACE_MULTIPLY,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__mod__",
         "nb_remainder_impl",
-        utils.type_implements_nb_remainder,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_REMAINDER,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__rmod__",
         "nb_remainder_impl",
-        utils.type_implements_nb_remainder,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_REMAINDER,
         _wrap_binaryfunc_r,
     ),
     SlotDef(
         "__imod__",
         "nb_inplace_remainder_impl",
-        utils.type_implements_nb_inplace_remainder,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INPLACE_REMAINDER,
         _wrap_binaryfunc,
     ),
     SlotDef(
-        "__pow__", "nb_power_impl", utils.type_implements_nb_power, _wrap_ternaryfunc
+        "__pow__",
+        "nb_power_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_POWER,
+        _wrap_ternaryfunc,
     ),
     SlotDef(
-        "__rpow__", "nb_power_impl", utils.type_implements_nb_power, _wrap_ternaryfunc_r
+        "__rpow__",
+        "nb_power_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_POWER,
+        _wrap_ternaryfunc_r,
     ),
     SlotDef(
         "__ipow__",
         "nb_inplace_power_impl",
-        utils.type_implements_nb_inplace_power,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INPLACE_POWER,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__lshift__",
         "nb_lshift_impl",
-        utils.type_implements_nb_lshift,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_LSHIFT,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__rlshift__",
         "nb_lshift_impl",
-        utils.type_implements_nb_lshift,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_LSHIFT,
         _wrap_binaryfunc_r,
     ),
     SlotDef(
         "__ilshift__",
         "nb_inplace_lshift_impl",
-        utils.type_implements_nb_inplace_lshift,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INPLACE_LSHIFT,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__rshift__",
         "nb_rshift_impl",
-        utils.type_implements_nb_rshift,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_RSHIFT,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__rrshift__",
         "nb_rshift_impl",
-        utils.type_implements_nb_rshift,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_RSHIFT,
         _wrap_binaryfunc_r,
     ),
     SlotDef(
         "__irshift__",
         "nb_inplace_rshift_impl",
-        utils.type_implements_nb_inplace_rshift,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INPLACE_RSHIFT,
         _wrap_binaryfunc,
     ),
-    SlotDef("__and__", "nb_and_impl", utils.type_implements_nb_and, _wrap_binaryfunc),
     SlotDef(
-        "__rand__", "nb_and_impl", utils.type_implements_nb_and, _wrap_binaryfunc_r
+        "__and__",
+        "nb_and_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_AND,
+        _wrap_binaryfunc,
+    ),
+    SlotDef(
+        "__rand__",
+        "nb_and_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_AND,
+        _wrap_binaryfunc_r,
     ),
     SlotDef(
         "__iand__",
         "nb_inplace_and_impl",
-        utils.type_implements_nb_inplace_and,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INPLACE_AND,
         _wrap_binaryfunc,
     ),
-    SlotDef("__xor__", "nb_xor_impl", utils.type_implements_nb_xor, _wrap_binaryfunc),
     SlotDef(
-        "__rxor__", "nb_xor_impl", utils.type_implements_nb_xor, _wrap_binaryfunc_r
+        "__xor__",
+        "nb_xor_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_XOR,
+        _wrap_binaryfunc,
+    ),
+    SlotDef(
+        "__rxor__",
+        "nb_xor_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_XOR,
+        _wrap_binaryfunc_r,
     ),
     SlotDef(
         "__ixor__",
         "nb_inplace_xor_impl",
-        utils.type_implements_nb_inplace_xor,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INPLACE_XOR,
         _wrap_binaryfunc,
     ),
-    SlotDef("__or__", "nb_or_impl", utils.type_implements_nb_or, _wrap_binaryfunc),
-    SlotDef("__ror__", "nb_or_impl", utils.type_implements_nb_or, _wrap_binaryfunc_r),
+    SlotDef(
+        "__or__", "nb_or_impl", SlotGroup.NUMBER, PyNumberSlots.NB_OR, _wrap_binaryfunc
+    ),
+    SlotDef(
+        "__ror__",
+        "nb_or_impl",
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_OR,
+        _wrap_binaryfunc_r,
+    ),
     SlotDef(
         "__ior__",
         "nb_inplace_or_impl",
-        utils.type_implements_nb_inplace_or,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INPLACE_OR,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__floordiv__",
         "nb_floor_divide_impl",
-        utils.type_implements_nb_floor_divide,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_FLOOR_DIVIDE,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__rfloordiv__",
         "nb_floor_divide_impl",
-        utils.type_implements_nb_floor_divide,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_FLOOR_DIVIDE,
         _wrap_binaryfunc_r,
     ),
     SlotDef(
         "__ifloordiv__",
         "nb_inplace_floor_divide_impl",
-        utils.type_implements_nb_inplace_floor_divide,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INPLACE_FLOOR_DIVIDE,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__truediv__",
         "nb_true_divide_impl",
-        utils.type_implements_nb_true_divide,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_TRUE_DIVIDE,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__rtruediv__",
         "nb_true_divide_impl",
-        utils.type_implements_nb_true_divide,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_TRUE_DIVIDE,
         _wrap_binaryfunc_r,
     ),
     SlotDef(
         "__itruediv__",
         "nb_inplace_true_divide_impl",
-        utils.type_implements_nb_inplace_true_divide,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_INPLACE_TRUE_DIVIDE,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__divmod__",
         "nb_divmod_impl",
-        utils.type_implements_nb_divmod,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_DIVMOD,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__rdivmod__",
         "nb_divmod_impl",
-        utils.type_implements_nb_divmod,
+        SlotGroup.NUMBER,
+        PyNumberSlots.NB_DIVMOD,
         _wrap_binaryfunc_r,
     ),
     # Mapping
-    SlotDef("__len__", "tp_len_impl", utils.type_implements_mp_length, _wrap_unaryfunc),
+    SlotDef(
+        "__len__",
+        "tp_len_impl",
+        SlotGroup.MAPPING,
+        PyMappingSlots.MP_LENGTH,
+        _wrap_unaryfunc,
+    ),
     SlotDef(
         "__getitem__",
         "mp_subscript_impl",
-        utils.type_implements_mp_subscript,
+        SlotGroup.MAPPING,
+        PyMappingSlots.MP_SUBSCRIPT,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__setitem__",
         "mp_ass_subscript_impl",
-        utils.type_implements_mp_ass_subscript,
+        SlotGroup.MAPPING,
+        PyMappingSlots.MP_ASS_SUBSCRIPT,
         _wrap_objobjargproc,
     ),
     SlotDef(
         "__delitem__",
         "mp_ass_subscript_impl",
-        utils.type_implements_mp_ass_subscript,
+        SlotGroup.MAPPING,
+        PyMappingSlots.MP_ASS_SUBSCRIPT,
         _wrap_delitem,
     ),
     # Sequence
-    SlotDef("__len__", "tp_len_impl", utils.type_implements_sq_length, _wrap_unaryfunc),
     SlotDef(
-        "__add__", "sq_concat_impl", utils.type_implements_sq_concat, _wrap_binaryfunc
+        "__len__",
+        "tp_len_impl",
+        SlotGroup.SEQUENCE,
+        PySequenceSlots.SQ_LENGTH,
+        _wrap_unaryfunc,
     ),
     SlotDef(
-        "__mul__", "sq_repeat_impl", utils.type_implements_sq_repeat, _wrap_indexargfunc
+        "__add__",
+        "sq_concat_impl",
+        SlotGroup.SEQUENCE,
+        PySequenceSlots.SQ_CONCAT,
+        _wrap_binaryfunc,
+    ),
+    SlotDef(
+        "__mul__",
+        "sq_repeat_impl",
+        SlotGroup.SEQUENCE,
+        PySequenceSlots.SQ_REPEAT,
+        _wrap_indexargfunc,
     ),
     SlotDef(
         "__rmul__",
         "sq_repeat_impl",
-        utils.type_implements_sq_repeat,
+        SlotGroup.SEQUENCE,
+        PySequenceSlots.SQ_REPEAT,
         _wrap_indexargfunc,
     ),
     SlotDef(
-        "__getitem__", "sq_item_impl", utils.type_implements_sq_item, _wrap_sq_item
+        "__getitem__",
+        "sq_item_impl",
+        SlotGroup.SEQUENCE,
+        PySequenceSlots.SQ_ITEM,
+        _wrap_sq_item,
     ),
     SlotDef(
         "__setitem__",
         "sq_ass_item_impl",
-        utils.type_implements_sq_ass_item,
+        SlotGroup.SEQUENCE,
+        PySequenceSlots.SQ_ASS_ITEM,
         _wrap_sq_setitem,
     ),
     SlotDef(
         "__delitem__",
         "sq_ass_item_impl",
-        utils.type_implements_sq_ass_item,
+        SlotGroup.SEQUENCE,
+        PySequenceSlots.SQ_ASS_ITEM,
         _wrap_sq_delitem,
     ),
     SlotDef(
         "__contains__",
         "sq_contains",
-        utils.type_implements_sq_contains,
+        SlotGroup.SEQUENCE,
+        PySequenceSlots.SQ_CONTAINS,
         _wrap_objobjproc,
     ),
     SlotDef(
         "__iadd__",
         "sq_inplace_concat_impl",
-        utils.type_implements_sq_inplace_concat,
+        SlotGroup.SEQUENCE,
+        PySequenceSlots.SQ_INPLACE_CONCAT,
         _wrap_binaryfunc,
     ),
     SlotDef(
         "__imul__",
         "sq_inplace_repeat_impl",
-        utils.type_implements_sq_inplace_repeat,
+        SlotGroup.SEQUENCE,
+        PySequenceSlots.SQ_INPLACE_REPEAT,
         _wrap_indexargfunc,
     ),
 ]
@@ -1019,11 +1238,184 @@ def _tp_dict(obj_type: type) -> dict[str, SlotDef]:
     # First-wins per name (mirrors add_operators skipping already-present names):
     # for a name with entries in multiple slot groups (e.g. __add__ -> nb_add
     # and sq_concat), the earlier _SLOTDEFS entry the type implements wins.
+    masks = get_type_slots(obj_type)
     d: dict[str, SlotDef] = {}
     for sd in _SLOTDEFS:
-        if sd.name not in d and sd.check(obj_type):
+        if sd.name in d:
+            continue
+        if has_slot(masks[sd.group.value], sd.slot):
             d[sd.name] = sd
     return d
+
+
+# One NamedTuple per group, mirroring CPython's Py{Number,Sequence,Mapping}Methods
+# sub-structs: fields are the modeled C slot names, each holding the SlotDef when
+# the type fills that slot, else None (an unfilled slot is NULL in CPython).
+class PyNumberMethods(NamedTuple):
+    nb_index: Slot | None
+    nb_int: Slot | None
+    nb_float: Slot | None
+    nb_negative: Slot | None
+    nb_positive: Slot | None
+    nb_absolute: Slot | None
+    nb_invert: Slot | None
+    nb_add: Slot | None
+    nb_inplace_add: Slot | None
+    nb_subtract: Slot | None
+    nb_inplace_subtract: Slot | None
+    nb_multiply: Slot | None
+    nb_inplace_multiply: Slot | None
+    nb_remainder: Slot | None
+    nb_inplace_remainder: Slot | None
+    nb_power: Slot | None
+    nb_inplace_power: Slot | None
+    nb_lshift: Slot | None
+    nb_inplace_lshift: Slot | None
+    nb_rshift: Slot | None
+    nb_inplace_rshift: Slot | None
+    nb_and: Slot | None
+    nb_inplace_and: Slot | None
+    nb_xor: Slot | None
+    nb_inplace_xor: Slot | None
+    nb_or: Slot | None
+    nb_inplace_or: Slot | None
+    nb_floor_divide: Slot | None
+    nb_inplace_floor_divide: Slot | None
+    nb_true_divide: Slot | None
+    nb_inplace_true_divide: Slot | None
+    nb_divmod: Slot | None
+
+
+class PySequenceMethods(NamedTuple):
+    sq_length: Slot | None
+    sq_concat: Slot | None
+    sq_repeat: Slot | None
+    sq_item: Slot | None
+    sq_ass_item: Slot | None
+    sq_contains: Slot | None
+    sq_inplace_concat: Slot | None
+    sq_inplace_repeat: Slot | None
+
+
+class PyMappingMethods(NamedTuple):
+    mp_length: Slot | None
+    mp_subscript: Slot | None
+    mp_ass_subscript: Slot | None
+
+
+# Dynamo's view of a CPython PyTypeObject: the tp_ slots as direct fields plus
+# the three sub-struct pointers.  Each tp_ field is the SlotDef the type fills for
+# that slot, else None; the sub-structs mirror PyNumberMethods etc.
+class PyTypeObject(NamedTuple):
+    tp_repr: Slot | None
+    tp_hash: Slot | None
+    tp_call: Slot | None
+    tp_str: Slot | None
+    tp_getattro: Slot | None
+    tp_setattro: Slot | None
+    tp_richcompare: Slot | None
+    tp_iter: Slot | None
+    tp_iternext: Slot | None
+    tp_descr_get: Slot | None
+    tp_descr_set: Slot | None
+    tp_init: Slot | None
+    tp_as_number: PyNumberMethods
+    tp_as_sequence: PySequenceMethods
+    tp_as_mapping: PyMappingMethods
+
+
+# The tp_ slot fields of PyTypeObject (everything but the sub-struct pointers).
+_TYPE_FIELDS = tuple(f for f in PyTypeObject._fields if not f.startswith("tp_as_"))
+
+# Per group: C slot bit -> struct field name, keyed via the enum's UPPERCASE name.
+_BIT_FIELD: dict[SlotGroup, dict[int, str]] = {
+    SlotGroup.NUMBER: {
+        getattr(PyNumberSlots, f.upper()): f for f in PyNumberMethods._fields
+    },
+    SlotGroup.SEQUENCE: {
+        getattr(PySequenceSlots, f.upper()): f for f in PySequenceMethods._fields
+    },
+    SlotGroup.MAPPING: {
+        getattr(PyMappingSlots, f.upper()): f for f in PyMappingMethods._fields
+    },
+    SlotGroup.TYPE: {getattr(PyTypeSlots, f.upper()): f for f in _TYPE_FIELDS},
+}
+
+# Every modeled slot must have a field in its struct (keeps _SLOTDEFS and the
+# static Py*Methods / PyTypeObject classes in sync).
+for _sd in _SLOTDEFS:
+    if _sd.slot not in _BIT_FIELD[_sd.group]:
+        raise AssertionError(
+            f"{_sd.name}: {_sd.group.name} slot has no field in its struct"
+        )
+
+
+# The actual slot function (a VariableTracker method) each struct field dispatches
+# to.  This is CPython's Py*Methods / tp_ slot table -- distinct from _SLOTDEFS
+# (slotdefs[], the dunder->slot table): a slot fn is NOT always the dunder impl.
+# e.g. the mp_length / sq_length slots are the raw length getters, not __len__'s
+# tp_len_impl wrapper.
+_SLOT_FN: dict[SlotGroup, dict[str, str]] = {
+    SlotGroup.NUMBER: {f: f"{f}_impl" for f in PyNumberMethods._fields},
+    SlotGroup.SEQUENCE: {
+        "sq_length": "sq_length",
+        "sq_concat": "sq_concat_impl",
+        "sq_repeat": "sq_repeat_impl",
+        "sq_item": "sq_item_impl",
+        "sq_ass_item": "sq_ass_item_impl",
+        "sq_contains": "sq_contains",
+        "sq_inplace_concat": "sq_inplace_concat_impl",
+        "sq_inplace_repeat": "sq_inplace_repeat_impl",
+    },
+    SlotGroup.MAPPING: {
+        "mp_length": "mp_length",
+        "mp_subscript": "mp_subscript_impl",
+        "mp_ass_subscript": "mp_ass_subscript_impl",
+    },
+    SlotGroup.TYPE: {
+        "tp_repr": "repr_impl",
+        "tp_hash": "tp_hash_impl",
+        "tp_call": "call_function",
+        "tp_str": "str_impl",
+        "tp_getattro": "getattro_impl",
+        "tp_setattro": "setattro_impl",
+        "tp_richcompare": "richcompare_impl",
+        "tp_iter": "tp_iter_impl",
+        "tp_iternext": "tp_iternext_impl",
+        "tp_descr_get": "tp_descr_get_impl",
+        "tp_descr_set": "tp_descr_set_impl",
+        "tp_init": "tp_init_impl",
+    },
+}
+
+# _SLOT_FN must name a slot fn for exactly each struct field.
+for _group, _fns in _SLOT_FN.items():
+    if set(_fns) != set(_BIT_FIELD[_group].values()):
+        raise AssertionError(f"{_group.name}: _SLOT_FN fields != struct fields")
+
+
+def _fill(group: SlotGroup, masks: tuple[int, int, int, int]) -> dict[str, Any]:
+    # {field -> Slot(slot fn) if the type fills the slot, else None}
+    mask = masks[group.value]
+    fn_map = _SLOT_FN[group]
+    return {
+        field: Slot(fn_map[field]) if has_slot(mask, bit) else None
+        for bit, field in _BIT_FIELD[group].items()
+    }
+
+
+@functools.cache
+def _tp_type(obj_type: type) -> PyTypeObject:
+    # obj_type's whole slot table (PyTypeObject-like).  Independent of _tp_dict's
+    # cross-group collapse, so a type with both sq_length and mp_length shows up in
+    # both the sequence and mapping views (as CPython's separate sub-structs do).
+    masks = get_type_slots(obj_type)
+    return PyTypeObject(
+        tp_as_number=PyNumberMethods(**_fill(SlotGroup.NUMBER, masks)),
+        tp_as_sequence=PySequenceMethods(**_fill(SlotGroup.SEQUENCE, masks)),
+        tp_as_mapping=PyMappingMethods(**_fill(SlotGroup.MAPPING, masks)),
+        **_fill(SlotGroup.TYPE, masks),
+    )
 
 
 class VariableTrackerMeta(type):
@@ -2546,6 +2938,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     @property
     def tp_dict(self):
         return _tp_dict(self.python_type())
+
+    @property
+    def tp_type(self) -> PyTypeObject:
+        return _tp_type(self.python_type())
+
+    @property
+    def tp_as_number(self) -> PyNumberMethods:
+        return _tp_type(self.python_type()).tp_as_number
+
+    @property
+    def tp_as_sequence(self) -> PySequenceMethods:
+        return _tp_type(self.python_type()).tp_as_sequence
+
+    @property
+    def tp_as_mapping(self) -> PyMappingMethods:
+        return _tp_type(self.python_type()).tp_as_mapping
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """
