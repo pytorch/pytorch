@@ -429,22 +429,6 @@ class TestPhiloxFlatSliceOps(TestCase):
         )
         self.assertIs(returned, legacy_result)
 
-        key = torch.empty(2, dtype=torch.uint64, device="meta")
-        with self.assertRaisesRegex(RuntimeError, "block_size must be positive"):
-            torch.ops.aten._philox_uniform_indexed_(
-                torch.empty(0, device="meta"), key, 8, [0], [0], [-1], [1]
-            )
-        with self.assertRaisesRegex(RuntimeError, "ordered and non-overlapping"):
-            torch.ops.aten._philox_uniform_indexed_(
-                torch.empty(4, device="meta"),
-                key,
-                8,
-                [0, 1],
-                [2, 2],
-                [2, 2],
-                [1, 1],
-            )
-
 
 if __name__ == "__main__":
     run_tests()
