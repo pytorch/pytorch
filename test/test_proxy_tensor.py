@@ -1,12 +1,18 @@
 # Owner(s): ["module: ProxyTensor"]
 # ruff: noqa: F841
 
-from torch.testing._internal.common_utils import TestCase, run_tests, xfailIfNoAcceleratorTriton
+from torch.testing._internal.common_utils import (
+    skipIfTorchDynamo,
+    TestCase,
+    run_tests,
+    xfailIfNoAcceleratorTriton,
+)
 import torch
 import torch._dynamo
 import unittest
 import warnings
 import operator
+import sys
 from collections.abc import Iterable
 from torch.nn.utils import stateless
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, skipOps, skip, xfail
@@ -1147,6 +1153,78 @@ def forward(self, x_1, y_1):
     empty = torch.ops.aten.empty.memory_format([sym_size_int], device = device(type='cpu'), pin_memory = False)
     return ((sym_size_int, sym_size_int_1), empty)""")
 
+    def test_deduped_symints_preserves_runtime_assert_condition_slice(self):
+        import sympy
+
+        from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        add = graph.call_function(operator.add, (a, 1))
+        add_1 = graph.call_function(operator.add, (b, 2))
+        eq = graph.call_function(operator.eq, (add, 4))
+        graph.call_function(torch.ops.aten._assert_scalar.default, (eq, "first"))
+        eq_1 = graph.call_function(operator.eq, (add_1, 4))
+        graph.call_function(torch.ops.aten._assert_scalar.default, (eq_1, "second"))
+        add_2 = graph.call_function(operator.add, (add, add_1))
+        graph.output(add_2)
+        gm = torch.fx.GraphModule({}, graph)
+
+        shape_env = ShapeEnv()
+        a.meta["val"] = shape_env.create_symintnode(
+            sympy.Symbol("s0", integer=True), hint=3
+        )
+        b.meta["val"] = shape_env.create_symintnode(
+            sympy.Symbol("s1", integer=True), hint=2
+        )
+        same_example_expr = sympy.Symbol("s2", integer=True)
+        add.meta["val"] = shape_env.create_symintnode(same_example_expr, hint=4)
+        add_1.meta["val"] = shape_env.create_symintnode(same_example_expr, hint=4)
+        eq.meta["val"] = shape_env.create_symboolnode(sympy.true)
+        eq_1.meta["val"] = shape_env.create_symboolnode(sympy.true)
+
+        dedupe_symints(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        self.assertIs(eq_1.args[0], add_1)
+        self.assertEqual(gm(3, 2), 8)
+        with self.assertRaisesRegex(RuntimeError, "second"):
+            gm(3, 1)
+
+    def test_deduped_symints_preserves_deep_runtime_assert_condition_slice(self):
+        import sympy
+
+        from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        current = a
+        chain_length = sys.getrecursionlimit() + 100
+        for _ in range(chain_length):
+            current = graph.call_function(operator.add, (current, 1))
+        eq = graph.call_function(operator.eq, (current, chain_length))
+        graph.call_function(torch.ops.aten._assert_scalar.default, (eq, "deep"))
+        graph.output(current)
+        gm = torch.fx.GraphModule({}, graph)
+
+        shape_env = ShapeEnv()
+        a.meta["val"] = shape_env.create_symintnode(
+            sympy.Symbol("s0", integer=True), hint=0
+        )
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and node.target is operator.add:
+                node.meta["val"] = shape_env.create_symintnode(
+                    sympy.Symbol(node.name, integer=True), hint=0
+                )
+        eq.meta["val"] = shape_env.create_symboolnode(sympy.true)
+
+        dedupe_symints(gm.graph)
+        gm.graph.lint()
+
     def test_unary(self):
         def f(x):
             if x.shape[0] >= 20:
@@ -2095,6 +2173,74 @@ L['a'].size()[1] <= 18""")
 
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(10))
         self.assertExpectedInline(show_guards(tensor), """""")
+
+    @skipIfTorchDynamo("make_fx cannot trace dynamo-optimized functions")
+    def test_make_fx_second_order_grad(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/175477
+        weight = torch.randn(4, 3, requires_grad=True)
+
+        def fn(x, weight):
+            x = x.detach().requires_grad_(True)
+            h = x @ weight.T
+            mean = h.mean(-1, keepdim=True)
+            var = h.var(-1, keepdim=True, correction=0)
+            h = (h - mean) / torch.sqrt(var + 1e-5)
+            energy = (h ** 2).sum()
+            force = -torch.autograd.grad(energy, x, create_graph=True)[0]
+            return energy, force
+
+        traced = make_fx(fn, tracing_mode="symbolic", _allow_non_fake_inputs=True)(
+            torch.randn(3, 3), weight.clone().requires_grad_(True)
+        )
+        self.assertFalse(
+            any(
+                n.op == "call_function" and n.target == torch.ops.aten.detach.default
+                for n in traced.graph.nodes
+            )
+        )
+
+        x = torch.randn(3, 3)
+        target_energy = torch.randn(())
+        target_force = torch.randn(3, 3)
+
+        def loss_fn(e, f):
+            return (e - target_energy).pow(2) + (f - target_force).pow(2).sum()
+
+        w1 = weight.detach().clone().requires_grad_(True)
+        e1, f1 = fn(x, w1)
+        loss_fn(e1, f1).backward()
+
+        w2 = weight.detach().clone().requires_grad_(True)
+        e2, f2 = traced(x, w2)
+        loss_fn(e2, f2).backward()
+
+        self.assertEqual(w1.grad, w2.grad)
+
+        traced_explicit = make_fx(
+            fn,
+            decomposition_table={},
+            tracing_mode="symbolic",
+            _allow_non_fake_inputs=True,
+        )(torch.randn(3, 3), weight.clone().requires_grad_(True))
+        self.assertTrue(
+            any(
+                n.op == "call_function" and n.target == torch.ops.aten.detach.default
+                for n in traced_explicit.graph.nodes
+            )
+        )
+
+        def detach_only(x):
+            return x.detach() * 2
+
+        traced_pre_dispatch = make_fx(detach_only, pre_dispatch=True)(
+            torch.randn(2, requires_grad=True)
+        )
+        self.assertTrue(
+            any(
+                n.op == "call_function" and n.target == torch.ops.aten.detach.default
+                for n in traced_pre_dispatch.graph.nodes
+            )
+        )
 
 
 make_fx_failures = {

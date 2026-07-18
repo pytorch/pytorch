@@ -103,9 +103,9 @@ class CuptiMonitorObserver:
         # Degrade gracefully (available == False) if the monitor can't be reached or
         # registration fails (CUPTI subscribe rejected, libcupti lacks v2)
         try:
-            from torch.profiler._cupti.monitor import instance
+            from torch.profiler._cupti.monitor import CuptiMonitor
 
-            self._monitor = instance()
+            self._monitor = CuptiMonitor()
             self._obs = self._monitor.register(activities, self._on_activities)
         except Exception:
             self._obs = None
@@ -200,11 +200,11 @@ class CuptiMonitorObserver:
         passthrough to the monitor."""
         return self._monitor.now_unix_ns() if self._monitor is not None else 0
 
-    def now_native_ns(self) -> int:
+    def now_record_ns(self) -> int:
         """Current value of CUPTI's native record clock -- the unconverted timebase of
         decoded record START/END. Use this to stamp a window boundary compared against
         raw record timestamps (see NodeTimerObserver bucketing). 0 if unavailable."""
-        return self._monitor.now_native_ns() if self._monitor is not None else 0
+        return self._monitor.now_record_ns() if self._monitor is not None else 0
 
     def convert_time(self, value: int) -> int:
         """Convert a CUPTI-clock timestamp to unix-epoch ns -- passthrough to the

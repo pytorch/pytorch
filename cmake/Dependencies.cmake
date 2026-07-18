@@ -501,7 +501,6 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
-  list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 endif()
 
 
@@ -812,11 +811,12 @@ endif()
 set(EIGEN_MPL2_ONLY 1)
 if(USE_SYSTEM_EIGEN_INSTALL)
   find_package(Eigen3)
-  if(EIGEN3_FOUND)
-    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
+  if(Eigen3_FOUND)
+    get_target_property(EIGEN3_INCLUDE_DIR Eigen3::Eigen INTERFACE_INCLUDE_DIRECTORIES)
+    message(STATUS "Found system Eigen ${Eigen3_VERSION} at ${EIGEN3_INCLUDE_DIR}")
   else()
     message(STATUS "Did not find system Eigen. Using third party subdirectory.")
-    execute_process(COMMAND ${Python_EXECUTABLE} ../tools/optional_modules.py checkout_eigen
+    execute_process(COMMAND ${Python_EXECUTABLE} ../tools/optional_submodules.py checkout_eigen
                     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
 
     set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)

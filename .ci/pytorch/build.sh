@@ -36,6 +36,15 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
   echo "NVCC version:"
   nvcc --version
+
+  # The CUPTI field-id codegen (tools/gen_cupti_stubs.py) parses cupti_activity.h with
+  # libclang's python bindings. Install libclang only when a sufficiently-new CUPTI header is
+  # actually resolvable (find_cupti_header applies the CUPTI_API_VERSION floor) -- so non-13.x
+  # / CPU builds, which have no such header, don't pull it in. Skip it too when LIBCLANG_PATH
+  # already points the codegen at a libclang.so (that env supplies the clang bindings itself).
+  if [ -z "${LIBCLANG_PATH:-}" ] && python -c "import sys; from tools.setup_helpers.cupti import find_cupti_header as f; sys.exit(0 if f() else 1)"; then
+    python -mpip install libclang
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
@@ -76,7 +85,7 @@ if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export ACL_ROOT_DIR=/acl
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
   if [[ -f /opt/riscv-cross-env/bin/activate ]]; then
     # shellcheck disable=SC1091
     source /opt/riscv-cross-env/bin/activate
@@ -224,7 +233,7 @@ fi
 
 # Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && -d /var/lib/jenkins/workspace ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64*cross* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -432,6 +441,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   PYTHONPATH=. python tools/stats/export_test_times.py
 fi
 # don't do this for s390x or riscv64 as they don't use sccache
-if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64*cross* ]]; then
   print_sccache_stats
 fi
