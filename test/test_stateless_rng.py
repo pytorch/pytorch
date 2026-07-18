@@ -10,6 +10,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_TRITON
+from torch.utils import _pytree as pytree
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 all_floating_dtypes = floating_types_and(torch.half, torch.bfloat16)
@@ -632,7 +634,109 @@ class TestStatelessRNGIndexedDistribution(TestCase):
             )
 
 
+class TestStatelessRNGLayout(TestCase):
+    def _layout(self):
+        return random.RNGLayout(
+            logical_numel=12,
+            blocks=(random.RNGIndexBlock(1, 2, 4, 3),),
+        )
+
+    @parametrize("op", ["normal", "uniform"])
+    @dtypes(*all_floating_dtypes)
+    def test_layout_matches_dense_gather(self, device, dtype, op):
+        key = random.key(42, device=device)
+        layout = self._layout()
+        dense = getattr(random, op)(key, (layout.logical_numel,), dtype=dtype)
+        actual = getattr(random, op)(key, (6,), layout=layout, dtype=dtype)
+        indices = torch.tensor([1, 2, 5, 6, 9, 10], device=device)
+        self.assertEqual(actual, dense[indices])
+
+        inplace = torch.empty(6, device=device, dtype=dtype)
+        returned = getattr(random, f"{op}_")(key, inplace, layout=layout)
+        self.assertIs(returned, inplace)
+        self.assertEqual(inplace, actual)
+
+    @parametrize("op", ["normal", "uniform"])
+    def test_vmap_over_keys_with_shared_layout(self, device, op):
+        keys = random.split(random.key(42, device=device), 3)
+        layout = self._layout()
+        generate = getattr(random, op)
+        actual = torch.vmap(lambda key: generate(key, (6,), layout=layout))(keys)
+        expected = torch.stack(
+            [generate(key, (6,), layout=layout) for key in keys.unbind()]
+        )
+        self.assertEqual(actual, expected)
+
+    @parametrize("op", ["normal", "uniform"])
+    def test_out_of_place_layout_uses_mutable_kernel(self, device, op):
+        class OpRecorder(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.ops = []
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.ops.append(func)
+                return func(*args, **(kwargs or {}))
+
+        recorder = OpRecorder()
+        with recorder:
+            getattr(random, op)(
+                random.key(42, device=device), (6,), layout=self._layout()
+            )
+
+        inplace_op = getattr(torch.ops.aten, f"_philox_{op}_indexed_").default
+        functional_op = getattr(torch.ops.aten, f"_philox_{op}_indexed").default
+        self.assertIn(inplace_op, recorder.ops)
+        self.assertNotIn(functional_op, recorder.ops)
+
+    def test_layout_is_pytree(self, device):
+        layout = self._layout()
+        leaves, spec = pytree.tree_flatten(layout)
+        rebuilt = pytree.tree_unflatten(leaves, spec)
+        self.assertEqual(rebuilt, layout)
+
+    def test_dense_and_layout_inplace_wrappers_fx_trace(self, device):
+        layout = self._layout()
+
+        def dense(key, output):
+            return random.uniform_(key, output)
+
+        def indexed(key, output):
+            return random.uniform_(key, output, layout=layout)
+
+        dense_graph = torch.fx.symbolic_trace(dense)
+        indexed_graph = torch.fx.symbolic_trace(indexed)
+        self.assertIn("aten._philox_uniform_", dense_graph.code)
+        self.assertIn("aten._philox_uniform_indexed_", indexed_graph.code)
+
+    def test_layout_validation_reaches_native_operator(self, device):
+        key = random.key(42, device=device)
+        bad_layout = random.RNGLayout(
+            8,
+            (
+                random.RNGIndexBlock(0, 2, 2),
+                random.RNGIndexBlock(1, 2, 2),
+            ),
+        )
+        with self.assertRaisesRegex(RuntimeError, "ordered and non-overlapping"):
+            random.uniform(key, (4,), layout=bad_layout)
+        with self.assertRaisesRegex(TypeError, "expected layout to be RNGLayout"):
+            random.uniform(key, (4,), layout=object())  # type: ignore[arg-type]
+
+
 class TestStatelessRNGCompile(TestCase):
+    @parametrize("op", ["normal", "uniform"])
+    def test_layout_fullgraph(self, device, op):
+        key = random.key(42, device=device)
+        layout = random.RNGLayout(12, (random.RNGIndexBlock(1, 2, 4, 3),))
+        generate = getattr(random, op)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(key):
+            return generate(key, (6,), layout=layout)
+
+        self.assertEqual(f(key), generate(key, (6,), layout=layout))
+
     @parametrize("op", ["normal", "uniform"])
     def test_indexed_fullgraph(self, device, op):
         key = random.key(42, device=device)
@@ -759,6 +863,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestStatelessRNGIndexedDistribution, globals(), only_for=("cuda",)
 )
+instantiate_device_type_tests(TestStatelessRNGLayout, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestStatelessRNGCompile, globals(), only_for=("cuda",))
 
 
