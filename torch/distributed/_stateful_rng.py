@@ -97,7 +97,7 @@ def _validate_stateful_rng_parameters(
 @maybe_run_for_local_tensor
 def _run_stateful_rng_op_rankwise(
     tensor: torch.Tensor,
-    logical_numel: int,
+    logical_numel: int | torch.SymInt,
     start_indices: tuple[int | torch.SymInt, ...],
     block_sizes: tuple[int | torch.SymInt, ...],
     block_strides: tuple[int | torch.SymInt, ...],
@@ -129,7 +129,7 @@ def _run_stateful_rng_op(
     op_call: torch._ops.OpOverload,
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None,
-    logical_numel: int,
+    logical_numel: int | torch.SymInt,
     index_blocks: tuple[
         tuple[
             int | torch.SymInt,
