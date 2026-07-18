@@ -10877,7 +10877,7 @@ class Conditional(ExternKernel):
         def _require_exact_strides(
             graph_outputs: Sequence[IRNode],
             fake_tensors: Sequence[torch.Tensor],
-            branch_fakes: Sequence[Any],
+            branch_fakes: Sequence[torch.Tensor | int | None],
         ) -> list[IRNode]:
             ret = []
             for output, fake, branch_fake in zip(
@@ -10889,7 +10889,7 @@ class Conditional(ExternKernel):
                     strides = fake.stride()
                     # merged strides can contain unbacked symbols (from mismatched
                     # branch output shapes) undefined inside the subgraph
-                    if any(has_free_unbacked_symbols(s) for s in strides):
+                    if has_free_unbacked_symbols(strides):
                         strides = branch_fake.stride()
                     ret.append(
                         # pyrefly: ignore [bad-argument-type]
@@ -10916,9 +10916,10 @@ class Conditional(ExternKernel):
                 ]
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
-                    # Force subgraph outputs to have the expected strides from
-                    # FakeTensor metadata. This ensures both branches produce
-                    # outputs with consistent strides.
+                    # Force subgraph outputs to the expected strides from
+                    # FakeTensor metadata. Branches share the merged strides
+                    # unless those carry an unbacked symbol (mismatched inner
+                    # dims), in which case each branch keeps its own strides.
                     subgraph.graph.graph_outputs = _require_exact_strides(
                         subgraph.graph.graph_outputs, fake_outputs, branch_fakes
                     )
