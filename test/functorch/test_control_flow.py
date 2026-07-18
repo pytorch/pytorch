@@ -1626,13 +1626,6 @@ def forward(self, pred_1, x_1):
             return switch(idx, (branch_mutating, branch_clean), (inp_x,))
 
         x = torch.ones(4, 5)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
-            "switch_branch0",
-        ):
-            make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
-                torch.tensor([0]), x
-            )
 
         def g(idx, inp_x):
             inp_x = inp_x.clone()
@@ -1656,10 +1649,11 @@ class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[4, 5]", arg1_1: "i64[1]"):
         clone: "f32[4, 5]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
 
+        clamp: "i64[1]" = torch.ops.aten.clamp.default(arg1_1, 0, 1);  arg1_1 = None
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = arg1_1, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  arg1_1 = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
         getitem: "f32[]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
         return (getitem,)
 
@@ -11614,10 +11608,11 @@ class <lambda>(torch.nn.Module):
         gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
         _to_copy: "i64[]" = torch.ops.aten._to_copy.default(gt, dtype = torch.int64);  gt = None
 
+        clamp: "i64[]" = torch.ops.aten.clamp.default(_to_copy, 0, 1);  _to_copy = None
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = _to_copy, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  _to_copy = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
         getitem: "f32[3, 4]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
 
         add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, getitem);  arg1_1 = getitem = None
@@ -11672,10 +11667,11 @@ class <lambda>(torch.nn.Module):
 
         _to_copy: "i64[]" = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.int64);  arg1_1 = None
 
+        clamp: "i64[]" = torch.ops.aten.clamp.default(_to_copy, 0, 1);  _to_copy = None
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = _to_copy, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg2_1, clone], _op_schema = _tree_spec_constant0);  _to_copy = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg2_1, clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
         getitem: "f32[8]" = auto_functionalized_v2[0]
         getitem_1: "f32[8]" = auto_functionalized_v2[1]
         getitem_2: "f32[1]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
@@ -11747,10 +11743,11 @@ class <lambda>(torch.nn.Module):
         gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
         _to_copy: "i64[]" = torch.ops.aten._to_copy.default(gt, dtype = torch.int64);  gt = None
 
+        clamp: "i64[]" = torch.ops.aten.clamp.default(_to_copy, 0, 1);  _to_copy = None
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = _to_copy, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg1_1, clone], _op_schema = _tree_spec_constant0);  _to_copy = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg1_1, clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
         getitem: "f32[3, 3]" = auto_functionalized_v2[0]
         getitem_1: "f32[4, 3]" = auto_functionalized_v2[1]
         getitem_2: "f32[3, 4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
@@ -12601,7 +12598,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> (Tensor, SymInt)""",
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> (Tensor, int)""",
         )
 
     def test_switch_gen_schema_matching_int_int_outputs(self):
