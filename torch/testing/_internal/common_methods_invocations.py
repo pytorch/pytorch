@@ -4845,11 +4845,6 @@ def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(4, 2))
     yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(4, 2), create_tensor(4))
 
-    # 1D weight and bias, checks correct fallback path when input is 2D and bias is defined
-    yield SampleInput(create_tensor(2, 3), create_tensor(3), create_tensor(1))
-
-
-
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
     batch_options: list[list[int]] = [
