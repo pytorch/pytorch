@@ -1751,7 +1751,7 @@ class TestFP8Lowering(TestCase):
         # The swizzled path must use the ATen fallback, not a generated kernel
         FileCheck().check("_scaled_mm_v2").run(code)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
     def test_mx_fp8_max_autotune(self, device):
         M, K, N = 128, 32, 128
