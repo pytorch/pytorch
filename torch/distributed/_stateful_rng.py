@@ -43,7 +43,7 @@ def _is_supported_stateful_rng_op(
     op_call: torch._ops.OpOverload,
     tensor: torch.Tensor,
 ) -> bool:
-    """Return whether ``tensor`` can use the Generator-indexed backend."""
+    """Return whether ``tensor`` can use logical-index Generator replay."""
     return (
         op_call in _SUPPORTED_STATEFUL_RNG_OPS
         and not tensor.is_meta
