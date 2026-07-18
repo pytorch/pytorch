@@ -63,7 +63,9 @@ struct HeapBlock;
 
 struct BufferBlock {
   id<MTLBuffer> buffer;
-  void* cpu_ptr = nullptr; // stores the pointer to CPU mapping of a Shared MTLBuffer
+  // the buffer's unified-memory contents address; this is the data pointer
+  // handed out to Storage and the key of m_allocated_buffers
+  void* cpu_ptr = nullptr;
   size_t size; // size after alignment
   size_t requested_size; // requested size (before alignment)
   // buffer shape is used for retrieving base of views in cached graphs
@@ -283,10 +285,15 @@ class MPSHeapAllocatorImpl {
   ~MPSHeapAllocatorImpl() {
     emptyCache();
   }
-  // interface exposed to at::Allocator
-  id<MTLBuffer> malloc(size_t size, uint32_t usage);
+  // interface exposed to at::Allocator; returns the unified-memory base
+  // address of the allocation (the MTLBuffer's contents pointer). All the
+  // `const void* ptr` keyed methods below take this data pointer.
+  void* malloc(size_t size, uint32_t usage);
   // frees a buffer and returns it into buffer pool
   void free(void* ptr);
+  // returns the MTLBuffer backing a data pointer handed out by malloc
+  // (nil if the pointer was not allocated here)
+  id<MTLBuffer> bufferForData(const void* ptr);
   // releases all the cached buffers and their associated heaps
   void emptyCache();
   // free inactive buffers that are pending to be freed
@@ -301,8 +308,9 @@ class MPSHeapAllocatorImpl {
   IntArrayRef getBufferShape(const void* ptr);
   // get the unique ID of the buffer
   id_t getBufferId(const void* ptr);
-  // allocate a buffer from a specialized pool to import CPU scalars into GPU
-  id<MTLBuffer> allocScalarBufferWithValue(void* value, size_t size);
+  // allocate a buffer from a specialized pool to import CPU scalars into GPU;
+  // returns the unified-memory data pointer (as malloc does)
+  void* allocScalarBufferWithValue(void* value, size_t size);
   // returns a CPU-mapping of the input buffer and its retainCount,
   // if only it has Shared storage-mode and allocated on MPSAllocator
   std::pair<const void*, uint32_t> getSharedBufferPtr(const void* buffer);
@@ -377,7 +385,8 @@ class MPSHeapAllocatorImpl {
 
   const id<MTLDevice> m_device;
   std::recursive_mutex m_mutex;
-  // allocated buffers by device pointer
+  // buffer blocks keyed by the data pointer handed out to Storage
+  // (the buffer's unified-memory contents address)
   ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers;
   // using a container for pools to simplify iterating them
   ska::flat_hash_map<BufferPool::Kind, std::unique_ptr<BufferPool>> m_pools;

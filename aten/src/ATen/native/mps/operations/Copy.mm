@@ -258,8 +258,12 @@ void copy_blit_mps(void* dst, const void* src, size_t size) {
   uint64_t profile_id =
       getMPSProfiler().beginProfileCopy(src, dst, at::OptionalTensorRef(), at::OptionalTensorRef(), size, false);
 
+  auto* allocator = at::mps::getIMPSAllocator();
+  id<MTLBuffer> srcBuf = __builtin_bit_cast(id<MTLBuffer>, allocator->getMTLBuffer(src));
+  id<MTLBuffer> dstBuf = __builtin_bit_cast(id<MTLBuffer>, allocator->getMTLBuffer(dst));
+  TORCH_INTERNAL_ASSERT(srcBuf && dstBuf, "copy_blit_mps: pointers must be MPSAllocator base data pointers");
   MPSStream* stream = getCurrentMPSStream();
-  stream->copy_and_sync((id<MTLBuffer>)(src), (id<MTLBuffer>)(dst), size, 0, 0, true, profile_id);
+  stream->copy_and_sync(srcBuf, dstBuf, size, 0, 0, true, profile_id);
 }
 
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
