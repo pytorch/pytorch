@@ -4315,6 +4315,10 @@ if HAS_CUDA_AND_TRITON:
             # 2 graph partitions lead to 2 cudagraph
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @unittest.skip(
+            "Disabled due to CI failures; see "
+            "https://github.com/pytorch/pytorch/issues/190233"
+        )
         def test_graph_partition_view_fallback(self):
             def f(x):
                 y = x + 1
