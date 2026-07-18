@@ -656,6 +656,48 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
   return set_eval_frame(callback, module);
 }
 
+// call_with_disable(callable, *args, **kwargs)
+//
+// Invoke callable(*args, **kwargs) with Dynamo's frame-evaluation callback
+// disabled for the duration of the call, then restore it. This is the C-level
+// fast path behind torch._dynamo.disable for hot callsites (e.g. custom
+// operators): it forwards the arguments straight through with vectorcall
+// instead of packing them into a tuple/dict, and avoids the Python wrapper
+// layers entirely. The callable must be passed positionally (it is read as
+// args[0]); passing it by keyword raises TypeError.
+//
+// We call set_eval_frame directly rather than going through the
+// justknobs-guarded _maybe_set_eval_frame: the enable_compiler_set_eval_frame
+// killswitch only matters when Dynamo would otherwise install a callback, in
+// which case `prior` is None here and restoring it leaves the callback cleared.
+static PyObject* call_with_disable(
+    PyObject* module,
+    PyObject* const* args,
+    Py_ssize_t nargs,
+    PyObject* kwnames) {
+  if (nargs < 1) {
+    PyErr_SetString(
+        PyExc_TypeError,
+        "call_with_disable() requires at least the callable to invoke");
+    return NULL;
+  }
+  PyObject* fn = args[0];
+  // Clear the callback; set_eval_frame returns a new reference to the prior one.
+  PyObject* prior = set_eval_frame(Py_None, module);
+  // Forward the remaining positional args and, when present, the keyword args
+  // (whose values sit right after the positionals in `args`, named by kwnames).
+  PyObject* result =
+      PyObject_Vectorcall(fn, args + 1, (size_t)(nargs - 1), kwnames);
+  // Nothing to restore when Dynamo was not active (prior is None) -- the common
+  // custom-op case.
+  if (prior != Py_None) {
+    PyObject* cleared = set_eval_frame(prior, module);
+    Py_DECREF(cleared);
+  }
+  Py_DECREF(prior);
+  return result;
+}
+
 static PyObject* set_skip_guard_eval_unsafe(
     PyObject* dummy,
     PyObject* skip_guard_unsafe_flag) {
@@ -800,6 +842,10 @@ static PyObject* set_fullgraph_error_on_nested_compile_py(
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
+    {"call_with_disable",
+     (PyCFunction)(void (*)(void))call_with_disable,
+     METH_FASTCALL | METH_KEYWORDS,
+     NULL},
     {"set_skip_guard_eval_unsafe", set_skip_guard_eval_unsafe, METH_O, NULL},
     {"get_eval_frame_callback", get_eval_frame_callback_py, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_O, NULL},
