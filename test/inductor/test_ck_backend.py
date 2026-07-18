@@ -560,6 +560,123 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager)
 
 
+@unittest.skipIf(not torch.version.hip, "ROCM only")
+class TestCKTileUniversalGemmTemplate(TestCase):
+    _MODULE = "torch._inductor.codegen.rocm.ck_tile_universal_gemm_template"
+
+    def setUp(self):
+        super().setUp()
+        from torch._inductor.codegen.rocm import ck_tile_universal_gemm_template
+
+        self._ck_tile = ck_tile_universal_gemm_template
+        self._ck_tile._ck_tile_universal_gemm_v2_api.cache_clear()
+
+    def _write_pipeline_header(self, rocm_home: str, body: str) -> None:
+        header_dir = os.path.join(
+            rocm_home,
+            "include",
+            os.path.dirname(self._ck_tile._CK_TILE_PIPELINE_PROBLEM_HEADER),
+        )
+        os.makedirs(header_dir, exist_ok=True)
+        with open(
+            os.path.join(
+                header_dir,
+                os.path.basename(self._ck_tile._CK_TILE_PIPELINE_PROBLEM_HEADER),
+            ),
+            "w",
+        ) as f:
+            f.write(body)
+
+    def test_header_probe_legacy_api(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as rocm_home:
+            self._write_pipeline_header(
+                rocm_home,
+                """
+struct UniversalGemmPipelineProblem
+{
+    template<typename ADataType_,
+             typename BDataType_,
+             typename AccDataType_,
+             typename GemmShape_,
+             typename GemmUniversalTraits_,
+             ck_tile::GemmPipelineScheduler Scheduler_,
+             bool HasHotLoop_    = true,
+             ck_tile::TailNumber TailNum_ = ck_tile::TailNumber::Full>
+    {};
+""",
+            )
+            self.assertFalse(self._ck_tile._ck_tile_universal_gemm_v2_api(rocm_home))
+
+    def test_header_probe_v2_api(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as rocm_home:
+            self._write_pipeline_header(
+                rocm_home,
+                """
+struct UniversalGemmPipelineProblem
+{
+    template<typename ADataType_,
+             typename BDataType_,
+             typename AccDataType_,
+             typename GemmShape_,
+             typename GemmUniversalTraits_,
+             ck_tile::GemmPipelineScheduler Scheduler_,
+             typename AElementWise_ = ck_tile::element_wise::PassThrough,
+             bool HasHotLoop_    = true,
+             ck_tile::TailNumber TailNum_ = ck_tile::TailNumber::Full>
+    {};
+""",
+            )
+            self.assertTrue(self._ck_tile._ck_tile_universal_gemm_v2_api(rocm_home))
+
+    def test_emit_v1_legacy_instance(self):
+        from unittest.mock import patch
+
+        tmpl = self._ck_tile.CKTileGemmTemplate
+        with patch(
+            f"{self._MODULE}._ck_tile_universal_gemm_v2_api", return_value=False
+        ):
+            code = object.__new__(tmpl).emit_ck_instance(self._ck_tile.ops()[0])
+        self.assertIn("has_hot_loop_v", code)
+        self.assertIn("GemmPipelineProblem", code)
+        self.assertNotIn(
+            "using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;",
+            code,
+        )
+
+    def test_emit_v2_simplified_instance(self):
+        from unittest.mock import patch
+
+        tmpl = self._ck_tile.CKTileGemmTemplate
+        with patch(f"{self._MODULE}._ck_tile_universal_gemm_v2_api", return_value=True):
+            code = object.__new__(tmpl).emit_ck_instance(self._ck_tile.ops()[0])
+        self.assertNotIn("TailHandler", code)
+        self.assertNotIn("has_hot_loop_v", code)
+        self.assertIn(
+            "using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;",
+            code,
+        )
+
+    def test_kernel_launch_v1_has_tail_handler(self):
+        tmpl = self._ck_tile.CKTileGemmTemplate
+        code = tmpl._template_from_string(tmpl.gemm_kernel_launch).render(
+            instance_namespace="test_ns", use_v2_api=False
+        )
+        self.assertIn("TailHandler", code)
+        self.assertIn("filter_op", code)
+
+    def test_kernel_launch_v2_no_tail_handler(self):
+        tmpl = self._ck_tile.CKTileGemmTemplate
+        code = tmpl._template_from_string(tmpl.gemm_kernel_launch).render(
+            instance_namespace="test_ns", use_v2_api=True
+        )
+        self.assertNotIn("TailHandler", code)
+        self.assertIn("kBlockPerCU", code)
+
+
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
