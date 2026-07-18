@@ -47,7 +47,7 @@ import weakref
 from collections import Counter, OrderedDict
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
-from functools import lru_cache
+from functools import lru_cache, partial
 from types import CodeType, MethodWrapperType
 from typing import (
     Any,
@@ -74,6 +74,14 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
+from torch._C._dynamo import (
+    get_type_slots,
+    has_slot,
+    PyMappingSlots,
+    PyNumberSlots,
+    PySequenceSlots,
+    PyTypeSlots,
+)
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
@@ -94,6 +102,187 @@ from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
 from .graph_utils import _get_flat_args
+
+
+@lru_cache(maxsize=256)
+def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
+    """Get all type slots for a type (cached)."""
+    return get_type_slots(obj_type)
+
+
+def type_implements_tp_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the given tp slot."""
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, slot)
+
+
+def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the given sq slot."""
+    seq_slots, _, _, _ = _get_cached_slots(obj_type)
+    return has_slot(seq_slots, slot)
+
+
+def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the given mp slot."""
+    _, map_slots, _, _ = _get_cached_slots(obj_type)
+    return has_slot(map_slots, slot)
+
+
+def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the nb slot."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, slot)
+
+
+# PySequenceSlots
+type_implements_sq_item = partial(type_implements_sq_slot, slot=PySequenceSlots.SQ_ITEM)
+type_implements_sq_length = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_LENGTH
+)
+type_implements_sq_concat = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_CONCAT
+)
+type_implements_sq_inplace_concat = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_INPLACE_CONCAT
+)
+type_implements_sq_contains = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_CONTAINS
+)
+type_implements_sq_ass_item = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_ASS_ITEM
+)
+type_implements_sq_repeat = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_REPEAT
+)
+type_implements_sq_inplace_repeat = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_INPLACE_REPEAT
+)
+
+# PyMappingSlots
+type_implements_mp_length = partial(
+    type_implements_mp_slot, slot=PyMappingSlots.MP_LENGTH
+)
+type_implements_mp_subscript = partial(
+    type_implements_mp_slot, slot=PyMappingSlots.MP_SUBSCRIPT
+)
+type_implements_mp_ass_subscript = partial(
+    type_implements_mp_slot, slot=PyMappingSlots.MP_ASS_SUBSCRIPT
+)
+
+# PyNumberSlots
+type_implements_nb_add = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_ADD)
+type_implements_nb_subtract = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_SUBTRACT
+)
+type_implements_nb_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_MULTIPLY
+)
+type_implements_nb_remainder = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_REMAINDER
+)
+type_implements_nb_power = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_POWER)
+type_implements_nb_divmod = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_DIVMOD
+)
+type_implements_nb_negative = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_NEGATIVE
+)
+type_implements_nb_positive = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_POSITIVE
+)
+type_implements_nb_absolute = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_ABSOLUTE
+)
+type_implements_nb_bool = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_BOOL)
+type_implements_nb_invert = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INVERT
+)
+type_implements_nb_lshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_LSHIFT
+)
+type_implements_nb_rshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_RSHIFT
+)
+type_implements_nb_and = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_AND)
+type_implements_nb_xor = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_XOR)
+type_implements_nb_or = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_OR)
+type_implements_nb_int = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_INT)
+type_implements_nb_float = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_FLOAT)
+type_implements_nb_inplace_add = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_ADD
+)
+type_implements_nb_inplace_subtract = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_SUBTRACT
+)
+type_implements_nb_inplace_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_MULTIPLY
+)
+type_implements_nb_inplace_remainder = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_REMAINDER
+)
+type_implements_nb_inplace_power = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_POWER
+)
+type_implements_nb_inplace_lshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_LSHIFT
+)
+type_implements_nb_inplace_rshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_RSHIFT
+)
+type_implements_nb_inplace_and = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_AND
+)
+type_implements_nb_inplace_xor = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_XOR
+)
+type_implements_nb_inplace_or = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_OR
+)
+type_implements_nb_floor_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_FLOOR_DIVIDE
+)
+type_implements_nb_true_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_TRUE_DIVIDE
+)
+type_implements_nb_inplace_floor_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_FLOOR_DIVIDE
+)
+type_implements_nb_inplace_true_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_TRUE_DIVIDE
+)
+type_implements_nb_index = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_INDEX)
+type_implements_nb_matrix_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_MATRIX_MULTIPLY
+)
+type_implements_nb_inplace_matrix_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_MATRIX_MULTIPLY
+)
+
+
+# PyTypeSlots
+type_implements_tp_hash = partial(type_implements_tp_slot, slot=PyTypeSlots.TP_HASH)
+type_implements_tp_iter = partial(type_implements_tp_slot, slot=PyTypeSlots.TP_ITER)
+type_implements_tp_iternext = partial(
+    type_implements_tp_slot, slot=PyTypeSlots.TP_ITERNEXT
+)
+type_implements_tp_call = partial(type_implements_tp_slot, slot=PyTypeSlots.TP_CALL)
+type_implements_tp_repr = partial(type_implements_tp_slot, slot=PyTypeSlots.TP_REPR)
+type_implements_tp_richcompare = partial(
+    type_implements_tp_slot, slot=PyTypeSlots.TP_RICHCOMPARE
+)
+type_implements_tp_getattro = partial(
+    type_implements_tp_slot, slot=PyTypeSlots.TP_GETATTRO
+)
+type_implements_tp_setattro = partial(
+    type_implements_tp_slot, slot=PyTypeSlots.TP_SETATTRO
+)
+type_implements_tp_descr_get = partial(
+    type_implements_tp_slot, slot=PyTypeSlots.TP_DESCR_GET
+)
+type_implements_tp_descr_set = partial(
+    type_implements_tp_slot, slot=PyTypeSlots.TP_DESCR_SET
+)
+type_implements_tp_str = partial(type_implements_tp_slot, slot=PyTypeSlots.TP_STR)
 
 
 if typing.TYPE_CHECKING:
