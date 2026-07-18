@@ -2014,6 +2014,7 @@ class CommonTemplate:
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "inf to int cast is UB under sanitizers")
     def test_index_propagation_to_dtype_inf(self):
         def fn(x):
             return torch.sum(torch.log(x), dtype=torch.int32).float()
