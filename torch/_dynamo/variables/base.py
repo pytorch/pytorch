@@ -24,7 +24,7 @@ import textwrap
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
 from enum import Enum
-from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 from torch._C._dynamo import (
     get_type_slots,
@@ -674,25 +674,6 @@ class SlotDef:
         return self.wrapper(vt, tx, func, args, kwargs)
 
 
-@dataclasses.dataclass(frozen=True)
-class Slot:
-    """A live CPython type slot: the VariableTracker method implementing the slot
-    function, late-bound to the instance's class at call time.  Distinct from
-    SlotDef (a slotdefs[] dunder entry) -- e.g. the mp_length slot fn is the raw
-    ``mp_length`` getter, not ``__len__``'s ``tp_len_impl`` wrapper."""
-
-    impl: str
-
-    def __call__(
-        self,
-        tx: InstructionTranslatorBase,
-        vt: VariableTracker,
-        *args: Any,
-        **kwargs: Any,
-    ) -> VariableTracker:
-        return getattr(type(vt), self.impl)(vt, tx, *args, **kwargs)
-
-
 # The declarative slot table (mirrors CPython's static slotdefs[] array).  Each
 # entry: dunder name, impl method, ``group`` + ``slot`` (which slot sub-struct
 # and bit -- reflected ops share the forward slot's group/slot), and wrapper
@@ -1246,176 +1227,6 @@ def _tp_dict(obj_type: type) -> dict[str, SlotDef]:
         if has_slot(masks[sd.group.value], sd.slot):
             d[sd.name] = sd
     return d
-
-
-# One NamedTuple per group, mirroring CPython's Py{Number,Sequence,Mapping}Methods
-# sub-structs: fields are the modeled C slot names, each holding the SlotDef when
-# the type fills that slot, else None (an unfilled slot is NULL in CPython).
-class PyNumberMethods(NamedTuple):
-    nb_index: Slot | None
-    nb_int: Slot | None
-    nb_float: Slot | None
-    nb_negative: Slot | None
-    nb_positive: Slot | None
-    nb_absolute: Slot | None
-    nb_invert: Slot | None
-    nb_add: Slot | None
-    nb_inplace_add: Slot | None
-    nb_subtract: Slot | None
-    nb_inplace_subtract: Slot | None
-    nb_multiply: Slot | None
-    nb_inplace_multiply: Slot | None
-    nb_remainder: Slot | None
-    nb_inplace_remainder: Slot | None
-    nb_power: Slot | None
-    nb_inplace_power: Slot | None
-    nb_lshift: Slot | None
-    nb_inplace_lshift: Slot | None
-    nb_rshift: Slot | None
-    nb_inplace_rshift: Slot | None
-    nb_and: Slot | None
-    nb_inplace_and: Slot | None
-    nb_xor: Slot | None
-    nb_inplace_xor: Slot | None
-    nb_or: Slot | None
-    nb_inplace_or: Slot | None
-    nb_floor_divide: Slot | None
-    nb_inplace_floor_divide: Slot | None
-    nb_true_divide: Slot | None
-    nb_inplace_true_divide: Slot | None
-    nb_divmod: Slot | None
-
-
-class PySequenceMethods(NamedTuple):
-    sq_length: Slot | None
-    sq_concat: Slot | None
-    sq_repeat: Slot | None
-    sq_item: Slot | None
-    sq_ass_item: Slot | None
-    sq_contains: Slot | None
-    sq_inplace_concat: Slot | None
-    sq_inplace_repeat: Slot | None
-
-
-class PyMappingMethods(NamedTuple):
-    mp_length: Slot | None
-    mp_subscript: Slot | None
-    mp_ass_subscript: Slot | None
-
-
-# Dynamo's view of a CPython PyTypeObject: the tp_ slots as direct fields plus
-# the three sub-struct pointers.  Each tp_ field is the SlotDef the type fills for
-# that slot, else None; the sub-structs mirror PyNumberMethods etc.
-class PyTypeObject(NamedTuple):
-    tp_repr: Slot | None
-    tp_hash: Slot | None
-    tp_call: Slot | None
-    tp_str: Slot | None
-    tp_getattro: Slot | None
-    tp_setattro: Slot | None
-    tp_richcompare: Slot | None
-    tp_iter: Slot | None
-    tp_iternext: Slot | None
-    tp_descr_get: Slot | None
-    tp_descr_set: Slot | None
-    tp_init: Slot | None
-    tp_as_number: PyNumberMethods
-    tp_as_sequence: PySequenceMethods
-    tp_as_mapping: PyMappingMethods
-
-
-# The tp_ slot fields of PyTypeObject (everything but the sub-struct pointers).
-_TYPE_FIELDS = tuple(f for f in PyTypeObject._fields if not f.startswith("tp_as_"))
-
-# Per group: C slot bit -> struct field name, keyed via the enum's UPPERCASE name.
-_BIT_FIELD: dict[SlotGroup, dict[int, str]] = {
-    SlotGroup.NUMBER: {
-        getattr(PyNumberSlots, f.upper()): f for f in PyNumberMethods._fields
-    },
-    SlotGroup.SEQUENCE: {
-        getattr(PySequenceSlots, f.upper()): f for f in PySequenceMethods._fields
-    },
-    SlotGroup.MAPPING: {
-        getattr(PyMappingSlots, f.upper()): f for f in PyMappingMethods._fields
-    },
-    SlotGroup.TYPE: {getattr(PyTypeSlots, f.upper()): f for f in _TYPE_FIELDS},
-}
-
-# Every modeled slot must have a field in its struct (keeps _SLOTDEFS and the
-# static Py*Methods / PyTypeObject classes in sync).
-for _sd in _SLOTDEFS:
-    if _sd.slot not in _BIT_FIELD[_sd.group]:
-        raise AssertionError(
-            f"{_sd.name}: {_sd.group.name} slot has no field in its struct"
-        )
-
-
-# The actual slot function (a VariableTracker method) each struct field dispatches
-# to.  This is CPython's Py*Methods / tp_ slot table -- distinct from _SLOTDEFS
-# (slotdefs[], the dunder->slot table): a slot fn is NOT always the dunder impl.
-# e.g. the mp_length / sq_length slots are the raw length getters, not __len__'s
-# tp_len_impl wrapper.
-_SLOT_FN: dict[SlotGroup, dict[str, str]] = {
-    SlotGroup.NUMBER: {f: f"{f}_impl" for f in PyNumberMethods._fields},
-    SlotGroup.SEQUENCE: {
-        "sq_length": "sq_length",
-        "sq_concat": "sq_concat_impl",
-        "sq_repeat": "sq_repeat_impl",
-        "sq_item": "sq_item_impl",
-        "sq_ass_item": "sq_ass_item_impl",
-        "sq_contains": "sq_contains",
-        "sq_inplace_concat": "sq_inplace_concat_impl",
-        "sq_inplace_repeat": "sq_inplace_repeat_impl",
-    },
-    SlotGroup.MAPPING: {
-        "mp_length": "mp_length",
-        "mp_subscript": "mp_subscript_impl",
-        "mp_ass_subscript": "mp_ass_subscript_impl",
-    },
-    SlotGroup.TYPE: {
-        "tp_repr": "repr_impl",
-        "tp_hash": "tp_hash_impl",
-        "tp_call": "call_function",
-        "tp_str": "str_impl",
-        "tp_getattro": "getattro_impl",
-        "tp_setattro": "setattro_impl",
-        "tp_richcompare": "richcompare_impl",
-        "tp_iter": "tp_iter_impl",
-        "tp_iternext": "tp_iternext_impl",
-        "tp_descr_get": "tp_descr_get_impl",
-        "tp_descr_set": "tp_descr_set_impl",
-        "tp_init": "tp_init_impl",
-    },
-}
-
-# _SLOT_FN must name a slot fn for exactly each struct field.
-for _group, _fns in _SLOT_FN.items():
-    if set(_fns) != set(_BIT_FIELD[_group].values()):
-        raise AssertionError(f"{_group.name}: _SLOT_FN fields != struct fields")
-
-
-def _fill(group: SlotGroup, masks: tuple[int, int, int, int]) -> dict[str, Any]:
-    # {field -> Slot(slot fn) if the type fills the slot, else None}
-    mask = masks[group.value]
-    fn_map = _SLOT_FN[group]
-    return {
-        field: Slot(fn_map[field]) if has_slot(mask, bit) else None
-        for bit, field in _BIT_FIELD[group].items()
-    }
-
-
-@functools.cache
-def _tp_type(obj_type: type) -> PyTypeObject:
-    # obj_type's whole slot table (PyTypeObject-like).  Independent of _tp_dict's
-    # cross-group collapse, so a type with both sq_length and mp_length shows up in
-    # both the sequence and mapping views (as CPython's separate sub-structs do).
-    masks = get_type_slots(obj_type)
-    return PyTypeObject(
-        tp_as_number=PyNumberMethods(**_fill(SlotGroup.NUMBER, masks)),
-        tp_as_sequence=PySequenceMethods(**_fill(SlotGroup.SEQUENCE, masks)),
-        tp_as_mapping=PyMappingMethods(**_fill(SlotGroup.MAPPING, masks)),
-        **_fill(SlotGroup.TYPE, masks),
-    )
 
 
 class VariableTrackerMeta(type):
@@ -2938,22 +2749,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     @property
     def tp_dict(self):
         return _tp_dict(self.python_type())
-
-    @property
-    def tp_type(self) -> PyTypeObject:
-        return _tp_type(self.python_type())
-
-    @property
-    def tp_as_number(self) -> PyNumberMethods:
-        return _tp_type(self.python_type()).tp_as_number
-
-    @property
-    def tp_as_sequence(self) -> PySequenceMethods:
-        return _tp_type(self.python_type()).tp_as_sequence
-
-    @property
-    def tp_as_mapping(self) -> PyMappingMethods:
-        return _tp_type(self.python_type()).tp_as_mapping
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """
