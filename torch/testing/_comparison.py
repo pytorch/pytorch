@@ -4,6 +4,7 @@ import cmath
 import collections.abc
 import contextlib
 import dataclasses
+import types
 from collections.abc import Callable, Collection, Sequence
 from typing import Any, NoReturn
 from typing_extensions import deprecated
@@ -1143,30 +1144,6 @@ class TensorLikePair(Pair):
         )
 
 
-def _is_dataclass_instance_impl(obj: object) -> bool:
-    return dataclasses.is_dataclass(obj) and not isinstance(obj, type)
-
-
-_is_dataclass_instance_check: Callable[[object], bool] | None = None
-
-
-def _is_dataclass_instance(obj: object) -> bool:
-    """True for dataclass instances only.
-
-    Dynamo-safe: tracing ``dataclasses.is_dataclass`` can fault on exotic values
-    (sparse Tensors, typing.Union, ...), so run the check with Dynamo disabled.
-    """
-    global _is_dataclass_instance_check
-    if _is_dataclass_instance_check is None:
-        # Lazy wrap: torch.testing loads before torch._dynamo during startup.
-        import torch._dynamo
-
-        _is_dataclass_instance_check = torch._dynamo.disable(
-            _is_dataclass_instance_impl
-        )
-    return _is_dataclass_instance_check(obj)
-
-
 def originate_pairs(
     actual: Any,
     expected: Any,
@@ -1279,9 +1256,17 @@ def originate_pairs(
     # raise on Python 3.13+ (no same-object shortcut), or return a Tensor when that
     # field is the sole compare=True field. Only then recurse field-by-field so
     # tensors use the normal tensor comparison path.
+    #
+    # Skip is_dataclass for types Dynamo mishandles (Tensor, UnionType, etc.).
     elif (
-        _is_dataclass_instance(actual)
-        and _is_dataclass_instance(expected)
+        not isinstance(
+            actual, (type, torch.Tensor, types.UnionType, types.GenericAlias)
+        )
+        and not isinstance(
+            expected, (type, torch.Tensor, types.UnionType, types.GenericAlias)
+        )
+        and dataclasses.is_dataclass(actual)
+        and dataclasses.is_dataclass(expected)
         and type(actual) is type(expected)
     ):
         try:
@@ -1296,6 +1281,7 @@ def originate_pairs(
                 return [ObjectPair(actual, expected, id=id, **options)]
 
         pairs = []
+        # pyrefly: ignore [bad-argument-type]  # narrowed by is_dataclass above
         for field in dataclasses.fields(actual):
             if not field.compare:
                 continue
