@@ -74,37 +74,14 @@ __device__ __forceinline__ double2 box_muller_double(uint4 r) {
   return {radius * c, radius * s};
 }
 
-void validate_philox_indexed_args(
+void validate_philox_index_blocks(
     const char* op_name,
     const Tensor& self,
-    const Tensor& key,
     int64_t logical_numel,
     IntArrayRef start_indices,
     IntArrayRef block_sizes,
     IntArrayRef block_strides,
     IntArrayRef block_counts) {
-  TORCH_CHECK(
-      self.is_floating_point(),
-      op_name,
-      ": self must be a floating point tensor, got ",
-      self.scalar_type());
-  TORCH_CHECK(
-      key.scalar_type() == kUInt64,
-      op_name,
-      ": key must have dtype uint64, got ",
-      key.scalar_type());
-  TORCH_CHECK(
-      self.device() == key.device(),
-      op_name,
-      ": self and key must be on the same device, got ",
-      self.device(),
-      " and ",
-      key.device());
-  TORCH_CHECK(
-      key.dim() == 1 && key.size(0) == 2,
-      op_name,
-      ": key must have shape (2,), got shape ",
-      key.sizes());
   TORCH_CHECK(
       logical_numel >= 0,
       op_name,
@@ -204,6 +181,184 @@ void validate_philox_indexed_args(
       self.numel());
 }
 
+void validate_philox_flat_slice_args(
+    const char* op_name,
+    const Tensor& self,
+    int64_t total_numel,
+    IntArrayRef start_indices,
+    IntArrayRef block_sizes,
+    IntArrayRef block_strides,
+    IntArrayRef num_blocks) {
+  TORCH_CHECK(total_numel >= 0, op_name, ": total_numel must be non-negative");
+  TORCH_CHECK(
+      start_indices.size() == block_sizes.size() &&
+          start_indices.size() == block_strides.size() &&
+          start_indices.size() == num_blocks.size(),
+      op_name,
+      ": index block arrays must have the same length");
+  TORCH_CHECK(
+      self.numel() <= total_numel,
+      op_name,
+      ": output numel ",
+      self.numel(),
+      " exceeds total_numel ",
+      total_numel);
+  TORCH_CHECK(
+      total_numel <= std::numeric_limits<int32_t>::max(),
+      op_name,
+      ": total_numel > INT_MAX is not supported yet");
+
+  int64_t mapped_numel = 0;
+  for (const auto index : c10::irange(start_indices.size())) {
+    const int64_t start_index = start_indices[index];
+    const int64_t block_size = block_sizes[index];
+    const int64_t block_stride = block_strides[index];
+    const int64_t block_count = num_blocks[index];
+    TORCH_CHECK(
+        start_index >= 0, op_name, ": start_index must be non-negative");
+    TORCH_CHECK(
+        start_index <= total_numel,
+        op_name,
+        ": start_index ",
+        start_index,
+        " exceeds total_numel ",
+        total_numel);
+    TORCH_CHECK(
+        block_size >= 0, op_name, ": block_size must be non-negative");
+    TORCH_CHECK(
+        block_count >= 0, op_name, ": num_blocks must be non-negative");
+    if (block_size == 0 || block_count == 0) {
+      continue;
+    }
+    TORCH_CHECK(
+        block_count <= total_numel / block_size,
+        op_name,
+        ": block_size * num_blocks exceeds total_numel");
+    TORCH_CHECK(
+        block_stride >= block_size,
+        op_name,
+        ": block_stride ",
+        block_stride,
+        " must be at least block_size ",
+        block_size);
+    TORCH_CHECK(
+        block_stride <= total_numel,
+        op_name,
+        ": block_stride ",
+        block_stride,
+        " exceeds total_numel ",
+        total_numel);
+    const int64_t local_numel = block_size * block_count;
+    TORCH_CHECK(
+        local_numel <= self.numel() - mapped_numel,
+        op_name,
+        ": index blocks describe more than output numel ",
+        self.numel());
+    const int64_t end_index =
+        start_index + (block_count - 1) * block_stride + block_size;
+    TORCH_CHECK(
+        end_index <= total_numel,
+        op_name,
+        ": output blocks end at ",
+        end_index,
+        ", beyond total_numel ",
+        total_numel);
+    mapped_numel += local_numel;
+  }
+  TORCH_CHECK(
+      mapped_numel == self.numel(),
+      op_name,
+      ": index blocks describe ",
+      mapped_numel,
+      " elements, expected output numel ",
+      self.numel());
+}
+
+void validate_philox_indexed_args(
+    const char* op_name,
+    const Tensor& self,
+    const Tensor& key,
+    int64_t logical_numel,
+    IntArrayRef start_indices,
+    IntArrayRef block_sizes,
+    IntArrayRef block_strides,
+    IntArrayRef block_counts) {
+  TORCH_CHECK(
+      self.is_floating_point(),
+      op_name,
+      ": self must be a floating point tensor, got ",
+      self.scalar_type());
+  TORCH_CHECK(
+      key.scalar_type() == kUInt64,
+      op_name,
+      ": key must have dtype uint64, got ",
+      key.scalar_type());
+  TORCH_CHECK(
+      self.device() == key.device(),
+      op_name,
+      ": self and key must be on the same device, got ",
+      self.device(),
+      " and ",
+      key.device());
+  TORCH_CHECK(
+      key.dim() == 1 && key.size(0) == 2,
+      op_name,
+      ": key must have shape (2,), got shape ",
+      key.sizes());
+  validate_philox_index_blocks(
+      op_name,
+      self,
+      logical_numel,
+      start_indices,
+      block_sizes,
+      block_strides,
+      block_counts);
+}
+
+void validate_normal_std(double stddev) {
+  TORCH_CHECK(
+      stddev >= 0.0,
+      "normal expects std >= 0.0, but found std ",
+      stddev);
+}
+
+template <typename scalar_t>
+void validate_uniform_bounds(const Tensor& self, double low, double high) {
+  const auto min =
+      static_cast<double>(std::numeric_limits<scalar_t>::lowest());
+  const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
+  TORCH_CHECK(low >= min && low <= max, "from is out of bounds for ", self.dtype());
+  TORCH_CHECK(
+      high >= min && high <= max, "to is out of bounds for ", self.dtype());
+  TORCH_CHECK(
+      low <= high,
+      "uniform_ expects to return a [from, to) range, but found from=",
+      low,
+      " > to=",
+      high);
+  TORCH_CHECK(
+      high - low <= max,
+      "uniform_ expects to-from <= std::numeric_limits<",
+      toString(self.scalar_type()),
+      ">::max(), but found to=",
+      high,
+      " and from=",
+      low,
+      " which result in to-from to exceed the limit");
+}
+
+__device__ __forceinline__ int64_t decode_philox_logical_index(
+    int64_t local_index,
+    int64_t local_numel,
+    int64_t start_index,
+    int64_t block_size,
+    int64_t block_stride) {
+  return block_size == local_numel
+      ? start_index + local_index
+      : start_index + (local_index / block_size) * block_stride +
+          local_index % block_size;
+}
+
 template <typename scalar_t, typename sample_t, typename param_t>
 void philox_distribution_kernel(
     const char* op_name,
@@ -230,10 +385,8 @@ __global__ void philox_indexed_distribution_kernel(
   int64_t local_index =
       static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   while (local_index < local_numel) {
-    const int64_t logical_index = block_size == local_numel
-        ? start_index + local_index
-        : start_index + (local_index / block_size) * block_stride +
-            local_index % block_size;
+    const int64_t logical_index = decode_philox_logical_index(
+        local_index, local_numel, start_index, block_size, block_stride);
     const uint64_t counter = static_cast<uint64_t>(logical_index / epc);
     const int64_t lane = logical_index % epc;
     auto sample = sample_func(seed, offset + counter);
@@ -323,10 +476,8 @@ __global__ void distribution_flat_slice_kernel(
     return;
   }
 
-  const int64_t logical_index = block_size == local_numel
-      ? start_index + local_idx
-      : start_index + (local_idx / block_size) * block_stride +
-          local_idx % block_size;
+  const int64_t logical_index = decode_philox_logical_index(
+      local_idx, local_numel, start_index, block_size, block_stride);
   if (logical_index >= total_numel) {
     return;
   }
@@ -366,89 +517,14 @@ void distribution_flat_slice(
       op_name,
       ": self must be a floating point tensor, got ",
       self.scalar_type());
-  TORCH_CHECK(total_numel >= 0, op_name, ": total_numel must be non-negative");
-  TORCH_CHECK(
-      start_indices.size() == block_sizes.size() &&
-          start_indices.size() == block_strides.size() &&
-          start_indices.size() == num_blocks.size(),
+  validate_philox_flat_slice_args(
       op_name,
-      ": index block arrays must have the same length");
-  TORCH_CHECK(
-      self.numel() <= total_numel,
-      op_name,
-      ": output numel ",
-      self.numel(),
-      " exceeds total_numel ",
-      total_numel);
-  TORCH_CHECK(
-      total_numel <= std::numeric_limits<int32_t>::max(),
-      op_name,
-      ": total_numel > INT_MAX is not supported yet");
-
-  int64_t mapped_numel = 0;
-  for (const auto index : c10::irange(start_indices.size())) {
-    const int64_t start_index = start_indices[index];
-    const int64_t block_size = block_sizes[index];
-    const int64_t block_stride = block_strides[index];
-    const int64_t block_count = num_blocks[index];
-    TORCH_CHECK(
-        start_index >= 0, op_name, ": start_index must be non-negative");
-    TORCH_CHECK(
-        start_index <= total_numel,
-        op_name,
-        ": start_index ",
-        start_index,
-        " exceeds total_numel ",
-        total_numel);
-    TORCH_CHECK(
-        block_size >= 0, op_name, ": block_size must be non-negative");
-    TORCH_CHECK(
-        block_count >= 0, op_name, ": num_blocks must be non-negative");
-    if (block_size == 0 || block_count == 0) {
-      continue;
-    }
-    TORCH_CHECK(
-        block_count <= total_numel / block_size,
-        op_name,
-        ": block_size * num_blocks exceeds total_numel");
-    TORCH_CHECK(
-        block_stride >= block_size,
-        op_name,
-        ": block_stride ",
-        block_stride,
-        " must be at least block_size ",
-        block_size);
-    TORCH_CHECK(
-        block_stride <= total_numel,
-        op_name,
-        ": block_stride ",
-        block_stride,
-        " exceeds total_numel ",
-        total_numel);
-    const int64_t local_numel = block_size * block_count;
-    TORCH_CHECK(
-        local_numel <= self.numel() - mapped_numel,
-        op_name,
-        ": index blocks describe more than output numel ",
-        self.numel());
-    const int64_t end_index =
-        start_index + (block_count - 1) * block_stride + block_size;
-    TORCH_CHECK(
-        end_index <= total_numel,
-        op_name,
-        ": output blocks end at ",
-        end_index,
-        ", beyond total_numel ",
-        total_numel);
-    mapped_numel += local_numel;
-  }
-  TORCH_CHECK(
-      mapped_numel == self.numel(),
-      op_name,
-      ": index blocks describe ",
-      mapped_numel,
-      " elements, expected output numel ",
-      self.numel());
+      self,
+      total_numel,
+      start_indices,
+      block_sizes,
+      block_strides,
+      num_blocks);
   if (total_numel == 0) {
     return;
   }
@@ -775,23 +851,9 @@ Tensor& _philox_uniform_indexed_cuda_(
       block_sizes,
       block_strides,
       block_counts);
-  TORCH_CHECK(
-      low <= high,
-      "uniform_ expects to return a [from, to) range, but found from=",
-      low,
-      " > to=",
-      high);
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_indexed_", [&] {
-        TORCH_CHECK(
-            high - low <= std::numeric_limits<scalar_t>::max(),
-            "uniform_ expects to-from <= std::numeric_limits<",
-            toString(self.scalar_type()),
-            ">, but found to=",
-            high,
-            " and from=",
-            low,
-            " which result in to-from to exceed the limit");
+        validate_uniform_bounds<scalar_t>(self, low, high);
         auto sample_func = []() {
           if constexpr (std::is_same_v<scalar_t, double>) {
             return [] __device__(uint64_t seed, uint64_t offset) {
@@ -849,10 +911,7 @@ Tensor& _philox_normal_indexed_cuda_(
       block_sizes,
       block_strides,
       block_counts);
-  TORCH_CHECK(
-      stddev >= 0.0,
-      "normal expects std >= 0.0, but found std ",
-      stddev);
+  validate_normal_std(stddev);
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_normal_indexed_", [&] {
         using compute_t =
@@ -904,6 +963,7 @@ Tensor& _philox_uniform_flat_slice_cuda_(
       self.scalar_type(),
       "_philox_uniform_flat_slice_",
       [&] {
+        validate_uniform_bounds<scalar_t>(self, low, high);
         using opmath_t = at::opmath_type<scalar_t>;
         auto lo = static_cast<scalar_t>(low);
         auto hi = static_cast<scalar_t>(high);
@@ -948,6 +1008,7 @@ Tensor& _philox_normal_flat_slice_cuda_(
     double mean,
     double stddev,
     std::optional<Generator> generator) {
+  validate_normal_std(stddev);
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
       kBFloat16,
