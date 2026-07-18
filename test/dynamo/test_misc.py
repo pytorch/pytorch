@@ -452,6 +452,36 @@ graph():
         self.assertEqual(include, torch._C._dispatch_tls_local_include_set())
         self.assertEqual(exclude, torch._C._dispatch_tls_local_exclude_set())
 
+    def test_dispatch_key_set_stack_balanced_on_fullgraph_error(self):
+        # compile_wrapper pushes the local dispatch key set onto a C++ stack and
+        # must pop it even when the wrapper's own finally raises. The
+        # fullgraph=True "found no compiled frames" error is raised from inside
+        # that finally, so a naive restore-at-end-of-finally would be skipped and
+        # leak a stack entry. Verify the save/restore stack stays balanced.
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class YoloMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.ops.aten.mul.Tensor(args[0], args[1])
+
+        x = torch.ones(5)
+        with YoloMode():
+            for _ in range(3):
+                with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
+                    torch.compile(torch.add, fullgraph=True)(x, x)
+
+        # A normal compiled call after the error loop must still work. This
+        # guards against an over-restore / double-pop regression, which would
+        # leave the stack empty and make the wrapper's own restore raise.
+        cf = torch.compile(lambda t: t + 1, backend="eager")
+        self.assertEqual(cf(x), x + 1)
+
+        # If any push had leaked, the stack would be non-empty here. When
+        # balanced it is empty, so a manual restore raises instead of silently
+        # popping a stale entry.
+        with self.assertRaisesRegex(RuntimeError, "empty stack"):
+            torch._C._dynamo_restore_local_dispatch_key_set()
+
     def test_compile_non_infra_empty_with_disalloed_dispatch_mode(self):
         from torch.utils._python_dispatch import TorchDispatchMode
 
