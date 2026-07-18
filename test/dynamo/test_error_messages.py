@@ -1483,7 +1483,7 @@ TRACE LOAD_ATTR 'graph_break' [LazyVariableTracker(unrealized: <class 'module'>)
 TRACE PUSH_NULL <class 'torch._dynamo.bytecode_transformation._NotProvided'> [LazyVariableTracker(unrealized: <class 'function'>)]
 TRACE SWAP <class 'torch._dynamo.bytecode_transformation._NotProvided'> [LazyVariableTracker(unrealized: <class 'function'>), NullVariable]
 TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(verbose=True)
