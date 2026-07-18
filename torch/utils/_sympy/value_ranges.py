@@ -344,7 +344,10 @@ class ValueRanges(Generic[_T]):
     def increasing_map(x: ExprIn | ExprVR, fn: ExprFn) -> ExprVR:
         """Increasing: x <= y => f(x) <= f(y)."""
         x = ValueRanges.wrap(x)
-        return ValueRanges(fn(x.lower), fn(x.upper))
+        l, u = fn(x.lower), fn(x.upper)
+        if l is sympy.nan or u is sympy.nan:
+            return ValueRanges.unknown()
+        return ValueRanges(l, u)
 
     @overload
     @staticmethod
@@ -360,7 +363,10 @@ class ValueRanges(Generic[_T]):
         """Decreasing: x <= y => f(x) >= f(y)."""
         x = ValueRanges.wrap(x)
         # consistently either Expr or Bool, but we don't know it here
-        return ValueRanges(fn(x.upper), fn(x.lower))  # type: ignore[arg-type]
+        l, u = fn(x.upper), fn(x.lower)
+        if l is sympy.nan or u is sympy.nan:
+            return ValueRanges.unknown()
+        return ValueRanges(l, u)  # type: ignore[arg-type]
 
     @staticmethod
     def monotone_map(x: ExprIn | ExprVR, fn: ExprFn) -> ExprVR:
@@ -368,6 +374,8 @@ class ValueRanges(Generic[_T]):
         x = ValueRanges.wrap(x)
         l = fn(x.lower)
         u = fn(x.upper)
+        if l is sympy.nan or u is sympy.nan:
+            return ValueRanges.unknown()
         return ValueRanges(min(l, u), max(l, u))
 
     @staticmethod
@@ -375,7 +383,10 @@ class ValueRanges(Generic[_T]):
         """Fn is convex and has a minimum at 0."""
         x = ValueRanges.wrap(x)
         if 0 in x:
-            upper = max(fn(x.lower), fn(x.upper))
+            l, u = fn(x.lower), fn(x.upper)
+            if l is sympy.nan or u is sympy.nan:
+                return ValueRanges.unknown()
+            upper = max(l, u)
             upper = simple_sympify(upper)
             if isinstance(upper, sympy.Float) or upper == sympy.oo:
                 return ValueRanges(0.0, upper)
@@ -412,19 +423,22 @@ class ValueRanges(Generic[_T]):
         f(x1, .., xn) <= f(x1, , yi, ..., xn)
         """
         x, y = ValueRanges.wrap(x), ValueRanges.wrap(y)
-        return ValueRanges(
-            fn(x.lower, y.lower),  # type: ignore[arg-type]
-            fn(x.upper, y.upper),  # type: ignore[arg-type]
-        )
+        l = fn(x.lower, y.lower)
+        u = fn(x.upper, y.upper)
+        if l is sympy.nan or u is sympy.nan:
+            return ValueRanges.unknown()
+        return ValueRanges(l, u)  # type: ignore[arg-type]
 
     @classmethod
     def coordinatewise_monotone_map(cls, x, y, fn):
         """It's increasing or decreasing on each coordinate."""
         x, y = cls.wrap(x), cls.wrap(y)
-        products = [
-            fn(a, b)
-            for a, b in itertools.product([x.lower, x.upper], [y.lower, y.upper])
-        ]
+        products = []
+        for a, b in itertools.product([x.lower, x.upper], [y.lower, y.upper]):
+            res = fn(a, b)
+            if res is sympy.nan:
+                return ValueRanges.unknown()
+            products.append(res)
         return ValueRanges(min(products), max(products))
 
 
