@@ -24,6 +24,40 @@ static inline id<MTLBuffer> getMTLBufferStorage(const torch::Tensor& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, at::mps::getIMPSAllocator()->getMTLBuffer(tensor.storage().data()));
 }
 
+static inline id<MTLBuffer> getMTLBuffer(const c10::DataPtr& data_ptr) {
+  return __builtin_bit_cast(id<MTLBuffer>, at::mps::getIMPSAllocator()->getMTLBuffer(data_ptr.get()));
+}
+
+TEST(MPSObjCInterfaceTest, MPSPlacementHeapCoalescing) {
+  ASSERT_TRUE(torch::mps::is_available());
+
+  auto* allocator = at::mps::getIMPSAllocator();
+  allocator->emptyCache();
+  constexpr size_t block_size = 8 * 1024 * 1024;
+
+  auto first = allocator->allocate(block_size);
+  auto second = allocator->allocate(block_size);
+  auto third = allocator->allocate(block_size);
+  id<MTLHeap> heap = [getMTLBuffer(first) heap];
+  ASSERT_NE(heap, nil);
+  ASSERT_EQ([heap type], MTLHeapTypePlacement);
+  ASSERT_EQ([getMTLBuffer(second) heap], heap);
+  ASSERT_EQ([getMTLBuffer(third) heap], heap);
+  const NSUInteger second_offset = [getMTLBuffer(second) heapOffset];
+  ASSERT_EQ(second_offset, [getMTLBuffer(first) heapOffset] + [getMTLBuffer(first) length]);
+  ASSERT_EQ([getMTLBuffer(third) heapOffset], second_offset + [getMTLBuffer(second) length]);
+
+  second.clear();
+  third.clear();
+  auto merged = allocator->allocate(2 * block_size);
+  ASSERT_EQ([getMTLBuffer(merged) heap], heap);
+  ASSERT_EQ([getMTLBuffer(merged) heapOffset], second_offset);
+
+  first.clear();
+  merged.clear();
+  allocator->emptyCache();
+}
+
 TEST(MPSObjCInterfaceTest, MPSCustomKernel) {
   const unsigned int tensor_length = 100000UL;
 

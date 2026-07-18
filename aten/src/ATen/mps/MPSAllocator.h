@@ -68,24 +68,34 @@ struct BufferBlock {
   void* cpu_ptr = nullptr;
   size_t size; // size after alignment
   size_t requested_size; // requested size (before alignment)
+  size_t offset = 0;
+  BufferBlock* prev = nullptr;
+  BufferBlock* next = nullptr;
   // buffer shape is used for retrieving base of views in cached graphs
   std::vector<int64_t> shape;
   bool in_use = false;
   HeapBlock* heap;
   id_t buf_id;
+  id_t block_id;
   // counter to candidate least recently used buffers for garbage collection
   uint32_t gc_count = 0;
   uint32_t use_count = 0;
   // counter to assign unique ids to buffer blocks
   static uint64_t buffer_counter;
+  static uint64_t block_counter;
   // Metal events used to sync GPU/CPU operations on the shared-storage buffers
   MPSEventPtr event;
 
   BufferBlock(size_t Size, size_t RequestedSize = 0, const id<MTLBuffer> Buffer = nullptr, HeapBlock* Heap = nullptr)
-      : buffer(Buffer), size(Size), requested_size(RequestedSize), heap(Heap), buf_id(Buffer ? ++buffer_counter : 0) {}
+      : buffer(Buffer),
+        size(Size),
+        requested_size(RequestedSize),
+        heap(Heap),
+        buf_id(Buffer ? ++buffer_counter : 0),
+        block_id(++block_counter) {}
 
   static bool Comparator(const BufferBlock* a, const BufferBlock* b) {
-    return (a->size != b->size) ? a->size < b->size : (uintptr_t)a->buffer < (uintptr_t)b->buffer;
+    return (a->size != b->size) ? a->size < b->size : a->block_id < b->block_id;
   }
   static size_t alignUp(size_t Size, size_t Alignment) {
     assert(((Alignment - 1) & Alignment) == 0);
@@ -100,7 +110,9 @@ typedef bool (*BufferComparison)(const BufferBlock*, const BufferBlock*);
 struct BufferPool;
 struct AllocParams {
   AllocParams(size_t Alloc_Size, size_t Requested_Size, BufferPool* Pool)
-      : search_key(Alloc_Size), pool(Pool), requested_size(Requested_Size) {}
+      : search_key(Alloc_Size), pool(Pool), requested_size(Requested_Size) {
+    search_key.block_id = 0;
+  }
   size_t size() const {
     return search_key.size;
   }
@@ -112,6 +124,7 @@ struct AllocParams {
   // true if we exceed the low watermark limit. In this case
   // we apply strategies to relieve the pressure before allocation.
   bool has_memory_pressure = false;
+  bool use_placement = false;
 };
 
 struct HeapBlock {
@@ -124,6 +137,9 @@ struct HeapBlock {
   id_t heap_id;
   // indicates if we split this heap to sub-allocate 'several' buffers (otherwise single buffer)
   bool is_split;
+  bool is_placement = false;
+  BufferBlock* first_block = nullptr;
+  size_t free_bytes = 0;
   // counter to assign unique ids to heap blocks
   static uint64_t heap_counter;
 
@@ -179,14 +195,17 @@ struct HeapBlock {
       d.hazardTrackingMode =
           (usage & UsageFlags::HAZARD) ? MTLHazardTrackingModeTracked : MTLHazardTrackingModeUntracked;
       d.resourceOptions = getOptions(usage);
-      d.type = MTLHeapTypeAutomatic;
+      const bool use_placement = params.use_placement && is_split;
+      d.type = use_placement ? MTLHeapTypePlacement : MTLHeapTypeAutomatic;
       id<MTLHeap> heap = [device newHeapWithDescriptor:d];
       if (heap) {
         [heap setPurgeableState:MTLPurgeableStateNonVolatile];
-        const size_t heap_size = heapAvailableSize(heap);
+        const size_t heap_size = use_placement ? static_cast<size_t>([heap size]) : heapAvailableSize(heap);
         heapBlock = new HeapBlock(heap_size, heap, params.pool);
         if (heapBlock) {
           heapBlock->is_split = is_split;
+          heapBlock->is_placement = use_placement;
+          heapBlock->free_bytes = use_placement ? heap_size : 0;
         }
       }
       [d release];
@@ -207,6 +226,13 @@ struct HeapBlock {
     id<MTLBuffer> buf = [heap newBufferWithLength:length options:getOptions(usage)];
     if (buf) {
       updateAvailableSize();
+      n_buffers++;
+    }
+    return buf;
+  }
+  id<MTLBuffer> newMTLBuffer(size_t length, uint32_t usage, size_t offset) {
+    id<MTLBuffer> buf = [heap newBufferWithLength:length options:getOptions(usage) offset:offset];
+    if (buf) {
       n_buffers++;
     }
     return buf;
@@ -234,7 +260,9 @@ struct HeapBlock {
     return [heap retainCount];
   }
   void updateAvailableSize() {
-    size.available = heapAvailableSize(heap);
+    if (!is_placement) {
+      size.available = heapAvailableSize(heap);
+    }
   }
 };
 typedef bool (*HeapComparison)(const HeapBlock*, const HeapBlock*);
@@ -258,9 +286,10 @@ struct BufferPool {
   size_t allocated_size = 0;
   // total memory available in the pool
   size_t available_size = 0;
-  // list of heaps ordered by their "available" (not total) memory size
+  // automatic heaps ordered by their "available" (not total) memory size
   std::set<HeapBlock*, HeapComparison> heaps;
-  // list of only "available" buffers in the pool (i.e., buffers not in-use)
+  std::unordered_set<HeapBlock*> placement_heaps;
+  // available buffers and unallocated placement ranges, ordered by size
   std::set<BufferBlock*, BufferComparison> available_buffers;
   // list of buffers that are in a state of "limbo" where they've already been freed
   // from PyTorch-side, but were not returned to pool due to still being
@@ -437,6 +466,13 @@ class MPSHeapAllocatorImpl {
   bool release_cached_buffers();
   // free unused cached blocks to reclaim GPU memory if memory pressure is high
   void garbage_collect_cached_buffers(AllocParams& params);
+  void release_placement_buffer(BufferPool& pool, BufferBlock* buffer_block);
+  BufferBlock* cut_placement_block(AllocParams& params, BufferBlock* free_block);
+  BufferBlock* merge_placement_blocks(BufferPool& pool, BufferBlock* first, BufferBlock* last);
+  bool get_free_placement_block(AllocParams& params);
+  bool alloc_placement_heap(AllocParams& params);
+  void release_placement_heap(BufferPool& pool, HeapBlock* heap);
+  size_t release_free_placement_heaps(BufferPool& pool, size_t target_size);
   // returns the suitable buffer pool type for the usage or
   // requested/allocated sizes
   BufferPool& get_pool(size_t requested_size, size_t aligned_size, uint32_t usage);
