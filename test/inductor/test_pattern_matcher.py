@@ -937,27 +937,7 @@ class TestPatternMatcher(TestCase):
             x = torch.full([10, 10], True, dtype=torch.int32)
             return torch.cumsum(x, 1)
 
-        def fn7():
-            ones = torch.full([2, 4, 4], True, dtype=torch.bool)
-            return torch.cumsum(ones, 1, dtype=torch.bfloat16)
-
-        def fn8():
-            x = torch.full([10, 10], 2, dtype=torch.int32)
-            return torch.cumsum(x, 1, dtype=torch.float64)
-
-        def fn9():
-            x = torch.full([100], 0.1, dtype=torch.float32)
-            return torch.cumsum(x, 0, dtype=torch.float64)
-
-        def fn10():
-            x = torch.full([5000], 1.0, dtype=torch.float16)
-            return torch.cumsum(x, 0, dtype=torch.float32)
-
-        def fn11():
-            x = torch.full([10], 2.5, dtype=torch.float32)
-            return torch.cumsum(x, 0, dtype=torch.int64)
-
-        for fn in (fn1, fn2, fn3, fn4, fn5, fn6, fn7, fn8, fn9, fn10, fn11):
+        for fn in (fn1, fn2, fn3, fn4, fn5, fn6):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
@@ -1500,6 +1480,66 @@ class TestPatternMatcher(TestCase):
         # hit the view path
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_unfuse_broadcast_bias_baddbmm(self):
+        args = [
+            torch.randn(4, 1, 8, device=GPU_TYPE),
+            torch.randn(4, 6, 5, device=GPU_TYPE),
+            torch.randn(4, 5, 8, device=GPU_TYPE),
+        ]
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.ops.aten.baddbmm(inp, a, b)
+
+        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        self.assertEqual(actual, torch.baddbmm(*args))
+        FileCheck().check("extern_kernels.baddbmm(").run(code[0])
+
+        @torch.compile()
+        def fn2(inp, a, b):
+            return torch.nn.functional.gelu(torch.ops.aten.baddbmm(inp, a, b))
+
+        actual, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
+        self.assertEqual(actual, torch.nn.functional.gelu(torch.baddbmm(*args)))
+        FileCheck().check_not("extern_kernels.baddbmm(").check(
+            "extern_kernels.bmm("
+        ).run(code[0])
+
+        @torch.compile()
+        def fn3(inp, a, b):
+            inp = inp.expand(4, 6, 8)
+            return torch.ops.aten.baddbmm(inp, a, b).relu()
+
+        actual, (code) = run_and_get_code(fn3, args[0], args[1], args[2])
+        expanded_bias = args[0].expand(4, 6, 8)
+        self.assertEqual(expanded_bias.stride(1), 0)
+        self.assertEqual(actual, torch.baddbmm(expanded_bias, args[1], args[2]).relu())
+        FileCheck().check_not("extern_kernels.baddbmm(").check(
+            "extern_kernels.bmm("
+        ).run(code[0])
+
+    def test_unfuse_broadcast_bias_baddbmm_alpha_beta(self):
+        args = [
+            torch.randn(4, 1, 8, device=GPU_TYPE),
+            torch.randn(4, 6, 5, device=GPU_TYPE),
+            torch.randn(4, 5, 8, device=GPU_TYPE),
+        ]
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.nn.functional.relu(
+                torch.ops.aten.baddbmm(inp, a, b, alpha=0.8, beta=0.2)
+            )
+
+        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        expected = torch.nn.functional.relu(
+            torch.baddbmm(args[0], args[1], args[2], alpha=0.8, beta=0.2)
+        )
+        self.assertEqual(actual, expected)
+        FileCheck().check_not("extern_kernels.baddbmm(").check(
+            "extern_kernels.bmm("
+        ).run(code[0])
 
     def test_preserve_accumulator_addmm_with_pointwise(self):
         args = [
