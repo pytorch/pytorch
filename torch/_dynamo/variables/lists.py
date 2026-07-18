@@ -49,6 +49,7 @@ from ..utils import (
     range_iterator,
     set_example_value,
     tracked_repr,
+    type_implements_nb_index,
     unpack_and_apply_fn,
     unpack_iterable,
 )
@@ -63,7 +64,6 @@ from .object_protocol import (
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
     pynumber_index,
-    type_implements_nb_index,
     vt_is_iterable,
 )
 
@@ -2175,7 +2175,7 @@ class SliceVariable(VariableTracker):
                     tx,
                     "slice indices must be integers or None or have an __index__ method",
                 )
-            members.append(member.nb_index_impl(tx).as_python_constant())
+            members.append(pynumber_index(tx, member).as_python_constant())
         return slice(*members)
 
     def is_hashable(self) -> bool:
