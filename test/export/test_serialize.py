@@ -47,6 +47,7 @@ from torch._export.serde.serialize import (
     deserialize_torch_artifact,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    GraphModuleDeserializer,
     GraphModuleSerializer,
     serialize,
     SerializeError,
@@ -506,6 +507,15 @@ def forward(self, x):
         self.assertEqual(len(res), 1)
         self.assertEqual(res[0].arg._type, "as_sym_ints")
 
+    def test_nested_tuple_input(self):
+        serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
+        serialized = serializer.serialize_input((1, (2, 3)))
+        self.assertEqual(serialized.type, "as_tuple")
+        self.assertEqual(serialized.as_tuple[1].type, "as_tuple")
+        self.assertEqual(
+            GraphModuleDeserializer().deserialize_input(serialized), (1, (2, 3))
+        )
+
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -792,7 +802,7 @@ def forward(self, x):
             kernel_name = kwargs["name"].as_string
             symbol_name = kernel_name.rpartition("_")[0]
             self.assertEqual(symbol_name, "add_kernel")
-            self.assertEqual(kwargs["grid"].as_ints, [1, 1, 1])
+            self.assertEqual([arg.as_int for arg in kwargs["grid"].as_tuple], [1, 1, 1])
             self.assertEqual(kwargs["output_indices"].as_ints, [2])
             self.assertEqual(
                 kwargs["num_warps"].as_int, 8 if isinstance(m, MyModelAutotune) else 4

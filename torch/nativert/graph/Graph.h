@@ -99,8 +99,7 @@ using Constant = std::variant<
     bool,
     std::vector<bool>,
     std::vector<std::string>,
-    // Represents heterogeneous or otherwise tuple-only constants. Homogeneous
-    // tuple constants continue to use the typed vector alternatives above.
+    // Represents tuple constants.
     std::vector<c10::IValue>,
     std::vector<std::vector<int64_t>>,
     std::vector<std::vector<double>>,

@@ -1,3 +1,4 @@
+#include <c10/util/string_view.h>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 #include <torch/nativert/graph/Serialization.h>
@@ -18,7 +19,8 @@ bool isEmptyTuple(const torch::_export::Argument& arg) {
 }
 
 bool isHigherOrderTarget(std::string_view target) {
-  return target.rfind("torch.ops.higher_order.", 0) == 0;
+  static constexpr std::string_view prefix = "torch.ops.higher_order.";
+  return c10::starts_with(target, prefix);
 }
 
 bool isSymIntTupleElement(const torch::_export::Argument& arg) {
@@ -220,7 +222,8 @@ Value* symbolicToValue(
       TORCH_CHECK(
           false,
           fmt::format(
-              "Unsupported symbolic tuple element type: {}",
+              "Mixed symbolic tuple inputs are not yet supported in nativert; "
+              "first unsupported element type was {}",
               torch::_export::printEnum(tupleElements.front()->tag())));
     }
     case torch::_export::Argument::Tag::AS_OPTIONAL_TENSORS: {
@@ -680,6 +683,9 @@ std::unique_ptr<Graph> jsonToSubgraph(
     for (const auto& input : jsonNode.get_inputs()) {
       // We handle constants and symbolic inputs differently.
       const auto& arg = input.get_arg();
+      // Higher-order kernels expect operand tuples as TensorList values. An
+      // empty operand tuple has no symbolic elements, so force it through the
+      // symbolic path to materialize an empty ListPack.
       const bool symbolicEmptyTuple =
           isEmptyTuple(arg) && isHigherOrderTarget(jsonNode.get_target());
       if (isSymbolic(arg) || symbolicEmptyTuple) {
@@ -869,65 +875,16 @@ Constant constantToValue(
       return ret;
     }
     case torch::_export::Argument::Tag::AS_TUPLE: {
-      std::vector<Constant> values;
-      values.reserve(jsonArg.get_as_tuple().size());
+      std::vector<c10::IValue> tupleValues;
+      tupleValues.reserve(jsonArg.get_as_tuple().size());
       for (const auto& arg : jsonArg.get_as_tuple()) {
         TORCH_CHECK(
             !isSymbolic(*arg),
             fmt::format(
                 "Symbolic tuple element {} cannot be converted to a constant",
                 torch::_export::printEnum(arg->tag())));
-        values.emplace_back(constantToValue(*arg, loadNodeMetadata));
-      }
-
-      if (values.empty()) {
-        return std::vector<c10::IValue>{};
-      }
-      if (std::all_of(values.begin(), values.end(), [](const Constant& value) {
-            return std::holds_alternative<int64_t>(value);
-          })) {
-        std::vector<int64_t> ret;
-        ret.reserve(values.size());
-        for (const auto& value : values) {
-          ret.push_back(std::get<int64_t>(value));
-        }
-        return ret;
-      }
-      if (std::all_of(values.begin(), values.end(), [](const Constant& value) {
-            return std::holds_alternative<double>(value);
-          })) {
-        std::vector<double> ret;
-        ret.reserve(values.size());
-        for (const auto& value : values) {
-          ret.push_back(std::get<double>(value));
-        }
-        return ret;
-      }
-      if (std::all_of(values.begin(), values.end(), [](const Constant& value) {
-            return std::holds_alternative<bool>(value);
-          })) {
-        std::vector<bool> ret;
-        ret.reserve(values.size());
-        for (const auto& value : values) {
-          ret.push_back(std::get<bool>(value));
-        }
-        return ret;
-      }
-      if (std::all_of(values.begin(), values.end(), [](const Constant& value) {
-            return std::holds_alternative<std::string>(value);
-          })) {
-        std::vector<std::string> ret;
-        ret.reserve(values.size());
-        for (const auto& value : values) {
-          ret.push_back(std::get<std::string>(value));
-        }
-        return ret;
-      }
-
-      std::vector<c10::IValue> tupleValues;
-      tupleValues.reserve(values.size());
-      for (const auto& value : values) {
-        tupleValues.push_back(constantToIValue(value));
+        tupleValues.push_back(
+            constantToIValue(constantToValue(*arg, loadNodeMetadata)));
       }
       return tupleValues;
     }

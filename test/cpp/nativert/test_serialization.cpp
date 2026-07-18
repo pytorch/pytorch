@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <gtest/gtest.h>
 #include <torch/nativert/graph/Serialization.h>
 
@@ -309,13 +310,17 @@ TEST(SerializationTest, ConstantToValue) {
 TEST(SerializationTest, ConstantToValueTuple) {
   auto intTuple = makeTupleArgument({makeIntArgument(2), makeIntArgument(3)});
   auto value = constantToValue(intTuple, false);
-  std::vector<int64_t> expectedInts = {2, 3};
-  EXPECT_EQ(value, Constant(expectedInts));
+  auto tupleIValue = constantToIValue(value);
+  ASSERT_TRUE(tupleIValue.isTuple());
+  const auto& intElements = tupleIValue.toTupleRef().elements();
+  ASSERT_EQ(intElements.size(), 2);
+  EXPECT_EQ(intElements[0].toInt(), 2);
+  EXPECT_EQ(intElements[1].toInt(), 3);
 
   auto mixedTuple = makeTupleArgument(
       {makeIntArgument(1), makeStringArgument("two"), makeBoolArgument(true)});
   value = constantToValue(mixedTuple, false);
-  auto tupleIValue = constantToIValue(value);
+  tupleIValue = constantToIValue(value);
   ASSERT_TRUE(tupleIValue.isTuple());
   const auto& elements = tupleIValue.toTupleRef().elements();
   ASSERT_EQ(elements.size(), 3);
@@ -575,7 +580,15 @@ TEST(SerializationTest, JsonToGraphUnsupportedMixedTupleInputThrows) {
   graphModule.set_graph(jsonGraph);
   graphModule.set_signature(sig);
 
-  EXPECT_THROW(jsonToGraph(graphModule), std::exception);
+  try {
+    jsonToGraph(graphModule);
+    FAIL() << "Expected mixed symbolic tuple deserialization to fail";
+  } catch (const c10::Error& e) {
+    EXPECT_NE(
+        std::string(e.what()).find("Mixed symbolic tuple inputs"),
+        std::string::npos)
+        << e.what();
+  }
 }
 
 TEST(SerializationTest, JsonToGraphHigherOrderEmptyTupleCreatesListPack) {

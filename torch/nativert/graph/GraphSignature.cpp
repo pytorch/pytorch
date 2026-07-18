@@ -27,7 +27,6 @@ bool isSymbolicOutput(torch::_export::Argument::Tag t) {
     case torch::_export::Argument::Tag::AS_SYM_FLOAT:
     case torch::_export::Argument::Tag::AS_SYM_FLOATS:
     case torch::_export::Argument::Tag::AS_CUSTOM_OBJ:
-    case torch::_export::Argument::Tag::AS_TUPLE:
       return true;
     default:
       return false;
@@ -496,7 +495,7 @@ GraphSignature::GraphSignature(const torch::_export::GraphSignature& storage) {
         break;
       case torch::_export::OutputSpec::Tag::USER_OUTPUT: {
         const auto& userOutputArg = outputSpec.get_user_output().get_arg();
-        if (isSymbolicOutput(userOutputArg.tag())) {
+        if (hasSymbolicElement(userOutputArg)) {
           switch (userOutputArg.tag()) {
             case torch::_export::Argument::Tag::AS_TENSOR: {
               userOutputs_.emplace_back(
