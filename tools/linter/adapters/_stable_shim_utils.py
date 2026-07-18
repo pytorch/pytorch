@@ -449,7 +449,9 @@ def _run_git_network_cmd(
     last_err = ""
     for attempt in range(attempts):
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout
+            )
             if result.returncode == 0:
                 return result
             last_err = result.stderr.strip()
@@ -457,7 +459,9 @@ def _run_git_network_cmd(
             last_err = f"timed out after {timeout}s"
         if attempt < attempts - 1:
             time.sleep(2**attempt)
-    raise RuntimeError(f"`{' '.join(cmd)}` failed after {attempts} attempts: {last_err}")
+    raise RuntimeError(
+        f"`{' '.join(cmd)}` failed after {attempts} attempts: {last_err}"
+    )
 
 
 @functools.cache
