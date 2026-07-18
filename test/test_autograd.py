@@ -13799,14 +13799,17 @@ class TestAutogradDeviceType(TestCase):
                 # invoking the TorchFunctionMode directly, it doesn't update the
                 # global state dynamo references for guards:
                 # torch.utils._device.CURRENT_DEVICE
+                prev = torch.get_default_device()
+                had_default_device = (
+                    getattr(torch._GLOBAL_DEVICE_CONTEXT, "device_context", None)
+                    is not None
+                )
                 torch.set_default_device(device)
                 out = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
                 out.sum().backward()
             finally:
-                # get_default_device() returns cpu when no default is set, so
-                # restoring via set_default_device(prev) would push a cpu
-                # DeviceContext and leak the torch function mode stack.
-                torch.set_default_device(None)
+                # None clears the DeviceContext mode; "cpu" would leak it.
+                torch.set_default_device(prev if had_default_device else None)
 
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             if expect_fail:
@@ -13860,6 +13863,12 @@ class TestAutogradDeviceType(TestCase):
 
         def hook(*args, **kwargs):
             executed.append("B")
+
+        device_type = torch.device(device).type
+        device_mod = getattr(torch, device_type, None)
+        if device_mod is not None and hasattr(device_mod, "is_bf16_supported"):
+            if not device_mod.is_bf16_supported():
+                self.skipTest(f"bf16 not supported on {device_type}")
 
         x = torch.randn((3, 3), dtype=torch.bfloat16, device=device, requires_grad=True)
         x = HookFunction.apply(x)
@@ -13959,7 +13968,9 @@ class TestAutogradDeviceType(TestCase):
         loss.backward()
         mem_no_checkpoint = torch.accelerator.max_memory_allocated()
         if mem_no_checkpoint == 0:
-            self.skipTest(f"{device} does not implement memory tracking")
+            import pytest
+
+            pytest.xfail(f"{device} does not implement memory tracking")
 
         torch.accelerator.reset_peak_memory_stats()
         loss = model_reentrant_checkpoint(x.clone()).sum()
@@ -14008,6 +14019,8 @@ class TestAutogradDeviceType(TestCase):
         a = torch.ones(1, requires_grad=True, device=device_type)
         y = f(a)
         memory_with_grad = torch.accelerator.memory_allocated()
+        if memory_with_grad == 0:
+            self.skipTest(f"{device} does not implement memory tracking")
 
         del a
         del y
@@ -16832,12 +16845,14 @@ class TestMultithreadAutogradDeviceType(TestCase):
             out.backward()
 
 
-# NOTE: This class is deliberately CUDA-only. Tests here use torch.cuda.*
-# APIs (memory_stats, profiler, pin_memory, etc.) that have no device-generic
-# equivalent. The `device` parameter is injected by instantiate_device_type_tests
-# but is only used for tensor placement; do not "complete the migration" by
-# replacing torch.cuda.* calls with torch.accelerator.* equivalents.
-class TestAutogradCUDA(TestCase):
+# NOTE: This class is deliberately CUDA-only (CudaOnly naming avoids
+# TestAutogradCUDACUDA after instantiate_device_type_tests). Tests here use
+# torch.cuda.* APIs (memory_stats, profiler, pin_memory, etc.) that have no
+# device-generic equivalent. The `device` parameter is injected by
+# instantiate_device_type_tests but is only used for tensor placement; do not
+# "complete the migration" by replacing torch.cuda.* calls with
+# torch.accelerator.* equivalents.
+class TestAutogradCudaOnly(TestCase):
     def test_forward_traceback_preserves_exception_with_checkpoint(self, device):
         # Regression test: gatherForwardTraceback() must not clear a pending
         # Python exception.  See combined_traceback.cpp for the fix.
@@ -16963,10 +16978,12 @@ class TestAutogradCUDA(TestCase):
                 a.add(1.0)
 
 
-# NOTE: This class is deliberately CUDA-only. Tests here use torch.cuda.memory_stats()
-# which has no device-generic equivalent. The `device` parameter is injected by
-# instantiate_device_type_tests but is only used for tensor placement.
-class TestSelectiveActivationCheckpointCUDA(TestCase):
+# NOTE: This class is deliberately CUDA-only (CudaOnly naming avoids
+# TestSelectiveActivationCheckpointCUDACUDA after instantiate_device_type_tests).
+# Tests here use torch.cuda.memory_stats() which has no device-generic
+# equivalent. The `device` parameter is injected by instantiate_device_type_tests
+# but is only used for tensor placement.
+class TestSelectiveActivationCheckpointCudaOnly(TestCase):
     def test_flops_and_mem(self, device):
         # From https://github.com/pytorch/pytorch/pull/126320
         def get_act_mem(f):
@@ -17069,9 +17086,9 @@ instantiate_device_type_tests(TestAutogradDeviceType, globals(), except_for=None
 instantiate_device_type_tests(
     TestMultithreadAutogradDeviceType, globals(), except_for=("cpu",)
 )
-instantiate_device_type_tests(TestAutogradCUDA, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestAutogradCudaOnly, globals(), only_for=("cuda",))
 instantiate_device_type_tests(
-    TestSelectiveActivationCheckpointCUDA, globals(), only_for=("cuda",)
+    TestSelectiveActivationCheckpointCudaOnly, globals(), only_for=("cuda",)
 )
 instantiate_device_type_tests(TestAutogradMultipleDispatch, globals())
 instantiate_device_type_tests(
