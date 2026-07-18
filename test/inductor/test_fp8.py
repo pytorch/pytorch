@@ -116,6 +116,10 @@ class TestFP8Types(TestCase):
     @onlyCUDA
     @skipIfRocm
     @config.patch({"force_disable_caches": True})
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/189560"
+    )
     def test_float8_e4m3fn_uint8_decode_codegen(self, device):
         import torch._inductor.codegen.triton as triton_codegen
         import torch._inductor.codegen.triton_utils as triton_utils
