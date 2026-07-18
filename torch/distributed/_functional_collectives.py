@@ -1817,6 +1817,30 @@ def all_gather_inplace(
     return tensor_list
 
 
+def reduce_scatter_inplace(
+    output: torch.Tensor,
+    input_list: list[torch.Tensor],
+    op: str = "sum",
+    group=None,
+    async_op: bool = False,
+    tag: str = "",
+):
+    if async_op:
+        raise AssertionError(
+            "Can't remap async version of inplace op to functional collective"
+        )
+    if not all(t.size() == output.size() for t in input_list):
+        raise AssertionError(
+            "Remapping variable size reduce_scatter is not yet supported"
+        )
+
+    group = group or dist.group.WORLD
+    if group is None:
+        raise AssertionError("group cannot be None")
+
+    return output.copy_(reduce_scatter_single(torch.cat(input_list), op, 0, group, tag))
+
+
 def isend_inplace(
     tensor: torch.Tensor,
     dst: int | None = None,
@@ -1918,6 +1942,7 @@ from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecate
     batch_isend_irecv as legacy_batch_p2p_ops,
     irecv as legacy_irecv,
     isend as legacy_isend,
+    reduce_scatter as legacy_reduce_scatter,
     reduce_scatter_single as legacy_reducescatter_single,
     reduce_scatter_tensor as legacy_reducescatter,
 )
@@ -1967,6 +1992,14 @@ def _remapped_all_gather(*args, **kwargs):
     all_gather_inplace(*args, **kwargs)
 
 
+def _remapped_reduce_scatter(*args, **kwargs):
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_reduce_scatter should only be called during tracing"
+        )
+    reduce_scatter_inplace(*args, **kwargs)
+
+
 def _remapped_isend(*args, **kwargs):
     if not _are_we_tracing():
         raise AssertionError("_remapped_isend should only be called during tracing")
@@ -1997,6 +2030,7 @@ traceable_collective_remaps = {
     legacy_allreduce: _remapped_allreduce,
     legacy_all_to_all_single: _remapped_all_to_all_single,
     legacy_all_gather: _remapped_all_gather,
+    legacy_reduce_scatter: _remapped_reduce_scatter,
     legacy_reduce_scatter_base: _remapped_reducescatter,
     legacy_all_gather_base: _remapped_allgather,
     legacy_isend: _remapped_isend,
