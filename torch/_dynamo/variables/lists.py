@@ -49,7 +49,6 @@ from ..utils import (
     range_iterator,
     set_example_value,
     tracked_repr,
-    type_implements_nb_index,
     unpack_and_apply_fn,
     unpack_iterable,
 )
@@ -64,6 +63,7 @@ from .object_protocol import (
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
     pynumber_index,
+    type_implements_nb_index,
     vt_is_iterable,
 )
 
