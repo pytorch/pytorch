@@ -1656,7 +1656,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_ldl_solve,
         decorators=[
             skipCUDAIfNoCusolver,
-            skipCUDAIfRocm,
             skipCPUIfNoLapack,
         ],
         skips=(
