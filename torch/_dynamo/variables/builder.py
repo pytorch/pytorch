@@ -3010,6 +3010,24 @@ class VariableBuilder:
             )
 
         if (
+            isinstance(value, torch.Tensor)
+            and torch._C._functorch.peek_interpreter_stack() is None
+        ):
+            try:
+                tangent = torch.autograd.forward_ad.unpack_dual(value).tangent
+            except RuntimeError:
+                tangent = None
+            if tangent is not None:
+                unimplemented(
+                    gb_type="Attempted to wrap a dual tensor input",
+                    context="",
+                    explanation="torch.compile does not support input tensors that "
+                    "carry a forward-mode AD tangent; compiled code would silently "
+                    "drop the tangent.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+        if (
             safe_has_grad(value)
             and safe_grad(value) is not None
             # type: ignore[attr-defined]
