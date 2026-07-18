@@ -4,8 +4,6 @@ import struct
 import time
 import unittest
 
-import pytest
-
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
@@ -130,9 +128,9 @@ def dropout_parity(shape, p=0.3, dtype=torch.float32, seed=1234):
 # ───────────────────────────────────────────────────────────────
 # Test class (Inductor idioms)
 # ───────────────────────────────────────────────────────────────
-@pytest.mark.skipif(
+@unittest.skipIf(
     not (IS_LINUX and HAS_CUDA_AND_TRITON),
-    reason="Inductor CUDA dropout alignment tests require Linux and CUDA",
+    "Inductor CUDA dropout alignment tests require Linux and CUDA",
 )
 @config.patch(align_random_eager=True)
 class TestDropoutAlignRandomEager(InductorTestCase):
