@@ -14652,7 +14652,8 @@ op_db: list[OpInfo] = [
                # Exception: Tensor-likes are not close!
                # torch-xpu-ops: #3296
                DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive',
-                            device_type='xpu', dtypes=(torch.float16,)),),
+                            device_type='xpu', dtypes=(torch.float16,)),
+            ),
            ),
     OpInfo('istft',
            dtypes=complex_types(),
@@ -18119,6 +18120,7 @@ op_db: list[OpInfo] = [
                wrapper_set_seed(torch.nn.functional.scaled_dot_product_attention, *args, **kwargs),
         sample_inputs_func=sample_inputs_scaled_dot_product_attention,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfXPU=floating_types_and(torch.float16, torch.bfloat16, torch.int8, torch.uint8),
         supports_out=False,
         supports_forward_ad=False,
         supports_fwgrad_bwgrad=True,
