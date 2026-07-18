@@ -290,6 +290,17 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             frame = builder(cols, convert, self._resolver)
             if frame is None or _named_len(frame) == 0:
                 continue
+            # Pluggable graphed-op lane assignment: attach (logical_lane, lane_name) columns
+            # for work kinds so the trace builder can reassign graphed ops onto a dedicated
+            # lane. No-op when no resolver is installed.
+            if (
+                self._lane_resolver is not None
+                and "graph_node_id" in frame
+                and "stream_id" in frame
+            ):
+                frame["logical_lane"], frame["lane_name"] = _resolve_lane_columns(
+                    self._lane_resolver, frame, self._lane_cache
+                )
             (timed if is_timed else ext).append((kind_str, frame))
         if not timed and not ext:
             return
@@ -518,9 +529,6 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
 # resolution -- on the worker thread while the active-id chain is live.
 
 
-_ANNOTATION_MISS = object()
-
-
 def _named_len(frame: dict[str, Any]) -> int:
     for col in frame.values():
         return len(col)
@@ -605,20 +613,39 @@ def _demangle_column(names: Any) -> Any:
 
 
 def _resolve_annotation_column(resolver, gnid: Any) -> Any:
-    """Per-row graph annotation as an object column, memoized over distinct graph_node_ids.
-    None resolver -> all-None column, no calls."""
+    """Per-row graph annotation as an object column. None resolver -> all-None column, no
+    calls. The resolver is memoized per graph_node_id by the observer (see
+    CuptiMonitorObserver._resolver), so distinct nodes resolve once for its lifetime."""
     n = len(gnid)
     out = np.empty(n, dtype=object)
     if resolver is None:
         out[:] = None
         return out
-    cache: dict[int, Any] = {}
     for i, g in enumerate(gnid.tolist()):
-        val = cache.get(g, _ANNOTATION_MISS)
-        if val is _ANNOTATION_MISS:
-            val = cache[g] = resolver(g)
-        out[i] = val
+        out[i] = resolver(g)
     return out
+
+
+def _resolve_lane_columns(lane_resolver, frame: dict[str, Any], cache: dict) -> Any:
+    """Per-row (logical_lane, lane_name) for graphed ops, memoized by graph_node_id in
+    ``cache`` (a node's lane is stable once its graph is baked, so it resolves once for the
+    observer's lifetime). Graphed rows (graph_node_id != 0) get the resolver's (lane, name)
+    from a record of that op's fields -- built only on a cache miss; eager rows keep their CUDA
+    stream and no name (the monitor names those "stream N")."""
+    gnid = frame["graph_node_id"]
+    n = len(gnid)
+    logical = np.array(
+        frame["stream_id"], dtype=np.int64
+    )  # default: the op's CUDA stream
+    names = np.full(n, None, dtype=object)
+    for i, g in enumerate(gnid.tolist()):
+        if not g:
+            continue
+        res = cache.get(g)
+        if res is None:
+            res = cache[g] = lane_resolver({col: frame[col][i] for col in frame})
+        logical[i], names[i] = res
+    return logical, names
 
 
 def _kernel_columns(cols, convert, resolver):

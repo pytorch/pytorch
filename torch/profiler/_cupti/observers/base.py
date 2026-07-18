@@ -11,6 +11,7 @@ clock passthroughs, and the user-annotation push/pop for naming regions.
 from __future__ import annotations
 
 import contextlib
+import functools
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -26,9 +27,19 @@ if TYPE_CHECKING:
 # replay, needs no extra record kinds).
 GraphAnnotationResolver = Callable[[int], "Any | None"]
 
+# op record (this op's fields, incl. its resolved ``annotation``) -> (logical_lane, lane_name):
+# which display lane a graphed op renders on and how that lane is named (the op's CUDA stream
+# is preserved as ``original_stream`` when the lane differs). The resolver itself is optional
+# (see ``ObserverAnnotationSettings.graph_lane_resolver`` -- unset means no reassignment); when
+# set it is called for every graphed op and always returns a lane -- an annotation's logical
+# stream when it has one, else the consumer's chosen default lane. Gets the whole record (not
+# just graph_node_id) so it can decide from any field, typically the resolved ``annotation``.
+LaneResolver = Callable[["dict[str, Any]"], "tuple[int, str]"]
+
 
 def default_graph_annotation_resolver(graph_node_id: int) -> Any | None:
-    """Default resolver: map a CUDA-graph node id to its registered annotation."""
+    """Default resolver: map a CUDA-graph node id to its registered annotation, or None when
+    it has none."""
     if graph_node_id == 0:
         return None
     try:
@@ -56,6 +67,10 @@ class ObserverAnnotationSettings:
 
     graph_annotation_resolver: GraphAnnotationResolver | None = None
     support_eager_annotations: bool = False
+    # Pluggable graphed-op lane assignment (see LaneResolver). None -> ops render on their
+    # CUDA stream lane (no reassignment). Independent of graph_annotation_resolver, though a
+    # consumer's implementation typically reads the op's resolved annotation from the record.
+    graph_lane_resolver: LaneResolver | None = None
 
 
 class CuptiMonitorObserver:
@@ -73,6 +88,30 @@ class CuptiMonitorObserver:
     (eager only -- external ids don't survive graph capture; under graphs use
     ``graph_node_id``)."""
 
+    # Both graph resolvers are memoized per graph_node_id: a node's annotation and lane are
+    # stable once its graph is baked, so each resolves once for this observer's lifetime
+    # (reused across every buffer delivery). The annotation resolver (int key) is wrapped in
+    # functools.cache on assignment; the lane resolver takes an unhashable record, so it is
+    # memoized by graph_node_id in _resolve_lane_columns via _lane_cache (reset on assignment).
+    # TODO: the caches grow with distinct graph_node_ids (each recapture mints new ids); we
+    # could evict a graph's entries on its shutdown/recapture to bound growth in long runs.
+    @property
+    def _resolver(self) -> GraphAnnotationResolver | None:
+        return self._resolver_cached
+
+    @_resolver.setter
+    def _resolver(self, fn: GraphAnnotationResolver | None) -> None:
+        self._resolver_cached = functools.cache(fn) if fn is not None else None
+
+    @property
+    def _lane_resolver(self) -> LaneResolver | None:
+        return self._lane_resolver_fn
+
+    @_lane_resolver.setter
+    def _lane_resolver(self, fn: LaneResolver | None) -> None:
+        self._lane_resolver_fn = fn
+        self._lane_cache: dict[int, tuple[int, str]] = {}
+
     def __init__(
         self,
         activities: Any,
@@ -82,10 +121,12 @@ class CuptiMonitorObserver:
         # Region naming (see ObserverAnnotationSettings): an enabled source folds its
         # required fields into the selection (graph: just graph_node_id; eager: extra kinds).
         if annotations is None:
-            self._resolver: GraphAnnotationResolver | None = None
+            self._resolver = None
+            self._lane_resolver = None
             self._eager = False
         else:
             self._resolver = annotations.graph_annotation_resolver
+            self._lane_resolver = annotations.graph_lane_resolver
             self._eager = annotations.support_eager_annotations
         if self._resolver is not None:
             activities = self._with_graph_fields(activities)

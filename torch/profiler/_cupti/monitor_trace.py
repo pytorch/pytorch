@@ -315,6 +315,7 @@ def _trace_window_entries(
     trace_events: list[dict[str, object]] = []
     seen_devices: dict[int, int] = {}
     seen_streams: set[tuple[int, int]] = set()
+    lane_names: dict[tuple[int, int], str] = {}
     seen_cpu_processes: dict[int, int] = {}
     seen_cpu_threads: set[tuple[int, int]] = set()
     need_overhead_metadata = False
@@ -447,14 +448,28 @@ def _trace_window_entries(
         ann_l = c["annotation"].tolist()
         meta_col = c.get("metadata")
         meta_l = meta_col.tolist() if meta_col is not None else None
+        # Pluggable lane assignment: a graph lane resolver (if installed) supplies per-op
+        # (logical_lane, lane_name) columns; a graphed op whose logical lane differs from
+        # its CUDA stream is moved onto that lane below. CUPTI reports graph-replay ops piled
+        # on the one stream the graph replays on, so on that stream's lane they overlap and
+        # hide in Perfetto; baking the move into this export pass (tid + args["stream"] moved,
+        # the op's CUDA stream kept as original_stream) means consumers need no read/reassign/
+        # rewrite round trip. Absent a resolver, ops render on their CUDA stream lane.
+        lane_col = c.get("logical_lane")
+        lane_name_col = c.get("lane_name")
+        lane_l = lane_col.tolist() if lane_col is not None else None
+        lane_name_l = lane_name_col.tolist() if lane_name_col is not None else None
+        display_tid_l = tid_l
         if (
             gid.any()
             or gnid.any()
-            or any(a is not None for a in ann_l)
+            or any(ann_l)  # any non-empty annotation (None / empty skip)
             or meta_l is not None
+            or lane_l is not None
         ):
             gid_l = gid.tolist()
             gnid_l = gnid.tolist()
+            display_tid_l = list(tid_l)
             for i, ev in enumerate(events):
                 a = ev["args"]
                 if gid_l[i]:
@@ -464,13 +479,23 @@ def _trace_window_entries(
                 _annotation_to_args(a, ann_l[i])
                 if meta_l is not None and meta_l[i] is not None:
                     _annotation_to_args(a, meta_l[i])
+                if gnid_l[i] and lane_l is not None and lane_l[i] != str_l[i]:
+                    lane_id = lane_l[i]
+                    lane = _export_tid(lane_id)
+                    ev["tid"] = lane
+                    a["stream"] = lane_id
+                    a["original_stream"] = str_l[i]
+                    display_tid_l[i] = lane
+                    seen_streams.add((dev_l[i], lane_id))
+                    if lane_name_l is not None and lane_name_l[i] is not None:
+                        lane_names[(dev_l[i], lane_id)] = lane_name_l[i]
         trace_events.extend(events)
         trace_events.extend(
             {
                 "ph": "f",
                 "id": corr_l[i],
                 "pid": dev_l[i],
-                "tid": tid_l[i],
+                "tid": display_tid_l[i],
                 "ts": ts_l[i],
                 "cat": _FLOW_CATEGORY,
                 "name": _FLOW_CATEGORY,
@@ -657,11 +682,10 @@ def _trace_window_entries(
 
     for did, rid in sorted(seen_streams):
         ts_us = 0.0
+        lane_name = lane_names.get((did, rid), f"stream {rid} ")
         metadata_events.extend(
             [
-                _metadata_event(
-                    "thread_name", ts_us, did, rid, "name", f"stream {rid} "
-                ),
+                _metadata_event("thread_name", ts_us, did, rid, "name", lane_name),
                 _metadata_event(
                     "thread_sort_index", ts_us, did, rid, "sort_index", rid
                 ),

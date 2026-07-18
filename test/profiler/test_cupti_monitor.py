@@ -460,6 +460,87 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(args["func"], "AllReduce")
         self.assertEqual(args["count"], 4096)
 
+    def test_graph_kernel_reassigned_to_logical_lane(self):
+        # A graphed kernel the lane resolver maps to a logical lane is placed on that lane
+        # (tid + args["stream"]), its real CUDA stream is preserved as original_stream, the
+        # lane is named by the resolver, and its ac2g flow arrow follows -- all in the single
+        # merge pass, so no read-trace/reassign/rewrite round trip is needed. A kernel the
+        # resolver leaves on its CUDA stream is untouched (no original_stream) and its lane
+        # keeps the default "stream N" name. Reassignment is driven by the logical_lane /
+        # lane_name columns the observer fills from the lane resolver (supplied here
+        # directly). No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _trace_window_entries
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),  # both replayed on the capture stream
+                "correlation_id": i64(11, 12),
+                "graph_id": i64(1, 1),
+                "graph_node_id": i64(101, 102),
+                "name": np.array(["graphKernelA", "graphKernelB"], dtype=object),
+                "annotation": np.array(
+                    [{"ann_id": "a"}, {"ann_id": "b"}], dtype=object
+                ),
+                # resolver output: A -> lane 8 named "side comms"; B -> its own stream 7 (no move)
+                "logical_lane": i64(8, 7),
+                "lane_name": np.array(["side comms", None], dtype=object),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(1, 1),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            }
+        }
+        metadata, events = _trace_window_entries({"columns": columns}, base_ns=0)
+        kernels = {e["name"]: e for e in events if e.get("cat") == "kernel"}
+
+        # resolved to a logical lane: moved onto lane 8, real CUDA stream preserved
+        a = kernels["graphKernelA"]
+        self.assertEqual(a["tid"], 8)
+        self.assertEqual(a["args"]["stream"], 8)
+        self.assertEqual(a["args"]["original_stream"], 7)
+        self.assertEqual(a["args"]["ann_id"], "a")
+        self.assertEqual(a["args"]["graph node id"], 101)
+
+        # resolver left it on its CUDA stream lane: untouched, no original_stream
+        b = kernels["graphKernelB"]
+        self.assertEqual(b["tid"], 7)
+        self.assertEqual(b["args"]["stream"], 7)
+        self.assertNotIn("original_stream", b["args"])
+
+        # the ac2g flow arrow for the reassigned kernel follows it to lane 8
+        flow_by_id = {
+            e["id"]: e for e in events if e.get("cat") == "ac2g" and e.get("ph") == "f"
+        }
+        self.assertEqual(flow_by_id[11]["tid"], 8)
+        self.assertEqual(flow_by_id[12]["tid"], 7)
+
+        # the reassigned lane is named by the resolver; the default lane keeps "stream N"
+        names = {
+            (e["pid"], e["tid"]): e["args"]["name"]
+            for e in metadata
+            if e.get("ph") == "M" and e.get("name") == "thread_name"
+        }
+        self.assertEqual(names[(0, 8)], "side comms")
+        self.assertEqual(names[(0, 7)].strip(), "stream 7")
+
     def test_chrome_counter_events_from_pm(self):
         # PM counters render as chrome "C" (counter) events in a dedicated per-device
         # "GPU N Counters" process row, separate from the GPU kernel work. No CUDA.
