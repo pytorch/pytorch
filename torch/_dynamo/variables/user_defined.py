@@ -4536,20 +4536,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             except ObservedKeyError:
                 handle_observed_exception(tx)
                 return self.call_method(tx, "__missing__", args, kwargs)
-        if name == "__init__" and self._maybe_get_baseclass_method("__init__") in (
-            dict.__init__,
-            collections.OrderedDict.__init__,
-        ):
-            # dict.__init__(*args, **kwargs) populates the underlying dict
-            # storage (CPython dict_init -> dict_update_common == dict.update).
-            # Route it to _base_vt so the content isn't lost, mirroring how a
-            # dict subclass inherits dict's C-level __init__.  Restricted to
-            # dict/OrderedDict __init__ -- defaultdict.__init__'s first arg is
-            # the default_factory, not dict content, and has its own path.
-            if self._base_vt is None:
-                raise AssertionError("_base_vt must not be None in call_method")
-            self._base_vt.call_method(tx, "update", args, kwargs)
-            return variables.ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
 
     def debug_repr(self) -> str:
@@ -5002,10 +4988,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
                 )
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None in __init__")
-        # dict.__init__(*args, **kwargs) populates via dict_update_common ==
-        # dict.update; route to update so the content is copied into _base_vt
-        # (call_method("__init__") no longer populates a ConstDictVariable).
-        return self._base_vt.call_method(tx, "update", args, kwargs)
+        return self._base_vt.call_method(tx, "__init__", args, kwargs)
 
     def call_method(
         self,
