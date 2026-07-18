@@ -367,6 +367,25 @@ class NbIndexTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(2))
         self.assertEqual(result, 30)
 
+    # --- SymNodeVariable ---
+
+    def test_symnode_dunder_index(self):
+        # KNOWN GAP: an explicit sym.__index__() binds a method-wrapper whose
+        # call routes through SymNodeVariable.call_method -- a catch-all that
+        # traces every method as an fx call_method op -- so __index__ becomes a
+        # torch op returning a non-Tensor instead of reaching nb_index_impl.
+        # The index protocol entrypoints operator.index(sym) and lst[sym] go
+        # through pynumber_index / getindex and DO reach nb_index_impl, so only
+        # the explicit dunder call is affected. This test fails until
+        # SymNodeVariable dispatches slot dunders through the slot table.
+        def fn(x):
+            n = x.shape[0]
+            return x + n.__index__()
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        x = torch.randn(5, 3)
+        self.assertEqual(opt(x), fn(x))
+
 
 if __name__ == "__main__":
     run_tests()

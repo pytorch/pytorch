@@ -696,7 +696,13 @@ def generic_int(
     obj_type = maybe_get_python_type(obj)
 
     if type_implements_nb_int(obj_type):
-        return obj.nb_int_impl(tx)
+        res = obj.nb_int_impl(tx)
+        if res.python_type() is not int:
+            raise_type_error(
+                tx,
+                f"__int__ returned non-int (type {res.python_type_name()})",
+            )
+        return res
 
     if type_implements_nb_index(obj_type):
         return obj.nb_index_impl(tx)
@@ -738,7 +744,13 @@ def generic_float(
     obj_type = maybe_get_python_type(obj)
 
     if type_implements_nb_float(obj_type):
-        return obj.nb_float_impl(tx)
+        res = obj.nb_float_impl(tx)
+        if res.python_type() is not float:
+            raise_type_error(
+                tx,
+                f"__float__ returned non-float (type {res.python_type_name()})",
+            )
+        return res
 
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1674-L1685
     if type_implements_nb_index(obj_type):
@@ -746,7 +758,7 @@ def generic_float(
 
     # PyFloat_FromString fallback — handles str and bytes.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1691
-    if obj.is_python_constant() and isinstance(obj.as_python_constant(), (str, bytes)):
+    if issubclass(obj.python_type(), (str, bytes)):
         try:
             return ConstantVariable.create(float(obj.as_python_constant()))
         except ValueError as e:
@@ -757,6 +769,22 @@ def generic_float(
         f"float() argument must be a string or a real number, "
         f"not '{obj.python_type_name()}'",
     )
+
+
+def getindex(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    arg: VariableTracker,
+) -> VariableTracker:
+    """Mirrors typeobject.c::getindex: calls PyNumber_AsSsize_t then tp_as_sequence.sq_length"""
+    obj_type = maybe_get_python_type(obj)
+
+    i = pynumber_as_ssize_t(tx, arg, err=OverflowError)
+    if i.as_python_constant() < 0:
+        if type_implements_sq_length(obj_type):
+            length = obj.sq_length(tx)
+            i = generic_add(tx, i, length)
+    return i
 
 
 def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
@@ -2069,15 +2097,6 @@ def _is_method_type(type_attr: object) -> bool:
     return isinstance(type_attr, _METHOD_TYPES)
 
 
-def _has_custom_call_method(obj: VariableTracker) -> bool:
-    for cls in type(obj).__mro__:
-        if cls is VariableTracker:
-            return False
-        if "call_method" in cls.__dict__:
-            return True
-    return False
-
-
 def object_generic_getattr(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
@@ -2126,14 +2145,6 @@ def object_generic_getattr(
 
     # Step 4: Non-data descriptor with __get__.
     if type_attr is not NO_SUCH_SUBOBJ and hasattr(type(type_attr), "__get__"):
-        # If the VT has custom call_method and this is a method, return a
-        # CallMethodVariable that dispatches through call_method instead of
-        # inlining the resolved method directly.  This preserves custom
-        # tracing logic (side effects, graph nodes, suppression) that
-        # MRO-based resolution via UserMethodVariable would bypass.
-        if _is_method_type(type_attr) and _has_custom_call_method(obj):
-            return variables.CallMethodVariable(obj, name, source=source)
-
         class_vt = VariableTracker.build(tx, py_type)
         result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
         if result is not None:

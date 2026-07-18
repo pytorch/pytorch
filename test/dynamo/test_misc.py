@@ -3245,6 +3245,43 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(ref, res)
         self.assertEqual(foo1.field, foo2.field)
 
+    def test_member_descriptor_set_delete_slot(self):
+        # member_descriptor (a __slots__ field) exposes __set__/__delete__ via
+        # the shared tp_descr_set slot; explicit calls should trace.
+        class Slotted:
+            __slots__ = ("a",)
+
+        def set_fn(x):
+            o = Slotted()
+            type(o).a.__set__(o, 9)
+            return x + o.a
+
+        def del_fn(x):
+            o = Slotted()
+            o.a = 4
+            type(o).a.__delete__(o)
+            return x + (0 if hasattr(o, "a") else 100)
+
+        for fn in (set_fn, del_fn):
+            opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+            self.assertEqual(opt_fn(torch.zeros(2)), fn(torch.zeros(2)))
+
+    def test_tuplegetter_readonly_slot(self):
+        # namedtuple field accessors are read-only; __set__/__delete__ raise
+        # AttributeError through the tp_descr_set slot.
+        P = collections.namedtuple("P", ["x", "y"])
+
+        def fn(t):
+            p = P(1, 2)
+            try:
+                type(p).x.__set__(p, 5)
+                return t + 1
+            except AttributeError as e:
+                return t, str(e)
+
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        self.assertEqual(opt_fn(torch.zeros(2)), fn(torch.zeros(2)))
+
     def test_dict_with_descriptor(self):
         class MyDescriptor:
             def __get__(self, obj, objtype=None):
@@ -15201,7 +15238,7 @@ fn
         self.assertEqual(cnts.frame_count, 1)
 
     def test_getattrvariable_as_python_constant(self):
-        from torch._dynamo.variables.misc import CallMethodVariable as CMV
+        from torch._dynamo.variables.functions import UserMethodVariable
 
         @torch.compile(backend="eager")
         def fn(x, rand1):
@@ -15217,7 +15254,11 @@ fn
         x = torch.randn(3, 3)
         expected = fn.__wrapped__(x, get_rng())
 
-        with patch.object(CMV, "as_python_constant", autospec=True) as po:
+        # rand1.getstate / random.Random().setstate bind to UserMethodVariable
+        # (Python methods); its as_python_constant is consulted while guarding.
+        with patch.object(
+            UserMethodVariable, "as_python_constant", autospec=True
+        ) as po:
             actual = fn(x, get_rng())
 
         self.assertEqual(expected, actual)
