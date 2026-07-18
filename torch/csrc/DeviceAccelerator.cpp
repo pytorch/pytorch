@@ -1,3 +1,4 @@
+#include <ATen/ATen.h>
 #include <c10/core/AllocatorConfig.h>
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/Exceptions.h>
@@ -7,6 +8,33 @@ namespace torch::accelerator {
 
 void initModule(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+
+  m.def(
+      "_tensors_data_ptrs_at_indices_mismatch",
+      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
+        for (auto index : indices) {
+          auto t = tensors[index].cast<at::Tensor>();
+          auto data_ptr = data_ptrs[index].cast<int64_t>();
+          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
+            return index.cast<int64_t>();
+          }
+        }
+        return int64_t{-1};
+      });
+
+  m.def(
+      "_tensors_data_ptrs_at_indices_mismatches",
+      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
+        py::list mismatches;
+        for (auto index : indices) {
+          auto t = tensors[index].cast<at::Tensor>();
+          auto data_ptr = data_ptrs[index].cast<int64_t>();
+          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
+            mismatches.append(index.cast<int64_t>());
+          }
+        }
+        return mismatches;
+      });
 
   m.def("_accelerator_getAccelerator", []() -> std::optional<c10::Device> {
     // If no accelerator was available at compile time, return None.
@@ -178,7 +206,7 @@ void initModule(PyObject* module) {
     return c10::CachingAllocator::getAllocatorSettings();
   });
 
-  m.def("_accelerator_setAllocatorSettings", [](std::string env) {
+  m.def("_accelerator_setAllocatorSettings", [](const std::string& env) {
     c10::CachingAllocator::setAllocatorSettings(env);
   });
 
