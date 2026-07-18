@@ -1091,8 +1091,11 @@ class TestTensorCreation(TestCase):
             # Note: numpy -2.0 or -1.5 -> uint8 conversion is undefined
             #       see https://github.com/pytorch/pytorch/issues/97794
             refs = (0, 254, 255, 0, 0, 0, 1, 2)
-        elif dtype == torch.int16:
-            # CPU min and max float -> int16 conversion is divergent.
+        elif dtype in (torch.int8, torch.int16):
+            # CPU min and max float -> int8/int16 conversion is divergent.
+            # (int8 also diverges under clang-21: out-of-range float->int is UB
+            # and codegen differs from numpy's reference.) Drop the out-of-range
+            # extremes.
             vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
 
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
@@ -1278,6 +1281,22 @@ class TestTensorCreation(TestCase):
 
         with self.assertRaises(RuntimeError):
             torch.repeat_interleave(torch.tensor([1, 2, -1, 3, 4], device=device))
+
+        # Negative repeats must be rejected even when output_size is passed,
+        # otherwise the CPU kernel can write out of bounds: the corrupted cumsum
+        # makes a later non-negative element produce start < 0, and in a
+        # multi-threaded run that OOB write races ahead of the sibling thread's
+        # check. See https://github.com/pytorch/pytorch/issues/188938
+        # On CUDA the kernel rejects these inputs via a device-side assert,
+        # which cannot be caught cleanly and poisons the context, so this is
+        # validated on CPU only.
+        if torch.device(device).type == "cpu":
+            with self.assertRaisesRegex(RuntimeError, "repeats can not be negative"):
+                torch.repeat_interleave(
+                    torch.tensor([-1, -1, 2], device=device), output_size=0)
+            with self.assertRaisesRegex(RuntimeError, "repeats can not be negative"):
+                torch.repeat_interleave(
+                    torch.tensor([5, -2, 1], device=device), output_size=4)
 
         y = torch.tensor([[1, 2], [3, 4]], device=device)
 
@@ -3735,7 +3754,7 @@ class TestRandomTensorCreation(TestCase):
         expected_bin = shuffled_interval.shape[0] / 10
         expected_error = math.sqrt(expected_bin) / expected_bin * 3
         error = (hist - expected_bin).abs().max() / expected_bin
-        self.assertTrue(error < expected_error, f"error {error} > {expected_error}")
+        self.assertTrue(error < expected_error, lambda msg: f"{msg}\nerror {error} > {expected_error}")
 
     # Test exceptions when device and generator types are incompatible
     @onlyCUDA
