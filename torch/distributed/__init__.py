@@ -20,8 +20,16 @@ class StatefulRNGTensor(typing.Protocol):
     block_stride, num_blocks)``.
     """
 
-    rng_global_numel: int
-    rng_index_blocks: tuple[tuple[int, int, int, int], ...]
+    rng_global_numel: int | torch.SymInt
+    rng_index_blocks: tuple[
+        tuple[
+            int | torch.SymInt,
+            int | torch.SymInt,
+            int | torch.SymInt,
+            int | torch.SymInt,
+        ],
+        ...,
+    ]
 
 
 def stateful_rng_mode():
