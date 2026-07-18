@@ -116,6 +116,10 @@ class P2PIpcTest(MultiProcContinuousTest):
         """Test P2P IPC with regular cudaMalloc allocations."""
         self._test_p2p_ipc_impl()
 
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/189879"
+    )
     @unittest.skipIf(
         TEST_WITH_ROCM, "expandable_segments mode is not supported on ROCm"
     )
