@@ -637,6 +637,176 @@ def meta_philox_uniform_(self, key, low=0.0, high=1.0):
     return self
 
 
+def _check_philox_indexed_distribution_args(
+    op_name,
+    self,
+    key,
+    logical_numel,
+    start_indices,
+    block_sizes,
+    block_strides,
+    block_counts,
+):
+    torch._check(
+        self.dtype.is_floating_point,
+        lambda: f"{op_name}: self must be a floating point tensor, got {self.dtype}",
+    )
+    torch._check(
+        key.dtype == torch.uint64,
+        lambda: f"{op_name}: key must have dtype uint64, got {key.dtype}",
+    )
+    torch._check(
+        self.device == key.device,
+        lambda: (
+            f"{op_name}: self and key must be on the same device, "
+            f"got {self.device} and {key.device}"
+        ),
+    )
+    torch._check(
+        key.dim() == 1,
+        lambda: f"{op_name}: key must have shape (2,), got shape {key.shape}",
+    )
+    torch._check(
+        key.shape[0] == 2,
+        lambda: f"{op_name}: key must have shape (2,), got shape {key.shape}",
+    )
+    torch._check(
+        logical_numel >= 0,
+        lambda: (f"{op_name}: logical_numel must be non-negative, got {logical_numel}"),
+    )
+    torch._check(
+        len(start_indices)
+        == len(block_sizes)
+        == len(block_strides)
+        == len(block_counts),
+        lambda: f"{op_name}: index block arrays must have the same length",
+    )
+    torch._check(
+        self.numel() <= logical_numel,
+        lambda: (
+            f"{op_name}: output numel {self.numel()} exceeds logical_numel "
+            f"{logical_numel}"
+        ),
+    )
+
+    mapped_numel = 0
+    previous_end = 0
+    for start_index, block_size, block_stride, block_count in zip(
+        start_indices, block_sizes, block_strides, block_counts
+    ):
+        torch._check(
+            start_index >= 0,
+            lambda: (f"{op_name}: start_index must be non-negative, got {start_index}"),
+        )
+        torch._check(
+            block_size > 0,
+            lambda: f"{op_name}: block_size must be positive, got {block_size}",
+        )
+        torch._check(
+            block_count > 0,
+            lambda: f"{op_name}: block_count must be positive, got {block_count}",
+        )
+        torch._check(
+            block_stride >= block_size,
+            lambda: (
+                f"{op_name}: block_stride {block_stride} must be at least "
+                f"block_size {block_size}"
+            ),
+        )
+        torch._check(
+            start_index >= previous_end,
+            lambda: (
+                f"{op_name}: index blocks must be ordered and non-overlapping; "
+                f"start_index {start_index} is before the previous end {previous_end}"
+            ),
+        )
+        end_index = start_index + (block_count - 1) * block_stride + block_size
+        torch._check(
+            end_index <= logical_numel,
+            lambda: (
+                f"{op_name}: index blocks end beyond logical_numel {logical_numel}"
+            ),
+        )
+        mapped_numel += block_size * block_count
+        previous_end = end_index
+
+    torch._check(
+        mapped_numel == self.numel(),
+        lambda: (
+            f"{op_name}: index blocks describe {mapped_numel} elements, "
+            f"expected output numel {self.numel()}"
+        ),
+    )
+
+
+@register_meta(aten._philox_normal_indexed_.default)
+def meta_philox_normal_indexed_(
+    self,
+    key,
+    logical_numel,
+    start_indices,
+    block_sizes,
+    block_strides,
+    block_counts,
+    mean=0.0,
+    std=1.0,
+):
+    _check_philox_indexed_distribution_args(
+        "_philox_normal_indexed_",
+        self,
+        key,
+        logical_numel,
+        start_indices,
+        block_sizes,
+        block_strides,
+        block_counts,
+    )
+    torch._check(
+        std >= 0.0,
+        lambda: f"normal expects std >= 0.0, but found std {std}",
+    )
+    return self
+
+
+@register_meta(aten._philox_uniform_indexed_.default)
+def meta_philox_uniform_indexed_(
+    self,
+    key,
+    logical_numel,
+    start_indices,
+    block_sizes,
+    block_strides,
+    block_counts,
+    low=0.0,
+    high=1.0,
+):
+    _check_philox_indexed_distribution_args(
+        "_philox_uniform_indexed_",
+        self,
+        key,
+        logical_numel,
+        start_indices,
+        block_sizes,
+        block_strides,
+        block_counts,
+    )
+    torch._check(
+        low <= high,
+        lambda: (
+            "uniform_ expects to return a [from, to) range, but found "
+            f"from={low} > to={high}"
+        ),
+    )
+    torch._check(
+        high - low <= torch.finfo(self.dtype).max,
+        lambda: (
+            f"uniform_ expects to-from <= {torch.finfo(self.dtype).max}, "
+            f"but found to={high} and from={low}"
+        ),
+    )
+    return self
+
+
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int):

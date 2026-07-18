@@ -21,8 +21,10 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_philox_normal_flat_slice_native.h>
+#include <ATen/ops/_philox_normal_indexed_native.h>
 #include <ATen/ops/_philox_normal_native.h>
 #include <ATen/ops/_philox_uniform_flat_slice_native.h>
+#include <ATen/ops/_philox_uniform_indexed_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #endif
 
@@ -70,6 +72,236 @@ __device__ __forceinline__ double2 box_muller_double(uint4 r) {
   double s, c;
   ::sincos(TWO_PI * u2, &s, &c);
   return {radius * c, radius * s};
+}
+
+void validate_philox_indexed_args(
+    const char* op_name,
+    const Tensor& self,
+    const Tensor& key,
+    int64_t logical_numel,
+    IntArrayRef start_indices,
+    IntArrayRef block_sizes,
+    IntArrayRef block_strides,
+    IntArrayRef block_counts) {
+  TORCH_CHECK(
+      self.is_floating_point(),
+      op_name,
+      ": self must be a floating point tensor, got ",
+      self.scalar_type());
+  TORCH_CHECK(
+      key.scalar_type() == kUInt64,
+      op_name,
+      ": key must have dtype uint64, got ",
+      key.scalar_type());
+  TORCH_CHECK(
+      self.device() == key.device(),
+      op_name,
+      ": self and key must be on the same device, got ",
+      self.device(),
+      " and ",
+      key.device());
+  TORCH_CHECK(
+      key.dim() == 1 && key.size(0) == 2,
+      op_name,
+      ": key must have shape (2,), got shape ",
+      key.sizes());
+  TORCH_CHECK(
+      logical_numel >= 0,
+      op_name,
+      ": logical_numel must be non-negative, got ",
+      logical_numel);
+  TORCH_CHECK(
+      start_indices.size() == block_sizes.size() &&
+          start_indices.size() == block_strides.size() &&
+          start_indices.size() == block_counts.size(),
+      op_name,
+      ": index block arrays must have the same length");
+  TORCH_CHECK(
+      self.numel() <= logical_numel,
+      op_name,
+      ": output numel ",
+      self.numel(),
+      " exceeds logical_numel ",
+      logical_numel);
+
+  int64_t mapped_numel = 0;
+  int64_t previous_end = 0;
+  for (const auto index : c10::irange(start_indices.size())) {
+    const int64_t start_index = start_indices[index];
+    const int64_t block_size = block_sizes[index];
+    const int64_t block_stride = block_strides[index];
+    const int64_t block_count = block_counts[index];
+    TORCH_CHECK(
+        start_index >= 0,
+        op_name,
+        ": start_index must be non-negative, got ",
+        start_index);
+    TORCH_CHECK(
+        block_size > 0,
+        op_name,
+        ": block_size must be positive, got ",
+        block_size);
+    TORCH_CHECK(
+        block_count > 0,
+        op_name,
+        ": block_count must be positive, got ",
+        block_count);
+    TORCH_CHECK(
+        block_stride >= block_size,
+        op_name,
+        ": block_stride ",
+        block_stride,
+        " must be at least block_size ",
+        block_size);
+    TORCH_CHECK(
+        start_index >= previous_end,
+        op_name,
+        ": index blocks must be ordered and non-overlapping; start_index ",
+        start_index,
+        " is before the previous end ",
+        previous_end);
+    TORCH_CHECK(
+        start_index <= logical_numel,
+        op_name,
+        ": start_index ",
+        start_index,
+        " exceeds logical_numel ",
+        logical_numel);
+    TORCH_CHECK(
+        block_size <= logical_numel - start_index,
+        op_name,
+        ": first block ends beyond logical_numel ",
+        logical_numel);
+
+    const int64_t remaining_after_first =
+        logical_numel - start_index - block_size;
+    TORCH_CHECK(
+        block_count == 1 ||
+            block_count - 1 <= remaining_after_first / block_stride,
+        op_name,
+        ": index blocks end beyond logical_numel ",
+        logical_numel);
+    TORCH_CHECK(
+        block_size <= self.numel() - mapped_numel &&
+            block_count <=
+                (self.numel() - mapped_numel) / block_size,
+        op_name,
+        ": index blocks describe more than output numel ",
+        self.numel());
+
+    const int64_t local_numel = block_size * block_count;
+    const int64_t end_index =
+        start_index + (block_count - 1) * block_stride + block_size;
+    mapped_numel += local_numel;
+    previous_end = end_index;
+  }
+  TORCH_CHECK(
+      mapped_numel == self.numel(),
+      op_name,
+      ": index blocks describe ",
+      mapped_numel,
+      " elements, expected output numel ",
+      self.numel());
+}
+
+template <typename scalar_t, typename sample_t, typename param_t>
+void philox_distribution_kernel(
+    const char* op_name,
+    Tensor& self,
+    const Tensor& key,
+    const sample_t& sample_func,
+    const param_t& param_func);
+
+template <typename scalar_t, typename sample_t, typename param_t>
+__global__ void philox_indexed_distribution_kernel(
+    scalar_t* __restrict__ output,
+    const uint64_t* __restrict__ key,
+    int64_t local_numel,
+    int64_t start_index,
+    int64_t block_size,
+    int64_t block_stride,
+    sample_t sample_func,
+    param_t param_func) {
+  constexpr int epc = elems_per_call<scalar_t>;
+  const uint64_t seed = key[0];
+  const uint64_t offset = key[1];
+  const int64_t local_stride =
+      static_cast<int64_t>(blockDim.x) * gridDim.x;
+  int64_t local_index =
+      static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  while (local_index < local_numel) {
+    const int64_t logical_index = block_size == local_numel
+        ? start_index + local_index
+        : start_index + (local_index / block_size) * block_stride +
+            local_index % block_size;
+    const uint64_t counter = static_cast<uint64_t>(logical_index / epc);
+    const int64_t lane = logical_index % epc;
+    auto sample = sample_func(seed, offset + counter);
+    output[local_index] = param_func((&sample.x)[lane]);
+    if (local_numel - local_index <= local_stride) {
+      break;
+    }
+    local_index += local_stride;
+  }
+}
+
+template <typename scalar_t, typename sample_t, typename param_t>
+void philox_indexed_distribution(
+    Tensor& self,
+    const Tensor& key,
+    IntArrayRef start_indices,
+    IntArrayRef block_sizes,
+    IntArrayRef block_strides,
+    IntArrayRef block_counts,
+    const sample_t& sample_func,
+    const param_t& param_func) {
+  if (self.numel() == 0) {
+    return;
+  }
+
+  // Snapshot the key before writing output because callers can construct a
+  // floating-point output that aliases the uint64 key through a dtype view.
+  auto key_snapshot =
+      self.is_alias_of(key) ? key.clone().contiguous() : key.contiguous();
+  if (start_indices.size() == 1 && start_indices[0] == 0 &&
+      block_sizes[0] == self.numel() && block_counts[0] == 1) {
+    philox_distribution_kernel<scalar_t>(
+        "philox_indexed_distribution",
+        self,
+        key_snapshot,
+        sample_func,
+        param_func);
+    return;
+  }
+
+  auto output = self.contiguous();
+  constexpr int threads = 256;
+  constexpr int max_blocks = 65535;
+  int64_t local_start = 0;
+  for (const auto index : c10::irange(start_indices.size())) {
+    const int64_t block_size = block_sizes[index];
+    const int64_t local_numel = block_size * block_counts[index];
+    const int64_t required_blocks =
+        (local_numel - 1) / threads + 1;
+    const int blocks = static_cast<int>(
+        required_blocks < max_blocks ? required_blocks : max_blocks);
+    philox_indexed_distribution_kernel<scalar_t>
+        <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+            output.mutable_data_ptr<scalar_t>() + local_start,
+            key_snapshot.const_data_ptr<uint64_t>(),
+            local_numel,
+            start_indices[index],
+            block_size,
+            block_strides[index],
+            sample_func,
+            param_func);
+    local_start += local_numel;
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  if (output.data_ptr() != self.data_ptr()) {
+    self.copy_(output);
+  }
 }
 
 template <typename scalar_t, typename sample_t, typename param_t>
@@ -521,6 +753,138 @@ Tensor& _philox_normal_cuda_(
     philox_distribution_kernel<scalar_t>(
         "_philox_normal_", self, key, sample_func, param_func);
   });
+  return self;
+}
+
+Tensor& _philox_uniform_indexed_cuda_(
+    Tensor& self,
+    const Tensor& key,
+    int64_t logical_numel,
+    IntArrayRef start_indices,
+    IntArrayRef block_sizes,
+    IntArrayRef block_strides,
+    IntArrayRef block_counts,
+    double low,
+    double high) {
+  validate_philox_indexed_args(
+      "_philox_uniform_indexed_",
+      self,
+      key,
+      logical_numel,
+      start_indices,
+      block_sizes,
+      block_strides,
+      block_counts);
+  TORCH_CHECK(
+      low <= high,
+      "uniform_ expects to return a [from, to) range, but found from=",
+      low,
+      " > to=",
+      high);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_indexed_", [&] {
+        TORCH_CHECK(
+            high - low <= std::numeric_limits<scalar_t>::max(),
+            "uniform_ expects to-from <= std::numeric_limits<",
+            toString(self.scalar_type()),
+            ">, but found to=",
+            high,
+            " and from=",
+            low,
+            " which result in to-from to exceed the limit");
+        auto sample_func = []() {
+          if constexpr (std::is_same_v<scalar_t, double>) {
+            return [] __device__(uint64_t seed, uint64_t offset) {
+              uint4 r = philox_4x32(seed, offset);
+              ulonglong2 packed;
+              packed.x =
+                  (static_cast<unsigned long long>(r.x) << 32) | r.y;
+              packed.y =
+                  (static_cast<unsigned long long>(r.z) << 32) | r.w;
+              return packed;
+            };
+          } else {
+            return [] __device__(uint64_t seed, uint64_t offset) {
+              return philox_4x32(seed, offset);
+            };
+          }
+        }();
+
+        auto lo = static_cast<scalar_t>(low);
+        auto hi = static_cast<scalar_t>(high);
+        auto param_func = [lo, hi] __device__(auto rand) {
+          return static_cast<scalar_t>(
+              at::transformation::uniform_real(rand, lo, hi));
+        };
+
+        philox_indexed_distribution<scalar_t>(
+            self,
+            key,
+            start_indices,
+            block_sizes,
+            block_strides,
+            block_counts,
+            sample_func,
+            param_func);
+      });
+  return self;
+}
+
+Tensor& _philox_normal_indexed_cuda_(
+    Tensor& self,
+    const Tensor& key,
+    int64_t logical_numel,
+    IntArrayRef start_indices,
+    IntArrayRef block_sizes,
+    IntArrayRef block_strides,
+    IntArrayRef block_counts,
+    double mean,
+    double stddev) {
+  validate_philox_indexed_args(
+      "_philox_normal_indexed_",
+      self,
+      key,
+      logical_numel,
+      start_indices,
+      block_sizes,
+      block_strides,
+      block_counts);
+  TORCH_CHECK(
+      stddev >= 0.0,
+      "normal expects std >= 0.0, but found std ",
+      stddev);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_normal_indexed_", [&] {
+        using compute_t =
+            std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
+        auto sample_func = []() {
+          if constexpr (std::is_same_v<scalar_t, double>) {
+            return [] __device__(uint64_t seed, uint64_t offset) {
+              return box_muller_double(philox_4x32(seed, offset));
+            };
+          } else {
+            return [] __device__(uint64_t seed, uint64_t offset) {
+              return box_muller_float(philox_4x32(seed, offset));
+            };
+          }
+        }();
+
+        auto mu = static_cast<compute_t>(mean);
+        auto sigma = static_cast<compute_t>(stddev);
+        auto param_func = [mu, sigma] __device__(compute_t rand) {
+          return static_cast<scalar_t>(rand * sigma + mu);
+        };
+
+        philox_indexed_distribution<scalar_t>(
+            self,
+            key,
+            start_indices,
+            block_sizes,
+            block_strides,
+            block_counts,
+            sample_func,
+            param_func);
+      });
   return self;
 }
 
