@@ -956,6 +956,11 @@ def nan_to_num(
     if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
         return a.clone()
 
+    if utils.is_complex_dtype(a.dtype):
+        real = nan_to_num(torch.real(a), nan=nan, posinf=posinf, neginf=neginf)
+        imag = nan_to_num(torch.imag(a), nan=nan, posinf=posinf, neginf=neginf)
+        return torch.complex(real, imag)
+
     if nan is None:
         nan = 0.0
 
