@@ -214,8 +214,7 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
     BufferBlock* buffer_block = *it;
 
     if (buffer_block->heap->is_placement) {
-      if (params.use_placement && buffer_block->buffer != nil &&
-          buffer_block->size <= params.size() + kLargeHeap) {
+      if (params.use_placement && buffer_block->buffer != nil && buffer_block->size <= params.size() + kLargeHeap) {
         params.buffer_block = buffer_block;
       }
     } else if (!params.use_placement) {
@@ -273,8 +272,7 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
   params.buffer_block->gc_count = 0;
   pool.available_size -= params.buffer_block->size;
   if (params.buffer_block->heap->is_placement) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        params.buffer_block->heap->free_bytes >= params.buffer_block->size);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(params.buffer_block->heap->free_bytes >= params.buffer_block->size);
     params.buffer_block->heap->free_bytes -= params.buffer_block->size;
   }
 
@@ -352,10 +350,7 @@ BufferBlock* MPSHeapAllocatorImpl::cut_placement_block(AllocParams& params, Buff
   return free_block;
 }
 
-BufferBlock* MPSHeapAllocatorImpl::merge_placement_blocks(
-    BufferPool& pool,
-    BufferBlock* first,
-    BufferBlock* last) {
+BufferBlock* MPSHeapAllocatorImpl::merge_placement_blocks(BufferPool& pool, BufferBlock* first, BufferBlock* last) {
   TORCH_INTERNAL_ASSERT(first->heap == last->heap);
   BufferBlock* after = last->next;
   pool.available_buffers.erase(first);
@@ -405,8 +400,7 @@ bool MPSHeapAllocatorImpl::get_free_placement_block(AllocParams& params) {
         block = block->next;
       }
       if (free_size >= requested_size) {
-        params.buffer_block =
-            cut_placement_block(params, merge_placement_blocks(pool, first, last));
+        params.buffer_block = cut_placement_block(params, merge_placement_blocks(pool, first, last));
         return true;
       }
     }
@@ -461,8 +455,8 @@ void MPSHeapAllocatorImpl::release_placement_heap(BufferPool& pool, HeapBlock* h
   const uint32_t retain_count = heap->releaseMTLHeap();
   if (m_debug_verbosity & DebugVerbosity::RELEASES) {
     LOG(INFO) << "Released placement heap #" << heap->heap_id << " of size " << format_size(heap->size.total)
-              << " (current allocated: " << format_size(current_allocated_size())
-              << ", retain#: " << retain_count << ")";
+              << " (current allocated: " << format_size(current_allocated_size()) << ", retain#: " << retain_count
+              << ")";
   }
   delete heap;
 }
@@ -506,8 +500,8 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   // low watermark limit has been reached
   params.has_memory_pressure = !(pool.usage & UsageFlags::SMALL) && getLowWatermarkValue() <= 0;
   const HeapTier tier = getHeapTier(alloc_size, params.has_memory_pressure);
-  params.use_placement = !(pool.usage & (UsageFlags::SMALL | UsageFlags::SCALAR)) &&
-      (tier == HeapTier::LARGE || tier == HeapTier::XLARGE);
+  params.use_placement =
+      !(pool.usage & (UsageFlags::SMALL | UsageFlags::SCALAR)) && (tier == HeapTier::LARGE || tier == HeapTier::XLARGE);
 
   // first, try to get a block from the existing pool.
   bool block_found = get_free_buffer(params);
@@ -521,8 +515,7 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
       block_found = alloc_placement_heap(params) ||
           (trigger_memory_callbacks(nullptr, IMpsAllocatorCallback::EventType::ALLOCATION_FAILED) &&
            get_free_buffer(params)) ||
-          (release_available_cached_buffers(params) &&
-           (get_free_buffer(params) || alloc_placement_heap(params))) ||
+          (release_available_cached_buffers(params) && (get_free_buffer(params) || alloc_placement_heap(params))) ||
           (release_cached_buffers() && alloc_placement_heap(params));
     } else {
       block_found =
