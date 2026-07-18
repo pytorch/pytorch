@@ -2803,6 +2803,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # tp_init slot.  A Python-defined __init__ resolves to a function and is
+        # inlined at the bind site (UserMethodVariable); only a C-inherited
+        # __init__ (object.__init__, list.__init__, ...) binds a method-wrapper
+        # and reaches here.  Mirrors call_method's __init__ handling.
+        method = self._maybe_get_baseclass_method("__init__")
+        if method is object.__init__:
+            return variables.ConstantVariable.create(None)
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.call_method(tx, "__init__", args, kwargs)
+        return super().tp_init_impl(tx, args, kwargs)
+
     def sq_concat_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> VariableTracker:
@@ -4249,6 +4270,20 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             return self._base_vt.call_method(tx, name, args, kwargs)  # type: ignore[missing-attribute]
         return super().call_method(tx, name, args, kwargs)
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Inherited C exception __init__ (BaseException.__init__, a method
+        # descriptor) is a no-op here; args are captured via __new__.  Mirrors
+        # call_method's __init__ handling.
+        method = self._maybe_get_baseclass_method("__init__")
+        if method and inspect.ismethoddescriptor(method) and len(kwargs) == 0:
+            return variables.ConstantVariable.create(None)
+        return super().tp_init_impl(tx, args, kwargs)
+
     def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         if name in (
             "args",
@@ -4537,6 +4572,26 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                 handle_observed_exception(tx)
                 return self.call_method(tx, "__missing__", args, kwargs)
         return super().call_method(tx, name, args, kwargs)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Inherited dict/OrderedDict __init__ populates the underlying storage
+        # (CPython dict_init == dict.update); route to _base_vt so content is
+        # not lost.  defaultdict.__init__'s first arg is the default_factory and
+        # has its own path.  Mirrors call_method's __init__ handling.
+        if self._maybe_get_baseclass_method("__init__") in (
+            dict.__init__,
+            collections.OrderedDict.__init__,
+        ):
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None in tp_init_impl")
+            self._base_vt.call_method(tx, "update", args, kwargs)
+            return variables.ConstantVariable.create(None)
+        return super().tp_init_impl(tx, args, kwargs)
 
     def debug_repr(self) -> str:
         if self._base_vt is None:
