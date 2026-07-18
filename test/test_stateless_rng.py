@@ -486,7 +486,173 @@ class TestStatelessRNGDistribution(TestCase):
         self.assertTrue(result.max().item() <= 5.0)
 
 
+class TestStatelessRNGIndexedDistribution(TestCase):
+    def _layout(self, name):
+        if name == "contiguous":
+            return 37, [5], [17], [17], [1]
+        if name == "strided_blocks":
+            return 37, [2], [3], [7], [5]
+        if name == "multiple_blocks":
+            return 40, [1, 16, 24], [2, 4, 1], [5, 4, 3], [3, 1, 4]
+        raise AssertionError(f"unknown layout {name}")
+
+    def _indices(self, starts, sizes, strides, counts):
+        return [
+            start + block * stride + offset
+            for start, size, stride, count in zip(starts, sizes, strides, counts)
+            for block in range(count)
+            for offset in range(size)
+        ]
+
+    @parametrize("gen_fn_name", ["normal", "uniform"])
+    @parametrize("layout", ["contiguous", "strided_blocks", "multiple_blocks"])
+    @dtypes(*all_floating_dtypes)
+    def test_matches_dense_gather(self, device, dtype, gen_fn_name, layout):
+        logical_numel, starts, sizes, strides, counts = self._layout(layout)
+        indices = self._indices(starts, sizes, strides, counts)
+        key = torch.tensor([1234, 7], dtype=torch.uint64, device=device)
+        result = torch.empty(len(indices), dtype=dtype, device=device)
+        if gen_fn_name == "normal":
+            params = (-1.25, 2.5)
+            dense = random.normal(
+                key,
+                (logical_numel,),
+                mean=params[0],
+                std=params[1],
+                dtype=dtype,
+            )
+        else:
+            params = (-2.0, 3.125)
+            dense = random.uniform(
+                key,
+                (logical_numel,),
+                low=params[0],
+                high=params[1],
+                dtype=dtype,
+            )
+
+        op = getattr(torch.ops.aten, f"_philox_{gen_fn_name}_indexed_")
+        returned = op(
+            result,
+            key,
+            logical_numel,
+            starts,
+            sizes,
+            strides,
+            counts,
+            *params,
+        )
+        self.assertIs(returned, result)
+        self.assertEqual(
+            result, dense[torch.tensor(indices, dtype=torch.int64, device=device)]
+        )
+
+    @parametrize("gen_fn_name", ["normal", "uniform"])
+    def test_noncontiguous_and_empty_output(self, device, gen_fn_name):
+        key = random.key(42, device=device)
+        op = getattr(torch.ops.aten, f"_philox_{gen_fn_name}_indexed_")
+
+        result = torch.empty(20, device=device)[::2]
+        op(result, key, 23, [1], [2], [5], [5])
+        dense = getattr(random, gen_fn_name)(key, (23,))
+        self.assertEqual(
+            result,
+            dense[torch.tensor([1, 2, 6, 7, 11, 12, 16, 17, 21, 22], device=device)],
+        )
+
+        empty = torch.empty(0, device=device)
+        returned = op(empty, key, 23, [], [], [], [])
+        self.assertIs(returned, empty)
+
+    def test_native_validation(self, device):
+        key = random.key(42, device=device)
+        op = torch.ops.aten._philox_uniform_indexed_
+
+        with self.assertRaisesRegex(RuntimeError, "same length"):
+            op(torch.empty(1, device=device), key, 4, [0], [1], [1], [])
+        with self.assertRaisesRegex(RuntimeError, "block_size must be positive"):
+            op(torch.empty(0, device=device), key, 4, [0], [0], [0], [1])
+        with self.assertRaisesRegex(RuntimeError, "ordered and non-overlapping"):
+            op(
+                torch.empty(4, device=device),
+                key,
+                8,
+                [0, 1],
+                [2, 2],
+                [2, 2],
+                [1, 1],
+            )
+        with self.assertRaisesRegex(RuntimeError, "end beyond logical_numel"):
+            op(torch.empty(3, device=device), key, 8, [6], [1], [2], [3])
+        with self.assertRaisesRegex(RuntimeError, "expected output numel"):
+            op(torch.empty(3, device=device), key, 8, [0], [2], [2], [1])
+
+        batched_key = key.expand(2, 2)
+        with self.assertRaisesRegex(RuntimeError, r"key must have shape \(2,\)"):
+            op(torch.empty(1, device=device), batched_key, 1, [0], [1], [1], [1])
+
+        with self.assertRaisesRegex(RuntimeError, "normal expects std >= 0.0"):
+            torch.ops.aten._philox_normal_indexed_(
+                torch.empty(1, device=device), key, 1, [0], [1], [1], [1], 0, -1
+            )
+        with self.assertRaisesRegex(RuntimeError, "found from=1.*> to=0"):
+            op(torch.empty(1, device=device), key, 1, [0], [1], [1], [1], 1, 0)
+
+    def test_key_may_alias_output(self, device):
+        storage = torch.tensor([1234, 7], dtype=torch.uint64, device=device)
+        expected = random.uniform(storage.clone(), (4,))
+        output = storage.view(torch.float32)
+        torch.ops.aten._philox_uniform_indexed_(
+            output,
+            storage,
+            4,
+            [0, 1, 2, 3],
+            [1, 1, 1, 1],
+            [1, 1, 1, 1],
+            [1, 1, 1, 1],
+        )
+        self.assertEqual(output, expected)
+
+    def test_meta(self, device):
+        key = torch.empty(2, dtype=torch.uint64, device="meta")
+        result = torch.empty(6, device="meta")
+        returned = torch.ops.aten._philox_normal_indexed_(
+            result, key, 17, [1, 10], [2, 2], [4, 3], [2, 1]
+        )
+        self.assertIs(returned, result)
+        with self.assertRaisesRegex(RuntimeError, "expected output numel"):
+            torch.ops.aten._philox_normal_indexed_(
+                torch.empty(7, device="meta"),
+                key,
+                17,
+                [1, 10],
+                [2, 2],
+                [4, 3],
+                [2, 1],
+            )
+
+
 class TestStatelessRNGCompile(TestCase):
+    @parametrize("op", ["normal", "uniform"])
+    def test_indexed_fullgraph(self, device, op):
+        key = random.key(42, device=device)
+        indexed_op = getattr(torch.ops.aten, f"_philox_{op}_indexed_")
+
+        def f(key):
+            result = torch.empty(6, device=key.device)
+            return indexed_op(
+                result,
+                key,
+                17,
+                [1, 10],
+                [2, 2],
+                [4, 3],
+                [2, 1],
+            )
+
+        compiled = torch.compile(f, backend="aot_eager", fullgraph=True)
+        self.assertEqual(compiled(key), f(key))
+
     def test_split_fullgraph(self, device):
         key = random.key(42, device=device)
 
@@ -589,6 +755,9 @@ instantiate_device_type_tests(TestStatelessRNGKeySplit, globals(), only_for=("cu
 instantiate_device_type_tests(TestStatelessRNGKeyFoldIn, globals(), only_for=("cuda",))
 instantiate_device_type_tests(
     TestStatelessRNGDistribution, globals(), only_for=("cuda",)
+)
+instantiate_device_type_tests(
+    TestStatelessRNGIndexedDistribution, globals(), only_for=("cuda",)
 )
 instantiate_device_type_tests(TestStatelessRNGCompile, globals(), only_for=("cuda",))
 
