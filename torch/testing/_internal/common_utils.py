@@ -3076,7 +3076,7 @@ class CudaMemoryLeakCheck:
         # Validates the discrepancy persists after garbage collection and
         #   is confirmed by the driver API
 
-        # NOTE: driver API iscrepancies alone are ignored because with the jiterator
+        # NOTE: driver API discrepancies alone are ignored because with the jiterator
         #   some tests may permanently increase the CUDA context size and
         #   that will appear as a driver memory leak but is the expected behavior.
 
@@ -5138,7 +5138,7 @@ class TestCase(expecttest.TestCase):
         Args:
             file (pathlib.Path): The path to the checkpoint to load.
             import_string (str): import string to add to the script
-            exected_failure_message (str, optional): The expected failure message if the
+            expected_failure_message (str, optional): The expected failure message if the
                 checkpoint fails to load. If None, the test will pass
         """
         script = f"import torch;{import_string}torch.load(r'{file}', weights_only=True)"
