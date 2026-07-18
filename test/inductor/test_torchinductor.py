@@ -78,6 +78,7 @@ from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
+    _get_torch_rocm_version,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
@@ -531,7 +532,22 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
+    from torch.testing._internal.opinfo.core import gradcheck_wrapper_masked_operation
+
+    use_gradcheck_wrapper = check_gradient and gradcheck_wrapper
+    add_original_op = gradcheck_wrapper is gradcheck_wrapper_masked_operation
+
+    example_inputs_gradcheck = (
+        [clone_preserve_strides_offset(x) for x in example_inputs]
+        if use_gradcheck_wrapper
+        else example_inputs
+    )
     ref_inputs = [clone_preserve_strides_offset(x) for x in example_inputs]
+    ref_gradcheck_inputs = (
+        [clone_preserve_strides_offset(x) for x in example_inputs]
+        if use_gradcheck_wrapper
+        else ref_inputs
+    )
     ref_kwargs = kwargs
     has_lowp_args = False
 
@@ -573,18 +589,30 @@ def check_model(
         # if example_inputs is already fp32 and get inplace updated in the model.
         # Call on the cloned tensors instead
         ref_inputs = list(map(upcast_fn, ref_inputs))
+        ref_gradcheck_inputs = (
+            list(map(upcast_fn, ref_gradcheck_inputs))
+            if use_gradcheck_wrapper
+            else ref_inputs
+        )
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
         if has_lowp_args and hasattr(model, "to"):
             ref_model = copy.deepcopy(model).to(torch.float)
 
     torch.manual_seed(0)
-
     correct = ref_model(*ref_inputs, **ref_kwargs)
-    correct_gradcheck = (
-        gradcheck_wrapper(ref_model, *ref_inputs, **ref_kwargs)
-        if gradcheck_wrapper
-        else correct
-    )
+
+    if use_gradcheck_wrapper:
+        torch.manual_seed(0)
+        if add_original_op:
+            correct_gradcheck = gradcheck_wrapper(
+                ref_model, *ref_gradcheck_inputs, original_op=model, **ref_kwargs
+            )
+        else:
+            correct_gradcheck = gradcheck_wrapper(
+                ref_model, *ref_gradcheck_inputs, **ref_kwargs
+            )
+    else:
+        correct_gradcheck = correct
 
     torch._inductor.metrics.reset()
 
@@ -595,16 +623,23 @@ def check_model(
         called = True
         return compile_fx(model_, example_inputs_)
 
-    def run(*ex, **kwargs):
-        ret = model(*ex, **kwargs)
-        return ret, gradcheck_wrapper(
-            model, *ex, **kwargs
-        ) if gradcheck_wrapper else ret
-
-    run = torch.compile(run, backend=compile_fx_wrapper, fullgraph=nopython)
+    run = torch.compile(model, backend=compile_fx_wrapper, fullgraph=nopython)
 
     torch.manual_seed(0)
-    actual, actual_gradcheck = run(*example_inputs, **kwargs)
+    actual = run(*example_inputs, **kwargs)
+
+    if use_gradcheck_wrapper:
+        torch.manual_seed(0)
+        if add_original_op:
+            actual_gradcheck = gradcheck_wrapper(
+                run, *example_inputs_gradcheck, original_op=model, **kwargs
+            )
+        else:
+            actual_gradcheck = gradcheck_wrapper(
+                run, *example_inputs_gradcheck, **kwargs
+            )
+    else:
+        actual_gradcheck = actual
 
     if check_has_compiled:
         if not called:
@@ -759,11 +794,11 @@ def check_model(
         for g in grads:
             g /= g.norm()
 
-        correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
+        correct_grad = compute_grads(ref_gradcheck_inputs, ref_kwargs, correct, grads)
         all_none_grads = all(x is None for x in correct_grad)
         tensor_args = [
             x
-            for x in pytree.tree_flatten(example_inputs)[0]
+            for x in pytree.tree_flatten(example_inputs_gradcheck)[0]
             if isinstance(x, torch.Tensor)
         ]
         any_non_leaves = any(x.grad_fn is not None for x in tensor_args)
@@ -782,7 +817,7 @@ def check_model(
             ]
             self.assertEqual(len(results_that_require_grad), 0)
         else:
-            actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
+            actual_grad = compute_grads(example_inputs_gradcheck, kwargs, actual, grads)
 
             if reference_in_float:
                 expect_grad = reference_to_expect(actual_grad, correct_grad)
@@ -3946,7 +3981,6 @@ class CommonTemplate:
         )
 
     @skip_if_triton_cpu  # divide by zero; cannot xfail because it crashes process
-    @skipIfXpu(msg="https://github.com/intel/intel-xpu-backend-for-triton/issues/6401")
     def test_div7(self):
         def fn(a, b):
             return (
@@ -4805,6 +4839,12 @@ for dtype in (torch.int32, torch.int64):
             return torch.dot(a, b) + torch.dot(a, b)
 
         fn = torch.vmap(dot_based)
+        gcn_arch_name = (
+            torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+            if TEST_WITH_ROCM
+            else ""
+        )
+        is_gfx11_0_or_5_x = re.fullmatch(r"gfx11[05]\d", gcn_arch_name) is not None
         bmm_codegen_call = (
             "aoti_torch_cuda_bmm_out" if config.cpp_wrapper else "extern_kernels.bmm"
         )
@@ -4830,7 +4870,18 @@ for dtype in (torch.int32, torch.int64):
                     actual, code = run_and_get_code(
                         torch.compile(fn, fullgraph=True), a, b
                     )
-                    self.assertEqual(actual, expected)
+                    # Workaround bf16 accuracy issue for gfx1100 root cause is incorrect calculation
+                    # `expected` in eager mode that uses rocBLAS(rocblas_gemvtsm_kernel) on gfx11[0|5]x
+                    # in case of usage of ROCM < 7.13
+                    if (
+                        TEST_WITH_ROCM
+                        and _get_torch_rocm_version() < (7, 13)
+                        and is_gfx11_0_or_5_x
+                        and dtype == torch.bfloat16
+                    ):
+                        self.assertEqual(actual, expected, atol=0.05, rtol=0.1)
+                    else:
+                        self.assertEqual(actual, expected)
                     code_str = "\n".join(code)
                     self.assertNotIn(bmm_codegen_call, code_str)
                     self.assertNotIn(bmm_fallback_call, code_str)
@@ -7899,6 +7950,16 @@ for dtype in (torch.int32, torch.int64):
 
         self.assertEqual(o1, o2)
 
+    def test_view_as_complex_non_contiguous(self):
+        def fn(x):
+            y = x.transpose(1, 2)
+            z = y.reshape(2, 8, 4, -1, 2)
+            return torch.view_as_complex(z)
+
+        x = torch.randn([2, 4, 8, 8], device=self.device, dtype=torch.float32)
+
+        self.common(fn, (x,), exact_stride=True, check_lowp=False)
+
     def test_view_as_real(self):
         def fn(x):
             y = torch.view_as_real(x)
@@ -8230,6 +8291,39 @@ for dtype in (torch.int32, torch.int64):
                     make_arg(16, 16, high=intmax),
                 ),
             )
+
+    @skip_if_triton_cpu
+    def test_pow_backward_dynamic_symint_exponent(self):
+        # Under dynamic=True the integer exponent becomes a symbolic scalar;
+        # pow's backward formula compared it with Scalar::equal, which was NYI
+        # for symbolic scalars. It must instead emit the general gradient and
+        # mask exponent == 0 (gradient 0) without specializing the exponent.
+        # Issue #185715.
+        def fn(x, exponent):
+            y = torch.pow(x, exponent)
+            (grad,) = torch.autograd.grad(y.sum(), x)
+            return y, grad
+
+        # base contains 0.0 so the exponent==0 path exercises the nan-avoidance
+        # mask (0 * self.pow(-1) would be nan at self == 0).
+        for exponent in (0, 1, 2, 3):
+            base = torch.tensor([0.0, 1.0, 2.5], device=self.device)
+            x = base.clone().requires_grad_(True)
+            x_c = base.clone().requires_grad_(True)
+            torch._dynamo.reset()
+            self.assertEqual(
+                fn(x, exponent), torch.compile(fn, dynamic=True)(x_c, exponent)
+            )
+
+        # The symbolic exponent must not be specialized: one graph serves all
+        # exponents, so changing it should not recompile.
+        cnts = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend=cnts, dynamic=True)
+        for exponent in (2, 3, 4, 5):
+            x = torch.ones(4, device=self.device, requires_grad=True)
+            compiled(x, exponent)
+        self.assertEqual(cnts.frame_count, 1)
 
     @xfail_if_triton_cpu
     def test_pow_symfloat(self):
@@ -10237,6 +10331,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         fn_compiled = torch.compile(fn)
         y = fn_compiled(x)
         self.assertTrue(y is not x)
+
+    def test_constant_pad_nd_fused_with_split_reduction(self):
+        # https://github.com/pytorch/pytorch/issues/<你的issue号>
+        # The pad's fill value used to be dropped when the pad was fused with
+        # the second stage of a split reduction: the body's load is served
+        # from the CSE store cache (producer fused into the same kernel), so
+        # no tl.load is emitted and the masked-load `other` never applies.
+        def fn(mask):
+            lengths = mask.sum(dim=-1, dtype=torch.int32)
+            return F.pad(torch.cumsum(lengths, dim=0, dtype=torch.int32), (1, 0))
+
+        self.common(fn, (torch.ones(1, 16384, dtype=torch.bool),))
 
     def test_l1_loss(self):
         def fn(a, b):
@@ -17271,7 +17377,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertFalse(".run(" in code[0])
 
     # skip cpu test since rms norm is always decomposed on cpu
-    @skipIfXpu(msg="_fused_rms_norm is not implemented on XPU yet")
     def test_lite_mode_not_decompose(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
@@ -18070,10 +18175,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (x, y, mask)
         self.common(Model(), inputs)
 
-    @skipIfXpu(
-        msg="Profile not enabled on XPU CI, "
-        "https://github.com/intel/torch-xpu-ops/issues/2334"
-    )
     @skipIfRocmArch(NAVI_ARCH)
     @requires_gpu_and_triton
     @parametrize("use_cat", [True, False])
@@ -18930,6 +19031,63 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(x_eager.device, x_compiled.device)
 
+    def test_jvp_compile_backward(self):
+        def jvp_fn(f, x):
+            return torch.func.jvp(f, (x.clone(),), (torch.ones_like(x),))[1]
+
+        def compute(f, x):
+            first, rest = x[..., :1], x[..., 1:]
+            return jvp_fn(lambda X: f(torch.cat([X, rest])), first)
+
+        in_features = 4
+        net = torch.nn.Sequential(
+            torch.nn.Linear(in_features, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 8),
+        ).to(self.device)
+
+        x = torch.rand((in_features,), device=self.device)
+
+        eager_out = compute(net, x).sum()
+        eager_out.backward()
+        eager_grads = [p.grad.clone() for p in net.parameters() if p.grad is not None]
+        net.zero_grad()
+
+        compiled = torch.compile(compute)
+        compiled_out = compiled(net, x).sum()
+        compiled_out.backward()
+        compiled_grads = [
+            p.grad.clone() for p in net.parameters() if p.grad is not None
+        ]
+
+        self.assertEqual(eager_out, compiled_out)
+        for eg, cg in zip(eager_grads, compiled_grads, strict=True):
+            self.assertEqual(eg, cg)
+
+    def test_efficient_zero_tensor_avoids_oom(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA OOM regression test")
+
+        element_size = torch.empty((), dtype=torch.float32).element_size()
+        numel = (
+            torch.cuda.get_device_properties(self.device).total_memory // element_size
+        )
+        numel += 1024
+
+        def fn():
+            return torch.ops.aten._efficientzerotensor.default(
+                [numel],
+                dtype=torch.float32,
+                layout=torch.strided,
+                device=torch.device(self.device),
+                pin_memory=False,
+            )
+
+        out = torch.compile(fn, fullgraph=True)()
+        self.assertEqual(out.size(0), numel)
+        self.assertEqual(out.stride(), (1,))
+        self.assertTrue(out._is_zerotensor())
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -19115,6 +19273,43 @@ if RUN_GPU or HAS_MPS:
                         expected = fn(x)
                         torch.testing.assert_close(actual, expected, equal_nan=True)
                         self.assertTrue(torch.isnan(actual[:3]).all())
+
+        @requires_cuda_and_triton
+        def test_complex_view_as_complex_exact_stride_copy_cuda(self):
+            def fn(x):
+                y = x.transpose(1, 2)
+                z = y.reshape(2, 8, 4, -1, 2)
+                return torch.view_as_complex(z)
+
+            x = torch.randn([2, 4, 8, 8], device=self.device, dtype=torch.float32)
+            expected = fn(x)
+            actual = torch.compile(fn, fullgraph=True)(x)
+
+            self.assertEqual(actual, expected, exact_stride=True)
+
+        @requires_cuda_and_triton
+        def test_complex_view_as_complex_expanded_exact_stride_copy_cuda(self):
+            def fn(x):
+                y = torch.view_as_complex(x)
+                return y.expand(2, 3, 4)
+
+            x = torch.randn([2, 1, 4, 2], device=self.device, dtype=torch.float32)
+            expected = fn(x)
+            actual = torch.compile(fn, fullgraph=True)(x)
+
+            self.assertEqual(actual, expected, exact_stride=True)
+
+        @requires_cuda_and_triton
+        def test_complex_copy_strided_stride_order_copy_cuda(self):
+            def fn(x):
+                y = torch.view_as_complex(x)
+                return torch.ops.prims.copy_strided.default(y, [1, 2])
+
+            x = torch.randn([2, 3, 2], device=self.device, dtype=torch.float32)
+            expected = fn(x)
+            actual = torch.compile(fn, fullgraph=True)(x)
+
+            self.assertEqual(actual, expected, exact_stride=True)
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
