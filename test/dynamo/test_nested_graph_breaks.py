@@ -1311,11 +1311,11 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
             x = torch.no_grad()(_skipped_function_for_test_reconstruct)(fn, x)
             assert torch.compiler.is_compiling()  # noqa: S101
             assert torch.is_grad_enabled()  # noqa: S101
-            return x
+            return x + 1
 
         inp = torch.randn(3)
-        self.assertEqual(gn(inp), inp + 3)
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(gn(inp), inp + 4)
+        self.assertEqual(cnts.frame_count, 3)
 
     def test_step_graph_break_frame_values_not_corrupted(self):
         """Bytecode generation bug in step_graph_break corrupted parent frame
@@ -1664,6 +1664,32 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
 
         result = fn()
         self.assertEqual(result.shape, torch.Size([1, 2]))
+
+    def test_load_attr_method_variant_nested_graph_break(self):
+        """Resume-into-resume with LOAD_ATTR method variant.
+
+        Two graph breaks inside a method called via obj.method(x) test that the
+        resume prefix correctly pushes NULL/self for the method call stack layout.
+        """
+
+        class Foo:
+            def method(self, x):
+                torch._dynamo.graph_break()
+                y = x + 1
+                torch._dynamo.graph_break()
+                return y + 1
+
+        obj = Foo()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            return obj.method(x)
+
+        x = torch.randn(3)
+        result = fn(x)
+        self.assertEqual(result, x + 2)
+        self.assertEqual(cnts.frame_count, 2)
 
 
 if __name__ == "__main__":
