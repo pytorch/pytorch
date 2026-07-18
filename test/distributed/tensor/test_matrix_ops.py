@@ -464,6 +464,10 @@ class DistMatrixOpsTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
+    @unittest.skip(
+        "Disabled due to CI failures on B200; see "
+        "https://github.com/pytorch/pytorch/issues/190086"
+    )
     def test_scaled_mm(self):
         device_mesh = self.build_device_mesh()
         shrd0 = Shard(0)
