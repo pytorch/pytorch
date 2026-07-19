@@ -3164,7 +3164,7 @@ def compile(
         - To register an out-of-tree custom backend:
           https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_custom_backends.html#registering-custom-backends
        mode (str): Can be either "default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"
-        or "max-precision"
+        or "eager-numerics"
 
         - "default" is the default mode, which is a good balance between performance and overhead
 
@@ -3182,12 +3182,14 @@ def compile(
 
         - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
 
-        - "max-precision" is a mode that trades some performance for numerics closer to eager.
-          It preserves fp16/bf16 downcast-upcast pairs across fused ops instead of eliding them,
-          uses the CUDA toolkit's libdevice for transcendental functions instead of Triton's bundled
-          version, and disables FTZ and fast-math codegen. It does not change TF32/matmul precision;
-          use `torch.set_float32_matmul_precision("highest")` and
-          `torch.backends.cudnn.allow_tf32 = False` for that.
+        - "eager-numerics" is a mode that trades some performance for numerics closer to eager.
+          Note that this is not strictly "higher precision"; e.g. it preserves fp16/bf16
+          downcast-upcast pairs across fused ops instead of eliding them, which matches eager's
+          rounding behavior but is not more precise in an absolute sense. It also uses the CUDA
+          toolkit's libdevice for transcendental functions instead of Triton's bundled version, and
+          disables FTZ and fast-math codegen. It does not change TF32/matmul precision; use
+          `torch.set_float32_matmul_precision("highest")` and `torch.backends.cudnn.allow_tf32 = False`
+          for that.
 
         - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
 
@@ -3238,7 +3240,7 @@ def compile(
         by a non-isolated region hitting its recompile limit does NOT bleed
         into isolated regions — each region manages its own RUN_ONLY state.
         Default False.
-       accuracy_high (bool): Shorthand for ``mode="max-precision"``. Can't be combined
+       accuracy_high (bool): Shorthand for ``mode="eager-numerics"``. Can't be combined
         with ``mode`` or ``options``.
 
     Example::
@@ -3310,7 +3312,7 @@ def compile(
             raise RuntimeError(
                 "accuracy_high can't be specified together with mode or options."
             )
-        mode = "max-precision"
+        mode = "eager-numerics"
 
     if mode is not None and options is not None:
         raise RuntimeError(

@@ -387,7 +387,7 @@ def list_mode_options(
             "coordinate_descent_tuning": True,
         },
         # trade some performance for numerics closer to eager
-        "max-precision": {
+        "eager-numerics": {
             "emulate_precision_casts": True,
             "emulate_precision_casts_on_saved_tensors": True,
             "eager_numerics.use_pytorch_libdevice": True,
