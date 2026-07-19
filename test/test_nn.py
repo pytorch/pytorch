@@ -14570,15 +14570,16 @@ if __name__ == '__main__':
         # Softmax over a non-last dim (inner_size != 1) routes the backward to
         # cunn_SpatialSoftMaxBackward, a separate kernel from the inner_size==1
         # path exercised by test_softmax_backward_64bit_indexing. Its element
-        # offsets must be 64-bit once a tensor crosses 2**32 elements. With the
-        # softmax dim kept at size 2, the per-column result is exactly +/-0.1875
-        # in fp16, so the last column (which lives past the 2**32-th element)
-        # gives a clean check that the wide offset is computed correctly.
-        numel = 2147483649  # > 2**31, so inner_size * dim_size overflows uint32
-        out = torch.empty([1, 2, numel], device=device, dtype=torch.float16)
+        # offsets must be 64-bit once the tensor has > INT_MAX elements (the
+        # 32-bit fast path uses signed int indexing). With the softmax dim kept
+        # at size 2, the per-column result is exactly +/-0.1875 in fp16, so the
+        # last column provides a clean check that the wide offset is computed
+        # correctly.
+        inner_size = 2147483649  # > INT_MAX; with dim_size==2, 2*inner_size > 2**32 so uint32_t offsets would wrap
+        out = torch.empty([1, 2, inner_size], device=device, dtype=torch.float16)
         out[0, 0].fill_(0.25)
         out[0, 1].fill_(0.75)
-        grad = torch.empty([1, 2, numel], device=device, dtype=torch.float16)
+        grad = torch.empty([1, 2, inner_size], device=device, dtype=torch.float16)
         grad[0, 0].fill_(1.0)
         grad[0, 1].fill_(0.0)
         gI = torch._softmax_backward_data(grad, out, 1, out.dtype)
