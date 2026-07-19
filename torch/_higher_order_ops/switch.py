@@ -47,7 +47,7 @@ class SwitchOp(HigherOrderOperator):
         from torch._higher_order_ops.utils import materialize_as_graph
 
         branch_gms: list[torch.fx.GraphModule] = []
-        branch0_outputs: list[Any] = []
+        branch0_outputs: list[Any] | tuple[Any, ...] = []
         mutated_inputs: set[int] = set()
         for branch in branches:
             gm = materialize_as_graph(branch, operands)
