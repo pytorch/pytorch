@@ -42,7 +42,7 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     BinaryUfuncInfo,
 )
-from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes
+from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes, largeTensorTest
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
 import numpy as np
@@ -2853,10 +2853,9 @@ class TestMPS(TestCaseMPS):
     # The row base offset (tg_id * axis_size) overflows 32 bits for tensors with
     # more than 2**32 elements; check a row past that boundary still normalizes.
     @serialTest()
+    @largeTensorTest("18GB", device="mps")
     @parametrize("axis_size", [4096, 8192])  # 4096 -> single_row, 8192 -> looped
     def test_layer_norm_large_tensor_indexing(self, axis_size):
-        if torch.mps.recommended_max_memory() < 18_000_000_000:
-            raise unittest.SkipTest("Needs at least 18GB of RAM")
         M = 2**32 // axis_size + 1  # last row starts at element offset >= 2**32
         x = torch.randn(M, axis_size, dtype=torch.bfloat16, device="mps")
         mps_y = F.layer_norm(x, (axis_size,))
