@@ -12480,6 +12480,43 @@ class TestNNDeviceType(NNTestCase):
         print(logits.numel(), labels.numel(), loss.numel())
         self.assertTrue(torch.allclose(loss_cpu, loss.cpu(), rtol=1e-4, atol=1e-4))
 
+    # Ref: https://github.com/pytorch/pytorch/issues/190139
+    @onlyCUDA
+    @largeTensorTest("5GB", "cuda")
+    def test_nll_loss2d_backward_large_sample_offset(self, device):
+        batch_size = 2**16 + 1
+        num_classes = 2**15
+        ignore_index = -100
+
+        # Reduced backward only uses input metadata. Expanding a scalar avoids
+        # materializing another four-GiB tensor.
+        input = torch.empty(
+            (),
+            device=device,
+            dtype=torch.float16,
+        ).expand(batch_size, num_classes, 1, 1)
+        target = torch.full(
+            (batch_size, 1, 1),
+            ignore_index,
+            dtype=torch.int64,
+            device=device,
+        )
+        target[-1] = 0
+        one = torch.ones((), dtype=torch.float16, device=device)
+
+        grad_input = torch.ops.aten.nll_loss2d_backward.default(
+            one,
+            input,
+            target,
+            None,
+            F._Reduction.get_enum("sum"),
+            ignore_index,
+            one,
+        )
+
+        torch.cuda.synchronize()
+        self.assertEqual(grad_input[-1, 0, 0, 0], -1)
+
     def _nll_loss_helper(self, input_size, reduction, expected, device, dtype):
         input = torch.rand(input_size, requires_grad=True, device=device, dtype=dtype)
         num_channels = input_size[1]
