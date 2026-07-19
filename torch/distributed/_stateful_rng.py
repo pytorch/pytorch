@@ -22,6 +22,47 @@ def _is_stateful_rng_tensor(obj: object) -> TypeGuard[StatefulRNGTensor]:
     return isinstance(obj, torch.Tensor) and isinstance(obj, StatefulRNGTensor)
 
 
+def _validate_stateful_rng_parameters(
+    op_call: torch._ops.OpOverload,
+    tensor: torch.Tensor,
+    op_args: list[object],
+) -> None:
+    if op_call is aten.normal_.default:
+        std = cast(float, op_args[1])
+        torch._check(
+            std >= 0.0,
+            lambda: f"normal expects std >= 0.0, but found std {std}",
+        )
+        return
+
+    if op_call is not aten.uniform_.default:
+        raise AssertionError(f"Unsupported stateful RNG op {op_call}")
+    low, high = cast(tuple[float, float], tuple(op_args))
+    finfo = torch.finfo(tensor.dtype)
+    torch._check(
+        low >= finfo.min and low <= finfo.max,
+        lambda: f"from is out of bounds for {tensor.dtype}",
+    )
+    torch._check(
+        high >= finfo.min and high <= finfo.max,
+        lambda: f"to is out of bounds for {tensor.dtype}",
+    )
+    torch._check(
+        low <= high,
+        lambda: (
+            "uniform_ expects to return a [from, to) range, but found "
+            f"from={low} > to={high}"
+        ),
+    )
+    torch._check(
+        high - low <= finfo.max,
+        lambda: (
+            f"uniform_ expects to-from <= {finfo.max}, but found "
+            f"to={high} and from={low}"
+        ),
+    )
+
+
 def _run_stateful_rng_op(
     tensor: torch.Tensor,
     global_numel: int,
@@ -84,6 +125,7 @@ class StatefulRNGMode(TorchDispatchMode):
             if func is aten.normal_.default
             else aten._philox_uniform_flat_slice_.default
         )
+        _validate_stateful_rng_parameters(func, tensor, op_args)
         _run_stateful_rng_op(
             tensor,
             rng_metadata.rng_global_numel,

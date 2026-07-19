@@ -72,6 +72,38 @@ __device__ __forceinline__ double2 box_muller_double(uint4 r) {
   return {radius * c, radius * s};
 }
 
+void validate_normal_std(double stddev) {
+  TORCH_CHECK(
+      stddev >= 0.0,
+      "normal expects std >= 0.0, but found std ",
+      stddev);
+}
+
+template <typename scalar_t>
+void validate_uniform_bounds(const Tensor& self, double low, double high) {
+  const auto min =
+      static_cast<double>(std::numeric_limits<scalar_t>::lowest());
+  const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
+  TORCH_CHECK(low >= min && low <= max, "from is out of bounds for ", self.dtype());
+  TORCH_CHECK(
+      high >= min && high <= max, "to is out of bounds for ", self.dtype());
+  TORCH_CHECK(
+      low <= high,
+      "uniform_ expects to return a [from, to) range, but found from=",
+      low,
+      " > to=",
+      high);
+  TORCH_CHECK(
+      high - low <= max,
+      "uniform_ expects to-from <= std::numeric_limits<",
+      toString(self.scalar_type()),
+      ">::max(), but found to=",
+      high,
+      " and from=",
+      low,
+      " which result in to-from to exceed the limit");
+}
+
 template <typename scalar_t, typename sample_t, typename param_t>
 __global__ void distribution_flat_slice_kernel(
     scalar_t* __restrict__ output,
@@ -540,6 +572,7 @@ Tensor& _philox_uniform_flat_slice_cuda_(
       self.scalar_type(),
       "_philox_uniform_flat_slice_",
       [&] {
+        validate_uniform_bounds<scalar_t>(self, low, high);
         using opmath_t = at::opmath_type<scalar_t>;
         auto lo = static_cast<scalar_t>(low);
         auto hi = static_cast<scalar_t>(high);
@@ -584,6 +617,7 @@ Tensor& _philox_normal_flat_slice_cuda_(
     double mean,
     double stddev,
     std::optional<Generator> generator) {
+  validate_normal_std(stddev);
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
       kBFloat16,
