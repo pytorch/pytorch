@@ -1814,10 +1814,8 @@ def _run_slow_mode_and_get_error(
             tupled_inputs, outputs, input_idx, output_idx
         )
 
-    # Assume jacobians have the same shape; they are empty if either the input
-    # or the output has zero elements
-    slow_diff = (slow_numerical - slow_analytical).abs()
-    slow_max_diff = slow_diff.max() if slow_diff.numel() > 0 else 0
+    # Assume jacobians are non-empty and have the same shape
+    slow_max_diff = (slow_numerical - slow_analytical).abs().max()
 
     slow_allclose = torch.allclose(slow_analytical, slow_numerical, rtol, atol)
     msg = (
@@ -1889,12 +1887,6 @@ def _check_analytical_numerical_equal(
     is_forward_ad=False,
 ):
     for i, all_numerical_for_input_i in enumerate(all_numerical):
-        u = all_u[i]
-        # Zero-element inputs have no gradient entries to check. Skip them:
-        # _adjusted_atol scales atol by sum(u) == 0, which would require the
-        # analytical jacobian to be bitwise-exactly zero.
-        if (u[0] if isinstance(u, tuple) else u).numel() == 0:
-            continue
         for j, n in enumerate(all_numerical_for_input_i):
             # Forward AD generates the transpose of what this function expects
             if is_forward_ad:
