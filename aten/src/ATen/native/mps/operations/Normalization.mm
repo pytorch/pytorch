@@ -972,7 +972,6 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() != kLong, "Not implemented for long on MPS");
   @autoreleasepool {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
-      // which kernel variant to use based on the normalized axis N size
       const int N_READS = 4;
       auto metalType = mps::scalarToMetalTypeString(input);
       // Use 32-bit index math unless the tensor is too large for it.
