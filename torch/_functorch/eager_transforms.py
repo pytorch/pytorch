@@ -591,7 +591,7 @@ def jacrev(
         >>> assert torch.allclose(hessian, torch.diag(-x.sin()))
 
     By default, :func:`jacrev` computes the Jacobian with respect to the first
-    input. However, it can compute the Jacboian with respect to a different
+    input. However, it can compute the Jacobian with respect to a different
     argument by using ``argnums``:
 
         >>> from torch.func import jacrev
@@ -1335,7 +1335,7 @@ def jacfwd(
         >>> assert torch.allclose(hessian, torch.diag(-x.sin()))
 
     By default, :func:`jacfwd` computes the Jacobian with respect to the first
-    input. However, it can compute the Jacboian with respect to a different
+    input. However, it can compute the Jacobian with respect to a different
     argument by using ``argnums``:
 
         >>> from torch.func import jacfwd
