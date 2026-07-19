@@ -1116,7 +1116,9 @@ class CppWrapperGpu(CppWrapperCpu):
                     )
                 )
             else:
-                buffer.writeline("CUDA_DRIVER_CHECK(cuCtxSynchronize());")
+                buffer.writeline(
+                    maybe_hipify_code_wrapper("CUDA_DRIVER_CHECK(cuCtxSynchronize());")
+                )
             return
 
         raise NotImplementedError(
