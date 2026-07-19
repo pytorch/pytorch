@@ -727,13 +727,6 @@ else()
   caffe2_update_option(USE_FBGEMM OFF)
 endif()
 
-if(USE_OPENCL)
-  message(INFO "USING OPENCL")
-  find_package(OpenCL REQUIRED)
-  include_directories(SYSTEM ${OpenCL_INCLUDE_DIRS})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCL_LIBRARIES})
-endif()
-
 # ---[ NUMA
 if(USE_NUMA)
   if(LINUX)
@@ -874,8 +867,6 @@ if(BUILD_PYTHON)
         caffe2_update_option(USE_NUMPY ON)
       endif()
     endif()
-    # Observers are required in the python build
-    caffe2_update_option(USE_OBSERVERS ON)
   else()
     message(WARNING "Python dependencies not met. Not compiling with python. Suppress this warning with -DBUILD_PYTHON=OFF")
     caffe2_update_option(BUILD_PYTHON OFF)
@@ -1107,9 +1098,12 @@ if(USE_ROCM)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::hipsparselt
       )
-      if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
-          set(CAFFE2_USE_HIPSPARSELT ON)
-      endif()
+    endif()
+    set(CAFFE2_USE_HIPSPARSELT OFF)
+    if(hipsparselt_FOUND AND USE_HIPSPARSELT AND ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
+      set(CAFFE2_USE_HIPSPARSELT ON)
+    elseif(USE_HIPSPARSELT)
+      caffe2_update_option(USE_HIPSPARSELT OFF)
     endif()
 
     # ROCM-SMI needed to support symmetric memory
@@ -1130,6 +1124,8 @@ if(USE_ROCM)
 
   else()
     caffe2_update_option(USE_ROCM OFF)
+    caffe2_update_option(USE_HIPSPARSELT OFF)
+    set(CAFFE2_USE_HIPSPARSELT OFF)
   endif()
 
   # Add ROCm includes as SYSTEM includes (lower priority than regular includes).
@@ -1360,19 +1356,6 @@ if(USE_PROF)
     set(USE_PROF_HTRACE ON)
   else()
     message(WARNING "htrace not found. Caffe2 will build without htrace prof")
-  endif()
-endif()
-
-if(USE_SNPE AND ANDROID)
-  if(SNPE_LOCATION AND SNPE_HEADERS)
-    message(STATUS "Using SNPE location specified by -DSNPE_LOCATION: " ${SNPE_LOCATION})
-    message(STATUS "Using SNPE headers specified by -DSNPE_HEADERS: " ${SNPE_HEADERS})
-    include_directories(SYSTEM ${SNPE_HEADERS})
-    add_library(snpe SHARED IMPORTED)
-    set_property(TARGET snpe PROPERTY IMPORTED_LOCATION ${SNPE_LOCATION})
-    list(APPEND Caffe2_DEPENDENCY_LIBS snpe)
-  else()
-    caffe2_update_option(USE_SNPE OFF)
   endif()
 endif()
 
