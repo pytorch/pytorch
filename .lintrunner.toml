@@ -134,6 +134,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyrefly_linter.py',
     '--config=pyrefly.toml',
