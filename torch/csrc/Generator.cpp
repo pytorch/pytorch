@@ -390,7 +390,7 @@ bool THPGenerator_init(PyObject* module) {
   if (PyModule_AddType(module, &THPGeneratorType) < 0)
     return false;
   // Register _set_generator_metaclass on torch._C so Python code can
-  // late-bind OpaqueBaseMeta as Generator's metaclass (see rng_prims.py).
+  // late-bind CustomClassBaseMeta as Generator's metaclass (see rng_prims.py).
   if (PyModule_AddFunctions(module, THPGenerator_moduleMethods) < 0)
     return false;
   return true;

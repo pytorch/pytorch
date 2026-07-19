@@ -141,7 +141,15 @@ static Variable sequenceToVariable(c10::TensorOptions options, PyObject* seq) {
       options, kLong, std::nullopt, seq);
 }
 
-inline Scalar valueToScalar(c10::TensorOptions options, PyObject* value) {
+inline Variable valueToTensor(
+    c10::TensorOptions options,
+    PyObject* value,
+    const at::Device& device) {
+  if (THPVariable_Check(value)) {
+    return THPVariable_Unpack(value);
+  }
+  at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
+  at::tracer::impl::NoTracerDispatchMode tracer_guard;
   Scalar scalar;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     scalar = Scalar(THPUtils_unpackLong(value));
@@ -163,23 +171,15 @@ inline Scalar valueToScalar(c10::TensorOptions options, PyObject* value) {
         " to a ",
         torch::utils::options_to_string(options));
   }
-  return scalar;
-}
-
-static inline Tensor asTensor(const Tensor& value, const Tensor& target) {
-  return value;
-}
-static inline Tensor asTensor(const Scalar& value, const Tensor& self) {
   // lift_fresh is supposed to be used in situations where you are guaranteed to
   // get a plain Tensor which is not true for cpu device but not for non cpu
   // device
-  at::AutoDispatchBelowADInplaceOrView guard;
-  at::tracer::impl::NoTracerDispatchMode tracer_guard;
-  Tensor tensor = at::indexing::asTensor(value, self);
-  if (tensor.device() == at::kCPU && !value.isSymbolic()) {
-    return at::lift_fresh(tensor);
+  if (device == at::kCPU && !scalar.isSymbolic()) {
+    return at::lift_fresh(
+        at::indexing::scalarToTensor(scalar, options, device));
+  } else {
+    return at::indexing::scalarToTensor(scalar, options, device);
   }
-  return tensor;
 }
 
 static void recordSliceTrace(PyObject* obj) {
@@ -468,15 +468,11 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   END_HANDLE_TH_ERRORS
 }
 
-template <typename T>
 static void dispatch_set_item(
     const Tensor& self,
     ArrayRef<at::indexing::TensorIndex> indices,
-    const T& value,
+    const Tensor& value,
     bool disable_slice_optimization = false) {
-  static_assert(
-      std::is_same_v<T, Tensor> || std::is_same_v<T, Scalar>,
-      "T must be either at::Tensor or at::Scalar");
   pybind11::gil_scoped_release no_gil;
   at::indexing::set_item(self, indices, value, disable_slice_optimization);
 }
@@ -489,19 +485,38 @@ static void dispatch_set_item(
 // 2. Python N-D setter calls C++ `at::indexing::handleDimInMultiDimIndexing`
 // for each dim, after converting Python index to C++ TensorIndex. If advanced
 // indexing is needed, it calls C++ `at::indexing::dispatch_index_put_`.
-template <typename T>
-static int THPVariable_setitem_impl(
-    PyObject* self,
-    const Tensor& self_,
-    PyObject* index,
-    PyObject* py_value,
-    const T& value,
-    bool skip_torch_function) {
-  static_assert(
-      std::is_same_v<T, Tensor> || std::is_same_v<T, Scalar>,
-      "T must be either at::Tensor or at::Scalar");
+int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
+  HANDLE_TH_ERRORS
+  if (py_value == nullptr) {
+    TORCH_CHECK_TYPE(false, "Tensor does not support deleting items");
+  }
+  const bool skip_torch_function = consume_should_skip_torch_function();
+  if (!skip_torch_function &&
+      ((check_has_torch_function(self)) ||
+       (check_has_torch_function(py_value)))) {
+    py::object ret = py::reinterpret_steal<py::object>(
+        handle_torch_function_indexing(self, index, py_value));
+    return 0;
+  }
+
+  const auto& self_ = THPVariable_Unpack(self);
+  if (self_.layout() == kSparse || self_.layout() == kSparseCsr ||
+      self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
+      self_.layout() == kSparseBsc) {
+    TORCH_CHECK_TYPE(false, "Cannot assign to a sparse tensor");
+  }
   OptionalDeviceGuard device_guard(device_of(self_));
   at::Device self_device = self_.device();
+  Variable value;
+  // TODO: This qint special case looks very suspicious...
+  if (isQIntType(self_.scalar_type())) {
+    value =
+        valueToTensor(device(kCPU).dtype(kFloat), py_value, at::Device(kCPU));
+  } else if (self_device.is_cuda()) {
+    value = valueToTensor(self_.options(), py_value, at::Device(kCPU));
+  } else {
+    value = valueToTensor(self_.options(), py_value, self_device);
+  }
 
   // handle simple types: ellipsis, none, bool
   if (Py_IsFalse(index)) {
@@ -575,59 +590,18 @@ static int THPVariable_setitem_impl(
 
   {
     pybind11::gil_scoped_release no_gil;
-    Tensor valueTensor = asTensor(value, self_);
-    SymIntArrayRef valueSizes = valueTensor.sym_sizes();
+    SymIntArrayRef valueSizes = value.sym_sizes();
     SymIntArrayRef slicedValueSizes =
         at::indexing::slicePrefix1sSize(valueSizes);
     torch::autograd::Variable valuesSliced;
     if (!valueSizes.equals(slicedValueSizes)) {
-      valuesSliced = valueTensor.view_symint(slicedValueSizes);
+      valuesSliced = value.view_symint(slicedValueSizes);
     } else {
-      valuesSliced = valueTensor;
+      valuesSliced = value;
     }
     at::indexing::dispatch_index_put_(
         sliced, std::move(variableIndices), valuesSliced);
     return 0;
-  }
-}
-
-int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
-  HANDLE_TH_ERRORS
-  if (py_value == nullptr) {
-    TORCH_CHECK_TYPE(false, "Tensor does not support deleting items");
-  }
-  const bool skip_torch_function = consume_should_skip_torch_function();
-  if (!skip_torch_function &&
-      ((check_has_torch_function(self)) ||
-       (check_has_torch_function(py_value)))) {
-    py::object ret = py::reinterpret_steal<py::object>(
-        handle_torch_function_indexing(self, index, py_value));
-    return 0;
-  }
-
-  const auto& self_ = THPVariable_Unpack(self);
-  if (self_.layout() == kSparse || self_.layout() == kSparseCsr ||
-      self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
-      self_.layout() == kSparseBsc) {
-    TORCH_CHECK_TYPE(false, "Cannot assign to a sparse tensor");
-  }
-
-  if (THPVariable_Check(py_value)) {
-    return THPVariable_setitem_impl<Tensor>(
-        self,
-        self_,
-        index,
-        py_value,
-        THPVariable_Unpack(py_value),
-        skip_torch_function);
-  } else {
-    return THPVariable_setitem_impl<Scalar>(
-        self,
-        self_,
-        index,
-        py_value,
-        valueToScalar(self_.options(), py_value),
-        skip_torch_function);
   }
   END_HANDLE_TH_ERRORS_RET(-1)
 }
