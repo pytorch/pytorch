@@ -1665,6 +1665,14 @@
       ]
     }
   ],
+  "GB6441": [
+    {
+      "Gb_type": "unsupported torch.cuda.MemPool attribute",
+      "Context": "torch.cuda.MemPool.{name}",
+      "Explanation": "Dynamo only supports reading torch.cuda.MemPool.id.",
+      "Hints": []
+    }
+  ],
   "GB0116": [
     {
       "Gb_type": "Unexpected type in sourceless builder",
@@ -4276,6 +4284,22 @@
       ]
     }
   ],
+  "GB2473": [
+    {
+      "Gb_type": "torch.cuda.use_mem_pool graph break",
+      "Context": "str(self)",
+      "Explanation": "Dynamo doesn't support graph breaks inside torch.cuda.use_mem_pool.",
+      "Hints": []
+    }
+  ],
+  "GB4996": [
+    {
+      "Gb_type": "torch.cuda.use_mem_pool with non-constant device",
+      "Context": "device={device}",
+      "Explanation": "Dynamo requires the device argument to torch.cuda.use_mem_pool to be a Python constant.",
+      "Hints": []
+    }
+  ],
   "GB6604": [
     {
       "Gb_type": "Missing CALL_INTRINSIC_2 handler",
@@ -6115,6 +6139,16 @@
       "Explanation": "torch.compile does not support sparse tensor creation functions like {fn_name}. Sparse tensors require specialized handling that is not yet implemented in the compiler.",
       "Hints": [
         "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
+      ]
+    }
+  ],
+  "GB0375": [
+    {
+      "Gb_type": "Attempted to wrap a dual tensor input",
+      "Context": "",
+      "Explanation": "torch.compile does not support input tensors that carry a forward-mode AD tangent; compiled code would silently drop the tangent.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ]
