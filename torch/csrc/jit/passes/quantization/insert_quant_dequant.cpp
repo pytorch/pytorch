@@ -732,7 +732,7 @@ class InsertQuantDeQuantHelper {
 
   void checkQScheme(Graph* g, c10::QScheme qscheme) {
     if (qscheme_for_graph_.count(g)) {
-      // FIXME[T110786721]: This check was broken before nevery failing.
+      // FIXME[T110786721]: This check was broken before never failing.
       // Once fixed, this check triggers and fails tests.
       // Fix the tests that enabling this check produce!
       /*
