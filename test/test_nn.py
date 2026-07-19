@@ -13808,7 +13808,7 @@ if __name__ == '__main__':
         # offset past INT_MAX.
         x = torch.ones((1, 1, 240000000, 3, 3), device=device, dtype=torch.float16, requires_grad=True)
         out = F.avg_pool3d(x, kernel_size=2, stride=1)
-        out.backward(torch.ones_like(out))
+        out.sum().backward()
         # An interior voxel near the end of the buffer sits at an offset above
         # INT_MAX and is covered by all 2**3 windows, so its gradient must be
         # exactly 1.0; with the 32-bit offset it stays ~0 because the atomic
