@@ -32,13 +32,6 @@ class StatefulRNGTensor(typing.Protocol):
     ]
 
 
-def stateful_rng_mode():
-    """Return a scoped mode that applies ``StatefulRNGTensor`` metadata."""
-    from ._stateful_rng import StatefulRNGMode
-
-    return StatefulRNGMode()
-
-
 log = logging.getLogger(__name__)
 
 
