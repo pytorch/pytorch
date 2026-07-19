@@ -10,7 +10,6 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/DistributionTemplates.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-#include <ATen/OpMathType.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
 #include <c10/util/irange.h>
@@ -22,7 +21,6 @@
 #else
 #include <ATen/ops/_philox_normal_flat_slice_native.h>
 #include <ATen/ops/_philox_normal_native.h>
-#include <ATen/ops/_philox_uniform_flat_slice_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #endif
 
@@ -273,31 +271,6 @@ void validate_normal_std(double stddev) {
       stddev >= 0.0,
       "normal expects std >= 0.0, but found std ",
       stddev);
-}
-
-template <typename scalar_t>
-void validate_uniform_bounds(const Tensor& self, double low, double high) {
-  const auto min =
-      static_cast<double>(std::numeric_limits<scalar_t>::lowest());
-  const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
-  TORCH_CHECK(low >= min && low <= max, "from is out of bounds for ", self.dtype());
-  TORCH_CHECK(
-      high >= min && high <= max, "to is out of bounds for ", self.dtype());
-  TORCH_CHECK(
-      low <= high,
-      "uniform_ expects to return a [from, to) range, but found from=",
-      low,
-      " > to=",
-      high);
-  TORCH_CHECK(
-      high - low <= max,
-      "uniform_ expects to-from <= std::numeric_limits<",
-      toString(self.scalar_type()),
-      ">::max(), but found to=",
-      high,
-      " and from=",
-      low,
-      " which result in to-from to exceed the limit");
 }
 
 // Single-key kernel: one thread per chunk of elements, where each chunk
@@ -553,57 +526,6 @@ Tensor& _philox_normal_cuda_(
     philox_distribution_kernel<scalar_t>(
         "_philox_normal_", self, key, sample_func, param_func);
   });
-  return self;
-}
-
-Tensor& _philox_uniform_flat_slice_cuda_(
-    Tensor& self,
-    int64_t total_numel,
-    IntArrayRef start_indices,
-    IntArrayRef block_sizes,
-    IntArrayRef block_strides,
-    IntArrayRef num_blocks,
-    double low,
-    double high,
-    std::optional<Generator> generator) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kHalf,
-      kBFloat16,
-      self.scalar_type(),
-      "_philox_uniform_flat_slice_",
-      [&] {
-        validate_uniform_bounds<scalar_t>(self, low, high);
-        using opmath_t = at::opmath_type<scalar_t>;
-        auto lo = static_cast<scalar_t>(low);
-        auto hi = static_cast<scalar_t>(high);
-        auto range = static_cast<opmath_t>(hi - lo);
-        auto sample_func = []() {
-          if constexpr (std::is_same_v<scalar_t, double>) {
-            return [] __device__ (curandStatePhilox4_32_10_t* state) {
-              return curand_uniform2_double(state);
-            };
-          } else {
-            return [] __device__ (curandStatePhilox4_32_10_t* state) {
-              return curand_uniform4(state);
-            };
-          }
-        }();
-        auto param_func = [range, lo, hi] __device__ (opmath_t rand) {
-          auto value = static_cast<scalar_t>(rand * range + lo);
-          return value == hi ? lo : value;
-        };
-        distribution_flat_slice<scalar_t>(
-            "_philox_uniform_flat_slice_",
-            self,
-            total_numel,
-            start_indices,
-            block_sizes,
-            block_strides,
-            num_blocks,
-            generator,
-            sample_func,
-            param_func);
-      });
   return self;
 }
 
