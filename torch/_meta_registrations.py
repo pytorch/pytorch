@@ -785,46 +785,49 @@ def _check_philox_uniform_bounds(self, low, high):
     )
 
 
-@register_meta(aten._philox_normal_flat_slice_.default)
-def meta_philox_normal_flat_slice_(
-    self,
-    total_numel,
-    start_indices,
-    block_sizes,
-    block_strides,
-    num_blocks,
-    mean=0.0,
-    std=1.0,
-    generator=None,
-):
-    _check_philox_normal_std(std)
-    _check_philox_flat_slice_args(
-        "_philox_normal_flat_slice_",
-        self,
-        total_numel,
-        start_indices,
-        block_sizes,
-        block_strides,
-        num_blocks,
+_PHILOX_DISTRIBUTION_NORMAL = 0
+_PHILOX_DISTRIBUTION_UNIFORM = 1
+
+
+def _check_philox_flat_slice_distribution(self, kind, params):
+    torch._check(
+        kind in (_PHILOX_DISTRIBUTION_NORMAL, _PHILOX_DISTRIBUTION_UNIFORM),
+        lambda: (
+            f"_philox_distribution_flat_slice_: unsupported distribution kind {kind}"
+        ),
     )
-    return self
+    torch._check(
+        len(params) == 2,
+        lambda: (
+            f"_philox_distribution_flat_slice_: distribution kind {kind} "
+            f"expects 2 parameters, got {len(params)}"
+        ),
+    )
+    torch._check(
+        all(not isinstance(param, complex) for param in params),
+        lambda: "_philox_distribution_flat_slice_: parameters must be real",
+    )
+    if kind == _PHILOX_DISTRIBUTION_NORMAL:
+        _check_philox_normal_std(params[1])
+    else:
+        _check_philox_uniform_bounds(self, params[0], params[1])
 
 
-@register_meta(aten._philox_uniform_flat_slice_.default)
-def meta_philox_uniform_flat_slice_(
+@register_meta(aten._philox_distribution_flat_slice_.default)
+def meta_philox_distribution_flat_slice_(
     self,
     total_numel,
     start_indices,
     block_sizes,
     block_strides,
     num_blocks,
-    low=0.0,
-    high=1.0,
+    kind,
+    params,
     generator=None,
 ):
-    _check_philox_uniform_bounds(self, low, high)
+    _check_philox_flat_slice_distribution(self, kind, params)
     _check_philox_flat_slice_args(
-        "_philox_uniform_flat_slice_",
+        "_philox_distribution_flat_slice_",
         self,
         total_numel,
         start_indices,

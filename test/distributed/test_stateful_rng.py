@@ -11,6 +11,8 @@ from torch.distributed import StatefulRNGTensor
 from torch.distributed._local_tensor import LocalIntNode, LocalTensor, LocalTensorMode
 from torch.distributed._stateful_rng import (
     _is_supported_stateful_rng_op,
+    _PHILOX_DISTRIBUTION_NORMAL,
+    _PHILOX_DISTRIBUTION_UNIFORM,
     _run_stateful_rng_op,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
@@ -333,7 +335,7 @@ class TestStatefulRNGTensor(TestCase):
         self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
 
 
-class TestPhiloxFlatSliceOps(TestCase):
+class TestPhiloxDistributionFlatSliceOp(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_invalid_calls_do_not_advance_generator(self):
         device = torch.device("cuda")
@@ -347,55 +349,99 @@ class TestPhiloxFlatSliceOps(TestCase):
 
         assert_invalid_without_advancing(
             "block_stride 1 must be at least block_size 2",
-            lambda: torch.ops.aten._philox_uniform_flat_slice_(
+            lambda: torch.ops.aten._philox_distribution_flat_slice_(
                 torch.empty(2, device=device),
                 4,
                 [0],
                 [2],
                 [1],
                 [1],
+                _PHILOX_DISTRIBUTION_UNIFORM,
+                [0.0, 1.0],
                 generator=generator,
             ),
         )
         assert_invalid_without_advancing(
             "normal expects std >= 0.0",
-            lambda: torch.ops.aten._philox_normal_flat_slice_(
+            lambda: torch.ops.aten._philox_distribution_flat_slice_(
                 torch.empty(1, device=device),
                 1,
                 [0],
                 [1],
                 [1],
                 [1],
-                0,
-                -1,
+                _PHILOX_DISTRIBUTION_NORMAL,
+                [0.0, -1.0],
                 generator=generator,
             ),
         )
         assert_invalid_without_advancing(
             "found from=1.*> to=0",
-            lambda: torch.ops.aten._philox_uniform_flat_slice_(
+            lambda: torch.ops.aten._philox_distribution_flat_slice_(
                 torch.empty(1, device=device),
                 1,
                 [0],
                 [1],
                 [1],
                 [1],
-                1,
-                0,
+                _PHILOX_DISTRIBUTION_UNIFORM,
+                [1.0, 0.0],
                 generator=generator,
             ),
         )
         assert_invalid_without_advancing(
             "from is out of bounds",
-            lambda: torch.ops.aten._philox_uniform_flat_slice_(
+            lambda: torch.ops.aten._philox_distribution_flat_slice_(
                 torch.empty(1, dtype=torch.float16, device=device),
                 1,
                 [0],
                 [1],
                 [1],
                 [1],
-                -70000,
-                0,
+                _PHILOX_DISTRIBUTION_UNIFORM,
+                [-70000.0, 0.0],
+                generator=generator,
+            ),
+        )
+        assert_invalid_without_advancing(
+            "unsupported distribution kind 2",
+            lambda: torch.ops.aten._philox_distribution_flat_slice_(
+                torch.empty(1, device=device),
+                1,
+                [0],
+                [1],
+                [1],
+                [1],
+                2,
+                [0.0, 1.0],
+                generator=generator,
+            ),
+        )
+        assert_invalid_without_advancing(
+            "expects 2 parameters, got 1",
+            lambda: torch.ops.aten._philox_distribution_flat_slice_(
+                torch.empty(1, device=device),
+                1,
+                [0],
+                [1],
+                [1],
+                [1],
+                _PHILOX_DISTRIBUTION_NORMAL,
+                [0.0],
+                generator=generator,
+            ),
+        )
+        assert_invalid_without_advancing(
+            "parameters must be real",
+            lambda: torch.ops.aten._philox_distribution_flat_slice_(
+                torch.empty(1, device=device),
+                1,
+                [0],
+                [1],
+                [1],
+                [1],
+                _PHILOX_DISTRIBUTION_NORMAL,
+                [0j, 1.0],
                 generator=generator,
             ),
         )
@@ -411,15 +457,15 @@ class TestPhiloxFlatSliceOps(TestCase):
 
         actual_generator = torch.Generator(device=device).manual_seed(123)
         actual = torch.empty(6, device=device)
-        returned = torch.ops.aten._philox_uniform_flat_slice_(
+        returned = torch.ops.aten._philox_distribution_flat_slice_(
             actual,
             8,
             [8, 4, 7, 1, 2],
             [0, 2, 3, 3, 1],
             [-1, 2, -1, 3, 1],
             [1, 1, 0, 1, 1],
-            -0.2,
-            0.3,
+            _PHILOX_DISTRIBUTION_UNIFORM,
+            [-0.2, 0.3],
             generator=actual_generator,
         )
 
@@ -429,41 +475,72 @@ class TestPhiloxFlatSliceOps(TestCase):
 
     def test_meta_validation(self):
         result = torch.empty(6, device="meta")
-        returned = torch.ops.aten._philox_normal_flat_slice_(
-            result, 17, [1, 10], [2, 2], [4, 3], [2, 1]
+        returned = torch.ops.aten._philox_distribution_flat_slice_(
+            result,
+            17,
+            [1, 10],
+            [2, 2],
+            [4, 3],
+            [2, 1],
+            _PHILOX_DISTRIBUTION_NORMAL,
+            [0.0, 1.0],
         )
         self.assertIs(returned, result)
 
         with self.assertRaisesRegex(RuntimeError, "normal expects std >= 0.0"):
-            torch.ops.aten._philox_normal_flat_slice_(
+            torch.ops.aten._philox_distribution_flat_slice_(
                 torch.empty(1, device="meta"),
                 1,
                 [0],
                 [1],
                 [1],
                 [1],
-                0,
-                -1,
+                _PHILOX_DISTRIBUTION_NORMAL,
+                [0.0, -1.0],
             )
         with self.assertRaisesRegex(RuntimeError, "found from=1.*> to=0"):
-            torch.ops.aten._philox_uniform_flat_slice_(
+            torch.ops.aten._philox_distribution_flat_slice_(
                 torch.empty(1, device="meta"),
                 1,
                 [0],
                 [1],
                 [1],
                 [1],
+                _PHILOX_DISTRIBUTION_UNIFORM,
+                [1.0, 0.0],
+            )
+        with self.assertRaisesRegex(RuntimeError, "parameters must be real"):
+            torch.ops.aten._philox_distribution_flat_slice_(
+                torch.empty(1, device="meta"),
                 1,
-                0,
+                [0],
+                [1],
+                [1],
+                [1],
+                _PHILOX_DISTRIBUTION_NORMAL,
+                [0j, 1.0],
+            )
+        with self.assertRaisesRegex(RuntimeError, "unsupported distribution kind 2"):
+            torch.ops.aten._philox_distribution_flat_slice_(
+                torch.empty(1, device="meta"),
+                1,
+                [0],
+                [1],
+                [1],
+                [1],
+                2,
+                [0.0, 1.0],
             )
         legacy_result = torch.empty(6, device="meta")
-        returned = torch.ops.aten._philox_uniform_flat_slice_(
+        returned = torch.ops.aten._philox_distribution_flat_slice_(
             legacy_result,
             8,
             [8, 4, 7, 1, 2],
             [0, 2, 3, 3, 1],
             [-1, 2, -1, 3, 1],
             [1, 1, 0, 1, 1],
+            _PHILOX_DISTRIBUTION_UNIFORM,
+            [0.0, 1.0],
         )
         self.assertIs(returned, legacy_result)
 
