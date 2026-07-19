@@ -1067,6 +1067,8 @@ def _other_is_broadcasted_in_dim(match):
     # Pad other_shape to the same ndim as inp
     other_shape = [1] * (inp_ndim - len(other_shape)) + list(other_shape)
 
+    # A scalar `other` is trivially constant across any reduction dim, 
+    # so the numerically-stable rewrite is valid.
     if len(other_shape) == 0:
         return True
 
