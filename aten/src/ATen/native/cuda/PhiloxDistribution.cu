@@ -20,9 +20,8 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_philox_normal_flat_slice_native.h>
+#include <ATen/ops/_philox_distribution_flat_slice_native.h>
 #include <ATen/ops/_philox_normal_native.h>
-#include <ATen/ops/_philox_uniform_flat_slice_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #endif
 
@@ -32,10 +31,51 @@ namespace {
 
 using at::cuda::philox_4x32;
 
+enum class PhiloxDistributionKind : int64_t {
+  Normal = 0,
+  Uniform = 1,
+};
+
 // Elements produced per Philox 4x32 call: 4 for float/half/bfloat16, 2 for double.
 // Note that we use a full float for each generated half/bfloat16 for better numerics.
 template <typename scalar_t>
 constexpr int elems_per_call = std::is_same_v<scalar_t, double> ? 2 : 4;
+
+struct CurandNormalFloat4 {
+  __device__ float4 operator()(curandStatePhilox4_32_10_t* state) const {
+    return curand_normal4(state);
+  }
+};
+
+struct CurandNormalDouble2 {
+  __device__ double2 operator()(curandStatePhilox4_32_10_t* state) const {
+    return curand_normal2_double(state);
+  }
+};
+
+struct CurandUniformFloat4 {
+  __device__ float4 operator()(curandStatePhilox4_32_10_t* state) const {
+    return curand_uniform4(state);
+  }
+};
+
+struct CurandUniformDouble2 {
+  __device__ double2 operator()(curandStatePhilox4_32_10_t* state) const {
+    return curand_uniform2_double(state);
+  }
+};
+
+template <typename scalar_t>
+using CurandNormalSampler = std::conditional_t<
+    std::is_same_v<scalar_t, double>,
+    CurandNormalDouble2,
+    CurandNormalFloat4>;
+
+template <typename scalar_t>
+using CurandUniformSampler = std::conditional_t<
+    std::is_same_v<scalar_t, double>,
+    CurandUniformDouble2,
+    CurandUniformFloat4>;
 
 // Box-Muller: convert 4 uniform uint32 values into 4 standard normal floats.
 __device__ __forceinline__ float4 box_muller_float(uint4 r) {
@@ -556,104 +596,93 @@ Tensor& _philox_normal_cuda_(
   return self;
 }
 
-Tensor& _philox_uniform_flat_slice_cuda_(
+Tensor& _philox_distribution_flat_slice_cuda_(
     Tensor& self,
     int64_t total_numel,
     IntArrayRef start_indices,
     IntArrayRef block_sizes,
     IntArrayRef block_strides,
     IntArrayRef num_blocks,
-    double low,
-    double high,
+    int64_t kind,
+    ArrayRef<Scalar> params,
     std::optional<Generator> generator) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kHalf,
-      kBFloat16,
-      self.scalar_type(),
-      "_philox_uniform_flat_slice_",
-      [&] {
-        validate_uniform_bounds<scalar_t>(self, low, high);
-        using opmath_t = at::opmath_type<scalar_t>;
-        auto lo = static_cast<scalar_t>(low);
-        auto hi = static_cast<scalar_t>(high);
-        auto range = static_cast<opmath_t>(hi - lo);
-        auto sample_func = []() {
-          if constexpr (std::is_same_v<scalar_t, double>) {
-            return [] __device__ (curandStatePhilox4_32_10_t* state) {
-              return curand_uniform2_double(state);
-            };
-          } else {
-            return [] __device__ (curandStatePhilox4_32_10_t* state) {
-              return curand_uniform4(state);
-            };
-          }
-        }();
-        auto param_func = [range, lo, hi] __device__ (opmath_t rand) {
-          auto value = static_cast<scalar_t>(rand * range + lo);
-          return value == hi ? lo : value;
-        };
-        distribution_flat_slice<scalar_t>(
-            "_philox_uniform_flat_slice_",
-            self,
-            total_numel,
-            start_indices,
-            block_sizes,
-            block_strides,
-            num_blocks,
-            generator,
-            sample_func,
-            param_func);
-      });
-  return self;
-}
+  const auto distribution_kind = static_cast<PhiloxDistributionKind>(kind);
+  TORCH_CHECK(
+      distribution_kind == PhiloxDistributionKind::Normal ||
+          distribution_kind == PhiloxDistributionKind::Uniform,
+      "_philox_distribution_flat_slice_: unsupported distribution kind ",
+      kind);
+  TORCH_CHECK(
+      params.size() == 2,
+      "_philox_distribution_flat_slice_: distribution kind ",
+      kind,
+      " expects 2 parameters, got ",
+      params.size());
+  TORCH_CHECK(
+      !params[0].isComplex() && !params[1].isComplex(),
+      "_philox_distribution_flat_slice_: parameters must be real");
 
-Tensor& _philox_normal_flat_slice_cuda_(
-    Tensor& self,
-    int64_t total_numel,
-    IntArrayRef start_indices,
-    IntArrayRef block_sizes,
-    IntArrayRef block_strides,
-    IntArrayRef num_blocks,
-    double mean,
-    double stddev,
-    std::optional<Generator> generator) {
-  validate_normal_std(stddev);
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kHalf,
-      kBFloat16,
-      self.scalar_type(),
-      "_philox_normal_flat_slice_",
-      [&] {
-        using accscalar_t = at::acc_type<scalar_t, true>;
-        auto mu = static_cast<accscalar_t>(mean);
-        auto sigma = static_cast<accscalar_t>(stddev);
-        auto sample_func = []() {
-          if constexpr (std::is_same_v<scalar_t, double>) {
-            return [] __device__ (curandStatePhilox4_32_10_t* state) {
-              return curand_normal2_double(state);
+  const double param0 = params[0].toDouble();
+  const double param1 = params[1].toDouble();
+  switch (distribution_kind) {
+    case PhiloxDistributionKind::Normal:
+      validate_normal_std(param1);
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          kHalf,
+          kBFloat16,
+          self.scalar_type(),
+          "_philox_distribution_flat_slice_",
+          [&] {
+            using accscalar_t = at::acc_type<scalar_t, true>;
+            auto mu = static_cast<accscalar_t>(param0);
+            auto sigma = static_cast<accscalar_t>(param1);
+            auto param_func = [mu, sigma] __device__ (accscalar_t rand) {
+              return static_cast<scalar_t>(
+                  at::transformation::normal<accscalar_t>(rand, mu, sigma));
             };
-          } else {
-            return [] __device__ (curandStatePhilox4_32_10_t* state) {
-              return curand_normal4(state);
+            distribution_flat_slice<scalar_t>(
+                "_philox_distribution_flat_slice_",
+                self,
+                total_numel,
+                start_indices,
+                block_sizes,
+                block_strides,
+                num_blocks,
+                generator,
+                CurandNormalSampler<scalar_t>{},
+                param_func);
+          });
+      break;
+    case PhiloxDistributionKind::Uniform:
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          kHalf,
+          kBFloat16,
+          self.scalar_type(),
+          "_philox_distribution_flat_slice_",
+          [&] {
+            validate_uniform_bounds<scalar_t>(self, param0, param1);
+            using opmath_t = at::opmath_type<scalar_t>;
+            auto lo = static_cast<scalar_t>(param0);
+            auto hi = static_cast<scalar_t>(param1);
+            auto range = static_cast<opmath_t>(hi - lo);
+            auto param_func = [range, lo, hi] __device__ (opmath_t rand) {
+              auto value = static_cast<scalar_t>(rand * range + lo);
+              return value == hi ? lo : value;
             };
-          }
-        }();
-        auto param_func = [mu, sigma] __device__ (accscalar_t rand) {
-          return static_cast<scalar_t>(
-              at::transformation::normal<accscalar_t>(rand, mu, sigma));
-        };
-        distribution_flat_slice<scalar_t>(
-            "_philox_normal_flat_slice_",
-            self,
-            total_numel,
-            start_indices,
-            block_sizes,
-            block_strides,
-            num_blocks,
-            generator,
-            sample_func,
-            param_func);
-      });
+            distribution_flat_slice<scalar_t>(
+                "_philox_distribution_flat_slice_",
+                self,
+                total_numel,
+                start_indices,
+                block_sizes,
+                block_strides,
+                num_blocks,
+                generator,
+                CurandUniformSampler<scalar_t>{},
+                param_func);
+          });
+      break;
+  }
   return self;
 }
 
