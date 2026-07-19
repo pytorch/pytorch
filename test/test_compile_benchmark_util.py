@@ -4,7 +4,10 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIfRocm,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -20,6 +23,7 @@ except ImportError:
 
 @unittest.skipIf(not HAS_TABULATE, "tabulate not available")
 class TestCompileBenchmarkUtil(TestCase):
+    @skipCUDAIfRocm
     def test_training_and_inference(self, device):
         class ToyModel(torch.nn.Module):
             def __init__(self) -> None:
