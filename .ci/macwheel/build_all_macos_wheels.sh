@@ -32,9 +32,27 @@ for desired in ${DESIRED_PYTHONS}; do
     echo "::group::Build wheel for Python ${desired}"
     iter_start=$(date +%s)
 
-    uv python install "${desired}"
-    py_bin_dir="$(dirname "$(uv python find "${desired}")")"
+    # uv does not select CPython pre-releases by default, and 3.15 has no stable
+    # release yet, so a bare `uv python install/find 3.15` silently resolves to
+    # another interpreter and produces a wrong-ABI wheel. Pin the explicit 3.15
+    # beta (bump as new betas land); other versions are unchanged.
+    uv_req="${desired}"
+    case "${desired}" in
+        3.15)  uv_req="3.15.0b3" ;;
+        3.15t) uv_req="3.15.0b3+freethreaded" ;;
+    esac
+    uv python install "${uv_req}"
+    py_bin="$(uv python find "${uv_req}")"
+    py_bin_dir="$(dirname "${py_bin}")"
     export PATH="${py_bin_dir}:${PATH}"
+
+    # Fail loudly if uv resolved a different interpreter than requested, rather
+    # than silently building a wheel with the wrong Python ABI tag.
+    found_minor="$("${py_bin}" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
+    if [[ "${found_minor}" != "${desired%t}" ]]; then
+        echo "ERROR: uv resolved '${desired}' (request '${uv_req}') to Python ${found_minor} at ${py_bin}; expected ${desired%t}" >&2
+        exit 1
+    fi
 
     build_name="wheel-py${desired//./_}-cpu"
     export DESIRED_PYTHON="${desired}"
