@@ -4,7 +4,10 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIfRocm,
+)
 from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     run_tests,
@@ -27,6 +30,7 @@ class TestCompileBenchmarkUtil(TestCase):
     # bench_all's _enable/_disable_tensor_cores restore via the legacy
     # set_float32_matmul_precision, which can't reproduce the "none" default
     # of the per-backend matmul flags.
+    @skipCUDAIfRocm
     @recover_orig_fp32_precision
     def test_training_and_inference(self, device):
         class ToyModel(torch.nn.Module):
