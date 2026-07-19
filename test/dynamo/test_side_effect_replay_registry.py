@@ -11,7 +11,11 @@ from torch._dynamo.side_effects import (
 )
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.variables import CellVariable
-from torch._dynamo.variables.base import AttributeMutationNew, VariableTracker
+from torch._dynamo.variables.base import (
+    AttributeMutation,
+    AttributeMutationNew,
+    VariableTracker,
+)
 
 
 class SideEffectReplayRegistryTests(TestCase):
@@ -19,7 +23,7 @@ class SideEffectReplayRegistryTests(TestCase):
     def make_context(var: VariableTracker | None = None) -> SideEffectReplayContext:
         side_effects = Mock(spec=SideEffects)
         side_effects.is_attribute_mutation.side_effect = lambda item: isinstance(
-            item.mutation_type, AttributeMutationNew
+            item.mutation_type, AttributeMutation
         )
         return SideEffectReplayContext(
             side_effects=side_effects,

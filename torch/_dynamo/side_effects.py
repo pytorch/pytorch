@@ -89,10 +89,6 @@ class SideEffectReplayContext:
     suffixes: list[list[Instruction]]
     log: Callable[[VariableTracker], None]
 
-    @property
-    def tx(self) -> "InstructionTranslatorBase":
-        return self.codegen.tx
-
 
 SideEffectReplayMatcher = Callable[[SideEffectReplayContext], bool]
 SideEffectReplayCodegen = Callable[[SideEffectReplayContext], None]
