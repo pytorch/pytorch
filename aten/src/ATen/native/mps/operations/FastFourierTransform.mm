@@ -132,6 +132,9 @@ Tensor& _fft_r2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
     out_sizes[last_dim] = last_dim_halfsize;
   }
   at::native::resize_output_symint(out, out_sizes);
+  if (out.numel() == 0) {
+    return out;
+  }
 
   auto key = __func__ + getTensorsStringKey({self, out}) + ":" + getArrayRefString(dim) + ":" +
       std::to_string(normalization) + ":" + std::to_string(onesided);
@@ -182,6 +185,10 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
   SymDimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = last_dim_size;
   at::native::resize_output_symint(out, out_sizes);
+  if (out.numel() == 0) {
+    return out;
+  }
+
   auto key = __func__ + getTensorsStringKey({self}) + ":" + getArrayRefString(dim) + ":" +
       std::to_string(normalization) + ":" + std::to_string(last_dim_size);
   @autoreleasepool {
@@ -210,6 +217,12 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
 }
 
 Tensor& _fft_c2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward, Tensor& out) {
+  TORCH_CHECK(self.is_complex());
+  at::native::resize_output_symint(out, self.sym_sizes());
+  if (out.numel() == 0) {
+    return out;
+  }
+
   auto key = __func__ + getTensorsStringKey({self}) + ":" + getArrayRefString(dim) + ":" +
       std::to_string(normalization) + ":" + std::to_string(forward);
   @autoreleasepool {

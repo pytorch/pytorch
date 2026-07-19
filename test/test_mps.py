@@ -2914,6 +2914,37 @@ class TestMPS(TestCaseMPS):
         # Expecting the inverted to yield the original signal
         self.assertEqual(ifft_result, signal)
 
+    _EMPTY_BATCH_FFT_CASES = {
+        "c2c": (torch.fft.fft, (0, 3, 7), torch.complex64, {}, (0, 3, 7), torch.complex64),
+        "r2c_full": (torch.fft.fft, (0, 3, 7), torch.float32, {}, (0, 3, 7), torch.complex64),
+        "r2c_onesided": (torch.fft.rfft, (0, 3, 7), torch.float32, {}, (0, 3, 4), torch.complex64),
+        "c2r": (torch.fft.irfft, (0, 3, 4), torch.complex64, {"n": 7}, (0, 3, 7), torch.float32),
+    }
+
+    @parametrize("case", tuple(_EMPTY_BATCH_FFT_CASES))
+    def test_empty_batch_fft(self, case):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190011: MPS FFTs must handle empty batch dimensions.
+        op, input_shape, input_dtype, kwargs, output_shape, output_dtype = self._EMPTY_BATCH_FFT_CASES[case]
+        input = torch.empty(input_shape, device="mps", dtype=input_dtype, requires_grad=True)
+
+        result = op(input, **kwargs)
+
+        self.assertEqual(result, torch.empty(output_shape, device="mps", dtype=output_dtype))
+        (result.real if result.is_complex() else result).sum().backward()
+        self.assertEqual(input.grad, torch.empty_like(input))
+
+    @parametrize("case", tuple(_EMPTY_BATCH_FFT_CASES))
+    def test_empty_batch_fft_out(self, case):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190011 (out= path)
+        op, input_shape, input_dtype, kwargs, output_shape, output_dtype = self._EMPTY_BATCH_FFT_CASES[case]
+        input = torch.empty(input_shape, device="mps", dtype=input_dtype)
+        out = torch.empty(0, device="mps", dtype=output_dtype)
+
+        result = op(input, out=out, **kwargs)
+
+        self.assertIs(result, out)
+        self.assertEqual(result, torch.empty(output_shape, device="mps", dtype=output_dtype))
+
     def test_fftfreq(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/135223
         freq_cpu = torch.fft.fftfreq(10**4, device='cpu')
