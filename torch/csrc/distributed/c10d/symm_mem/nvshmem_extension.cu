@@ -9,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/custom_class.h>
 
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
 #include <ATen/cuda/cub.cuh>
@@ -144,6 +145,62 @@ void nvshmem_get(at::Tensor& tensor, const int64_t peer) {
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_getmem_on_stream(tensor.mutable_data_ptr(), buffer_ptr, buffer_size, peer, stream);
+}
+
+void nvshmem_get_out(
+    at::Tensor& dst,
+    const c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory>& hdl,
+    int64_t offset,
+    int64_t size,
+    int64_t peer) {
+  TORCH_CHECK(dst.is_cuda(), "symm_mem.get: expected a CUDA tensor");
+  TORCH_CHECK(
+      dst.device() == hdl->get_device(),
+      "symm_mem.get: dst must be on the same device as hdl");
+  TORCH_CHECK(
+      dst.is_contiguous(),
+      "symm_mem.get: dst must be backed by contiguous memory");
+  TORCH_CHECK(offset >= 0, "symm_mem.get: offset must be non-negative");
+  TORCH_CHECK(size >= 0, "symm_mem.get: size must be non-negative");
+  TORCH_CHECK(
+      dst.numel() >= size,
+      "symm_mem.get: dst must contain at least `size` elements");
+  TORCH_CHECK(
+      peer >= 0 && peer < hdl->get_world_size(), "symm_mem.get: invalid peer");
+  auto global_peer = hdl->get_rank_to_global_rank().at(peer);
+  auto element_size = static_cast<size_t>(dst.element_size());
+  auto buffer_offset = hdl->get_offset();
+  TORCH_CHECK(
+      buffer_offset % element_size == 0,
+      "symm_mem.get: handle offset is not element-aligned");
+  auto buffer_size = hdl->get_buffer_size();
+  TORCH_CHECK(
+      buffer_offset <= buffer_size,
+      "symm_mem.get: handle offset exceeds symmetric allocation");
+  auto available_bytes = buffer_size - buffer_offset;
+  TORCH_CHECK(
+      static_cast<size_t>(offset) <= available_bytes / element_size &&
+          static_cast<size_t>(size) <=
+              (available_bytes - static_cast<size_t>(offset) * element_size) /
+                  element_size,
+      "symm_mem.get: requested range exceeds symmetric allocation");
+  auto nbytes = static_cast<size_t>(size) * element_size;
+  if (nbytes == 0) {
+    return;
+  }
+
+  // Local symmetric source pointer for this rank's allocation. NVSHMEM
+  // translates it to the peer's allocation internally.
+  auto src_byte_offset =
+      buffer_offset + static_cast<size_t>(offset) * element_size;
+  void* src_ptr = reinterpret_cast<uint8_t*>(
+                      hdl->get_buffer_ptrs()[hdl->get_rank()]) +
+      src_byte_offset;
+
+  c10::cuda::CUDAGuard guard(dst.device());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  nvshmemx_getmem_on_stream(
+      dst.mutable_data_ptr(), src_ptr, nbytes, global_peer, stream);
 }
 
 at::Tensor nvshmem_all_to_all(
@@ -1057,11 +1114,31 @@ void multi_root_tile_reduce(
 
 } // namespace c10d::nvshmem_extension
 
+namespace {
+// Boxed function for `nvshmem_get_out`, which accepts the custom class
+// `SymmetricMemory`. See the note in nccl_extension.cu about why a boxed
+// kernel is needed for ops that take a TorchBind custom class.
+void nvshmem_get_out_boxed(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet ks,
+    c10::Stack* stack) {
+  auto peer = torch::jit::pop(*stack).toInt();
+  auto size = torch::jit::pop(*stack).toInt();
+  auto offset = torch::jit::pop(*stack).toInt();
+  auto hdl = torch::jit::pop(*stack)
+                 .toCustomClass<c10d::symmetric_memory::SymmetricMemory>();
+  auto dst = torch::jit::pop(*stack).toTensor();
+  c10d::nvshmem_extension::nvshmem_get_out(dst, hdl, offset, size, peer);
+}
+} // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
   m.impl("nvshmem_put", c10d::nvshmem_extension::nvshmem_put);
   m.impl("nvshmem_get", c10d::nvshmem_extension::nvshmem_get);
+  m.impl(
+      "nvshmem_get_out",
+      torch::CppFunction::makeFromBoxedFunction<&nvshmem_get_out_boxed>());
   m.impl("nvshmem_wait_for_signal", c10d::nvshmem_extension::nvshmem_wait_for_signal);
   m.impl("nvshmem_put_with_signal", c10d::nvshmem_extension::nvshmem_put_with_signal);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);

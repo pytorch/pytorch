@@ -2,6 +2,7 @@
 
 import itertools
 import unittest
+import uuid
 
 import torch
 import torch._dynamo.testing
@@ -198,6 +199,24 @@ class CondModels:
                 return x - e
 
             return torch.cond(p, true_fn, false_fn, [c])
+
+    class BranchTensorConstant(torch.nn.Module):
+        # A branch that materializes a tensor constant (e.g. an index tensor)
+        # which is only referenced from within the subgraph.
+        def forward(self, p, x):
+            def true_fn(t):
+                v = t[:, ::2]
+                index = torch.tensor(
+                    [[0, 0, 1], [1, 1, 2], [2, 2, 0], [0, 0, 2]],
+                    dtype=torch.long,
+                    device=t.device,
+                )
+                return v.scatter_add(1, index, torch.ones(4, 3, device=t.device))
+
+            def false_fn(t):
+                return t[:, 1::2] - 3.0
+
+            return torch.cond(p, true_fn, false_fn, (x,))
 
     class WithNonTensorPredicate(torch.nn.Module):
         def forward(self, a, b):
@@ -633,6 +652,16 @@ class CondTests(TestCase):
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_branch_tensor_constant(self, device):
+        # branch references a tensor constant only used inside the subgraph
+        self._run_test(
+            model=CondModels.BranchTensorConstant(),
+            inputs=(torch.arange(24, dtype=torch.float32).reshape(4, 6),),
+            device=device,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_non_tensor_predicates(self, device, dynamic):
         # model with a boolean predicate
@@ -725,18 +754,24 @@ class CondTests(TestCase):
         counters = {"pre_grad": 0, "post_grad": 0}
 
         class PreGradPassCounter(CustomGraphPass):
+            def __init__(self):
+                self._uuid = str(uuid.uuid4())
+
             def __call__(self, graph):
                 counters["pre_grad"] += 1
 
             def uuid(self):
-                return "PreGradPassCounter"
+                return self._uuid
 
         class PostGradPassCounter(CustomGraphPass):
+            def __init__(self):
+                self._uuid = str(uuid.uuid4())
+
             def __call__(self, graph):
                 counters["post_grad"] += 1
 
             def uuid(self):
-                return "PostGradPassCounter"
+                return self._uuid
 
         with torch._inductor.config.patch(
             {
@@ -2144,6 +2179,12 @@ class ScanTests(TestCase):
     def test_scan_in_cond(
         self, device, dynamic, reverse, dim, pred, scan_length, autograd
     ):
+        # TODO: remove when https://github.com/pytorch/pytorch/issues/182381 is resolved.
+        if autograd:
+            raise unittest.SkipTest(
+                "Fails due to issues with backward pass when compiled."
+            )
+
         init = torch.randn(4, 4, 4, dtype=torch.float64)
         xs = torch.randn(scan_length, 4, 4, 4, dtype=torch.float64)
         xs = xs.movedim(0, dim)

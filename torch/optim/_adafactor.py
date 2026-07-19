@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import cast, TYPE_CHECKING
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -380,7 +380,7 @@ def _single_tensor_adafactor(
         rho_t = min(lr, 1 / (step_float**0.5))
         alpha = max(eps2, param.norm(2).item() / (param.numel() ** 0.5)) * rho_t
 
-        # Perform stepweight decay
+        # Perform step weight decay
         if weight_decay != 0:
             param.mul_(1 - lr * weight_decay)
 
@@ -502,9 +502,6 @@ def _multi_tensor_adafactor(
             eps_dtype = dtype if dtype is not None else device_params[0].dtype
             eps1 = torch.finfo(eps_dtype).eps
 
-        if TYPE_CHECKING:
-            assert device_state_steps[0] is not None
-
         if maximize:
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
@@ -532,7 +529,7 @@ def _multi_tensor_adafactor(
             for p, r in zip(device_params, rho_ts, strict=True)
         ]
 
-        # Perform stepweight decay
+        # Perform step weight decay
         if weight_decay != 0:
             torch._foreach_mul_(device_params, 1 - lr * weight_decay)
 

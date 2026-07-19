@@ -23,6 +23,7 @@ from tools.linter.adapters._stable_shim_utils import (
     get_current_version,
     LintMessage,
     LintSeverity,
+    merge_base_with_main,
     MULTILINE_MATCHERS,
     PreprocessorTracker,
 )
@@ -77,31 +78,7 @@ def get_added_lines(filename: str) -> set[int]:
             added_lines.update(parse_diff(result.stdout))
 
         # Get merge-base with origin/main to check all PR commits
-        result = subprocess.run(
-            ["git", "fetch", "origin", "main"],
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Failed to fetch origin. Error: {result.stderr.strip()}"
-            )
-
-        result = subprocess.run(
-            ["git", "merge-base", "HEAD", "origin/main"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Failed to find merge-base with origin/main. "
-                f"Make sure origin/main exists (run 'git fetch origin main'). "
-                f"Error: {result.stderr.strip()}"
-            )
-
-        merge_base = result.stdout.strip()
+        merge_base = merge_base_with_main()
         result = subprocess.run(
             ["git", "diff", f"{merge_base}..HEAD", filename],
             capture_output=True,
