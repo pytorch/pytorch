@@ -5,13 +5,13 @@
 using namespace metal;
 using namespace c10::metal;
 
-template <typename T>
+template <typename T, typename idx_t>
 kernel void layer_norm_single_row(
     device T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
     device T* meanOut [[buffer(2)]],
     device T* rstdTensor [[buffer(3)]],
-    constant ulong& axis_size [[buffer(4)]],
+    constant idx_t& axis_size [[buffer(4)]],
     constant float& epsilon [[buffer(5)]],
     constant int& use_weight [[buffer(6)]],
     constant int& use_bias [[buffer(7)]],
@@ -26,7 +26,7 @@ kernel void layer_norm_single_row(
   // Each threadgroup handles one full row of length axis_size, and each thread
   // owns exactly its N_READS-element slice. The slice is loaded once and reused
   // for the variance pass and the write-back
-  size_t row_offset = tg_id * size_t(axis_size);
+  idx_t row_offset = idx_t(tg_id) * axis_size;
   device T* x = input + row_offset + tid * N_READS;
   device T* out = output + row_offset + tid * N_READS;
 
@@ -80,13 +80,13 @@ kernel void layer_norm_single_row(
   }
 }
 
-template <typename T>
+template <typename T, typename idx_t>
 kernel void layer_norm_looped(
     device T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
     device T* meanOut [[buffer(2)]],
     device T* rstdTensor [[buffer(3)]],
-    constant ulong& axis_size [[buffer(4)]],
+    constant idx_t& axis_size [[buffer(4)]],
     constant float& epsilon [[buffer(5)]],
     constant int& use_weight [[buffer(6)]],
     constant int& use_bias [[buffer(7)]],
@@ -98,7 +98,7 @@ kernel void layer_norm_looped(
     uint simd_lane_id [[thread_index_in_simdgroup]]) {
   constexpr int N_READS = 4;
 
-  size_t row_offset = tg_id * size_t(axis_size);
+  idx_t row_offset = idx_t(tg_id) * axis_size;
   device T* x = input + row_offset;
   device T* out = output + row_offset;
 
@@ -109,8 +109,8 @@ kernel void layer_norm_looped(
   threadgroup float local_sum_sq[simdgroup_size];
 
   float partial_sum = 0.0f;
-  for (ulong r = 0; r < axis_size; r += lsize * N_READS) {
-    ulong base = r + tid * N_READS;
+  for (idx_t r = 0; r < axis_size; r += lsize * N_READS) {
+    idx_t base = r + tid * N_READS;
     if (base + N_READS <= axis_size) {
       float4 v4 = float4(x[base], x[base + 1], x[base + 2], x[base + 3]);
       partial_sum += v4.x + v4.y + v4.z + v4.w;
@@ -127,8 +127,8 @@ kernel void layer_norm_looped(
       threadgroup_sum(local_sum, partial_sum, tid, lsize) / float(axis_size);
 
   float partial_sum_sq = 0.0f;
-  for (ulong r = 0; r < axis_size; r += lsize * N_READS) {
-    ulong base = r + tid * N_READS;
+  for (idx_t r = 0; r < axis_size; r += lsize * N_READS) {
+    idx_t base = r + tid * N_READS;
     if (base + N_READS <= axis_size) {
       float4 d4 = float4(x[base], x[base + 1], x[base + 2], x[base + 3]) - mean;
       partial_sum_sq += dot(d4, d4);
@@ -146,8 +146,8 @@ kernel void layer_norm_looped(
       float(axis_size);
   float inv_std = metal::precise::rsqrt(var + epsilon);
 
-  for (ulong r = 0; r < axis_size; r += lsize * N_READS) {
-    ulong base = r + tid * N_READS;
+  for (idx_t r = 0; r < axis_size; r += lsize * N_READS) {
+    idx_t base = r + tid * N_READS;
     if (base + N_READS <= axis_size) {
 #pragma unroll
       for (int i = 0; i < N_READS; i++) {
@@ -181,44 +181,49 @@ kernel void layer_norm_looped(
   }
 }
 
-#define instantiate_layer_norm_single_row(DTYPE)                          \
-  template [[host_name("layer_norm_single_row_" #DTYPE)]] [[kernel]] void \
-  layer_norm_single_row<DTYPE>(                                           \
-      device DTYPE * input [[buffer(0)]],                                 \
-      device DTYPE * output [[buffer(1)]],                                \
-      device DTYPE * meanOut [[buffer(2)]],                               \
-      device DTYPE * rstdTensor [[buffer(3)]],                            \
-      constant ulong & axis_size [[buffer(4)]],                           \
-      constant float& epsilon [[buffer(5)]],                              \
-      constant int& use_weight [[buffer(6)]],                             \
-      constant int& use_bias [[buffer(7)]],                               \
-      device DTYPE* weight [[buffer(8)]],                                 \
-      device DTYPE* bias [[buffer(9)]],                                   \
-      uint tg_id [[threadgroup_position_in_grid]],                        \
-      uint tid [[thread_position_in_threadgroup]],                        \
-      uint lsize [[threads_per_threadgroup]],                             \
+#define instantiate_layer_norm_single_row(DTYPE, IDX_T, IDXNAME) \
+  template [[host_name("layer_norm_single_row_" IDXNAME          \
+                       "_" #DTYPE)]] [[kernel]] void             \
+  layer_norm_single_row<DTYPE, IDX_T>(                           \
+      device DTYPE * input [[buffer(0)]],                        \
+      device DTYPE * output [[buffer(1)]],                       \
+      device DTYPE * meanOut [[buffer(2)]],                      \
+      device DTYPE * rstdTensor [[buffer(3)]],                   \
+      constant IDX_T & axis_size [[buffer(4)]],                  \
+      constant float& epsilon [[buffer(5)]],                     \
+      constant int& use_weight [[buffer(6)]],                    \
+      constant int& use_bias [[buffer(7)]],                      \
+      device DTYPE* weight [[buffer(8)]],                        \
+      device DTYPE* bias [[buffer(9)]],                          \
+      uint tg_id [[threadgroup_position_in_grid]],               \
+      uint tid [[thread_position_in_threadgroup]],               \
+      uint lsize [[threads_per_threadgroup]],                    \
       uint simd_lane_id [[thread_index_in_simdgroup]]);
 
-#define instantiate_layer_norm_looped(DTYPE)                          \
-  template [[host_name("layer_norm_looped_" #DTYPE)]] [[kernel]] void \
-  layer_norm_looped<DTYPE>(                                           \
-      device DTYPE * input [[buffer(0)]],                             \
-      device DTYPE * output [[buffer(1)]],                            \
-      device DTYPE * meanOut [[buffer(2)]],                           \
-      device DTYPE * rstdTensor [[buffer(3)]],                        \
-      constant ulong & axis_size [[buffer(4)]],                       \
-      constant float& epsilon [[buffer(5)]],                          \
-      constant int& use_weight [[buffer(6)]],                         \
-      constant int& use_bias [[buffer(7)]],                           \
-      device DTYPE* weight [[buffer(8)]],                             \
-      device DTYPE* bias [[buffer(9)]],                               \
-      uint tg_id [[threadgroup_position_in_grid]],                    \
-      uint tid [[thread_position_in_threadgroup]],                    \
-      uint lsize [[threads_per_threadgroup]],                         \
-      uint simd_lane_id [[thread_index_in_simdgroup]]);
+#define instantiate_layer_norm_looped(DTYPE, IDX_T, IDXNAME)                 \
+  template                                                                   \
+      [[host_name("layer_norm_looped_" IDXNAME "_" #DTYPE)]] [[kernel]] void \
+      layer_norm_looped<DTYPE, IDX_T>(                                       \
+          device DTYPE * input [[buffer(0)]],                                \
+          device DTYPE * output [[buffer(1)]],                               \
+          device DTYPE * meanOut [[buffer(2)]],                              \
+          device DTYPE * rstdTensor [[buffer(3)]],                           \
+          constant IDX_T & axis_size [[buffer(4)]],                          \
+          constant float& epsilon [[buffer(5)]],                             \
+          constant int& use_weight [[buffer(6)]],                            \
+          constant int& use_bias [[buffer(7)]],                              \
+          device DTYPE* weight [[buffer(8)]],                                \
+          device DTYPE* bias [[buffer(9)]],                                  \
+          uint tg_id [[threadgroup_position_in_grid]],                       \
+          uint tid [[thread_position_in_threadgroup]],                       \
+          uint lsize [[threads_per_threadgroup]],                            \
+          uint simd_lane_id [[thread_index_in_simdgroup]]);
 
-#define instantiate_layer_norm(DTYPE) \
-  instantiate_layer_norm_single_row(DTYPE) instantiate_layer_norm_looped(DTYPE)
+#define instantiate_layer_norm(DTYPE)                        \
+  instantiate_layer_norm_single_row(DTYPE, uint, "i32")      \
+      instantiate_layer_norm_single_row(DTYPE, ulong, "i64") \
+          instantiate_layer_norm_looped(DTYPE, uint, "i32")  \
+              instantiate_layer_norm_looped(DTYPE, ulong, "i64")
 
 instantiate_layer_norm(float);
 instantiate_layer_norm(half);
