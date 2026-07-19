@@ -1025,11 +1025,8 @@ class TestSetTritonLibdevicePath(TestCase):
         actual = knobs.nvidia.libdevice_path
         self.assertTrue(actual, "libdevice path was not set")
         self.assertTrue(
-            actual.endswith("libdevice.10.bc"),
-            f"unexpected libdevice path name: {actual!r}",
-        )
-        self.assertTrue(
-            os.path.isfile(actual), f"libdevice path does not exist: {actual!r}"
+            actual.endswith("libdevice.10.bc") and os.path.isfile(actual),
+            f"expected a valid libdevice path, got {actual!r}",
         )
 
 
