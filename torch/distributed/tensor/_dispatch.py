@@ -13,6 +13,7 @@ from torch._library.utils import fill_defaults
 from torch._logging import LazyString
 from torch._prims.rng_prims import run_dtensor_rng_op
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed._local_tensor import LocalTensor
 from torch.distributed._stateful_rng import (
@@ -386,7 +387,10 @@ class OpDispatcher:
                         isinstance(random._rng_tracker, random.OffsetBasedRNGTracker)
                         and (
                             type(first_local_arg) is torch.Tensor
-                            or isinstance(first_local_arg, (LocalTensor, FakeTensor))
+                            or isinstance(
+                                first_local_arg,
+                                (LocalTensor, FakeTensor, FunctionalTensor),
+                            )
                         )
                         and _is_supported_stateful_rng_op(op_call, first_local_arg)
                     ):

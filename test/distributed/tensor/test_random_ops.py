@@ -481,6 +481,15 @@ class DistTensorStatefulRNGInitTest(DTensorTestBase):
                 partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
             )
 
+        for shape, placement in (((0, 5), Shard(1)), ((5, 0), Shard(0))):
+            with self.subTest(name="empty_global_tensor", shape=shape):
+                self._assert_init_matches_dense(
+                    device_mesh,
+                    shape,
+                    placement,
+                    partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
+                )
+
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_stateful_init_uses_dense_generator_increment(self):
@@ -1211,7 +1220,7 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
                 fn,
                 device_mesh,
                 placements=placements,
-                expected_graph_op="_philox_normal_flat_slice",
+                expected_graph_op="_philox_distribution_flat_slice",
             )
 
     @with_comms
@@ -1260,7 +1269,7 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
                 fn,
                 device_mesh,
                 placements=placements,
-                expected_graph_op="_philox_uniform_flat_slice",
+                expected_graph_op="_philox_distribution_flat_slice",
             )
 
     @with_comms

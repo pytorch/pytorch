@@ -72,6 +72,8 @@ def _try_compute_stateful_rng_layout(
     logical_numel: IntLikeType = 1
     for size in spec.shape:
         logical_numel *= size
+    if logical_numel == 0:
+        return logical_numel, ()
     # The legacy dense-launch replay kernel currently uses a 32-bit grid policy.
     if logical_numel > torch.iinfo(torch.int32).max:
         return None
