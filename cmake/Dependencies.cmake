@@ -275,7 +275,7 @@ elseif(BLAS STREQUAL "APL")
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
-  if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
+  if("$ENV{GENERIC_BLAS_LIBRARIES}" STREQUAL "")
     set(GENERIC_BLAS "blas")
   else()
     set(GENERIC_BLAS $ENV{GENERIC_BLAS_LIBRARIES})
