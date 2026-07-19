@@ -958,7 +958,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   auto rstd = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
 
   auto input_shape = input.sizes();
-  int axis_size = static_cast<int>(N);
+  uint64_t axis_size = static_cast<uint64_t>(N);
   float epsilon_buf = static_cast<float>(eps);
   int use_weight_buf = weight.defined() ? 1 : 0;
   int use_bias_buf = bias.defined() ? 1 : 0;
@@ -991,7 +991,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
       } else if (use_bias_buf) {
         mps::mtl_setArgs<9>(computeEncoder, *bias_contig);
       }
-      MTLSize numThreads = MTLSizeMake(std::min((axis_size + N_READS - 1) / N_READS, 1024), 1, 1);
+      MTLSize numThreads = MTLSizeMake(std::min<uint64_t>((axis_size + N_READS - 1) / N_READS, 1024), 1, 1);
       MTLSize numThreadgroups = MTLSizeMake(M, 1, 1);
       [computeEncoder dispatchThreadgroups:numThreadgroups threadsPerThreadgroup:numThreads];
     });
