@@ -10,7 +10,9 @@ class TestLSTM(TestCase):
         input_size, hidden_size, num_layers = 10, 20, 1
         seq_len, batch_size = 5, 2
 
-        lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers)
+        lstm = nn.LSTM(
+            input_size=input_size, hidden_size=hidden_size, num_layers=num_layers
+        )
         lstm_openreg = lstm.to("openreg")
         x = torch.randn(seq_len, batch_size, input_size, device="openreg")
 
