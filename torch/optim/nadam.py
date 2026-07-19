@@ -260,7 +260,7 @@ NAdam.__doc__ = (
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        momentum_decay (float, optional): momentum momentum_decay (default: 4e-3)
+        momentum_decay (float, optional): momentum decay (default: 4e-3)
         decoupled_weight_decay (bool, optional): whether to decouple the weight
             decay as in AdamW to obtain NAdamW. If True, the algorithm does not
             accumulate weight decay in the momentum nor variance. (default: False)
@@ -338,7 +338,7 @@ def _single_tensor_nadam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 param.mul_(1 - lr * weight_decay)
             else:
                 grad = grad.add(param, alpha=weight_decay)
@@ -462,7 +462,7 @@ def _multi_tensor_nadam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
                 # Reuse the intermediate memory (grouped_grads) already allocated for maximize

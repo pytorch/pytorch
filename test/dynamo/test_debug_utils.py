@@ -108,6 +108,31 @@ def forward(self, x_1):
         self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_AFTER', None)", env_strings)
         self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_LEVEL', None)", env_strings)
 
+    def test_cuda_system_info_comment_nvcc_os_errors(self):
+        self.addCleanup(debug_utils._cuda_system_info_comment.cache_clear)
+        errors = (
+            PermissionError(13, "Permission denied", "nvcc"),
+            OSError(5, "Input/output error", "nvcc"),
+        )
+
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                debug_utils._cuda_system_info_comment.cache_clear()
+                with (
+                    patch.object(torch.cuda, "is_available", return_value=True),
+                    patch.object(torch.version, "hip", None),
+                    patch.object(
+                        debug_utils.subprocess,
+                        "check_output",
+                        side_effect=error,
+                    ),
+                    patch.object(torch.cuda, "device_count", return_value=0),
+                ):
+                    result = debug_utils._cuda_system_info_comment()
+
+                self.assertIn("# nvcc not found\n", result)
+                self.assertIn("# GPU Hardware Info: \n", result)
+
 
 class TestDebugUtilsDevice(TestCase):
     def test_aot_graph_parser(self, device):
@@ -794,7 +819,7 @@ class TestInductorConfigOverrideIntegration(TestCase):
             patch.object(compile_fx_mod, "compile_fx", tracking_compile_fx),
             patch.object(torch._functorch.config, "enable_autograd_cache", False),
         ):
-            compiled_fn = torch.compile(fn)
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
             x = torch.randn(10, device=device, requires_grad=True)
             result = compiled_fn(x)
             result.backward()
@@ -802,15 +827,23 @@ class TestInductorConfigOverrideIntegration(TestCase):
         # Verify each graph has fwd+bwd, correct overrides, no cross-graph
         # leak, and identical configs for forward and backward.
         for gid in range(3):
-            self.assertIn((gid, False), configs_at_compile, f"graph {gid} fwd missing")
-            self.assertIn((gid, True), configs_at_compile, f"graph {gid} bwd missing")
+            self.assertIn(
+                (gid, False),
+                configs_at_compile,
+                lambda msg: f"{msg}\ngraph {gid} fwd missing",
+            )
+            self.assertIn(
+                (gid, True),
+                configs_at_compile,
+                lambda msg: f"{msg}\ngraph {gid} bwd missing",
+            )
             expected = {**baseline, **expected_overrides[gid]}
             for is_bw in [False, True]:
                 phase = "backward" if is_bw else "forward"
                 self.assertEqual(
                     configs_at_compile[(gid, is_bw)],
                     expected,
-                    f"graph {gid} {phase}: config mismatch",
+                    lambda msg: f"{msg}\ngraph {gid} {phase}: config mismatch",
                 )
 
         self.assertIsNotNone(x.grad)
