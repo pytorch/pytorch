@@ -42,6 +42,7 @@ class TORCH_API ThreadLocalState {
   // according to the thread boundary specified
   static void setThreadLocalState(const ThreadLocalState& state);
 
+  // Setter populates a ThreadLocalState snapshot; getters read the applied TLS.
   void set_python_context(std::shared_ptr<c10::SafePyObject> context);
   static const std::shared_ptr<c10::SafePyObject>& get_python_context();
   static bool is_python_context_origin_thread();

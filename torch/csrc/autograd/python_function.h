@@ -6,11 +6,10 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/python_context.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/object_ptr.h>
-
-#include <c10/util/SmallVector.h>
 
 #include <c10/core/DeviceGuard.h>
 #include <optional>
@@ -70,8 +69,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
 
   PyObject* tuple = PyTuple_New(1);
   if (!tuple)
-    // NOLINTNEXTLINE(hicpp-exception-baseclass)
-    throw python_error();
+    throw_persisted_python_error();
   PyTuple_SET_ITEM(tuple, 0, obj.release());
   obj = tuple;
   return true;
@@ -84,10 +82,6 @@ struct THPFunction {
   PyObject_HEAD
 
   PyObject* needs_input_grad;
-  // Lazily stores the default ctx.needs_input_grad values until the Python
-  // tuple is first requested. needs_input_grad is authoritative once set,
-  // either by materialization or direct Python assignment.
-  std::optional<c10::SmallVector<bool, 24>> needs_input_grad_bits;
 
   // Python tuple of tensors whose variables we should save.  Set
   // by Python with 'save_for_backward'.  If nullptr, no tensors were

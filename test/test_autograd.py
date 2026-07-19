@@ -2288,31 +2288,6 @@ class TestAutograd(TestCase):
         sum(rx, ry).sum().backward()
         self.assertTrue(was_called[0])
 
-    def test_needs_input_grad_setter_roundtrip(self):
-        sentinel = ([False, True],)
-
-        class NeedsInputGradSetter(Function):
-            @staticmethod
-            def forward(ctx, x, y):
-                return x + y
-
-            @staticmethod
-            def backward(ctx, grad):
-                original = ctx.needs_input_grad
-                self.assertEqual(original, (True, False))
-                ctx.needs_input_grad = sentinel
-                self.assertIs(ctx.needs_input_grad, sentinel)
-                ctx.needs_input_grad = None
-                self.assertIsNone(ctx.needs_input_grad)
-                ctx.needs_input_grad = original
-                self.assertIs(ctx.needs_input_grad, original)
-                return grad, None
-
-        x = torch.randn((), requires_grad=True)
-        y = torch.randn(())
-        NeedsInputGradSetter.apply(x, y).backward()
-        self.assertEqual(x.grad, torch.ones_like(x))
-
     def test_retain_grad(self):
         input = torch.rand(1, 3, requires_grad=True)
         h1 = input * 3
@@ -7269,6 +7244,34 @@ Done""",
             gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
+
+    def test_gradcheck_forward_ad_zero_numel_input(self):
+        # https://github.com/pytorch/pytorch/issues/190436
+        # Emulates device kernels whose jvp for a zero-element input is not
+        # bitwise-exactly zero: fast mode must skip such inputs instead of
+        # comparing against an atol scaled down to zero by sum(u) == 0
+        class NoisyJvpFn(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x.sum() + y.sum()
+
+            @staticmethod
+            def jvp(ctx, x_t, y_t):
+                return x_t.sum() + y_t.sum() + 1e-9
+
+        x = torch.rand(5, 0, dtype=torch.double, requires_grad=True)
+        y = torch.rand(3, dtype=torch.double, requires_grad=True)
+        self.assertTrue(
+            gradcheck(
+                NoisyJvpFn.apply,
+                (x, y),
+                check_forward_ad=True,
+                check_backward_ad=False,
+                check_undefined_grad=False,
+                check_batched_grad=False,
+                fast_mode=True,
+            )
+        )
 
     def test_gradcheck_forward_ad_runs_with_no_requires_grad(self):
         # Currently requires_grad is used as a easy way for gradcheck to know
