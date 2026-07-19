@@ -489,6 +489,11 @@ def fractional_max_pool2d_with_indices(
             return_indices=return_indices,
             _random_samples=_random_samples,
         )
+    for k in _pair(kernel_size):
+        if k < 1:
+            raise ValueError(
+                "fractional_max_pool2d requires kernel_size to be greater than zero"
+            )
     if output_size is None and output_ratio is None:
         raise ValueError(
             "fractional_max_pool2d requires specifying either an output_size or an output_ratio"
@@ -609,6 +614,11 @@ def fractional_max_pool3d_with_indices(
             return_indices=return_indices,
             _random_samples=_random_samples,
         )
+    for k in _triple(kernel_size):
+        if k < 1:
+            raise ValueError(
+                "fractional_max_pool3d requires kernel_size to be greater than zero"
+            )
     if output_size is None and output_ratio is None:
         raise ValueError(
             "fractional_max_pool3d requires specifying either an output_size or an output_ratio"

@@ -5508,6 +5508,10 @@ def meta_fractional_max_pool2d(self, kernel_size, output_size, random_samples):
         lambda: "fractional_max_pool2d: output_size must "
         "either be a single int or tuple of Ints",
     )
+    torch._check(
+        kernel_size[0] >= 1 and kernel_size[1] >= 1,
+        lambda: f"fractional_max_pool2d: kernel_size must be greater than zero, but got {kernel_size}",
+    )
 
     input_channels = self.size(-3)
     input_height = self.size(-2)

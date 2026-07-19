@@ -6571,6 +6571,18 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.randn(1, 4, 16, 16),), check_lowp=False)
 
+    def test_fractional_max_pool2d_invalid_kernel_size(self):
+        # https://github.com/pytorch/pytorch/issues/190272
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (-1, -1), (2, 2), samples)
+
+        x = torch.randn(1, 16, 32, 32, device=self.device)
+        samples = torch.rand(1, 16, 2, device=self.device)
+        with self.assertRaisesRegex(
+            RuntimeError, "kernel_size must be greater than zero"
+        ):
+            torch.compile(fn)(x, samples)
+
     @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d5(self):
         def fn(x, samples):

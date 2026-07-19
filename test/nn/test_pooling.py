@@ -2040,6 +2040,16 @@ torch.cuda.synchronize()
                         _random_samples=samples,
                     )
 
+            for kernel_size in [(-1, 2), (0, 2)]:
+                with self.assertRaisesRegex(ValueError, "greater than zero"):
+                    # Non-positive kernel_size
+                    F.fractional_max_pool2d(
+                        x,
+                        kernel_size=kernel_size,
+                        output_size=(3, 3),
+                        _random_samples=samples,
+                    )
+
             err_large_msg = "too large relative to input "
             err_out_size_msg = "output_size must either"
             for output_size, msg in [
@@ -2090,6 +2100,16 @@ torch.cuda.synchronize()
             for kernel_size in [(), (1,), (1, 1)]:
                 with self.assertRaisesRegex(RuntimeError, "kernel_size must either"):
                     # Incorrect kernel_size
+                    F.fractional_max_pool3d(
+                        x,
+                        kernel_size=kernel_size,
+                        output_size=(3, 3, 3),
+                        _random_samples=samples,
+                    )
+
+            for kernel_size in [(-1, 2, 2), (0, 2, 2)]:
+                with self.assertRaisesRegex(ValueError, "greater than zero"):
+                    # Non-positive kernel_size
                     F.fractional_max_pool3d(
                         x,
                         kernel_size=kernel_size,
