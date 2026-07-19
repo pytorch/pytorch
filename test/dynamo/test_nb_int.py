@@ -2,8 +2,8 @@
 """Tests for nb_int_impl: unified __int__ / int() protocol in Dynamo."""
 
 import torch
-import torch._dynamo.testing
-from torch.testing._internal.common_utils import make_dynamo_test, run_tests, TestCase
+from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class NbIntTests(TestCase):
@@ -302,6 +302,25 @@ class NbIntTests(TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(5))
         self.assertEqual(result, 5)
+
+    # --- Blocked slot: __int__ = None ---
+
+    def test_user_defined_int_none_raises(self):
+        class NoInt:
+            __int__ = None
+
+        obj = NoInt()
+
+        def fn(x):
+            try:
+                return int(obj)
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        eager_result = fn(torch.tensor(0))
+        self.assertIn("NoneType", result)
+        self.assertEqual(result, eager_result)
 
     # --- SymNodeVariable ---
 

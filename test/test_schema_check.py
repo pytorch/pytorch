@@ -30,17 +30,17 @@ def secretly_mutating(x):
 def output_is_input(x):
     return x
 
-custom_lib = torch.library.Library("bad_schemas", "DEF")  # noqa: TOR901
+custom_lib = torch.library.Library("bad_schemas", "DEF")  # noqa: SCOPED_LIBRARY
 custom_lib.define("secretly_aliasing(Tensor x) -> Tensor")
 custom_lib.define("secretly_mutating(Tensor x) -> Tensor")
 custom_lib.define("output_is_input(Tensor(a) x) -> Tensor(a)")
 
-custom_lib_cpu = torch.library.Library("bad_schemas", "IMPL", "CPU")  # noqa: TOR901
+custom_lib_cpu = torch.library.Library("bad_schemas", "IMPL", "CPU")  # noqa: SCOPED_LIBRARY
 custom_lib_cpu.impl("secretly_aliasing", secretly_aliasing)
 custom_lib_cpu.impl("secretly_mutating", secretly_mutating)
 custom_lib_cpu.impl("output_is_input", output_is_input)
 
-custom_lib_meta = torch.library.Library("bad_schemas", "IMPL", "Meta")  # noqa: TOR901
+custom_lib_meta = torch.library.Library("bad_schemas", "IMPL", "Meta")  # noqa: SCOPED_LIBRARY
 custom_lib_meta.impl("secretly_aliasing", secretly_aliasing)
 custom_lib_meta.impl("secretly_mutating", secretly_mutating)
 custom_lib_meta.impl("output_is_input", output_is_input)
@@ -500,9 +500,9 @@ class TestSchemaCheckModeOpInfo(JitTestCase):
     @ops(op_db, dtypes=OpDTypes.supported)
     @slowTestIf(IS_WINDOWS)
     def test_schema_correctness(self, device, dtype, op):
-        # Currently torch.equal isn't supported with torch.complex32
+        # Currently torch.equal isn't supported with torch.complex32 or torch.bcomplex32.
         # There's also errors with complex64 and complex128
-        if (dtype == torch.complex32):
+        if (dtype in (torch.complex32, torch.bcomplex32)):
             return
         for sample in op.sample_inputs(device, dtype, requires_grad=False):
             with SchemaCheckMode():

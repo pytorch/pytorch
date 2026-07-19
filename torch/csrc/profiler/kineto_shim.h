@@ -62,7 +62,8 @@ struct activity_t;
 void addMetadata(
     activity_t* activity,
     const std::string& key,
-    const std::string& value);
+    const std::string& value,
+    bool quote = false);
 
 // Wraps: libkineto::CpuTraceBuffer
 struct TraceWrapper {
@@ -146,6 +147,8 @@ TORCH_API void addMetadataJson(
     const std::string& value);
 
 TORCH_API void profilerStep();
+
+TORCH_API bool isKinetoStopped();
 
 } // namespace autograd::profiler
 

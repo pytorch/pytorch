@@ -442,7 +442,7 @@ def _load_packed_weight(
             setattr(self, attr_name, state_dict[attr_name])
             attrs_to_pop.append(attr_name)
 
-    # pop the packed param attributesn
+    # pop the packed param attributes
     for attr_name in attrs_to_pop:
         state_dict.pop(attr_name)
 
@@ -1326,7 +1326,7 @@ def special_pattern_replacement(model: GraphModule):
         if is_call_function:
             # pass scale/zer_point arguments from quantize_per_tensor to the default node operator
             # insert an op after the zero_point node so that the scale/zero_point
-            # nodes are is available
+            # nodes are available
             qop = get_quantized_operator(ref_node.target)
             args = list(ref_node.args)
             kwargs = dict(ref_node.kwargs)

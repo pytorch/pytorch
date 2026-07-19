@@ -47,7 +47,7 @@ class StorageWriter(abc.ABC):
         """
         Calls to indicates a brand new checkpoint write is going to happen.
         A checkpoint_id may be present if users set the checkpoint_id for
-        this checkpoint write. The meaning of the checkpiont_id is
+        this checkpoint write. The meaning of the checkpoint_id is
         storage-dependent. It can be a path to a folder/file or a key for
         a key-value storage.
 
@@ -188,7 +188,7 @@ class StorageReader(abc.ABC):
         """
         Calls to indicates a brand new checkpoint read is going to happen.
         A checkpoint_id may be present if users set the checkpoint_id for
-        this checkpoint read. The meaning of the checkpiont_id is
+        this checkpoint read. The meaning of the checkpoint_id is
         storage-dependent. It can be a path to a folder/file or a key for
         a key-value storage.
 

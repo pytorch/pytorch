@@ -9,7 +9,7 @@
     "request_more_info": {
       "action": "Add comment and stop",
       "use_when": "Classification is unclear and more details are needed to decide between question vs bug/feature",
-      "comment": "Thanks for the report. To triage this, could you share:\n\n- A minimal repro (small script or steps)\n- Full error logs / stack trace\n- Output of `collect_env.py`\n\nOnce we have that, we can classify and route this properly."
+      "comment": "Thanks for the report. To triage this, could you share:\n\n- A minimal repro (small script or steps)\n- Full error logs / stack trace\n- Output of `python -m torch.utils.collect_env`\n\nOnce we have that, we can classify and route this properly."
     },
     "needs_reproduction": {
       "action": "Edit issue to remove external links, add label 'needs reproduction', and comment",

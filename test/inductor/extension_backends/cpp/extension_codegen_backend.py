@@ -45,10 +45,16 @@ class ExtensionCppWrapperCodegen(cpp_wrapper_cpu.CppWrapperCpu):
         return ExtensionCppWrapperCodegen()
 
     @staticmethod
-    def get_device_include_path(device: str) -> str:
+    def get_device_include_path_jit(device: str) -> str:
         if device == "extension_device":
-            return cpp_wrapper_cpu.CppWrapperCpu.get_device_include_path("cpu")
-        return cpp_wrapper_cpu.CppWrapperCpu.get_device_include_path(device)
+            return cpp_wrapper_cpu.CppWrapperCpu.get_device_include_path_jit("cpu")
+        return cpp_wrapper_cpu.CppWrapperCpu.get_device_include_path_jit(device)
+
+    @staticmethod
+    def get_device_include_path_aot(device: str) -> str:
+        if device == "extension_device":
+            return cpp_wrapper_cpu.CppWrapperCpu.get_device_include_path_aot("cpu")
+        return cpp_wrapper_cpu.CppWrapperCpu.get_device_include_path_aot(device)
 
 
 class ExtensionScheduling(BaseScheduling):

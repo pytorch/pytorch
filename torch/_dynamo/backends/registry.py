@@ -13,6 +13,7 @@ Key components:
 - CompilerFn: Type for backend compiler functions that transform FX graphs
 - _BACKENDS: Registry mapping backend names to entry points
 - _COMPILER_FNS: Registry mapping backend names to loaded compiler functions
+- _BACKEND_TAGS: Registry mapping backend names to their tags
 
 Example usage:
     @register_backend
@@ -79,6 +80,7 @@ CompilerFn = Callable[[fx.GraphModule, list[torch.Tensor]], CompiledFn]
 
 _BACKENDS: dict[str, EntryPoint | None] = {}
 _COMPILER_FNS: dict[str, CompilerFn] = {}
+_BACKEND_TAGS: dict[str, tuple[str, ...]] = {}
 _default_backend: str | CompilerFn = "inductor"
 
 
@@ -101,13 +103,15 @@ def register_backend(
     if compiler_fn is None:
         # @register_backend(name="") syntax
         return functools.partial(register_backend, name=name, tags=tags)  # type: ignore[return-value]
-    assert callable(compiler_fn)
+    if not callable(compiler_fn):
+        raise AssertionError(f"compiler_fn must be callable, got {type(compiler_fn)}")
     name = name or compiler_fn.__name__
-    assert name not in _COMPILER_FNS, f"duplicate name: {name}"
-    if compiler_fn not in _BACKENDS:
+    if name in _COMPILER_FNS:
+        raise AssertionError(f"duplicate name: {name}")
+    if name not in _BACKENDS:
         _BACKENDS[name] = None
     _COMPILER_FNS[name] = compiler_fn
-    compiler_fn._tags = tuple(tags)  # type: ignore[attr-defined]
+    _BACKEND_TAGS[name] = tuple(tags)
     return compiler_fn
 
 
@@ -123,9 +127,12 @@ def lookup_backend(compiler_fn: str | CompilerFn) -> CompilerFn:
         if compiler_fn not in _BACKENDS:
             _lazy_import()
         if compiler_fn not in _BACKENDS:
+            import difflib
+
             from ..exc import InvalidBackend
 
-            raise InvalidBackend(name=compiler_fn)
+            suggestions = difflib.get_close_matches(compiler_fn, list_backends(), n=2)
+            raise InvalidBackend(name=compiler_fn, suggestions=suggestions)
 
         if compiler_fn not in _COMPILER_FNS:
             entry_point = _BACKENDS[compiler_fn]
@@ -148,8 +155,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:  # type:
     backends = [
         name
         for name in _BACKENDS
-        if name not in _COMPILER_FNS
-        or not exclude_tags_set.intersection(_COMPILER_FNS[name]._tags)  # type: ignore[attr-defined]
+        if not exclude_tags_set.intersection(_BACKEND_TAGS.get(name, ()))
     ]
     return sorted(backends)
 
@@ -163,7 +169,8 @@ def _lazy_import() -> None:
 
     from ..repro.after_dynamo import dynamo_minifier_backend
 
-    assert dynamo_minifier_backend is not None
+    if dynamo_minifier_backend is None:
+        raise AssertionError("dynamo_minifier_backend failed to load")
 
     _discover_entrypoint_backends()
 

@@ -22,6 +22,7 @@ from urllib.error import HTTPError
 from github_utils import gh_graphql
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import (
+    _find_non_matching_files,
     _revlist_to_prs,
     categorize_checks,
     DRCI_CHECKRUN_NAME,
@@ -289,6 +290,31 @@ class TestTryMerge(TestCase):
         repo = DummyGitRepo()
         merge_rules = read_merge_rules(repo, "pytorch", "pytorch")
         self.assertGreater(len(merge_rules), 1)
+
+    def test_negative_pattern_excludes_subpath(self, *args: Any) -> None:
+        "Patterns prefixed with '-' exclude matching files from a rule."
+        patterns = [".ci/**", "-.ci/docker/**", ".github/**"]
+        files = [
+            ".ci/test.sh",
+            ".ci/docker/Dockerfile",
+            ".ci/docker/common/install_onnx.sh",
+            ".github/workflows/lint.yml",
+            "torch/foo.py",
+        ]
+        non_matching = _find_non_matching_files(patterns, files)
+        self.assertEqual(
+            sorted(non_matching),
+            [
+                ".ci/docker/Dockerfile",
+                ".ci/docker/common/install_onnx.sh",
+                "torch/foo.py",
+            ],
+        )
+
+    def test_negative_pattern_no_negatives(self, *args: Any) -> None:
+        "Without negative patterns, behavior matches the positive-only case."
+        files = [".ci/test.sh", "torch/foo.py"]
+        self.assertEqual(_find_non_matching_files([".ci/**"], files), ["torch/foo.py"])
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_match_rules(self, *args: Any) -> None:
@@ -568,10 +594,6 @@ class TestTryMerge(TestCase):
             {
                 "name": "lintrunner / linux-job",
                 "expected": "lintrunner / linux-job",
-            },
-            {
-                "name": "Test `run_test.py` is usable without boto3",
-                "expected": "Test `run_test.py` is usable without boto3",
             },
         ]
 
@@ -932,6 +954,44 @@ class TestBypassFailures(TestCase):
             "1 checks failed but were likely due flakiness or broken trunk",
             str(w[0].message),
         )
+
+    def test_get_classifications_crcr_l3(self, *args: Any) -> None:
+        """Test that CRCR L3 failures are classified as CRCR_L3
+        and are always non-blocking regardless of the ok_failed_checks_threshold."""
+        pr = GitHubPR("pytorch", "pytorch", 100652)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        oot_check = (
+            "inductor / cuda11.8-py3.10-gcc7-sm86"
+            " / test (inductor_timm, 2, 2, linux.g5.4xlarge.nvidia.gpu)"
+        )
+        self.assertEqual(checks[oot_check].classification, "CRCR_L3")
+
+        # BROKEN_TRUNK classification still works independently
+        bt_check = (
+            "inductor / cuda11.8-py3.10-gcc7-sm86"
+            " / test (inductor_torchbench_dynamic, 1, 1, linux.g5.4xlarge.nvidia.gpu)"
+        )
+        self.assertEqual(checks[bt_check].classification, "BROKEN_TRUNK")
+
+        # CRCR_L3 is always non-blocking: ignored by default
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["CRCR_L3"]) == 1)
+
+        # CRCR_L3 stays ignored even with threshold=0, unlike flaky/broken_trunk
+        # which get promoted to blocking failures when the threshold is exceeded
+        pending, failed, ignorable = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=0
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(ignorable["CRCR_L3"]) == 1)
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)

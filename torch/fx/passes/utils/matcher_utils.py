@@ -97,7 +97,7 @@ class SubgraphMatcher:
             if node.op != "output" and not node.is_impure():
                 if len(node.users) == 0:
                     raise AssertionError(
-                        "SubgraphMatcher cannot be initialized with an pattern with dead code"
+                        "SubgraphMatcher cannot be initialized with a pattern with dead code"
                     )
 
         # TODO: assert pattern is a connected graph
@@ -356,8 +356,8 @@ class SubgraphMatcher:
         in order for the match to be valid. This is implemented with backtracking. See `backtracking`
         for more details.
 
-        Notice: graph traversal must be done in the reverser order because a tensor can have multiple
-        consumers, but can only have a single producer. Only with reverser order, we can we jointly
+        Notice: graph traversal must be done in the reverse order because a tensor can have multiple
+        consumers, but can only have a single producer. Only with reverse order can we jointly
         traverse the pattern and target graph in a deterministic path.
 
         Warning: In theory, this backtracking algorithm have an **exponential** time complexity. However,

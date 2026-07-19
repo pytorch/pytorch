@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfNoCuteDSL,
     TestCase,
 )
 
@@ -44,6 +45,7 @@ class TestNativeDSLOps(TestCase):
 
     def setUp(self):
         """Clear all caches before each test to ensure test isolation."""
+        super().setUp()
         self._cache_functions_to_clear = [
             (
                 "torch._native.common_utils",
@@ -115,7 +117,7 @@ class TestNativeDSLOps(TestCase):
 
                 self.assertTrue(
                     required_methods <= public,
-                    f"{module_name} missing: {required_methods - public}",
+                    lambda msg: f"{msg}\n{module_name} missing: {required_methods - public}",
                 )
 
                 for method_name in required_methods:
@@ -129,7 +131,7 @@ class TestNativeDSLOps(TestCase):
                 self.assertEqual(
                     api_sets[0],
                     api_set,
-                    f"Module {i} should have identical public API to module 0",
+                    lambda msg: f"{msg}\nModule {i} should have identical public API to module 0",
                 )
 
         # Test runtime functions return expected types
@@ -160,7 +162,11 @@ class TestNativeDSLOps(TestCase):
             print(repr(leaked))
         """)
         result = _subprocess_lastline(script)
-        self.assertEqual(result, "[]", f"DSL modules leaked on import torch: {result}")
+        self.assertEqual(
+            result,
+            "[]",
+            lambda msg: f"{msg}\nDSL modules leaked on import torch: {result}",
+        )
 
     def test_no_external_packaging_dependency(self):
         """torch._native must not import the external `packaging` package.
@@ -248,11 +254,11 @@ class TestNativeDSLOps(TestCase):
                     self.assertEqual(
                         result,
                         expected_result,
-                        f"_available_version({version_str!r}) = {result}",
+                        lambda msg: f"{msg}\n_available_version({version_str!r}) = {result}",
                     )
 
     def test_registry_mechanics(self):
-        """_get_or_create_library caches Library instances per (lib, dispatch_key)."""
+        """_get_or_create_library caches Library instances per dispatch_key."""
         import torch._native.registry as registry
         import torch.library
 
@@ -265,23 +271,23 @@ class TestNativeDSLOps(TestCase):
         )
 
         try:
-            key = ("_test_native_dsl_registry", "CPU")
-            registry._libs.pop(key, None)
+            cpu_key = ("_native", "CPU")
+            cuda_key = ("_native", "CUDA")
+            registry._libs.pop(cpu_key, None)
+            registry._libs.pop(cuda_key, None)
 
-            lib1 = registry._get_or_create_library(*key)
+            lib1 = registry._get_or_create_library("CPU")
             self.assertIsInstance(lib1, torch.library.Library)
-            lib2 = registry._get_or_create_library(*key)
+            lib2 = registry._get_or_create_library("CPU")
             self.assertIs(lib1, lib2, "should return cached instance")
 
             # Different dispatch key -> different Library
-            key2 = ("_test_native_dsl_registry", "CUDA")
-            registry._libs.pop(key2, None)
-            lib3 = registry._get_or_create_library(*key2)
+            lib3 = registry._get_or_create_library("CUDA")
             self.assertIsNot(lib1, lib3)
 
             # cleanup
-            registry._libs.pop(key, None)
-            registry._libs.pop(key2, None)
+            registry._libs.pop(cpu_key, None)
+            registry._libs.pop(cuda_key, None)
         finally:
             # Restore original registry state
             registry._libs.clear()
@@ -361,10 +367,10 @@ class TestNativeDSLOps(TestCase):
                 # Use a unique operation name
                 unique_op = f"test_jit_disabled_{uuid.uuid4().hex[:8]}.Tensor"
                 triton_utils.register_op_override(
-                    "aten", unique_op, "CPU", lambda: None
+                    "aten", unique_op, "CPU", lambda *a, **k: True, lambda: None
                 )
                 cutedsl_utils.register_op_override(
-                    "aten", unique_op, "CPU", lambda: None
+                    "aten", unique_op, "CPU", lambda *a, **k: True, lambda: None
                 )
                 # Should not call the registry function at all since JIT is disabled
                 self.assertEqual(registry_mock.call_count, 0)
@@ -409,14 +415,18 @@ class TestNativeDSLOps(TestCase):
                 op_name = f"test_version_skip_{uuid.uuid4().hex[:8]}.Tensor"
 
                 # Call the register functions
-                triton_utils.register_op_override("aten", op_name, "CPU", lambda: None)
-                cutedsl_utils.register_op_override("aten", op_name, "CPU", lambda: None)
+                triton_utils.register_op_override(
+                    "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
+                )
+                cutedsl_utils.register_op_override(
+                    "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
+                )
 
                 # Verify both implementation functions were called
                 self.assertEqual(
                     triton_mock.call_count + cute_mock.call_count,
                     2,
-                    f"Expected 2 calls but got triton: {triton_mock.call_count}, cutedsl: {cute_mock.call_count}",
+                    lambda msg: f"{msg}\nExpected 2 calls but got triton: {triton_mock.call_count}, cutedsl: {cute_mock.call_count}",
                 )
 
     @parametrize("env_value, expected", [(None, False), ("1", True)])
@@ -469,7 +479,6 @@ class TestNativeDSLOps(TestCase):
         """Test that DSL test helper decorators work"""
         from torch.testing._internal.common_utils import (
             skipIfDSLUnavailable,
-            skipIfNoCuteDSL,
             skipIfNoTritonDSL,
             skipUnlessDSLAvailable,
         )
@@ -560,6 +569,7 @@ class TestNativeDSLOps(TestCase):
 
 
 instantiate_parametrized_tests(TestNativeDSLOps)
+
 
 if __name__ == "__main__":
     run_tests()

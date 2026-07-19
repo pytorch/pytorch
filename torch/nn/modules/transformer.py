@@ -309,7 +309,7 @@ class Transformer(Module):
         return _generate_square_subsequent_mask(sz, dtype=dtype, device=device)
 
     def _reset_parameters(self) -> None:
-        r"""Initiate parameters in the transformer model."""
+        r"""Initialize parameters in the transformer model."""
         for p in self.parameters():
             if p.dim() > 1:
                 xavier_uniform_(p)
@@ -361,7 +361,7 @@ class TransformerEncoder(Module):
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
-        # this attribute saves the value providedat object construction
+        # this attribute saves the value provided at object construction
         self.enable_nested_tensor = enable_nested_tensor
         # this attribute controls whether nested tensors are used
         self.use_nested_tensor = enable_nested_tensor

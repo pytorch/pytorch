@@ -1,12 +1,11 @@
 # Owner(s): ["module: dynamo"]
 
 import torch
-import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+from torch._dynamo.test_case import run_tests, TestCase
 
 
-class TestGroupTensorsByDeviceAndDtype(torch._dynamo.test_case.TestCase):
+class TestGroupTensorsByDeviceAndDtype(TestCase):
     """Tests for the group_tensors_by_device_and_dtype polyfill."""
 
     def test_polyfill_matches_cpp_single_list(self):
@@ -185,7 +184,6 @@ class TestGroupTensorsByDeviceAndDtype(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.equal(f64_lists[0][1], t_f64_1))
         self.assertEqual(f64_indices, [1, 3])
 
-    @skipIfTorchDynamo("test uses CompileCounter which doesn't work under dynamo")
     def test_group_tensors_traceable_with_compile(self):
         """Test that torch._C._group_tensors_by_device_and_dtype is traceable with torch.compile.
 

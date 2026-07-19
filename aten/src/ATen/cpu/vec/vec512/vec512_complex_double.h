@@ -169,18 +169,12 @@ class Vectorized<c10::complex<double>> {
     if (count == size())
       return _mm512_loadu_pd(reinterpret_cast<const double*>(ptr));
 
-    __at_align__ double tmp_values[2 * size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(2 * size())) {
-      tmp_values[i] = 0.0;
-    }
+    // Zero tail past `count`.
+    __at_align__ double tmp_values[2 * size()] = {};
     std::memcpy(
         tmp_values,
         reinterpret_cast<const double*>(ptr),
-        count * sizeof(c10::complex<double>));
+        std::min<int64_t>(count, size()) * sizeof(c10::complex<double>));
     return _mm512_load_pd(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -189,7 +183,10 @@ class Vectorized<c10::complex<double>> {
     } else if (count > 0) {
       double tmp_values[2 * size()];
       _mm512_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(c10::complex<double>));
+      std::memcpy(
+          ptr,
+          tmp_values,
+          std::min<int64_t>(count, size()) * sizeof(c10::complex<double>));
     }
   }
   const c10::complex<double>& operator[](int idx) const = delete;
