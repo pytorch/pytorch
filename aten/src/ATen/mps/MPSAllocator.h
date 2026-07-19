@@ -69,7 +69,6 @@ struct BufferBlock {
   size_t size; // size after alignment
   size_t requested_size; // requested size (before alignment)
   size_t offset = 0;
-  BufferBlock* prev = nullptr;
   BufferBlock* next = nullptr;
   // buffer shape is used for retrieving base of views in cached graphs
   std::vector<int64_t> shape;

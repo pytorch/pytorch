@@ -323,11 +323,7 @@ BufferBlock* MPSHeapAllocatorImpl::cut_placement_block(AllocParams& params, Buff
   if (remainder_size >= kMaxSmallAlloc) {
     BufferBlock* remainder = new BufferBlock(remainder_size, 0, nil, heap);
     remainder->offset = free_block->offset + alloc_size;
-    remainder->prev = free_block;
     remainder->next = free_block->next;
-    if (free_block->next) {
-      free_block->next->prev = remainder;
-    }
     free_block->next = remainder;
     pool.available_buffers.insert(remainder);
     pool.available_size += remainder_size;
@@ -368,9 +364,6 @@ BufferBlock* MPSHeapAllocatorImpl::merge_placement_blocks(BufferPool& pool, Buff
   }
   first->size = merged_size;
   first->next = after;
-  if (after) {
-    after->prev = first;
-  }
   return first;
 }
 
