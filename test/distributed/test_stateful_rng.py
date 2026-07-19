@@ -100,6 +100,55 @@ class TestStatefulRNGTensor(TestCase):
         self.assertEqual(actual_generator.get_state(), expected_generator.get_state())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_invalid_parameters_do_not_advance_generator(self):
+        device = torch.device("cuda")
+        max_float = torch.finfo(torch.float32).max
+        cases = (
+            ("negative_std", "std >= 0.0", "normal_", (0.0, -1.0)),
+            ("reversed_uniform", "from=1.*> to=0", "uniform_", (1.0, 0.0)),
+            (
+                "wide_uniform",
+                "to-from",
+                "uniform_",
+                (-max_float, max_float),
+            ),
+        )
+
+        for generator_kind in ("default", "explicit"):
+            for case_name, error, op_name, op_args in cases:
+                with self.subTest(generator=generator_kind, case=case_name):
+                    torch.manual_seed(321)
+                    generator = (
+                        None
+                        if generator_kind == "default"
+                        else torch.Generator(device=device).manual_seed(321)
+                    )
+                    torch.rand(11, device=device, generator=generator)
+                    before = (
+                        torch.cuda.get_rng_state(device)
+                        if generator is None
+                        else generator.get_state()
+                    )
+                    reference = torch.Generator(device=device)
+                    reference.set_state(before)
+
+                    actual = torch.empty(3, device=device)
+                    self._set_rng_metadata(actual, 7, ((2, 3, 3, 1),))
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        with stateful_rng_mode():
+                            getattr(actual, op_name)(*op_args, generator=generator)
+
+                    after = (
+                        torch.cuda.get_rng_state(device)
+                        if generator is None
+                        else generator.get_state()
+                    )
+                    self.assertEqual(after, before)
+                    actual_next = torch.rand(17, device=device, generator=generator)
+                    expected_next = torch.rand(17, device=device, generator=reference)
+                    self.assertEqual(actual_next, expected_next, rtol=0, atol=0)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_empty_local_tensor_reserves_dense_increment(self):
         device = torch.device("cuda")
         torch.manual_seed(123)
@@ -113,6 +162,62 @@ class TestStatefulRNGTensor(TestCase):
             actual.uniform_()
 
         self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
+
+
+class TestPhiloxFlatSliceOps(TestCase):
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_invalid_calls_do_not_advance_generator(self):
+        device = torch.device("cuda")
+        generator = torch.Generator(device=device).manual_seed(123)
+
+        def assert_invalid_without_advancing(regex, fn):
+            state = generator.get_state().clone()
+            with self.assertRaisesRegex(RuntimeError, regex):
+                fn()
+            self.assertEqual(generator.get_state(), state)
+
+        assert_invalid_without_advancing(
+            "normal expects std >= 0.0",
+            lambda: torch.ops.aten._philox_normal_flat_slice_(
+                torch.empty(1, device=device),
+                1,
+                [0],
+                [1],
+                [1],
+                [1],
+                0,
+                -1,
+                generator=generator,
+            ),
+        )
+        assert_invalid_without_advancing(
+            "found from=1.*> to=0",
+            lambda: torch.ops.aten._philox_uniform_flat_slice_(
+                torch.empty(1, device=device),
+                1,
+                [0],
+                [1],
+                [1],
+                [1],
+                1,
+                0,
+                generator=generator,
+            ),
+        )
+        assert_invalid_without_advancing(
+            "from is out of bounds",
+            lambda: torch.ops.aten._philox_uniform_flat_slice_(
+                torch.empty(1, dtype=torch.float16, device=device),
+                1,
+                [0],
+                [1],
+                [1],
+                [1],
+                -70000,
+                0,
+                generator=generator,
+            ),
+        )
 
 
 if __name__ == "__main__":
