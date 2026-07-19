@@ -1182,8 +1182,8 @@ class TestConvolutionNN(NNTestCase):
 
 class TestConvolutionNNDeviceType(NNTestCase):
     def test_slow_conv_transpose3d_kernel_size_mismatch(self, device):
-        inp = torch.full((1, 2, 4, 5, 4), 0.5, dtype=torch.double, device=device)
-        weight = torch.full((2, 3, 2, 3, 2), 0.5, dtype=torch.double, device=device)
+        inp = torch.full((1, 2, 4, 5, 4), 0.5, device=device)
+        weight = torch.full((2, 3, 2, 3, 2), 0.5, device=device)
         with self.assertRaisesRegex(
             RuntimeError, "kernel_size.*must match weight spatial dimensions"
         ):
@@ -1191,7 +1191,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 inp,
                 weight,
                 [1, 1, 1],
-                torch.full((3,), 0.5, dtype=torch.double, device=device),
+                torch.full((3,), 0.5, device=device),
                 [1, 1, 1],
                 [2, 2, 2],
                 [0, 0, 0],
