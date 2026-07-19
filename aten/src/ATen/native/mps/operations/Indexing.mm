@@ -385,16 +385,16 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   // with base 0, identical to the unchunked path.
   const uint64_t chunk_elems = (static_cast<uint64_t>(1) << 31) / threads_per_group * threads_per_group;
 
-  // Storage for the four helper buffers is a single int32-typed tensor (same
-  // 4 bytes/slot as uint32 on-device), but the Metal kernels write and read
-  // them as uint32. Reading `total_nonzero_buf.item<int32_t>()` and casting
-  // to uint32 recovers the correct count even when it exceeds INT_MAX
-  // (dense masks on tensors larger than 2^31 elements).
-  auto tmp = at::empty({numel + 2 * num_blocks_u32 + 1}, input.options().dtype(kInt));
-  Tensor prefix_buf = tmp.slice(0, 0, numel);
-  Tensor block_sums_buf = tmp.slice(0, numel, numel + num_blocks_u32);
-  Tensor block_offsets_buf = tmp.slice(0, numel + num_blocks_u32, numel + 2 * num_blocks_u32);
-  Tensor total_nonzero_buf = tmp.slice(0, numel + 2 * num_blocks_u32, numel + 2 * num_blocks_u32 + 1);
+  // Scratch buffers. prefix (intra-block, <= threadgroup size) and block_sums
+  // (per-block totals, likewise bounded) fit in uint32. block_offsets (the
+  // running cumulative count) and total_nonzero can exceed 2^32 for a large
+  // dense input, so they are int64, matching CUDA's int64 aggregate.
+  auto tmp32 = at::empty({numel + num_blocks_u32}, input.options().dtype(kInt));
+  Tensor prefix_buf = tmp32.slice(0, 0, numel);
+  Tensor block_sums_buf = tmp32.slice(0, numel, numel + num_blocks_u32);
+  auto tmp64 = at::empty({num_blocks_u32 + 1}, input.options().dtype(kLong));
+  Tensor block_offsets_buf = tmp64.slice(0, 0, num_blocks_u32);
+  Tensor total_nonzero_buf = tmp64.slice(0, num_blocks_u32, num_blocks_u32 + 1);
 
   // Steps 1+2: compute prefix sums and block offsets entirely on GPU
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -418,10 +418,9 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   });
 
   if (!max_elements) {
-    // Dynamic path: sync to learn output size. Reinterpret the int32 slot
-    // as uint32 so counts above INT_MAX round-trip correctly.
-    const uint32_t total_nonzero_u32 = static_cast<uint32_t>(total_nonzero_buf.item<int32_t>());
-    const int64_t total_nonzero = static_cast<int64_t>(total_nonzero_u32);
+    // Dynamic path: sync to learn output size. total_nonzero is int64, so the
+    // count reads back directly even when it exceeds INT_MAX.
+    const int64_t total_nonzero = total_nonzero_buf.item<int64_t>();
     at::native::resize_output(out_, {total_nonzero, nDim});
     max_elements = total_nonzero;
   }
@@ -434,9 +433,10 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   Tensor out = contiguous_output ? out_ : at::empty_like(out_, MemoryFormat::Contiguous);
 
   int ndim_int = static_cast<int>(nDim);
-  // Clamp to uint32: max_elements is user-supplied (int64) on the static path
-  // and could exceed 2^32, which would silently truncate and drop nonzeros.
-  uint32_t max_entries = static_cast<uint32_t>(std::min<int64_t>(*max_elements, std::numeric_limits<uint32_t>::max()));
+  // max_entries caps how many nonzeros scatter writes. It is int64 (kernel-side
+  // too), so a user-supplied static size or a dynamic count above 2^32 is not
+  // truncated.
+  int64_t max_entries = *max_elements;
 
   // Pick the scatter index width. tid is a 32-bit grid position, so the flat
   // input index is bounded by numel; the output offset is num_nonzeros * ndim.
