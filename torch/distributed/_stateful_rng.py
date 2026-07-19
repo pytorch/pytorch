@@ -15,10 +15,8 @@ from torch.distributed._local_tensor import (
 
 aten = torch.ops.aten
 
-_SUPPORTED_STATEFUL_RNG_OPS = {
-    aten.normal_.default: aten._philox_normal_flat_slice_.default,
-    aten.uniform_.default: aten._philox_uniform_flat_slice_.default,
-}
+_PHILOX_DISTRIBUTION_NORMAL = 0
+_PHILOX_DISTRIBUTION_UNIFORM = 1
 
 _SUPPORTED_DTYPES = {
     torch.float16,
@@ -28,35 +26,21 @@ _SUPPORTED_DTYPES = {
 }
 
 
-def _is_supported_stateful_rng_op(
-    op_call: torch._ops.OpOverload,
-    tensor: torch.Tensor,
-) -> bool:
-    """Return whether ``tensor`` can use logical-index Generator replay."""
-    return (
-        op_call in _SUPPORTED_STATEFUL_RNG_OPS
-        and not tensor.is_meta
-        and tensor.device.type == "cuda"
-        and tensor.dtype in _SUPPORTED_DTYPES
-        and tensor.is_contiguous()
-    )
-
-
-def _validate_stateful_rng_parameters(
-    op_call: torch._ops.OpOverload,
+def _validate_normal_parameters(
     tensor: torch.Tensor,
     op_args: list[object],
 ) -> None:
-    if op_call is aten.normal_.default:
-        std = cast(float, op_args[1])
-        torch._check(
-            std >= 0.0,
-            lambda: f"normal expects std >= 0.0, but found std {std}",
-        )
-        return
+    std = cast(float, op_args[1])
+    torch._check(
+        std >= 0.0,
+        lambda: f"normal expects std >= 0.0, but found std {std}",
+    )
 
-    if op_call is not aten.uniform_.default:
-        raise AssertionError(f"Unsupported stateful RNG op {op_call}")
+
+def _validate_uniform_parameters(
+    tensor: torch.Tensor,
+    op_args: list[object],
+) -> None:
     low, high = cast(tuple[float, float], tuple(op_args))
     finfo = torch.finfo(tensor.dtype)
     torch._check(
@@ -83,6 +67,32 @@ def _validate_stateful_rng_parameters(
     )
 
 
+_STATEFUL_RNG_OP_SPECS = {
+    aten.normal_.default: (
+        _PHILOX_DISTRIBUTION_NORMAL,
+        _validate_normal_parameters,
+    ),
+    aten.uniform_.default: (
+        _PHILOX_DISTRIBUTION_UNIFORM,
+        _validate_uniform_parameters,
+    ),
+}
+
+
+def _is_supported_stateful_rng_op(
+    op_call: torch._ops.OpOverload,
+    tensor: torch.Tensor,
+) -> bool:
+    """Return whether ``tensor`` can use logical-index Generator replay."""
+    return (
+        op_call in _STATEFUL_RNG_OP_SPECS
+        and not tensor.is_meta
+        and tensor.device.type == "cuda"
+        and tensor.dtype in _SUPPORTED_DTYPES
+        and tensor.is_contiguous()
+    )
+
+
 @maybe_run_for_local_tensor
 def _run_stateful_rng_op_rankwise(
     tensor: torch.Tensor,
@@ -91,10 +101,10 @@ def _run_stateful_rng_op_rankwise(
     block_sizes: tuple[int | torch.SymInt, ...],
     block_strides: tuple[int | torch.SymInt, ...],
     block_counts: tuple[int | torch.SymInt, ...],
-    flat_slice_op_call: torch._ops.OpOverload,
+    kind: int,
     generator: torch.Generator | None,
     generator_state: torch.Tensor | None,
-    op_args: tuple[object, ...],
+    params: tuple[object, ...],
 ) -> torch.Tensor:
     if generator_state is not None:
         if generator is None:
@@ -102,14 +112,15 @@ def _run_stateful_rng_op_rankwise(
         # LocalTensor runs every virtual rank in one process. Replay each rank
         # from the same explicit state, leaving one logical draw consumed.
         generator.set_state(generator_state)
-    return flat_slice_op_call(
+    return aten._philox_distribution_flat_slice_.default(
         tensor,
         logical_numel,
         start_indices,
         block_sizes,
         block_strides,
         block_counts,
-        *op_args,
+        kind,
+        params,
         generator=generator,
     )
 
@@ -130,7 +141,7 @@ def _run_stateful_rng_op(
     ],
 ) -> torch.Tensor:
     """Run an in-place RNG op for selected indices of one logical CUDA draw."""
-    if op_call not in _SUPPORTED_STATEFUL_RNG_OPS:
+    if op_call not in _STATEFUL_RNG_OP_SPECS:
         raise NotImplementedError(f"Unsupported stateful RNG op {op_call}")
     if kwargs is None:
         kwargs = {}
@@ -161,8 +172,9 @@ def _run_stateful_rng_op(
         )
 
     # Validate before entering the rankwise helper or reserving generator state.
-    _validate_stateful_rng_parameters(op_call, tensor, op_args)
-    flat_slice_op_call = _SUPPORTED_STATEFUL_RNG_OPS[op_call]
+    kind, validate = _STATEFUL_RNG_OP_SPECS[op_call]
+    validate(tensor, op_args)
+    params = tuple(op_args)
     generator_state = (
         generator.get_state()
         if generator is not None and enabled_local_tensor_mode()
@@ -173,14 +185,15 @@ def _run_stateful_rng_op(
     block_strides = tuple(block[2] for block in index_blocks)
     block_counts = tuple(block[3] for block in index_blocks)
     if generator_state is None:
-        flat_slice_op_call(
+        aten._philox_distribution_flat_slice_.default(
             tensor,
             logical_numel,
             start_indices,
             block_sizes,
             block_strides,
             block_counts,
-            *op_args,
+            kind,
+            params,
             generator=generator,
         )
     else:
@@ -191,9 +204,9 @@ def _run_stateful_rng_op(
             block_sizes,
             block_strides,
             block_counts,
-            flat_slice_op_call,
+            kind,
             generator,
             generator_state,
-            tuple(op_args),
+            params,
         )
     return tensor
