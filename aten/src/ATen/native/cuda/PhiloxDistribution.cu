@@ -73,99 +73,6 @@ __device__ __forceinline__ double2 box_muller_double(uint4 r) {
   return {radius * c, radius * s};
 }
 
-void validate_philox_flat_slice_args(
-    const char* op_name,
-    const Tensor& self,
-    int64_t total_numel,
-    IntArrayRef start_indices,
-    IntArrayRef block_sizes,
-    IntArrayRef block_strides,
-    IntArrayRef num_blocks) {
-  TORCH_CHECK(total_numel >= 0, op_name, ": total_numel must be non-negative");
-  TORCH_CHECK(
-      start_indices.size() == block_sizes.size() &&
-          start_indices.size() == block_strides.size() &&
-          start_indices.size() == num_blocks.size(),
-      op_name,
-      ": index block arrays must have the same length");
-  TORCH_CHECK(
-      self.numel() <= total_numel,
-      op_name,
-      ": output numel ",
-      self.numel(),
-      " exceeds total_numel ",
-      total_numel);
-  TORCH_CHECK(
-      total_numel <= std::numeric_limits<int32_t>::max(),
-      op_name,
-      ": total_numel > INT_MAX is not supported yet");
-
-  int64_t mapped_numel = 0;
-  for (const auto index : c10::irange(start_indices.size())) {
-    const int64_t start_index = start_indices[index];
-    const int64_t block_size = block_sizes[index];
-    const int64_t block_stride = block_strides[index];
-    const int64_t block_count = num_blocks[index];
-    TORCH_CHECK(
-        start_index >= 0, op_name, ": start_index must be non-negative");
-    TORCH_CHECK(
-        start_index <= total_numel,
-        op_name,
-        ": start_index ",
-        start_index,
-        " exceeds total_numel ",
-        total_numel);
-    TORCH_CHECK(
-        block_size >= 0, op_name, ": block_size must be non-negative");
-    TORCH_CHECK(
-        block_count >= 0, op_name, ": num_blocks must be non-negative");
-    if (block_size == 0 || block_count == 0) {
-      continue;
-    }
-    TORCH_CHECK(
-        block_count <= total_numel / block_size,
-        op_name,
-        ": block_size * num_blocks exceeds total_numel");
-    TORCH_CHECK(
-        block_stride >= block_size,
-        op_name,
-        ": block_stride ",
-        block_stride,
-        " must be at least block_size ",
-        block_size);
-    TORCH_CHECK(
-        block_stride <= total_numel,
-        op_name,
-        ": block_stride ",
-        block_stride,
-        " exceeds total_numel ",
-        total_numel);
-    const int64_t local_numel = block_size * block_count;
-    TORCH_CHECK(
-        local_numel <= self.numel() - mapped_numel,
-        op_name,
-        ": index blocks describe more than output numel ",
-        self.numel());
-    const int64_t end_index =
-        start_index + (block_count - 1) * block_stride + block_size;
-    TORCH_CHECK(
-        end_index <= total_numel,
-        op_name,
-        ": output blocks end at ",
-        end_index,
-        ", beyond total_numel ",
-        total_numel);
-    mapped_numel += local_numel;
-  }
-  TORCH_CHECK(
-      mapped_numel == self.numel(),
-      op_name,
-      ": index blocks describe ",
-      mapped_numel,
-      " elements, expected output numel ",
-      self.numel());
-}
-
 void validate_normal_std(double stddev) {
   TORCH_CHECK(
       stddev >= 0.0,
@@ -260,14 +167,89 @@ void distribution_flat_slice(
       op_name,
       ": self must be a floating point tensor, got ",
       self.scalar_type());
-  validate_philox_flat_slice_args(
+  TORCH_CHECK(total_numel >= 0, op_name, ": total_numel must be non-negative");
+  TORCH_CHECK(
+      start_indices.size() == block_sizes.size() &&
+          start_indices.size() == block_strides.size() &&
+          start_indices.size() == num_blocks.size(),
       op_name,
-      self,
-      total_numel,
-      start_indices,
-      block_sizes,
-      block_strides,
-      num_blocks);
+      ": index block arrays must have the same length");
+  TORCH_CHECK(
+      self.numel() <= total_numel,
+      op_name,
+      ": output numel ",
+      self.numel(),
+      " exceeds total_numel ",
+      total_numel);
+  TORCH_CHECK(
+      total_numel <= std::numeric_limits<int32_t>::max(),
+      op_name,
+      ": total_numel > INT_MAX is not supported yet");
+
+  int64_t mapped_numel = 0;
+  for (const auto index : c10::irange(start_indices.size())) {
+    const int64_t start_index = start_indices[index];
+    const int64_t block_size = block_sizes[index];
+    const int64_t block_stride = block_strides[index];
+    const int64_t block_count = num_blocks[index];
+    TORCH_CHECK(
+        start_index >= 0, op_name, ": start_index must be non-negative");
+    TORCH_CHECK(
+        start_index <= total_numel,
+        op_name,
+        ": start_index ",
+        start_index,
+        " exceeds total_numel ",
+        total_numel);
+    TORCH_CHECK(
+        block_size >= 0, op_name, ": block_size must be non-negative");
+    TORCH_CHECK(
+        block_count >= 0, op_name, ": num_blocks must be non-negative");
+    if (block_size == 0 || block_count == 0) {
+      continue;
+    }
+    TORCH_CHECK(
+        block_count <= total_numel / block_size,
+        op_name,
+        ": block_size * num_blocks exceeds total_numel");
+    TORCH_CHECK(
+        block_stride >= block_size,
+        op_name,
+        ": block_stride ",
+        block_stride,
+        " must be at least block_size ",
+        block_size);
+    TORCH_CHECK(
+        block_stride <= total_numel,
+        op_name,
+        ": block_stride ",
+        block_stride,
+        " exceeds total_numel ",
+        total_numel);
+    const int64_t local_numel = block_size * block_count;
+    TORCH_CHECK(
+        local_numel <= self.numel() - mapped_numel,
+        op_name,
+        ": index blocks describe more than output numel ",
+        self.numel());
+    const int64_t end_index =
+        start_index + (block_count - 1) * block_stride + block_size;
+    TORCH_CHECK(
+        end_index <= total_numel,
+        op_name,
+        ": output blocks end at ",
+        end_index,
+        ", beyond total_numel ",
+        total_numel);
+    mapped_numel += local_numel;
+  }
+  TORCH_CHECK(
+      mapped_numel == self.numel(),
+      op_name,
+      ": index blocks describe ",
+      mapped_numel,
+      " elements, expected output numel ",
+      self.numel());
   if (total_numel == 0) {
     return;
   }
