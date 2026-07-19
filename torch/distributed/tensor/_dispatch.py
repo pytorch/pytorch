@@ -509,7 +509,7 @@ class OpDispatcher:
 
         if output_sharding.output_spec is None:
             if op_call == aten.equal.default:
-                # The output of the equal op is a bool, by converting it into a
+                # The output of the equal op is a bool, by converting it into
                 # a single value tensor, we can use all-reduce with min reduce op
                 # to simulate logical and.
                 if not (local_results is None or isinstance(local_results, bool)):
