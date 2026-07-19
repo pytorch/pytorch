@@ -3,24 +3,17 @@
 
 from __future__ import annotations
 
-from typing import Any, cast, TypeGuard
+from typing import Any, cast
 
 import torch
 from torch._library.utils import fill_defaults
-from torch.distributed import StatefulRNGTensor
 from torch.distributed._local_tensor import (
     enabled_local_tensor_mode,
     maybe_run_for_local_tensor,
 )
-from torch.utils._python_dispatch import TorchDispatchMode
 
 
 aten = torch.ops.aten
-
-__all__ = [
-    "StatefulRNGMode",
-]
-
 
 _SUPPORTED_STATEFUL_RNG_OPS = {
     aten.normal_.default: aten._philox_normal_flat_slice_.default,
@@ -33,10 +26,6 @@ _SUPPORTED_DTYPES = {
     torch.float32,
     torch.float64,
 }
-
-
-def _is_stateful_rng_tensor(obj: object) -> TypeGuard[StatefulRNGTensor]:
-    return isinstance(obj, torch.Tensor) and isinstance(obj, StatefulRNGTensor)
 
 
 def _is_supported_stateful_rng_op(
@@ -208,35 +197,3 @@ def _run_stateful_rng_op(
             tuple(op_args),
         )
     return tensor
-
-
-class StatefulRNGMode(TorchDispatchMode):
-    def __torch_dispatch__(
-        self,
-        func: torch._ops.OpOverload,
-        types: tuple[type, ...],
-        args: tuple[Any, ...] = (),
-        kwargs: dict[str, Any] | None = None,
-    ) -> Any:
-        if kwargs is None:
-            kwargs = {}
-        if func not in (aten.normal_.default, aten.uniform_.default):
-            return func(*args, **kwargs)
-
-        filled_args, _ = fill_defaults(func._schema, args, kwargs)
-        tensor_arg = filled_args[0]
-        if not isinstance(tensor_arg, torch.Tensor):
-            return func(*args, **kwargs)
-        if tensor_arg.is_meta or tensor_arg.device.type != "cuda":
-            return func(*args, **kwargs)
-        if not _is_stateful_rng_tensor(tensor_arg):
-            return func(*args, **kwargs)
-        rng_metadata = cast(StatefulRNGTensor, tensor_arg)
-
-        return _run_stateful_rng_op(
-            func,
-            args,
-            kwargs,
-            rng_metadata.rng_global_numel,
-            rng_metadata.rng_index_blocks,
-        )
