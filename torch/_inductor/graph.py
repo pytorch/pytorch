@@ -2912,6 +2912,19 @@ class GraphLowering(torch.fx.Interpreter):
 
         real_inputs = extract_real_inputs()
 
+        # A const-folding subgraph has no runtime placeholder inputs; only its
+        # self.constants (appended below) are valid handles for the const
+        # wrapper's [graph_inputs(empty), constants] entry signature. Non-empty
+        # real_inputs here means the main graph's params/inputs leaked in and the
+        # fold kernels would launch on wrong-shaped tensors (a silent CUDA
+        # illegal memory access on internal builds). Assert to keep this OSS
+        # regression catchable rather than masked.
+        if self.is_const_graph and real_inputs:
+            raise AssertionError(
+                "const graph JIT-autotune must receive no real inputs; "
+                f"got {len(real_inputs)}"
+            )
+
         def materialize_constant(name: str) -> torch.Tensor:
             constant = self.constants[name]
             if is_fake_tensor(constant):
