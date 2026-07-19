@@ -732,6 +732,30 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_float8_scale_result(self, device) -> None:
+        # scale_result must scale the fp8 output. Regression guard for the v1
+        # _scaled_mm path silently dropping scale_result. Integer operands with
+        # K=16 keep the fp32-accumulated products and their 0.5x scaling exact in
+        # e4m3, so any deviation is a real bug rather than floating point rounding.
+        torch.manual_seed(0)
+        M, K, N = 16, 16, 16
+        x = torch.randint(-1, 2, (M, K), device=device).float().to(e4m3_type)
+        # hipblaslt does not yet support mixed e4m3_type input
+        y_type = e4m3_type if torch.version.hip else e5m2_type
+        y = torch.randint(-1, 2, (N, K), device=device).float().to(y_type).t()
+        one = torch.tensor(1.0, device=device)
+        half = torch.tensor(0.5, device=device)
+        out_unscaled = scaled_mm_wrap(
+            x, y, scale_a=one, scale_b=one, scale_result=one,
+            out_dtype=e4m3_type, wrap_v2=False,
+        )
+        out_scaled = scaled_mm_wrap(
+            x, y, scale_a=one, scale_b=one, scale_result=half,
+            out_dtype=e4m3_type, wrap_v2=False,
+        )
+        self.assertEqual(out_scaled.to(torch.float), 0.5 * out_unscaled.to(torch.float))
+
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
