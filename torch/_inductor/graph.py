@@ -2910,7 +2910,12 @@ class GraphLowering(torch.fx.Interpreter):
             next((d for d in self.device_types if d != "meta"), "cpu"),
         )
 
-        real_inputs = extract_real_inputs()
+        # A const graph has no runtime graph inputs (its weights are read as
+        # constants, not placeholders), so its JIT entry point expects only the
+        # appended constant handles. extract_real_inputs() would return the main
+        # model's params/inputs, producing a handle-count/type mismatch, so pass
+        # an empty input list here and rely solely on the constants below.
+        real_inputs = [] if self.is_const_graph else extract_real_inputs()
 
         # A const-folding subgraph has no runtime placeholder inputs; only its
         # self.constants (appended below) are valid handles for the const
