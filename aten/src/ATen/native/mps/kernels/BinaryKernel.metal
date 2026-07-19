@@ -263,6 +263,39 @@ struct nextafter_functor {
   inline T operator()(const T a, const T b) {
     return static_cast<T>(::metal::nextafter(a, b));
   }
+
+  inline bfloat operator()(const bfloat from, const bfloat to) {
+    ushort ufrom = as_type<ushort>(from);
+    ushort uto = as_type<ushort>(to);
+    ushort sign_mask = ushort(1) << 15;
+
+    if (from != from || to != to) {
+      return from + to;
+    }
+
+    if (ufrom == uto) {
+      return from;
+    }
+
+    ushort abs_from = ufrom & ~sign_mask;
+    ushort abs_to = uto & ~sign_mask;
+
+    if (abs_from == 0) {
+      if (abs_to == 0) {
+        return to;
+      }
+      ufrom = (uto & sign_mask) | ushort(1);
+      return as_type<bfloat>(ufrom);
+    }
+
+    if (abs_from > abs_to || ((ufrom ^ uto) & sign_mask)) {
+      ufrom--;
+    } else {
+      ufrom++;
+    }
+
+    return as_type<bfloat>(ufrom);
+  }
 };
 
 struct hypot_functor {
