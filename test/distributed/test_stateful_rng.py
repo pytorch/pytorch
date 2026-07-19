@@ -177,6 +177,18 @@ class TestPhiloxFlatSliceOps(TestCase):
             self.assertEqual(generator.get_state(), state)
 
         assert_invalid_without_advancing(
+            "block_stride 1 must be at least block_size 2",
+            lambda: torch.ops.aten._philox_uniform_flat_slice_(
+                torch.empty(2, device=device),
+                4,
+                [0],
+                [2],
+                [1],
+                [1],
+                generator=generator,
+            ),
+        )
+        assert_invalid_without_advancing(
             "normal expects std >= 0.0",
             lambda: torch.ops.aten._philox_normal_flat_slice_(
                 torch.empty(1, device=device),
