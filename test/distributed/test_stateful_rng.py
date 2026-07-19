@@ -3,10 +3,69 @@
 
 import unittest
 from functools import partial
+from typing import Any, cast
 
 import torch
-from torch.distributed import stateful_rng_mode, StatefulRNGTensor
+from torch._library.utils import fill_defaults
+from torch.distributed import StatefulRNGTensor
+from torch.distributed._stateful_rng import (
+    _run_stateful_rng_op,
+    _validate_stateful_rng_parameters,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
+from torch.utils._python_dispatch import TorchDispatchMode
+
+
+aten = torch.ops.aten
+
+
+class _StatefulRNGMode(TorchDispatchMode):
+    def __torch_dispatch__(
+        self,
+        func: torch._ops.OpOverload,
+        types: tuple[type, ...],
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        if kwargs is None:
+            kwargs = {}
+        if func not in (aten.normal_.default, aten.uniform_.default):
+            return func(*args, **kwargs)
+
+        filled_args, filled_kwargs = fill_defaults(func._schema, args, kwargs)
+        tensor_arg = filled_args[0]
+        if not isinstance(tensor_arg, torch.Tensor):
+            return func(*args, **kwargs)
+        if tensor_arg.is_meta or tensor_arg.device.type != "cuda":
+            return func(*args, **kwargs)
+        if not isinstance(tensor_arg, StatefulRNGTensor):
+            return func(*args, **kwargs)
+        rng_metadata = cast(StatefulRNGTensor, tensor_arg)
+
+        tensor, *op_args = filled_args
+        generator = filled_kwargs.pop("generator")
+        if filled_kwargs:
+            raise AssertionError
+        if not isinstance(tensor, torch.Tensor):
+            raise AssertionError
+        if not (generator is None or isinstance(generator, torch.Generator)):
+            raise AssertionError
+
+        flat_slice_op_call = (
+            aten._philox_normal_flat_slice_.default
+            if func is aten.normal_.default
+            else aten._philox_uniform_flat_slice_.default
+        )
+        _validate_stateful_rng_parameters(func, tensor, op_args)
+        _run_stateful_rng_op(
+            tensor,
+            rng_metadata.rng_global_numel,
+            rng_metadata.rng_index_blocks,
+            flat_slice_op_call,
+            generator,
+            *op_args,
+        )
+        return tensor
 
 
 class TestStatefulRNGTensor(TestCase):
@@ -55,7 +114,7 @@ class TestStatefulRNGTensor(TestCase):
                     actual = torch.empty(expected_local.shape, device=device)
                     self._set_rng_metadata(actual, expected.numel(), index_blocks)
                     self.assertIsInstance(actual, StatefulRNGTensor)
-                    with stateful_rng_mode():
+                    with _StatefulRNGMode():
                         init_fn(actual)
                     actual_state = torch.cuda.get_rng_state(device)
                     actual_next = torch.rand(17, device=device)
@@ -77,7 +136,7 @@ class TestStatefulRNGTensor(TestCase):
         torch.manual_seed(123)
         actual = torch.empty(global_indices.numel(), device=device)
         self._set_rng_metadata(actual, expected.numel(), index_blocks)
-        with stateful_rng_mode():
+        with _StatefulRNGMode():
             actual.normal_(0.1, 0.02)
 
         self.assertEqual(actual, expected[global_indices], rtol=0, atol=0)
@@ -93,7 +152,7 @@ class TestStatefulRNGTensor(TestCase):
         actual_generator = torch.Generator(device=device).manual_seed(123)
         actual = torch.empty((5, 3), device=device)
         self._set_rng_metadata(actual, expected.numel(), ((4, 3, 7, 5),))
-        with stateful_rng_mode():
+        with _StatefulRNGMode():
             actual.uniform_(-0.2, 0.3, generator=actual_generator)
 
         self.assertEqual(actual, expected[:, 4:], rtol=0, atol=0)
@@ -135,7 +194,7 @@ class TestStatefulRNGTensor(TestCase):
                     actual = torch.empty(3, device=device)
                     self._set_rng_metadata(actual, 7, ((2, 3, 3, 1),))
                     with self.assertRaisesRegex(RuntimeError, error):
-                        with stateful_rng_mode():
+                        with _StatefulRNGMode():
                             getattr(actual, op_name)(*op_args, generator=generator)
 
                     after = (
@@ -158,7 +217,7 @@ class TestStatefulRNGTensor(TestCase):
         torch.manual_seed(123)
         actual = torch.empty(0, device=device)
         self._set_rng_metadata(actual, 7, ())
-        with stateful_rng_mode():
+        with _StatefulRNGMode():
             actual.uniform_()
 
         self.assertEqual(torch.cuda.get_rng_state(device), expected_state)

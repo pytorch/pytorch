@@ -3,23 +3,12 @@
 
 from __future__ import annotations
 
-from typing import Any, cast, TypeGuard
+from typing import cast
 
 import torch
-from torch._library.utils import fill_defaults
-from torch.distributed import StatefulRNGTensor
-from torch.utils._python_dispatch import TorchDispatchMode
 
 
 aten = torch.ops.aten
-
-__all__ = [
-    "StatefulRNGMode",
-]
-
-
-def _is_stateful_rng_tensor(obj: object) -> TypeGuard[StatefulRNGTensor]:
-    return isinstance(obj, torch.Tensor) and isinstance(obj, StatefulRNGTensor)
 
 
 def _validate_stateful_rng_parameters(
@@ -86,52 +75,3 @@ def _run_stateful_rng_op(
         *op_args,
         generator=generator,
     )
-
-
-class StatefulRNGMode(TorchDispatchMode):
-    def __torch_dispatch__(
-        self,
-        func: torch._ops.OpOverload,
-        types: tuple[type, ...],
-        args: tuple[Any, ...] = (),
-        kwargs: dict[str, Any] | None = None,
-    ) -> Any:
-        if kwargs is None:
-            kwargs = {}
-        if func not in (aten.normal_.default, aten.uniform_.default):
-            return func(*args, **kwargs)
-
-        filled_args, filled_kwargs = fill_defaults(func._schema, args, kwargs)
-        tensor_arg = filled_args[0]
-        if not isinstance(tensor_arg, torch.Tensor):
-            return func(*args, **kwargs)
-        if tensor_arg.is_meta or tensor_arg.device.type != "cuda":
-            return func(*args, **kwargs)
-        if not _is_stateful_rng_tensor(tensor_arg):
-            return func(*args, **kwargs)
-        rng_metadata = cast(StatefulRNGTensor, tensor_arg)
-
-        tensor, *op_args = filled_args
-        generator = filled_kwargs.pop("generator")
-        if filled_kwargs:
-            raise AssertionError
-        if not isinstance(tensor, torch.Tensor):
-            raise AssertionError
-        if not (generator is None or isinstance(generator, torch.Generator)):
-            raise AssertionError
-
-        flat_slice_op_call = (
-            aten._philox_normal_flat_slice_.default
-            if func is aten.normal_.default
-            else aten._philox_uniform_flat_slice_.default
-        )
-        _validate_stateful_rng_parameters(func, tensor, op_args)
-        _run_stateful_rng_op(
-            tensor,
-            rng_metadata.rng_global_numel,
-            rng_metadata.rng_index_blocks,
-            flat_slice_op_call,
-            generator,
-            *op_args,
-        )
-        return tensor
