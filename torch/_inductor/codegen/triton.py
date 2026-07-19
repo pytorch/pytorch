@@ -168,7 +168,7 @@ def get_triton_reduction_function(reduction_type):
 
 
 def is_sympy_integer_like(expr: object):
-    """ "
+    """
     Is this expression a Sympy Integer or is it an integer sympy Expr
     containing no free symbols. The latter case can happen with Identity expr.
     """
