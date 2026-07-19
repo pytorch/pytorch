@@ -24,13 +24,6 @@ class StatefulRNGTensor(typing.Protocol):
     rng_index_blocks: tuple[tuple[int, int, int, int], ...]
 
 
-def stateful_rng_mode():
-    """Return a scoped mode that applies ``StatefulRNGTensor`` metadata."""
-    from ._stateful_rng import StatefulRNGMode
-
-    return StatefulRNGMode()
-
-
 log = logging.getLogger(__name__)
 
 
