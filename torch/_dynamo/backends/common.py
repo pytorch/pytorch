@@ -203,13 +203,13 @@ def fake_tensor_unsupported(fn: Callable[[Any, list[Any], Any], R]) -> Any:
 
 def device_from_inputs(example_inputs: Iterable[Any]) -> torch.device:
     for x in example_inputs:
-        if hasattr(x, "device"):
+        if isinstance(x, torch.Tensor):
             return x.device
     return torch.device("cpu")  # Default fallback
 
 
 def dtype_from_inputs(example_inputs: Iterable[Any]) -> torch.dtype:
     for x in example_inputs:
-        if hasattr(x, "dtype"):
+        if isinstance(x, torch.Tensor):
             return x.dtype
     return torch.float32  # Default fallback
