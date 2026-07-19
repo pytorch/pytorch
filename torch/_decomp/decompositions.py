@@ -2125,7 +2125,7 @@ def native_batch_norm_helper(
         running_var = running_var.to(dtype=computation_dtype, copy=True)
         new_running_var = running_var
         mean = running_mean
-        invstd = 1 / (torch.sqrt(running_var + eps))
+        invstd = torch.rsqrt(running_var + eps)
         # Very annoying inconsistency where CPU and CUDA give different shapes
         if input.device.type != "cpu":
             save_mean = running_mean

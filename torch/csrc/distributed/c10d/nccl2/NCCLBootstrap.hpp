@@ -13,7 +13,6 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 
 #include <nccl.h>
-#include <torch/csrc/distributed/c10d/nccl2/CudaApi.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 
 namespace c10d::nccl2 {
@@ -30,10 +29,9 @@ class NCCLBootstrap {
       c10::Device device,
       int rank,
       int comm_size,
+      uint64_t generation,
       std::shared_ptr<NcclApi> nccl_api,
-      std::shared_ptr<CudaApi> cuda_api,
       std::chrono::milliseconds timeout);
-  ~NCCLBootstrap() noexcept;
 
   // Delete copy and move operations
   NCCLBootstrap(const NCCLBootstrap&) = delete;
@@ -44,9 +42,6 @@ class NCCLBootstrap {
   ncclComm_t createNcclComm(
       const std::string& name,
       const std::unordered_map<std::string, std::string>& hints = {});
-  static std::string getNCCLStoreKey();
-  static std::string getNCCLStoreKeyPrefix();
-  static int getNCCLStoreKeyCounter();
 
   int getRank() {
     return rank_;
@@ -67,14 +62,13 @@ class NCCLBootstrap {
 
  private:
   const std::chrono::milliseconds timeout_;
-  static int counter_;
+  const uint64_t generation_;
 
   c10::intrusive_ptr<c10d::Store> store_;
   bool created_internal_store_;
   c10::Device device_;
   std::shared_ptr<NcclApi> nccl_api_;
-  std::shared_ptr<CudaApi> cuda_api_;
-  void* barrier_buffer_{nullptr};
+  at::DataPtr barrier_buffer_;
   int rank_;
   int comm_size_;
 
