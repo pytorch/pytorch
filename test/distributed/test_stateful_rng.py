@@ -8,10 +8,7 @@ from typing import Any, cast
 import torch
 from torch._library.utils import fill_defaults
 from torch.distributed import StatefulRNGTensor
-from torch.distributed._stateful_rng import (
-    _run_stateful_rng_op,
-    _validate_stateful_rng_parameters,
-)
+from torch.distributed._stateful_rng import _run_stateful_rng_op, _validate_normal_std
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -29,7 +26,7 @@ class _StatefulRNGMode(TorchDispatchMode):
     ) -> Any:
         if kwargs is None:
             kwargs = {}
-        if func not in (aten.normal_.default, aten.uniform_.default):
+        if func is not aten.normal_.default:
             return func(*args, **kwargs)
 
         filled_args, filled_kwargs = fill_defaults(func._schema, args, kwargs)
@@ -51,17 +48,12 @@ class _StatefulRNGMode(TorchDispatchMode):
         if not (generator is None or isinstance(generator, torch.Generator)):
             raise AssertionError
 
-        flat_slice_op_call = (
-            aten._philox_normal_flat_slice_.default
-            if func is aten.normal_.default
-            else aten._philox_uniform_flat_slice_.default
-        )
-        _validate_stateful_rng_parameters(func, tensor, op_args)
+        _validate_normal_std(op_args)
         _run_stateful_rng_op(
             tensor,
             rng_metadata.rng_global_numel,
             rng_metadata.rng_index_blocks,
-            flat_slice_op_call,
+            aten._philox_normal_flat_slice_.default,
             generator,
             *op_args,
         )
@@ -90,13 +82,10 @@ class TestStatefulRNGTensor(TestCase):
         )
         init_fns = {
             "normal": partial(torch.nn.init.normal_, mean=0.1, std=0.02),
-            "uniform": partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
             "trunc_normal": partial(
                 torch.nn.init.trunc_normal_,
                 mean=0.0,
                 std=0.02,
-                a=-0.06,
-                b=0.06,
             ),
         }
 
@@ -147,78 +136,65 @@ class TestStatefulRNGTensor(TestCase):
         device = torch.device("cuda")
         expected_generator = torch.Generator(device=device).manual_seed(123)
         expected = torch.empty((5, 7), device=device)
-        expected.uniform_(-0.2, 0.3, generator=expected_generator)
+        expected.normal_(0.1, 0.02, generator=expected_generator)
 
         actual_generator = torch.Generator(device=device).manual_seed(123)
         actual = torch.empty((5, 3), device=device)
         self._set_rng_metadata(actual, expected.numel(), ((4, 3, 7, 5),))
         with _StatefulRNGMode():
-            actual.uniform_(-0.2, 0.3, generator=actual_generator)
+            actual.normal_(0.1, 0.02, generator=actual_generator)
 
         self.assertEqual(actual, expected[:, 4:], rtol=0, atol=0)
         self.assertEqual(actual_generator.get_state(), expected_generator.get_state())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
-    def test_invalid_parameters_do_not_advance_generator(self):
+    def test_invalid_std_does_not_advance_generator(self):
         device = torch.device("cuda")
-        max_float = torch.finfo(torch.float32).max
-        cases = (
-            ("negative_std", "std >= 0.0", "normal_", (0.0, -1.0)),
-            ("reversed_uniform", "from=1.*> to=0", "uniform_", (1.0, 0.0)),
-            (
-                "wide_uniform",
-                "to-from",
-                "uniform_",
-                (-max_float, max_float),
-            ),
-        )
-
         for generator_kind in ("default", "explicit"):
-            for case_name, error, op_name, op_args in cases:
-                with self.subTest(generator=generator_kind, case=case_name):
-                    torch.manual_seed(321)
-                    generator = (
-                        None
-                        if generator_kind == "default"
-                        else torch.Generator(device=device).manual_seed(321)
-                    )
-                    torch.rand(11, device=device, generator=generator)
-                    before = (
-                        torch.cuda.get_rng_state(device)
-                        if generator is None
-                        else generator.get_state()
-                    )
-                    reference = torch.Generator(device=device)
-                    reference.set_state(before)
+            with self.subTest(generator=generator_kind):
+                torch.manual_seed(321)
+                generator = (
+                    None
+                    if generator_kind == "default"
+                    else torch.Generator(device=device).manual_seed(321)
+                )
+                torch.rand(11, device=device, generator=generator)
+                before = (
+                    torch.cuda.get_rng_state(device)
+                    if generator is None
+                    else generator.get_state()
+                )
+                reference = torch.Generator(device=device)
+                reference.set_state(before)
 
-                    actual = torch.empty(3, device=device)
-                    self._set_rng_metadata(actual, 7, ((2, 3, 3, 1),))
-                    with self.assertRaisesRegex(RuntimeError, error):
-                        with _StatefulRNGMode():
-                            getattr(actual, op_name)(*op_args, generator=generator)
+                actual = torch.empty(3, device=device)
+                self._set_rng_metadata(actual, 7, ((2, 3, 3, 1),))
+                with self.assertRaisesRegex(RuntimeError, "std >= 0.0"):
+                    with _StatefulRNGMode():
+                        actual.normal_(0.0, -1.0, generator=generator)
 
-                    after = (
-                        torch.cuda.get_rng_state(device)
-                        if generator is None
-                        else generator.get_state()
-                    )
-                    self.assertEqual(after, before)
-                    actual_next = torch.rand(17, device=device, generator=generator)
-                    expected_next = torch.rand(17, device=device, generator=reference)
-                    self.assertEqual(actual_next, expected_next, rtol=0, atol=0)
+                after = (
+                    torch.cuda.get_rng_state(device)
+                    if generator is None
+                    else generator.get_state()
+                )
+                self.assertEqual(after, before)
+                actual_next = torch.rand(17, device=device, generator=generator)
+                expected_next = torch.rand(17, device=device, generator=reference)
+                self.assertEqual(actual_next, expected_next, rtol=0, atol=0)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_empty_local_tensor_reserves_dense_increment(self):
         device = torch.device("cuda")
         torch.manual_seed(123)
-        torch.empty(7, device=device).uniform_()
+        torch.empty(7, device=device).normal_()
         expected_state = torch.cuda.get_rng_state(device)
 
         torch.manual_seed(123)
         actual = torch.empty(0, device=device)
         self._set_rng_metadata(actual, 7, ())
         with _StatefulRNGMode():
-            actual.uniform_()
+            actual.normal_()
 
         self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
 
@@ -237,7 +213,7 @@ class TestPhiloxFlatSliceOps(TestCase):
 
         assert_invalid_without_advancing(
             "block_stride 1 must be at least block_size 2",
-            lambda: torch.ops.aten._philox_uniform_flat_slice_(
+            lambda: torch.ops.aten._philox_normal_flat_slice_(
                 torch.empty(2, device=device),
                 4,
                 [0],
@@ -258,34 +234,6 @@ class TestPhiloxFlatSliceOps(TestCase):
                 [1],
                 0,
                 -1,
-                generator=generator,
-            ),
-        )
-        assert_invalid_without_advancing(
-            "found from=1.*> to=0",
-            lambda: torch.ops.aten._philox_uniform_flat_slice_(
-                torch.empty(1, device=device),
-                1,
-                [0],
-                [1],
-                [1],
-                [1],
-                1,
-                0,
-                generator=generator,
-            ),
-        )
-        assert_invalid_without_advancing(
-            "from is out of bounds",
-            lambda: torch.ops.aten._philox_uniform_flat_slice_(
-                torch.empty(1, dtype=torch.float16, device=device),
-                1,
-                [0],
-                [1],
-                [1],
-                [1],
-                -70000,
-                0,
                 generator=generator,
             ),
         )
