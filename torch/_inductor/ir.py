@@ -591,6 +591,7 @@ class IRNode:
 
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
     _current_stream_idx: ClassVar[int | None] = None
+    _current_mempool: ClassVar[tuple[int, int] | None] = None
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
@@ -601,6 +602,8 @@ class IRNode:
     annotations: dict[str, object] = dataclasses.field(init=False)
     # User-annotated stream index from FX node metadata (set during lowering)
     stream_idx: int | None = dataclasses.field(init=False)
+    # User-annotated CUDA MemPool from FX node metadata (set during lowering)
+    mempool: tuple[int, int] | None = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -623,6 +626,18 @@ class IRNode:
             yield
         finally:
             IRNode._current_stream_idx = old
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_mempool(
+        mempool: tuple[int, int] | None,
+    ) -> Generator[None, None, None]:
+        old = IRNode._current_mempool
+        IRNode._current_mempool = mempool
+        try:
+            yield
+        finally:
+            IRNode._current_mempool = old
 
     @staticmethod
     def is_realized_node(node: IRNode) -> bool:
@@ -656,6 +671,7 @@ class IRNode:
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self._post_init_setattr("annotations", {})
         self._post_init_setattr("stream_idx", self._current_stream_idx)
+        self._post_init_setattr("mempool", self._current_mempool)
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -954,6 +970,11 @@ class Operation:
         if not hasattr(self, "stream_idx"):
             raise AssertionError('Expected hasattr(self, "stream_idx")')
         return self.stream_idx
+
+    def get_mempool(self) -> tuple[int, int] | None:
+        if not hasattr(self, "mempool"):
+            raise AssertionError('Expected hasattr(self, "mempool")')
+        return self.mempool
 
     def get_operation_name(self) -> str:
         if self.operation_name is None:
@@ -6353,7 +6374,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
         assert isinstance(caller, NVUniversalGemmCaller), type(caller)  # noqa: S101
-        assert self.layout == caller.layout  # noqa: S101 # noqa: S101
+        assert self.layout == caller.layout  # noqa: S101
 
         render = self.make_kernel_render
         prev_kind = self._render_kind
@@ -10577,6 +10598,7 @@ class StorageBox(MutableBox):
         self.data.origin_node = origin_node
         self.data.traceback = traceback
         self.data.stream_idx = self.data.data.stream_idx
+        self.data.mempool = self.data.data.mempool
         return self.data.name
 
     def realize_hint(self) -> None:
@@ -10925,16 +10947,25 @@ class Conditional(ExternKernel):
         def _require_exact_strides(
             graph_outputs: Sequence[IRNode],
             fake_tensors: Sequence[torch.Tensor],
+            branch_fakes: Sequence[torch.Tensor | int | None],
         ) -> list[IRNode]:
             ret = []
-            for output, fake in zip(graph_outputs, fake_tensors):
+            for output, fake, branch_fake in zip(
+                graph_outputs, fake_tensors, branch_fakes
+            ):
                 if isinstance(output, ShapeAsConstantBuffer):
                     ret.append(output)
                 else:
+                    strides = fake.stride()
+                    # merged strides can contain unbacked symbols (from mismatched
+                    # branch output shapes) undefined inside the subgraph
+                    if has_free_unbacked_symbols(strides):
+                        # pyrefly: ignore [missing-attribute]
+                        strides = branch_fake.stride()
                     ret.append(
                         # pyrefly: ignore [bad-argument-type]
                         ExternKernel.require_exact_strides(
-                            TensorBox(output), fake.stride(), allow_padding=False
+                            TensorBox(output), strides, allow_padding=False
                         )
                     )
             # pyrefly: ignore [bad-return]
@@ -10948,13 +10979,20 @@ class Conditional(ExternKernel):
                     example_inputs=fake_operands,
                     subgraph_name=subgraph.name,
                 )
+                branch_out_args = subgraph.graph_module.graph.output_node().args[0]
+                if not isinstance(branch_out_args, Sequence):
+                    raise AssertionError(type(branch_out_args))
+                branch_fakes: list[Any] = [
+                    a.meta["val"] if isinstance(a, Node) else a for a in branch_out_args
+                ]
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
-                    # Force subgraph outputs to have the expected strides from
-                    # FakeTensor metadata. This ensures both branches produce
-                    # outputs with consistent strides.
+                    # Force subgraph outputs to the expected strides from
+                    # FakeTensor metadata. Branches share the merged strides
+                    # unless those carry an unbacked symbol (mismatched inner
+                    # dims), in which case each branch keeps its own strides.
                     subgraph.graph.graph_outputs = _require_exact_strides(
-                        subgraph.graph.graph_outputs, fake_outputs
+                        subgraph.graph.graph_outputs, fake_outputs, branch_fakes
                     )
 
         if true_fn.graph is None:

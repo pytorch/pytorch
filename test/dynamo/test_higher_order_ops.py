@@ -2809,7 +2809,7 @@ class GraphModule(torch.nn.Module):
             return wrap(lambda x, y: x + y, x, y)
 
         x = torch.randn(3)
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 5)
         self._test_wrap_simple(f, default_args_generator((x,)), arg_count)
 
     def test_lift_tensor_constant(self):
