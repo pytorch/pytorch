@@ -1023,8 +1023,79 @@ class FakeTensorTest(TestCase):
             dispatch_keys=dispatch_keys,
         )
 
+        conj_key = torch._C.DispatchKey.Conjugate
         self.assertEqual(fake_x.dispatch_keys, dispatch_keys)
-        self.assertIsNone(fake_x.extra_dispatch_keys)
+        self.assertTrue(torch._C._dispatch_keys(fake_x).has(conj_key))
+        self.assertTrue(fake_x.extra_dispatch_keys.has(conj_key))
+
+        with mode:
+            alias_x = torch.ops.aten.alias.default(fake_x)
+            add_x = fake_x + 1
+            empty_like_x = torch.empty_like(fake_x)
+
+        self.assertTrue(torch._C._dispatch_keys(alias_x).has(conj_key))
+        self.assertTrue(alias_x.extra_dispatch_keys.has(conj_key))
+        self.assertTrue(alias_x.is_conj())
+        self.assertFalse(torch._C._dispatch_keys(add_x).has(conj_key))
+        self.assertIsNone(add_x.extra_dispatch_keys)
+        self.assertFalse(add_x.is_conj())
+        self.assertFalse(torch._C._dispatch_keys(empty_like_x).has(conj_key))
+        self.assertIsNone(empty_like_x.extra_dispatch_keys)
+        self.assertFalse(empty_like_x.is_conj())
+
+    @skipIfTorchDynamo("mutates private dispatch key state")
+    @expectedFailurePropagateRealTensors
+    def test_refake_view_preserves_base_dispatch_keys(self):
+        mode = FakeTensorMode()
+        base = mode.fake_tensor_converter.from_meta_and_device(
+            mode,
+            torch.empty(4, dtype=torch.complex64, device="meta"),
+            torch.device("cpu"),
+        )
+        with mode:
+            view = torch.ops.aten.alias.default(base)
+
+        conj_key = torch._C.DispatchKey.Conjugate
+        torch._C._set_conj(view, True)
+        view.dispatch_keys = torch._C._dispatch_keys(view)
+        view.extra_dispatch_keys = torch._C.DispatchKeySet(conj_key)
+
+        refake_mode = FakeTensorMode()
+        refake_view = refake_mode.from_tensor(view)
+        refake_base = refake_view._base
+        self.assertIsNotNone(refake_base)
+
+        self.assertTrue(torch._C._dispatch_keys(refake_view).has(conj_key))
+        self.assertTrue(refake_view.dispatch_keys.has(conj_key))
+        self.assertTrue(refake_view.extra_dispatch_keys.has(conj_key))
+        self.assertTrue(refake_view.is_conj())
+
+        self.assertFalse(torch._C._dispatch_keys(refake_base).has(conj_key))
+        self.assertIsNone(refake_base.dispatch_keys)
+        self.assertIsNone(refake_base.extra_dispatch_keys)
+        self.assertFalse(refake_base.is_conj())
+
+        mode = FakeTensorMode()
+        base = mode.fake_tensor_converter.from_meta_and_device(
+            mode,
+            torch.empty(4, device="meta"),
+            torch.device("cpu"),
+        )
+        with mode:
+            view = torch.ops.aten.alias.default(base)
+
+        autocast_key = torch._C.DispatchKey.AutocastCUDA
+        view.extra_dispatch_keys = torch._C.DispatchKeySet(autocast_key)
+
+        refake_mode = FakeTensorMode()
+        refake_view = refake_mode.from_tensor(view)
+        refake_base = refake_view._base
+        self.assertIsNotNone(refake_base)
+
+        self.assertTrue(refake_view.extra_dispatch_keys.has(autocast_key))
+        self.assertFalse(torch._C._dispatch_keys(refake_base).has(autocast_key))
+        self.assertIsNone(refake_base.dispatch_keys)
+        self.assertIsNone(refake_base.extra_dispatch_keys)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA autocast")
     @expectedFailurePropagateRealTensors
@@ -1137,11 +1208,10 @@ import torch._subclasses.fake_tensor as fake_tensor
 torch.utils.rename_privateuse1_backend("foo")
 autocast_key = torch._C.DispatchKey.AutocastPrivateUse1
 dispatch_keys = torch._C.DispatchKeySet(autocast_key)
+elem = torch.empty((), device="meta")
 
-assert fake_tensor._extra_autocast_dispatch_keys("foo", dispatch_keys) is None
-extra_dispatch_keys = fake_tensor._extra_autocast_dispatch_keys(
-    "xla", dispatch_keys
-)
+assert fake_tensor._extra_dispatch_keys("foo", elem, dispatch_keys) is None
+extra_dispatch_keys = fake_tensor._extra_dispatch_keys("xla", elem, dispatch_keys)
 assert extra_dispatch_keys is not None
 assert extra_dispatch_keys.has(autocast_key)
 """
@@ -3724,6 +3794,33 @@ class FakeTensorDispatchCache(TestCase):
             z = torch.randn(4, 3, dtype=torch.complex64)
             torch._C._set_neg(z, not z.is_neg())
             self._test_cache_key(fm, x, y, z)
+
+    @skipIfTorchDynamo("mutates private dispatch key state")
+    def test_cache_hit_preserves_full_dispatch_keys(self):
+        x = torch.randn(4, 3, dtype=torch.complex64)
+        torch._C._set_conj(x, True)
+        dispatch_keys = torch._C._dispatch_keys(x)
+        mode = FakeTensorMode()
+        fake_x = mode.fake_tensor_converter.from_meta_and_device(
+            mode,
+            torch.empty_like(x, device="meta"),
+            x.device,
+            dispatch_keys=dispatch_keys,
+        )
+
+        with mode:
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+            alias_x = torch.ops.aten.alias.default(fake_x)
+            self.assertHitsMisses(0, 1)
+            cached_alias_x = torch.ops.aten.alias.default(fake_x)
+            self.assertHitsMisses(1, 1)
+
+        self.assertEqual(alias_x.dispatch_keys, dispatch_keys)
+        self.assertEqual(cached_alias_x.dispatch_keys, dispatch_keys)
+        self.assertTrue(
+            cached_alias_x.extra_dispatch_keys.has(torch._C.DispatchKey.Conjugate)
+        )
 
     def test_cache_key_is_inference(self):
         with torch.inference_mode(True):

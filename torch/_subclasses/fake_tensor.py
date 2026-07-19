@@ -28,6 +28,7 @@ from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
+    _META_CONVERTER_META_DESC_ATTR,
     assert_eq,
     assert_metadata_eq,
     is_sparse_any,
@@ -119,93 +120,151 @@ _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS = frozenset(
 )
 
 
+_EMPTY_DISPATCH_KEY_SET = torch._C.DispatchKeySet.from_raw_repr(0)
+_FAKE_TENSOR_BASE_DISPATCH_KEYS_CACHE: dict[tuple[str, int], torch.DispatchKeySet] = {}
+
+
 def _maybe_dispatch_key(name: str) -> torch._C.DispatchKey | None:
     return getattr(torch._C.DispatchKey, name, None)
 
 
-_AUTOCAST_DISPATCH_KEY_BY_DEVICE_TYPE = {
-    device_type: key
-    for device_type, key in (
-        ("cpu", _maybe_dispatch_key("AutocastCPU")),
-        ("mps", _maybe_dispatch_key("AutocastMPS")),
-        ("cuda", _maybe_dispatch_key("AutocastCUDA")),
-        ("xpu", _maybe_dispatch_key("AutocastXPU")),
-        ("ipu", _maybe_dispatch_key("AutocastIPU")),
-        ("hpu", _maybe_dispatch_key("AutocastHPU")),
-        ("xla", _maybe_dispatch_key("AutocastXLA")),
-        ("mtia", _maybe_dispatch_key("AutocastMTIA")),
-        ("maia", _maybe_dispatch_key("AutocastMAIA")),
-    )
-    if key is not None
-}
-_AUTOCAST_PRIVATEUSE1_DISPATCH_KEY = _maybe_dispatch_key("AutocastPrivateUse1")
+def _dispatch_key_set_from_names(names: Iterable[str]) -> torch.DispatchKeySet:
+    dispatch_keys = _EMPTY_DISPATCH_KEY_SET
+    for name in names:
+        if dispatch_key := _maybe_dispatch_key(name):
+            dispatch_keys = dispatch_keys.add(dispatch_key)
+    return dispatch_keys
 
-_AUTOCAST_DISPATCH_KEYS = tuple(
-    key
-    for key in (
-        *_AUTOCAST_DISPATCH_KEY_BY_DEVICE_TYPE.values(),
-        _AUTOCAST_PRIVATEUSE1_DISPATCH_KEY,
+
+_AUTOCAST_DISPATCH_KEY_NAMES = (
+    "AutocastCPU",
+    "AutocastMPS",
+    "AutocastCUDA",
+    "AutocastXPU",
+    "AutocastIPU",
+    "AutocastHPU",
+    "AutocastXLA",
+    "AutocastMTIA",
+    "AutocastMAIA",
+    "AutocastPrivateUse1",
+)
+_PROPAGATED_EXTRA_DISPATCH_KEYS = _dispatch_key_set_from_names(
+    _AUTOCAST_DISPATCH_KEY_NAMES
+)
+# Only keys whose TensorImpl state is represented by the key bit itself can be
+# physically installed here. Mode-owned keys such as Python, FuncTorch, or
+# Tracer need their owning wrapper/mode state and must not be copied blindly.
+_PHYSICAL_EXTRA_DISPATCH_KEYS = _dispatch_key_set_from_names(
+    (
+        "Conjugate",
+        "Negative",
+        *_AUTOCAST_DISPATCH_KEY_NAMES,
     )
-    if key is not None
 )
 
 
-def _autocast_dispatch_key_for_device_type(
-    device_type: str,
-) -> torch._C.DispatchKey | None:
-    if device_type == torch._C._get_privateuse1_backend_name():
-        return _AUTOCAST_PRIVATEUSE1_DISPATCH_KEY
-    return _AUTOCAST_DISPATCH_KEY_BY_DEVICE_TYPE.get(device_type)
+def _dispatch_key_set_intersection(
+    lhs: torch.DispatchKeySet,
+    rhs: torch.DispatchKeySet,
+) -> torch.DispatchKeySet:
+    return torch._C.DispatchKeySet.from_raw_repr(lhs.raw_repr() & rhs.raw_repr())
 
 
-def _extra_autocast_dispatch_keys(
+def _dispatch_key_set_difference(
+    lhs: torch.DispatchKeySet,
+    rhs: torch.DispatchKeySet,
+) -> torch.DispatchKeySet:
+    return torch._C.DispatchKeySet.from_raw_repr(lhs.raw_repr() & ~rhs.raw_repr())
+
+
+def _empty_dispatch_key_set_to_none(
+    dispatch_keys: torch.DispatchKeySet,
+) -> torch.DispatchKeySet | None:
+    return None if dispatch_keys.raw_repr() == 0 else dispatch_keys
+
+
+def _fake_tensor_base_dispatch_keys(
     device: torch.device | str,
+    elem: Tensor,
+) -> torch.DispatchKeySet:
+    device = torch.device(device)
+    elem_keys = torch._C._dispatch_keys(elem)
+    cache_key = (device.type, elem_keys.raw_repr())
+    cached_keys = _FAKE_TENSOR_BASE_DISPATCH_KEYS_CACHE.get(cache_key)
+    if cached_keys is not None:
+        return cached_keys
+
+    probe = Tensor._make_subclass(
+        FakeTensor,
+        elem,
+        False,
+        dispatch_device=True,
+        device_for_backend_keys=device,
+    )
+    base_keys = torch._C._dispatch_keys(probe)
+    _FAKE_TENSOR_BASE_DISPATCH_KEYS_CACHE[cache_key] = base_keys
+    return base_keys
+
+
+def _extra_dispatch_keys(
+    device: torch.device | str,
+    elem: Tensor,
+    dispatch_keys: torch.DispatchKeySet | None = None,
+    extra_dispatch_keys: torch.DispatchKeySet | None = None,
+) -> torch.DispatchKeySet | None:
+    extra_keys = _EMPTY_DISPATCH_KEY_SET
+
+    if dispatch_keys is not None:
+        base_keys = _fake_tensor_base_dispatch_keys(device, elem)
+        extra_keys = extra_keys | _dispatch_key_set_intersection(
+            _dispatch_key_set_difference(dispatch_keys, base_keys),
+            _PHYSICAL_EXTRA_DISPATCH_KEYS,
+        )
+    if extra_dispatch_keys is not None:
+        extra_keys = extra_keys | _dispatch_key_set_intersection(
+            extra_dispatch_keys,
+            _PHYSICAL_EXTRA_DISPATCH_KEYS,
+        )
+
+    return _empty_dispatch_key_set_to_none(extra_keys)
+
+
+def _propagated_extra_dispatch_keys(
     dispatch_keys: torch.DispatchKeySet | None,
 ) -> torch.DispatchKeySet | None:
     if dispatch_keys is None:
         return None
-
-    device_type = torch.device(device).type
-    default_autocast_key = _autocast_dispatch_key_for_device_type(device_type)
-    extra_keys = torch._C.DispatchKeySet.from_raw_repr(0)
-    for autocast_key in _AUTOCAST_DISPATCH_KEYS:
-        if autocast_key != default_autocast_key and dispatch_keys.has(autocast_key):
-            extra_keys = extra_keys.add(autocast_key)
-
-    if extra_keys.raw_repr() == 0:
-        return None
-    return extra_keys
+    return _empty_dispatch_key_set_to_none(
+        _dispatch_key_set_intersection(dispatch_keys, _PROPAGATED_EXTRA_DISPATCH_KEYS)
+    )
 
 
-def _extra_autocast_dispatch_keys_for_tensor(
+def _extra_dispatch_keys_for_tensor(
     device: torch.device | str,
     t: Tensor,
 ) -> torch.DispatchKeySet | None:
     if is_fake_tensor(t):
-        return _extra_autocast_dispatch_keys(device, torch._C._dispatch_keys(t))
+        return cast("FakeTensor", t).extra_dispatch_keys
 
-    # XLA:CUDA tensors have device type XLA but use AutocastCUDA. Avoid probing
-    # ordinary tensors here, since Dynamo guards on direct dispatch-key reads.
-    if torch.device(device).type != "xla":
-        return None
-
-    return _extra_autocast_dispatch_keys(device, torch._C._dispatch_keys(t))
+    return None
 
 
-def _common_extra_autocast_dispatch_keys(
+def _common_extra_dispatch_keys(
     output_device: torch.device | str,
     flat_args: Sequence[object],
 ) -> torch.DispatchKeySet | None:
     output_device = torch.device(output_device)
+    found_arg = False
     found_keys = None
     for arg in flat_args:
         if not is_fake_tensor(arg) or arg.device != output_device:
             continue
-        arg_extra_dispatch_keys = cast("FakeTensor", arg).extra_dispatch_keys
-        if arg_extra_dispatch_keys is None:
-            continue
-        if found_keys is not None and found_keys != arg_extra_dispatch_keys:
+        arg_extra_dispatch_keys = _propagated_extra_dispatch_keys(
+            cast("FakeTensor", arg).extra_dispatch_keys
+        )
+        if found_arg and found_keys != arg_extra_dispatch_keys:
             return None
+        found_arg = True
         found_keys = arg_extra_dispatch_keys
 
     return found_keys
@@ -616,27 +675,9 @@ class FakeTensorConverter:
 
         constant = t if make_constant else None
 
-        # This callback is used by both subclass and inner tensors. Require the
-        # caller to explicitly specify the device in case outer and inner tensors
-        # have different devices.
-        source_device = t.device
-        source_dispatch_keys = (
-            t.dispatch_keys
-            if isinstance(t, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-            else (
-                torch._C._dispatch_keys(t)
-                if torch.device(source_device).type == "xla"
-                else None
-            )
-        )
-        source_extra_dispatch_keys = _extra_autocast_dispatch_keys_for_tensor(
-            source_device, t
-        )
-
         def mk_fake_tensor(
-            make_meta_t: Callable[[], object], device: torch.device | str
+            make_meta_t: Callable[[], Tensor], device: torch.device | str
         ) -> FakeTensor:
-            same_device = torch.device(device) == source_device
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
             # as necessary.  Invocation manager is "more correct" as
@@ -645,19 +686,32 @@ class FakeTensorConverter:
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
             with no_dispatch():
+                meta_t = make_meta_t()
+                source_desc = getattr(meta_t, _META_CONVERTER_META_DESC_ATTR, None)
+                same_device = (
+                    source_desc is not None
+                    and torch.device(device) == source_desc.device
+                )
+                dispatch_keys = (
+                    torch._C.DispatchKeySet.from_raw_repr(source_desc.dispatch_keys)
+                    if same_device and source_desc.dispatch_keys is not None
+                    else None
+                )
+                extra_dispatch_keys = (
+                    torch._C.DispatchKeySet.from_raw_repr(
+                        source_desc.extra_dispatch_keys
+                    )
+                    if same_device and source_desc.extra_dispatch_keys is not None
+                    else None
+                )
                 return FakeTensor(
                     fake_mode,
-                    # pyrefly: ignore [bad-argument-type]
-                    make_meta_t(),
+                    meta_t,
                     # pyrefly: ignore [bad-argument-type]
                     device,
-                    # TODO: callback might be used in recursive contexts, in
-                    # which case using t is wrong!  BUG!
                     constant=constant,
-                    dispatch_keys=source_dispatch_keys if same_device else None,
-                    extra_dispatch_keys=(
-                        source_extra_dispatch_keys if same_device else None
-                    ),
+                    dispatch_keys=dispatch_keys,
+                    extra_dispatch_keys=extra_dispatch_keys,
                 )
 
         out = self.meta_converter(
@@ -1143,21 +1197,20 @@ class FakeTensor(Tensor):
                 "'device' (or 'fake_device')"
             )
 
-        extra_autocast_dispatch_keys = _extra_autocast_dispatch_keys(
-            device, extra_dispatch_keys
+        extra_dispatch_keys = _extra_dispatch_keys(
+            device,
+            elem,
+            dispatch_keys=dispatch_keys,
+            extra_dispatch_keys=extra_dispatch_keys,
         )
-        if extra_autocast_dispatch_keys is None:
-            extra_autocast_dispatch_keys = _extra_autocast_dispatch_keys(
-                device, dispatch_keys
-            )
-        if extra_autocast_dispatch_keys is not None:
+        if extra_dispatch_keys is not None:
             self = Tensor._make_subclass(
                 cls,
                 elem,
                 elem.requires_grad if requires_grad is None else requires_grad,
                 dispatch_device=True,
                 device_for_backend_keys=device,
-                _extra_dispatch_keys=extra_autocast_dispatch_keys,
+                _extra_dispatch_keys=extra_dispatch_keys,
             )
         else:
             self = Tensor._make_subclass(
@@ -1193,7 +1246,7 @@ class FakeTensor(Tensor):
         self.constant = constant
         self.pytype = pytype
         self.dispatch_keys = dispatch_keys
-        self.extra_dispatch_keys = extra_autocast_dispatch_keys
+        self.extra_dispatch_keys = extra_dispatch_keys
         if isinstance(real_tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             raise AssertionError("real_tensor must not be a FakeTensor")
         self.real_tensor = real_tensor
@@ -1488,6 +1541,7 @@ class TensorMetadata:
     is_coalesced: bool | None
     dense_dim: int | None
     sparse_dim: int | None
+    dispatch_keys: int
     extra_dispatch_keys: int
 
     def _flatten_into(
@@ -1531,6 +1585,9 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
 
     storage_offset = t.storage_offset()
 
+    dispatch_keys = cast("FakeTensor", t).dispatch_keys if is_fake_tensor(t) else None
+    extra_dispatch_keys = _extra_dispatch_keys_for_tensor(t.device, t)
+
     return TensorMetadata(
         t.dtype,
         t.shape,
@@ -1550,16 +1607,8 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         t.is_coalesced() if t.is_sparse else None,
         t.dense_dim() if _is_sparse_any else None,
         t.sparse_dim() if _is_sparse_any else None,
-        (
-            extra_dispatch_keys.raw_repr()
-            if (
-                extra_dispatch_keys := _extra_autocast_dispatch_keys_for_tensor(
-                    t.device, t
-                )
-            )
-            is not None
-            else 0
-        ),
+        dispatch_keys.raw_repr() if dispatch_keys is not None else 0,
+        (extra_dispatch_keys.raw_repr() if extra_dispatch_keys is not None else 0),
     )
 
 
@@ -2535,6 +2584,11 @@ class FakeTensorMode(TorchDispatchMode):
             self,
             empty,
             metadata.device,
+            dispatch_keys=(
+                torch._C.DispatchKeySet.from_raw_repr(metadata.dispatch_keys)
+                if metadata.dispatch_keys
+                else None
+            ),
             extra_dispatch_keys=(
                 torch._C.DispatchKeySet.from_raw_repr(metadata.extra_dispatch_keys)
                 if metadata.extra_dispatch_keys
@@ -3517,7 +3571,7 @@ class FakeTensorMode(TorchDispatchMode):
                         self,
                         e,
                         output_device,
-                        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(
+                        extra_dispatch_keys=_common_extra_dispatch_keys(
                             output_device, flat_args
                         ),
                     )

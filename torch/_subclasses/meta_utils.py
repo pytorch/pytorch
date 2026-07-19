@@ -241,6 +241,7 @@ MetaTensorId = NewType("MetaTensorId", int)
 
 _DescriberId = NewType("_DescriberId", int)
 DESCRIBER_NEXT_ID = _DescriberId(0)
+_META_CONVERTER_META_DESC_ATTR = "_meta_converter_meta_desc"
 
 
 class MetaTensorDescriber:
@@ -422,12 +423,33 @@ class MetaTensorDescriber:
 
         view_func = ViewFunc.from_tensor(t)
 
+        dispatch_keys = None
+        extra_dispatch_keys = None
+        from torch._subclasses.fake_tensor import (
+            _extra_dispatch_keys_for_tensor,
+            is_fake_tensor,
+        )
+
+        if is_fake_tensor(t):
+            fake_t = typing.cast("FakeTensor", t)
+            dispatch_keys = (
+                fake_t.dispatch_keys.raw_repr()
+                if fake_t.dispatch_keys is not None
+                else None
+            )
+        elif t.device.type == "xla":
+            dispatch_keys = torch._C._dispatch_keys(t).raw_repr()
+        extra_keys = _extra_dispatch_keys_for_tensor(t.device, t)
+        extra_dispatch_keys = extra_keys.raw_repr() if extra_keys is not None else None
+
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
         is_inference_mode_disabled = getattr(tls, "disable_inference_mode", False)
         r: MetaTensorDesc[Any] = MetaTensorDesc(
             id=self.get_tensor_id(t),
             storage=storage,
+            dispatch_keys=dispatch_keys,
+            extra_dispatch_keys=extra_dispatch_keys,
             is_inference=False if is_inference_mode_disabled else t.is_inference(),
             is_leaf=is_leaf,
             requires_grad=t.requires_grad,
@@ -682,6 +704,8 @@ class MetaTensorDesc(Generic[_TensorT]):
     dynamo_dynamic_indices: list[int]
     dynamo_hint_overrides: dict[int, int]
 
+    dispatch_keys: int | None = None
+    extra_dispatch_keys: int | None = None
     layout: torch.layout = torch.strided
     is_inference: bool = False
     is_leaf: bool = False
@@ -1087,9 +1111,30 @@ class MetaConverter(Generic[_TensorT]):
     ) -> _TensorT:
         from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_real_tensor
 
-        callback: _MetaTensorCallbackOptDevice[_TensorT] = functools.partial(
+        base_callback: _MetaTensorCallbackOptDevice[_TensorT] = functools.partial(
             callback_, device=t.device
         )
+
+        def callback(
+            make_meta_t: Callable[[], torch.Tensor],
+            **kwargs: Unpack[_MetaTensorCallbackKwargs],
+        ) -> _TensorT:
+            attached_meta_tensors: list[torch.Tensor] = []
+
+            def make_meta_t_with_desc() -> torch.Tensor:
+                meta_t = make_meta_t()
+                if not hasattr(meta_t, _META_CONVERTER_META_DESC_ATTR):
+                    setattr(meta_t, _META_CONVERTER_META_DESC_ATTR, t)
+                    attached_meta_tensors.append(meta_t)
+                return meta_t
+
+            try:
+                return base_callback(make_meta_t_with_desc, **kwargs)
+            finally:
+                for meta_t in attached_meta_tensors:
+                    if getattr(meta_t, _META_CONVERTER_META_DESC_ATTR, None) is t:
+                        delattr(meta_t, _META_CONVERTER_META_DESC_ATTR)
+
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -2287,6 +2332,22 @@ class MetaConverter(Generic[_TensorT]):
                 torch._C._set_conj(r, t.is_conj)
                 # pyrefly: ignore [unbound-name]
                 torch._C._set_neg(r, t.is_neg)
+                # pyrefly: ignore [unbound-name]
+                if is_fake_tensor(r):
+                    r.dispatch_keys = (  # type: ignore[attr-defined]
+                        torch._C.DispatchKeySet.from_raw_repr(t.dispatch_keys)
+                        if t.dispatch_keys is not None
+                        else None
+                    )
+                    r.extra_dispatch_keys = (  # type: ignore[attr-defined]
+                        torch._C.DispatchKeySet.from_raw_repr(t.extra_dispatch_keys)
+                        if t.extra_dispatch_keys is not None
+                        else (
+                            r.extra_dispatch_keys  # type: ignore[attr-defined]
+                            if t.dispatch_keys is not None
+                            else None
+                        )
+                    )
             # This can be skipped if necessary for performance reasons
             skip_leaf = (
                 t.is_gradtrackingtensor and t.level == GRAD_TENSOR_SENTINEL_VALUE

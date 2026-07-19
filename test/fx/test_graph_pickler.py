@@ -507,6 +507,64 @@ class TestDillSerializationFeatures(TestCase):
         self.GraphPickler = GraphPickler
         self.Options = Options
 
+    def test_fake_tensor_metadata_preserves_extra_dispatch_keys(self):
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+        autocast_key = torch._C.DispatchKey.AutocastCUDA
+        fake_mode = FakeTensorMode()
+        fake_x = fake_mode.fake_tensor_converter.from_meta_and_device(
+            fake_mode,
+            torch.empty(2, 3, device="meta"),
+            torch.device("xla"),
+            extra_dispatch_keys=torch._C.DispatchKeySet(autocast_key),
+        )
+        conj_x = torch.randn(2, dtype=torch.complex64)
+        torch._C._set_conj(conj_x, True)
+        conj_dispatch_keys = torch._C._dispatch_keys(conj_x)
+        fake_conj = fake_mode.fake_tensor_converter.from_meta_and_device(
+            fake_mode,
+            torch.empty_like(conj_x, device="meta"),
+            conj_x.device,
+            dispatch_keys=conj_dispatch_keys,
+        )
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                node.meta["val"] = fake_x
+            elif node.op == "output":
+                node.meta["conj_val"] = fake_conj
+
+        options = self.Options(node_metadata_key_filter=None)
+        serialized = self.GraphPickler.dumps(gm, options)
+        load_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = self.GraphPickler.loads(serialized, load_mode)
+
+        restored = next(
+            node.meta["val"]
+            for node in deserialized.graph.nodes
+            if node.op == "placeholder"
+        )
+        self.assertIsInstance(restored, FakeTensor)
+        self.assertTrue(torch._C._dispatch_keys(restored).has(autocast_key))
+        self.assertIsNone(restored.dispatch_keys)
+        self.assertTrue(restored.extra_dispatch_keys.has(autocast_key))
+
+        restored_conj = next(
+            node.meta["conj_val"]
+            for node in deserialized.graph.nodes
+            if node.op == "output"
+        )
+        conj_key = torch._C.DispatchKey.Conjugate
+        self.assertIsInstance(restored_conj, FakeTensor)
+        self.assertTrue(torch._C._dispatch_keys(restored_conj).has(conj_key))
+        self.assertEqual(restored_conj.dispatch_keys, conj_dispatch_keys)
+        self.assertTrue(restored_conj.extra_dispatch_keys.has(conj_key))
+
     def test_inner_function_in_graph_metadata(self):
         """
         Test that a graph with an inner function in node metadata can be

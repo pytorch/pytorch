@@ -37,7 +37,7 @@ from torch._prims_common import (
     ShapeType,
 )
 from torch._subclasses.fake_tensor import (
-    _common_extra_autocast_dispatch_keys,
+    _common_extra_dispatch_keys,
     DataDependentOutputException,
     DynamicOutputShapeException,
     FakeTensor,
@@ -294,7 +294,7 @@ def constructors(
     out_device = out_device if out_device is not None else default_device
     if has_device_arg:
         new_kwargs["device"] = torch.device("meta")
-    extra_dispatch_keys = _common_extra_autocast_dispatch_keys(
+    extra_dispatch_keys = _common_extra_dispatch_keys(
         out_device, pytree.tree_leaves((args, new_kwargs))
     )
     # _like constructors have fake tensor inputs (maybe this causes the non-like
@@ -376,7 +376,7 @@ def non_kwarg_to(
         fake_mode,
         r,
         out_device,
-        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(out_device, [inp]),
+        extra_dispatch_keys=_common_extra_dispatch_keys(out_device, [inp]),
     )
 
 
@@ -597,9 +597,7 @@ def _spdiags(
         fake_mode,
         out,
         diagonals.device,
-        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(
-            diagonals.device, [diagonals]
-        ),
+        extra_dispatch_keys=_common_extra_dispatch_keys(diagonals.device, [diagonals]),
     )
 
 
@@ -628,9 +626,7 @@ def _to_dense(
             fake_mode,
             out,
             self.fake_device,
-            extra_dispatch_keys=_common_extra_autocast_dispatch_keys(
-                self.fake_device, [self]
-            ),
+            extra_dispatch_keys=_common_extra_dispatch_keys(self.fake_device, [self]),
         )
 
     with in_kernel_invocation_manager(fake_mode):
@@ -639,9 +635,7 @@ def _to_dense(
         fake_mode,
         out,
         self.fake_device,
-        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(
-            self.fake_device, [self]
-        ),
+        extra_dispatch_keys=_common_extra_dispatch_keys(self.fake_device, [self]),
     )
 
 
@@ -1655,7 +1649,7 @@ def run_and_return_new_tensor_of_input_device(
         fake_mode,
         out,
         out_device,
-        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(
+        extra_dispatch_keys=_common_extra_dispatch_keys(
             out_device, pytree.tree_leaves(new_kwargs)
         ),
     )
@@ -1714,7 +1708,7 @@ def maybe_to_dense_mkldnn(
         fake_mode,
         out,
         a.fake_device,
-        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(a.fake_device, [a]),
+        extra_dispatch_keys=_common_extra_dispatch_keys(a.fake_device, [a]),
     )
 
 
@@ -1910,7 +1904,7 @@ def to_mkldnn(
         out,
         a.fake_device,
         dispatch_keys=_MKLDNN_DISPATCH_KEYS,
-        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(a.fake_device, [a]),
+        extra_dispatch_keys=_common_extra_dispatch_keys(a.fake_device, [a]),
     )
 
 
@@ -1952,9 +1946,7 @@ def foreach_run_and_map_input_device(
                 fake_mode,
                 meta_t,
                 device,
-                extra_dispatch_keys=_common_extra_autocast_dispatch_keys(
-                    device, inputs
-                ),
+                extra_dispatch_keys=_common_extra_dispatch_keys(device, inputs),
             )
         )
 
@@ -2213,7 +2205,7 @@ def conv(
                 input_, weight, conv_backend
             )
 
-    extra_dispatch_keys = _common_extra_autocast_dispatch_keys(
+    extra_dispatch_keys = _common_extra_dispatch_keys(
         device, pytree.tree_leaves(new_kwargs)
     )
 
@@ -2483,7 +2475,7 @@ def make_fast_binary_impl(
             elif op.device != common_device:
                 return slow("error")
 
-        common_extra_dispatch_keys = _common_extra_autocast_dispatch_keys(
+        common_extra_dispatch_keys = _common_extra_dispatch_keys(
             common_device, operands
         )
 

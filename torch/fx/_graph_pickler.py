@@ -29,6 +29,7 @@ from torch._subclasses.fake_tensor import (
     Tensor,
 )
 from torch._subclasses.meta_utils import (
+    _META_CONVERTER_META_DESC_ATTR,
     MetaConverter,
     MetaTensorDesc,
     MetaTensorDescriber,
@@ -567,11 +568,28 @@ class _TensorPickleData:
             make_meta_t: Callable[[], torch.Tensor], device: torch.device | str
         ) -> FakeTensor:
             with no_dispatch():
+                meta_t = make_meta_t()
+                source_desc = getattr(meta_t, _META_CONVERTER_META_DESC_ATTR, None)
+                dispatch_keys = (
+                    torch._C.DispatchKeySet.from_raw_repr(source_desc.dispatch_keys)
+                    if source_desc is not None and source_desc.dispatch_keys is not None
+                    else None
+                )
+                extra_dispatch_keys = (
+                    torch._C.DispatchKeySet.from_raw_repr(
+                        source_desc.extra_dispatch_keys
+                    )
+                    if source_desc is not None
+                    and source_desc.extra_dispatch_keys is not None
+                    else None
+                )
                 return FakeTensor(
                     unpickle_state.fake_mode,
-                    make_meta_t(),
+                    meta_t,
                     # pyrefly: ignore [bad-argument-type]
                     device,
+                    dispatch_keys=dispatch_keys,
+                    extra_dispatch_keys=extra_dispatch_keys,
                 )
 
         return unpickle_state.meta_converter.meta_tensor(
