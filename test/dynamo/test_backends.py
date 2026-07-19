@@ -494,6 +494,19 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
 
+    def test_device_and_dtype_from_inputs(self):
+        from torch._dynamo.backends.common import device_from_inputs, dtype_from_inputs
+
+        class NotATensor:
+            device = "not-a-device"
+            dtype = "not-a-dtype"
+
+        tensor = torch.randn(3, dtype=torch.float64)
+        self.assertEqual(device_from_inputs([NotATensor(), tensor]), tensor.device)
+        self.assertEqual(dtype_from_inputs([NotATensor(), tensor]), torch.float64)
+        self.assertEqual(device_from_inputs([NotATensor()]), torch.device("cpu"))
+        self.assertEqual(dtype_from_inputs([NotATensor()]), torch.float32)
+
     def test_lookup_backend_suggestion(self):
         from torch._dynamo.backends.registry import lookup_backend
         from torch._dynamo.exc import InvalidBackend
