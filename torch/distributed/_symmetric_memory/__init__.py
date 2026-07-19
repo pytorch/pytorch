@@ -916,6 +916,18 @@ def _fused_all_gather_matmul(
         )
 
 
+# Upper bound on the K dimension (A_shard.shape[-1]) for which the native
+# async-TP path outperforms the decomposition fallback on ROCm (gfx942/gfx950).
+# Benchmarks on MI350 (gfx950, ws=4, bf16, col-major B, repeats=5) show:
+#   K=512:  native ~0.49-0.65x fused_fallback  (clear win)
+#   K=1024: native ~0.84-0.96x fused_fallback  (win or parity)
+#   K=2048: native ~1.17-1.34x fused_fallback  (loss across all combos)
+#   K=4096: native ~1.79x fused_fallback        (large loss)
+# The threshold is architecture-independent from the CUDA side (CUTLASS path
+# does not use this selector).
+_NATIVE_ASYNC_TP_MAX_K = 2048
+
+
 def _should_use_fused_all_gather_matmul_native(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
@@ -938,6 +950,11 @@ def _should_use_fused_all_gather_matmul_native(
         and 2048 < local_M * group.size() <= 4096
         # _async_input_mm only supports a single B.
         and len(Bs) == 1
+        # Profitability gate (ROCm only): native loses to the decomposition
+        # fallback for large K due to staging/protocol overhead dominating the
+        # CK GEMM. Benchmarked on MI350 (gfx950); CUDA/CUTLASS has different
+        # K-scaling and is not gated here. See _NATIVE_ASYNC_TP_MAX_K.
+        and (torch.version.hip is None or A_shard.shape[-1] < _NATIVE_ASYNC_TP_MAX_K)
     )
 
 
