@@ -86,19 +86,6 @@ else()
   set(AT_NNPACK_ENABLED 1)
 endif()
 
-if(NOT USE_CUSPARSELT)
-  set(AT_CUSPARSELT_ENABLED 0)
-else()
-  set(AT_CUSPARSELT_ENABLED 1)
-endif()
-
-# Add hipSPARSELt support flag if the package is available.
-if(USE_ROCM AND hipsparselt_FOUND)
-  set(AT_HIPSPARSELT_ENABLED 1)
-else()
-  set(AT_HIPSPARSELT_ENABLED 0)
-endif()
-
 list(APPEND ATen_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_subdirectory(src/ATen)
