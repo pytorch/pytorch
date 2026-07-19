@@ -72,38 +72,6 @@ __device__ __forceinline__ double2 box_muller_double(uint4 r) {
   return {radius * c, radius * s};
 }
 
-void validate_normal_std(double stddev) {
-  TORCH_CHECK(
-      stddev >= 0.0,
-      "normal expects std >= 0.0, but found std ",
-      stddev);
-}
-
-template <typename scalar_t>
-void validate_uniform_bounds(const Tensor& self, double low, double high) {
-  const auto min =
-      static_cast<double>(std::numeric_limits<scalar_t>::lowest());
-  const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
-  TORCH_CHECK(low >= min && low <= max, "from is out of bounds for ", self.dtype());
-  TORCH_CHECK(
-      high >= min && high <= max, "to is out of bounds for ", self.dtype());
-  TORCH_CHECK(
-      low <= high,
-      "uniform_ expects to return a [from, to) range, but found from=",
-      low,
-      " > to=",
-      high);
-  TORCH_CHECK(
-      high - low <= max,
-      "uniform_ expects to-from <= std::numeric_limits<",
-      toString(self.scalar_type()),
-      ">::max(), but found to=",
-      high,
-      " and from=",
-      low,
-      " which result in to-from to exceed the limit");
-}
-
 template <typename scalar_t, typename sample_t, typename param_t>
 __global__ void distribution_flat_slice_kernel(
     scalar_t* __restrict__ output,
@@ -298,6 +266,38 @@ void distribution_flat_slice(
   if (output.data_ptr() != self.data_ptr()) {
     self.copy_(output);
   }
+}
+
+void validate_normal_std(double stddev) {
+  TORCH_CHECK(
+      stddev >= 0.0,
+      "normal expects std >= 0.0, but found std ",
+      stddev);
+}
+
+template <typename scalar_t>
+void validate_uniform_bounds(const Tensor& self, double low, double high) {
+  const auto min =
+      static_cast<double>(std::numeric_limits<scalar_t>::lowest());
+  const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
+  TORCH_CHECK(low >= min && low <= max, "from is out of bounds for ", self.dtype());
+  TORCH_CHECK(
+      high >= min && high <= max, "to is out of bounds for ", self.dtype());
+  TORCH_CHECK(
+      low <= high,
+      "uniform_ expects to return a [from, to) range, but found from=",
+      low,
+      " > to=",
+      high);
+  TORCH_CHECK(
+      high - low <= max,
+      "uniform_ expects to-from <= std::numeric_limits<",
+      toString(self.scalar_type()),
+      ">::max(), but found to=",
+      high,
+      " and from=",
+      low,
+      " which result in to-from to exceed the limit");
 }
 
 // Single-key kernel: one thread per chunk of elements, where each chunk
