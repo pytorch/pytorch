@@ -1134,9 +1134,9 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
                             bool include_last_offset, int64_t padding_idx, _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   if (mode == EmbeddingBagMode::MEAN || mode == EmbeddingBagMode::SUM) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, weight.scalar_type(), "embedding_bag_no_grad_cpu_out",
-      [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx, &fbgemm_kernel_cache]() {
+      [&]() {
       AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_no_grad_cpu_out",
-        [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx, &fbgemm_kernel_cache]() {
+        [&]() {
         if (per_sample_weights.has_value() && per_sample_weights.value().defined()) {
           TORCH_INTERNAL_ASSERT(mode == EmbeddingBagMode::SUM);
           index_select_scale_add<scalar_t, index_t>(

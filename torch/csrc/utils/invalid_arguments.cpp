@@ -323,8 +323,8 @@ std::string _argDesc(
   std::string result = "(";
   for (auto& arg : arguments)
     result += std::string(py_typename(arg)) + ", ";
-  for (auto& kwarg : kwargs)
-    result += kwarg.first + "=" + py_typename(kwarg.second) + ", ";
+  for (const auto& [name, value] : kwargs)
+    result += name + "=" + py_typename(value) + ", ";
   if (!arguments.empty())
     result.erase(result.length() - 2);
   result += ')';
@@ -341,16 +341,16 @@ std::vector<std::string> _tryMatchKwargs(
     start_idx--;
   if (start_idx < 0)
     start_idx = 0;
-  for (auto& entry : kwargs) {
+  for (const auto& [name, value] : kwargs) {
     bool found = false;
     for (unsigned int i = start_idx; i < option.arguments.size(); i++) {
-      if (option.arguments[i].name == entry.first) {
+      if (option.arguments[i].name == name) {
         found = true;
         break;
       }
     }
     if (!found)
-      unmatched.push_back(entry.first);
+      unmatched.push_back(name);
   }
   return unmatched;
 }

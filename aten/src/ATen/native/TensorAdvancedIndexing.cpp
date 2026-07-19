@@ -1675,7 +1675,7 @@ Tensor& index_select_out_cpu_(
               sub_iter.unsafe_replace_operand(0, result_data);
               sub_iter.unsafe_replace_operand(1, self_data);
               copy_stub(sub_iter.device_type(), sub_iter, false);
-            };
+            }
           });
     };
 

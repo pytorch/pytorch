@@ -797,10 +797,10 @@ struct GRUCell : Cell<Tensor, cell_params> {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hidden);
-      auto result = at::_thnn_fused_gru_cell(
+      auto [hy, workspace] = at::_thnn_fused_gru_cell(
           igates, hgates, hidden, params.b_ih(), params.b_hh());
       // Slice off the workspace argument (it's needed only for AD).
-      return std::move(std::get<0>(result));
+      return std::move(hy);
     }
     const auto chunked_igates = pre_compute_input
         ? input.unsafe_chunk(3, 1)

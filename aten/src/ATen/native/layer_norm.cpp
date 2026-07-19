@@ -208,7 +208,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  auto [M, N] = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto M = _check_layer_norm_inputs(input, normalized_shape, weight, bias).first;
   auto X = input.expect_contiguous();
   auto gamma = weight.expect_contiguous();
 
