@@ -699,6 +699,25 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_list_input(self):
+        def func(output, inputs):
+            torch.distributed.reduce_scatter(output, inputs)
+            return output
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            inputs = [
+                torch.ones(4, 4, device=self.device) * (self.rank + i)
+                for i in range(self.world_size)
+            ]
+            output = torch.empty(4, 4, device=self.device)
+            correct = torch.empty(4, 4, device=self.device)
+            func_compiled = torch.compile(func, fullgraph=True)
+            func_compiled(output, inputs)
+            func(correct, inputs)
+            self.assertTrue(same(output, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     def test_allgather_contiguous_input(self):
         class Model(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
