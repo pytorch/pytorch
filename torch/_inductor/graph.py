@@ -2602,6 +2602,15 @@ class GraphLowering(torch.fx.Interpreter):
         if has_gpu or needs_cpu_triton_two_pass:
 
             def extract_real_inputs() -> list[int | float | torch.Tensor]:
+                if self.is_const_graph:
+                    # The constant-folding subgraph has no runtime placeholder
+                    # inputs; its foldable constants are appended separately below
+                    # from self.constants. Inheriting the main graph's V.real_inputs
+                    # here would feed those tensors at the const wrapper's constant
+                    # offsets and launch the fold kernels on wrong shapes (an
+                    # illegal memory access), so the const graph has no real inputs.
+                    return []
+
                 def materialize(
                     x: torch.SymInt | torch.SymFloat | torch.Tensor,
                 ) -> int | float | torch.Tensor:
@@ -2907,6 +2916,19 @@ class GraphLowering(torch.fx.Interpreter):
         # model's params/inputs, producing a handle-count/type mismatch, so pass
         # an empty input list here and rely solely on the constants below.
         real_inputs = [] if self.is_const_graph else extract_real_inputs()
+
+        # A const-folding subgraph has no runtime placeholder inputs; only its
+        # self.constants (appended below) are valid handles for the const
+        # wrapper's [graph_inputs(empty), constants] entry signature. Non-empty
+        # real_inputs here means the main graph's params/inputs leaked in and the
+        # fold kernels would launch on wrong-shaped tensors (a silent CUDA
+        # illegal memory access on internal builds). Assert to keep this OSS
+        # regression catchable rather than masked.
+        if self.is_const_graph and real_inputs:
+            raise AssertionError(
+                "const graph JIT-autotune must receive no real inputs; "
+                f"got {len(real_inputs)}"
+            )
 
         def materialize_constant(name: str) -> torch.Tensor:
             constant = self.constants[name]
