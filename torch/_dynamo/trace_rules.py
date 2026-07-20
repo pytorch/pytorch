@@ -3155,7 +3155,7 @@ Return if a torch object is ATen op or torch.Tensor method.
 """
 
 
-def is_aten_op_or_tensor_method(obj: Any) -> bool:
+def is_aten_op_or_tensor_method(obj: object) -> bool:
     return obj in get_tensor_method() or isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
@@ -3336,58 +3336,58 @@ def _maybe_init_lazy_module(obj: object) -> None:
             fn()
 
 
-def is_callable_allowed(obj: Any) -> bool:
+def is_callable_allowed(obj: object) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _allowed_callable_ids
 
 
-def is_nonstrict_trace_callable(obj: Any) -> bool:
+def is_nonstrict_trace_callable(obj: object) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _nonstrict_trace_callable_ids
 
 
-def is_leaf_function(obj: Any) -> bool:
+def is_leaf_function(obj: object) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _leaf_function_ids
 
 
-def is_callable_disallowed(obj: Any) -> bool:
+def is_callable_disallowed(obj: object) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _disallowed_callable_ids
 
 
-def is_forbidden(obj: Any) -> bool:
+def is_forbidden(obj: object) -> bool:
     _maybe_init_lazy_module(obj)
     return inspect.getattr_static(obj, "_dynamo_forbidden", False)
 
 
-def is_builtin_callable(obj: Any) -> bool:
+def is_builtin_callable(obj: object) -> bool:
     # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     return id(obj) in _builtin_function_ids
 
 
-def is_builtin_constant(obj: Any) -> bool:
+def is_builtin_constant(obj: object) -> bool:
     return id(obj) in _builtin_constant_ids
 
 
-def is_polyfilled_callable(obj: Any) -> bool:
+def is_polyfilled_callable(obj: object) -> bool:
     # See also @torch._dynamo.decorators.substitute_in_graph(...), which adds items in _polyfilled_function_ids
     return id(obj) in _polyfilled_function_ids
 
 
-def is_numpy(obj: Any) -> bool:
+def is_numpy(obj: object) -> bool:
     if np is None:
         return False
     return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids
 
 
-def is_numpy_dtype(obj: Any) -> bool:
+def is_numpy_dtype(obj: object) -> bool:
     if np is None:
         return False
     return isinstance(obj, np.dtype)
 
 
-def is_numpy_type_info(obj: Any) -> bool:
+def is_numpy_type_info(obj: object) -> bool:
     if np is None:
         return False
     return isinstance(obj, (np.finfo, np.iinfo))
@@ -3933,7 +3933,7 @@ def _force_inline() -> Iterator[None]:
 
 
 def check_verbose(
-    obj: Any, is_inlined_call: bool = False, frame: Any | None = None
+    obj: object, is_inlined_call: bool = False, frame: Any | None = None
 ) -> SkipResult:
     if _force_inline_flag:
         return SkipResult(
@@ -4029,11 +4029,11 @@ def check_verbose(
         return SkipResult(True, reasons.pop())
 
 
-def check(obj: Any, is_inlined_call: bool = False, frame: Any | None = None) -> bool:
+def check(obj: object, is_inlined_call: bool = False, frame: Any | None = None) -> bool:
     return check_verbose(obj, is_inlined_call, frame).skipped
 
 
-def get_skip_reason(obj: Any) -> str:
+def get_skip_reason(obj: object) -> str:
     """Compute a descriptive skip reason for a callable. Only called on graph break."""
     if is_callable_disallowed(obj):
         return _disallowed_callable_ids.get_name(id(obj), repr(obj))
@@ -4128,13 +4128,13 @@ E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 """
 
 
-def lookup(obj: Any) -> type[VariableTracker] | None:
+def lookup(obj: object) -> type[VariableTracker] | None:
     return lookup_inner(obj)
 
 
 # also takes config.dont_skip_tracing into account
 def lookup_inner(
-    obj: Any,
+    obj: object,
     name: str | None = None,
     filename: str | None = None,
     is_direct_call: bool = True,
@@ -4175,7 +4175,7 @@ def lookup_inner(
 
 
 def _lookup_inner(
-    obj: Any,
+    obj: object,
     name: str | None = None,
     filename: str | None = None,
     is_direct_call: bool = True,

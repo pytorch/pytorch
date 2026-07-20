@@ -1053,7 +1053,7 @@ def identity(x: T) -> T:
     return x
 
 
-def hashable(x: Any) -> bool:
+def hashable(x: object) -> bool:
     try:
         hash(x)
         return True
@@ -1238,7 +1238,7 @@ if sys.version_info >= (3, 14):
     _builtin_final_typing_classes += (typing.Union,)
 
 
-def is_typing(value: Any) -> bool:
+def is_typing(value: object) -> bool:
     # _Final catches most of typing classes:
     #   - Any
     #   - Callable
@@ -1256,7 +1256,7 @@ def is_typing(value: Any) -> bool:
     )
 
 
-def is_numpy_int_type(value: Any) -> bool:
+def is_numpy_int_type(value: object) -> bool:
     if not np:
         return False
 
@@ -1275,7 +1275,7 @@ def is_numpy_int_type(value: Any) -> bool:
     )
 
 
-def is_numpy_float_type(value: Any) -> bool:
+def is_numpy_float_type(value: object) -> bool:
     if not np:
         return False
 
@@ -1386,7 +1386,7 @@ def allow_lru_cache_wrapper_trace_without_warning(
     _lru_cache_wrappers_allowed_to_trace_without_warning.add(value)
 
 
-def is_lru_cache_wrapper_trace_without_warning_allowed(value: Any) -> bool:
+def is_lru_cache_wrapper_trace_without_warning_allowed(value: object) -> bool:
     return value in _lru_cache_wrappers_allowed_to_trace_without_warning
 
 
@@ -2738,20 +2738,25 @@ def torchscript(model: Any, example_inputs: Any, verbose: bool = False) -> Any:
     return None
 
 
-def getfile(obj: Any) -> str | None:
+def getfile(obj: object) -> str | None:
     try:
-        return inspect.getfile(obj)
+        # inspect.getfile is typed to accept only a narrow union of callable
+        # and module-like objects, but at runtime it accepts any object and
+        # raises TypeError for unsupported ones, which this function catches.
+        return inspect.getfile(obj)  # type: ignore[arg-type]
     except (TypeError, OSError):
         return None
 
 
-def is_namedtuple(obj: Any) -> bool:
+def is_namedtuple(obj: object) -> bool:
     """Test if an object is a namedtuple or a torch.return_types.* quasi-namedtuple"""
     return is_namedtuple_cls(type(obj))
 
 
-def is_namedtuple_cls(cls: Any) -> bool:
+def is_namedtuple_cls(cls: object) -> bool:
     """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
+    if not isinstance(cls, type):
+        return False
     try:
         if issubclass(cls, tuple):
             module = getattr(cls, "__module__", None)
@@ -2909,7 +2914,7 @@ if has_triton_package():
 """
 
 
-def is_safe_constant(v: Any) -> bool:
+def is_safe_constant(v: object) -> bool:
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return isinstance(
@@ -2937,7 +2942,7 @@ def common_constants() -> set[int]:
     }
 
 
-def is_torch_sym(value: Any) -> TypeGuard[torch.SymBool | torch.SymInt]:
+def is_torch_sym(value: object) -> TypeGuard[torch.SymBool | torch.SymInt]:
     return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
         value.node, torch.nested._internal.nested_int.NestedIntNode
     )
@@ -4427,7 +4432,7 @@ def import_submodule(mod: types.ModuleType) -> None:
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
 
 
-def object_has_getattribute(value: Any) -> bool:
+def object_has_getattribute(value: object) -> bool:
     return class_has_getattribute(type(value))
 
 
@@ -4788,7 +4793,7 @@ def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
     return cache_key
 
 
-def is_safe_numpy_wrapper(obj: Any) -> bool:
+def is_safe_numpy_wrapper(obj: object) -> bool:
     return numpy_wrapper_cache_key(obj) is not None
 
 
@@ -4841,14 +4846,14 @@ def _disable_side_effect_safety_checks_for_current_subtracer(
     return fn(*args, **kwargs)
 
 
-def is_utils_checkpoint(obj: Any) -> bool:
+def is_utils_checkpoint(obj: object) -> bool:
     # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
 
     return obj is torch.utils.checkpoint.checkpoint
 
 
-def is_invoke_subgraph(obj: Any) -> bool:
+def is_invoke_subgraph(obj: object) -> bool:
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
 
     return obj is invoke_subgraph_placeholder
@@ -5236,7 +5241,7 @@ def get_static_address_type(t: Any) -> StaticInputType | None:
     return None
 
 
-def is_rng_state_getter_or_setter(value: Any) -> bool:
+def is_rng_state_getter_or_setter(value: object) -> bool:
     getters = (
         # The following two functions are not identical, so don't remove anyone!
         torch._C.Generator.get_state,
@@ -5253,7 +5258,7 @@ def is_rng_state_getter_or_setter(value: Any) -> bool:
     return value in (*setters, *getters)
 
 
-def is_tensor_base_attr_getter(value: Any) -> bool:
+def is_tensor_base_attr_getter(value: object) -> bool:
     return (
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
@@ -5283,7 +5288,7 @@ def is_torch_class(cls: type) -> bool:
     return module is not None and (module == "torch" or module.startswith("torch."))
 
 
-def is_torch_function_object(value: Any) -> bool:
+def is_torch_function_object(value: object) -> bool:
     return hasattr(value, "__torch_function__")
 
 
@@ -5333,10 +5338,13 @@ def to_fake_tensor(
 
 
 # NB: this works for both classes and instances
-def is_frozen_dataclass(value: Any) -> bool:
-    return (
+def is_frozen_dataclass(value: object) -> bool:
+    # value may be either a dataclass instance or a dataclass type; both are
+    # accepted by getattr_static, so the class_has_getattribute call is safe
+    # even though it is annotated to take a type.
+    return bool(
         not object_has_getattribute(value)
-        and not class_has_getattribute(value)
+        and not class_has_getattribute(value)  # type: ignore[arg-type]
         and is_dataclass(value)
         and hasattr(value, "__dataclass_params__")
         and hasattr(value.__dataclass_params__, "frozen")
@@ -5833,7 +5841,7 @@ def get_traced_code() -> list[CodeType] | None:
     return TracingContext.get_traced_code()
 
 
-def is_pybind11_enum_member(value: Any) -> bool:
+def is_pybind11_enum_member(value: object) -> bool:
     """Check if value is a pybind11 enum member (with stable hash and eq).
 
     Pybind11 enums have __members__ on their type. Unlike Python's enum.Enum,
