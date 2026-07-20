@@ -96,12 +96,14 @@ class CuptiMonitorObserver:
     # TODO: the caches grow with distinct graph_node_ids (each recapture mints new ids); we
     # could evict a graph's entries on its shutdown/recapture to bound growth in long runs.
     @property
-    def _resolver(self) -> GraphAnnotationResolver | None:
-        return self._resolver_cached
+    def _annotation_resolver(self) -> GraphAnnotationResolver | None:
+        return self._annotation_resolver_cached
 
-    @_resolver.setter
-    def _resolver(self, fn: GraphAnnotationResolver | None) -> None:
-        self._resolver_cached = functools.cache(fn) if fn is not None else None
+    @_annotation_resolver.setter
+    def _annotation_resolver(self, fn: GraphAnnotationResolver | None) -> None:
+        self._annotation_resolver_cached = (
+            functools.cache(fn) if fn is not None else None
+        )
 
     @property
     def _lane_resolver(self) -> LaneResolver | None:
@@ -120,14 +122,14 @@ class CuptiMonitorObserver:
         # Region naming (see ObserverAnnotationSettings): an enabled source folds its
         # required fields into the selection (graph: just graph_node_id; eager: extra kinds).
         if annotations is None:
-            self._resolver = None
+            self._annotation_resolver = None
             self._lane_resolver = None
             self._eager = False
         else:
-            self._resolver = annotations.graph_annotation_resolver
+            self._annotation_resolver = annotations.graph_annotation_resolver
             self._lane_resolver = annotations.graph_lane_resolver
             self._eager = annotations.support_eager_annotations
-        if self._resolver is not None:
+        if self._annotation_resolver is not None:
             activities = self._with_graph_fields(activities)
         if self._eager:
             activities = self._with_eager_fields(activities)

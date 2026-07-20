@@ -287,7 +287,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             if spec is None:
                 continue
             kind_str, builder, is_timed = spec
-            frame = builder(cols, convert, self._resolver)
+            frame = builder(cols, convert, self._annotation_resolver)
             if frame is None or _named_len(frame) == 0:
                 continue
             # Pluggable graphed-op lane assignment: attach (logical_lane, lane_name) columns
@@ -615,7 +615,8 @@ def _demangle_column(names: Any) -> Any:
 def _resolve_annotation_column(resolver, gnid: Any) -> Any:
     """Per-row graph annotation as an object column. None resolver -> all-None column, no
     calls. The resolver is memoized per graph_node_id by the observer (see
-    CuptiMonitorObserver._resolver), so distinct nodes resolve once for its lifetime."""
+    CuptiMonitorObserver._annotation_resolver), so distinct nodes resolve once for its
+    lifetime."""
     n = len(gnid)
     out = np.empty(n, dtype=object)
     if resolver is None:
