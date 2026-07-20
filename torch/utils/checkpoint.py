@@ -1085,6 +1085,17 @@ class _StopRecomputationError(Exception):
     pass
 
 
+def _current_user_saved_tensors_hooks():
+    # The (pack, unpack) pair a SavedVariable created right now would use,
+    # skipping checkpoint-internal hooks, or None. Checkpoint-internal hooks
+    # record the pair that was visible when they were pushed so that nested
+    # checkpoints resolve to the user's hooks, not each other's.
+    hooks = torch._C._autograd._top_saved_tensors_default_hooks(False)
+    while hooks is not None and getattr(hooks[0], "_checkpoint_internal", False):
+        hooks = hooks[0]._user_hooks
+    return hooks
+
+
 class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
     def __init__(self, target_frame_ref: ReferenceType, gid: GraphExecGroup | int) -> None:
         # Dynamo guards on WeakKeyDictionary internals are unstable here
@@ -1137,6 +1148,8 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             # the graph created during recomputation could be backwarded.
             return x
 
+        pack_hook._checkpoint_internal = True  # type: ignore[attr-defined]
+        pack_hook._user_hooks = _current_user_saved_tensors_hooks()  # type: ignore[attr-defined]
         super().__init__(pack_hook, unpack_hook)
 
 
@@ -1206,6 +1219,8 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             holder.handles[gid] = None
             return ret
 
+        pack_hook._checkpoint_internal = True  # type: ignore[attr-defined]
+        pack_hook._user_hooks = _current_user_saved_tensors_hooks()  # type: ignore[attr-defined]
         if frame.unpack_error_cb is not None:
             def unpack_hook_with_error_cb(holder):
                 try:
@@ -1227,9 +1242,12 @@ def _is_compiling(func, args, kwargs):
 
 class _VersionWrapper:
     # Check that cached tensors are not mutated.
-    def __init__(self, val) -> None:
+    def __init__(self, val, unpack_hook=None) -> None:
         self.val: torch.Tensor | Any = val
         self.version: int | None = val._version if isinstance(val, torch.Tensor) else None
+        # Set when val was produced by a user saved-tensors pack hook; applied
+        # on retrieval so SAC-cached tensors honor hooks like save_on_cpu.
+        self.unpack_hook = unpack_hook
 
     def get_val(self, allow_cache_entry_mutation):
         if self.version is not None and not allow_cache_entry_mutation:
@@ -1238,7 +1256,7 @@ class _VersionWrapper:
                 raise RuntimeError(
                     "Tensor cached during selective activation checkpoint has been mutated"
                 )
-        return self.val
+        return self.val if self.unpack_hook is None else self.unpack_hook(self.val)
 
 
 def _detach_helper(x):
@@ -1402,7 +1420,21 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                     node.meta["recompute"] = policy
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            self.storage[key][idx] = tree_map(lambda x: _VersionWrapper(_detach_helper(x)), out)
+            # SAC caches these tensors outside the autograd graph, bypassing
+            # SavedVariable, so simulate pack/unpack with the user's
+            # saved-tensors hooks (if any): hooks like save_on_cpu must see
+            # every tensor retained until backward, whether autograd or SAC
+            # holds it. Skipped under compile, where storage is a tracing
+            # artifact rather than a real cache.
+            user_hooks = None if is_compiling else _current_user_saved_tensors_hooks()
+
+            def wrap(x):
+                x = _detach_helper(x)
+                if user_hooks is not None and isinstance(x, torch.Tensor):
+                    return _VersionWrapper(user_hooks[0](x), unpack_hook=user_hooks[1])
+                return _VersionWrapper(x)
+
+            self.storage[key][idx] = tree_map(wrap, out)
         else:
             self.storage[key][idx] = _RECOMPUTE
         return out
