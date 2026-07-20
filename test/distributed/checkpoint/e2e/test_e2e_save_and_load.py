@@ -41,13 +41,14 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skip_but_pass_in_sandcastle_if,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    skip_if_lt_x_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
@@ -152,6 +153,8 @@ def _train(model, optim, train_steps=1):
 
 
 class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def backend(self):
         curr_backend = dist.get_default_backend_for_device(self.device_type)
@@ -212,7 +215,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def _optim(self, model):
         return torch.optim.Adam(model.parameters(), lr=0.1)
 
-    @skip_if_lt_x_gpu(4)
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 4,
+        "test requires 4+ accelerators",
+    )
     @with_comms
     @with_temp_dir
     @parametrize("compile", [True, False])
@@ -222,7 +228,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def test_e2e(self, compile, model_type):
         self._run_e2e_test(compile, model_type)
 
-    @skip_if_lt_x_gpu(4)
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 4,
+        "test requires 4+ accelerators",
+    )
     @with_comms
     @with_temp_dir
     @parametrize(
@@ -386,7 +395,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         # Validate that the non-stateful state dict was replaced with the loaded state dict
         self.assertTrue(sd.set_sd_item_called)
 
-    @skip_if_lt_x_gpu(4)
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 4,
+        "test requires 4+ accelerators",
+    )
     @with_comms
     @with_temp_dir
     def test_different_ordered_state_dict_keys(self):
@@ -445,7 +457,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         DCP.save({}, checkpoint_id=self.temp_dir)
         DCP.load({}, checkpoint_id=self.temp_dir)
 
-    @skip_if_lt_x_gpu(4)
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 4,
+        "test requires 4+ accelerators",
+    )
     @with_comms
     @with_temp_dir
     def test_partial_load(self):
@@ -484,7 +499,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                     loaded_optim_state[k][optim_key], v[optim_key], offload_to_cpu=True
                 )
 
-    @skip_if_lt_x_gpu(4)
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 4,
+        "test requires 4+ accelerators",
+    )
     @with_comms
     @with_temp_dir
     def test_overwrite(self):
@@ -510,12 +528,16 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
 
 class TestNoCPU(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def backend(self):
-        return "nccl"
+        return dist.get_default_backend_for_device(self.device_type)
 
     @with_comms
     def test_no_cpu(self):
+        if self.device_type == "cpu":
+            self.skipTest("test_no_cpu requires a non-CPU device")
         with self.assertRaisesRegex(
             AssertionError, r"A CPU backend must be enabled for async save;.*?"
         ):
@@ -524,6 +546,8 @@ class TestNoCPU(DTensorTestBase):
 
 
 class TestInitStateDict(DTensorTestBase):
+    hw_classification = HardwareClassification.CPU
+
     @with_temp_dir
     def test_init_state_dict(self):
         temp_dir = self.temp_dir
