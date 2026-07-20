@@ -117,6 +117,9 @@ class StaticallyLaunchedTritonKernel:
         # function is bound to a single device, so when device_agnostic is set we keep
         # them per device and resolve the current device at launch time. The cubin
         # (device-agnostic) is retained so it can be loaded onto additional devices.
+        # These per-device dicts assume one thread per device for a given launcher (the
+        # single-process multi-device path is sequential in practice); concurrent
+        # first-launch on two new devices would need external locking.
         self.device_agnostic: bool = False
         self.functions: dict[int, int] = {}
         self.modules: dict[int, int] = {}
@@ -238,8 +241,8 @@ class StaticallyLaunchedTritonKernel:
         """
         if ty[0] == "*":
             return "O"
-        elif ty == "nvTmaDesc":
-            raise NotImplementedError("nvTmaDesc kernels are not yet supported")
+        elif ty == "nvTmaDesc" or ty.startswith("tensordesc<"):
+            raise NotImplementedError("TMA descriptor kernels are not yet supported")
         return StaticallyLaunchedTritonKernel.type_mappings()[ty]
 
     def arg_ty_from_signature(self, src: ASTSource) -> str:

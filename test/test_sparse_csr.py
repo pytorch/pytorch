@@ -1406,6 +1406,11 @@ class TestSparseCSR(TestCase):
                 torch.randint(100, (5, 5), device=device),
                 size=100)
 
+        with self.assertRaisesRegex(RuntimeError, "size must be non-negative"):
+            torch._convert_indices_from_coo_to_csr(
+                torch.tensor([1, 2, 3], device=device),
+                size=-1)
+
         size = (5, 5)
         sparse_dim = 2
         nnz = 10
@@ -2716,12 +2721,12 @@ class TestSparseCSR(TestCase):
                 (output_zero, expected_zero),
                 (output_explicit_zeros, expected_explicit_zeros)
         ]:
-            self.assertEqual(output, expected, f"This operator ({op.name}) should not be supported for "
+            self.assertEqual(output, expected, lambda msg: f"{msg}\nThis operator ({op.name}) should not be supported for "
                              "Sparse CSR as it breaks 0->0 correspondence.")
 
         for inp in [zero.to_sparse_csr(), tensor_explicit_zeros]:
             self.assertEqual(op(inp).values().numel(), inp.values().numel(),
-                             f"{op.name} fails to preserve sparsity pattern.")
+                             lambda msg: f"{msg}\n{op.name} fails to preserve sparsity pattern.")
 
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_out(self, device, dtype, op):

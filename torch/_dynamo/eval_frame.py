@@ -44,7 +44,7 @@ from collections.abc import Generator, Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
 from unittest.mock import patch
 
 import sympy
@@ -70,9 +70,15 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     unsupported,
 )
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
+from torch._dynamo.types import (
+    CompilerConfig,
+    CompilerConfigProvider,
+    ConvertFrameReturn,
+    FrameAction,
+    FrameExecStrategy,
+)
 from torch._export.utils import _compiling_state_context
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -179,9 +185,22 @@ else:
             return set_eval_frame(callback)
 
 
+# The set of valid stance strings accepted by torch.compiler.set_stance. Kept as
+# a shared alias so producers (set_stance) and the exhaustive consumer
+# (_callback_from_stance) stay in sync at type-check time.
+StanceStr = Literal[
+    "default",
+    "eager_then_compile",
+    "aot_eager_then_compile",
+    "force_eager",
+    "eager_on_recompile",
+    "fail_on_recompile",
+]
+
+
 @dataclass
 class DynamoStance:
-    stance: str = "default"
+    stance: StanceStr = "default"
     skip_guard_eval_unsafe: bool = False
     backend: str | Callable[..., Any] | None = None
 
@@ -339,7 +358,7 @@ def _get_or_add_example_inputs(frame: DynamoFrameType) -> list[Any]:
 
 
 def _create_delayed_compile_callback(
-    callback: DynamoCallback, stance: str
+    callback: DynamoCallback, stance: StanceStr
 ) -> Callable[..., Any]:
     def callback_fn(*args: Any, **kwargs: Any) -> convert_frame.ConvertFrameReturn:
         frame = args[0]
@@ -438,7 +457,7 @@ class OptimizedModule(torch.nn.Module):
     """
 
     _torchdynamo_orig_callable: Callable[..., Any]
-    get_compiler_config: Callable[[], Any]
+    get_compiler_config: Callable[[], CompilerConfig | None]
 
     _opt_mod_attributes = {
         "_orig_mod",
@@ -496,7 +515,7 @@ class OptimizedModule(torch.nn.Module):
             # Invoke hooks outside of dynamo then pickup the inner frame
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
-        if hasattr(self._orig_mod, "_initialize_hook"):
+        if inspect.getattr_static(self._orig_mod, "_initialize_hook", None) is not None:
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
@@ -623,8 +642,9 @@ class OptimizedModule(torch.nn.Module):
 
     def _call_lazy_check(self, *args: Any, **kwargs: Any) -> Any:
         if (
-            hasattr(self._orig_mod, "_initialize_hook")
-            and hasattr(self._orig_mod, "_infer_parameters")
+            inspect.getattr_static(self._orig_mod, "_initialize_hook", None) is not None
+            and inspect.getattr_static(self._orig_mod, "_infer_parameters", None)
+            is not None
             and callable(self._orig_mod._infer_parameters)
         ):
             # In the case of a lazy module, we want to run
@@ -672,9 +692,12 @@ def innermost_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
     the innermost function to pass on the optimize, run, disable etc.
     """
+    # getattr_static so probing for these internal attributes never runs a
+    # user-defined __getattr__, which may not tolerate unknown names.
     unaltered_fn = fn
     while (
-        hasattr(unaltered_fn, "_torchdynamo_orig_callable")
+        inspect.getattr_static(unaltered_fn, "_torchdynamo_orig_callable", None)
+        is not None
         # Only follow the chain if _torchdynamo_wrapper_id matches id(fn).
         # This prevents following chains in two cases:
         # 1. Bound methods: id(bound_method) != id(wrapper_function), so we
@@ -682,8 +705,10 @@ def innermost_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
         # 2. functools.wraps copies: When functools.wraps copies
         #    _torchdynamo_orig_callable from a wrapped function, the copied
         #    _torchdynamo_wrapper_id won't match the outer wrapper's id.
-        and getattr(unaltered_fn, "_torchdynamo_wrapper_id", None) == id(unaltered_fn)
+        and inspect.getattr_static(unaltered_fn, "_torchdynamo_wrapper_id", None)
+        == id(unaltered_fn)
     ):
+        # pyrefly: ignore [missing-attribute]
         unaltered_fn = unaltered_fn._torchdynamo_orig_callable
         if not callable(unaltered_fn):
             raise AssertionError(
@@ -815,7 +840,7 @@ class _TorchDynamoContext:
         error_on_graph_break: bool | None = None,
         export: bool = False,
         dynamic: bool | None = None,
-        compiler_config: Any | None = None,
+        compiler_config: CompilerConfig | None = None,
         package: CompilePackage | None = None,
         hooks: Hooks | None = None,
         isolate_recompiles: bool = False,
@@ -916,7 +941,7 @@ class _TorchDynamoContext:
 
     def __call__(self, fn: Any) -> Any:
         # public api for compiler config/options
-        def get_compiler_config() -> Any:
+        def get_compiler_config() -> CompilerConfig | None:
             return self.compiler_config
 
         from .package import DynamoCache
@@ -1000,7 +1025,8 @@ class _TorchDynamoContext:
 
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
-            if hasattr(new_mod, "get_compiler_config"):
+            # check mod, not new_mod: OptimizedModule.__getattr__ delegates to mod
+            if inspect.getattr_static(mod, "get_compiler_config", None) is not None:
                 raise AssertionError(
                     "new_mod already has a get_compiler_config attribute"
                 )
@@ -1304,7 +1330,7 @@ class OptimizeContext(_TorchDynamoContext):
         error_on_graph_break: bool | None = None,
         export: bool = False,
         dynamic: bool | None = None,
-        compiler_config: Any | None = None,
+        compiler_config: CompilerConfig | None = None,
         rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator] | None = None,
         package: CompilePackage | None = None,
         hooks: Hooks | None = None,
@@ -1486,7 +1512,7 @@ def _optimize_catch_errors(
     error_on_graph_break: bool | None = None,
     export: bool = False,
     dynamic: bool | None = None,
-    compiler_config: Any | None = None,
+    compiler_config: CompilerConfig | None = None,
     rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator] | None = None,
     package: CompilePackage | None = None,
     isolate_recompiles: bool = False,
@@ -1799,7 +1825,7 @@ def _optimize(
         and not config.debug_force_graph_break_on_leaf_return,
         dynamic=dynamic,
         compiler_config=(
-            backend.get_compiler_config()
+            cast(CompilerConfigProvider, backend).get_compiler_config()
             if hasattr(backend, "get_compiler_config")
             else None
         ),
@@ -2082,7 +2108,7 @@ def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -
     ] + list(common_constant_types)
 
     def is_supported_type(val: Any) -> bool:
-        return isinstance(val, tuple(supported_types)) or is_opaque_type(type(val))
+        return isinstance(val, tuple(supported_types)) or is_custom_class(type(val))
 
     value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
     # We only check that the outputs are not None. Inputs can be None.
