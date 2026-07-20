@@ -508,6 +508,8 @@ def forward(self, x):
         self.assertEqual(res[0].arg._type, "as_sym_ints")
 
     def test_nested_tuple_input(self):
+        # HOP operands are flattened before they reach the serialized HOP node,
+        # so nested tuple preservation is covered at the serde argument layer.
         serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
         serialized = serializer.serialize_input((1, (2, 3)))
         self.assertEqual(serialized.type, "as_tuple")

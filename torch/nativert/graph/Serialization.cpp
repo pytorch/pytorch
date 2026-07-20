@@ -1,9 +1,10 @@
-#include <c10/util/string_view.h>
+#include <c10/util/Enumerate.h>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 #include <torch/nativert/graph/Serialization.h>
 #include <algorithm>
 #include <limits>
+#include <string_view>
 namespace torch::nativert {
 
 namespace {
@@ -13,14 +14,23 @@ std::unique_ptr<Graph> jsonToSubgraph(
     const torch::_export::GraphSignature* signature,
     bool loadNodeMetadata);
 
-bool isEmptyTuple(const torch::_export::Argument& arg) {
-  return arg.tag() == torch::_export::Argument::Tag::AS_TUPLE &&
-      arg.get_as_tuple().empty();
-}
-
-bool isHigherOrderTarget(std::string_view target) {
-  static constexpr std::string_view prefix = "torch.ops.higher_order.";
-  return c10::starts_with(target, prefix);
+bool isHigherOrderOperandTuple(
+    std::string_view target,
+    std::string_view inputName,
+    size_t inputIndex) {
+  if (!inputName.empty()) {
+    return false;
+  }
+  if (target == "torch.ops.higher_order.while_loop") {
+    return inputIndex == 2 || inputIndex == 3;
+  }
+  if (target == "torch.ops.higher_order.cond") {
+    return inputIndex == 3;
+  }
+  if (target == "torch.ops.higher_order.run_const_graph") {
+    return inputIndex == 1;
+  }
+  return false;
 }
 
 bool isSymIntTupleElement(const torch::_export::Argument& arg) {
@@ -680,15 +690,20 @@ std::unique_ptr<Graph> jsonToSubgraph(
 
     std::vector<NamedArgument> args;
     std::vector<Attribute> attributes;
-    for (const auto& input : jsonNode.get_inputs()) {
+    for (const auto& [inputIndex, input] :
+         c10::enumerate(jsonNode.get_inputs())) {
       // We handle constants and symbolic inputs differently.
       const auto& arg = input.get_arg();
-      // Higher-order kernels expect operand tuples as TensorList values. An
-      // empty operand tuple has no symbolic elements, so force it through the
-      // symbolic path to materialize an empty ListPack.
-      const bool symbolicEmptyTuple =
-          isEmptyTuple(arg) && isHigherOrderTarget(jsonNode.get_target());
-      if (isSymbolic(arg) || symbolicEmptyTuple) {
+      // Higher-order kernels expect positional operand tuples as list values.
+      // Constant operand tuples usually deserialize as attributes, but these
+      // HOP operand slots need graph inputs. Empty HOP operand tuples become
+      // empty TensorLists, the least-specific empty list type nativert HOP
+      // kernels can consume today.
+      const bool higherOrderOperandTuple =
+          arg.tag() == torch::_export::Argument::Tag::AS_TUPLE &&
+          isHigherOrderOperandTuple(
+              jsonNode.get_target(), input.get_name(), inputIndex);
+      if (isSymbolic(arg) || higherOrderOperandTuple) {
         // Symbolic values are made part of the inputs to the node
         node->addInput(NamedArgument{
             input.get_name(), symbolicToValue(input.get_arg(), *graph, node)});

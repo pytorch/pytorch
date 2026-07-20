@@ -13,8 +13,8 @@ namespace torch::nativert {
 
 namespace {
 
-bool isSymbolicOutput(torch::_export::Argument::Tag t) {
-  switch (t) {
+bool isSymbolicOutput(const torch::_export::Argument& arg) {
+  switch (arg.tag()) {
     case torch::_export::Argument::Tag::AS_TENSOR:
     case torch::_export::Argument::Tag::AS_TENSORS:
     case torch::_export::Argument::Tag::AS_NESTED_TENSORS:
@@ -28,21 +28,18 @@ bool isSymbolicOutput(torch::_export::Argument::Tag t) {
     case torch::_export::Argument::Tag::AS_SYM_FLOATS:
     case torch::_export::Argument::Tag::AS_CUSTOM_OBJ:
       return true;
+    case torch::_export::Argument::Tag::AS_TUPLE:
+      return std::any_of(
+          arg.get_as_tuple().begin(),
+          arg.get_as_tuple().end(),
+          [](const auto& element) { return isSymbolicOutput(*element); });
     default:
       return false;
   }
 }
 
 bool hasSymbolicElement(const torch::_export::Argument& arg) {
-  if (arg.tag() != torch::_export::Argument::Tag::AS_TUPLE) {
-    return isSymbolicOutput(arg.tag());
-  }
-  for (const auto& element : arg.get_as_tuple()) {
-    if (hasSymbolicElement(*element)) {
-      return true;
-    }
-  }
-  return false;
+  return isSymbolicOutput(arg);
 }
 
 void appendUserInputNames(

@@ -53,4 +53,19 @@ TEST(OpKernelTest, GetReadableArgs) {
   EXPECT_EQ(result, expected);
 }
 
+TEST(OpKernelTest, PrefillConvertsTupleConstantForListSchemaArg) {
+  auto graph = Graph::createGraph();
+  Node* node = graph->insertNode("test.op.default");
+  node->addAttribute(
+      {"size", std::vector<c10::IValue>{c10::IValue(2), c10::IValue(3)}});
+
+  c10::FunctionSchema schema = c10::FunctionSchema(
+      "test_op", "", {c10::Argument("size", c10::ListType::ofSymInts())}, {});
+
+  Arguments args = prefillStackWithStaticArgs(node, schema);
+
+  ASSERT_TRUE(args.getStatic(0).isIntList());
+  EXPECT_EQ(args.getStatic(0).toIntVector(), (std::vector<int64_t>{2, 3}));
+}
+
 } // namespace torch::nativert
