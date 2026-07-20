@@ -3,6 +3,11 @@
 add_library(aoti_custom_ops SHARED custom_ops.cpp)
 target_link_libraries(aoti_custom_ops torch)
 
+include(GNUInstallDirs)
+if(NOT TORCH_INSTALL_LIB_DIR)
+  set(TORCH_INSTALL_LIB_DIR ${CMAKE_INSTALL_LIBDIR})
+endif()
+
 if(INSTALL_TEST)
-  install(TARGETS aoti_custom_ops DESTINATION lib)
+  install(TARGETS aoti_custom_ops DESTINATION ${TORCH_INSTALL_LIB_DIR})
 endif()
