@@ -331,7 +331,7 @@ class CondAutogradOp(torch.autograd.Function):
             false_fn,
             operands,
         )
-        # We snapshot the dispatch keys in forward for materializing the
+        # We snapshot the dispatch keys in forward for materializing
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
@@ -680,6 +680,11 @@ def _merge_output(
             nxt_merged_stride_expr = merged_strides[i] * merged_size[i]
             a_stride_expr[_maybe_expr(a_val * a_ex_size[i])] = nxt_merged_stride_expr
             b_stride_expr[_maybe_expr(b_val * b_ex_size[i])] = nxt_merged_stride_expr
+            # fake tensors accumulate contiguous strides as stride * max(size, 1)
+            a_max_key = _maybe_expr(a_val * torch.sym_max(a_ex_size[i], 1))
+            b_max_key = _maybe_expr(b_val * torch.sym_max(b_ex_size[i], 1))
+            a_stride_expr.setdefault(a_max_key, nxt_merged_stride_expr)
+            b_stride_expr.setdefault(b_max_key, nxt_merged_stride_expr)
         return merged_strides
 
     merged_stride: list[int | torch.SymInt] = _bound_stride(

@@ -12,6 +12,7 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._inductor.heuristics.registry import register_template_heuristic
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
@@ -43,7 +44,6 @@ from ...utils import (
 )
 from ...virtualized import V
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
-from .registry import register_template_heuristic
 from .triton_addmm import AddMMConfigMixin
 
 
@@ -2201,9 +2201,20 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         dtype = kernel_inputs.dtype()
         # Get the appropriate config generator
         configs = self._get_config_generator()
+        # origami is a C++ perf model that requires concrete m, n, k; feeding it
+        # sympy symbols (dynamic shapes, e.g. torch.cat with k=s0+s1) yields no
+        # usable selection, so restrict origami to fully static problems and let
+        # symbolic shapes fall through to the regular config generator below.
+        mnk_static = all(not getattr(x, "free_symbols", None) for x in (m, n, k))
+        if origami is not None and not mnk_static:
+            log.debug("Origami skipped: symbolic m/n/k, using regular config generator")
         # `origami is not None` encodes the module-load gate (see top of file);
         # only DEFAULT search space is supported here.
-        if origami is not None and config.max_autotune_gemm_search_space == "DEFAULT":
+        if (
+            origami is not None
+            and config.max_autotune_gemm_search_space == "DEFAULT"
+            and mnk_static
+        ):
             # Extract device and strides for origami GEMM
             device = kernel_inputs.device()
             strides = kernel_inputs.strides_symbolic()
