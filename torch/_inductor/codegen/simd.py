@@ -1508,7 +1508,15 @@ class _IterationSpace:
     values: Sequence[sympy.Expr]
 
 
-RemappedRangeValue = CSEVariable | tuple[CSEVariable, ...]
+@dataclasses.dataclass(frozen=True)
+class _ContiguousSubParentRemappedValue:
+    parts: tuple[CSEVariable, ...]
+    child_extent: sympy.Expr
+
+
+RemappedRangeValue = (
+    CSEVariable | tuple[CSEVariable, ...] | _ContiguousSubParentRemappedValue
+)
 
 
 def _select_lane(
@@ -1525,7 +1533,30 @@ def _resolve_remapped_value(
     value: RemappedRangeValue,
     index: sympy.Expr,
     name: str,
+    kernel: SIMDKernel[Any],
 ) -> CSEVariable:
+    if isinstance(value, _ContiguousSubParentRemappedValue):
+        factor = len(value.parts)
+        # The lane is the constant chunk offset; fall back to symbolic
+        # simplification for equivalent forms that keep the offset in the index.
+        offset = sympy_subs(index, dict.fromkeys(index.free_symbols, 0))
+        lane = FloorDiv(
+            sympy.Mod(offset, factor * value.child_extent), value.child_extent
+        )
+        lane = V.graph.sizevars.simplify(lane)
+        part = _select_lane(value.parts, lane)
+        if part is not None:
+            return part
+        lane = FloorDiv(
+            sympy.Mod(index, factor * value.child_extent), value.child_extent
+        )
+        lane = kernel.simplify_indexing(lane)
+        part = _select_lane(value.parts, lane)
+        if part is not None:
+            return part
+        raise AssertionError(
+            f"contiguous sub-parent load for {name!r} has non-constant lane {lane}"
+        )
     if not isinstance(value, tuple):
         return value
     lane = V.graph.sizevars.simplify(sympy.Mod(index, len(value)))
@@ -1992,9 +2023,6 @@ class _GroupedReductionLayout:
         source_layout: scheduler.NestedReduction.SubParentSourceLayout,
     ) -> bool:
         assert value.dtype is not None
-        assert (
-            source_layout is scheduler.NestedReduction.SubParentSourceLayout.INTERLEAVED
-        )
         parent_dim = self.parent_dim(value)
         if parent_dim is None or parent_dim == "1":
             family.remapped_values[name] = value
@@ -2003,6 +2031,11 @@ class _GroupedReductionLayout:
             family.remapped_values[name] = value
             return True
         if parent_dim != self.parent_block:
+            if (
+                source_layout
+                is scheduler.NestedReduction.SubParentSourceLayout.CONTIGUOUS
+            ):
+                return False
             family.remapped_values[name] = self._broadcast_value_to_axis_resolution(
                 kernel,
                 value,
@@ -2017,19 +2050,41 @@ class _GroupedReductionLayout:
         factor_dim = str(factor)
         shape = value.shape
         assert shape is not None
-        if len(shape) == 2:
-            passthrough_dim = str(shape[1 - self.parent_axis])
-            reshape_shape = (passthrough_dim, child_block, factor_dim)
-            part_shape = (passthrough_dim, child_block)
+        if source_layout is scheduler.NestedReduction.SubParentSourceLayout.CONTIGUOUS:
+            if len(shape) == 2:
+                passthrough_dim = str(shape[1 - self.parent_axis])
+                reshape_shape = (passthrough_dim, factor_dim, child_block)
+                permute_dims = (0, 2, 1)
+                part_shape = (passthrough_dim, child_block)
+            else:
+                reshape_shape = (factor_dim, child_block)
+                permute_dims = (1, 0)
+                part_shape = (child_block,)
+            parts = tuple(
+                kernel.cse.newvar(dtype=value.dtype, shape=part_shape)
+                for _ in range(factor)
+            )
+            kernel.emit_split_via_reshape_permute(
+                value, reshape_shape, permute_dims, tuple(map(str, parts))
+            )
+            family.remapped_values[name] = _ContiguousSubParentRemappedValue(
+                parts,
+                FloorDiv(self.local_reduction_size, factor),
+            )
         else:
-            reshape_shape = (child_block, factor_dim)
-            part_shape = (child_block,)
-        parts = tuple(
-            kernel.cse.newvar(dtype=value.dtype, shape=part_shape)
-            for _ in range(factor)
-        )
-        kernel.emit_split_via_reshape(value, reshape_shape, tuple(map(str, parts)))
-        family.remapped_values[name] = parts
+            if len(shape) == 2:
+                passthrough_dim = str(shape[1 - self.parent_axis])
+                reshape_shape = (passthrough_dim, child_block, factor_dim)
+                part_shape = (passthrough_dim, child_block)
+            else:
+                reshape_shape = (child_block, factor_dim)
+                part_shape = (child_block,)
+            parts = tuple(
+                kernel.cse.newvar(dtype=value.dtype, shape=part_shape)
+                for _ in range(factor)
+            )
+            kernel.emit_split_via_reshape(value, reshape_shape, tuple(map(str, parts)))
+            family.remapped_values[name] = parts
         return True
 
     def _broadcast_value_to_axis_resolution(
@@ -2211,7 +2266,7 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         value = self._family.remapped_values.get(name)
         if value is not None:
-            return _resolve_remapped_value(value, index, name)
+            return _resolve_remapped_value(value, index, name, self._kernel)
         remapped_index = self._family.remap_index(index)
         with self._family.ensure_active(self._kernel):
             value = self._inner.load(name, remapped_index)
@@ -3627,7 +3682,10 @@ class SIMDScheduling(BaseScheduling):
         metrics.codegen_nested_reduction += 1
         sub_parent_factor = sub_parent_epilogue_plan.sub_parent_factor
         sub_parent_source_layouts = sub_parent_epilogue_plan.source_layouts
-        if not V.graph.sizevars.statically_known_equals(numel, 1):
+        if not V.graph.sizevars.statically_known_equals(numel, 1) and not any(
+            layout is scheduler.NestedReduction.SubParentSourceLayout.CONTIGUOUS
+            for layout in sub_parent_source_layouts.values()
+        ):
             # Keep enough rows per program to amortize the parent-tile load and
             # epilogue split for the standalone packing pattern.
             kernel.min_xblock = 128

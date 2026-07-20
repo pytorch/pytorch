@@ -5969,6 +5969,40 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         reshaped = self._reshape_expr(value, reshape_shape)
         self.compute.writeline(f"{', '.join(part_names)} = tl.split({reshaped})")
 
+    def emit_split_via_reshape_permute(
+        self,
+        value: CSEVariable,
+        reshape_shape: Sequence[sympy.Expr | int | str],
+        permute_dims: Sequence[int],
+        part_names: Sequence[str],
+    ) -> None:
+        reshaped = self._reshape_expr(value, reshape_shape)
+        permuted = f"tl.permute({reshaped}, ({', '.join(map(str, permute_dims))}))"
+        factor = len(part_names)
+        assert factor > 1 and factor & (factor - 1) == 0
+        permuted_shape = tuple(reshape_shape[i] for i in permute_dims)
+
+        def emit_recursive_split(
+            expr: str,
+            names: Sequence[str],
+            shape: Sequence[sympy.Expr | int | str],
+        ) -> None:
+            if len(names) == 2:
+                self.compute.writeline(f"{', '.join(names)} = tl.split({expr})")
+                return
+            half = len(names) // 2
+            split_shape = (*shape[:-1], half, 2)
+            even = f"{names[0]}_to_{names[-2]}"
+            odd = f"{names[1]}_to_{names[-1]}"
+            self.compute.writeline(
+                f"{even}, {odd} = tl.split("
+                f"tl.reshape({expr}, {triton_shape_str(split_shape)}))"
+            )
+            emit_recursive_split(even, names[0::2], (*shape[:-1], half))
+            emit_recursive_split(odd, names[1::2], (*shape[:-1], half))
+
+        emit_recursive_split(permuted, part_names, permuted_shape)
+
     def emit_broadcast_via_reshape(
         self,
         value: CSEVariable,

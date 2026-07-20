@@ -579,6 +579,9 @@ class NestedReduction:
         # The parent grouped axis is split as child, lane, so parent_r =
         # factor * child_r + lane. This covers NVFP4 even/odd packing.
         INTERLEAVED = enum.auto()
+        # The parent grouped axis is split as lane, child, so parent_r =
+        # lane * child_extent + child_r. This covers chunk/split consumers.
+        CONTIGUOUS = enum.auto()
 
     @dataclasses.dataclass(frozen=True)
     class PointwiseDomainContext:
@@ -651,11 +654,19 @@ class NestedReduction:
             full_numel,
             reduction_reads,
             sub_parent_factor,
+            rnumel_hint,
         )
         if source_deps is None:
             return None
         if not source_deps:
             return None
+        if not cls._sub_parent_epilogue_layouts_profitable(
+            numel,
+            rnumel_hint,
+            tuple(layout for _dep, layout in source_deps),
+        ):
+            return None
+
         planned_source_deps = tuple(dep for dep, _layout in source_deps)
         epilogue_node_set = OrderedSet(epilogue_nodes)
         if not cls._sub_parent_epilogue_outputs_unread(nodes, epilogue_node_set):
@@ -771,6 +782,21 @@ class NestedReduction:
         return None
 
     @classmethod
+    def _sub_parent_epilogue_layouts_profitable(
+        cls,
+        numel: sympy.Expr,
+        rnumel_hint: int,
+        source_layouts: tuple[NestedReduction.SubParentSourceLayout, ...],
+    ) -> bool:
+        if not any(
+            layout is cls.SubParentSourceLayout.CONTIGUOUS for layout in source_layouts
+        ):
+            return True
+        if rnumel_hint <= 4096:
+            return True
+        return V.graph.sizevars.statically_known_geq(numel, 128)
+
+    @classmethod
     def _sub_parent_epilogue_source_deps(
         cls,
         nodes: Sequence[BaseSchedulerNode],
@@ -778,6 +804,7 @@ class NestedReduction:
         full_numel: sympy.Expr,
         reduction_reads: dict[str, list[MemoryDep]],
         sub_parent_factor: int,
+        parent_rnumel: int | None,
         renames: dict[str, str] | None = None,
     ) -> tuple[tuple[MemoryDep, NestedReduction.SubParentSourceLayout], ...] | None:
         source_deps: list[tuple[MemoryDep, NestedReduction.SubParentSourceLayout]] = []
@@ -841,6 +868,21 @@ class NestedReduction:
                     if not add_source(
                         reduction_dep,
                         cls.SubParentSourceLayout.INTERLEAVED,
+                    ):
+                        return None
+                    continue
+                if (
+                    parent_rnumel is not None
+                    and cls._contiguous_sub_parent_epilogue_read_matches_reduction_read(
+                        dep,
+                        reduction_dep,
+                        sub_parent_factor,
+                        parent_rnumel,
+                    )
+                ):
+                    if not add_source(
+                        reduction_dep,
+                        cls.SubParentSourceLayout.CONTIGUOUS,
                     ):
                         return None
                     continue
@@ -976,6 +1018,114 @@ class NestedReduction:
 
         expected = reduction_dep.index.subs(substitutions)
         return V.graph.sizevars.statically_known_equals(dep.index, expected)
+
+    @staticmethod
+    def _contiguous_sub_parent_epilogue_read_matches_reduction_read(
+        dep: MemoryDep,
+        reduction_dep: MemoryDep,
+        sub_parent_factor: int,
+        parent_rnumel: int,
+    ) -> bool:
+        if dep.num_vars == 0 or not V.graph.sizevars.statically_known_equals(
+            sub_parent_factor * dep.size[-1], parent_rnumel
+        ):
+            return False
+        if len(dep.var_names) != len(reduction_dep.var_names):
+            return NestedReduction._contiguous_sub_parent_epilogue_read_matches_flat_reduction_read(
+                dep,
+                reduction_dep,
+                sub_parent_factor,
+                parent_rnumel,
+            )
+
+        half_dim = NestedReduction._unique_trailing_sub_parent_dim(
+            dep, reduction_dep, sub_parent_factor
+        )
+        if half_dim is None:
+            return False
+
+        substitutions_by_lane: list[dict[sympy.Symbol, sympy.Expr]] = [
+            {} for _ in range(sub_parent_factor)
+        ]
+        for i, reduction_var in enumerate(reduction_dep.var_names):
+            dep_var = dep.var_names[i]
+            if i == half_dim:
+                for lane, substitutions in enumerate(substitutions_by_lane):
+                    substitutions[reduction_var] = dep_var + lane * dep.size[half_dim]
+            elif V.graph.sizevars.statically_known_equals(
+                reduction_dep.size[i], dep.size[i]
+            ):
+                for substitutions in substitutions_by_lane:
+                    substitutions[reduction_var] = dep_var
+            else:
+                return False
+
+        matching_lanes = [
+            lane
+            for lane, substitutions in enumerate(substitutions_by_lane)
+            if V.graph.sizevars.statically_known_equals(
+                dep.index,
+                reduction_dep.index.subs(substitutions),
+            )
+        ]
+        return len(matching_lanes) == 1 and V.graph.sizevars.statically_known_equals(
+            NestedReduction._contiguous_sub_parent_epilogue_emitted_lane(
+                dep, sub_parent_factor, parent_rnumel
+            ),
+            matching_lanes[0],
+        )
+
+    @staticmethod
+    def _contiguous_sub_parent_epilogue_read_matches_flat_reduction_read(
+        dep: MemoryDep,
+        reduction_dep: MemoryDep,
+        sub_parent_factor: int,
+        parent_rnumel: int,
+    ) -> bool:
+        if reduction_dep.num_vars != 1 or dep.num_vars == 0:
+            return False
+        half_dim = len(dep.var_names) - 1
+        reduction_var = reduction_dep.var_names[0]
+        parent_index = sympy.S.Zero
+        stride = sympy.S.One
+        for i in reversed(range(dep.num_vars)):
+            parent_index += dep.var_names[i] * stride
+            size = dep.size[i] * sub_parent_factor if i == half_dim else dep.size[i]
+            stride *= size
+        if not V.graph.sizevars.statically_known_equals(
+            reduction_dep.size[0],
+            stride,
+        ):
+            return False
+
+        matching_lanes = [
+            lane
+            for lane in range(sub_parent_factor)
+            if V.graph.sizevars.statically_known_equals(
+                dep.index,
+                reduction_dep.index.subs(
+                    {reduction_var: parent_index + lane * dep.size[half_dim]}
+                ),
+            )
+        ]
+        return len(matching_lanes) == 1 and V.graph.sizevars.statically_known_equals(
+            NestedReduction._contiguous_sub_parent_epilogue_emitted_lane(
+                dep, sub_parent_factor, parent_rnumel
+            ),
+            matching_lanes[0],
+        )
+
+    @staticmethod
+    def _contiguous_sub_parent_epilogue_emitted_lane(
+        dep: MemoryDep,
+        sub_parent_factor: int,
+        parent_rnumel: int,
+    ) -> sympy.Expr:
+        child_extent = FloorDiv(parent_rnumel, sub_parent_factor)
+        offset = sympy_subs(dep.index, dict.fromkeys(dep.index.free_symbols, 0))
+        return V.graph.sizevars.simplify(
+            FloorDiv(sympy.Mod(offset, parent_rnumel), child_extent)
+        )
 
     @classmethod
     def _get_grouped_reduction_and_size(
@@ -3637,6 +3787,7 @@ class FusedNestedReductions(FusedSchedulerNode):
             fullres_numel,
             reduction_reads,
             2,
+            None,
             renames,
         )
         if source_deps is None:
