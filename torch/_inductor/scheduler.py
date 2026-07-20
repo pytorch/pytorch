@@ -199,22 +199,6 @@ class FusionMemoryContext:
     baseline_peak: int
     baseline_live_before: list[int]
     baseline_live_after: list[int]
-    round_index: int = 0
-    timeline_buffers: int = 0
-    stats: defaultdict[str, float] = dataclasses.field(
-        default_factory=lambda: defaultdict(float)
-    )
-    timings: defaultdict[str, float] = dataclasses.field(
-        default_factory=lambda: defaultdict(float)
-    )
-
-
-def _debug_fusion_memory_timeline() -> bool:
-    return os.environ.get("TORCHINDUCTOR_FUSION_MEMORY_TIMELINE_DEBUG") == "1"
-
-
-def _bytes_to_mib(num_bytes: float) -> float:
-    return num_bytes / (1024 * 1024)
 
 
 def _is_gpu_triton_backend(
@@ -4273,7 +4257,6 @@ class Scheduler:
         self._populate_stream_assignments()
 
         self._fusion_memory_context: FusionMemoryContext | None = None
-        self._fusion_memory_round = 0
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
@@ -6252,19 +6235,13 @@ class Scheduler:
                 peak_allowed_increase = (
                     self.fusion_memory_timeline_peak_allowed_increase_bytes()
                 )
-                if peak_allowed_increase is not None:
-                    ctx = self._fusion_memory_context
-                    debug = ctx is not None and _debug_fusion_memory_timeline()
-                    if debug:
-                        guard_start = time.perf_counter()
-                        ctx.stats["guard_pairs"] += 1
-                    regresses_peak = self.fusion_regresses_estimated_peak_memory(
+                if (
+                    peak_allowed_increase is not None
+                    and self.fusion_regresses_estimated_peak_memory(
                         node1, node2, peak_allowed_increase
                     )
-                    if debug:
-                        ctx.timings["guard_s"] += time.perf_counter() - guard_start
-                    if regresses_peak:
-                        continue
+                ):
+                    continue
                 fusion_res = self.speedup_by_fusion(node1, node2)
                 if fusion_res.callable_fn is not None:
                     pending_fusion = PendingFusion(
@@ -6363,8 +6340,6 @@ class Scheduler:
 
         prev_fusion_memory_context = self._fusion_memory_context
         peak_allowed_increase = self.fusion_memory_timeline_peak_allowed_increase_bytes()
-        debug = _debug_fusion_memory_timeline()
-        ctx = None
         self._fusion_memory_context = None
         try:
             # These are potential fusions which we are async compiling,
@@ -6381,57 +6356,25 @@ class Scheduler:
                 tuple[BaseSchedulerNode, BaseSchedulerNode]
             ] = []
 
-            if debug:
-                possible_start = time.perf_counter()
             possible_fusions = self.get_possible_fusions(
                 nodes,
                 is_reorder_round,
-                select_highest_priority=peak_allowed_increase is None,
-                sort_results=peak_allowed_increase is None,
             )
-            if debug:
-                possible_elapsed = time.perf_counter() - possible_start
 
-            if peak_allowed_increase is not None and possible_fusions:
-                self._fusion_memory_context = self._init_fusion_memory_context(nodes)
-                ctx = self._fusion_memory_context
-                self._fusion_memory_round += 1
-                ctx.round_index = self._fusion_memory_round
-                if debug:
-                    ctx.timings["candidate_search_s"] += possible_elapsed
-                    ctx.timings["get_possible_fusions_s"] += possible_elapsed
-                    ctx.stats["possible_fusions_unfiltered"] += len(possible_fusions)
-
-                if debug:
-                    priority_start = time.perf_counter()
+            if possible_fusions:
+                if peak_allowed_increase is not None:
+                    self._fusion_memory_context = self._init_fusion_memory_context(
+                        nodes
+                    )
                 possible_fusions = self.get_possible_fusions_with_highest_priority(
                     possible_fusions
                 )
-                if debug:
-                    priority_elapsed = time.perf_counter() - priority_start
-                    ctx.timings["priority_filter_s"] += priority_elapsed
-                    ctx.timings["get_possible_fusions_s"] += priority_elapsed
-
-                if debug:
-                    sort_start = time.perf_counter()
                 possible_fusions.sort(key=self.score_fusion_key, reverse=True)
-                if debug:
-                    sort_elapsed = time.perf_counter() - sort_start
-                    ctx.timings["score_sort_s"] += sort_elapsed
-                    ctx.timings["get_possible_fusions_s"] += sort_elapsed
-                    ctx.stats["possible_fusions"] += len(possible_fusions)
 
             if config.max_autotune_gemm or config.max_autotune:
                 possible_fusions = self._handle_template_overlap(
                     possible_fusions, deferred_prologue_fusions
                 )
-                if ctx is not None and debug:
-                    ctx.stats["possible_after_template_overlap"] += len(
-                        possible_fusions
-                    )
-                    ctx.stats["deferred_prologue_fusions"] += len(
-                        deferred_prologue_fusions
-                    )
 
             self._try_fusion_pairs(
                 possible_fusions,
@@ -6457,65 +6400,11 @@ class Scheduler:
                     template_fusion_nodes, fused_nodes
                 )
         finally:
-            if ctx is not None and debug:
-                self._log_fusion_memory_timeline_stats(
-                    ctx, len(nodes), len(fused_nodes), is_reorder_round
-                )
             self._fusion_memory_context = prev_fusion_memory_context
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
         return nodes
-
-    def _log_fusion_memory_timeline_stats(
-        self,
-        ctx: FusionMemoryContext,
-        nodes_before: int,
-        nodes_after: int,
-        is_reorder_round: bool,
-    ) -> None:
-        stats = ctx.stats
-        timings = ctx.timings
-        total_rejects = stats["regression_exact_rejects"] + stats[
-            "regression_fast_rejects"
-        ] + stats["span_rejects"]
-        print(
-            "[fusion_memory_timeline] "
-            f"graph={getattr(V.graph, 'graph_id', '?')} "
-            f"post_grad={self.post_grad_graph_id} "
-            f"round={ctx.round_index} reorder={is_reorder_round} "
-            f"nodes={nodes_before}->{nodes_after} "
-            f"baseline_peak={_bytes_to_mib(ctx.baseline_peak):.1f}MiB "
-            f"timeline_buffers={ctx.timeline_buffers:.0f} "
-            f"init={timings['context_total_s']:.3f}s "
-            f"(freeable={timings['context_freeable_s']:.3f}s "
-            f"buf_mpi={timings['context_buffer_mpi_s']:.3f}s "
-            f"node_mpi={timings['context_node_mpi_s']:.3f}s "
-            f"timeline={timings['context_timeline_s']:.3f}s "
-            f"peak={timings['context_peak_s']:.3f}s) "
-            f"candidates={stats['possible_fusions_unfiltered']:.0f} "
-            f"candidate_time={timings['candidate_search_s']:.3f}s "
-            f"priority_time={timings['priority_filter_s']:.3f}s "
-            f"sort_time={timings['score_sort_s']:.3f}s "
-            f"possible={stats['possible_fusions']:.0f} "
-            f"possible_time={timings['get_possible_fusions_s']:.3f}s "
-            f"guard_pairs={stats['guard_pairs']:.0f} "
-            f"guard_time={timings['guard_s']:.3f}s "
-            f"reg_calls={stats['regression_calls']:.0f} "
-            f"exact={stats['regression_exact_calls']:.0f} "
-            f"exact_rejects={stats['regression_exact_rejects']:.0f} "
-            f"exact_time={timings['regression_exact_s']:.3f}s "
-            f"(fuse={timings['regression_exact_fuse_s']:.3f}s "
-            f"topo={timings['regression_exact_toposort_s']:.3f}s "
-            f"estimate={timings['regression_exact_estimate_s']:.3f}s) "
-            f"fast={stats['regression_fast_calls']:.0f} "
-            f"fast_rejects={stats['regression_fast_rejects']:.0f} "
-            f"span_rejects={stats['span_rejects']:.0f} "
-            f"total_rejects={total_rejects:.0f} "
-            f"max_exact_span={stats['regression_exact_span_max']:.0f} "
-            f"max_peak_delta={_bytes_to_mib(stats['regression_peak_delta_max']):.1f}MiB",
-            file=sys.stderr,
-        )
 
     @staticmethod
     def _distance_windows(
@@ -6878,11 +6767,9 @@ class Scheduler:
         self,
         nodes: list[BaseSchedulerNode],
         is_reorder_round: bool,
-        select_highest_priority: bool = True,
-        sort_results: bool = True,
     ) -> list[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
         """
-        Helper to find all legal fusion opportunities, sorted by self.score_fusion()
+        Helper to find all legal fusion opportunities.
         """
         possible_fusions = []
         seen = OrderedSet[tuple[BaseSchedulerNode, BaseSchedulerNode]]()
@@ -6925,12 +6812,6 @@ class Scheduler:
             for node_grouping in group_grouping.values():
                 check_all_pairs(node_grouping)
 
-        if select_highest_priority:
-            possible_fusions = self.get_possible_fusions_with_highest_priority(
-                possible_fusions
-            )
-        if sort_results:
-            possible_fusions.sort(key=self.score_fusion_key, reverse=True)
         fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
 
@@ -7040,9 +6921,6 @@ class Scheduler:
     def _init_fusion_memory_context(
         self, nodes: list[BaseSchedulerNode]
     ) -> FusionMemoryContext:
-        debug = _debug_fusion_memory_timeline()
-        if debug:
-            context_start = time.perf_counter()
         from .memory import (
             assign_memory_planning_info_for_scheduler_buffers,
             assign_memory_planning_info_for_scheduler_nodes,
@@ -7054,36 +6932,20 @@ class Scheduler:
 
         graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
         graph_outputs = OrderedSet(V.graph.get_output_names())
-        if debug:
-            freeable_start = time.perf_counter()
         name_to_freeable = get_freeable_input_buf(nodes, graph_inputs)
-        if debug:
-            freeable_elapsed = time.perf_counter() - freeable_start
-            buffer_mpi_start = time.perf_counter()
         assign_memory_planning_info_for_scheduler_buffers(nodes, self.name_to_buf)
-        if debug:
-            buffer_mpi_elapsed = time.perf_counter() - buffer_mpi_start
-            node_mpi_start = time.perf_counter()
         assign_memory_planning_info_for_scheduler_nodes(
             nodes, self.name_to_fused_node, self.name_to_buf, name_to_freeable
         )
-        if debug:
-            node_mpi_elapsed = time.perf_counter() - node_mpi_start
-            timeline_start = time.perf_counter()
         buf_info_list, _, _ = compute_memory_timeline(
             nodes, name_to_freeable, graph_outputs
         )
-        if debug:
-            timeline_elapsed = time.perf_counter() - timeline_start
-            peak_start = time.perf_counter()
         baseline_peak, baseline_live_after = peak_memory_from_buf_info_list(
             buf_info_list, len(nodes)
         )
         baseline_live_before = live_memory_before_steps_from_buf_info_list(
             buf_info_list, len(nodes)
         )
-        if debug:
-            peak_elapsed = time.perf_counter() - peak_start
 
         node_to_idx: dict[BaseSchedulerNode, int] = {}
         for idx, node in enumerate(nodes):
@@ -7099,15 +6961,7 @@ class Scheduler:
             baseline_peak=baseline_peak,
             baseline_live_before=baseline_live_before,
             baseline_live_after=baseline_live_after,
-            timeline_buffers=len(buf_info_list) if debug else 0,
         )
-        if debug:
-            ctx.timings["context_freeable_s"] = freeable_elapsed
-            ctx.timings["context_buffer_mpi_s"] = buffer_mpi_elapsed
-            ctx.timings["context_node_mpi_s"] = node_mpi_elapsed
-            ctx.timings["context_timeline_s"] = timeline_elapsed
-            ctx.timings["context_peak_s"] = peak_elapsed
-            ctx.timings["context_total_s"] = time.perf_counter() - context_start
         return ctx
 
     @staticmethod
@@ -7140,25 +6994,13 @@ class Scheduler:
         ctx = self._fusion_memory_context
         if ctx is None:
             return False
-        debug = _debug_fusion_memory_timeline()
-        if debug:
-            ctx.stats["regression_calls"] += 1
-            regression_start = time.perf_counter()
-
-            def finish(result: bool) -> bool:
-                ctx.timings["regression_s"] += time.perf_counter() - regression_start
-                return result
-
-        else:
-            def finish(result: bool) -> bool:
-                return result
 
         step1 = self._fusion_node_step(ctx, node1)
         step2 = self._fusion_node_step(ctx, node2)
         if step1 is None or step2 is None:
-            return finish(False)
+            return False
         if node1 not in ctx.node_set or node2 not in ctx.node_set:
-            return finish(False)
+            return False
 
         region_start = min(step1, step2)
         region_end = max(step1, step2)
@@ -7174,15 +7016,9 @@ class Scheduler:
         max_exact_span = max(128, 2 * config.max_fusion_size)
         if region_end - region_start > max_exact_span:
             if peak_start is None or peak_end is None:
-                return finish(False)
+                return False
 
             moved_live_bytes = 0
-            if debug:
-                ctx.stats["regression_fast_calls"] += 1
-                ctx.stats["regression_fast_span_total"] += region_end - region_start
-                ctx.stats["regression_fast_span_max"] = max(
-                    ctx.stats["regression_fast_span_max"], region_end - region_start
-                )
             for node in (node1, node2):
                 old_step = self._fusion_node_step(ctx, node)
                 if old_step is None or old_step <= peak_end:
@@ -7206,12 +7042,6 @@ class Scheduler:
                         )
 
             regresses_peak = moved_live_bytes > peak_allowed_increase
-            if debug:
-                ctx.stats["regression_fast_moved_bytes_max"] = max(
-                    ctx.stats["regression_fast_moved_bytes_max"], moved_live_bytes
-                )
-                if regresses_peak:
-                    ctx.stats["regression_fast_rejects"] += 1
             if regresses_peak:
                 fusion_log.debug(
                     "memory-timeline fusion rejected %s with %s: moves %d bytes across peak",
@@ -7219,21 +7049,9 @@ class Scheduler:
                     node2.get_name(),
                     moved_live_bytes,
                 )
-                return finish(True)
+                return True
         else:
-            if debug:
-                exact_start = time.perf_counter()
-                ctx.stats["regression_exact_calls"] += 1
-                ctx.stats["regression_exact_span_total"] += region_end - region_start
-                ctx.stats["regression_exact_span_max"] = max(
-                    ctx.stats["regression_exact_span_max"], region_end - region_start
-                )
-                fuse_start = time.perf_counter()
             candidate = self.get_backend(node1.get_device()).fuse(node1, node2)
-            if debug:
-                ctx.timings["regression_exact_fuse_s"] += (
-                    time.perf_counter() - fuse_start
-                )
             candidate_buffers = candidate.get_buffer_names()
             pred_buffers = OrderedSet()
             for node in (node1, node2):
@@ -7263,17 +7081,7 @@ class Scheduler:
                 e.node
                 for e in sorted(local_entries, key=lambda e: (e.cur, e.baseline))
             ]
-            if debug:
-                ctx.stats["regression_exact_local_nodes_total"] += len(local_nodes)
-                ctx.stats["regression_exact_local_nodes_max"] = max(
-                    ctx.stats["regression_exact_local_nodes_max"], len(local_nodes)
-                )
-                topo_start = time.perf_counter()
             local_nodes = self.topological_sort_schedule(local_nodes)
-            if debug:
-                ctx.timings["regression_exact_toposort_s"] += (
-                    time.perf_counter() - topo_start
-                )
 
             new_step = {
                 node: region_start + idx for idx, node in enumerate(local_nodes)
@@ -7301,8 +7109,6 @@ class Scheduler:
                         )
                 return step_cache[node]
 
-            if debug:
-                estimate_start = time.perf_counter()
             region_peak = estimate_region_peak_memory(
                 local_nodes,
                 region_start=region_start,
@@ -7311,20 +7117,9 @@ class Scheduler:
                 graph_outputs=ctx.graph_outputs,
                 cur_memory=ctx.baseline_live_before[region_start],
             )
-            if debug:
-                ctx.timings["regression_exact_estimate_s"] += (
-                    time.perf_counter() - estimate_start
-                )
-                ctx.timings["regression_exact_s"] += time.perf_counter() - exact_start
 
             peak_delta = region_peak - ctx.baseline_peak
             regresses_peak = peak_delta > peak_allowed_increase
-            if debug:
-                ctx.stats["regression_peak_delta_max"] = max(
-                    ctx.stats["regression_peak_delta_max"], peak_delta
-                )
-                if regresses_peak:
-                    ctx.stats["regression_exact_rejects"] += 1
             if regresses_peak:
                 fusion_log.debug(
                     "memory-timeline fusion rejected %s with %s: estimated peak delta %d bytes",
@@ -7332,15 +7127,15 @@ class Scheduler:
                     node2.get_name(),
                     peak_delta,
                 )
-                return finish(True)
+                return True
 
         # A fusion can make one large output live through peak while another dies early.
         if (node1.get_operation_names() & node2.ancestors) or (
             node2.get_operation_names() & node1.ancestors
         ):
-            return finish(False)
+            return False
         if peak_start is None or peak_end is None:
-            return finish(False)
+            return False
 
         has_pre_peak_output = False
         has_large_peak_spanning_output = False
@@ -7374,10 +7169,8 @@ class Scheduler:
                 node1.get_name(),
                 node2.get_name(),
             )
-            if debug:
-                ctx.stats["span_rejects"] += 1
-            return finish(True)
-        return finish(False)
+            return True
+        return False
 
     def fusion_prevent_too_many_reads_and_writes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode, threshold: int
