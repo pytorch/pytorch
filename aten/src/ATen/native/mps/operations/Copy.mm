@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -61,6 +62,32 @@ static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
   lib.exec_unary_kernel(iter, std::string(name), std::nullopt, std::nullopt, /*ilp_threshold=*/131072u);
 }
 
+// Byte-erased compute copy, not a blit: faster at small sizes and avoids the encoder switch.
+// One dispatch per <=2GB chunk keeps chunk_bytes in uint. Callers must pass contiguous src and
+// dst with equal nbytes (both are treated as flat byte runs).
+static void contiguous_copy_kernel_mps(at::Tensor& dst, const at::Tensor& src, bool non_blocking) {
+  uint64_t profile_id = getMPSProfiler().beginProfileCopy(
+      getMTLBufferStorage(src), getMTLBufferStorage(dst), src, dst, src.nbytes(), non_blocking, /*usesBlitter=*/false);
+  auto* kernel = lib.getCachedKernelFunctionPtr("contiguous_byte_copy");
+  constexpr size_t max_chunk = 0x80000000; // 2GB
+  const size_t total = src.nbytes();
+  kernel->runCommandBlock([&] {
+    kernel->startEncoding();
+    kernel->setArg(0, dst);
+    kernel->setArg(1, src);
+    for (size_t base = 0; base < total;) {
+      const uint32_t chunk = static_cast<uint32_t>(std::min(max_chunk, total - base));
+      kernel->setArg(2, chunk);
+      kernel->setArg(3, static_cast<uint64_t>(base));
+      kernel->dispatch((chunk + 15) / 16);
+      base += chunk;
+    }
+  });
+  if (profile_id) {
+    getMPSProfiler().endProfileCopy(profile_id, SyncType::NONE);
+  }
+}
+
 static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
   uintptr_t address = (uintptr_t)ptr;
   uintptr_t alignedAddress = address & ~(PAGE_SIZE - 1);
@@ -74,14 +101,24 @@ static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* a
   return (void*)alignedAddress;
 }
 
-// Returns an autoreleased MTLBuffer and byte offset for the host side of a
-// CPU<->MPS copy; it stays valid for the caller's enclosing @autoreleasepool. The
-// host pages are wrapped with newBufferWithBytesNoCopy, retaining the storage
-// across an async copy so the pages outlive the in-flight blit.
+// Returns an MTLBuffer and byte offset for the host side of a CPU<->MPS copy that
+// the caller must not release: a pinned tensor's own shared MTLBuffer is returned
+// borrowed (kept alive by the tensor), otherwise the host pages are wrapped in an
+// autoreleased newBufferWithBytesNoCopy (valid for the caller's @autoreleasepool),
+// retaining the storage across an async copy so the pages outlive the in-flight blit.
 static std::pair<id<MTLBuffer>, NSUInteger> buffer_with_offset_from_tensor(const at::Tensor& cpu_tensor,
                                                                            size_t nbytes,
                                                                            bool non_blocking) {
   const auto byte_offset = cpu_tensor.storage_offset() * cpu_tensor.itemsize();
+  // Blit directly from/to the pinned tensor's own shared MTLBuffer, avoiding the
+  // newBufferWithBytesNoCopy wrapper. Metal blit offsets must be 4-byte aligned.
+  if (void* pinned = at::mps::getMPSPinnedMTLBuffer(cpu_tensor.storage().data()); pinned && byte_offset % 4 == 0) {
+    // Mark the buffer so that if it is freed while this copy's blit is still in
+    // flight, the allocator defers recycling it instead of handing it to a new
+    // allocation that could CPU-overwrite it before the GPU is done.
+    at::mps::getIMPSAllocator()->recordEvents({pinned});
+    return {__builtin_bit_cast(id<MTLBuffer>, pinned), static_cast<NSUInteger>(byte_offset)};
+  }
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   const void* host = static_cast<const char*>(cpu_tensor.storage().data()) + byte_offset;
   NSUInteger alignedLength = 0;
@@ -107,12 +144,19 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
   Tensor dst = dst_;
   Tensor src = src_;
 
-  if (dst_.strides() != src_.strides()) {
+  // Equal strides alone don't make the flat blit/castout below valid: both
+  // sides must also map a contiguous storage segment. Views like x[::2] share
+  // strides yet have holes, so a flat copy reads/writes the wrong bytes and
+  // clobbers out-of-view storage (the CPU-to-MPS direction already guards
+  // this with is_dense_in_storage). Gather/scatter through contiguous
+  // temporaries in that case.
+  const bool direct_copy = dst_.strides() == src_.strides() && is_dense_in_storage(src_);
+  if (!direct_copy) {
     dst = at::empty_like(dst_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
-  if (dst_.strides() != src_.strides()) {
+  if (!direct_copy) {
     Tensor emptyShell = Tensor();
     src = gatherViewTensor(src_, emptyShell);
     if (src.has_storage()) {
@@ -131,23 +175,18 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     // 4 bytes alignment required on macos for blits.
     TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned blit request");
 
-    id<MTLBuffer> maybeCastedSourceBuffer = sourceBuffer;
-    Tensor maybeCastedSource;
+    id<MTLBuffer> blitSourceBuffer = sourceBuffer;
+    Tensor blitSource = src;
+    NSUInteger blitSourceOffset = storage_byte_offset;
     bool needsBlit = true;
     if (src_.dtype() != dst.dtype()) {
-      uint32_t dst_offs_for_cast = 0;
-      if (destOffset == 0 && storage_byte_offset == 0) {
-        // Return the casted tensor directly if there's no destination offset
-        needsBlit = false;
-        maybeCastedSourceBuffer = destBuffer;
-      } else if (src.element_size() < dst.element_size()) {
-        maybeCastedSource = at::empty(dst.sizes(), dst.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-        maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
-      }
-
-      // In case of dtype change, first convert src inplace via a Metal castout kernel writing into
-      // maybeCastedSourceBuffer (which may be the wrapped CPU destBuffer, a fresh MPS temp, or
-      // sourceBuffer itself when src.element_size() >= dst.element_size()).
+      // Unified memory: cast straight from the MPS source into the CPU-wrapped
+      // destination buffer at the requested offsets. This avoids the temporary
+      // that used to alias the live source buffer and blitting from it (see
+      // #189563). src and dst are dense with identical strides here, so a linear
+      // castout of numel elements from the source offset to the dest offset is a
+      // faithful conversion.
+      needsBlit = false;
       const bool needs_conj = src.is_conj() != dst.is_conj();
       const bool needs_neg = src.is_neg() != dst.is_neg();
       const bool fused_conj_neg = needs_conj && needs_neg && c10::isComplexType(src.scalar_type());
@@ -155,12 +194,12 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
           : needs_neg                              ? "copy_neg"
           : needs_conj                             ? "copy_conj"
                                                    : "copy_identity";
-      lib.exec_unary_kernel_raw(std::string(name),
+      lib.exec_unary_kernel_raw(name,
                                 sourceBuffer,
                                 static_cast<uint32_t>(storage_byte_offset),
                                 src.scalar_type(),
-                                maybeCastedSourceBuffer,
-                                dst_offs_for_cast,
+                                destBuffer,
+                                static_cast<uint32_t>(destOffset),
                                 dst.scalar_type(),
                                 static_cast<uint32_t>(src.numel()),
                                 /*ilp_threshold=*/0u);
@@ -173,12 +212,12 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
       const size_t size_to_copy = (src.nbytes() / src.element_size()) * dst.element_size();
 
       // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
-      TORCH_INTERNAL_ASSERT(sourceBuffer && dst_tensor_nbytes > 0);
+      TORCH_INTERNAL_ASSERT(blitSourceBuffer && dst_tensor_nbytes > 0);
       uint64_t profile_id =
-          getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
+          getMPSProfiler().beginProfileCopy(blitSourceBuffer, destBuffer, blitSource, dst, size_to_copy, non_blocking);
 
       stream->copy_and_sync(
-          maybeCastedSourceBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
+          blitSourceBuffer, destBuffer, size_to_copy, blitSourceOffset, destOffset, non_blocking, profile_id);
     }
   }
   if (!dst.is_same(dst_)) {
@@ -242,11 +281,10 @@ void copy_blit_mps(void* dst, const void* src, size_t size) {
 }
 
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
-  auto src_byte_offset = src_.storage_offset() * src_.itemsize();
   auto dst_byte_offset = dst_.storage_offset() * dst_.itemsize();
 
   // If dst is contiguous and there is no byte offset, we can save directly the result of
-  // gather into dst. This reduces the overhead of doing an additional blit for most cases.
+  // gather into dst. This reduces the overhead of doing an additional copy for most cases.
   bool returnGatherOutput = dst_.is_contiguous();
   Tensor src;
   auto sameMemFormat =
@@ -264,21 +302,15 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
       if (returnGatherOutput) {
         return dst_;
       }
-
-      src_byte_offset = 0;
     } else {
       src = src_.expand_as(dst_).contiguous();
-      src_byte_offset = src.storage_offset() * src.itemsize();
     }
   } else {
     src = src_;
   }
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst_);
-  id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
 
-  // Scatter to `dst` if the memory is not contiguous
-  // If the memory is not contiguous, it means that the tensor has strides and we would not be
-  // able to do the copy using a single blit
+  // Strided dst can't be written as one contiguous run: route it through the scatter kernel.
   if (!dst_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
     return scatterViewTensor(src, dst_);
   }
@@ -287,9 +319,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
 
   MPSStream* stream = getCurrentMPSStream();
   if (sameDataType) {
-    uint64_t profile_id = getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst_, src.nbytes(), true);
-    // for GPU to GPU copies we only encode to stream's command buffer (no flushing)
-    stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset, profile_id);
+    contiguous_copy_kernel_mps(dst_, src, non_blocking);
   } else {
     if (dst_byte_offset) {
       auto maybeCastedSource =

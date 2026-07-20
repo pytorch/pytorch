@@ -78,6 +78,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
+    IS_X86,
     MACOS_VERSION,
     NAVI_ARCH,
     parametrize,
@@ -2532,7 +2533,9 @@ class AOTInductorTestsTemplate:
                 return res[0]
 
         m = Module().to(device=self.device)
-        tensor_shape = (4, 32, 4, 4)
+        # Use head_dim = q.shape[1] // 2 = 64, which is supported by both CUDA
+        # and XPU flash attention (XPU supports: 64, 96, 128, 192).
+        tensor_shape = (4, 128, 4, 4)
         inputs = (
             torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
             torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
@@ -3372,9 +3375,7 @@ class AOTInductorTestsTemplate:
                 )
 
             def forward(self, x):
-                return x + self._tensor_constant0.to(
-                    torch.device(type=GPU_TYPE, index=0)
-                )
+                return x + self._tensor_constant0.to(x.device)
 
         example_inputs = (
             torch.randint(1, size=[38], dtype=torch.int64, device=GPU_TYPE),
@@ -3383,6 +3384,7 @@ class AOTInductorTestsTemplate:
 
     @skipCUDAIf(True, "Test for x86 backend")
     @skipIfXpu(msg="Test for x86 backend")
+    @unittest.skipUnless(IS_X86, "Test for x86 backend")
     @unittest.skipIf(sys.platform == "darwin", "Skip MacOS")
     @unittest.skipIf(IS_FBCODE, "Need newer ideep")
     def test_buffer_mutation_and_force_mmap_weights(self):
@@ -5825,6 +5827,49 @@ class AOTInductorTestsTemplate:
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(y4)
 
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
+    def test_runtime_check_overbound_no_input_leak(self):
+        # When AOTI_RUNTIME_CHECK_INPUTS rejects an over-bound input, the check
+        # throws before the input handles are stolen into RAII. A correct runner
+        # must free those un-stolen handles; otherwise every rejected call leaks
+        # one at::Tensor (and its backing GPU storage) per input.
+        # MPS has no memory_allocated accounting (needed below); skip CPU and MPS.
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU with memory_allocated support")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2048, 2048)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = Model().to(self.device)
+        x = torch.randn(8, 2048, device=self.device)  # example within bound
+        dim0 = Dim("b", min=1, max=64)  # compiled upper bound = 64
+        with torch.no_grad():
+            package_path: str = AOTIRunnerUtil.compile(
+                model, (x,), dynamic_shapes={"x": {0: dim0}}
+            )
+        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
+        # in-bound call works and warms up the allocator
+        aot_inductor_module(torch.randn(8, 2048, device=self.device))
+
+        device_interface = get_interface_for_device(GPU_TYPE)
+        device = device_interface.current_device()
+        device_interface.synchronize()
+        mem_before = device_interface.memory_allocated(device)
+        # Repeatedly reject FRESH over-bound inputs; storage must not be retained.
+        for _ in range(64):
+            over = torch.randn(128, 2048, device=self.device)  # 128 > 64 -> rejected
+            with self.assertRaisesRegex(Exception, "dim value is too large"):
+                aot_inductor_module(over)
+            del over
+        device_interface.synchronize()
+        mem_after = device_interface.memory_allocated(device)
+        self.assertEqual(mem_after, mem_before)
+
     def test_add_complex(self):
         class Model(torch.nn.Module):
             def forward(self, a, b):
@@ -6674,7 +6719,6 @@ class AOTInductorTestsTemplate:
         self.check_model(sin_triton, none_inputs)
         self.check_model(sin_triton, not_none_inputs)
 
-    @skipIfRocm  # RoCM does not support the config block size in test suite.
     @skipIfXpu(
         msg="SYCL work-item index overflow issue when block sizes are used in this test."
     )
@@ -6690,13 +6734,17 @@ class AOTInductorTestsTemplate:
             n_elements,
             BLOCK_SIZE: "tl.constexpr",
         ):
-            pid = tl.program_id(axis=0).to(tl.int64)
-            block_start = pid * BLOCK_SIZE
+            pid0 = tl.program_id(axis=0).to(tl.int64)
+            pid1 = tl.program_id(axis=1).to(tl.int64)
+            grid0 = tl.num_programs(axis=0).to(tl.int64)
+            block_id = pid1 * grid0 + pid0
+            block_start = block_id * BLOCK_SIZE
             offsets = block_start + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
+            s = x.to(tl.int32) + y.to(tl.int32)
+            output = (s & 0xFF).to(tl.int8)
             tl.store(out_ptr + offsets, output, mask=mask)
 
         @torch.library.triton_op("mylib::add", mutates_args=())
@@ -6705,9 +6753,15 @@ class AOTInductorTestsTemplate:
             n_elements = output.numel()
 
             def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+                num_blocks = triton.cdiv(n_elements, meta["BLOCK_SIZE"])
+                # 2D split to respect the 65535 grid-x limit. Use cdiv-by-constant
+                # rather than min(num_blocks, 65535): a symbolic min introduces an
+                # inequality guard that AOTInductor dynamic-shape export rejects.
+                grid1 = triton.cdiv(num_blocks, 65535)
+                grid0 = triton.cdiv(num_blocks, grid1)
+                return (grid0, grid1)
 
-            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 256)
             return output
 
         class Model(torch.nn.Module):
@@ -8076,7 +8130,7 @@ class AOTInductorTestsTemplate:
             self.assertIn(
                 actual_grid,
                 expected_grids,
-                f"grid_0={actual_grid} not in expected {expected_grids} from kernel configs",
+                lambda msg: f"{msg}\ngrid_0={actual_grid} not in expected {expected_grids} from kernel configs",
             )
 
     @requires_autotune_at_compile_time
@@ -8135,7 +8189,7 @@ class AOTInductorTestsTemplate:
             self.assertIn(
                 actual_grid,
                 expected_grids,
-                f"grid_0={actual_grid} not in expected {expected_grids} from kernel configs",
+                lambda msg: f"{msg}\ngrid_0={actual_grid} not in expected {expected_grids} from kernel configs",
             )
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
