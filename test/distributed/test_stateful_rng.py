@@ -9,7 +9,7 @@ from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._library.utils import fill_defaults
-from torch.distributed import StatefulRNGTensor
+from torch.distributed import RNGLayoutTensor
 from torch.distributed._local_tensor import LocalIntNode, LocalTensor, LocalTensorMode
 from torch.distributed._stateful_rng import (
     _is_supported_stateful_rng_op,
@@ -47,9 +47,9 @@ class _StatefulRNGMode(TorchDispatchMode):
             return func(*args, **kwargs)
         if tensor_arg.is_meta or tensor_arg.device.type != "cuda":
             return func(*args, **kwargs)
-        if not isinstance(tensor_arg, StatefulRNGTensor):
+        if not isinstance(tensor_arg, RNGLayoutTensor):
             return func(*args, **kwargs)
-        rng_metadata = cast(StatefulRNGTensor, tensor_arg)
+        rng_metadata = cast(RNGLayoutTensor, tensor_arg)
 
         return _run_stateful_rng_op(
             func,
@@ -60,7 +60,7 @@ class _StatefulRNGMode(TorchDispatchMode):
         )
 
 
-class TestStatefulRNGTensor(TestCase):
+class TestRNGLayoutTensor(TestCase):
     @staticmethod
     def _set_rng_metadata(
         tensor: torch.Tensor,
@@ -72,11 +72,11 @@ class TestStatefulRNGTensor(TestCase):
 
     def test_plain_tensor_metadata_satisfies_protocol(self):
         tensor = torch.empty(1)
-        self.assertNotIsInstance(tensor, StatefulRNGTensor)
+        self.assertNotIsInstance(tensor, RNGLayoutTensor)
 
         block: RNGIndexBlock = (0, 1, 1, 1)
         self._set_rng_metadata(tensor, 1, (block,))
-        self.assertIsInstance(tensor, StatefulRNGTensor)
+        self.assertIsInstance(tensor, RNGLayoutTensor)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_initializers_match_dense(self):
