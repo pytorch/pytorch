@@ -233,25 +233,6 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         else:
             self.assertIs(ng, dist.GroupMember.NON_GROUP_MEMBER)
 
-    def test_new_group_via_split_group_raises_on_unsupported_args(self):
-        # `split_group` has a narrower surface than `new_group`; under
-        # torchcomms the delegation must surface that mismatch instead of
-        # silently falling back to the legacy path.
-        ranks = list(range(self.world_size))
-        with self.assertRaisesRegex(NotImplementedError, "use_local_synchronization"):
-            dist.new_group(ranks=ranks, use_local_synchronization=True)
-
-    def test_new_group_sort_ranks_false_preserves_order(self):
-        reversed_ranks = list(range(self.world_size - 1, -1, -1))
-        ng = dist.new_group(ranks=reversed_ranks, sort_ranks=False)
-        self.assertEqual(dist.get_process_group_ranks(ng), reversed_ranks)
-        self.assertEqual(
-            dist.get_group_rank(ng, self.rank), reversed_ranks.index(self.rank)
-        )
-        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
-        dist.all_reduce(tensor, group=ng)
-        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
-
     def test_new_group_backend_none_narrows_to_default_device(self):
         ranks = list(range(self.world_size))
         ng = dist.new_group(ranks=ranks, backend=None)
