@@ -108,6 +108,75 @@ def _require_cuda_bindings() -> None:
         )
 
 
+# Graph-destroy callbacks are retained on a CUDA user object (see
+# CUDAGraph.register_graph_destroy_callback). CUDA invokes the destructor on a
+# driver thread once the graph -- and every executable graph instantiated from it
+# -- is destroyed, possibly after the CUDAGraph wrapper is gone, so the ctypes
+# trampoline and the snapshotted callbacks must outlive the wrapper. Keep them
+# here, keyed by a token passed as the user object's pointer and echoed back to
+# the destructor, and drop the entry when it fires. The trampoline is a single
+# shared, stateless C callback.
+_graph_destroy_callbacks: dict[int, list[Callable[[], None]]] = {}
+_graph_destroy_next_token = 0
+_graph_destroy_trampoline: typing.Any = None
+
+
+def _graph_destroy_dispatch(user_ptr: typing.Any) -> None:
+    # Runs on a CUDA driver thread once a graph holding our user object is fully
+    # destroyed. user_ptr is the token passed to cudaUserObjectCreate. The user
+    # object destructor is a CUDA host function, bound by the cuLaunchHostFunc_v2
+    # restrictions: "The host function must not make any CUDA API calls. Attempting
+    # to use a CUDA API may result in CUDA_ERROR_NOT_PERMITTED, but this is not
+    # required. The host function must not perform any synchronization that may
+    # depend on outstanding CUDA work not mandated to run earlier. Host functions
+    # without a mandated order (such as in independent streams) execute in undefined
+    # order and may be serialized." So: no CUDA calls, never raise into the driver,
+    # stay cheap.
+    # https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html#group__CUDA__EXEC_1g455b2a1a09e543e5f0cd058acd6c55ab
+    import sys
+
+    entry = _graph_destroy_callbacks.pop(int(user_ptr or 0), None)
+    if entry is None or sys.is_finalizing():
+        return
+    for cb in entry:
+        try:
+            cb()
+        except Exception:
+            pass
+
+
+def _retain_graph_destroy_callbacks(
+    raw_graph: int, callbacks: list[Callable[[], None]]
+) -> None:
+    """Retain a CUDA user object on ``raw_graph`` (a live ``cudaGraph_t``
+    template) whose destructor fires ``callbacks`` once the graph and every
+    executable graph instantiated from it are destroyed."""
+    import ctypes
+
+    assert _cuda_runtime is not None  # noqa: S101
+    global _graph_destroy_next_token, _graph_destroy_trampoline
+    if _graph_destroy_trampoline is None:
+        _graph_destroy_trampoline = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(
+            _graph_destroy_dispatch
+        )
+    _graph_destroy_next_token += 1
+    token = _graph_destroy_next_token
+    _graph_destroy_callbacks[token] = list(callbacks)
+    addr = ctypes.cast(_graph_destroy_trampoline, ctypes.c_void_p).value
+    no_sync = int(_cuda_runtime.cudaUserObjectFlags.cudaUserObjectNoDestructorSync)
+    move = int(_cuda_runtime.cudaUserObjectRetainFlags.cudaGraphUserObjectMove)
+    try:
+        obj = _check_cuda_bindings(
+            _cuda_runtime.cudaUserObjectCreate(token, addr, 1, no_sync)
+        )
+        _check_cuda_bindings(
+            _cuda_runtime.cudaGraphRetainUserObject(raw_graph, obj, 1, move)
+        )
+    except Exception:
+        _graph_destroy_callbacks.pop(token, None)
+        raise
+
+
 # Python shim helps Sphinx process docstrings more reliably.
 class CUDAGraph(_CUDAGraph):
     r"""Wrapper around a CUDA graph.
@@ -151,6 +220,17 @@ class CUDAGraph(_CUDAGraph):
     # User hooks fired by capture_end / instantiate (see register_*_hook).
     _capture_end_hooks: dict[int, Callable[[CUDAGraph], None]]
     _post_instantiate_hooks: dict[int, Callable[[CUDAGraph], None]]
+    # Replay lifecycle hooks, fired around each replay (hot path -- only iterated
+    # when non-empty). See register_replay_start_hook / register_replay_end_hook.
+    _replay_start_hooks: dict[int, Callable[[CUDAGraph], None]]
+    _replay_end_hooks: dict[int, Callable[[CUDAGraph], None]]
+    # Callbacks retained on a CUDA user object (see register_graph_destroy_callback):
+    # snapshotted and retained on the template at capture_end so CUDA fires them
+    # once the graph is fully destroyed.
+    _destroy_callbacks: dict[int, Callable[[], None]]
+    # Set at capture_end (registration must precede it, while the template is
+    # live); cleared on reset() so a re-captured graph can register again.
+    _capture_finalized: bool
 
     def __new__(cls, keep_graph: bool = False) -> Self:
         instance = super().__new__(cls, keep_graph)
@@ -161,6 +241,10 @@ class CUDAGraph(_CUDAGraph):
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
         instance._capture_end_hooks = OrderedDict()
         instance._post_instantiate_hooks = OrderedDict()
+        instance._replay_start_hooks = OrderedDict()
+        instance._replay_end_hooks = OrderedDict()
+        instance._destroy_callbacks = OrderedDict()
+        instance._capture_finalized = False
         return instance
 
     def register_capture_end_hook(
@@ -192,6 +276,99 @@ class CUDAGraph(_CUDAGraph):
         handle = RemovableHandle(self._post_instantiate_hooks)
         self._post_instantiate_hooks[handle.id] = hook
         return handle
+
+    def register_replay_start_hook(
+        self, hook: Callable[[CUDAGraph], None]
+    ) -> RemovableHandle:
+        r"""Register ``hook(graph)`` to run at the start of every :meth:`replay`,
+        just before the graph is launched (after any on-demand instantiation, so
+        :meth:`raw_cuda_graph_exec` is valid). Hooks fire in registration order.
+        Returns a handle whose ``remove()`` deregisters the hook.
+
+        .. note::
+            Replay is the hot path and a registered hook runs on every replay --
+            keep it cheap. With no hook registered the cost is a single dict
+            emptiness check.
+        """
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._replay_start_hooks)
+        self._replay_start_hooks[handle.id] = hook
+        return handle
+
+    def register_replay_end_hook(
+        self, hook: Callable[[CUDAGraph], None]
+    ) -> RemovableHandle:
+        r"""Register ``hook(graph)`` to run at the end of every :meth:`replay`,
+        just after the graph is launched. The launch is asynchronous, so the hook
+        runs once the replay is *enqueued*, not once the GPU work completes. Hooks
+        fire in registration order. Returns a handle whose ``remove()``
+        deregisters the hook. See the hot-path note on
+        :meth:`register_replay_start_hook`.
+
+        End hooks fire even if the launch raises -- so a start hook is always
+        balanced by an end -- and the launch error then propagates. (Start hooks
+        that raise abort the replay before launch, and no end hook fires.)
+        """
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._replay_end_hooks)
+        self._replay_end_hooks[handle.id] = hook
+        return handle
+
+    def register_graph_destroy_callback(
+        self, callback: Callable[[], None]
+    ) -> RemovableHandle:
+        r"""Register ``callback()`` to run once when this graph is destroyed by
+        CUDA -- after the captured ``cudaGraph_t`` and every ``cudaGraphExec_t``
+        instantiated from it are released (via :meth:`reset` or garbage collection
+        of this wrapper). Implemented by retaining a CUDA user object on the graph
+        (``cudaGraphRetainUserObject``), so it is tied to the graph's true
+        lifetime: it fires only once the graph is fully gone and no replay can
+        still reference its resources -- it does not fire on capture or replay.
+
+        The callback takes no arguments; capture any needed context (e.g. an exec
+        graph id) in a closure. It must be registered before capture ends (the
+        user object is retained at :meth:`capture_end`, while the template is
+        live). Returns a handle whose ``remove()`` deregisters the callback, which
+        is only effective before capture ends. Requires the ``cuda.bindings``
+        package.
+
+        Because it fires only once nothing can reference the graph anymore, this
+        is the correct signal for releasing resources whose lifetime must outlast
+        the graph and its replays (e.g. host/pinned buffers it read) and for
+        evicting per-graph external state keyed by its ids.
+
+        .. warning::
+            The callback runs on a CUDA driver thread, asynchronously, at
+            graph-destruction time -- not the Python thread. Per CUDA
+            host-function rules it must not call the CUDA runtime/driver API, must
+            be cheap and non-blocking, and must not capture this ``CUDAGraph``
+            (that would keep it alive and prevent destruction). Exceptions are
+            swallowed. To actually free CUDA resources, hand off to a normal thread
+            that this callback signals rather than calling CUDA here.
+        """
+        if self._capture_finalized:
+            raise RuntimeError(
+                "register_graph_destroy_callback must be called before the graph's "
+                "capture ends; the destroy user object is retained at capture_end."
+            )
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._destroy_callbacks)
+        self._destroy_callbacks[handle.id] = callback
+        return handle
+
+    def _retain_destroy_user_object(self) -> None:
+        # Retain one CUDA user object on the live template so the registered
+        # destroy callbacks fire when the graph is fully destroyed. Called from
+        # capture_end before instantiate().
+        if not self._destroy_callbacks:
+            return
+        _require_cuda_bindings()
+        _retain_graph_destroy_callbacks(
+            self.raw_cuda_graph(), list(self._destroy_callbacks.values())
+        )
 
     def _maybe_remap_annotations(self) -> None:
         # Remap recorded kernel annotations to the current exec graph id. No-op
@@ -291,6 +468,8 @@ class CUDAGraph(_CUDAGraph):
         maybe_stamp_capture_graph_id(self)
         for hook in list(self._capture_end_hooks.values()):
             hook(self)
+        self._retain_destroy_user_object()
+        self._capture_finalized = True
         if not self._keep_graph:
             # Route keep_graph=False instantiation through Python so the remap
             # and post-instantiate hooks fire from instantiate().
@@ -318,7 +497,15 @@ class CUDAGraph(_CUDAGraph):
         # annotation remap rides on instantiate(), so it is handled by that call.
         if not self._has_graph_exec:
             self.instantiate()
-        super().replay()
+        if self._replay_start_hooks:
+            for hook in list(self._replay_start_hooks.values()):
+                hook(self)
+        try:
+            super().replay()
+        finally:
+            if self._replay_end_hooks:
+                for hook in list(self._replay_end_hooks.values()):
+                    hook(self)
 
     def reset(self) -> None:
         r"""Delete the graph currently held by this instance."""
@@ -327,6 +514,8 @@ class CUDAGraph(_CUDAGraph):
             self._tracker = None
         self._capture_graph_id = None
         self._remapped_exec_id = None
+        self._destroy_callbacks.clear()
+        self._capture_finalized = False
         super().reset()
 
     def pool(self) -> _POOL_HANDLE:
