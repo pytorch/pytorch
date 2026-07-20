@@ -55,33 +55,12 @@ class Benchmark(_DisableOverheadBase):
         self._fn = torch._dynamo.disable(f)
 
 
-class BenchmarkCallWithDisable(_DisableOverheadBase):
-    # The C-level fast path: torch._C._dynamo.eval_frame.call_with_disable
-    # toggles the eval-frame handler and forwards args via vectorcall in C,
-    # avoiding the Python wrapper layers of torch._dynamo.disable. Compare this
-    # count against disable_overhead above. _work calls it directly (not through
-    # self._fn) so the instruction count reflects the raw C path with no extra
-    # Python wrapper.
-    _CATEGORY = "call_with_disable_overhead"
-    _DESCRIPTION = "per-call overhead of torch._C._dynamo.eval_frame.call_with_disable"
-
-    def _setup(self):
-        from torch._C._dynamo.eval_frame import call_with_disable
-
-        def f(x):
-            return x
-
-        self._call_with_disable = call_with_disable
-        self._f = f
-
-    def _work(self):
-        self._call_with_disable(self._f, self.a)
-
-
 class BenchmarkDisableDynamo(_DisableOverheadBase):
     # torch._compile._disable_dynamo is the torch-internal disable used on hot
-    # paths like torch.library.custom_op and torch.optim. It routes fully
-    # recursive, non-export calls through call_with_disable.
+    # paths like torch.library.custom_op and torch.optim. It wraps fn in a
+    # functools.wraps closure that resolves and calls torch._dynamo.disable(fn)
+    # (the C DisableWrapper) on first use, so it inherits that fast path plus its
+    # own lazy-import wrapper frame.
     _CATEGORY = "disable_dynamo_overhead"
     _DESCRIPTION = "per-call overhead of torch._compile._disable_dynamo"
 
@@ -98,9 +77,6 @@ class BenchmarkDisableDynamo(_DisableOverheadBase):
 def main():
     result_path = sys.argv[1]
     Benchmark().enable_instruction_count().collect_all().append_results(result_path)
-    BenchmarkCallWithDisable().enable_instruction_count().collect_all().append_results(
-        result_path
-    )
     BenchmarkDisableDynamo().enable_instruction_count().collect_all().append_results(
         result_path
     )

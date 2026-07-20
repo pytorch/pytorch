@@ -3720,6 +3720,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 type_attr, self, source_fn=var_source, source=source
             )
+        elif isinstance(type_attr, torch._C._dynamo.eval_frame.DisableWrapper):
+            # A torch._dynamo.disable-d callable found on the type MRO, accessed
+            # as a method. Build it from the attribute source (self.name) rather
+            # than the class __dict__ so it reconstructs through the descriptor
+            # (DisableWrapper's tp_descr_get binds self) and then graph-breaks in
+            # SkipFunctionVariable.call_function.
+            return VariableTracker.build(tx, type_attr, source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
