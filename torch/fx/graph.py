@@ -24,14 +24,21 @@ from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
-from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
+from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_constant_type
 from torch.types import py_sym_types
 from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 from .immutable_collections import immutable_dict
-from .node import _get_qualified_name, _type_repr, Argument, Node, Target
+from .node import (
+    _device_annotation,
+    _get_qualified_name,
+    _type_repr,
+    Argument,
+    Node,
+    Target,
+)
 from .tensor_type import TensorType
 
 
@@ -62,7 +69,7 @@ _legal_ops = dict.fromkeys(
 )
 
 
-# Signature for functions thattransforms the body (`list[str]`) of the
+# Signature for functions that transform the body (`list[str]`) of the
 # generated code
 TransformCodeFunc = Callable[[list[str]], list[str]]
 
@@ -616,6 +623,19 @@ class CodeGen:
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
+            elif isinstance(arg, complex):
+                if (
+                    arg.real == 0.0
+                    or arg.imag == 0.0
+                    or not math.isfinite(arg.real)
+                    or not math.isfinite(arg.imag)
+                ):
+                    # complex.__repr__ is not a safe source representation for
+                    # signed zero components, e.g. eval("(-0-1j)") loses the sign.
+                    # It's also unsafe for nan/inf imaginary parts: repr produces
+                    # "nanj"/"infj" which Python parses as a single identifier.
+                    return f"complex({_get_repr(arg.real)}, {_get_repr(arg.imag)})"
+                return blue(repr(arg))
             elif isinstance(arg, torch.Tensor):
                 size = list(arg.size())
                 dtype = str(arg.dtype).split(".")[-1]
@@ -629,7 +649,7 @@ class CodeGen:
                 return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
-            elif is_opaque_value_type(type(arg)):
+            elif is_opaque_constant_type(type(arg)):
                 obj_repr, opaque_types = get_opaque_obj_repr(arg)
                 for n, t in opaque_types.items():
                     add_global(n, t)
@@ -722,6 +742,10 @@ class CodeGen:
                 if stack_trace := node.stack_trace:
                     if parsed_stack_trace := _parse_stack_trace(stack_trace):
                         stack_trace_str = parsed_stack_trace.get_summary_str()
+                        if node.meta.get("autograd_backward", False):
+                            stack_trace_str = (
+                                f"Backward of forward node: {stack_trace_str}"
+                            )
 
                 maybe_recompute_info = ""
                 if hasattr(node, "meta") and node.meta:
@@ -776,7 +800,7 @@ class CodeGen:
 
                 def _tensor_annotation(t: torch.Tensor) -> str:
                     stride = stringify_shape(t.stride()) if include_stride else ""
-                    device = f"{t.device}" if include_device else ""
+                    device = _device_annotation(t.device) if include_device else ""
                     return (
                         f"{red(dtype_abbrs[t.dtype])}"
                         f"{blue(stringify_shape(t.shape))}"
@@ -910,9 +934,68 @@ class CodeGen:
                         f"{repr(node)}{maybe_type_annotation} = {_format_target(_get_repr(node.args[0]), node.args[1])}"
                     )
                     return
-                body.append(
-                    f"{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})"
-                )
+                meta = node.meta
+                boxed_arg_indices = getattr(node.target, "_boxed_arg_indices", ())
+                boxed_arg_indices = meta.get("boxed_arg_indices", boxed_arg_indices)
+                boxed_arg_names: dict[int, str] = {}
+                for i in boxed_arg_indices:
+                    name = f"{node.name}_boxed_arg_{i}"
+                    boxed_arg_names[i] = namespace.create_name(name, None)
+
+                if boxed_arg_names:
+                    # Generate the boxed arguments on separate lines so the
+                    # original node locals can be cleared before the call.
+                    boxed_assignments = []
+                    for i, name in boxed_arg_names.items():
+                        boxed_assignments.append(f"{name} = {_get_repr(node.args[i])}")
+                    body.append("\n".join(boxed_assignments))
+
+                    # If this call is the last use of nodes inside the boxed
+                    # args, clear those node locals after creating the boxed
+                    # args and before emitting the call.
+                    boxed_nodes: set[Node] = set()
+                    unboxed_nodes: set[Node] = set()
+                    boxed_args = tuple(node.args[i] for i in boxed_arg_names)
+                    unboxed_args = []
+                    for i, arg in enumerate(node.args):
+                        if i not in boxed_arg_names:
+                            unboxed_args.append(arg)
+                    map_arg(boxed_args, boxed_nodes.add)
+                    map_arg((unboxed_args, node.kwargs), unboxed_nodes.add)
+
+                    last_uses = user_to_last_uses.get(node, [])
+                    only_in_boxes = boxed_nodes - unboxed_nodes
+                    nodes_to_delete = [n for n in last_uses if n in only_in_boxes]
+                    if nodes_to_delete:
+                        last_uses = [n for n in last_uses if n not in nodes_to_delete]
+                        user_to_last_uses[node] = last_uses
+                        to_delete_str = " = ".join(
+                            [repr(n) for n in nodes_to_delete] + ["None"]
+                        )
+                        body.append(f";  {dim(to_delete_str)}")
+                    body.append("\n")
+
+                    # Rewrite the generated call to use the boxed arg locals
+                    # instead of rebuilding the boxed args inline.
+                    kwargs = node.kwargs.items()
+                    call_args = [_get_repr(arg) for arg in node.args]
+                    for i, name in boxed_arg_names.items():
+                        call_args[i] = name
+                    call_args.extend(f"{k} = {_get_repr(v)}" for k, v in kwargs)
+                    formatted_args_str = ", ".join(call_args)
+                else:
+                    formatted_args_str = _format_args(node.args, node.kwargs)
+
+                lhs = f"{repr(node)}{maybe_type_annotation}"
+                rhs = f"{global_name}({formatted_args_str})"
+                body.append(f"{lhs} = {rhs}")
+
+                if boxed_arg_names:
+                    # Clear the generated boxed arg locals after the call. The
+                    # call is their only generated use, and these locals are not
+                    # FX nodes tracked by normal last-use cleanup.
+                    boxed_names_str = " = ".join([*boxed_arg_names.values(), "None"])
+                    body.append(f";  {dim(boxed_names_str)}")
                 if node.meta.get("is_wrapped", False):
                     wrapped_fns.setdefault(global_name)
                 return
@@ -2409,7 +2492,7 @@ class Graph:
         # When generating Python code, we need to make sure to name things
         # appropriately. In particular:
         # - All names should be unique, to avoid weird shadowing bugs.
-        # - These names need to be consistent, e.g. a object should always be
+        # - These names need to be consistent, e.g. an object should always be
         #   referenced by the same name.
         #
         # To do this, we create a new namespace just for this source. All names

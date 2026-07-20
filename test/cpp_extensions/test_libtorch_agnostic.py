@@ -62,6 +62,7 @@ class TestLibtorchAgnostic(TestCase):
     - libtorch_agn_2_11: Extension built with TORCH_TARGET_VERSION=2.11.0
     - libtorch_agn_2_12: Extension built with TORCH_TARGET_VERSION=2.12.0
     - libtorch_agn_2_13: Extension built with TORCH_TARGET_VERSION=2.13.0
+    - libtorch_agn_2_14: Extension built with TORCH_TARGET_VERSION=2.14.0
 
     Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
     version that they target.
@@ -126,6 +127,16 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.13 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 14):
+            try:
+                import libtorch_agn_2_14  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_14_extension"
+                )
+        else:
+            print(f"Skipping 2.14 extension (running on PyTorch {torch.__version__})")
 
     @onlyCPU
     def test_slow_sgd(self, device):
@@ -247,6 +258,15 @@ class TestLibtorchAgnostic(TestCase):
         t = torch.rand(2, 7, device=device)
         self.assertTrue(libtorch_agnostic.ops.is_contiguous(t))
         self.assertFalse(libtorch_agnostic.ops.is_contiguous(t.transpose(0, 1)))
+
+    @skipIfTorchVersionLessThan(2, 14)
+    def test_has_storage(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        t = torch.rand(2, 7, device=device)
+        self.assertTrue(libtorch_agnostic.ops.my_has_storage(t))
+        # Sparse tensors do not own a contiguous storage.
+        self.assertFalse(libtorch_agnostic.ops.my_has_storage(t.to_sparse()))
 
     # TODO: Debug this:
     # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
@@ -708,13 +728,6 @@ class TestLibtorchAgnostic(TestCase):
 
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCPU
-    # TODO: Debug this:
-    # Dynamo failed to run FX node with fake tensors:
-    # call_function libtorch_agnostic.test_parallel_for.default(*(100, 10), **{}):
-    # got RuntimeError('libtorch_agnostic::test_parallel_for() expected at most
-    # 2 argument(s) but received 3 argument(s).
-    # Declaration: libtorch_agnostic::test_parallel_for(int size, int grain_size) -> Tensor')
-    @xfailIfTorchDynamo
     def test_parallel_for(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
@@ -1430,7 +1443,7 @@ except RuntimeError as e:
         self.assertTrue(
             "CUDA error: invalid device ordinal" in error_message
             or "HIP error: invalid device ordinal" in error_message,
-            f"Expected 'CUDA/HIP error: invalid device ordinal' in error message, got: {error_message}",
+            lambda msg: f"{msg}\nExpected 'CUDA/HIP error: invalid device ordinal' in error message, got: {error_message}",
         )
         self.assertIn(
             "GPU device may be out of range, do you have enough GPUs?",
@@ -1606,7 +1619,7 @@ except RuntimeError as e:
         self.assertTrue(
             "CUDA error: invalid configuration argument" in error_message
             or "HIP error: invalid configuration argument" in error_message,
-            f"Expected 'CUDA|HIP error: invalid configuration argument' in error message, got: {error_message}",
+            lambda msg: f"{msg}\nExpected 'CUDA|HIP error: invalid configuration argument' in error message, got: {error_message}",
         )
 
         if show_cpp_stacktraces:
