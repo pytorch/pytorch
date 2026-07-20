@@ -79,6 +79,18 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
     """
     from torch.fx.traceback import _FX_METADATA_REGISTRY
 
+    _kernel_ops = {}
+    try:
+        from torch._inductor import config as _ic
+        if _ic.effective_provenance_tracking_level() != 0:
+            from torch._inductor.kernel_trace import get_last_emitted_trace, kernel_ops_summary
+            import json
+            last_emitted = get_last_emitted_trace()
+            if last_emitted:
+                _kernel_ops = kernel_ops_summary(json.loads(last_emitted))
+    except Exception:
+        _kernel_ops = {}
+
     trace_events = traced_data.get("traceEvents", [])
 
     # Create event timeline
@@ -114,8 +126,9 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
                 try:
                     node_index = int(content)
                 except ValueError:
-                    pass
-                append_fx_marker_event("node", node_index, event)  # type: ignore[possibly-undefined]
+                    # marker content is not a node index (e.g. "Call CompiledFxGraph None"); skip it
+                    continue
+                append_fx_marker_event("node", node_index, event)
 
         else:
             # Regular event that needs augmentation
@@ -211,3 +224,9 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
                         args["stack_trace"] = current_stack_trace
                     if current_node_name:
                         args["node_name"] = current_node_name
+
+                if _kernel_ops:
+                    ev_name = timeline_event.event.get("name", "")
+                    summ = _kernel_ops.get(ev_name)
+                    if summ is not None:
+                        timeline_event.event.setdefault("args", {})["inductor_kernel_ops"] = summ
