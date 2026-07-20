@@ -1443,6 +1443,21 @@ class BaseSchedulerNode:
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return [self]
 
+    @cache_on_self
+    def sum_reduction_contracts(self) -> set[tuple[bool, int, bool]]:
+        return {
+            (
+                node.node.data.strict_sum,
+                node.node.data.src_dtype.itemsize,
+                node.node.data.strict_sum_linear,
+            )
+            for node in self.get_nodes()
+            if isinstance(node, SchedulerNode)
+            and isinstance(node.node, ComputedBuffer)
+            and isinstance(node.node.data, ir.Reduction)
+            and node.node.data.reduction_type == "sum"
+        }
+
     def get_outputs(self) -> Sequence[SchedulerBuffer]:
         return self.outputs
 
@@ -3495,6 +3510,15 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 template_nodes,
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
+
+        # Strict numerics: strict sums can't join combo kernels (shared block geometry can't
+        # honor their per-sum tiling contract). No-op when strict numerics is off.
+        if config.numerics == "strict":
+            filtered_nodes = [
+                node
+                for node in filtered_nodes
+                if not any(contract[0] for contract in node.sum_reduction_contracts())
+            ]
 
         # Filter out reduction nodes if combo_kernels_pointwise_only is enabled
         if config.combo_kernels_pointwise_only:
@@ -7982,6 +8006,19 @@ class Scheduler:
                 node2.get_name(),
                 shared_data_score,
             )
+
+        # Strict numerics: two sum reductions can only share a kernel if they need the same
+        # tiling/order contract. No-op (and zero cost) unless strict numerics is enabled.
+        if config.numerics == "strict":
+            sum_contracts = (
+                node1.sum_reduction_contracts() | node2.sum_reduction_contracts()
+            )
+            strict_contracts = {c for c in sum_contracts if c[0]}
+            if strict_contracts and (
+                len(strict_contracts) != 1 or len(sum_contracts) != 1
+            ):
+                why("incompatible strict sum reduction order")
+                return False
 
         if not V.choices.can_fuse(self, node1, node2, shared_data_score):
             return False

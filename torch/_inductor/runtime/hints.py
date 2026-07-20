@@ -296,6 +296,7 @@ class InductorMeta(typing.TypedDict, total=False):
     store_cubin: bool
     deterministic: bool
     batch_invariant: bool
+    numerics: typing.Literal["default", "strict"]
     force_filter_reduction_configs: bool
     mix_order_reduction_allow_multi_stages: bool
     dynamic_disable_pipelining: bool
@@ -328,6 +329,8 @@ class InductorMeta(typing.TypedDict, total=False):
     native_matmul_persistent_rblock: int
     add_persistent_rblock: bool
     max_persistent_rblock: int
+    strict_sum_itemsize: int
+    strict_sum_linear: bool
     kernel_num_gb: float
     kernel_flop: int
 

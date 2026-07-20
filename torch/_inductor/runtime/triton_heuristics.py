@@ -4451,32 +4451,32 @@ def _reduction_configs(
         num_dynamic=num_dynamic,
     )
     if inductor_meta.get("numerics") == "strict":
-        configs = _force_strict_rblock(configs, size_hints)
+        configs = _force_strict_rblock(configs, size_hints, inductor_meta)
     return configs
 
 
-def _force_strict_rblock(configs: list[Config], size_hints: dict[str, int]) -> list[Config]:
-    # Strict numerics: pin R0_BLOCK to eager's per-batch tile (batch_total_elements) so eager
-    # and Inductor tile a (looped) reduction identically -> same reduction order -> bitwise.
-    # Persistent configs (no R0_BLOCK kwarg -- they reduce the whole axis) are left unchanged.
-    # Planning comes from the shared, runtime-free inner_tree_plan (exposed by the eager PR).
+def _force_strict_rblock(
+    configs: list[Config],
+    size_hints: dict[str, int],
+    inductor_meta: InductorMeta,
+) -> list[Config]:
+    # Match eager's fixed per-batch tile; persistent configs have no R0_BLOCK.
     from torch._native.ops.sum.inner_tree_plan import compute_inner_tree_params, vec_size
 
-    r0 = compute_inner_tree_params(
-        get_total_reduction_numel(size_hints), 1, vec_size(4)
-    ).batch_total_elements
-    out: list[Config] = []
-    seen: set = set()
-    for c in configs:
-        kw = dict(c.kwargs)
-        if "R0_BLOCK" in kw:
-            kw["R0_BLOCK"] = r0
-        key = (tuple(sorted(kw.items())), c.num_warps, c.num_stages)
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(Config(kw, num_warps=c.num_warps, num_stages=c.num_stages))
-    return out or configs
+    if inductor_meta.get("strict_sum_linear"):
+        r0 = 1
+    else:
+        itemsize = inductor_meta.get("strict_sum_itemsize")
+        if itemsize is None:
+            raise AssertionError("strict sum reduction requires its source itemsize")
+        r0 = compute_inner_tree_params(
+            get_total_reduction_numel(size_hints), 1, vec_size(itemsize)
+        ).batch_total_elements
+    out = copy.deepcopy(configs)
+    for triton_config in out:
+        if "R0_BLOCK" in triton_config.kwargs:
+            triton_config.kwargs["R0_BLOCK"] = r0
+    return unique_configs(out)
 
 
 def filter_reduction_configs_for_determinism(

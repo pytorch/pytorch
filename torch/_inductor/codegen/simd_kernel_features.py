@@ -14,6 +14,7 @@ import torch
 from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
+from .. import ir
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
 from ..scheduler import SchedulerNode
@@ -101,6 +102,41 @@ class SIMDKernelFeatures:
 
     def reduction_nodes(self) -> list[SchedulerNode]:
         return [n for n in self.scheduler_nodes() if n.is_reduction()]
+
+    @cache_on_self
+    def has_strict_sum_reduction(self) -> bool:
+        return any(
+            node.node is not None
+            and isinstance(node.node.data, ir.Reduction)
+            and node.node.data.strict_sum
+            for node in self.reduction_nodes()
+        )
+
+    @cache_on_self
+    def has_strict_sum_linear_reduction(self) -> bool:
+        return any(
+            node.node is not None
+            and isinstance(node.node.data, ir.Reduction)
+            and node.node.data.strict_sum_linear
+            for node in self.reduction_nodes()
+        )
+
+    @cache_on_self
+    def strict_sum_itemsize(self) -> int | None:
+        itemsizes = {
+            node.node.data.src_dtype.itemsize
+            for node in self.reduction_nodes()
+            if node.node is not None
+            and isinstance(node.node.data, ir.Reduction)
+            and node.node.data.strict_sum
+        }
+        if not itemsizes:
+            return None
+        if len(itemsizes) != 1:
+            raise AssertionError(
+                f"strict sums require one source itemsize, got {itemsizes}"
+            )
+        return next(iter(itemsizes))
 
     @cache_on_self
     def buf_accesses(self) -> dict[str, list[Dep]]:

@@ -447,6 +447,8 @@ class InductorChoices:
         """
         if not config.triton.persistent_reductions:
             return False
+        if config.numerics == "strict" and features.has_strict_sum_linear_reduction():
+            return False
         threshold = {
             ReductionHint.INNER: 1024,
         }.get(features.get_reduction_hint(), 64)
@@ -525,30 +527,6 @@ class InductorChoices:
         num_threads = warp_size * num_warps
 
         if inner_reduction:
-            # Strict numerics: share the split factor with eager via the SAME shared, runtime-free
-            # API (inner_tree_plan.compute_inner_tree_params, exposed by the eager PR), so eager
-            # and Inductor chunk the reduction axis identically -> the two-stage split sums group
-            # the same way -> bitwise. split = eager num_batches, but only when Inductor's equal
-            # ceil(N/C) chunks match eager's fixed batch_total_elements batches (N an exact
-            # multiple); else 1 (the looped kernel handles the ragged tail via zero-padding).
-            from torch.utils._triton import has_triton_reduction_ordering
-
-            # Only force eager's split when INNER_TREE is available (else strict codegen falls
-            # back to default, so keep the split default too). Otherwise fall through below.
-            if config.numerics == "strict" and has_triton_reduction_ordering():
-                from torch._native.ops.sum.inner_tree_plan import (
-                    _K_TWO_KERNEL_THRESHOLD,
-                    compute_inner_tree_params,
-                    vec_size,
-                )
-
-                p = compute_inner_tree_params(reduction_numel_hint, numel_hint, vec_size(4))
-                if (
-                    p.num_batches > _K_TWO_KERNEL_THRESHOLD
-                    and reduction_numel_hint % p.batch_total_elements == 0
-                ):
-                    return p.num_batches
-                return 1
             # do heuristics that's close to eager mode for split inner reduction
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
             if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs

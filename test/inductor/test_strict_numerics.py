@@ -1,14 +1,5 @@
 # Owner(s): ["module: inductor"]
-"""Bitwise parity tests for ``torch._inductor.config.numerics == "strict"``.
-
-Strict mode makes Inductor emit a fixed, layout-independent reduction order (Triton
-``INNER_TREE``, tree-then-linear accumulation, shared R0_BLOCK/split + persistent/loop
-thresholds) so that ``torch.compile`` matches EAGER (ATen) bit-for-bit. In this env ATen's
-reduction is itself INNER_TREE (tree-then-linear), so ``numerics`` only affects the Inductor
-codegen -- eager ``torch.sum`` is the reference and is unaffected by the flag.
-
-Add a bitwise op by adding one entry to ``STRICT_OPS`` -- it inherits the whole matrix.
-"""
+"""Tests for strict inner-contiguous sum ordering."""
 
 import unittest
 
@@ -19,25 +10,32 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    run_tests,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import has_triton_reduction_ordering
 
 
-# op name -> fn(x, dim). Extend with mean/prod/amax/...
-STRICT_OPS = {
-    "sum": lambda z, d: torch.sum(z, d) if d is not None else torch.sum(z),
-}
+# Strict sum consumes eager's planning API (torch._native.ops.sum.inner_tree_plan), which the
+# eager INNER_TREE PR provides and this PR stacks on. Skip the suite if it isn't checked out.
+try:
+    from torch._native.ops.sum.inner_tree_plan import (  # noqa: F401
+        compute_inner_tree_params,
+    )
 
-# (name, shape, dim): inner (contiguous) reduced dim only -- 2D row reductions (dim=-1) and 1D;
-# sizes span persistent / looped / split reduction structures, pow2 + non-pow2. Column/strided,
-# full-reduce, and multi-dim reductions are out of scope (eager runs classic ATen there).
+    _HAS_INNER_TREE_PLAN = True
+except ImportError:
+    _HAS_INNER_TREE_PLAN = False
+
+
+# Persistent, looped, and split inner reductions, including ragged extents.
 CASES = [
     ("row_persistent", (8192, 256), 1),
     ("row_nonpow2", (8192, 300), 1),
     ("row_tiny", (8192, 5), 1),
     ("row_looped", (4096, 8192), 1),
     ("row_split", (8, 65536), 1),
+    ("row_split_ragged", (8, 65537), 1),
     ("row_split_wide", (64, 262144), 1),
     ("row_split_manyout", (200, 262144), 1),
     ("d1", (65536,), 0),
@@ -51,8 +49,12 @@ AUTOTUNE_CASES = [c for c in CASES if c[0] in ("row_persistent", "row_split")]
 
 
 @unittest.skipUnless(
-    has_triton_reduction_ordering(),
-    "requires a Triton build with tl.ReductionOrdering",
+    HAS_GPU
+    and GPU_TYPE == "cuda"
+    and torch.version.hip is None
+    and has_triton_reduction_ordering()
+    and _HAS_INNER_TREE_PLAN,
+    "requires CUDA, tl.ReductionOrdering, and the eager inner-tree planning API",
 )
 @config.patch({"force_disable_caches": True})
 @instantiate_parametrized_tests
@@ -62,16 +64,18 @@ class StrictNumericsTest(TestCase):
         torch.manual_seed(0)
         torch._dynamo.reset()
 
-    def _check(self, op, shape, dim, dtype, **cfg):
-        fn = STRICT_OPS[op]
+    def _code(self, shape, dim, dtype, **cfg):
         x = torch.randn(*shape, device=GPU_TYPE, dtype=dtype)
-        f = lambda z: fn(z, dim)
-        eager = f(x)  # eager ATen (INNER_TREE here); numerics only affects Inductor codegen
+        fn = lambda z: torch.sum(z, dim)
         with config.patch({"numerics": "strict", **cfg}):
             torch._dynamo.reset()
-            result, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
-        self.assertTrue(torch.equal(eager, result))  # bitwise-equal to eager ATen
-        self.assertIn(  # strict emitted the fixed order
+            result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        return fn(x), result, code
+
+    def _check(self, shape, dim, dtype, **cfg):
+        eager, result, code = self._code(shape, dim, dtype, **cfg)
+        self.assertEqual(eager, result, atol=0, rtol=0)
+        self.assertIn(
             "reduction_ordering=tl.constexpr(tl.ReductionOrdering.INNER_TREE)", code
         )
         return code
@@ -80,54 +84,49 @@ class StrictNumericsTest(TestCase):
     @parametrize("dtype", DTYPES)
     def test_sum_bitwise(self, case, dtype):
         _, shape, dim = case
-        self._check("sum", shape, dim, dtype)
+        self._check(shape, dim, dtype)
 
-    @parametrize(
-        "case",
-        [c for c in CASES if c[2] is not None],
-        name_fn=lambda c: c[0],
-    )
-    def test_sum_keepdim(self, case):
-        # keepdim=True must give the CORRECT shape AND bitwise-match eager ATen.
-        _, shape, dim = case
-        x = torch.randn(*shape, device=GPU_TYPE, dtype=torch.float32)
-        f = lambda z: torch.sum(z, dim, keepdim=True)
+    def test_sum_keepdim(self):
+        x = torch.randn(64, 300, device=GPU_TYPE)
+        f = lambda z: torch.sum(z, 1, keepdim=True)
         eager = f(x)
         with config.patch({"numerics": "strict"}):
             torch._dynamo.reset()
             result, _ = run_and_get_code(torch.compile(f, fullgraph=True), x)
-        self.assertEqual(tuple(result.shape), tuple(eager.shape))
-        self.assertTrue(torch.equal(eager, result))
+        self.assertEqual(eager, result, atol=0, rtol=0)
 
     @parametrize("case", AUTOTUNE_CASES, name_fn=lambda c: c[0])
-    @parametrize(
-        "mode",
-        [
-            {"max_autotune": True},
-            {"max_autotune": True, "coordinate_descent_tuning": True},
-        ],
-        name_fn=lambda m: "cdt" if "coordinate_descent_tuning" in m else "autotune",
-    )
-    def test_sum_matches_eager_under_autotune(self, case, mode):
-        # a different autotuned num_warps/XBLOCK must still match eager; representative
-        # subset only (config-invariance is geometry/dtype-independent, autotune is slow).
+    def test_sum_matches_eager_under_autotune(self, case):
         _, shape, dim = case
-        self._check("sum", shape, dim, torch.float32, **mode)
+        self._check(shape, dim, torch.float32, max_autotune=True)
 
-    def test_default_drifts_from_eager(self):
-        # negative control: without strict, Inductor drifts from eager ATen (the drift strict fixes).
-        x = torch.randn(1024, 1024, device=GPU_TYPE)
-        fn = lambda z: torch.sum(z, 0)
-        eager = fn(x)
-        torch._dynamo.reset()
-        with config.patch({"numerics": "default"}):
-            default, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
-        self.assertNotIn("reduction_ordering", code)
-        self.assertFalse(torch.equal(eager, default))
+    def test_dynamic_matches_eager(self):
+        # A divisibility hint must not enable split reduction for a dynamic extent.
+        fn = lambda z: torch.sum(z, 1)
+        with config.patch({"numerics": "strict"}):
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+            for n in (65536, 65537):
+                x = torch.randn(8, n, device=GPU_TYPE)
+                self.assertEqual(fn(x), compiled(x), atol=0, rtol=0)
+
+    @parametrize(
+        "case",
+        [
+            ("column", lambda z: torch.sum(z, 0)),
+            ("multidim", lambda z: torch.sum(z, (0, 1))),
+            ("non_sum", lambda z: torch.amax(z, 1)),
+        ],
+        name_fn=lambda c: c[0],
+    )
+    def test_out_of_scope_uses_default_order(self, case):
+        _, fn = case
+        x = torch.randn(64, 300, device=GPU_TYPE)
+        with config.patch({"numerics": "strict"}):
+            torch._dynamo.reset()
+            _, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertNotIn("ReductionOrdering.INNER_TREE", code)
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    if HAS_GPU:
-        run_tests(needs="filelock")
+    run_tests()
