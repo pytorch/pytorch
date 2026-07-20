@@ -10,6 +10,7 @@ from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codegen.cutlass.cache import maybe_fetch_ops
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
@@ -1051,6 +1052,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         if self.cache_key in self.filtered_ops_cache:
             log.debug("Using cached ops for %s", self.cache_key)
             return self.filtered_ops_cache[self.cache_key]
+
+        counters["inductor"]["cutlass_filtered_ops_cache_miss"] += 1
 
         with dynamo_timed("CUTLASSGemmTemplate.maybe_fetch_ops"):
             maybe_ops = maybe_fetch_ops(self.device_type)
