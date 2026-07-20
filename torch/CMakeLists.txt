@@ -175,9 +175,6 @@ if(USE_ROCM)
     if(NOT WIN32)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
     endif()
-    if(USE_HIPSPARSELT)
-        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_HIPSPARSELT)
-    endif()
 endif()
 
 if(USE_XPU)
@@ -198,7 +195,7 @@ if(USE_CUDNN OR USE_ROCM)
     endif()
 endif()
 
-if(USE_CUSPARSELT OR USE_HIPSPARSELT)
+if(USE_CUSPARSELT)
     list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/cuda/shared/cusparselt.cpp)
 endif()
 

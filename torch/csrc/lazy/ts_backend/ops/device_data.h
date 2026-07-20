@@ -36,7 +36,7 @@ class TORCH_API DeviceData : public TsNode {
   static const DeviceData* Cast(const Node* node);
 
   // To reuse IR nodes, use this method to create DeviceData nodes
-  // instead of calling the constructor directly.
+  // instead of calling the constructor directconst ly.
   static NodePtr Create(const std::shared_ptr<BackendData>& data);
 
   TSOpVector Lower(

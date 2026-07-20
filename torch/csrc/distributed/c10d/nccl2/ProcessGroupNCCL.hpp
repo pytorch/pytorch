@@ -28,8 +28,6 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime.h>
 #include <nccl.h>
 
@@ -38,6 +36,7 @@
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
 #include <torch/csrc/distributed/c10d/nccl2/Batch.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/CudaApi.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
@@ -214,9 +213,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
   void setTimeout(std::chrono::milliseconds timeout) override;
   void eagerConnectSingleDevice(at::Device device) override;
-  uint64_t getSequenceNumberForGroup() override {
-    return sequence_number_;
-  }
   void shutdown() override;
   void abort() override;
   ::c10d::ErrorType getError() override;
@@ -269,11 +265,17 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void unregisterAbortHook(int64_t hook_id) override;
 
   // ---- accessors used by friend classes (work) ----
+  CudaApi* getCudaApi() const {
+    return cuda_api_.get();
+  }
   NcclApi* getNcclApi() const {
     return nccl_api_.get();
   }
   void setNcclApi(std::shared_ptr<NcclApi> api) {
     nccl_api_ = std::move(api);
+  }
+  void setCudaApi(std::shared_ptr<CudaApi> api) {
+    cuda_api_ = std::move(api);
   }
   const at::Device& getDevice() const {
     return device_;
@@ -288,8 +290,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   friend class WindowNCCL;
 
  protected:
-  [[nodiscard]] std::unique_ptr<at::cuda::CUDAEvent> getEvent();
-  void returnEvent(std::unique_ptr<at::cuda::CUDAEvent> event);
+  [[nodiscard]] cudaEvent_t getEvent();
+  void returnEvent(cudaEvent_t event);
   void abortNcclComm();
   void revokeNcclComm();
 
@@ -319,7 +321,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     /* implicit */ RedOpRAII(ncclRedOp_t op);
     explicit RedOpRAII(
         const ::c10d::ReduceOp& op,
-        ncclComm_t comm,
+        const ncclComm_t comm,
         const ncclDataType_t dataType,
         std::shared_ptr<NcclApi> nccl_api);
 
@@ -461,7 +463,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   size_t wordSize(ncclDataType_t type) const;
   RedOpRAII getNcclReduceOp(
       const ::c10d::ReduceOp& op,
-      ncclComm_t comm,
+      const ncclComm_t comm,
       const ncclDataType_t dataType);
   void timeoutWatchdog() noexcept;
   void checkInitialized() const;
@@ -486,9 +488,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // ctor and refreshed from NCCL in initNcclResources). The ported engine code
   // reads/writes `rank_` directly, which resolves to that protected member.
   size_t max_event_pool_size_{};
-  std::optional<at::cuda::CUDAStream> internal_stream_;
-  std::optional<at::cuda::CUDAEvent> dependency_event_;
-  at::DataPtr barrier_buffer_;
+  cudaStream_t internal_stream_{};
+  cudaEvent_t dependency_event_{};
+  void* barrier_buffer_{};
   enum class InitializationState {
     UNINITIALIZED,
     INITIALIZED,
@@ -496,12 +498,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   } init_state_{InitializationState::UNINITIALIZED};
 
   c10::intrusive_ptr<::c10d::Store> store_;
-  uint64_t bootstrap_generation_{0};
-  uint64_t sequence_number_{0};
 
   std::shared_ptr<NcclApi> nccl_api_;
+  std::shared_ptr<CudaApi> cuda_api_;
 
-  std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
+  std::queue<cudaEvent_t> event_pool_;
   std::mutex event_pool_mutex_;
 
   WorkNCCLQueue workq_;
@@ -529,7 +530,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     ncclWindow_t winHandle{nullptr};
     size_t len{0};
   };
-  std::map<void*, RegistrationHandle, std::less<>> memoryRegistrationHandles_;
+  std::map<void*, RegistrationHandle> memoryRegistrationHandles_;
   // Guards memoryRegistrationHandles_: register/deregister_address run on
   // allocator threads while window ops look segments up on the main thread.
   std::mutex memory_registration_mutex_;
@@ -541,7 +542,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
   std::optional<BatchSendRecv> coalescing_batch_;
-  c10::intrusive_ptr<WorkNCCL> coalesced_work_;
 
   std::unordered_map<
       unsigned long long,
