@@ -4520,6 +4520,15 @@ class RemovableHandleVariable(VariableTracker):
         self.mutation_type = mutation_type
         self.idx = idx
 
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "remove":
+            from .misc import CallMethodVariable
+
+            return CallMethodVariable(self, name)
+        return super().getattro_impl(tx, name)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",

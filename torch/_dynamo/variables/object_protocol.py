@@ -74,10 +74,11 @@ def vt_identity_compare(
             else ConstantVariable.create(False)
         )
 
-    # One side has a concrete backing object, the other doesn't — they can't
-    # be the same object.
+    # One side has a concrete backing object, the other doesn't.  We cannot
+    # prove they are different — the unknown side might be a deferred
+    # representation (e.g. CallMethodVariable) of the same value.
     if left_known != right_known:
-        return ConstantVariable.create(False)
+        return None
 
     # Objects created during tracing: VT identity = Python identity.
     from .dicts import ConstDictVariable
@@ -2134,7 +2135,6 @@ def generic_getattr(
             return default  # type: ignore[return-value]
 
     # Core dispatch: call the VT's getattro_impl (tp_getattro).
-    source = obj.source and AttrSource(obj.source, name)
     try:
         return obj.getattro_impl(tx, name)
     except AsPythonConstantNotImplementedError:
