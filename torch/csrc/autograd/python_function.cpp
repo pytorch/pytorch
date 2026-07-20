@@ -53,15 +53,13 @@ using namespace torch;
 using namespace torch::autograd;
 using at::Tensor;
 
-// NOLINTBEGIN(hicpp-exception-baseclass)
-
 PyObject* THPFunctionClass = nullptr;
 PyObject* THPGradientEdgeClass = nullptr;
 
 #define THPFunction_assert(condition, ...) \
   if (!(condition)) {                      \
     THPUtils_setError(__VA_ARGS__);        \
-    throw python_error();                  \
+    throw_python_error();                  \
   }
 
 // Anonymous namespace for helpful functions used in this file
@@ -92,6 +90,7 @@ inline void check_legacy_fn_attr_access(
 void throw_python_error() {
   python_error err;
   err.persist();
+  // NOLINTNEXTLINE(hicpp-exception-baseclass)
   throw std::move(err);
 }
 
@@ -165,7 +164,7 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
   auto ret = THPObjectPtr(THPSizeType.tp_alloc(
       &THPSizeType, static_cast<Py_ssize_t>(sym_sizes.size())));
   if (!ret)
-    throw python_error();
+    throw_python_error();
 
   for (auto i : c10::irange(sym_sizes.size())) {
     auto symint = sym_sizes[i];
@@ -287,7 +286,7 @@ auto PyNode::apply_with_saved_impl(
   THPObjectPtr fwdInputMetadatas(
       PyTuple_New(static_cast<Py_ssize_t>(is_variable_input.size())));
   if (!fwdInputMetadatas)
-    throw python_error();
+    throw_python_error();
 
   int offset = 0;
   for (const auto i : c10::irange(is_variable_input.size())) {
@@ -306,7 +305,7 @@ auto PyNode::apply_with_saved_impl(
     // Metadata is a tuple of 4 elements: (layout, device, dtype, size)
     THPObjectPtr fwdInputMetadata(PyTuple_New(4));
     if (!fwdInputMetadata)
-      throw python_error();
+      throw_python_error();
     PyTuple_SET_ITEM(
         fwdInputMetadata.get(), 0, autograd::utils::wrap(input_info.layout));
     PyTuple_SET_ITEM(fwdInputMetadata.get(), 1, device.release());
@@ -797,13 +796,13 @@ static void _wrap_outputs(
     THPObjectPtr py_x(THPVariable_Wrap(x));
     THPObjectPtr py_view_as_method(PyObject_GetAttrString(py_x, "view_as"));
     if (!py_view_as_method)
-      throw python_error();
+      throw_python_error();
     THPObjectPtr args(PyTuple_Pack(1, py_x.get()));
     if (!args)
-      throw python_error();
+      throw_python_error();
     THPObjectPtr result(PyObject_CallObject(py_view_as_method, args));
     if (!result)
-      throw python_error();
+      throw_python_error();
     return THPVariable_Unpack(result);
   };
 
@@ -1229,7 +1228,7 @@ PyObject* process_outputs(
 
   THPObjectPtr outputs(PyTuple_New(num_outputs));
   if (!outputs)
-    throw python_error();
+    throw_python_error();
 
   grad_fn->cdata->clear_input_metadata();
 
@@ -1832,7 +1831,7 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
       "'saved_variables' is deprecated; use 'saved_tensors'",
       0);
   if (r != 0)
-    throw python_error();
+    throw_python_error();
   TORCH_CHECK(
       !self->saved_tensors_accessed_and_cleared,
       "saved_tensors can only be accessed once when "
@@ -1862,7 +1861,7 @@ PyObject* THPFunction_get_compiled_autograd_symints(
   auto size = self->compiled_autograd_symints.size();
   THPObjectPtr result(PyTuple_New(static_cast<Py_ssize_t>(size)));
   if (!result) {
-    throw python_error();
+    throw_python_error();
   }
   for (const auto i : c10::irange(size)) {
     PyTuple_SET_ITEM(
@@ -2180,5 +2179,3 @@ bool THPFunction_initModule(PyObject* module) {
     return false;
   return true;
 }
-
-// NOLINTEND(hicpp-exception-baseclass)
