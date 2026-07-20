@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from _common import get_torch_version
+# _common is resolved at build time via scikit-build-core's provider path,
+# not statically importable from the repo root.
+from _common import get_torch_version  # pyrefly: ignore[missing-import]
 
 
 if TYPE_CHECKING:
