@@ -892,7 +892,7 @@ Tensor get_expanded_index(const Tensor& index, SymIntArrayRef self_size, int64_t
   // Now apply expand to index_
   {
     VmapSymDimVector new_index_shape = {self_size.begin(), self_size.end()};
-    new_index_shape[dim] = idx_size;
+    new_index_shape[dim] = std::move(idx_size);
     index_ = index_.expand_symint(new_index_shape);
   }
   return index_;
