@@ -2485,6 +2485,8 @@ class TestSDPA(NNTestCase):
     @parametrize("kv_heads", [1, 2])
     @parametrize("variant", ["plain", "mask", "causal", "dropout_mask"])
     def test_math_gqa_broadcast_matches_repeat(self, device, dtype, kv_heads, variant):
+        if dtype == torch.float64 and torch.device(device).type == "mps":
+            self.skipTest("float64 is not supported on MPS")
         # The math backend computes GQA by broadcasting key/value over grouped
         # query heads. Check that matches the historical behavior of repeating
         # key/value with repeat_interleave and running attention with equal heads.
