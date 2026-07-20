@@ -612,9 +612,12 @@ class OverlapScheduler:
         for node in self.nodes:
             baseline_tracker.schedule_node(node)
             current_mem = baseline_tracker.current_memory_bytes
+            last_node_peak = baseline_tracker.last_node_peak_memory
 
             # Record the max memory between this and previous compute node
-            last_compute_max_memory = max(last_compute_max_memory, current_mem)
+            last_compute_max_memory = max(
+                last_compute_max_memory, current_mem, last_node_peak
+            )
 
             if is_compute_node(node):
                 self.original_mem_before_compute_index.append(last_compute_max_memory)
