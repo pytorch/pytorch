@@ -5,6 +5,7 @@ import sys
 import traceback
 import typing
 from datetime import timedelta
+from typing_extensions import TypeAliasType as _TypeAliasType
 
 import torch
 
@@ -12,13 +13,16 @@ import torch
 RankType = int | torch.SymInt
 
 
-class RNGIndexBlock(typing.NamedTuple):
-    """A strided set of contiguous indices in a flattened logical RNG stream."""
-
-    start_index: int | torch.SymInt
-    block_size: int | torch.SymInt
-    block_stride: int | torch.SymInt
-    num_blocks: int | torch.SymInt
+# (start_index, block_size, block_stride, num_blocks)
+RNGIndexBlock = _TypeAliasType(
+    "RNGIndexBlock",
+    tuple[
+        int | torch.SymInt,
+        int | torch.SymInt,
+        int | torch.SymInt,
+        int | torch.SymInt,
+    ],
+)
 
 
 @typing.runtime_checkable
