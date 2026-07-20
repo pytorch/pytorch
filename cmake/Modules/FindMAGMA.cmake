@@ -1,7 +1,7 @@
 # - Find MAGMA library
 # This module finds an installed MAGMA library, a matrix algebra library
 # similar to LAPACK for GPU and multicore systems
-# (see http://icl.cs.utk.edu/magma/).
+# (see https://icl.utk.edu/magma/).
 #
 # This module will look for MAGMA library under /usr/local/magma by
 # default. To use a different installed version of the library set

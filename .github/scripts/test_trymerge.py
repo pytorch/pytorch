@@ -955,6 +955,44 @@ class TestBypassFailures(TestCase):
             str(w[0].message),
         )
 
+    def test_get_classifications_crcr_l3(self, *args: Any) -> None:
+        """Test that CRCR L3 failures are classified as CRCR_L3
+        and are always non-blocking regardless of the ok_failed_checks_threshold."""
+        pr = GitHubPR("pytorch", "pytorch", 100652)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        oot_check = (
+            "inductor / cuda11.8-py3.10-gcc7-sm86"
+            " / test (inductor_timm, 2, 2, linux.g5.4xlarge.nvidia.gpu)"
+        )
+        self.assertEqual(checks[oot_check].classification, "CRCR_L3")
+
+        # BROKEN_TRUNK classification still works independently
+        bt_check = (
+            "inductor / cuda11.8-py3.10-gcc7-sm86"
+            " / test (inductor_torchbench_dynamic, 1, 1, linux.g5.4xlarge.nvidia.gpu)"
+        )
+        self.assertEqual(checks[bt_check].classification, "BROKEN_TRUNK")
+
+        # CRCR_L3 is always non-blocking: ignored by default
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["CRCR_L3"]) == 1)
+
+        # CRCR_L3 stays ignored even with threshold=0, unlike flaky/broken_trunk
+        # which get promoted to blocking failures when the threshold is exceeded
+        pending, failed, ignorable = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=0
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(ignorable["CRCR_L3"]) == 1)
+
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch("trymerge.gh_fetch_merge_base", return_value="")
