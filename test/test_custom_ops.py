@@ -746,6 +746,88 @@ class TestCustomOp(CustomOpTestCaseBase):
         self.assertEqual(x.grad, x.detach().cos())
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_tensor_list_output(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_tensor_list_output",
+            mutates_args=(),
+        )
+        def f(x: Tensor, sizes: Tensor) -> List[Tensor]:
+            return tuple(t.clone() for t in torch.split(x, sizes.tolist(), dim=0))  # type: ignore[return-value]
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        backward_called = False
+
+        def backward(ctx, grad_outputs):
+            nonlocal backward_called
+            backward_called = True
+            self.assertIsInstance(grad_outputs, list)
+            return torch.cat(grad_outputs, dim=0), None
+
+        f.register_autograd(backward, setup_context=setup_context)
+
+        op = self.ns().pyobject_dispatch_tensor_list_output.default
+        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+
+        x = torch.randn(6, 2, requires_grad=True)
+        sizes = torch.tensor([1, 2, 3])
+        y = f(x, sizes)
+        self.assertIsInstance(y, list)
+        self.assertEqual([part.shape[0] for part in y], sizes.tolist())
+
+        sum(part.sum() for part in y).backward()
+        self.assertTrue(backward_called)
+        self.assertEqual(x.grad, torch.ones_like(x))
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_tensor_list_output_for_module(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_module_tensor_list_output",
+            mutates_args=(),
+        )
+        def f(x: Tensor, sizes: Tensor) -> Tuple[List[Tensor], Tensor]:
+            splits = tuple(t.clone() for t in torch.split(x, sizes.tolist(), dim=0))
+            return typing.cast(List[Tensor], splits), x.clone()
+
+        class ModuleExpectingTensor(torch.nn.Module):
+            def forward(self, input: Tensor) -> Tensor:
+                return torch.empty(input.size(0))
+
+        class ListModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.module_expecting_tensor = ModuleExpectingTensor()
+                self.register_forward_pre_hook(self._forward_pre_hook)
+
+            def _forward_pre_hook(self, module, inputs):
+                self.module_expecting_tensor(input=inputs[0][0])
+                return inputs
+
+            def forward(self, input_embs: List[Tensor]) -> List[Tensor]:
+                return input_embs
+
+        class Consumer(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.list_module = ListModule()
+
+            def forward(self, input_embs: List[Tensor]) -> Tensor:
+                if not isinstance(input_embs, list):
+                    input_embs = [input_embs]
+                return self.list_module([input_embs[0]])[0]
+
+        op = self.ns().pyobject_dispatch_module_tensor_list_output.default
+        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+
+        x = torch.randn(6, 2)
+        sizes = torch.tensor([1, 2, 3])
+        y, passthrough = f(x, sizes)
+        self.assertIsInstance(y, list)
+        self.assertEqual(passthrough, x)
+        self.assertEqual(Consumer()(y), y[0])
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_normalizes_tensor_list_input(self):
         @torch.library.custom_op(
             f"{self.test_ns}::pyobject_dispatch_tensor_list", mutates_args=()

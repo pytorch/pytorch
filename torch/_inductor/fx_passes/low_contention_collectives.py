@@ -59,15 +59,16 @@ def replace_collectives_with_low_contention(
 
     from torch._inductor import config
 
-    min_bytes = config.aten_distributed_optimizations.low_contention_min_bytes_per_rank
-    skip_overlap_check = (
-        config.aten_distributed_optimizations.low_contention_skip_overlap_check
-    )
+    cfg = config.aten_distributed_optimizations
+    min_bytes = cfg.low_contention_min_bytes_per_rank
+    skip_overlap_check = cfg.low_contention_skip_overlap_check
+    use_ag_ce_multicast = cfg.low_contention_all_gather_ce_multicast
 
     replacements = 0
     skipped_small = 0
     skipped_no_overlap = 0
     skipped_nvlink_contention = 0
+    skipped_out_variant = 0
     for node, is_ag, group_name in collectives:
         coll_type = "AG" if is_ag else "RS"
 
@@ -104,18 +105,37 @@ def replace_collectives_with_low_contention(
                 )
                 continue
 
-        _replace_collective(node, graph, symm_mem, is_ag, group_name)
+        target = None
+        if is_ag:
+            target = _select_low_contention_all_gather_target(
+                symm_mem,
+                input_node=node.args[0],
+                use_ag_ce_multicast=use_ag_ce_multicast,
+            )
+
+        if not _replace_collective(
+            node,
+            graph,
+            symm_mem,
+            is_ag,
+            group_name,
+            target=target,
+        ):
+            skipped_out_variant += 1
+            continue
         replacements += 1
 
     log.info(
         "Replaced %d/%d FSDP collectives "
         "(skipped_small=%d, skipped_no_overlap=%d, "
-        "skipped_nvlink_contention=%d, min_bytes=%d, skip_overlap_check=%s)",
+        "skipped_nvlink_contention=%d, skipped_out_variant=%d, "
+        "min_bytes=%d, skip_overlap_check=%s)",
         replacements,
         len(collectives),
         skipped_small,
         skipped_no_overlap,
         skipped_nvlink_contention,
+        skipped_out_variant,
         min_bytes,
         skip_overlap_check,
     )
@@ -140,11 +160,66 @@ def _enable_symm_mem(group_name):
         return False
 
 
-def _replace_collective(node, graph, symm_mem, is_ag, group_name):
+def _has_multicast_support(device_index: int) -> bool:
+    try:
+        from torch._C._autograd import DeviceType
+        from torch._C._distributed_c10d import _SymmetricMemory
+
+        return bool(
+            _SymmetricMemory.has_multicast_support(DeviceType.CUDA, device_index)
+        )
+    except Exception:
+        return False
+
+
+def _select_low_contention_all_gather_target(
+    symm_mem,
+    input_node,
+    use_ag_ce_multicast=False,
+):
+    if not use_ag_ce_multicast:
+        return symm_mem._low_contention_all_gather.default
+
+    device_index = None
+    input_val = input_node.meta.get("val")
+    if isinstance(input_val, torch.Tensor) and input_val.device.type == "cuda":
+        device_index = input_val.device.index
+    if device_index is None:
+        device_index = torch.cuda.current_device()
+
+    if _has_multicast_support(device_index):
+        return symm_mem._low_contention_all_gather_ce_multicast.default
+    log.info(
+        "low_contention_all_gather_ce_multicast requested but multicast is not "
+        "supported on device %d; falling through.",
+        device_index,
+    )
+
+    return symm_mem._low_contention_all_gather.default
+
+
+def _replace_collective(
+    node,
+    graph,
+    symm_mem,
+    is_ag,
+    group_name,
+    target=None,
+) -> bool:
     input_node = node.args[0]
     if is_ag:
-        target = symm_mem._low_contention_all_gather.default
-        args = (input_node, group_name)
+        if target is None:
+            return False
+        if node.target is torch.ops._c10d_functional.all_gather_into_tensor_out.default:
+            out = node.kwargs["out"]
+            if target is symm_mem._low_contention_all_gather_ce_multicast.default:
+                target = symm_mem._low_contention_all_gather_ce_multicast_out.default
+            else:
+                # The existing low-contention all-gather has no out variant.
+                return False
+            args = (input_node, group_name, out)
+        else:
+            args = (input_node, group_name)
     else:
         reduce_op = node.args[1]
         target = symm_mem._low_contention_reduce_scatter.default
@@ -155,6 +230,7 @@ def _replace_collective(node, graph, symm_mem, is_ag, group_name):
     new_node.meta.update(node.meta)
     node.replace_all_uses_with(new_node)
     graph.erase_node(node)
+    return True
 
 
 def _get_per_rank_bytes(node, is_ag):

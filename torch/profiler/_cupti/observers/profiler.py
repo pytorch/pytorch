@@ -169,7 +169,7 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Environment.DEVICE_ID,
         Environment.TIMESTAMP,
         Environment.ENVIRONMENT_KIND,
-        Environment.DATA,
+        Environment.ENVIRONMENT_KIND_DATA,
     },
 }
 
@@ -801,7 +801,7 @@ def _environment_columns(cols, convert, resolver):
         "start_ns": convert(cols[Environment.TIMESTAMP.id]),
         "device_id": cols[Environment.DEVICE_ID.id].astype(np.int64),
         "environment_kind": cols[Environment.ENVIRONMENT_KIND.id].astype(np.int64),
-        "data": cols[Environment.DATA.id].astype(np.uint64),
+        "data": cols[Environment.ENVIRONMENT_KIND_DATA.id].astype(np.uint64),
     }
 
 
