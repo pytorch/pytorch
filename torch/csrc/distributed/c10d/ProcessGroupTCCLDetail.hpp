@@ -18,7 +18,7 @@ namespace c10d {
 class TCCLConnection;
 class TCCLSharedBuffer;
 
-// ---- Reduction op templates ------------------------------------------------
+// Reduction op templates
 
 
 
@@ -53,7 +53,7 @@ inline void TCCLSumOp<float>::operator()(
   }
 }
 
-// float16 / bfloat16 SUM — accumulate in float32 then round back, matching
+// float16 / bfloat16 SUM - accumulate in float32 then round back, matching
 // PyTorch's reduction semantics for low-precision floats (the dtypes DDP/TP
 // reduce most).
 template <>
@@ -196,13 +196,12 @@ TCCL_DEFINE_MINMAX_VIA_FLOAT(c10::BFloat16)
 #undef TCCL_DEFINE_MINMAX_VIA_FLOAT
 
 
-// ---- TCCLEngine ----------------------------------------------------------
+// TCCLEngine
 
 class TCCLEngine {
  public:
-  // Size of each per-peer staging buffer (hence its registered MR) and the
-  // max bytes per ibv_post_send; larger messages split into a chunk loop and
-  // reduce incrementally. Capped at 512 KB.
+  // Per-peer staging buffer size (hence its MR) and max bytes per ibv_post_send.
+  // Larger messages split into a chunk loop and reduce incrementally.
   static constexpr size_t kChunkSize = 512 * 1024;
 
   TCCLEngine(
@@ -291,13 +290,11 @@ class TCCLEngine {
   // through the per-peer recv buffer (PIPELINE=1). Posts the recv before polling.
   void p2p_recv(int src, char* out, std::size_t nbytes);
 
-  // Mesh (direct) all-to-all. This rank's slab destined for peer p is
-  // [send_base + send_off[p], +send_bytes[p]); the slab received from peer p lands
-  // at [recv_base + recv_off[p], +recv_bytes[p]). Handles equal AND uneven
-  // (alltoallv) splits — sizes are per-peer. The self slot (p == rank_) is a local
-  // memcpy. Every peer is served simultaneously (recv+send in flight per peer,
-  // chunked at kChunkSize, PIPELINE=1), polling each peer's CQ; recv posted before
-  // send (UC discipline).
+  // Mesh (direct) all-to-all. Slab destined for peer p is [send_base +
+  // send_off[p], +send_bytes[p]); slab from peer p lands at [recv_base +
+  // recv_off[p], +recv_bytes[p]). Handles equal AND uneven (alltoallv) splits.
+  // Self slot is a local memcpy. Every peer served simultaneously (recv+send in
+  // flight per peer, kChunkSize, PIPELINE=1), recv before send (UC discipline).
   void all_to_all(
       const char* send_base,
       char* recv_base,
@@ -313,19 +310,15 @@ class TCCLEngine {
       const char* send_base, char* recv_base, std::size_t seg_bytes);
 
  private:
-  // Core mesh primitive shared by all collectives above. Exchanges up to
-  // `total_bytes` bytes with every non-self peer in kChunkSize chunks. Per
-  // chunk [off, off+chunk_bytes):
-  //   - for each peer with want_recv(peer) == true: pre-post a recv (UC needs
-  //     the recv posted before the matching send arrives, Apple TN3205 §12.3);
-  //   - for each peer where send_src(peer, off) != nullptr: memcpy that source
-  //     region into the peer's send buffer and post a send;
-  //   - busy-poll (PG-timeout watchdog) until every posted WR completes,
-  //     calling on_recv(peer, recv_buf, off, chunk_bytes) once per recv
-  //     completion.
-  // The per-peer send_src lets reduce_scatter hand each peer a different slab;
-  // want_recv + a nullable send_src let broadcast post an asymmetric
-  // (root-sends / leaf-receives) WR set.
+  // Core mesh primitive shared by the mesh collectives. Exchanges up to
+  // `total_bytes` with every non-self peer in kChunkSize chunks. Per chunk:
+  //   - want_recv(peer): pre-post a recv (UC needs recv before the matching
+  //     send, Apple TN3205 sec. 12.3)
+  //   - send_src(peer, off) != nullptr: memcpy into the send buffer, post a send
+  //   - busy-poll (timeout watchdog) until all WRs complete, firing
+  //     on_recv(peer, recv_buf, off, chunk_bytes) per recv
+  // Per-peer send_src lets reduce_scatter send each peer a different slab;
+  // want_recv + nullable send_src let broadcast post an asymmetric WR set.
   template <typename SendSrc, typename WantRecv, typename OnRecv>
   void mesh_exchange(
       std::size_t total_bytes,
@@ -334,13 +327,11 @@ class TCCLEngine {
       OnRecv on_recv);
 
   // One ring step shared by reduce-scatter and all-gather: send `send_bytes`
-  // from `send_base` to the right neighbor `send_peer` AND receive `recv_bytes`
-  // from the left neighbor `recv_peer`, both in kChunkSize pieces (PIPELINE=1,
-  // one piece in flight per direction). recv posted before send (UC discipline);
-  // per-completion wc.status check + a timeout_ watchdog. on_recv(recv_offset,
-  // src, n_bytes) reduces/copies each received piece into the destination chunk.
-  // The two directions carry independent byte counts (the ragged last chunk
-  // differs per direction).
+  // from `send_base` to right neighbor `send_peer` AND receive `recv_bytes` from
+  // left neighbor `recv_peer`, in kChunkSize pieces (PIPELINE=1, one in flight
+  // per direction). Recv before send (UC discipline), per-completion wc.status
+  // check + timeout_ watchdog. on_recv reduces/copies each received piece. The
+  // two directions carry independent byte counts (ragged last chunk differs).
   template <typename OnRecv>
   void ring_step(
       int send_peer,
@@ -356,7 +347,8 @@ class TCCLEngine {
   std::vector<TCCLSharedBuffer>& send_buffers_;
   std::vector<TCCLSharedBuffer>& recv_buffers_;
   const std::chrono::milliseconds& timeout_;
-  const bool ring_topology_{false};  // true => mesh_exchange must never be reached
+  // True => mesh_exchange must never be reached
+  const bool ring_topology_{false};
 };
 
 } // namespace c10d

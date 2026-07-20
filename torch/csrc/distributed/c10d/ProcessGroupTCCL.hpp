@@ -25,7 +25,7 @@ namespace c10d {
 
 constexpr const char* TCCL_BACKEND_NAME = "tccl";
 
-// Forward declaration — definition in TCCLUtils.hpp (transport layer).
+// Forward declaration - definition in TCCLUtils.hpp (transport layer).
 class TCCLConnection;
 class TCCLSharedBuffer;
 class TCCLEngine;
@@ -134,10 +134,8 @@ class TORCH_API ProcessGroupTCCL : public Backend {
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  // Coalesced all-gather-into-tensor. This is the virtual that DTensor /
-  // Tensor-Parallel reach via _functional_collectives (all_gather_into_tensor
-  // -> Functional.cpp -> group->allgather_into_tensor_coalesced), NOT
-  // _allgather_base.
+  // Coalesced all-gather-into-tensor. The virtual DTensor / TP reach via
+  // _functional_collectives (all_gather_into_tensor), NOT _allgather_base.
   c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
@@ -164,8 +162,8 @@ class TORCH_API ProcessGroupTCCL : public Backend {
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
   // Coalesced reduce-scatter-tensor. The virtual DTensor / sequence-parallel
-  // reach via _functional_collectives (reduce_scatter_tensor -> Functional.cpp
-  // -> group->reduce_scatter_tensor_coalesced).
+  // reach via _functional_collectives (reduce_scatter_tensor), NOT
+  // _reduce_scatter_base.
   c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
@@ -194,11 +192,12 @@ class TORCH_API ProcessGroupTCCL : public Backend {
  protected:
   c10::intrusive_ptr<Store> store_;
   c10::intrusive_ptr<Options> options_;
-  Topology topology_{Topology::Mesh};  // resolved in ctor (options_ + TCCL_TOPOLOGY)
+  // Resolved in ctor from options_ + TCCL_TOPOLOGY
+  Topology topology_{Topology::Mesh};
   uint64_t seq_{0};
   uint64_t barrierSeq_{0};
 
-  // One TCCLConnection per (peer_rank, wire) — one UC queue pair each. Index
+  // One TCCLConnection per (peer_rank, wire) - one UC queue pair each. Index
   // = peer_rank * num_wires + wire. Slots at peer_rank == rank_ stay null.
   // Total size = size_ * options_->num_wires.
   std::vector<std::unique_ptr<TCCLConnection>> connections_;
@@ -220,12 +219,11 @@ class TORCH_API ProcessGroupTCCL : public Backend {
   std::condition_variable workCV_;
   std::atomic<bool> stop_{false};
 
-  // Shared async scaffold for collectives. Records an MPS event on the
-  // calling (main) thread so the worker waits for the GPU to flush writes to
-  // the input tensors, enqueues `fn` onto the worker, and returns a TCCLWork
-  // whose Future completes with `outputs` when `fn` returns. `fn` captures the
-  // tensors it needs and does the mpsSharedCpuView + engine_-> call; `outputs`
-  // are the tensors the Future should carry (for DDP's getFuture() chaining).
+  // Shared async scaffold. Records an MPS event so the worker waits for the GPU
+  // to flush writes to the inputs, enqueues `fn`, and returns a TCCLWork whose
+  // Future completes with `outputs` when `fn` returns. `fn` does the
+  // mpsSharedCpuView + engine_ call; `outputs` are what the Future carries (DDP
+  // getFuture() chaining).
   c10::intrusive_ptr<Work> enqueueCollective(
       OpType opType,
       std::vector<at::Tensor> outputs,
