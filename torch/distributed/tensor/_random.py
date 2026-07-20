@@ -8,6 +8,7 @@ from typing import Optional
 
 import torch
 from torch._prims_common import make_contiguous_strides_for
+from torch.distributed import RNGIndexBlock
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -24,8 +25,6 @@ __all__ = [
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
-
-_RNGIndexBlock = tuple[IntLikeType, IntLikeType, IntLikeType, IntLikeType]
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
@@ -58,7 +57,7 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
 def _try_compute_stateful_rng_layout(
     spec: DTensorSpec,
     local_tensor: torch.Tensor,
-) -> tuple[IntLikeType, tuple[_RNGIndexBlock, ...]] | None:
+) -> tuple[IntLikeType, tuple[RNGIndexBlock, ...]] | None:
     """Map a supported DTensor shard to logical row-major RNG indices."""
     if spec.mesh.ndim != 1 or len(spec.placements) != 1:
         return None
@@ -110,7 +109,7 @@ def _try_compute_stateful_rng_layout(
         )
 
     if shard_dim is None:
-        return logical_numel, ((0, logical_numel, logical_numel, 1),)
+        return logical_numel, (RNGIndexBlock(0, logical_numel, logical_numel, 1),)
 
     start_index: IntLikeType = 0
     for offset, stride in zip(global_offset, global_stride):
@@ -120,7 +119,9 @@ def _try_compute_stateful_rng_layout(
     block_count: IntLikeType = 1
     for size in local_shape[:shard_dim]:
         block_count *= size
-    return logical_numel, ((start_index, block_size, block_stride, block_count),)
+    return logical_numel, (
+        RNGIndexBlock(start_index, block_size, block_stride, block_count),
+    )
 
 
 def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:

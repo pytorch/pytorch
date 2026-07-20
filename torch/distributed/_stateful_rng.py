@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._library.utils import fill_defaults
@@ -11,6 +11,10 @@ from torch.distributed._local_tensor import (
     enabled_local_tensor_mode,
     maybe_run_for_local_tensor,
 )
+
+
+if TYPE_CHECKING:
+    from torch.distributed import RNGIndexBlock
 
 
 aten = torch.ops.aten
@@ -130,15 +134,7 @@ def _run_stateful_rng_op(
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None,
     logical_numel: int | torch.SymInt,
-    index_blocks: tuple[
-        tuple[
-            int | torch.SymInt,
-            int | torch.SymInt,
-            int | torch.SymInt,
-            int | torch.SymInt,
-        ],
-        ...,
-    ],
+    index_blocks: tuple[RNGIndexBlock, ...],
 ) -> torch.Tensor:
     """Run an in-place RNG op for selected indices of one logical CUDA draw."""
     if op_call not in _STATEFUL_RNG_OP_SPECS:
@@ -180,10 +176,10 @@ def _run_stateful_rng_op(
         if generator is not None and enabled_local_tensor_mode()
         else None
     )
-    start_indices = tuple(block[0] for block in index_blocks)
-    block_sizes = tuple(block[1] for block in index_blocks)
-    block_strides = tuple(block[2] for block in index_blocks)
-    block_counts = tuple(block[3] for block in index_blocks)
+    start_indices = tuple(block.start_index for block in index_blocks)
+    block_sizes = tuple(block.block_size for block in index_blocks)
+    block_strides = tuple(block.block_stride for block in index_blocks)
+    block_counts = tuple(block.num_blocks for block in index_blocks)
     if generator_state is None:
         aten._philox_distribution_flat_slice_.default(
             tensor,
