@@ -203,13 +203,24 @@ _ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
     ]
 )
 
-_FRESH_SCATTER_FACTORY_OPS = OrderedSet(
+_UNINITIALIZED_FACTORY_OPS = OrderedSet(
     [
         aten.empty.memory_format,
         aten.empty_strided.default,
         aten.empty_like.default,
         aten.new_empty.default,
         aten.new_empty_strided.default,
+    ]
+)
+
+_INITIALIZED_FACTORY_OPS = OrderedSet(
+    [
+        aten.zeros.default,
+        aten.zeros_like.default,
+        aten.ones.default,
+        aten.ones_like.default,
+        aten.full.default,
+        aten.full_like.default,
     ]
 )
 
@@ -224,17 +235,100 @@ def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     )
 
 
-def scatter_has_fresh_factory_base(node: torch.fx.Node) -> bool:
+def scatter_has_factory_base(
+    node: torch.fx.Node,
+    factory_ops: OrderedSet,
+    scatter_ops: tuple[Callable[..., Any], ...],
+) -> bool:
+    node = _get_view_base(node)
+    while node.op == "call_function" and node.target in scatter_ops:
+        inp = node.args[0]
+        if not isinstance(inp, torch.fx.Node):
+            return False
+        node = _get_view_base(inp)
+
+    return node.op == "call_function" and node.target in factory_ops
+
+
+def scatter_has_uninitialized_factory_base(node: torch.fx.Node) -> bool:
+    return scatter_has_factory_base(
+        node,
+        _UNINITIALIZED_FACTORY_OPS,
+        (_generalized_scatter, _inplace_generalized_scatter),
+    )
+
+
+def scatter_has_initialized_factory_base(node: torch.fx.Node) -> bool:
+    return scatter_has_factory_base(
+        node,
+        _INITIALIZED_FACTORY_OPS,
+        (_generalized_scatter, _inplace_generalized_scatter),
+    )
+
+
+def scatter_base_has_no_functional_scatter(node: torch.fx.Node) -> bool:
+    node = _get_view_base(node)
     while node.op == "call_function" and node.target in (
         _generalized_scatter,
         _inplace_generalized_scatter,
     ):
+        if node.target is _generalized_scatter:
+            return False
         inp = node.args[0]
         if not isinstance(inp, torch.fx.Node):
             return False
-        node = inp
+        node = _get_view_base(inp)
 
-    return node.op == "call_function" and node.target in _FRESH_SCATTER_FACTORY_OPS
+    return True
+
+
+def scatter_base_has_inplace_scatter(node: torch.fx.Node) -> bool:
+    node = _get_view_base(node)
+    while node.op == "call_function" and node.target in (
+        _generalized_scatter,
+        _inplace_generalized_scatter,
+    ):
+        if node.target is _inplace_generalized_scatter:
+            return True
+        inp = node.args[0]
+        if not isinstance(inp, torch.fx.Node):
+            return False
+        node = _get_view_base(inp)
+
+    return False
+
+
+def scatter_has_smaller_src(inp: torch.fx.Node, src: torch.fx.Node) -> bool:
+    inp_val = inp.meta.get("val", None)
+    src_val = src.meta.get("val", None)
+    if not isinstance(inp_val, torch.Tensor) or not isinstance(src_val, torch.Tensor):
+        return False
+
+    return statically_known_true(src_val.numel() < inp_val.numel())
+
+
+def scatter_has_smaller_realized_src(
+    inp: torch.fx.Node, src: torch.fx.Node
+) -> bool:
+    if not scatter_has_smaller_src(inp, src):
+        return False
+
+    return is_node_realized(_get_view_base(src))
+
+
+def scatter_can_reinplace_smaller_src(
+    inp: torch.fx.Node, src: torch.fx.Node
+) -> bool:
+    if scatter_has_smaller_realized_src(inp, src):
+        return True
+
+    if not scatter_has_smaller_src(inp, src):
+        return False
+
+    return (
+        scatter_base_has_inplace_scatter(inp)
+        or not scatter_has_initialized_factory_base(inp)
+    )
 
 
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
@@ -251,15 +345,16 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     if scatter_always_uses_mutation(node):
         return True
 
-    if isinstance(inp, torch.fx.Node) and scatter_has_fresh_factory_base(inp):
+    if isinstance(inp, torch.fx.Node) and scatter_has_uninitialized_factory_base(inp):
         return True
 
-    if isinstance(inp, torch.fx.Node) and isinstance(src, torch.fx.Node):
-        inp_val = inp.meta.get("val", None)
-        src_val = src.meta.get("val", None)
-        if isinstance(inp_val, torch.Tensor) and isinstance(src_val, torch.Tensor):
-            if statically_known_true(src_val.numel() < inp_val.numel()):
-                return True
+    if (
+        isinstance(inp, torch.fx.Node)
+        and isinstance(src, torch.fx.Node)
+        and scatter_base_has_no_functional_scatter(inp)
+        and scatter_can_reinplace_smaller_src(inp, src)
+    ):
+        return True
 
     if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
         return True
