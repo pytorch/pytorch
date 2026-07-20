@@ -1744,8 +1744,8 @@ def native_group_norm_backward(
     )
 
     # Compute Internal gradients
-    ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
-    db = grad_output.view(N, C, HxW).sum(dim=[2])
+    ds = torch.mul(grad_output, input).reshape(N, C, HxW).sum(dim=[2])
+    db = grad_output.reshape(N, C, HxW).sum(dim=[2])
 
     d_input: Tensor | None = None
     d_gamma: Tensor | None = None
