@@ -104,9 +104,12 @@ def signature_of(
         elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
             arg.expr, (SymT.UNBACKED_FLOAT)
         ):
-            # Unbacked floats from .item() should preserve fp64 precision
-            if config._use_fp64_for_unbacked_floats and device_supports_fp64(
-                V.graph.current_device
+            # Unbacked floats from .item() are runtime Python floats, so they
+            # follow the same eager-vs-Inductor signature policy as literals.
+            if (
+                use_fp64_for_python_float
+                and config._use_fp64_for_unbacked_floats
+                and device_supports_fp64(V.graph.current_device)
             ):
                 return "fp64"
             return "fp32"

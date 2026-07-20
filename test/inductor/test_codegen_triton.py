@@ -37,6 +37,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
 )
 from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
+from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
@@ -566,14 +567,17 @@ class TestCodegenTriton(InductorTestCase):
         class FakeGraph:
             current_device = torch.device("cuda")
 
-        signature = [SizeArg("scale", 0.5)]
-        argdefs = [ArgName("scale")]
+        signature = [
+            SizeArg("scale", 0.5),
+            SizeArg("runtime_scale", make_symbol(SymT.UNBACKED_FLOAT, 0)),
+        ]
+        argdefs = [ArgName("scale"), ArgName("runtime_scale")]
         with V.set_graph_handler(FakeGraph()):
             self.assertEqual(
                 triton_utils.signature_to_meta(
                     signature, size_dtype=None, argdefs=argdefs
                 ),
-                {"scale": "fp64"},
+                {"scale": "fp64", "runtime_scale": "fp64"},
             )
             self.assertEqual(
                 triton_utils.signature_to_meta(
@@ -582,7 +586,7 @@ class TestCodegenTriton(InductorTestCase):
                     argdefs=argdefs,
                     use_fp64_for_python_float=False,
                 ),
-                {"scale": "fp32"},
+                {"scale": "fp32", "runtime_scale": "fp32"},
             )
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
