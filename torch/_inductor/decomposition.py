@@ -5,7 +5,7 @@ import math
 import operator
 import sys
 from collections.abc import Callable
-from typing import Any, TypeAlias, TypeVar
+from typing import Any, cast, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -36,7 +36,11 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
-from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    statically_known_true,
+    sym_eq,
+)
 
 from . import config, inductor_prims
 from .utils import (
@@ -154,6 +158,72 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+if torch.distributed.is_available():
+
+    @register_decomposition([torch.ops._dtensor.shard_dim_alltoall.default])
+    def shard_dim_alltoall_decomp(
+        inp: torch.Tensor,
+        gather_dim: int,
+        shard_dim: int,
+        group_name: str,
+    ) -> torch.Tensor:
+        if not config.decompose_shard_dim_alltoall:
+            return NotImplemented
+        if inp.dtype.is_complex:
+            return NotImplemented
+
+        ndim = inp.dim()
+        gather_dim = gather_dim + ndim if gather_dim < 0 else gather_dim
+        shard_dim = shard_dim + ndim if shard_dim < 0 else shard_dim
+        if not (0 <= gather_dim < ndim and 0 <= shard_dim < ndim):
+            return NotImplemented
+        if gather_dim == shard_dim:
+            return NotImplemented
+
+        try:
+            from torch.distributed.distributed_c10d import (
+                _get_group_size_by_name,
+                GroupName,
+            )
+
+            group_size = _get_group_size_by_name(GroupName(group_name))
+        except (RuntimeError, ValueError):
+            return NotImplemented
+
+        input_shape = list(inp.shape)
+        shard_dim_size = input_shape[shard_dim]
+        # Match eager shard_dim_alltoall semantics. DTensor pads uneven logical
+        # shards before reaching this op, so the local shard dim should split
+        # evenly across the process group here. If the guard fails at runtime,
+        # Dynamo recompiles and may keep the original shard_dim_alltoall fallback.
+        if not guard_or_false(sym_eq(shard_dim_size % group_size, 0)):
+            return NotImplemented
+        local_shard_dim_size = shard_dim_size // group_size
+
+        pre_view_shape = list(input_shape)
+        pre_view_shape[shard_dim] = local_shard_dim_size
+        pre_view_shape.insert(shard_dim, group_size)
+
+        post_view_shape = list(input_shape)
+        post_view_shape[shard_dim] = local_shard_dim_size
+        post_view_shape[gather_dim] = post_view_shape[gather_dim] * group_size
+
+        out = aten.view.default(inp, pre_view_shape)
+        out = aten.movedim.int(out, shard_dim, 0)
+        out = aten.clone.default(out, memory_format=torch.contiguous_format)
+        out = torch.ops._c10d_functional.all_to_all_single.default(
+            out,
+            [1] * group_size,
+            [1] * group_size,
+            group_name,
+        )
+        out = torch.ops._c10d_functional.wait_tensor.default(out)
+        out = aten.movedim.int(out, 0, gather_dim)
+        out = aten.clone.default(out, memory_format=torch.contiguous_format)
+        counters["inductor"]["decompose_shard_dim_alltoall"] += 1
+        return aten.view.default(out, post_view_shape)
 
 
 @register_decomposition([aten.lerp.Scalar])
@@ -393,7 +463,16 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    def add_input(out: torch.Tensor) -> torch.Tensor:
+        if alpha != 1:
+            out = alpha * out
+        if beta != 1:
+            return out + beta * self
+        return out + self
+
     if mat1.device.type not in ["cpu", "mps"]:
+        if beta == 0 and mat1.device.type == "cuda":
+            return NotImplemented
         if (
             statically_known_true(mat1.size(-1) == 1)
             and statically_known_true(mat1.size(0) != 1)
@@ -401,7 +480,7 @@ def addmm(
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = mat1 * mat2
-            return alpha * out + beta * self
+            return add_input(out)
 
     if self.device.type == "cpu":
         if statically_known_true(mat1.size(0) == 1) and statically_known_true(
@@ -843,6 +922,30 @@ def randint(
     **kwargs: Any,
 ) -> torch.Tensor:
     return aten.randint.low(0, high, size, **kwargs)
+
+
+@register_decomposition(prims.uniform)
+def uniform(
+    shape: list[int | torch.SymInt],
+    *,
+    low: torch.types.Number,
+    high: torch.types.Number,
+    dtype: torch.dtype,
+    device: torch.device,
+    stride: list[int | torch.SymInt],
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    if generator is None:
+        rand_samples = torch.rand(shape, dtype=dtype, device=device)
+    else:
+        rand_samples = torch.rand(
+            shape, generator=generator, dtype=dtype, device=device
+        )
+    res = (high - low) * rand_samples + low
+
+    if tuple(stride) != utils.make_contiguous_strides_for(cast(list[int], shape)):
+        return res.as_strided(shape, stride)
+    return res
 
 
 @register_decomposition(quantized.linear_dynamic_fp16_unpacked_weight.default)
