@@ -927,6 +927,16 @@ def analyze_memory_coalescing_for_nodes(
     if len(nodes) == 1:
         return nodes[0].get_coalesce_analysis()
 
+    graph_scheduler = getattr(V.graph, "scheduler", None)
+    if graph_scheduler is not None:
+        fused_node = graph_scheduler.name_to_fused_node.get(nodes[0].get_first_name())
+        if fused_node is not None:
+            fused_nodes = list(fused_node.get_nodes())
+            if len(fused_nodes) == len(nodes) and all(
+                fused is node for fused, node in zip(fused_nodes, nodes, strict=True)
+            ):
+                return fused_node.get_coalesce_analysis()
+
     return _analyze_memory_coalescing(
         _FusedNodeView(
             nodes=nodes,
