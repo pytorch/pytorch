@@ -1613,6 +1613,7 @@ def forward(self, pred_1, x_1):
             idx = torch.tensor([i])
             self.assertEqual(functional_f(idx, x), f(idx, x))
 
+    @skipIfTorchDynamo("don't test compile on compile")
     def test_switch_functionalized_input_mutation(self):
         def branch_mutating(inp_x):
             view_x = inp_x.view(inp_x.shape)
