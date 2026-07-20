@@ -193,18 +193,15 @@ class ComboKernelMemoryContext:
 @dataclasses.dataclass(slots=True)
 class FusionMemoryContext:
     nodes: list[BaseSchedulerNode]
-    node_set: OrderedSet[BaseSchedulerNode]
     graph_outputs: OrderedSet[str]
     node_to_idx: dict[BaseSchedulerNode, int]
+    allowed_peak_increase: int
     baseline_peak: int
     baseline_live_before: list[int]
-    baseline_live_after: list[int]
-    peak_regression_cache: dict[tuple[int, int, int], bool] = dataclasses.field(
-        default_factory=dict
-    )
-    peak_span_cache: dict[tuple[int, int, int], bool] = dataclasses.field(
-        default_factory=dict
-    )
+    peak_start: int
+    peak_end: int
+    peak_regression_cache: dict[tuple[int, int], bool] = dataclasses.field(default_factory=dict)
+    peak_span_cache: dict[tuple[int, int], bool] = dataclasses.field(default_factory=dict)
 
 
 def _is_gpu_triton_backend(
@@ -6238,16 +6235,10 @@ class Scheduler:
             if self.can_fuse(
                 node1, node2, is_reorder_round
             ) and not self.will_fusion_create_cycle(node1, node2):
-                peak_allowed_increase = (
-                    self.fusion_memory_timeline_peak_allowed_increase_bytes()
-                )
-                if peak_allowed_increase is not None:
-                    regresses_peak = self.fusion_regresses_estimated_peak_memory(
-                        node1, node2, peak_allowed_increase
-                    )
-                    if regresses_peak or self.fusion_extends_large_output_across_peak(
-                        node1, node2, peak_allowed_increase
-                    ):
+                if self._fusion_memory_context is not None:
+                    if self.fusion_regresses_estimated_peak_memory(
+                        node1, node2
+                    ) or self.fusion_extends_large_output_across_peak(node1, node2):
                         continue
                 fusion_res = self.speedup_by_fusion(node1, node2)
                 if fusion_res.callable_fn is not None:
@@ -6345,70 +6336,66 @@ class Scheduler:
             for node in fused_nodes:
                 fusion_log.debug("  %s", node.debug_str_short())
 
-        prev_fusion_memory_context = self._fusion_memory_context
-        peak_allowed_increase = (
-            self.fusion_memory_timeline_peak_allowed_increase_bytes()
-        )
+        allowed_peak_increase = self._fusion_peak_allowed_increase_bytes()
         self._fusion_memory_context = None
-        try:
-            # These are potential fusions which we are async compiling,
-            # and which we will benchmark profitability of.
-            # Maps node -> (is_speedup_fn, LambdaFuture, node1, node2)
-            # Only used in the case of benchmark_kernel=True
-            pending_fusions: dict[
-                BaseSchedulerNode,
-                PendingFusion,
-            ] = {}
 
-            template_fusion_nodes: dict[BaseSchedulerNode, list[PendingFusion]] = {}
-            deferred_prologue_fusions: list[
-                tuple[BaseSchedulerNode, BaseSchedulerNode]
-            ] = []
+        # These are potential fusions which we are async compiling,
+        # and which we will benchmark profitability of.
+        # Maps node -> (is_speedup_fn, LambdaFuture, node1, node2)
+        # Only used in the case of benchmark_kernel=True
+        pending_fusions: dict[
+            BaseSchedulerNode,
+            PendingFusion,
+        ] = {}
 
-            possible_fusions = self.get_possible_fusions(
-                nodes,
-                is_reorder_round,
-                select_highest_priority=peak_allowed_increase is None,
-                sort_results=peak_allowed_increase is None,
+        template_fusion_nodes: dict[BaseSchedulerNode, list[PendingFusion]] = {}
+        deferred_prologue_fusions: list[
+            tuple[BaseSchedulerNode, BaseSchedulerNode]
+        ] = []
+
+        possible_fusions = self.get_possible_fusions(
+            nodes,
+            is_reorder_round,
+            apply_priority=allowed_peak_increase is None,
+        )
+
+        if allowed_peak_increase is not None and possible_fusions:
+            self._fusion_memory_context = self._init_fusion_memory_context(
+                nodes, allowed_peak_increase
+            )
+            possible_fusions = self.get_possible_fusions_with_highest_priority(
+                possible_fusions
+            )
+            possible_fusions.sort(key=self.score_fusion_key, reverse=True)
+
+        if config.max_autotune_gemm or config.max_autotune:
+            possible_fusions = self._handle_template_overlap(
+                possible_fusions, deferred_prologue_fusions
             )
 
-            if peak_allowed_increase is not None and possible_fusions:
-                self._fusion_memory_context = self._init_fusion_memory_context(nodes)
-                possible_fusions = self.get_possible_fusions_with_highest_priority(
-                    possible_fusions
-                )
-                possible_fusions.sort(key=self.score_fusion_key, reverse=True)
+        self._try_fusion_pairs(
+            possible_fusions,
+            pending_fusions,
+            template_fusion_nodes,
+            fused_nodes,
+            is_reorder_round,
+        )
+        self._finish_pending_fusions(fused_nodes, pending_fusions)
 
-            if config.max_autotune_gemm or config.max_autotune:
-                possible_fusions = self._handle_template_overlap(
-                    possible_fusions, deferred_prologue_fusions
-                )
+        self._evaluate_pending_template_fusions(template_fusion_nodes, fused_nodes)
+        template_fusion_nodes.clear()
 
+        if deferred_prologue_fusions:
             self._try_fusion_pairs(
-                possible_fusions,
+                deferred_prologue_fusions,
                 pending_fusions,
                 template_fusion_nodes,
                 fused_nodes,
                 is_reorder_round,
             )
-            self._finish_pending_fusions(fused_nodes, pending_fusions)
-
             self._evaluate_pending_template_fusions(template_fusion_nodes, fused_nodes)
-            template_fusion_nodes.clear()
 
-            if deferred_prologue_fusions:
-                self._try_fusion_pairs(
-                    deferred_prologue_fusions,
-                    pending_fusions,
-                    template_fusion_nodes,
-                    fused_nodes,
-                    is_reorder_round,
-                )
-                self._evaluate_pending_template_fusions(
-                    template_fusion_nodes, fused_nodes
-                )
-        finally:
-            self._fusion_memory_context = prev_fusion_memory_context
+        self._fusion_memory_context = None
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
@@ -6775,8 +6762,7 @@ class Scheduler:
         self,
         nodes: list[BaseSchedulerNode],
         is_reorder_round: bool,
-        select_highest_priority: bool = True,
-        sort_results: bool = True,
+        apply_priority: bool = True,
     ) -> list[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
         """
         Helper to find all legal fusion opportunities, sorted by self.score_fusion()
@@ -6822,11 +6808,10 @@ class Scheduler:
             for node_grouping in group_grouping.values():
                 check_all_pairs(node_grouping)
 
-        if select_highest_priority:
+        if apply_priority:
             possible_fusions = self.get_possible_fusions_with_highest_priority(
                 possible_fusions
             )
-        if sort_results:
             possible_fusions.sort(key=self.score_fusion_key, reverse=True)
         fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
@@ -6935,7 +6920,7 @@ class Scheduler:
         return False
 
     def _init_fusion_memory_context(
-        self, nodes: list[BaseSchedulerNode]
+        self, nodes: list[BaseSchedulerNode], allowed_peak_increase: int
     ) -> FusionMemoryContext:
         from .memory import (
             assign_memory_planning_info_for_scheduler_buffers,
@@ -6962,6 +6947,11 @@ class Scheduler:
         baseline_live_before = live_memory_before_steps_from_buf_info_list(
             buf_info_list, len(nodes)
         )
+        peak_steps = [
+            i for i, live in enumerate(baseline_live_after) if live >= baseline_peak
+        ]
+        if not peak_steps:
+            raise AssertionError("expected at least one peak step")
 
         node_to_idx: dict[BaseSchedulerNode, int] = {}
         for idx, node in enumerate(nodes):
@@ -6971,16 +6961,17 @@ class Scheduler:
 
         return FusionMemoryContext(
             nodes=nodes,
-            node_set=OrderedSet(nodes),
             graph_outputs=graph_outputs,
             node_to_idx=node_to_idx,
+            allowed_peak_increase=allowed_peak_increase,
             baseline_peak=baseline_peak,
             baseline_live_before=baseline_live_before,
-            baseline_live_after=baseline_live_after,
+            peak_start=min(peak_steps),
+            peak_end=max(peak_steps),
         )
 
     @staticmethod
-    def fusion_memory_timeline_peak_allowed_increase_bytes() -> int | None:
+    def _fusion_peak_allowed_increase_bytes() -> int | None:
         allowed_mb = config.fusion_memory_timeline_peak_allowed_increase_mb
         if allowed_mb is None:
             return None
@@ -7001,7 +6992,6 @@ class Scheduler:
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
-        peak_allowed_increase: int,
     ) -> bool:
         """Estimate the local peak after replacing two scheduled nodes with one fusion."""
         from .memory import estimate_region_peak_memory
@@ -7014,9 +7004,9 @@ class Scheduler:
         step2 = self._fusion_node_step(ctx, node2)
         if step1 is None or step2 is None:
             return False
-        if node1 not in ctx.node_set or node2 not in ctx.node_set:
+        if ctx.nodes[step1] is not node1 or ctx.nodes[step2] is not node2:
             return False
-        cache_key = (id(node1), id(node2), peak_allowed_increase)
+        cache_key = (id(node1), id(node2))
         if cache_key in ctx.peak_regression_cache:
             return ctx.peak_regression_cache[cache_key]
 
@@ -7024,21 +7014,10 @@ class Scheduler:
         region_end = max(step1, step2)
         max_exact_span = max(128, 2 * config.max_fusion_size)
         if region_end - region_start > max_exact_span:
-            peak_steps = [
-                i
-                for i, live in enumerate(ctx.baseline_live_after)
-                if live >= ctx.baseline_peak
-            ]
-            if not peak_steps:
-                ctx.peak_regression_cache[cache_key] = False
-                return False
-
-            peak_start = min(peak_steps)
-            peak_end = max(peak_steps)
             moved_live_bytes = 0
             for node in (node1, node2):
                 old_step = self._fusion_node_step(ctx, node)
-                if old_step is None or old_step <= peak_end:
+                if old_step is None or old_step <= ctx.peak_end:
                     continue
                 for buf in node.get_outputs():
                     if buf.get_name() in ctx.graph_outputs:
@@ -7050,15 +7029,15 @@ class Scheduler:
                     ]
                     if (
                         succ_steps
-                        and region_start <= peak_end
-                        and max(succ_steps) >= peak_start
+                        and region_start <= ctx.peak_end
+                        and max(succ_steps) >= ctx.peak_start
                     ):
                         moved_live_bytes += max(
                             buf.mpi_buffer.size_alloc,
                             buf.mpi_buffer.size_free,
                         )
 
-            regresses_peak = moved_live_bytes > peak_allowed_increase
+            regresses_peak = moved_live_bytes > ctx.allowed_peak_increase
             ctx.peak_regression_cache[cache_key] = regresses_peak
             return regresses_peak
 
@@ -7123,7 +7102,7 @@ class Scheduler:
         )
 
         peak_delta = region_peak - ctx.baseline_peak
-        regresses_peak = peak_delta > peak_allowed_increase
+        regresses_peak = peak_delta > ctx.allowed_peak_increase
         ctx.peak_regression_cache[cache_key] = regresses_peak
         return regresses_peak
 
@@ -7131,40 +7110,30 @@ class Scheduler:
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
-        peak_allowed_increase: int,
     ) -> bool:
         """Reject independent fusions that extend a large output across the peak."""
         ctx = self._fusion_memory_context
         if ctx is None:
             return False
 
-        if node1 not in ctx.node_set or node2 not in ctx.node_set:
+        step1 = self._fusion_node_step(ctx, node1)
+        step2 = self._fusion_node_step(ctx, node2)
+        if step1 is None or step2 is None:
+            return False
+        if ctx.nodes[step1] is not node1 or ctx.nodes[step2] is not node2:
             return False
         if (node1.get_operation_names() & node2.ancestors) or (
             node2.get_operation_names() & node1.ancestors
         ):
             return False
 
-        step1 = self._fusion_node_step(ctx, node1)
-        step2 = self._fusion_node_step(ctx, node2)
-        if step1 is None or step2 is None:
-            return False
-        cache_key = (id(node1), id(node2), peak_allowed_increase)
+        cache_key = (id(node1), id(node2))
         if cache_key in ctx.peak_span_cache:
             return ctx.peak_span_cache[cache_key]
 
-        peak_steps = [
-            i
-            for i, live in enumerate(ctx.baseline_live_after)
-            if live >= ctx.baseline_peak
-        ]
-        if not peak_steps:
-            return False
-        peak_start = min(peak_steps)
-        peak_end = max(peak_steps)
         fused_step = min(step1, step2)
 
-        min_size = max(peak_allowed_increase, 16 * 1024 * 1024)
+        min_size = max(ctx.allowed_peak_increase, 16 * 1024 * 1024)
         has_pre_peak_output = False
         has_large_peak_spanning_output = False
 
@@ -7180,12 +7149,12 @@ class Scheduler:
                 if not succ_steps:
                     continue
                 end_step = max(succ_steps)
-                if end_step < peak_start:
+                if end_step < ctx.peak_start:
                     has_pre_peak_output = True
                 if (
                     max(buf.mpi_buffer.size_alloc, buf.mpi_buffer.size_free) > min_size
-                    and fused_step <= peak_end
-                    and end_step >= peak_start
+                    and fused_step <= ctx.peak_end
+                    and end_step >= ctx.peak_start
                 ):
                     has_large_peak_spanning_output = True
 
@@ -9085,24 +9054,20 @@ class Scheduler:
                 possible_fusions_group_by_priority[fusion_pair_priority].append(
                     (node1, node2)
                 )
-        peak_allowed_increase = (
-            self.fusion_memory_timeline_peak_allowed_increase_bytes()
-        )
+        ctx = self._fusion_memory_context
         for _, possible_fusions_with_highest_priority in sorted(
             possible_fusions_group_by_priority.items(), key=operator.itemgetter(0)
         ):
-            if peak_allowed_increase is not None:
+            if ctx is not None:
                 possible_fusions_with_highest_priority = [
                     (node1, node2)
                     for node1, node2 in possible_fusions_with_highest_priority
-                    if not self.fusion_regresses_estimated_peak_memory(
-                        node1, node2, peak_allowed_increase
-                    )
+                    if not self.fusion_regresses_estimated_peak_memory(node1, node2)
                 ]
             if possible_fusions_with_highest_priority:
                 return possible_fusions_with_highest_priority
 
-        if peak_allowed_increase is None:
+        if ctx is None:
             raise AssertionError(
                 "expected at least one possible fusion with highest priority"
             )
