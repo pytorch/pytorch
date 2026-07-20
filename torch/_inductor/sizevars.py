@@ -408,7 +408,11 @@ class SizeVarAllocator:
             if isinstance(base, ModularIndexing):
                 inner_base, inner_divisor, inner_modulus = base.args
                 period = divisor * modulus
-                if self.statically_known_multiple_of(inner_modulus, period):
+                # Target use cases have constant indices; avoid symbolic compile-time analysis.
+                if all(
+                    isinstance(value, sympy.Integer) and value > 0
+                    for value in (inner_modulus, divisor, modulus)
+                ) and self.statically_known_multiple_of(inner_modulus, period):
                     return ModularIndexing(inner_base, inner_divisor * divisor, modulus)
 
             can_remove_mod = statically_known(base >= 0) and statically_known(
