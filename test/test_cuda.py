@@ -3534,6 +3534,44 @@ torch.cuda.synchronize()
         self.assertIsNone(ref())
 
     @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_replay_hooks(self):
+        x = torch.randn(8, device="cuda")
+
+        # replay hooks fire start-then-end, in registration order, on every
+        # replay; removable, and a no-op (hot path) once removed.
+        events: list[str] = []
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            x + 1
+        start_handle = g.register_replay_start_hook(lambda _g: events.append("start"))
+        end_handle = g.register_replay_end_hook(lambda _g: events.append("end"))
+        g.replay()
+        g.replay()
+        self.assertEqual(events, ["start", "end", "start", "end"])
+        end_handle.remove()
+        events.clear()
+        g.replay()
+        self.assertEqual(events, ["start"])
+        start_handle.remove()
+        events.clear()
+        g.replay()
+        self.assertEqual(events, [])
+
+        # end hook fires even if the launch raises (start balanced by end), and
+        # the launch error still propagates.
+        events.clear()
+        g.register_replay_start_hook(lambda _g: events.append("start"))
+        g.register_replay_end_hook(lambda _g: events.append("end"))
+        with unittest.mock.patch.object(
+            torch._C._CUDAGraph, "replay", side_effect=RuntimeError("boom")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                g.replay()
+        self.assertEqual(events, ["start", "end"])
+
+    @unittest.skipIf(
         not TEST_CUDA_GRAPH,
         "CUDA >= 11.0 / ROCm >= 7.0 required for external events in cuda graphs",
     )
