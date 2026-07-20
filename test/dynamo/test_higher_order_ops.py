@@ -617,7 +617,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3)
         y = torch.randn(3, 3)
         # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 7)
         self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_same_freevar_twice(self):

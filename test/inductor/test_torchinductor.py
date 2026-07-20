@@ -19273,6 +19273,138 @@ if RUN_GPU or HAS_MPS:
 
             self.assertEqual(actual, expected, exact_stride=True)
 
+        @unittest.skipIf(
+            GPU_TYPE != "cuda",
+            "CUDA eager ignores addmm input shape when beta=0",
+        )
+        def test_addmm_beta_zero_mismatched_bias_cuda(self):
+            def check(fn, args):
+                expected = fn(*args)
+                actual = torch.compile(fn, fullgraph=True)(*args)
+                self.assertEqual(actual, expected)
+
+            bias = torch.zeros(8, device=self.device)
+            x = torch.randn(2, 8, device=self.device)
+            weight = torch.randn(13, 8, device=self.device)
+
+            with config.patch(shape_padding=False):
+                check(
+                    lambda bias, x, weight: torch.addmm(
+                        bias, x, weight.t(), beta=0.0, alpha=0.1
+                    ),
+                    (bias, x, weight),
+                )
+                check(
+                    lambda bias, x, weight: torch.relu(
+                        torch.addmm(bias, x, weight.t(), beta=0.0, alpha=0.1)
+                    ),
+                    (bias, x, weight),
+                )
+                decomp_bias = torch.zeros(3, device=self.device)
+                decomp_x = torch.randn(2, 1, device=self.device)
+                decomp_weight = torch.randn(1, 5, device=self.device)
+                check(
+                    lambda bias, x, weight: torch.addmm(
+                        bias, x, weight, beta=0.0, alpha=0.5
+                    ),
+                    (decomp_bias, decomp_x, decomp_weight),
+                )
+
+                nan_bias = torch.tensor(
+                    [float("nan"), float("inf"), -float("inf"), 1.0, -1.0],
+                    device=self.device,
+                )
+                check(
+                    lambda bias, x, weight: torch.addmm(
+                        bias, x, weight, beta=0.0, alpha=0.5
+                    ),
+                    (nan_bias, decomp_x, decomp_weight),
+                )
+
+                zero_bias = torch.full((8,), float("nan"), device=self.device)
+                zero_x = torch.full((2, 8), float("nan"), device=self.device)
+                zero_weight = torch.randn(8, 13, device=self.device)
+                check(
+                    lambda bias, x, weight: torch.addmm(
+                        bias, x, weight, beta=0.0, alpha=0.0
+                    ),
+                    (zero_bias, zero_x, zero_weight),
+                )
+                check(
+                    lambda bias, x, weight: torch.relu(
+                        torch.addmm(bias, x, weight, beta=0.0, alpha=0.0)
+                    ),
+                    (zero_bias, zero_x, zero_weight),
+                )
+                check(
+                    lambda bias, x, weight: torch.addmm(
+                        bias, x, weight, beta=0.0, alpha=0.0
+                    ),
+                    (
+                        torch.full((2, 13), float("nan"), device=self.device),
+                        zero_x,
+                        zero_weight,
+                    ),
+                )
+
+            bad_bias = torch.zeros(13, device=self.device, dtype=torch.float16)
+            bad_x = torch.randn(2, 8, device=self.device)
+            bad_weight = torch.randn(8, 13, device=self.device)
+
+            def addmm_dtype_mismatch(bias, x, weight):
+                return torch.addmm(bias, x, weight, beta=0.0)
+
+            with self.assertRaisesRegex(RuntimeError, "must have the same dtype"):
+                addmm_dtype_mismatch(bad_bias, bad_x, bad_weight)
+
+            bad_decomp_bias = torch.zeros(5, device=self.device, dtype=torch.float16)
+            bad_decomp_x = torch.randn(2, 1, device=self.device)
+            bad_decomp_weight = torch.randn(1, 5, device=self.device)
+
+            def addmm_decomp_dtype_mismatch(bias, x, weight):
+                return torch.addmm(bias, x, weight, beta=0.0)
+
+            with self.assertRaisesRegex(RuntimeError, "must have the same dtype"):
+                addmm_decomp_dtype_mismatch(
+                    bad_decomp_bias, bad_decomp_x, bad_decomp_weight
+                )
+            with config.patch(shape_padding=False):
+                with self.assertRaisesRegex(Exception, "input dtypes must be the same"):
+                    torch.compile(addmm_decomp_dtype_mismatch, fullgraph=True)(
+                        bad_decomp_bias, bad_decomp_x, bad_decomp_weight
+                    )
+
+            with config.patch({"shape_padding": False, "triton.native_matmul": True}):
+                with self.assertRaisesRegex(Exception, "input dtypes must be the same"):
+                    torch.compile(addmm_dtype_mismatch, fullgraph=True)(
+                        bad_bias, bad_x, bad_weight
+                    )
+
+                check(
+                    lambda bias, x, weight: torch.addmm(
+                        bias, x, weight, beta=0.0, alpha=0.0
+                    ),
+                    (zero_bias, zero_x, zero_weight),
+                )
+
+            with config.patch(
+                {
+                    "shape_padding": False,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                }
+            ):
+                check(
+                    lambda bias, x, weight: torch.addmm(
+                        bias, x, weight, beta=0.0, alpha=0.0
+                    ),
+                    (
+                        torch.full((2, 13), float("nan"), device=self.device),
+                        zero_x,
+                        zero_weight,
+                    ),
+                )
+
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
 if RUN_TPU:
@@ -19625,15 +19757,11 @@ if RUN_GPU:
         @parametrize("backend", ["cublaslt", "cutlass"])
         def test_grouped_mm(self, backend):
             if backend == "cublaslt":
-                if _get_torch_cuda_version() < (13, 2):
-                    self.skipTest("cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+                if _get_torch_cuda_version() < (13, 3):
+                    self.skipTest("cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
                 sm_major = torch.cuda.get_device_capability()[0]
                 if sm_major < 9 or sm_major >= 12:
                     self.skipTest("cublaslt grouped gemm requires SM 9.0-11.0")
-                if sm_major == 9 and _get_torch_cuda_version() < (13, 3):
-                    self.skipTest(
-                        "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3"
-                    )
             prev = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
             torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = (
                 backend == "cublaslt"
