@@ -13897,6 +13897,24 @@ if __name__ == '__main__':
             self.assertEqual(out[0, 0, 0], 1 / numel)
 
     @onlyCUDA
+    @largeTensorTest("24GB", "cuda")
+    def test_avg_pool3d_backward_64bit_indexing(self, device):
+        # The overlapping-window avg_pool3d backward path scatters gradients
+        # through an atomicAdd kernel that computed the destination offset with
+        # 32-bit ints, so on inputs with more than INT_MAX elements the offset
+        # wrapped around and silently corrupted the gradient. Use the smallest
+        # overlapping config (kernel 2, stride 1) that pushes the per-element
+        # offset past INT_MAX.
+        x = torch.ones((1, 1, 240000000, 3, 3), device=device, dtype=torch.float16, requires_grad=True)
+        out = F.avg_pool3d(x, kernel_size=2, stride=1)
+        out.sum().backward()
+        # An interior voxel near the end of the buffer sits at an offset above
+        # INT_MAX and is covered by all 2**3 windows, so its gradient must be
+        # exactly 1.0; with the 32-bit offset it stays ~0 because the atomic
+        # adds land at wrapped-around locations instead.
+        self.assertEqual(x.grad[0, 0, -2, 1, 1], 1.0)
+
+    @onlyCUDA
     def test_softmax_backward_smem(self, device):
         torch.manual_seed(0)
         # We use smem for tensors that have > 1024 elements and size >= 4096 bytes.
