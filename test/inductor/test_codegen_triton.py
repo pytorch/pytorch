@@ -666,6 +666,7 @@ class TestCodegenTriton(InductorTestCase):
     def test_user_defined_triton_kernel_python_float_arg_signature_matches_triton(self):
         import triton
         import triton.language as tl
+        from triton.runtime.jit import mangle_type
 
         @triton.jit
         def scale_kernel(in_ptr, out_ptr, n_elements, scale, BLOCK_SIZE: tl.constexpr):
@@ -690,8 +691,10 @@ class TestCodegenTriton(InductorTestCase):
         result, code = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(result, x * 0.5)
         code_str = " ".join(code)
-        self.assertIn("'scale': 'fp32'", code_str)
-        self.assertNotIn("'scale': 'fp64'", code_str)
+        expected_signature = mangle_type(0.5)
+        self.assertIn(f"'scale': '{expected_signature}'", code_str)
+        if expected_signature != "fp64":
+            self.assertNotIn("'scale': 'fp64'", code_str)
 
 
 if __name__ == "__main__":

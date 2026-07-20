@@ -64,6 +64,7 @@ def signature_of(
     size_dtype: str | None,
     use_fp64_for_python_float: bool = True,
 ) -> str:
+    """Return the Triton signature type for an Inductor kernel argument."""
     if isinstance(arg, TensorArg):
         typ = _type_of(arg.dtype)
         if should_unwrap_unspec_arg(arg.buffer):
@@ -93,7 +94,9 @@ def signature_of(
             # it should be marked as "constexpr" in the signature.
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
-            # Python floats are natively fp64, so use fp64 to preserve precision
+            # Inductor-generated kernels use fp64 to preserve Python-float
+            # precision. User-defined Triton kernels opt out so their compiled
+            # signatures match Triton's eager specialization.
             if (
                 use_fp64_for_python_float
                 and config._use_fp64_for_unbacked_floats
