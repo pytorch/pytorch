@@ -3835,6 +3835,7 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
     # based on whether `requires_grad` is set or not.
     for requires_grad in (True, False):
         make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=requires_grad)
+        too_large = 2**63 - 1
         # error inputs when pad is negative
         x = make_arg((0, 1, 49))
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
@@ -3908,6 +3909,16 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
         error_msg = 'kernel_size must be greater than zero'
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
                          error_regex=error_msg)
+
+        # error inputs when parameters overflow the int range used by the 1D kernel
+        yield ErrorInput(SampleInput(x, kwargs={'kernel_size': too_large}),
+                         error_regex='kernel_size causes integer overflow')
+
+        yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': too_large}),
+                         error_regex='stride causes integer overflow')
+
+        yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'dilation': too_large}),
+                         error_regex='dilation causes integer overflow')
 
         # error inputs for strides > 0
         error_msg = 'stride must be greater than zero'
