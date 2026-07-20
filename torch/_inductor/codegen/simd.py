@@ -3068,8 +3068,19 @@ class SIMDScheduling(BaseScheduling):
             if sn not in outer_local_reduction_pointwise_set
         ]
         grouped_reduction: scheduler.SchedulerNode = node.grouped_reduction
+        parent_half_domain = scheduler.NestedReduction.PointwiseDomain.PARENT_HALF
+        grouped_parent_half_pointwise = [
+            sn
+            for sn, domain in nested_pointwise_domains
+            if sn in grouped_node.get_nodes() and domain is parent_half_domain
+        ]
+        grouped_parent_half_pointwise_set = OrderedSet(grouped_parent_half_pointwise)
         grouped_schedule: list[NodeScheduleEntry] = self.generate_node_schedule(
-            grouped_node.get_nodes(),
+            [
+                sn
+                for sn in grouped_node.get_nodes()
+                if sn not in grouped_parent_half_pointwise_set
+            ],
             grouped_numel,
             grouped_rnumel,
         )
@@ -3162,6 +3173,24 @@ class SIMDScheduling(BaseScheduling):
             parent_full_source: _IterationSpace = layout.parent_full_iteration_values(
                 group_reduction_vars
             )
+            parent_half_family: _DerivedIterationFamily | None = None
+            parent_half_source: _IterationSpace | None = None
+            sub_parent_source_layouts: (
+                dict[str, scheduler.NestedReduction.SubParentSourceLayout] | None
+            ) = None
+            if any(
+                domain is scheduler.NestedReduction.PointwiseDomain.PARENT_HALF
+                for domain in pointwise_domain_by_node.values()
+            ):
+                parent_half_family = layout.make_sub_parent_family(2)
+                parent_half_source = layout.sub_parent_iteration_values(
+                    parent_half_family, 2
+                )
+                sub_parent_source_layouts = node._parent_half_source_layouts(
+                    grouped_parent_half_pointwise,
+                    grouped_node.get_nodes(),
+                )
+                assert sub_parent_source_layouts is not None
             self._codegen_remapped_pointwise(
                 kernel,
                 outer_local_reduction_pointwise,
@@ -3181,7 +3210,24 @@ class SIMDScheduling(BaseScheduling):
                 pointwise_domain_by_node,
                 reduced_output_family,
                 parent_full_family,
+                parent_half_family,
+                parent_half_source,
+                sub_parent_source_layouts,
             )
+            if grouped_parent_half_pointwise:
+                assert parent_half_family is not None
+                assert parent_half_source is not None
+                assert sub_parent_source_layouts is not None
+                self._codegen_sub_parent_pointwise(
+                    kernel,
+                    grouped_parent_half_pointwise,
+                    layout,
+                    parent_half_family,
+                    parent_half_source,
+                    source_layouts=sub_parent_source_layouts,
+                    sub_parent_factor=2,
+                    materialize_all_store_cache_values=True,
+                )
 
             kernel.codegen_body()
 
@@ -3193,6 +3239,7 @@ class SIMDScheduling(BaseScheduling):
                 *combined_schedule,
                 *outer_local_reduction_pointwise,
                 *grouped_schedule,
+                *grouped_parent_half_pointwise,
             ],
         )
 
@@ -3239,6 +3286,12 @@ class SIMDScheduling(BaseScheduling):
         ],
         reduced_output_family,
         parent_full_family,
+        parent_half_family: _DerivedIterationFamily | None = None,
+        parent_half_source: _IterationSpace | None = None,
+        sub_parent_source_layouts: dict[
+            str, scheduler.NestedReduction.SubParentSourceLayout
+        ]
+        | None = None,
     ) -> None:
         """Interpret the local reduction schedule with nested emitters.
 
@@ -3272,6 +3325,8 @@ class SIMDScheduling(BaseScheduling):
                     iter_remapped,
                     reduce_remapped,
                     reduced_output_family,
+                    parent_half_family=parent_half_family,
+                    source_layouts=sub_parent_source_layouts,
                 )
                 continue
             domain = pointwise_domain_by_node.get(sn)
@@ -3283,6 +3338,24 @@ class SIMDScheduling(BaseScheduling):
                     [sn],
                     reduced_output_family,
                     reduced_source,
+                )
+                continue
+            elif domain is scheduler.NestedReduction.PointwiseDomain.PARENT_HALF:
+                if parent_half_family is None:
+                    raise AssertionError("expected parent-half iteration family")
+                if parent_half_source is None:
+                    raise AssertionError("expected parent-half iteration source")
+                if sub_parent_source_layouts is None:
+                    raise AssertionError("expected sub-parent source layouts")
+                self._codegen_sub_parent_pointwise(
+                    kernel,
+                    [sn],
+                    layout,
+                    parent_half_family,
+                    parent_half_source,
+                    source_layouts=sub_parent_source_layouts,
+                    sub_parent_factor=2,
+                    materialize_all_store_cache_values=True,
                 )
                 continue
             elif (
@@ -3348,16 +3421,29 @@ class SIMDScheduling(BaseScheduling):
         iter_remapped,
         reduce_remapped,
         reduced_output_family,
+        parent_half_family: _DerivedIterationFamily | None = None,
+        source_layouts: dict[str, scheduler.NestedReduction.SubParentSourceLayout]
+        | None = None,
     ) -> None:
         grouped_reduction_body = grouped_reduction._body
         load_transform = _ParentFullLoadTransform(kernel, layout)
-        handler = _GroupedReductionOpsHandler(
+        handler: WrapperHandler = _GroupedReductionOpsHandler(
             V.get_ops_handler(),
             kernel=kernel,
             layout=layout,
             family=reduced_output_family,
             load_transform=load_transform,
         )
+        if parent_half_family is not None:
+            assert source_layouts is not None
+            handler = _SubParentSourceLoadMaterializer(
+                handler,
+                kernel,
+                layout,
+                parent_half_family,
+                source_layouts=source_layouts,
+                sub_parent_factor=2,
+            )
         with V.set_ops_handler(handler), kernel.set_current_node(grouped_reduction):
             grouped_reduction_body(
                 iter_remapped,
