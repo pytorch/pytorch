@@ -463,6 +463,9 @@ class MPSHeapAllocatorImpl {
   void release_buffers(BufferPool& pool);
   bool release_available_cached_buffers(AllocParams& params);
   bool release_cached_buffers();
+  // waits for buffers parked in-flight in the pool's pending-free list to finish
+  // on the GPU and returns them to the pool; returns true if any were reclaimed
+  bool wait_for_pending_free_buffers(BufferPool& pool);
   // free unused cached blocks to reclaim GPU memory if memory pressure is high
   void garbage_collect_cached_buffers(AllocParams& params);
   void release_placement_buffer(BufferPool& pool, BufferBlock* buffer_block);

@@ -301,6 +301,7 @@ with torch.xpu._DeviceGuard(0):
         self.assertTrue(make_line(0).setup_stream_cache)
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @xfailIfNoAcceleratorTriton
     def test_generated_code_uses_get_stream_by_index(self):
         """Generated inductor code should use _get_stream_by_index."""
         from torch._inductor.utils import run_and_get_code
@@ -2734,6 +2735,7 @@ instantiate_parametrized_tests(TestStreamCudagraphInteraction)
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
 class TestStreamExternalObjectRestore(InductorTestCase):
+    @xfailIfNoAcceleratorTriton
     def test_restore_external_objects_before_backward(self):
         """Forward snapshots external object registry, backward restores it."""
         from torch._dynamo.graph_bytecode_inputs import store_user_object_weakrefs
