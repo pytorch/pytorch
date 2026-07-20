@@ -362,6 +362,7 @@ class MemoryTracker:
                         self.current_memory_bytes += self._get_storage_size(storage_key)
 
         self.peak_memory = self.current_memory_bytes
+        self.last_node_peak_memory = self.current_memory_bytes
 
         log.debug(
             "Memory tracker initialized with initial memory: %d MB",
@@ -418,6 +419,7 @@ class MemoryTracker:
     def _update_memory_for_node(self, node: fx.Node) -> None:
         """Update memory tracking when a node is scheduled."""
         if node.op in ("placeholder", "get_attr", "output"):
+            self.last_node_peak_memory = self.current_memory_bytes
             return
 
         # Add fresh allocations
@@ -433,6 +435,7 @@ class MemoryTracker:
                 self.current_memory_bytes += size
                 alloc_bytes += size
 
+        self.last_node_peak_memory = self.current_memory_bytes
         self.peak_memory = max(self.current_memory_bytes, self.peak_memory)
 
         # Remove storages that are no longer used
