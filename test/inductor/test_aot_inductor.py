@@ -6385,9 +6385,18 @@ class AOTInductorTestsTemplate:
         _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, Model(), example_inputs)
         signature_to_cpp_type = {"fp32": "float", "fp64": "double"}
         expected_cpp_type = signature_to_cpp_type[mangle_type(0.5)]
-        self.assertRegex(code, rf"\b{expected_cpp_type}\s+var_\d+\s*=\s*0\.5[0-9]*;")
+        expected_signature = mangle_type(0.5)
+        self.assertIn(f"'scaling_factor': '{expected_signature}'", code)
+        self.assertRegex(code, rf"\b{expected_cpp_type}\s+scaling_factor[,\s)]")
+        self.assertRegex(
+            code, rf"\b{expected_cpp_type}\s+var_\d+\s*=\s*scaling_factor;"
+        )
+        self.assertIn(
+            "call_add_kernel_with_scaling_0(arg0_1, arg1_1, buf0, 16, 0.5", code
+        )
         if expected_cpp_type != "double":
-            self.assertNotRegex(code, r"\bdouble\s+var_\d+\s*=\s*0\.5[0-9]*;")
+            self.assertNotRegex(code, r"\bdouble\s+scaling_factor[,\s)]")
+            self.assertNotRegex(code, r"\bdouble\s+var_\d+\s*=\s*scaling_factor;")
 
     def test_aoti_debug_printer_user_defined_triton_kernel(self):
         if self.device != GPU_TYPE:
