@@ -450,11 +450,14 @@ def _trace_window_entries(
         meta_l = meta_col.tolist() if meta_col is not None else None
         # Pluggable lane assignment: a graph lane resolver (if installed) supplies per-op
         # (logical_lane, lane_name) columns; a graphed op whose logical lane differs from
-        # its CUDA stream is moved onto that lane below. CUPTI reports graph-replay ops piled
-        # on the one stream the graph replays on, so on that stream's lane they overlap and
-        # hide in Perfetto; baking the move into this export pass (tid + args["stream"] moved,
-        # the op's CUDA stream kept as original_stream) means consumers need no read/reassign/
-        # rewrite round trip. Absent a resolver, ops render on their CUDA stream lane.
+        # its CUDA stream is moved onto that lane below. CUPTI reports graph-replay ops on
+        # whatever streams the graph executor placed them on -- often hundreds of distinct
+        # streams -- which scatters one logical replay across a wall of stream lanes and makes
+        # for a very confusing profile (the ops don't overlap or disappear, there are just far
+        # too many lanes). The resolver collapses them onto a few meaningful logical lanes.
+        # Baking the move into this export pass (tid + args["stream"] moved, the op's CUDA
+        # stream kept as original_stream) means consumers need no read/reassign/rewrite round
+        # trip. Absent a resolver, ops render on their CUDA stream lane.
         lane_col = c.get("logical_lane")
         lane_name_col = c.get("lane_name")
         lane_l = lane_col.tolist() if lane_col is not None else None
