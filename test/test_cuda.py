@@ -5889,6 +5889,14 @@ class TestCudaAllocator(TestCase):
                 self.assertEqual(e["addr"], ptr)
             self.assertEqual(notes[0]["user_metadata"], "retained by autograd")
             self.assertEqual(notes[1]["user_metadata"], "second annotation")
+            # tensor-level wrapper resolves views to the storage base address
+            view = x[1:]
+            self.assertNotEqual(view.data_ptr(), ptr)
+            torch.cuda.memory._annotate_tensor(view, "via view")
+            ss = torch.cuda.memory._snapshot()
+            notes = [e for e in ss["device_traces"][0] if e["action"] == "annotate"]
+            self.assertEqual(notes[-1]["addr"], ptr)
+            self.assertEqual(notes[-1]["user_metadata"], "via view")
             # allocation-time metadata is not clobbered
             alloc_events = [
                 e
@@ -5898,7 +5906,7 @@ class TestCudaAllocator(TestCase):
             self.assertEqual(len(alloc_events), 1)
             self.assertEqual(alloc_events[0]["user_metadata"], "alloc-time metadata")
             # annotating a dead pointer raises
-            del x
+            del x, view
             torch.cuda.synchronize()
             with self.assertRaisesRegex(RuntimeError, "no live allocation"):
                 torch.cuda.memory._annotate_memory(ptr, "should fail")

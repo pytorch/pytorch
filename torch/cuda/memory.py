@@ -1271,6 +1271,25 @@ def _annotate_memory(data_ptr: int, metadata: str):
     torch._C._cuda_annotateMemory(data_ptr, metadata)
 
 
+def _annotate_tensor(tensor: torch.Tensor, metadata: str):
+    """
+    Attach metadata to the allocation backing ``tensor``, post facto.
+
+    Convenience wrapper around :func:`_annotate_memory` that annotates the
+    base address of the tensor's untyped storage, so it works for views and
+    tensors with a nonzero ``storage_offset``. See :func:`_annotate_memory`
+    for semantics.
+
+    Args:
+        tensor (torch.Tensor): CUDA tensor whose backing allocation to
+                               annotate.
+        metadata (str): Annotation string to record.
+    """
+    if not tensor.is_cuda:
+        raise ValueError(f"expected a CUDA tensor, got device {tensor.device}")
+    _annotate_memory(tensor.untyped_storage().data_ptr(), metadata)
+
+
 def _save_segment_usage(filename="output.svg", snapshot=None):
     if snapshot is None:
         snapshot = _snapshot()
