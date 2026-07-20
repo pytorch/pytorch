@@ -57,7 +57,7 @@ from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch._inductor.stream_utils import get_stream_name
 from torch.fx.experimental.symbolic_shapes import free_symbols
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
@@ -88,6 +88,7 @@ from .utils import (
     _unstable_customized_partition_wrapper,
     cache_on_self,
     cmp,
+    decompose_index,
     device_need_guard,
     get_current_backend,
     get_device_tflops,
@@ -2375,6 +2376,19 @@ class SchedulerNode(BaseSchedulerNode):
         self.group = (device, group_fn(self._sizes))
 
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
+
+    def _apply_indexing_expr_replacements(
+        self,
+        replacements: dict[str, sympy.Expr],
+        *,
+        normalize: bool,
+    ) -> None:
+        self._before_loop_state_mutation()
+        self._body = self._body._replace_indexing_exprs(replacements)
+        self.refresh_dependencies(
+            normalize=normalize,
+            need_clear_tiling_cache=False,
+        )
 
     def swap_pw_red_dimension(self) -> None:
         num_rdims = self._body.get_original_num_rdims()
@@ -7008,7 +7022,7 @@ class Scheduler:
             return -1
 
         # Currently only handle single read/write operations
-        if len(node2.read_writes.reads) > 1 or len(node2.read_writes.writes) > 1:
+        if len(node2.read_writes.reads) != 1 or len(node2.read_writes.writes) != 1:
             return -1
 
         node2_read = next(iter(node2.read_writes.reads))
@@ -7019,21 +7033,26 @@ class Scheduler:
         ):
             return -1
 
-        node1_writes = {dep.name: dep for dep in node1.read_writes.writes}
-        if node2_read.name not in node1_writes:
+        matching_node1_writes = [
+            dep for dep in node1.read_writes.writes if dep.name == node2_read.name
+        ]
+        if len(matching_node1_writes) != 1:
             return -1
 
-        node1_write = node1_writes[node2_read.name]
+        node1_write = matching_node1_writes[0]
 
         if not isinstance(node1_write, MemoryDep):
             return -1
 
         if config.loop_reindexing_after_fusion:
-            score = self._try_reindex_transpose_contiguous_clone(
+            score = self._try_reindex_invertible_memory_copy(
                 node1, node2, node1_write, node2_read, node2_write
             )
             if score >= 0:
                 return score
+
+        if not isinstance(node2, SchedulerNode):
+            return -1
 
         # We are checking for compatibility with the normalized node1 write
         # then modifying node2 reads/writes. since the node1 write will be just used
@@ -7102,14 +7121,17 @@ class Scheduler:
 
         # === Apply Inversion ===
 
-        # Swap the indexing expressions using the inverse formula
-        node2._body.indexing_exprs[read_expr_index] = node2._body.indexing_exprs[  # type: ignore[attr-defined]
-            write_expr_index
-        ]
-        node2._body.indexing_exprs[write_expr_index] = inverse_formula  # type: ignore[attr-defined]
+        # Replace the indexing expressions copy-on-write so speculative fusion
+        # rollback retains an untouched LoopBody snapshot.
+        node2._apply_indexing_expr_replacements(
+            {
+                read_expr_index: node2._body.indexing_exprs[write_expr_index],
+                write_expr_index: inverse_formula,
+            },
+            normalize=True,
+        )
 
-        # Refresh dependencies and calculate fusion score
-        node2.refresh_dependencies(True, False)  # type: ignore[attr-defined]
+        # Calculate fusion score
         score = self.score_fusion_memory(node1, node2)
         if not isinstance(score, int):
             raise AssertionError("expected score to be an int")
@@ -7117,7 +7139,7 @@ class Scheduler:
         fusion_log.info("Shared memory after inversion: %d", score)
         return score
 
-    def _try_reindex_transpose_contiguous_clone(
+    def _try_reindex_invertible_memory_copy(
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
@@ -7126,23 +7148,13 @@ class Scheduler:
         node2_write: MemoryDep,
     ) -> int:
         """
-        Reindex a layout-changing clone after a producer of [B, S, H].
+        Reindex an invertible memory copy to the producer iteration domain.
 
-        This handles the common attention layout transition:
-
-            producer[B, S, H] -> view(B, S, heads, D)
-                -> transpose(1, 2).contiguous()
-
-        The clone initially iterates in output order [B, heads, S, D] and reads
-        the producer storage with a permuted index. Reindexing the clone to the
-        producer domain [B, S, H] makes its read dependency match the producer
-        write while preserving the final contiguous output store.
+        The copy's read address is expressed as a function R(q) of a flattened
+        iteration index q. If R is invertible, running the old body at
+        q = R^-1(producer_address) makes the read match the producer write while
+        preserving every other access in the copy, including its output layout.
         """
-        # Note [Targeted transpose-contiguous clone reindexing]
-        # This intentionally matches only the common attention layout above when
-        # its sizes and index polynomials can be proven statically. Other layouts
-        # fail closed; broader matching belongs in the general reindexing machinery
-        # rather than as additional special cases here.
         if not isinstance(node2, SchedulerNode):
             return -1
 
@@ -7155,51 +7167,71 @@ class Scheduler:
         body = node2._body
         if not body.is_memory_copy():
             return -1
-        if len(body.indexing_exprs) != 2 or body.subblocks:
-            return -1
-        if "index0" not in body.indexing_exprs or "index1" not in body.indexing_exprs:
+        if body.subblocks:
             return -1
 
-        read_exprs = OrderedSet(body.get_read_exprs())
-        if len(read_exprs) != 1:
-            return -1
-        if next(iter(read_exprs)) not in body.indexing_exprs.values():
+        read_exprs = body.get_read_exprs()
+        write_exprs = body.get_write_exprs()
+        if len(read_exprs) != 1 or len(write_exprs) != 1:
             return -1
 
         iter_vars = body.vars[0]
-        if len(iter_vars) != 4:
+        if not iter_vars:
             return -1
 
         producer_size = list(node1_write.size)
-        clone_read_size = list(node2_read.size)
-        clone_write_size = list(node2_write.size)
-        if (
-            len(producer_size) != 3
-            or len(clone_read_size) != 4
-            or clone_read_size != clone_write_size
-        ):
+        old_iter_sizes = list(body.sizes[0])
+        if len(node1_write.var_names) != len(producer_size):
             return -1
 
-        bsz, seq, hidden = producer_size
-        read_bsz, heads, read_seq, head_dim = clone_read_size
-        if not (
-            V.graph.sizevars.statically_known_equals(bsz, read_bsz)
-            and V.graph.sizevars.statically_known_equals(seq, read_seq)
-            and V.graph.sizevars.statically_known_equals(hidden, heads * head_dim)
-        ):
-            return -1
-
-        b, head, s, d = iter_vars
-        expected_read = b * seq * hidden + s * hidden + head * head_dim + d
-        expected_write = (
-            b * heads * seq * head_dim + head * seq * head_dim + s * head_dim + d
-        )
-        if not (
-            V.graph.sizevars.statically_known_equals(node2_read.index, expected_read)
-            and V.graph.sizevars.statically_known_equals(
-                node2_write.index, expected_write
+        memory_deps = (node1_write, node2_read, node2_write)
+        if any(
+            free_symbols(size)
+            for size in itertools.chain(
+                old_iter_sizes,
+                *(dep.size for dep in memory_deps),
             )
         ):
+            return -1
+        if any(
+            set(free_symbols(dep.index)).difference(dep.var_names)
+            for dep in memory_deps
+        ):
+            return -1
+        if any(
+            set(free_symbols(expr)).difference(iter_vars)
+            for expr in itertools.chain(read_exprs, write_exprs)
+        ):
+            return -1
+
+        copy_numel = sympy_product(old_iter_sizes)
+        sizevars = V.graph.sizevars
+        if sizevars.statically_known_equals(copy_numel, 0):
+            return -1
+        if not all(
+            sizevars.statically_known_equals(copy_numel, sympy_product(sizes))
+            for sizes in (producer_size, node2_read.size, node2_write.size)
+        ):
+            return -1
+
+        if not self._is_dense_and_injective_memory_dep(node1_write):
+            return -1
+
+        flat_var = sympy.Dummy("copy_flat", integer=True, nonnegative=True)
+        old_iter_idx = decompose_index(flat_var, old_iter_sizes)
+        flattened_read = sympy_subs(
+            read_exprs[0], dict(zip(iter_vars, old_iter_idx))
+        )
+        simplified_terms = [
+            sizevars.combine_modular_indexing_pairs(term)
+            for term in sympy.Add.make_args(sympy.expand(flattened_read))
+        ]
+        flattened_read = sum(simplified_terms)
+
+        from torch._inductor.invert_expr_analysis import generate_inverse_formula
+
+        inverse_formula = generate_inverse_formula(flattened_read, flat_var)
+        if inverse_formula is None:
             return -1
 
         old_score = self.score_fusion_memory(node1, node2)
@@ -7209,15 +7241,27 @@ class Scheduler:
             new_iter_idx: Sequence[sympy.Expr],
             old_iter_sizes: Sequence[sympy.Expr],
         ) -> Sequence[sympy.Expr]:
-            b, s, h = new_iter_idx
-            return [
-                b,
-                FloorDiv(h, old_iter_sizes[3]),
-                s,
-                ModularIndexing(h, 1, old_iter_sizes[3]),
-            ]
+            producer_index = sympy_subs(
+                node1_write.index,
+                dict(zip(node1_write.var_names, new_iter_idx)),
+            )
+            old_flat = sympy_subs(inverse_formula, {flat_var: producer_index})
+            return decompose_index(old_flat, old_iter_sizes)
 
         node2.apply_loop_reindexing(producer_size, indexer=indexer)
+        node2.refresh_dependencies(normalize=True, need_clear_tiling_cache=False)
+
+        matching_reads = [
+            dep
+            for dep in node2.read_writes.reads
+            if isinstance(dep, MemoryDep) and dep.name == node1_write.name
+        ]
+        if len(matching_reads) != 1 or not self.deps_match_normalized(
+            node1_write, matching_reads[0]
+        ):
+            node2.restore_loop_state(state)
+            return -1
+
         score = self.score_fusion_memory(node1, node2)
         if not isinstance(score, int):
             raise AssertionError("expected score to be an int")
@@ -7226,7 +7270,7 @@ class Scheduler:
             return -1
 
         fusion_log.info(
-            "Shared memory after transpose-contiguous clone reindex: %d", score
+            "Shared memory after invertible memory-copy reindex: %d", score
         )
         return score
 
@@ -8239,6 +8283,16 @@ class Scheduler:
             and read.size[: len(write.size)] == write.size
         )
 
+    @staticmethod
+    def _is_dense_and_injective_memory_dep(dep: MemoryDep) -> bool:
+        """Return whether each iteration writes one element of a dense region."""
+        if not OrderedSet(dep.var_names) <= dep.index.free_symbols:
+            return False
+        return (
+            dep.normalize().is_contiguous()
+            or dep.normalize_with_stride_order().is_contiguous()
+        )
+
     # StarDep doesn't match MemoryDep, and indirect indexing is not fusible.
     def fusable_read_and_write(
         self, read: Dep, write: MemoryDep, *, allow_index_equivalence: bool = False
@@ -8306,18 +8360,7 @@ class Scheduler:
     def _fusable_read_after_index_equivalence(
         self, read: MemoryDep, write: MemoryDep
     ) -> bool:
-        # Relaxed matching is only for consumer-side reshapes/broadcasts.
-        # If a write var is absent from the write index, the producer itself
-        # broadcasts multiple loop iterations to the same address.
-        if not OrderedSet(write.var_names) <= write.index.free_symbols:
-            return False
-        # Once read/write indices differ, require the producer to write a
-        # dense logical region. Otherwise gaps or aliases in the producer
-        # could be hidden by a consumer-side broadcast.
-        if not (
-            write.normalize().is_contiguous()
-            or write.normalize_with_stride_order().is_contiguous()
-        ):
+        if not self._is_dense_and_injective_memory_dep(write):
             return False
 
         return self.deps_match_normalized(

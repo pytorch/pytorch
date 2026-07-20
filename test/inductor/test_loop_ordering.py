@@ -13,11 +13,13 @@ import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import config as inductor_config, ir, metrics
+from torch._inductor import config as inductor_config, dependencies, ir, metrics
 from torch._inductor.codegen.triton import TritonScheduling
+from torch._inductor.dependencies import MemoryDep, ReadWrites
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
-from torch._inductor.scheduler import SchedulerNode
+from torch._inductor.loop_body import LoopBody
+from torch._inductor.scheduler import _LoopMutationTracker, Scheduler, SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
@@ -268,61 +270,122 @@ class LoopOrderingTest(TestCase):
         sin = torch.sin(freqs)[None, :, :]
         return f, (token_ids, embedding_weight, norm_weight, cos, sin)
 
-    @contextlib.contextmanager
-    def _record_transpose_contiguous_clone_reindex_scores(self):
-        import torch._inductor.scheduler as inductor_scheduler
+    def _complex_memory_copy_reindexing_case(
+        self,
+        transform,
+        token_shape=(2, 16),
+        hidden=32,
+    ):
+        def f(token_ids, embedding_weight, norm_weight, cos, sin):
+            x = F.embedding(token_ids, embedding_weight)
+            inv_rms = torch.rsqrt(torch.mean(x * x, dim=-1, keepdim=True) + 1e-6)
+            x = x * inv_rms * norm_weight
+            x = (x * cos) + (self._rotate_every_two(x) * sin)
+            return transform(x)
 
-        scores = []
-        orig_reindex = (
-            inductor_scheduler.Scheduler._try_reindex_transpose_contiguous_clone
+        vocab = 128
+        torch.manual_seed(0)
+        token_ids = torch.randint(0, vocab, token_shape, device=GPU_TYPE)
+        embedding_weight = torch.randn(vocab, hidden, device=GPU_TYPE)
+        norm_weight = torch.randn(hidden, device=GPU_TYPE)
+        cos = torch.randn(*token_shape, hidden, device=GPU_TYPE)
+        sin = torch.randn(*token_shape, hidden, device=GPU_TYPE)
+        return f, (token_ids, embedding_weight, norm_weight, cos, sin)
+
+    @staticmethod
+    def _memory_dep(name, offset=0, size=(8,)):
+        var_names = tuple(sympy.Symbol(f"i{idx}") for idx in range(len(size)))
+        index = sympy.S.Zero
+        for var, dim_size in zip(var_names, size):
+            index = index * dim_size + var
+        return MemoryDep(
+            name=name,
+            index=index + offset,
+            var_names=var_names,
+            size=tuple(sympy.sympify(value) for value in size),
         )
 
-        def wrapped_reindex(*args, **kwargs):
-            score = orig_reindex(*args, **kwargs)
-            if score > -1:
-                scores.append(score)
+    @staticmethod
+    def _fake_scheduler_node(reads=(), writes=(), unmet_dependencies=None):
+        node = mock.Mock()
+        node.is_cpu.return_value = False
+        node.read_writes = ReadWrites(
+            reads=OrderedSet(reads),
+            writes=OrderedSet(writes),
+            index_exprs=OrderedSet(),
+        )
+        node.unmet_dependencies = OrderedSet(
+            reads if unmet_dependencies is None else unmet_dependencies
+        )
+        return node
+
+    @staticmethod
+    def _fake_memory_copy_scheduler_node(read, write):
+        node = object.__new__(SchedulerNode)
+        node.is_reduction = mock.Mock(return_value=False)
+        node.read_writes = ReadWrites(
+            reads=OrderedSet((read,)),
+            writes=OrderedSet((write,)),
+            index_exprs=OrderedSet(),
+        )
+        body = mock.Mock()
+        body.is_memory_copy.return_value = True
+        body.subblocks = {}
+        body.get_read_exprs.return_value = [read.index]
+        body.get_write_exprs.return_value = [write.index]
+        body.vars = (list(read.var_names), [])
+        body.sizes = (list(read.size), [])
+        node._body = body
+        node.apply_loop_reindexing = mock.Mock()
+        return node
+
+    @staticmethod
+    def _fake_index_inversion_graph():
+        graph = mock.Mock()
+        graph.sizevars.statically_known_equals.side_effect = (
+            lambda left, right: sympy.simplify(left - right) == 0
+        )
+        graph.sizevars.simplify.side_effect = lambda expr: expr
+        graph.sizevars.simplify_with_ranges.side_effect = lambda expr, ranges: expr
+        graph.sizevars.combine_modular_indexing_pairs.side_effect = lambda expr: expr
+        graph.sizevars.shape_env.evaluate_expr.side_effect = lambda expr: bool(expr)
+        graph.sizevars.optimization_hint.side_effect = (
+            lambda expr, fallback=0: int(expr)
+        )
+        return graph
+
+    @contextlib.contextmanager
+    def _record_invertible_memory_copy_reindex_scores(self):
+        import torch._inductor.scheduler as inductor_scheduler
+
+        attempts = []
+        orig_reindex = inductor_scheduler.Scheduler._try_reindex_invertible_memory_copy
+
+        def wrapped_reindex(
+            scheduler,
+            node1,
+            node2,
+            node1_write,
+            node2_read,
+            node2_write,
+        ):
+            score = orig_reindex(
+                scheduler,
+                node1,
+                node2,
+                node1_write,
+                node2_read,
+                node2_write,
+            )
+            attempts.append((score, node2_read))
             return score
 
         with mock.patch.object(
             inductor_scheduler.Scheduler,
-            "_try_reindex_transpose_contiguous_clone",
+            "_try_reindex_invertible_memory_copy",
             wrapped_reindex,
         ):
-            yield scores
-
-    @contextlib.contextmanager
-    def _force_transpose_contiguous_clone_reindex_rollback(self):
-        import torch._inductor.scheduler as inductor_scheduler
-
-        results = []
-        orig_reindex = (
-            inductor_scheduler.Scheduler._try_reindex_transpose_contiguous_clone
-        )
-
-        def wrapped_reindex(scheduler, *args, **kwargs):
-            score_call_count = 0
-
-            def force_no_score_gain(*score_args, **score_kwargs):
-                nonlocal score_call_count
-                score_call_count += 1
-                return 0
-
-            with mock.patch.object(
-                inductor_scheduler.Scheduler,
-                "score_fusion_memory",
-                force_no_score_gain,
-            ):
-                result = orig_reindex(scheduler, *args, **kwargs)
-            if score_call_count:
-                results.append(result)
-            return result
-
-        with mock.patch.object(
-            inductor_scheduler.Scheduler,
-            "_try_reindex_transpose_contiguous_clone",
-            wrapped_reindex,
-        ):
-            yield results
+            yield attempts
 
     def test_for_reordering_reindex(self):
         """
@@ -591,7 +654,7 @@ class LoopOrderingTest(TestCase):
         loop_index_inversion_in_fusion=True,
         loop_reindexing_after_fusion=True,
     )
-    def test_transpose_contiguous_clone_reindexing(self):
+    def test_invertible_memory_copy_reindexing_attention_layout(self):
         """
         A producer writes [B, S, H], then a view + transpose + contiguous clone
         changes the layout to [B, heads, S, D]. Reindexing the clone to the
@@ -601,7 +664,7 @@ class LoopOrderingTest(TestCase):
 
         f, args = self._transpose_contiguous_clone_reindexing_case()
         ref = f(*args)
-        with self._record_transpose_contiguous_clone_reindex_scores() as scores:
+        with self._record_invertible_memory_copy_reindex_scores() as attempts:
             actual, code = run_and_get_code(
                 torch.compile(f),
                 *args,
@@ -609,7 +672,7 @@ class LoopOrderingTest(TestCase):
 
         torch.testing.assert_close(actual, ref)
         self.assertEqual(actual.stride(), (512, 128, 8, 1))
-        self.assertGreaterEqual(len(scores), 1)
+        self.assertTrue(any(score > 0 for score, _ in attempts))
         FileCheck().check_count("@triton.jit", 1, exactly=True).check_not(
             "triton_poi_fused_clone"
         ).run(code[0])
@@ -619,71 +682,477 @@ class LoopOrderingTest(TestCase):
         loop_index_inversion_in_fusion=True,
         loop_reindexing_after_fusion=True,
     )
-    def test_transpose_contiguous_clone_reindexing_rolls_back_without_score_gain(
-        self,
-    ):
-        """
-        If the targeted clone reindex does not improve the fusion score, the
-        speculative loop mutation should be rolled back and the normal clone
-        kernel should remain.
-        """
-
-        f, args = self._transpose_contiguous_clone_reindexing_case()
+    def test_invertible_memory_copy_reindexing_rank_2_to_3(self):
+        f, args = self._complex_memory_copy_reindexing_case(
+            lambda x: x.view(2, 3, 4).permute(1, 0, 2).contiguous(),
+            token_shape=(6,),
+            hidden=4,
+        )
         ref = f(*args)
-        with self._force_transpose_contiguous_clone_reindex_rollback() as results:
-            actual, code = run_and_get_code(
-                torch.compile(f),
-                *args,
-            )
+        with self._record_invertible_memory_copy_reindex_scores() as attempts:
+            actual, code = run_and_get_code(torch.compile(f), *args)
 
         torch.testing.assert_close(actual, ref)
-        self.assertTrue(results)
-        self.assertFalse(any(result > 0 for result in results))
-        FileCheck().check("triton_poi_fused_clone").run(code[0])
+        self.assertEqual(actual.stride(), (8, 4, 1))
+        self.assertTrue(any(score > 0 for score, _ in attempts))
+        FileCheck().check_count("@triton.jit", 1, exactly=True).check_not(
+            "triton_poi_fused_clone"
+        ).run(code[0])
 
     @skipUnless(HAS_GPU, "requires GPU")
     @inductor_config.patch(
         loop_index_inversion_in_fusion=True,
         loop_reindexing_after_fusion=True,
     )
-    def test_transpose_contiguous_clone_reindexing_rejects_other_permute(self):
-        """
-        A different permute + contiguous copy should not be rewritten by the
-        targeted [B, S, H] -> [B, heads, S, D] clone reindexing path.
-        """
-
-        def f(x):
-            y = torch.sin(x)
-            y = y.view(2, 16, 4, 8)
-            return y.permute(0, 2, 3, 1).contiguous()
-
-        torch.manual_seed(0)
-        x = torch.randn(2, 16, 32, device=GPU_TYPE)
-        ref = f(x)
-        with self._record_transpose_contiguous_clone_reindex_scores() as scores:
-            actual = torch.compile(f)(x)
+    def test_invertible_memory_copy_reindexing_rejects_non_bijective_read(self):
+        f, args = self._complex_memory_copy_reindexing_case(
+            lambda x: torch.as_strided(x, x.shape, (0, 32, 1)).contiguous()
+        )
+        ref = f(*args)
+        with self._record_invertible_memory_copy_reindex_scores() as attempts:
+            actual = torch.compile(f)(*args)
 
         torch.testing.assert_close(actual, ref)
-        self.assertEqual(actual.stride(), (512, 128, 16, 1))
-        self.assertEqual(scores, [])
+        target_scores = [
+            score
+            for score, read in attempts
+            if len(read.index.free_symbols) < len(read.var_names)
+        ]
+        self.assertTrue(target_scores)
+        self.assertTrue(all(score == -1 for score in target_scores))
 
-    @skipUnless(HAS_GPU, "requires GPU")
+    @inductor_config.patch(
+        loop_index_inversion_in_fusion=True,
+        loop_reindexing_after_fusion=True,
+    )
+    def test_index_inversion_rejects_two_source_consumer_before_reindex(self):
+        source0 = self._memory_dep("source0")
+        source1 = self._memory_dep("source1")
+        output = self._memory_dep("output")
+        node1 = self._fake_scheduler_node(writes=(source0, source1))
+        node2 = self._fake_scheduler_node(
+            reads=(source0, source1),
+            writes=(output,),
+        )
+        scheduler = object.__new__(Scheduler)
+
+        with mock.patch.object(
+            scheduler, "_try_reindex_invertible_memory_copy", return_value=1
+        ) as reindex:
+            score = scheduler.shared_data_after_inverting_indexing(node1, node2)
+
+        self.assertEqual(score, -1)
+        reindex.assert_not_called()
+
+    @inductor_config.patch(
+        loop_index_inversion_in_fusion=True,
+        loop_reindexing_after_fusion=True,
+    )
+    def test_index_inversion_selects_matching_multi_output_write(self):
+        source0 = self._memory_dep("source0")
+        source1 = self._memory_dep("source1")
+        output = self._memory_dep("output")
+        node1 = self._fake_scheduler_node(writes=(source0, source1))
+        node2 = self._fake_scheduler_node(reads=(source1,), writes=(output,))
+        scheduler = object.__new__(Scheduler)
+
+        with mock.patch.object(
+            scheduler, "_try_reindex_invertible_memory_copy", return_value=7
+        ) as reindex:
+            score = scheduler.shared_data_after_inverting_indexing(node1, node2)
+
+        self.assertEqual(score, 7)
+        reindex.assert_called_once()
+        self.assertIs(reindex.call_args.args[2], source1)
+
+    @inductor_config.patch(
+        loop_index_inversion_in_fusion=True,
+        loop_reindexing_after_fusion=True,
+    )
+    def test_index_inversion_rejects_ambiguous_same_name_writes(self):
+        source0 = self._memory_dep("source", offset=0)
+        source1 = self._memory_dep("source", offset=1)
+        read = self._memory_dep("source")
+        output = self._memory_dep("output")
+        node1 = self._fake_scheduler_node(writes=(source0, source1))
+        node2 = self._fake_scheduler_node(reads=(read,), writes=(output,))
+        scheduler = object.__new__(Scheduler)
+
+        with mock.patch.object(
+            scheduler, "_try_reindex_invertible_memory_copy", return_value=1
+        ) as reindex:
+            score = scheduler.shared_data_after_inverting_indexing(node1, node2)
+
+        self.assertEqual(score, -1)
+        reindex.assert_not_called()
+
+    @inductor_config.patch(
+        loop_index_inversion_in_fusion=True,
+        loop_reindexing_after_fusion=True,
+    )
+    def test_index_inversion_rejects_different_source_name(self):
+        producer_write = self._memory_dep("producer")
+        different_read = self._memory_dep("different")
+        overlapping_write = self._memory_dep("producer")
+        node1 = self._fake_scheduler_node(writes=(producer_write,))
+        node2 = self._fake_scheduler_node(
+            reads=(different_read,),
+            writes=(overlapping_write,),
+            unmet_dependencies=(),
+        )
+        scheduler = object.__new__(Scheduler)
+
+        with mock.patch.object(
+            scheduler, "_try_reindex_invertible_memory_copy", return_value=1
+        ) as reindex:
+            score = scheduler.shared_data_after_inverting_indexing(node1, node2)
+
+        self.assertEqual(score, -1)
+        reindex.assert_not_called()
+
     @inductor_config.patch(
         loop_index_inversion_in_fusion=True,
         loop_reindexing_after_fusion=False,
     )
-    def test_transpose_contiguous_clone_reindexing_disabled_by_config(self):
-        f, args = self._transpose_contiguous_clone_reindexing_case()
-        ref = f(*args)
-        with self._record_transpose_contiguous_clone_reindex_scores() as scores:
-            actual, code = run_and_get_code(
-                torch.compile(f),
-                *args,
+    def test_invertible_memory_copy_reindexing_disabled_by_config(self):
+        source = self._memory_dep("source")
+        output = self._memory_dep("output")
+        node1 = self._fake_scheduler_node(writes=(source,))
+        node2 = self._fake_scheduler_node(reads=(source,), writes=(output,))
+        scheduler = object.__new__(Scheduler)
+
+        with mock.patch.object(
+            scheduler, "_try_reindex_invertible_memory_copy", return_value=1
+        ) as reindex:
+            score = scheduler.shared_data_after_inverting_indexing(node1, node2)
+
+        self.assertEqual(score, -1)
+        reindex.assert_not_called()
+
+    def test_invertible_memory_copy_reindexing_rejects_zero_numel(self):
+        producer_write = self._memory_dep("source", size=(0, 8))
+        consumer_read = self._memory_dep("source", size=(0, 8))
+        consumer_write = self._memory_dep("output", size=(0, 8))
+        node2 = self._fake_memory_copy_scheduler_node(consumer_read, consumer_write)
+        scheduler = object.__new__(Scheduler)
+        graph = self._fake_index_inversion_graph()
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch.object(
+                scheduler, "_is_dense_and_injective_memory_dep"
+            ) as is_dense,
+        ):
+            score = scheduler._try_reindex_invertible_memory_copy(
+                mock.Mock(),
+                node2,
+                producer_write,
+                consumer_read,
+                consumer_write,
             )
 
-        torch.testing.assert_close(actual, ref)
-        self.assertEqual(scores, [])
-        FileCheck().check("triton_poi_fused_clone").run(code[0])
+        self.assertEqual(score, -1)
+        is_dense.assert_not_called()
+        node2.apply_loop_reindexing.assert_not_called()
+
+    def test_invertible_memory_copy_reindexing_rejects_symbolic_shape(self):
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        producer_write = self._memory_dep("source", size=(s0, 8))
+        consumer_read = self._memory_dep("source", size=(s0, 8))
+        consumer_write = self._memory_dep("output", size=(s0, 8))
+        node2 = self._fake_memory_copy_scheduler_node(consumer_read, consumer_write)
+        scheduler = object.__new__(Scheduler)
+
+        with mock.patch.object(
+            scheduler, "_is_dense_and_injective_memory_dep"
+        ) as is_dense:
+            score = scheduler._try_reindex_invertible_memory_copy(
+                mock.Mock(),
+                node2,
+                producer_write,
+                consumer_read,
+                consumer_write,
+            )
+
+        self.assertEqual(score, -1)
+        is_dense.assert_not_called()
+        node2.apply_loop_reindexing.assert_not_called()
+
+    def test_invertible_memory_copy_reindexing_rejects_non_injective_producer(self):
+        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
+        producer_write = MemoryDep(
+            name="source",
+            index=i1,
+            var_names=(i0, i1),
+            size=(sympy.Integer(2), sympy.Integer(8)),
+        )
+        consumer_read = MemoryDep(
+            name="source",
+            index=8 * i0 + i1,
+            var_names=(i0, i1),
+            size=(sympy.Integer(2), sympy.Integer(8)),
+        )
+        consumer_write = MemoryDep(
+            name="output",
+            index=8 * i0 + i1,
+            var_names=(i0, i1),
+            size=(sympy.Integer(2), sympy.Integer(8)),
+        )
+        node2 = self._fake_memory_copy_scheduler_node(consumer_read, consumer_write)
+        scheduler = object.__new__(Scheduler)
+        graph = self._fake_index_inversion_graph()
+
+        with V.set_graph_handler(graph):
+            score = scheduler._try_reindex_invertible_memory_copy(
+                mock.Mock(),
+                node2,
+                producer_write,
+                consumer_read,
+                consumer_write,
+            )
+
+        self.assertEqual(score, -1)
+        node2.apply_loop_reindexing.assert_not_called()
+
+    @inductor_config.patch(
+        loop_index_inversion_in_fusion=True,
+        loop_reindexing_after_fusion=True,
+        constant_and_index_propagation=False,
+    )
+    def test_index_inversion_right_inverse_fallback_rollback(self):
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+
+        def copy_body(iter_indices, _reduction_indices):
+            value = ops.load("source", FloorDiv(iter_indices[0], 2))
+            return ops.store("output", iter_indices[0], value)
+
+        producer_write = MemoryDep(
+            name="source",
+            index=i0,
+            var_names=(i0,),
+            size=(sympy.Integer(8),),
+        )
+        consumer_read = MemoryDep(
+            name="source",
+            index=FloorDiv(i0, 2),
+            var_names=(i0,),
+            size=(sympy.Integer(8),),
+        )
+        consumer_write = MemoryDep(
+            name="output",
+            index=i0,
+            var_names=(i0,),
+            size=(sympy.Integer(8),),
+        )
+        graph = self._fake_index_inversion_graph()
+        with V.set_graph_handler(graph):
+            body = LoopBody(
+                copy_body,
+                ([i0], []),
+                {i0: sympy.Integer(8)},
+                [i0],
+                [],
+            )
+
+        original_indexing_exprs = dict(body.indexing_exprs)
+        node1 = self._fake_scheduler_node(writes=(producer_write,))
+        node2 = object.__new__(SchedulerNode)
+        node2.is_cpu = mock.Mock(return_value=False)
+        node2.is_reduction = mock.Mock(return_value=False)
+        node2.read_writes = ReadWrites(
+            reads=OrderedSet((consumer_read,)),
+            writes=OrderedSet((consumer_write,)),
+            index_exprs=OrderedSet(),
+        )
+        node2.unmet_dependencies = OrderedSet((consumer_read,))
+        node2._body = body
+        node2._sizes = body.sizes
+        node2.group = mock.sentinel.group
+        node2._loop_mutation_listener = None
+        node2.clear_loop_body_dependent_caches = mock.Mock()
+        computed_buffer = object.__new__(ir.ComputedBuffer)
+        computed_buffer.get_device_or_error = mock.Mock(
+            return_value=torch.device("cpu")
+        )
+        node2.node = computed_buffer
+        node2.scheduler = mock.Mock()
+        node2.scheduler.get_backend.return_value.group_fn.return_value = (
+            mock.sentinel.reindexed_group
+        )
+
+        def refresh_dependencies(normalize, need_clear_tiling_cache):
+            node2.read_writes = dependencies.extract_read_writes(
+                node2._body,
+                *node2._sizes,
+                normalize=False,
+            )
+
+        node2.refresh_dependencies = refresh_dependencies
+        scheduler = object.__new__(Scheduler)
+        scheduler.score_fusion_memory = mock.Mock(side_effect=(0, 5))
+        refreshed_reads = []
+
+        def reject_refreshed_dependency(producer, refreshed_read):
+            refreshed_reads.append(refreshed_read)
+            return False
+
+        scheduler.deps_match_normalized = reject_refreshed_dependency
+
+        tracker = _LoopMutationTracker.create((node2,))
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch.object(
+                scheduler,
+                "_is_dense_and_injective_memory_dep",
+                return_value=True,
+            ),
+            mock.patch.object(MemoryDep, "normalize", return_value=producer_write),
+            mock.patch.object(
+                node2,
+                "apply_loop_reindexing",
+                wraps=node2.apply_loop_reindexing,
+            ) as apply_reindex,
+            mock.patch.object(
+                node2,
+                "restore_loop_state",
+                wraps=node2.restore_loop_state,
+            ) as restore_loop_state,
+        ):
+            score = scheduler.shared_data_after_inverting_indexing(node1, node2)
+
+        self.assertEqual(score, 5)
+        apply_reindex.assert_called_once()
+        restore_loop_state.assert_called_once()
+        self.assertEqual(len(refreshed_reads), 1)
+        self.assertNotEqual(refreshed_reads[0].index, producer_write.index)
+        self.assertIsNot(node2._body, body)
+        self.assertEqual(body.indexing_exprs, original_indexing_exprs)
+        self.assertEqual(node2._body.indexing_exprs["index0"], consumer_write.index)
+        self.assertEqual(node2._body.indexing_exprs["index1"], 2 * i0)
+
+        # Equivalent to the final can_fuse() decision rejecting this candidate.
+        with mock.patch.object(
+            node2,
+            "restore_loop_state",
+            wraps=node2.restore_loop_state,
+        ) as outer_restore:
+            tracker.finish(rollback=True)
+
+        outer_restore.assert_called_once()
+        self.assertIs(node2._body, body)
+        self.assertEqual(node2._body.indexing_exprs, original_indexing_exprs)
+        self.assertIsNone(node2._loop_mutation_listener)
+
+    def test_invertible_memory_copy_reindexing_rolls_back_dependency_mismatch(self):
+        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
+        producer_write = MemoryDep(
+            name="source",
+            index=8 * i0 + i1,
+            var_names=(i0, i1),
+            size=(sympy.Integer(2), sympy.Integer(8)),
+        )
+        consumer_write = MemoryDep(
+            name="output",
+            index=8 * i0 + i1,
+            var_names=(i0, i1),
+            size=(sympy.Integer(2), sympy.Integer(8)),
+        )
+        read_indices = {
+            "non_bijective": i1,
+            "offset": 8 * i0 + i1 + 1,
+        }
+
+        for name, read_index in read_indices.items():
+            with self.subTest(name=name):
+                consumer_read = MemoryDep(
+                    name="source",
+                    index=read_index,
+                    var_names=(i0, i1),
+                    size=(sympy.Integer(2), sympy.Integer(8)),
+                )
+                node2 = self._fake_memory_copy_scheduler_node(
+                    consumer_read, consumer_write
+                )
+                snapshot = object()
+                node2.snapshot_loop_state = mock.Mock(return_value=snapshot)
+                node2.refresh_dependencies = mock.Mock()
+                node2.restore_loop_state = mock.Mock()
+                scheduler = object.__new__(Scheduler)
+                scheduler.score_fusion_memory = mock.Mock(return_value=0)
+                scheduler.deps_match_normalized = mock.Mock(return_value=False)
+                graph = self._fake_index_inversion_graph()
+
+                with (
+                    V.set_graph_handler(graph),
+                    mock.patch.object(
+                        scheduler,
+                        "_is_dense_and_injective_memory_dep",
+                        return_value=True,
+                    ),
+                    mock.patch(
+                        "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+                        side_effect=lambda expr, var: var,
+                    ),
+                ):
+                    score = scheduler._try_reindex_invertible_memory_copy(
+                        mock.Mock(),
+                        node2,
+                        producer_write,
+                        consumer_read,
+                        consumer_write,
+                    )
+
+                self.assertEqual(score, -1)
+                node2.apply_loop_reindexing.assert_called_once()
+                node2.restore_loop_state.assert_called_once_with(snapshot)
+
+    def test_invertible_memory_copy_reindexing_rolls_back_without_score_gain(self):
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        producer_write = MemoryDep("source", i0, (i0,), (sympy.Integer(8),))
+        consumer_read = MemoryDep("source", i0, (i0,), (sympy.Integer(8),))
+        consumer_write = MemoryDep("output", i0, (i0,), (sympy.Integer(8),))
+        node2 = self._fake_memory_copy_scheduler_node(consumer_read, consumer_write)
+        snapshot = object()
+        node2.snapshot_loop_state = mock.Mock(return_value=snapshot)
+        node2.refresh_dependencies = mock.Mock()
+        node2.restore_loop_state = mock.Mock()
+
+        def apply_reindex(*args, **kwargs):
+            node2.read_writes = ReadWrites(
+                reads=OrderedSet((producer_write,)),
+                writes=OrderedSet((consumer_write,)),
+                index_exprs=OrderedSet(),
+            )
+
+        node2.apply_loop_reindexing.side_effect = apply_reindex
+        scheduler = object.__new__(Scheduler)
+        scheduler.score_fusion_memory = mock.Mock(side_effect=(0, 0))
+        scheduler.deps_match_normalized = mock.Mock(return_value=True)
+        graph = self._fake_index_inversion_graph()
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch.object(
+                scheduler,
+                "_is_dense_and_injective_memory_dep",
+                return_value=True,
+            ),
+            mock.patch(
+                "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+                side_effect=lambda expr, var: var,
+            ),
+        ):
+            score = scheduler._try_reindex_invertible_memory_copy(
+                mock.Mock(),
+                node2,
+                producer_write,
+                consumer_read,
+                consumer_write,
+            )
+
+        self.assertEqual(score, -1)
+        node2.restore_loop_state.assert_called_once_with(snapshot)
 
     def test_reindex_unfusable_write_read_dep(self):
         """

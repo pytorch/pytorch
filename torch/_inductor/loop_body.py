@@ -359,6 +359,28 @@ class LoopBody:
             reduce_vars2,
         )
 
+    def _replace_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> LoopBody:
+        """Return a copy with selected indexing expressions replaced."""
+        unknown_names = replacements.keys() - self.indexing_exprs.keys()
+        if unknown_names:
+            raise AssertionError(f"unknown indexing expressions: {unknown_names}")
+
+        new_body = LoopBody(
+            self,
+            self.vars,
+            self.var_ranges,
+            self.iter_vars,
+            self.reduce_vars,
+            allow_same_symbol_in_index=True,
+        )
+        new_body.indexing_exprs.update(
+            {
+                name: self._wrap_int_to_sympy_integer(expr)
+                for name, expr in replacements.items()
+            }
+        )
+        return new_body
+
     def reorder_iter_loops(self, new_order) -> LoopBody:
         """
         Reorder iteration loops and return a new LoopBody.
