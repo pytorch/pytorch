@@ -21,42 +21,46 @@ __global__ void weight_int8pack_mm_kernel(
   const int lane = threadIdx.x & (kWarpSize - 1);
   const int warp_in_block = threadIdx.x / kWarpSize;
   const int warps_per_block = blockDim.x / kWarpSize;
-  const int64_t out_idx =
-      static_cast<int64_t>(blockIdx.x) * warps_per_block + warp_in_block;
+  const int64_t output_count = B * N;
+  const int64_t output_stride =
+      static_cast<int64_t>(gridDim.x) * warps_per_block;
+  for (int64_t out_idx =
+           static_cast<int64_t>(blockIdx.x) * warps_per_block + warp_in_block;
+       out_idx < output_count;
+       out_idx += output_stride) {
+    const int64_t b = out_idx / N;
+    const int64_t n = out_idx % N;
+    const float* x_row = x + b * K;
+    const int8_t* w_row = w + n * K;
 
-  if (out_idx >= B * N)
-    return;
-
-  const int64_t b = out_idx / N;
-  const int64_t n = out_idx % N;
-  const float* x_row = x + b * K;
-  const int8_t* w_row = w + n * K;
-
-  float acc = 0.0f;
-  if ((K & 3) == 0) {
-    const int64_t k4 = K >> 2;
-    const float4* x_row4 = reinterpret_cast<const float4*>(x_row);
-    const char4* w_row4 = reinterpret_cast<const char4*>(w_row);
-    for (int64_t j = lane; j < k4; j += kWarpSize) {
-      const float4 xv = x_row4[j];
-      const char4 wv = w_row4[j];
-      acc += xv.x * static_cast<float>(wv.x) +
-          xv.y * static_cast<float>(wv.y) +
-          xv.z * static_cast<float>(wv.z) + xv.w * static_cast<float>(wv.w);
+    float acc = 0.0f;
+    if ((K & 3) == 0 &&
+        reinterpret_cast<uintptr_t>(x_row) % alignof(float4) == 0 &&
+        reinterpret_cast<uintptr_t>(w_row) % 4 == 0) {
+      const int64_t k4 = K >> 2;
+      const float4* x_row4 = reinterpret_cast<const float4*>(x_row);
+      const char4* w_row4 = reinterpret_cast<const char4*>(w_row);
+      for (int64_t j = lane; j < k4; j += kWarpSize) {
+        const float4 xv = x_row4[j];
+        const char4 wv = w_row4[j];
+        acc += xv.x * static_cast<float>(wv.x) +
+            xv.y * static_cast<float>(wv.y) +
+            xv.z * static_cast<float>(wv.z) + xv.w * static_cast<float>(wv.w);
+      }
+    } else {
+      for (int64_t k = lane; k < K; k += kWarpSize) {
+        acc += x_row[k] * static_cast<float>(w_row[k]);
+      }
     }
-  } else {
-    for (int64_t k = lane; k < K; k += kWarpSize) {
-      acc += x_row[k] * static_cast<float>(w_row[k]);
-    }
-  }
 
 #pragma unroll
-  for (int offset = kWarpSize / 2; offset > 0; offset >>= 1) {
-    acc += __shfl_down_sync(0xffffffff, acc, offset);
-  }
+    for (int offset = kWarpSize / 2; offset > 0; offset >>= 1) {
+      acc += __shfl_down_sync(0xffffffff, acc, offset);
+    }
 
-  if (lane == 0) {
-    out[out_idx] = acc * scale[n];
+    if (lane == 0) {
+      out[out_idx] = acc * scale[n];
+    }
   }
 }
 
@@ -73,7 +77,11 @@ void launch_weight_int8pack_mm_cuda_kernel(
   constexpr int kWarpsPerBlock = 4;
   const dim3 block(kWarpSize * kWarpsPerBlock);
   const int64_t num_warps = B * N;
-  const dim3 grid((num_warps + kWarpsPerBlock - 1) / kWarpsPerBlock);
+  const int64_t requested_grid_x =
+      (num_warps + kWarpsPerBlock - 1) / kWarpsPerBlock;
+  const int64_t max_grid_x =
+      at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+  const dim3 grid(std::min(requested_grid_x, max_grid_x));
 
   auto stream = at::cuda::getCurrentCUDAStream();
 

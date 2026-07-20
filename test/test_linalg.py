@@ -7017,6 +7017,15 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
 
+        a_f32_storage = torch.empty((m * k) + 1, dtype=torch.float32, device=device)
+        a_f32 = a_f32_storage[1:].view(m, k)
+        a_f32.copy_(a)
+        res = torch._weight_int8pack_mm(a_f32, b_int8pack, b_scales)
+        ref = torch.mm(a_f32, b.float().transpose(0, 1))
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
+
     @slowTest
     @onlyCPU
     @largeTensorTest('12GB', device='cpu')
