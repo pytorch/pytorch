@@ -34,13 +34,20 @@ for desired in ${DESIRED_PYTHONS}; do
 
     # uv does not select CPython pre-releases by default, and 3.15 has no stable
     # release yet, so a bare `uv python install/find 3.15` silently resolves to
-    # another interpreter and produces a wrong-ABI wheel. Pin the explicit 3.15
-    # beta (bump as new betas land); other versions are unchanged.
+    # another interpreter and produces a wrong-ABI wheel. Request the explicit
+    # 3.15 beta. The uv pinned in CI (0.11.14) also predates these betas in its
+    # bundled metadata (it only ships up to 3.15.0b1), so point it at a newer
+    # metadata snapshot (same schema) that includes 3.15.0b3. Bump the tag +
+    # beta together as new betas land, keeping the beta aligned with the version
+    # the test job's setup-python resolves. Other versions are unchanged.
     uv_req="${desired}"
     case "${desired}" in
         3.15)  uv_req="3.15.0b3" ;;
         3.15t) uv_req="3.15.0b3+freethreaded" ;;
     esac
+    if [[ "${desired}" == 3.15* ]]; then
+        export UV_PYTHON_DOWNLOADS_JSON_URL="https://raw.githubusercontent.com/astral-sh/uv/0.11.29/crates/uv-python/download-metadata.json"
+    fi
     uv python install "${uv_req}"
     py_bin="$(uv python find "${uv_req}")"
     py_bin_dir="$(dirname "${py_bin}")"
