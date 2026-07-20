@@ -70,33 +70,61 @@ foreach(_var IN LISTS _ENV_PASSTHROUGH)
   endif()
 endforeach()
 
-# Forward all BUILD_*, USE_*, CMAKE_* env vars not already set as CMake
-# variables, plus vars ending in EXITCODE or EXITCODE__TRYRUN_OUTPUT.
-# This matches the existing behavior where setup.py passed everything with
-# these prefixes/suffixes through to CMake.
-# We use execute_process + env to get the full list since CMake has no
-# built-in way to enumerate environment variables.
-execute_process(
-  COMMAND "${CMAKE_COMMAND}" -E environment
-  OUTPUT_VARIABLE _all_env
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-string(REPLACE "\n" ";" _env_lines "${_all_env}")
-foreach(_line IN LISTS _env_lines)
-  if(_line MATCHES "^([A-Za-z_0-9]+)=(.*)")
-    set(_var_name "${CMAKE_MATCH_1}")
-    set(_var_value "${CMAKE_MATCH_2}")
-    # Only forward vars with BUILD_/USE_/CMAKE_ prefix or *EXITCODE* suffix.
-    string(REGEX MATCH "^(BUILD_|USE_|CMAKE_)" _has_prefix "${_var_name}")
-    string(REGEX MATCH "(EXITCODE|EXITCODE__TRYRUN_OUTPUT)$" _has_suffix "${_var_name}")
-    if(NOT _has_prefix AND NOT _has_suffix)
-      continue()
-    endif()
-    if(NOT DEFINED ${_var_name})
-      set(${_var_name} "${_var_value}" CACHE STRING "From environment" FORCE)
-    endif()
+# Forward all BUILD_*, USE_*, CMAKE_* environment variables (plus names ending
+# in EXITCODE / EXITCODE__TRYRUN_OUTPUT) into the CMake cache, mirroring the -D
+# flags setup.py used to pass.
+#
+# CMake cannot enumerate environment variables, and serializing the whole
+# environment to text and re-parsing it in CMake is unsafe: values such as PS1
+# contain ';' and '\' (and some exported shell functions even contain newlines),
+# all of which collide with CMake's list, escape, and line semantics and
+# silently corrupt unrelated variables. The top-level CMakeLists.txt already
+# requires Python (find_package(Python COMPONENTS Interpreter REQUIRED)) before
+# including this module, so read os.environ directly there -- the full
+# environment is never serialized -- and have it emit only the selected,
+# properly escaped cache assignments for CMake to evaluate.
+
+# Applies one forwarded variable. An explicitly-set environment variable takes
+# priority, matching the -D semantics this module emulates: override the cache
+# (do not merely fill when undefined) so a value left by an earlier env-less
+# configure -- an option() default or a ninja-triggered reconfigure -- cannot
+# permanently shadow the environment.
+function(_envfwd_apply _name _value)
+  if(NOT DEFINED ${_name} OR NOT "${${_name}}" STREQUAL "${_value}")
+    set(${_name} "${_value}" CACHE STRING "From environment" FORCE)
   endif()
-endforeach()
+endfunction()
+
+# Reads os.environ and prints `_envfwd_apply("<name>" "<value>")` for each
+# selected variable, escaping the value for a CMake double-quoted argument.
+set(_envfwd_script [==[
+import os, re, sys
+
+select = re.compile(r"^(BUILD_|USE_|CMAKE_)|(EXITCODE|EXITCODE__TRYRUN_OUTPUT)$")
+
+def q(s):
+    # Escape for a CMake double-quoted argument. Backslash and quote are
+    # structural; '$' is escaped to suppress ${}/$ENV{} expansion. ';' and
+    # newlines are literal inside quotes and need no escaping.
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
+
+sys.stdout.write("\n".join(
+    '_envfwd_apply("%s" "%s")' % (q(name), q(value))
+    for name, value in os.environ.items()
+    if select.search(name)
+))
+]==])
+
+execute_process(
+  COMMAND "${Python_EXECUTABLE}" -c "${_envfwd_script}"
+  OUTPUT_VARIABLE _envfwd_code
+  RESULT_VARIABLE _envfwd_rc
+)
+if(NOT _envfwd_rc EQUAL 0)
+  message(FATAL_ERROR
+    "EnvVarForwarding: failed to read the environment via Python (exit ${_envfwd_rc}).")
+endif()
+cmake_language(EVAL CODE "${_envfwd_code}")
 
 # Low-priority aliases
 foreach(_alias IN LISTS _LOW_PRIORITY_ALIASES)
