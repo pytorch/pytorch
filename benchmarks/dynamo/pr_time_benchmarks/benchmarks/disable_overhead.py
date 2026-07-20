@@ -5,14 +5,16 @@ from benchmark_base import BenchmarkBase
 import torch
 
 
-class Benchmark(BenchmarkBase):
-    # torch._dynamo.disable is used on hot paths (e.g. around custom operators),
-    # so the per-call overhead of its wrapper -- toggling the eval-frame handler
-    # off and back on around the call -- matters. Measure it with a trivial
-    # callee so the count reflects the wrapper, not the callee body.
+class _DisableOverheadBase(BenchmarkBase):
+    # Shared skeleton for the torch._dynamo.disable family of per-call overhead
+    # microbenchmarks. A subclass sets _CATEGORY/_DESCRIPTION and implements
+    # _setup() to assign the callable(s) it measures; _work() invokes the target
+    # with a single tensor arg. Kept as separate subclasses (rather than one
+    # parametrized instance) so each reports its own instruction count on the
+    # pr_time dashboard.
     def __init__(self):
         super().__init__(
-            category="disable_overhead",
+            category=self._CATEGORY,
             device="cpu",
         )
 
@@ -20,15 +22,11 @@ class Benchmark(BenchmarkBase):
         return self.category()
 
     def description(self):
-        return "per-call overhead of torch._dynamo.disable with a trivial callee"
+        return self._DESCRIPTION
 
     def _prepare_once(self):
         torch._dynamo.reset()
-
-        def f(x):
-            return x
-
-        self._fn = torch._dynamo.disable(f)
+        self._setup()
         self.a = torch.ones(1)
 
         # warm up
@@ -40,6 +38,21 @@ class Benchmark(BenchmarkBase):
 
     def _work(self):
         self._fn(self.a)
+
+
+class Benchmark(_DisableOverheadBase):
+    # torch._dynamo.disable is used on hot paths (e.g. around custom operators),
+    # so the per-call overhead of its wrapper -- toggling the eval-frame handler
+    # off and back on around the call -- matters. Measure it with a trivial
+    # callee so the count reflects the wrapper, not the callee body.
+    _CATEGORY = "disable_overhead"
+    _DESCRIPTION = "per-call overhead of torch._dynamo.disable with a trivial callee"
+
+    def _setup(self):
+        def f(x):
+            return x
+
+        self._fn = torch._dynamo.disable(f)
 
 
 def main():
