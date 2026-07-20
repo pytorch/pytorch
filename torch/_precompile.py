@@ -207,6 +207,7 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 
 import torch
@@ -221,7 +222,9 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
+
+    from torch._subclasses.fake_tensor import FakeTensorMode
 
 
 # ``precompile`` and ``PrecompileError`` are exposed under the compiler namespace as
@@ -242,6 +245,25 @@ _CACHE_VERSION = 1
 # Index into the caller's positional nn.Module arguments (0-based over the modules,
 # not over all args), used to qualify tied-across-modules param/buffer names as m<i>.<n>.
 _ModuleIndex = NewType("_ModuleIndex", int)
+
+
+# Decoded mark_unbacked spec for one dim: (shape_id, min, max, hint_override). shape_id is
+# an opaque hashable grouping label (dims sharing it collapse to one unbacked symbol); the
+# other three are optional integer sizes and are None wherever the decorator left them unset.
+_MarkSpec = tuple[object, int | None, int | None, int | None]
+# Per-user-input-leaf runtime bounds harvested from the marks: {dim: (min, max)} (either
+# may be None), or None when the leaf has no bounded marked dim.
+_LeafBounds = dict[int, tuple[int | None, int | None]] | None
+
+
+# Reused read-only empty mapping for the mark_unbacked getattr fallbacks (Note [precompile
+# reads private dynamo mark attributes]), so the common unmarked leaf reads its (absent)
+# _dynamo_* dicts without allocating a throwaway {} per call.
+# The value type is Any because these back three DISTINCT private dynamo dicts (dim ->
+# shape_id label / (min, max) tuple / hint int); one shared empty default cannot name all
+# three, and the private _dynamo_* attrs are untyped (Note above), so Any is the isolated
+# boundary here.
+_NO_MARKS: Mapping[int, Any] = MappingProxyType({})
 
 
 class PrecompileError(RuntimeError):
@@ -316,7 +338,7 @@ def _resolved_get_attrs(
 # dynamo contract -- mark_unbacked is the documented entry point, and precompile reads
 # what it leaves behind rather than exposing its own dynamic-shape kwarg. A stable
 # dynamo-owned accessor is the eventual home; until then these names are load-bearing.
-def _has_unbacked_marks(args: tuple[Any, ...]) -> bool:
+def _has_unbacked_marks(args: tuple[object, ...]) -> bool:
     """True if any tensor reachable in ``args`` carries a mark_unbacked dim (backed or
     strict)."""
     return any(
@@ -329,7 +351,7 @@ def _has_unbacked_marks(args: tuple[Any, ...]) -> bool:
     )
 
 
-def _reject_unsupported_marks(user_flat: list[Any]) -> None:
+def _reject_unsupported_marks(user_flat: list[object]) -> None:
     """Reject mark options precompile cannot honor, loudly (invariant 3).
 
     precompile only honors mark_unbacked (backed unbacked dims) and mark_unbacked's
@@ -376,7 +398,7 @@ def _reject_unsupported_marks(user_flat: list[Any]) -> None:
             )
 
 
-def _read_unbacked_marks(user_flat: list[Any]) -> list[dict[int, Any]]:
+def _read_unbacked_marks(user_flat: list[object]) -> list[dict[int, _MarkSpec]]:
     """Read ``torch._dynamo.decorators.mark_unbacked`` marks off the user-input tensors.
 
     Dynamic shapes are opt-in via that decorator (the caller marks dims before calling
@@ -387,7 +409,7 @@ def _read_unbacked_marks(user_flat: list[Any]) -> list[dict[int, Any]]:
     construction); ``min``/``max`` become runtime range asserts; ``hint_override`` is a
     perf-only autotuning size hint applied to the symbol in _fakeify_with_unbacked.
     """
-    marks: list[dict[int, Any]] = []
+    marks: list[dict[int, _MarkSpec]] = []
     for t in user_flat:
         if not isinstance(t, torch.Tensor):
             marks.append({})
@@ -404,9 +426,9 @@ def _read_unbacked_marks(user_flat: list[Any]) -> list[dict[int, Any]]:
         if not idx:
             marks.append({})
             continue
-        shape_ids = getattr(t, "_dynamo_shape_ids", {}) or {}
-        bounds = getattr(t, "_dynamo_unbacked_bounds", {}) or {}
-        hints = getattr(t, "_dynamo_hint_overrides", {}) or {}
+        shape_ids = getattr(t, "_dynamo_shape_ids", _NO_MARKS) or _NO_MARKS
+        bounds = getattr(t, "_dynamo_unbacked_bounds", _NO_MARKS) or _NO_MARKS
+        hints = getattr(t, "_dynamo_hint_overrides", _NO_MARKS) or _NO_MARKS
         marks.append(
             {
                 d: (shape_ids.get(d), *bounds.get(d, (None, None)), hints.get(d))
@@ -416,7 +438,7 @@ def _read_unbacked_marks(user_flat: list[Any]) -> list[dict[int, Any]]:
     return marks
 
 
-def _read_input_bounds(marks: list[dict[int, Any]]) -> list[Any]:
+def _read_input_bounds(marks: list[dict[int, _MarkSpec]]) -> list[_LeafBounds]:
     """Build the per-leaf runtime min/max bounds from the already-read mark_unbacked
     marks, aligned to ``user_flat`` (so ``marks`` is the output of _read_unbacked_marks).
 
@@ -427,9 +449,9 @@ def _read_input_bounds(marks: list[dict[int, Any]]) -> list[Any]:
     Each entry is None when the leaf has no bounded marked dim, else a dict mapping a
     marked dim index to ``(lo, hi)`` (either may be None); mirrors USER_INPUT_DTYPES.
     """
-    bounds: list[Any] = []
+    bounds: list[_LeafBounds] = []
     for per in marks:
-        per_leaf: dict[int, Any] = {}
+        per_leaf: dict[int, tuple[int | None, int | None]] = {}
         for d, (_shape_id, lo, hi, _hint) in per.items():
             if lo is not None or hi is not None:
                 per_leaf[d] = (lo, hi)
@@ -461,8 +483,8 @@ def _detect_memory_format(t: torch.Tensor) -> torch.memory_format:
 
 
 def _fakeify_with_unbacked(
-    pb_flat: list[Any], user_flat: list[Any], marks: list[dict[int, Any]]
-) -> tuple[list[Any], Any]:
+    pb_flat: list[Tensor], user_flat: list[object], marks: list[dict[int, _MarkSpec]]
+) -> tuple[list[object], FakeTensorMode]:
     """Fakeify the flat capture inputs for an unbacked dynamic-shape capture.
 
     Params/buffers and unmarked dims become static fakes; each mark_unbacked dim becomes
@@ -476,17 +498,18 @@ def _fakeify_with_unbacked(
 
     shape_env = ShapeEnv()
     fake_mode = FakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True)
-    shared: dict[Any, Any] = {}  # shape_id -> symint, so grouped dims share one symbol
+    # shape_id -> unbacked symint (a dynamic SymInt); untyped so grouped dims share one symbol.
+    shared: dict[object, Any] = {}
     with fake_mode:
         fake_pb = [fake_mode.from_tensor(t, static_shapes=True) for t in pb_flat]
-        fake_user: list[Any] = []
+        fake_user: list[object] = []
         for leaf, per in zip(user_flat, marks):
             if not isinstance(leaf, torch.Tensor):
                 fake_user.append(leaf)
             elif not per:
                 fake_user.append(fake_mode.from_tensor(leaf, static_shapes=True))
             else:
-                sizes: list[Any] = []
+                sizes: list[Any] = []  # mix of static ints and unbacked SymInts
                 for i, s in enumerate(leaf.shape):
                     if i not in per:
                         sizes.append(int(s))
@@ -906,8 +929,8 @@ class _Capture:
         user_input_shapes: list[tuple[int | None, ...] | None],
         user_input_dtypes: list[str | None],
         user_input_devices: list[str | None],
-        user_input_bounds: list[Any],
-        fake_mode: Any = None,
+        user_input_bounds: list[_LeafBounds],
+        fake_mode: FakeTensorMode | None = None,
     ) -> None:
         self.gm = gm
         self.flat_args = flat_args
@@ -2003,9 +2026,13 @@ class _PrecompileApi:
         construction); ``min``/``max`` become runtime asserts. Other dims stay static.
         Dims that MUST be equal at runtime (e.g. two inputs combined by a broadcast that
         requires equal sizes, ``model(a) + model(b)``) MUST be given a SHARED ``shape_id``
-        so a mismatch is rejected; marking two such dims INDEPENDENTLY silently bakes an
-        equal-size assumption and a runtime mismatch is UNDEFINED -- NOT the loud failure
-        eager gives (invariant 3).
+        so a mismatch is rejected; marking two such dims INDEPENDENTLY currently bakes a
+        SILENT equal-size assumption and a runtime mismatch does NOT raise the loud failure
+        eager gives (invariant 3). This is a harvesting gap, not an inherent limit of the
+        standalone artifact: the capture ShapeEnv DOES record the equality (as a deferred
+        runtime assert, e.g. ``Eq(u0, u1)``), but precompile does not yet harvest/enforce
+        those relational asserts in the driver -- only the decorator's declared min/max feed
+        the runtime bound checks. A shared ``shape_id`` is the way to get the check today.
 
         Returns ``(python_code, cache)`` -- a self-contained, executable Python
         source string (the single source of truth for the calling convention) and a
