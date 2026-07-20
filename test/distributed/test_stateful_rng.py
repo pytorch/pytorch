@@ -5,24 +5,22 @@ from __future__ import annotations
 
 import unittest
 from functools import partial
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, cast
 
 import torch
 from torch._library.utils import fill_defaults
-from torch.distributed import RNGLayoutTensor
+from torch.distributed._rng_layout import _derive_checkpointable_rng_layout
 from torch.distributed._local_tensor import LocalIntNode, LocalTensor, LocalTensorMode
 from torch.distributed._stateful_rng import (
     _is_supported_stateful_rng_op,
     _PHILOX_DISTRIBUTION_NORMAL,
     _PHILOX_DISTRIBUTION_UNIFORM,
     _run_stateful_rng_op,
+    _run_stateful_rng_op_for_checkpointable_tensor,
 )
+from torch.distributed.checkpoint import CheckpointableTensor
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
-
-
-if TYPE_CHECKING:
-    from torch.distributed import RNGIndexBlock
 
 
 aten = torch.ops.aten
@@ -47,36 +45,62 @@ class _StatefulRNGMode(TorchDispatchMode):
             return func(*args, **kwargs)
         if tensor_arg.is_meta or tensor_arg.device.type != "cuda":
             return func(*args, **kwargs)
-        if not isinstance(tensor_arg, RNGLayoutTensor):
+        if not isinstance(tensor_arg, CheckpointableTensor):
             return func(*args, **kwargs)
-        rng_metadata = cast(RNGLayoutTensor, tensor_arg)
-
-        return _run_stateful_rng_op(
+        rng_metadata = cast(CheckpointableTensor, tensor_arg)
+        return _run_stateful_rng_op_for_checkpointable_tensor(
             func,
             args,
             kwargs,
-            rng_metadata.rng_global_numel,
-            rng_metadata.rng_index_blocks,
+            rng_metadata,
         )
 
 
-class TestRNGLayoutTensor(TestCase):
+class TestCheckpointableTensorRNG(TestCase):
     @staticmethod
-    def _set_rng_metadata(
+    def _set_shard_metadata(
         tensor: torch.Tensor,
-        global_numel: int,
-        index_blocks: tuple[RNGIndexBlock, ...],
+        global_shape: tuple[int, ...],
+        global_offsets: tuple[tuple[int, ...], ...],
+        local_offsets: tuple[tuple[int, ...], ...],
+        local_sizes: tuple[tuple[int, ...], ...],
     ) -> None:
-        setattr(tensor, "rng_global_numel", global_numel)  # noqa: B010
-        setattr(tensor, "rng_index_blocks", index_blocks)  # noqa: B010
+        setattr(tensor, "global_shape", global_shape)  # noqa: B010
+        setattr(tensor, "global_offsets", global_offsets)  # noqa: B010
+        setattr(tensor, "local_offsets", local_offsets)  # noqa: B010
+        setattr(tensor, "local_sizes", local_sizes)  # noqa: B010
 
     def test_plain_tensor_metadata_satisfies_protocol(self):
         tensor = torch.empty(1)
-        self.assertNotIsInstance(tensor, RNGLayoutTensor)
+        self.assertNotIsInstance(tensor, CheckpointableTensor)
 
-        block: RNGIndexBlock = (0, 1, 1, 1)
-        self._set_rng_metadata(tensor, 1, (block,))
-        self.assertIsInstance(tensor, RNGLayoutTensor)
+        self._set_shard_metadata(tensor, (1,), ((0,),), ((0,),), ((1,),))
+        self.assertIsInstance(tensor, CheckpointableTensor)
+
+    def test_shard_metadata_lowers_to_flat_indices(self):
+        cases = (
+            ((3, 4), (0, 2), (3, 2), ((2, 2, 4, 3),)),
+            ((4, 5, 6), (1, 1, 2), (2, 3, 3), ((38, 3, 6, 3), (68, 3, 6, 3))),
+        )
+        for global_shape, global_offset, local_shape, expected_blocks in cases:
+            with self.subTest(global_shape=global_shape):
+                tensor = torch.empty(local_shape)
+                zero_offset = (0,) * len(local_shape)
+                self._set_shard_metadata(
+                    tensor,
+                    global_shape,
+                    (global_offset,),
+                    (zero_offset,),
+                    (local_shape,),
+                )
+
+                layout = _derive_checkpointable_rng_layout(
+                    cast(CheckpointableTensor, tensor)
+                )
+
+                self.assertEqual(layout.logical_numel, torch.Size(global_shape).numel())
+                self.assertEqual(layout.index_blocks, expected_blocks)
+                self.assertTrue(layout.is_direct)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_initializers_match_dense(self):
@@ -96,35 +120,35 @@ class TestRNGLayoutTensor(TestCase):
                 "normal_contiguous",
                 normal,
                 (slice(3, 5), slice(None)),
-                ((21, 14, 14, 1),),
+                ((3, 0),),
             ),
             (
                 "normal_strided",
                 normal,
                 (slice(None), slice(4, 7)),
-                ((4, 3, 7, 5),),
+                ((0, 4),),
             ),
             (
                 "uniform_contiguous",
                 uniform,
                 (slice(3, 5), slice(None)),
-                ((21, 14, 14, 1),),
+                ((3, 0),),
             ),
             (
                 "uniform_strided",
                 uniform,
                 (slice(None), slice(4, 7)),
-                ((4, 3, 7, 5),),
+                ((0, 4),),
             ),
             (
                 "trunc_normal_strided",
                 trunc_normal,
                 (slice(None), slice(4, 7)),
-                ((4, 3, 7, 5),),
+                ((0, 4),),
             ),
         )
 
-        for case_name, init_fn, global_slice, index_blocks in cases:
+        for case_name, init_fn, global_slice, global_offsets in cases:
             with self.subTest(case=case_name):
                 torch.manual_seed(123)
                 expected = torch.empty(global_shape, device=device)
@@ -133,7 +157,14 @@ class TestRNGLayoutTensor(TestCase):
 
                 torch.manual_seed(123)
                 actual = torch.empty(expected[global_slice].shape, device=device)
-                self._set_rng_metadata(actual, expected.numel(), index_blocks)
+                local_size = tuple(actual.shape)
+                self._set_shard_metadata(
+                    actual,
+                    global_shape,
+                    global_offsets,
+                    ((0, 0),),
+                    (local_size,),
+                )
                 with _StatefulRNGMode():
                     init_fn(actual)
 
@@ -153,10 +184,6 @@ class TestRNGLayoutTensor(TestCase):
             * (properties.max_threads_per_multi_processor // block_size)
         )
         global_numel = 5 * total_stride + 8
-        index_blocks = (
-            (2, 2, total_stride, 3),
-            (4 * total_stride + 5, 3, 3, 1),
-        )
         global_indices = torch.tensor(
             [
                 2,
@@ -195,7 +222,19 @@ class TestRNGLayoutTensor(TestCase):
                     actual = torch.empty(
                         global_indices.numel(), dtype=dtype, device=device
                     )
-                    self._set_rng_metadata(actual, global_numel, index_blocks)
+                    # Metadata order is deliberately unrelated to local storage order.
+                    self._set_shard_metadata(
+                        actual,
+                        (global_numel,),
+                        (
+                            (4 * total_stride + 5,),
+                            (2,),
+                            (total_stride + 2,),
+                            (2 * total_stride + 2,),
+                        ),
+                        ((6,), (0,), (2,), (4,)),
+                        ((3,), (2,), (2,), (2,)),
+                    )
                     results = []
                     with _StatefulRNGMode():
                         for _ in range(2):
@@ -298,7 +337,13 @@ class TestRNGLayoutTensor(TestCase):
                     )
 
                     actual = torch.empty(3, device=device)
-                    self._set_rng_metadata(actual, 7, ((2, 3, 3, 1),))
+                    self._set_shard_metadata(
+                        actual,
+                        (7,),
+                        ((2,),),
+                        ((0,),),
+                        ((3,),),
+                    )
                     with self.assertRaisesRegex(RuntimeError, error):
                         with _StatefulRNGMode():
                             getattr(actual, op_name)(*op_args, generator=generator)
@@ -322,11 +367,31 @@ class TestRNGLayoutTensor(TestCase):
 
                     torch.manual_seed(123)
                     actual = torch.empty(0, device=device)
-                    self._set_rng_metadata(actual, global_numel, ())
+                    self._set_shard_metadata(actual, (global_numel,), (), (), ())
                     with _StatefulRNGMode():
                         getattr(actual, f"{op_name}_")()
 
                     self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_invalid_metadata_does_not_advance_generator(self):
+        device = torch.device("cuda")
+        generator = torch.Generator(device=device).manual_seed(123)
+        actual = torch.empty(3, device=device)
+        self._set_shard_metadata(
+            actual,
+            (7,),
+            ((2,),),
+            ((0,),),
+            ((2,),),
+        )
+        state = generator.get_state().clone()
+
+        with self.assertRaisesRegex(ValueError, "cover the entire tensor"):
+            with _StatefulRNGMode():
+                actual.normal_(generator=generator)
+
+        self.assertEqual(generator.get_state(), state)
 
 
 class TestPhiloxDistributionFlatSliceOp(TestCase):
