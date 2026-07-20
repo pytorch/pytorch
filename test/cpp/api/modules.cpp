@@ -2305,6 +2305,12 @@ TEST_F(ModulesTest, CosineSimilarity) {
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
+
+  // keepdim=true should preserve the reduced dimension
+  CosineSimilarity cos_keepdim(CosineSimilarityOptions().dim(1).keepdim(true));
+  auto out_keepdim = cos_keepdim->forward(input1.detach(), input2.detach());
+  ASSERT_EQ(out_keepdim.sizes(), torch::IntArrayRef({2, 1}));
+  ASSERT_TRUE(out_keepdim.squeeze(1).allclose(expected, 1e-04));
 }
 
 TEST_F(ModulesTest, SoftMarginLossDefaultOptions) {
@@ -5126,10 +5132,11 @@ TEST_F(ModulesTest, PrettyPrintSoftMarginLoss) {
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
   ASSERT_EQ(
       c10::str(CosineSimilarity()),
-      "torch::nn::CosineSimilarity(dim=1, eps=1e-08)");
+      "torch::nn::CosineSimilarity(dim=1, eps=1e-08, keepdim=false)");
   ASSERT_EQ(
-      c10::str(CosineSimilarity(CosineSimilarityOptions().dim(0).eps(0.5))),
-      "torch::nn::CosineSimilarity(dim=0, eps=0.5)");
+      c10::str(CosineSimilarity(
+          CosineSimilarityOptions().dim(0).eps(0.5).keepdim(true))),
+      "torch::nn::CosineSimilarity(dim=0, eps=0.5, keepdim=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
