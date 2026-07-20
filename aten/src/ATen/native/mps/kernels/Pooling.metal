@@ -56,7 +56,7 @@ IterBounds<int32_t> get_adaptive_input_iter_bounds(
 
 template <int32_t dim>
 IterBounds<int32_t> get_pool_input_iter_bounds(
-    PoolDimGeom geom,
+    thread PoolDimGeom& geom,
     thread int32_t (&pooling_dim_indices)[3]) {
   if (geom.adaptive) {
     return get_adaptive_input_iter_bounds<dim>(

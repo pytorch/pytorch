@@ -3576,7 +3576,8 @@ def sample_inputs_adaptive_max_pool1d(op_info, device, dtype, requires_grad, **k
         # ((0, 8, 8), (5,)),
         # 0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
         ((3, 4, 4), 3),
-        ((3, 4, 4), 1)
+        ((3, 4, 4), 1),
+        ((2, 3, 7), 4),
     )
 
     for shapes, return_idx in product(cases, (True, False)):
@@ -3610,6 +3611,8 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
         ((1, 4, 4, 3), (3, None)),
         ((1, 4, 4, 3), (None, None)),
         ((1, 4, 4, 3), (3)),
+        ((2, 3, 7, 11), (4, 5)),
+        ((2, 3, 4, 10), (8, 5)),
     )
 
     for shapes, return_idx in product(cases, (True, False)):
@@ -3617,6 +3620,12 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
         yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
         # Unbatched
         yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
+
+    for return_idx in (True, False):
+        yield SampleInput(
+            make_arg((2, 3, 7, 7), memory_format=torch.channels_last),
+            args=((4, 4), return_idx),
+        )
 
 def error_inputs_adaptive_max_pool2d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
