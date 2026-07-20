@@ -124,7 +124,7 @@ def merge_matmul(in_mod: torch.nn.Module) -> torch.fx.GraphModule:
         rhs_users.setdefault(rhs, []).append(node)
 
     for rhs, mms in rhs_users.items():
-        # There must be at least matmuls for a merge to make sense.
+        # There must be at least two matmuls for a merge to make sense.
         if len(mms) < 2:
             continue
 
