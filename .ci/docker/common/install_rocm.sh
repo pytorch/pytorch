@@ -30,9 +30,9 @@ install_ubuntu() {
       if [[ -z "${THEROCK_NIGHTLY_INDEX_URL:-}" ]]; then
         THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
       fi
-      # FIXME: temporarily pin TheRock nightly ROCm to the June 12 build while
+      # FIXME: temporarily pin TheRock nightly ROCm to the July 12 build while
       # the rolling nightly index is unstable.
-      THEROCK_NIGHTLY_VERSION="7.14.0a20260612"
+      THEROCK_NIGHTLY_VERSION="7.14.0a20260712"
 
       echo "=============================================="
       echo "ROCm Multi-Arch Wheel Installation (TheRock preview)"
