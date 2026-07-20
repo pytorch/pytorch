@@ -232,6 +232,34 @@ class MiscTests(torch._inductor.test_case.TestCase):
         entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
         self.assertEqual(len(entries), 0)
 
+    @torch.testing._internal.common_utils.scoped_load_inline
+    def test_pybind11_enum_conversion(self, load_inline):
+        cpp_source = """
+        #include <torch/extension.h>
+
+        enum class E { A = 0, B = 1 };
+
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+            py::enum_<E>(m, "E")
+                .value("A", E::A)
+                .value("B", E::B);
+        }
+        """
+        mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
+        e = mod.E.A
+        self.assertEqual(
+            torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
+        )
+        self.assertEqual(
+            torch.compile(lambda x: float(x), backend="eager", fullgraph=True)(e), 0.0
+        )
+        self.assertEqual(
+            torch.compile(lambda x: [10, 20][x], backend="eager", fullgraph=True)(
+                mod.E.B
+            ),
+            20,
+        )
+
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
             if flag:
@@ -8888,6 +8916,22 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(result.shape, expected.shape)
         self.assertEqual(result, expected)
 
+    def test_python_type_name_mirrors_cpython_tp_name(self):
+        """Test python_type_name() mirrors CPython's tp_name slot."""
+        from torch._dynamo.variables.constant import ConstantVariable
+
+        # python_type_name() should return CPython's tp_name string
+        test_cases = [
+            (42, "int"),
+            ("hello", "str"),
+            (None, "NoneType"),
+            (..., "ellipsis"),
+        ]
+
+        for value, expected_tp_name in test_cases:
+            vt = ConstantVariable(value)
+            self.assertEqual(vt.python_type_name(), expected_tp_name)
+
     def test_guard_failure_fn(self):
         def fn(x, y, k):
             x = x + 1
@@ -9050,6 +9094,123 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_out = opt_fn(args2)
         self.assertEqual(out, opt_out)
         self.assertEqual(guard_failure, None)
+
+    def test_no_guard_for_unused_input(self):
+        def fn(x, y):
+            return x + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=False)
+        opt_fn(torch.randn(3), torch.randn(3))
+        opt_fn(torch.randn(3), torch.randn(5))
+        opt_fn(torch.randn(3), 42)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_no_guard_for_unused_scalar_input(self):
+        def fn(x, n):
+            return x + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=False)
+        opt_fn(torch.randn(3), 5)
+        opt_fn(torch.randn(3), 99)
+        opt_fn(torch.randn(3), "hello")
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_no_guard_for_unused_input_when_locals_called(self):
+        # locals() is handled at trace time by _call_frame_locals_snapshot, which
+        # adds pruned locals back from tx.f_locals and installs guards on them.
+        # So y still causes a recompile when its shape changes.
+        def fn(x, y):
+            return locals()["x"] + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=False)
+        opt_fn(torch.randn(3), torch.randn(3))
+        opt_fn(torch.randn(3), torch.randn(5))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_locals_dict_access_of_unused_param_works(self):
+        def fn(x, y):
+            return locals()["y"] + x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+
+    def test_locals_alias_access_of_unused_param_works(self):
+        # locals() called via an alias (locals2 = locals in global scope) must
+        # still expose pruned locals; _call_frame_locals_snapshot adds them back.
+        locals2 = locals
+
+        def fn(x, y):
+            return locals2()["y"] + x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+
+    def test_no_guard_for_unused_input_varargs(self):
+        def fn(x, *args, **kwargs):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(3)
+        result = opt_fn(x, torch.randn(2), extra=torch.randn(1))
+        self.assertEqual(result, fn(x))
+
+    def test_no_guard_for_unused_input_still_recompiles_on_used(self):
+        def fn(x, y):
+            return x + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=False)
+        opt_fn(torch.randn(3), torch.randn(3))
+        opt_fn(torch.randn(3), torch.randn(5))
+        self.assertEqual(cnt.frame_count, 1)
+        opt_fn(torch.randn(4), torch.randn(3))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_no_guard_for_unused_input_with_graph_break(self):
+        def fn(x, y):
+            z = x + 1
+            torch._dynamo.graph_break()
+            return z + 2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=False)
+        opt_fn(torch.randn(3), torch.randn(3))
+        after_first = cnt.frame_count
+        opt_fn(torch.randn(3), torch.randn(5))
+        self.assertEqual(cnt.frame_count, after_first)
+
+    def test_no_guard_for_input_unused_before_graph_break(self):
+        # y is not read before the break, so the first subgraph must not
+        # guard on it. Only the resume function (which reads y) should guard.
+        def fn(x, y):
+            z = x + 1
+            torch._dynamo.graph_break()
+            return z + y.sum()
+
+        recompiled_names = []
+
+        def guard_failures(failure):
+            recompiled_names.append(failure.orig_code.co_name)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(
+            cnt, nopython=False, guard_fail_fn=guard_failures
+        )(fn)
+
+        x = torch.randn(3)
+        y1, y2, y3 = torch.randn(3), torch.randn(5), torch.randn(9)
+        self.assertEqual(opt_fn(x, y1), fn(x, y1))
+
+        self.assertEqual(opt_fn(x, y2), fn(x, y2))
+        self.assertEqual(opt_fn(x, y3), fn(x, y3))
+        # Resume function recompiled (y's shape changed), base frame did not.
+        self.assertTrue(recompiled_names)
+        self.assertNotIn(fn.__code__.co_name, recompiled_names)
 
     def test_guard_sym_node_fstring_when_used(self):
         def fn(x):

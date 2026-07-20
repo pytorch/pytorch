@@ -436,9 +436,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 self.assertEqual(actual, x + y + (2 * x + y))
             elif GPU_TYPE == "cuda":
                 sync_fn = (
-                    "hipDeviceSynchronize"
-                    if torch.version.hip
-                    else "cudaDeviceSynchronize"
+                    "hipDeviceSynchronize" if torch.version.hip else "cuCtxSynchronize"
                 )
                 self.assertIn(sync_fn, code)
                 sync_idx = code.index(sync_fn)
