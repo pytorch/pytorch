@@ -254,6 +254,19 @@ class LoopBody:
 
         return new_body
 
+    def with_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> LoopBody:
+        iter_vars, reduce_vars = self.vars
+        new_body = LoopBody(
+            self,
+            (iter_vars, reduce_vars),
+            self.var_ranges,
+            iter_vars,
+            reduce_vars,
+            allow_same_symbol_in_index=True,
+        )
+        new_body.indexing_exprs.update(replacements)
+        return new_body
+
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
     ) -> LoopBody:
