@@ -523,6 +523,14 @@ def estimate_region_peak_memory(
     """
     R = region_end - region_start + 1
     region = [SNodeMemory(0, 0) for _ in range(R)]
+    last_use_step_cache: dict[int, int | None] = {}
+
+    def last_use_step(buffer) -> int | None:
+        key = id(buffer)
+        if key not in last_use_step_cache:
+            succ_steps = [step_of(n) for n in buffer.succ_nodes]
+            last_use_step_cache[key] = max(succ_steps) if succ_steps else None
+        return last_use_step_cache[key]
 
     for node in nodes_in_window:
         s = step_of(node)
@@ -536,18 +544,17 @@ def estimate_region_peak_memory(
             name = buf.get_name()
             if name in graph_outputs:
                 continue
-            succ_steps = [step_of(n) for n in bi.succ_nodes]
-            if not succ_steps:
+            if last_use_step(bi) is None:
                 region[slot].size_free += bi.size_free
 
         for pb in node.mpi_node.pred_buffers:
             name = pb.get_name()
             if name in graph_outputs:
                 continue
-            succ_steps = [step_of(n) for n in pb.mpi_buffer.succ_nodes]
-            if not succ_steps:
+            last_step = last_use_step(pb.mpi_buffer)
+            if last_step is None:
                 raise AssertionError("expected non-empty succ_steps")
-            if max(succ_steps) == s:
+            if last_step == s:
                 region[slot].size_free += pb.mpi_buffer.size_free
 
     cur = cur_memory

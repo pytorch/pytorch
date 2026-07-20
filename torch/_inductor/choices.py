@@ -652,18 +652,6 @@ class InductorChoices:
             WhyNoFuse(node1, node2)("Fusion will increase peak memory")
             return False
 
-        peak_allowed_increase = (
-            scheduler.fusion_memory_timeline_peak_allowed_increase_bytes()
-        )
-        if (
-            peak_allowed_increase is not None
-            and scheduler.fusion_regresses_estimated_peak_memory(
-                node1, node2, peak_allowed_increase
-            )
-        ):
-            WhyNoFuse(node1, node2)("Fusion regresses estimated peak memory")
-            return False
-
         if (
             config.max_fusion_unique_io_buffers is not None
             and scheduler.fusion_prevent_too_many_reads_and_writes(

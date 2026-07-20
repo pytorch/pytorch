@@ -602,31 +602,27 @@ class OverlapScheduler:
     def _compute_baseline_memory(self) -> int:
         """
         Simulate the original schedule to compute baseline memory profile.
-        Returns the peak live memory observed during simulation.
+        Returns the peak memory observed during simulation.
         """
         baseline_tracker = MemoryTracker(self.graph)
 
         last_compute_max_memory = 0
-        peak_live_memory = 0
+        peak_memory = 0
 
         for node in self.nodes:
             baseline_tracker.schedule_node(node)
             current_mem = baseline_tracker.current_memory_bytes
-            node_peak_mem = baseline_tracker.last_node_peak_memory
 
-            # Record the max memory between this and previous compute node,
-            # including the transient allocation peak before last-use frees.
-            last_compute_max_memory = max(
-                last_compute_max_memory, current_mem, node_peak_mem
-            )
+            # Record the max memory between this and previous compute node
+            last_compute_max_memory = max(last_compute_max_memory, current_mem)
 
             if is_compute_node(node):
                 self.original_mem_before_compute_index.append(last_compute_max_memory)
                 last_compute_max_memory = current_mem
 
-            peak_live_memory = max(peak_live_memory, current_mem)
+            peak_memory = max(peak_memory, current_mem)
 
-        return peak_live_memory
+        return peak_memory
 
     def _prefetch_would_exceed_memory_budget(self, start_node: fx.Node) -> bool:
         """
@@ -638,6 +634,7 @@ class OverlapScheduler:
 
         domination_index = self.compute_index_domination[start_node]
 
+        # If off-path, assume it doesn't increase memory
         if domination_index == sys.maxsize:
             return False
 
