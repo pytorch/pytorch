@@ -142,10 +142,11 @@ from .virtualized import V
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
-    from torch._inductor.output_code import _StrideExprStr
+    from torch._inductor.output_code import _StrideExprStr, CompiledFnRunner
     from torch._ops import OpOverload
     from torch.export.pt2_archive._package_weights import Weights
 
+    from .codecache import CacheInfo
     from .ir import ExternKernelNode
 
 
@@ -262,6 +263,12 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
 
 def record_original_output_strides(gm: GraphModule) -> None:
     output_node = gm.graph.find_nodes(op="output")[0]
+
+    # Don't overwrite strides that were already recorded (e.g., before
+    # joint_graph_passes which can introduce padded strides via pad_mm).
+    if "original_output_strides" in output_node.meta:
+        return
+
     output_strides = []
 
     if not isinstance(output_node.args[0], torch.fx.Node):
@@ -995,7 +1002,7 @@ def _compile_fx_inner(
 
         mb_compiled_graph: OutputCode | None = None
         key_info = None
-        cache_info = None
+        cache_info: CacheInfo | None = None
         remote_cache = None
         constants = CompiledFxGraphConstantsWithGm(gm)
         # TODO: this time will be slightly inconsistent with the one computed
@@ -1184,7 +1191,7 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
-        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
+        cache_event_metadata = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
             metadata=cache_event_metadata,
@@ -1611,7 +1618,7 @@ class _InProcessFxCompile(FxCompile):
                     # not going to touch it for now
 
                     compiled_fn: Any
-                    compiled_fn_runner = None
+                    compiled_fn_runner: CompiledFnRunner | None = None
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
@@ -2593,6 +2600,11 @@ def compile_fx_forward(
             for arg in output.args[0]  # type: ignore[union-attr]
         ]
 
+        # Record original output strides BEFORE joint_graph_passes, because
+        # pad_mm (run as part of joint_graph_passes) can introduce views with
+        # padded strides that would be incorrectly captured as "original".
+        _recursive_record_original_output_strides(gm)
+
         inputs_devices = get_inputs_devices(example_inputs, gm)
         gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
 
@@ -3258,6 +3270,7 @@ def make_graph_return_tuple(
     with gm.graph.inserting_before(node):
         gm.graph.output(rv)
     gm.graph.erase_node(node)
+    gm.recompile()
     if not graph_returns_tuple(gm):
         raise AssertionError("Expected graph to return a tuple")
 
