@@ -2387,7 +2387,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
     def test_canonical_graph_is_safe_to_reorder(self):
         import operator
 
-        from torch._dynamo.output_graph import _is_safe_to_reorder
+        from torch.fx.passes.canonicalize import is_safe_to_reorder as _is_safe_to_reorder
 
         graph = fx.Graph()
         x = graph.placeholder("x")
