@@ -17,7 +17,7 @@ from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
-from torch._inductor.scheduler import SchedulerNode
+from torch._inductor.scheduler import _LoopMutationTracker, SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
@@ -171,6 +171,27 @@ class ImplDetailTest(MockSchedulerTest):
         # we cache pointwise_read_writes result on a scheduler node
         # make sure new_var_ranges is refreshed by invalidating the cache.
         self.assertTrue(len(new_var_ranges) == 1)  # 2 dimensions get merged
+
+    def test_template_producer_loop_state_rollback(self):
+        layout = ir.FixedLayout(
+            torch.device(GPU_TYPE), torch.float32, [sympy.Integer(8)], [1]
+        )
+        template = ir.TemplateBuffer(layout, [], None)
+        template_node = SchedulerNode(V.graph.scheduler, template)
+        computed_node = SchedulerNode(
+            V.graph.scheduler, self._create_computed_buffer_ax2()
+        )
+        original_body = computed_node._body
+        tracker = _LoopMutationTracker.create((template_node, computed_node))
+
+        try:
+            computed_node.apply_indexing_exprs({})
+            self.assertIsNot(computed_node._body, original_body)
+        finally:
+            tracker.finish(rollback=True)
+
+        self.assertIsNone(template_node._body)
+        self.assertIs(computed_node._body, original_body)
 
     def test_reorder_modular_indexing(self):
         """
