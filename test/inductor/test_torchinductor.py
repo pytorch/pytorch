@@ -19750,15 +19750,11 @@ if RUN_GPU:
         @parametrize("backend", ["cublaslt", "cutlass"])
         def test_grouped_mm(self, backend):
             if backend == "cublaslt":
-                if _get_torch_cuda_version() < (13, 2):
-                    self.skipTest("cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+                if _get_torch_cuda_version() < (13, 3):
+                    self.skipTest("cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
                 sm_major = torch.cuda.get_device_capability()[0]
                 if sm_major < 9 or sm_major >= 12:
                     self.skipTest("cublaslt grouped gemm requires SM 9.0-11.0")
-                if sm_major == 9 and _get_torch_cuda_version() < (13, 3):
-                    self.skipTest(
-                        "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3"
-                    )
             prev = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
             torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = (
                 backend == "cublaslt"
