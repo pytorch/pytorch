@@ -4499,7 +4499,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                         sample.kwargs["memory_format"] == torch.channels_last
                     ),
                 ),
-                xfail("native_group_norm"),
                 # https://github.com/pytorch/pytorch/issues/164556
                 skipIf("cholesky_solve", lambda *args: TEST_WITH_ROCM),
             }
@@ -4666,7 +4665,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 skip("_softmax_backward_data"),
                 # One or more of the overload doesn't have a Batch rule.
                 xfail("bincount"),
-                xfail("native_group_norm"),
                 xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
             }
         ),
