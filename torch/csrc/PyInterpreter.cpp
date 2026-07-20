@@ -982,10 +982,8 @@ std::string ConcretePyInterpreterVTable::name() const {
 
 namespace {
 
-// Cache Python imports as leaked handles: a plain function-local
-// `static py::object` would run its destructor at interpreter shutdown and
-// decref after finalization. Mirrors DEFINE_CACHING_PYTHON_IMPORT_GETTER in
-// python_variable.cpp.
+// use this pattern to avoid decref after pyinterpreter finalization
+// this is non owning
 #if IS_PYBIND_2_13_PLUS
 #define DEFINE_CACHED_PYTHON_IMPORT(name, import_expr)                     \
   py::handle name() {                                                      \
@@ -1086,6 +1084,24 @@ bool run_fake_python_callback(
   return true;
 }
 
+// The active FakeTensorMode and the CppFakeTensorMode Python object that op-impl
+// callbacks are invoked against.
+struct ActiveFakeMode {
+  std::shared_ptr<c10::FakeTensorMode> mode;
+  py::object py_fake_mode;
+};
+
+ActiveFakeMode get_active_fake_mode() {
+  auto mode = c10::impl::FakeTensorModeTLS::get_state();
+  TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
+  TORCH_CHECK(
+      mode->fake_mode_pyobj_ != nullptr,
+      "CppFakeTensorMode must be set on mode");
+  py::object py_fake_mode = py::reinterpret_borrow<py::object>(
+      mode->fake_mode_pyobj_->ptr(getPyInterpreter()));
+  return {std::move(mode), std::move(py_fake_mode)};
+}
+
 } // namespace
 
 // Try a registered Python decomposition for op (skipped when op has a
@@ -1129,14 +1145,9 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
   // pattern-based checks (constructors, like-ops, etc.).
   py::handle op_impl_checks = get_op_implementations_checks();
 
-  auto mode = c10::impl::FakeTensorModeTLS::get_state();
-  TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
-  TORCH_CHECK(
-      mode->fake_mode_pyobj_ != nullptr,
-      "CppFakeTensorMode must be set on mode");
-  py::object py_fake_mode = py::reinterpret_borrow<py::object>(
-      mode->fake_mode_pyobj_->ptr(getPyInterpreter()));
-  auto stamp = make_fake_device_stamp(common_device, mode, /*skip_fake=*/true);
+  auto active = get_active_fake_mode();
+  auto stamp =
+      make_fake_device_stamp(common_device, active.mode, /*skip_fake=*/true);
 
   for (auto item : op_impl_checks) {
     py::tuple check_impl = item.cast<py::tuple>();
@@ -1152,7 +1163,7 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
               c10::impl::ExcludeDispatchKeyGuard guard(
                   c10::DispatchKeySet(c10::DispatchKey::Python) |
                   c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
-              return op_impl(py_fake_mode, py_op, *args, **kwargs);
+              return op_impl(active.py_fake_mode, py_op, *args, **kwargs);
             },
             stamp,
             "op_impl")) {
@@ -1178,13 +1189,7 @@ bool ConcretePyInterpreterVTable::fake_try_fast_op_impls(
   }
   py::object fast_impl = fast_op_impls[py_op];
 
-  auto mode = c10::impl::FakeTensorModeTLS::get_state();
-  TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
-  TORCH_CHECK(
-      mode->fake_mode_pyobj_ != nullptr,
-      "CppFakeTensorMode must be set on mode");
-  py::object py_fake_mode = py::reinterpret_borrow<py::object>(
-      mode->fake_mode_pyobj_->ptr(getPyInterpreter()));
+  auto active = get_active_fake_mode();
 
   return run_fake_python_callback(
       op,
@@ -1193,9 +1198,9 @@ bool ConcretePyInterpreterVTable::fake_try_fast_op_impls(
         c10::impl::ExcludeDispatchKeyGuard guard(
             c10::DispatchKeySet(c10::DispatchKey::Python) |
             c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
-        return fast_impl(py_fake_mode, *args, **kwargs);
+        return fast_impl(active.py_fake_mode, *args, **kwargs);
       },
-      make_fake_device_stamp(common_device, mode, /*skip_fake=*/false),
+      make_fake_device_stamp(common_device, active.mode, /*skip_fake=*/false),
       "fast_op_impl");
 }
 
@@ -1242,7 +1247,7 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
   meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(
       real.device());
   meta_tensor.unsafeGetTensorImpl()->set_fake_tensor_mode(std::move(mode));
-  return meta_tensor.getIntrusivePtr();
+  return meta_tensor.unsafeReleaseIntrusivePtr();
 }
 
 PyInterpreterHolder self_interpreter;
