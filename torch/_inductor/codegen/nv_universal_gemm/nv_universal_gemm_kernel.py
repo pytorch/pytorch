@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import logging
+import re
 from typing import Any, TYPE_CHECKING
 
 from torch._inductor.codegen.common import (
@@ -209,6 +210,7 @@ def _worker_nvgemm_autotuning_precompile(
     scale_type_b=None,
     swizzle_type_a=None,
     swizzle_type_b=None,
+    has_bias_epilogue=False,
 ):
     """Subprocess worker: compile one NVGEMM kernel and save to disk cache.
 
@@ -216,10 +218,14 @@ def _worker_nvgemm_autotuning_precompile(
     so CuTeDSL compilation is process-isolated (no thread-safety issues).
     Returns (None, elapsed_us) for compatibility with the precompile callback.
     """
-    import os
     import time
 
-    os.environ.update(extra_env)
+    # Share the persistent-worker env/cache handling used by PyCodeCache workers.
+    from torch._inductor.runtime.compile_tasks import (
+        _apply_subprocess_env_and_clear_caches,
+    )
+
+    _apply_subprocess_env_and_clear_caches(extra_env)
 
     start_ns = time.time_ns()
 
@@ -256,7 +262,25 @@ def _worker_nvgemm_autotuning_precompile(
             "swizzle_mode_b": swizzle_mode_b,
         }
 
-    cache_key = _create_gemm_cache_key(input_tensors, out)
+    # For an addmm bias choice the last input is the bias, consumed by a
+    # bias-add epilogue; the rest are the GEMM operands. Building the epilogue
+    # (and keying the cache with it) here lets the parallel precompile hand off
+    # to the benchmark, which reads the same key.
+    epilogue_args = None
+    epilogue_source = ""
+    aux_tensors: tuple = ()
+    if has_bias_epilogue:
+        from cutlass.operators.arguments import EpilogueArguments
+
+        *gemm_list, bias = input_tensors
+        input_tensors = tuple(gemm_list)
+        epilogue_args = EpilogueArguments(_nvgemm_bias_add_epilogue, bias=bias, D=out)
+        epilogue_source = "nvgemm_addmm_bias_v1"
+        aux_tensors = (bias,)
+
+    cache_key = _create_gemm_cache_key(
+        input_tensors, out, has_epilogue=has_bias_epilogue, aux_tensors=aux_tensors
+    )
     dev_idx = input_tensors[0].device.index or 0
     disk_config_key = _make_disk_config_key(
         kernel_name,
@@ -278,6 +302,8 @@ def _worker_nvgemm_autotuning_precompile(
             accumulator_type,
             kernel_name=kernel_name,
             args_kwargs=helper_kwargs,
+            epilogue_args=epilogue_args,
+            epilogue_source=epilogue_source,
         )
 
         if was_compiled:
@@ -473,12 +499,11 @@ def _rewrap_efc_compiled_obj(compiled_fn, kernel, epilogue_args=None):
             else (e.tensor.runtime_tensor if isinstance(e, KernelOperand) else e)
             for e in supplemental_args
         ]
-        return compiled_fn(
-            a_tensor,
-            b_tensor,
-            stream,
-            kernel.impl.efc.jit.pack_arguments(*runtime_args),
-        )
+        # A disk-reloaded artifact is the raw kernel module func: it takes the
+        # epilogue tensors unpacked (a, b, stream, aux..., out), unlike the
+        # freshly-JIT-compiled closure which expects pack_arguments(...). All
+        # callers of _rewrap_efc_compiled_obj load from disk, so pass unpacked.
+        return compiled_fn(a_tensor, b_tensor, stream, *runtime_args)
 
     return wrapped_launch
 
@@ -503,18 +528,13 @@ def _nvgemm_run(
     aux_tensors: tuple = (),
     swap_ab: bool = False,
 ):
-    swap_ab_final_out = None
     if swap_ab and len(input_tensors) >= 4:
         a, b, sa, sb = input_tensors[:4]
         input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
-        # Kernel computes (N, M) but the caller expects (M, N): write into a
-        # contiguous (N, M) temp and transpose-copy back after the run.
-        import torch
-
-        swap_ab_final_out = out
-        out = torch.empty(
-            out.shape[1], out.shape[0], dtype=out.dtype, device=out.device
-        )
+        # Swapped GEMM computes (N, M) = out.t(); write it zero-copy into a
+        # transposed (column-major) view of the real (M, N) output -- no temp
+        # buffer / copy (the kernel handles column-major C).
+        out = out.t()
     from cutlass.operators.artifact import CompiledArtifact
 
     from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
@@ -592,8 +612,6 @@ def _nvgemm_run(
         workspace=workspace,
         assume_supported_args=True,
     )
-    if swap_ab_final_out is not None:
-        swap_ab_final_out.copy_(out.t())
 
 
 # Patch both the canonical definition (integration_utils.mma) for callers that
@@ -705,6 +723,71 @@ class NVUniversalGemmKernelWrapper:
 # ── Kernel codegen class ─────────────────────────────────────────────────────
 
 
+# Module-level bias-add epilogue for benchmark tracing. Must be a real
+# (introspectable) function -- EpilogueArguments parses its source via
+# inspect.getsource -- and must contain NO string literals (the AST tracer
+# treats any constant as an immediate). The param name is deliberately not
+# ``C`` (see _build_bias_epilogue) so a 1D bias routes to the row-broadcast impl.
+def _nvgemm_bias_add_epilogue(accum, bias):
+    D = accum + bias
+    return D
+
+
+def _build_bias_epilogue(
+    bias_name: str, out_name: str
+) -> tuple[str, list[str], list[str], dict[str, str]]:
+    """Build the epilogue fields for an addmm bias-add (``accum + bias``).
+
+    Uses the bias buffer name as the epilogue-fn parameter, matching
+    CutlassEVTCodegen's convention. This deliberately avoids the name ``C``:
+    cutlass.operators' LoadSrcImpl claims any epilogue param named ``C`` whose
+    shape equals the output (ignoring stride), which shadows the row/column
+    broadcast impls and silently mis-reads a broadcast (1D) bias.
+    """
+    epilogue_fn_code = (
+        f"def _epilogue_fn(accum, {bias_name}):\n"
+        f"    D = accum + {bias_name}\n"
+        f"    return D"
+    )
+    epilogue_reads = [bias_name]
+    epilogue_writes: list[str] = []
+    epilogue_var_renames = {bias_name: bias_name, "D": out_name}
+    return epilogue_fn_code, epilogue_reads, epilogue_writes, epilogue_var_renames
+
+
+def _compose_bias_into_epilogue(
+    epilogue_fn_code: str,
+    epilogue_reads: list[str],
+    epilogue_var_renames: dict[str, Any],
+    bias_name: str,
+) -> tuple[str, list[str], dict[str, Any]]:
+    """Inject an addmm bias-add into a scheduler-fused epilogue.
+
+    The EFC kernel's ``accum`` is the raw ``A @ B``; a fused pointwise epilogue
+    written by CutlassEVTCodegen assumes its ``accum`` is the addmm output
+    (``A @ B + bias``). We keep ``accum`` as the raw accumulator (required by
+    the cutlass epilogue tracer) and rewrite the fused body to read a new
+    ``biased = accum + bias`` value instead, adding ``bias`` as an aux input.
+    """
+    lines = epilogue_fn_code.splitlines()
+    def_line = lines[0]
+    body = lines[1:]
+    # Add bias as the 2nd parameter (after the required `accum`), unless the
+    # fused epilogue already reads the same buffer -- then it is already a
+    # parameter and re-adding it would emit `def fn(accum, b, b)` (SyntaxError).
+    if bias_name not in epilogue_reads:
+        def_line = def_line.replace("(accum", f"(accum, {bias_name}", 1)
+    # Rewrite fused-body references to the accumulator to the biased value.
+    rewritten = [re.sub(r"\baccum\b", "biased", bl) for bl in body]
+    composed = "\n".join([def_line, f"    biased = accum + {bias_name}", *rewritten])
+    reads = list(epilogue_reads)
+    if bias_name not in reads:
+        reads.append(bias_name)
+    renames = dict(epilogue_var_renames)
+    renames[bias_name] = bias_name
+    return composed, reads, renames
+
+
 class NVUniversalGemmKernel(Kernel):
     """
     Kernel implementation for NVIDIA Universal GEMM.
@@ -732,6 +815,7 @@ class NVUniversalGemmKernel(Kernel):
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
         swap_ab: bool = False,
+        bias_node: Buffer | None = None,
     ) -> None:
         super().__init__()
         self.kernel_name = kernel_name
@@ -750,6 +834,30 @@ class NVUniversalGemmKernel(Kernel):
         self.epilogue_writes = epilogue_writes or []
         self.epilogue_var_renames = epilogue_var_renames or {}
         self.swap_ab = swap_ab
+
+        # An addmm bias baked into the choice becomes a bias-add epilogue. With
+        # no scheduler-fused epilogue it's a standalone bias-add; when the
+        # scheduler also fuses pointwise ops, compose the bias-add into them so
+        # the fused epilogue sees A@B + bias (matches Triton's epilogue fusion).
+        if bias_node is not None:
+            if not self.epilogue_fn_code:
+                (
+                    self.epilogue_fn_code,
+                    self.epilogue_reads,
+                    self.epilogue_writes,
+                    self.epilogue_var_renames,
+                ) = _build_bias_epilogue(bias_node.get_name(), output_node.get_name())
+            else:
+                (
+                    self.epilogue_fn_code,
+                    self.epilogue_reads,
+                    self.epilogue_var_renames,
+                ) = _compose_bias_into_epilogue(
+                    self.epilogue_fn_code,
+                    self.epilogue_reads,
+                    self.epilogue_var_renames,
+                    bias_node.get_name(),
+                )
 
         self._template_input_args: list[tuple[str, Buffer]] = []
 
@@ -826,9 +934,14 @@ class NVUniversalGemmKernel(Kernel):
         # -- Epilogue function definition (must be module-level for cutlass.operators) --
         epilogue_fn_code = self.epilogue_fn_code
         if has_epilogue and epilogue_fn_code is not None:
-            code.splice(epilogue_fn_code, strip=True)
             epilogue_source_hash = hashlib.sha256(epilogue_fn_code.encode()).hexdigest()
             code.writeline(f'_EPILOGUE_FN_SOURCE = "{epilogue_source_hash}"')
+            # Pass the epilogue to cutlass.operators as a SOURCE STRING, not a
+            # callable: EpilogueArguments traces a string directly, whereas a
+            # callable triggers inspect.getsource() at every kernel launch --
+            # which fails ("could not get source code") for generated modules
+            # loaded from the subprocess PyCodeCache.
+            code.writeline(f"_EPILOGUE_FN_SRC = {epilogue_fn_code!r}")
             code.writeline("")
 
         # -- Module-level state --
@@ -865,7 +978,7 @@ class NVUniversalGemmKernel(Kernel):
             aux_tensors_expr = "()"
             if has_epilogue:
                 epilogue_kwargs = self._render_epilogue_kwargs()
-                epi_kwargs_str = "epilogue_fn=_epilogue_fn"
+                epi_kwargs_str = "epilogue_fn=_EPILOGUE_FN_SRC"
                 if epilogue_kwargs:
                     epi_kwargs_str += f", {epilogue_kwargs}"
                 code.writeline(f"epi_args = EpilogueArguments({epi_kwargs_str})")

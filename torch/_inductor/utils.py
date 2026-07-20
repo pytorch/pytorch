@@ -4542,6 +4542,42 @@ def python_subprocess_env() -> dict[str, str]:
     return env
 
 
+def apply_subprocess_env(extra_env: Mapping[str, str | None] | None) -> None:
+    """
+    Apply environment updates sent from a parent process to a persistent worker.
+    A None value means the variable is absent in the parent and should be
+    removed from the worker, rather than leaving a stale value behind.
+    """
+    if extra_env is None:
+        return
+
+    for key, value in extra_env.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+@contextlib.contextmanager
+def patch_subprocess_env(
+    extra_env: Mapping[str, str | None] | None,
+) -> Iterator[None]:
+    """
+    Temporarily apply parent process environment updates in a persistent worker.
+    """
+    if extra_env is None:
+        yield
+        return
+
+    old_env = dict(os.environ)
+    apply_subprocess_env(extra_env)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(old_env)
+
+
 @dataclasses.dataclass(frozen=True)
 class CUDAGraphWrapperMetadata:
     """
@@ -4784,18 +4820,30 @@ def _infer_scale_swizzle_impl(
 
     # NVFP4: BlockWise1x16 with float8_e4m3fn scales
     if mat_dtype == torch.float4_e2m1fn_x2 and scale_dtype == torch.float8_e4m3fn:
-        expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
-            ceildiv(K_multiplier * mat_size[1], 16), 4
-        )
-        expected_numel_b = _round_up(mat_size[1], 128) * _round_up(
-            ceildiv(K_multiplier * mat_size[0], 16), 4
-        )
-        if eq_fn(scale_numel, expected_numel_a) or eq_fn(scale_numel, expected_numel_b):
-            return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
+        if torch.xpu._is_compiled():
+            # XPU: no swizzle
+            expected_numel_a = ceildiv(mat_size[0], 16) * K_multiplier * mat_size[1]
+            expected_numel_b = ceildiv(K_multiplier * mat_size[1], 16) * mat_size[0]
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.NO_SWIZZLE
+        else:
+            # NVIDIA: uses swizzled 32x4x4 layout
+            expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
+                ceildiv(K_multiplier * mat_size[1], 16), 4
+            )
+            expected_numel_b = _round_up(mat_size[1], 128) * _round_up(
+                ceildiv(K_multiplier * mat_size[0], 16), 4
+            )
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
 
     # MXFP8: BlockWise1x32 with float8_e8m0fnu scales
     if scale_dtype == torch.float8_e8m0fnu:
-        if not torch.version.hip:
+        if not torch.version.hip and not torch.xpu._is_compiled():
             # NVIDIA: uses swizzled 32x4x4 layout
             expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
                 ceildiv(K_multiplier * mat_size[1], 32), 4
@@ -4808,7 +4856,7 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
-            # AMD: no swizzle
+            # AMD/XPU: no swizzle
             expected_numel_a = ceildiv(mat_size[0], 32) * K_multiplier * mat_size[1]
             expected_numel_b = ceildiv(K_multiplier * mat_size[1], 32) * mat_size[0]
             if eq_fn(scale_numel, expected_numel_a) or eq_fn(
