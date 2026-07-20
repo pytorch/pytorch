@@ -107,7 +107,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
     def _run_reinplace_pass(self, f, *args):
         gm = make_fx(f, tracing_mode="fake")(*args)
-        fake_mode = detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
+        fake_mode = detect_fake_mode(
+            [node.meta.get("val") for node in gm.graph.nodes]
+        )
         with V.set_fake_mode(fake_mode):
             reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
         gm.graph.lint()
@@ -540,7 +542,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
         self.assertEqual(result, expected)
 
-    def test_generalized_scatter_reinplaces_empty_factory_base(self):
+    def test_generalized_scatter_reinplaces_uninitialized_factory_base(self):
         def f(x):
             base = torch.empty_like(x)
             return aten.slice_scatter.default(base, x, 0, 0, x.shape[0])
@@ -553,7 +555,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertNotIn(aten.slice_scatter.default, targets)
         self.assertEqual(gm(x), f(x))
 
-    def test_generalized_scatter_reinplaces_fill_factory_realized_src(self):
+    def test_generalized_scatter_reinplaces_initialized_factory_realized_src(self):
         def f(x):
             base = torch.zeros_like(x)
             src = x[1:3]
@@ -619,7 +621,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         def subgraph(src):
             return (src.sin(),)
 
-        subgm = make_fx(subgraph, tracing_mode="fake")(torch.randn(2, 4, device=device))
+        subgm = make_fx(subgraph, tracing_mode="fake")(
+            torch.randn(2, 4, device=device)
+        )
 
         def f(x):
             base = x.cos()
@@ -634,7 +638,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertNotIn(aten.slice_scatter.default, targets)
         self.assertEqual(gm(x), f(x))
 
-    def test_generalized_scatter_reinplaces_fill_factory_generated_src(self):
+    def test_generalized_scatter_keeps_initialized_factory_generated_src(self):
         def f(x):
             base = torch.zeros_like(x)
             src = torch.full((2, x.shape[1]), 1.0, device=x.device)
@@ -644,15 +648,15 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         gm = self._run_reinplace_pass(f, x)
 
         targets = [node.target for node in gm.graph.nodes]
-        self.assertIn(aten.copy_.default, targets)
-        self.assertNotIn(aten.slice_scatter.default, targets)
+        self.assertNotIn(aten.copy_.default, targets)
+        self.assertIn(aten.slice_scatter.default, targets)
         self.assertEqual(gm(x), f(x))
 
     def test_generalized_scatter_does_not_cross_functional_scatter(self):
         def f(x):
             base = torch.zeros_like(x)
-            generated = torch.full_like(x, 1.0)
-            out = aten.slice_scatter.default(base, generated, 0, 0, x.shape[0])
+            generated = torch.full((2, x.shape[1]), 1.0, device=x.device)
+            out = aten.slice_scatter.default(base, generated, 0, 0, 2)
             realized = x[2:4]
             return aten.slice_scatter.default(out, realized, 0, 2, 4)
 
