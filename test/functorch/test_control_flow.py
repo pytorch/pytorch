@@ -33,17 +33,21 @@ from torch._subclasses.functional_tensor import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import SM70OrLater
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
-    requires_cuda,
     run_tests,
     skipIfCrossRef,
     skipIfRocm,
     skipIfTorchDynamo,
+    TEST_CUDA,
     TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -2612,8 +2616,6 @@ class GraphModule(torch.nn.Module):
         )
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("autograd", [False, True])
     def test_scan_closure_RNN(self, compile_mode, autograd):
@@ -2792,6 +2794,14 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     return (carry, out_1)""",
         )
 
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
+class TestControlFlowDevice(TestCase):
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
+
     def check_autograd(self, result, result_exp, params):
         params_flatten = pytree.tree_leaves(params)
         result_flatten = pytree.tree_leaves(result)
@@ -2804,21 +2814,21 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         grads = torch.autograd.grad(result_flatten, params_flatten, grad_init)
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_cond_gpu(self):
+    @onlyAccelerator
+    def test_cond_gpu(self, device):
         def true_fn(x):
             return x.sin()
 
         def false_fn(x):
             return x.cos()
 
-        x = torch.randn(4, device="cuda")
-        pred = torch.tensor(False, device="cuda")
+        x = torch.randn(4, device=device)
+        pred = torch.tensor(False, device=device)
         result = cond(pred, true_fn, false_fn, [x])
         self.assertEqual(result, torch.cos(x))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_cond_autograd_gpu(self):
+    @onlyAccelerator
+    def test_cond_autograd_gpu(self, device):
         def true_fn(x):
             return x.sin()
 
@@ -2826,10 +2836,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             return x.cos()
 
         for pred, fn in zip(
-            [torch.tensor(False, device="cuda"), torch.tensor(True, device="cuda")],
+            [torch.tensor(False, device=device), torch.tensor(True, device=device)],
             [false_fn, true_fn],
         ):
-            x = torch.randn(4, requires_grad=True, device="cuda")
+            x = torch.randn(4, requires_grad=True, device=device)
             result = cond(pred, true_fn, false_fn, (x,))
             self.assertEqual(result, fn(x))
 
@@ -2904,14 +2914,13 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         return cond_outputs, cond_inputs
 
     @skipIfTorchDynamo("don't test compile on compile")
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["compile_dynamic_shape"])
     @parametrize("scalar", [False])
     def test_cond_autograd_zeros_unused_branch_complex_compile_fail(
-        self, compile_mode, scalar
+        self, device, compile_mode, scalar
     ):
-        device = torch.device("cuda")
         cond_fct = compile_mode_helper(torch.cond, compile_mode)
 
         autograd = [False, True, True, True, True]
@@ -2956,21 +2965,21 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             cond_fct, pred_fn, true_fn, false_fn, operands
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_switch_gpu(self):
+    @onlyAccelerator
+    def test_switch_gpu(self, device):
         def branch0(inp_x):
             return inp_x.sin()
 
         def branch1(inp_x):
             return inp_x.cos()
 
-        x = torch.randn(4, device="cuda")
-        index = torch.tensor(1, device="cuda")
+        x = torch.randn(4, device=device)
+        index = torch.tensor(1, device=device)
         result = switch(index, (branch0, branch1), (x,))
         self.assertEqual(result, torch.cos(x))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_switch_autograd_gpu(self):
+    @onlyAccelerator
+    def test_switch_autograd_gpu(self, device):
         def branch0(x):
             return x.sin()
 
@@ -2982,8 +2991,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
         branches = (branch0, branch1, branch2)
         for i, fn in enumerate(branches):
-            x = torch.randn(4, requires_grad=True, device="cuda")
-            result = switch(torch.tensor(i, device="cuda"), branches, (x,))
+            x = torch.randn(4, requires_grad=True, device=device)
+            result = switch(torch.tensor(i, device=device), branches, (x,))
             self.assertEqual(result, fn(x))
 
             grad_out = torch.ones_like(result)
@@ -2991,38 +3000,36 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
             self.assertEqual(expected_grads, grads)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_map_gpu(self):
+    @onlyAccelerator
+    def test_map_gpu(self, device):
         def f(x, y):
             return x + y
 
-        xs = torch.ones(3, 2, 2, device="cuda")
-        y = torch.ones(2, device="cuda")
+        xs = torch.ones(3, 2, 2, device=device)
+        y = torch.ones(2, device=device)
         res = control_flow.map(f, xs, y)
         expected = _fake_map(f, xs, y)
         self.assertEqual(expected, res)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_while_loop_gpu(self):
+    @onlyAccelerator
+    def test_while_loop_gpu(self, device):
         def cond_fn(x):
             return x.sum() < 10
 
         def body_fn(x):
             return (x + 1,)
 
-        x = torch.zeros(1, device="cuda")
+        x = torch.zeros(1, device=device)
         res = while_loop(cond_fn, body_fn, (x,))
         expected = _fake_while_loop(cond_fn, body_fn, (x,))
         self.assertEqual(expected, res)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @skipIfTorchDynamo("don't test compile on compile")
-    @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_compile(self, reverse, compile_mode, device, autograd):
+    def test_scan_compile(self, device, reverse, compile_mode, autograd):
         def add2(x: torch.Tensor, y: torch.Tensor):
             return x * y, x + y
 
@@ -3128,10 +3135,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @skipIfTorchDynamo("don't test compile on compile")
-    @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize(
         "dtype",
         [
@@ -3142,7 +3147,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             torch.complex64,
         ],
     )
-    def test_scan_dtype(self, reverse, compile_mode, device, dtype):
+    def test_scan_dtype(self, device, reverse, compile_mode, dtype):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Check all outputs and carries on the correct device and with torch.float32
@@ -3156,7 +3161,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         self.assertEqual(result, result_exp)
         self.assertEqual(
             [[r.device.type for r in res] for res in result],
-            [[device.type for _ in res] for res in result],
+            [[torch.device(device).type for _ in res] for res in result],
         )
         self.assertEqual(
             [[r.dtype for r in res] for res in result],
@@ -3199,13 +3204,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             ],
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_dim(self, reverse, compile_mode, device, autograd):
+    def test_scan_dim(self, device, reverse, compile_mode, autograd):
         import random
 
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -3241,13 +3244,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
                 if autograd:
                     self.check_autograd(result, result_exp, (init, x))
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_binary_operator(self, reverse, compile_mode, device, autograd):
+    def test_scan_binary_operator(self, device, reverse, compile_mode, autograd):
         state_dim = 20
         timesteps = 10
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -3303,13 +3304,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             )
             self.assertEqual(grads, expected_grads)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_tuple(self, reverse, compile_mode, device, autograd):
+    def test_scan_tuple(self, device, reverse, compile_mode, autograd):
         x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
         y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
         inp = (x, y)
@@ -3354,12 +3353,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         if autograd:
             self.check_autograd(result_diff, expected_result, (init, inp))
 
-    @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_complex_pytree(self, reverse, compile_mode, device, autograd):
+    def test_scan_complex_pytree(self, device, reverse, compile_mode, autograd):
         # Init and input have same pytree
 
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -3394,15 +3391,13 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     # TODO: Does not work because of the usage of vmap within associative_scan
     # The paT206899919 rameterization is commented out for the moment and the test is marked with expected fail
     # Fails with: AssertionError: scan is not an OpOverload
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_scan_associative_scan(self):
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
+    def test_scan_associative_scan(self, device):
         combine_mode = "generic"
         compile_mode_scan = "compile"
         compile_mode_associative_scan = "none"
         reverse = True
         reverse_associative_scan = True
-        device = torch.device("cuda")
 
         scan_fct = compile_mode_helper(scan, compile_mode_scan)
         associative_scan_fct = compile_mode_helper(
@@ -3434,12 +3429,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @skipIfTorchDynamo("don't test compile on compile")
-    @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_downstream_scan_matmul(self, compile_mode, reverse, device, autograd):
+    def test_scan_downstream_scan_matmul(self, device, compile_mode, reverse, autograd):
         inp = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
         init = torch.randn(3, 2, device=device, requires_grad=autograd)
 
@@ -3473,13 +3466,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @skipIfTorchDynamo("don't test compile on compile")
-    @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_downstream_scan_scan_dim(
-        self, compile_mode, reverse, device, autograd
+        self, device, compile_mode, reverse, autograd
     ):
         inp = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
         init = torch.randn(3, 2, device=device, requires_grad=autograd)
@@ -3526,13 +3517,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         if autograd:
             self.check_autograd(result, expected_result, (init, init2, inp))
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_non_pointwise(self, reverse, compile_mode, device, autograd):
+    def test_scan_non_pointwise(self, device, reverse, compile_mode, autograd):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
@@ -3557,10 +3546,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         if autograd:
             self.check_autograd(result, expected_result, (init, x))
 
-    @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_compile_cnt(self, reverse, device):
+    def test_scan_compile_cnt(self, device, reverse):
         dim = 1
 
         from torch._dynamo.testing import CompileCounter
@@ -3689,12 +3676,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             self.assertEqual(cnt.frame_count, 6)
 
     @skipIfTorchDynamo("don't test compile on compile")
-    @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_init(self, reverse, compile_mode, device, autograd):
+    def test_scan_init(self, device, reverse, compile_mode, autograd):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Only init and no input
@@ -3797,10 +3782,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         if autograd:
             self.check_autograd(result, result_exp, (init, x))
 
-    @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_init_wrong_pytree_complex(self, reverse, device):
+    def test_scan_init_wrong_pytree_complex(self, device, reverse):
         x = torch.randn(3, 2, 2, device=device)
         y = torch.randn(3, 2, 2, device=device)
         z = torch.randn(3, 2, 2, device=device)
@@ -3833,13 +3816,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
                 reverse=reverse,
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_init_pytree_complex(self, reverse, compile_mode, device, autograd):
+    def test_scan_init_pytree_complex(self, device, reverse, compile_mode, autograd):
         def fct_pointwise_different_output(x, y):
             return (
                 {
@@ -3970,16 +3951,14 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             inp_flat = pytree.tree_leaves(inp)
             self.check_autograd(result, expected_result, (*init_flat, *inp_flat))
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize(
         "partial_grad", ["xs", "init", "additional_inputs", "complex", "random"]
     )
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_closure_RNN_partial_autograd(
-        self, reverse, compile_mode, partial_grad, device
+        self, device, reverse, compile_mode, partial_grad
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4059,13 +4038,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
                     params,
                 )
 
-    @requires_cuda
     @skipIfTorchDynamo("not a dynamo test")
-    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("layers", [1, 2, 3])
-    @parametrize("device", ["cpu", "cuda"])
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_scan_multiple_layers_gradient(self, layers, device):
+    def test_scan_multiple_layers_gradient(self, device, layers):
         import torch.nn as nn
 
         torch.manual_seed(1)
@@ -4216,14 +4193,12 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
                 compiled_loss,
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_init_carries_unequal_grad(
-        self, reverse, compile_mode, device, autograd
+        self, device, reverse, compile_mode, autograd
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4256,14 +4231,12 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             res_exp_req_grad_flat = pytree.tree_leaves(result_exp)[1:]
             self.check_autograd(res_req_grad_flat, res_exp_req_grad_flat, (x, h2))
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_init_carries_equal_grad(
-        self, reverse, compile_mode, device, autograd
+        self, device, reverse, compile_mode, autograd
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4296,14 +4269,12 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             res_exp_req_grad_flat = pytree.tree_leaves(result_exp)[1:]
             self.check_autograd(res_req_grad_flat, res_exp_req_grad_flat, (x, h2))
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_for_out(
-        self, reverse, compile_mode, device, autograd
+        self, device, reverse, compile_mode, autograd
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4325,14 +4296,12 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         if autograd:
             self.check_autograd(result[0], result_exp[0], (x, h1, h2))
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_additional_inputs_partial(
-        self, reverse, compile_mode, device, autograd
+        self, device, reverse, compile_mode, autograd
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4360,14 +4329,12 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         if autograd:
             self.check_autograd(result[1], result_exp[1], (h, x, W_ih, b_ih))
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_additional_inputs_all(
-        self, reverse, compile_mode, device, autograd
+        self, device, reverse, compile_mode, autograd
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4397,14 +4364,12 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         if autograd:
             self.check_autograd(result[1], result_exp[1], (h, x))
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_carries_ys_same_grad(
-        self, reverse, compile_mode, device, autograd
+        self, device, reverse, compile_mode, autograd
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4434,13 +4399,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         if autograd:
             self.check_autograd(result[1], result_exp[1], (h, x))
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_closure_nested(self, reverse, compile_mode, device, autograd):
+    def test_scan_closure_nested(self, device, reverse, compile_mode, autograd):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Simple non-nested case
@@ -4532,10 +4495,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
                 result1, expected_result, (h1, h2, x1, W_1, b_1, W_2, b_2)
             )
 
-    @requires_cuda
-    def test_scan_input_mutation(self):
-        device = torch.device("cuda")
-
+    @onlyAccelerator
+    def test_scan_input_mutation(self, device):
         def fct_input_mutation(x, y):
             x.add_(1)
             return x + y, x + y + 2
@@ -4552,9 +4513,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         ):
             scan(fct_input_mutation, init, x, dim=0)
 
-    @requires_cuda
-    def test_scan_additional_input_mutation(self):
-        device = torch.device("cuda")
+    @onlyAccelerator
+    def test_scan_additional_input_mutation(self, device):
         buf = torch.randn(2, 2, device=device)
 
         def fct_additional_input_mutation(x, y):
@@ -4570,10 +4530,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         ):
             scan(fct_additional_input_mutation, init, x, dim=0)
 
-    @requires_cuda
-    def test_scan_input_carry_alias(self):
-        device = torch.device("cuda")
-
+    @onlyAccelerator
+    def test_scan_input_carry_alias(self, device):
         def fct_input_output_alias(x, y):
             return (x[0], x[1] + y[1]), (x[1] + y[1] + 1, x[1] + y[1] + 2)
 
@@ -4591,10 +4549,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
 
-    @requires_cuda
-    def test_scan_input_output_alias(self):
-        device = torch.device("cuda")
-
+    @onlyAccelerator
+    def test_scan_input_output_alias(self, device):
         def fct_input_output_alias(x, y):
             return (x[0] + 1, x[1] + y[1]), (x[1], x[1] + y[1] + 2)
 
@@ -4612,11 +4568,9 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_scan_carry_carry_alias(self):
-        device = torch.device("cuda")
-
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
+    def test_scan_carry_carry_alias(self, device):
         def fct_carry_carry_alias(x, y):
             c = x[0] + y[1]
             return (c, c), (x[0] + y[1], x[0] + y[1] + 1)
@@ -4635,11 +4589,9 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         ):
             scan(fct_carry_carry_alias, init, inp, dim=0)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_scan_carry_output_alias(self):
-        device = torch.device("cuda")
-
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
+    def test_scan_carry_output_alias(self, device):
         def fct_carry_output_alias(x, y):
             c = x[0] + y[1]
             return (x[0] + y[1], c), (c, x[0] + y[1] + 1)
@@ -4915,7 +4867,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
     def test_associative_scan_sparse_tensor(self):
         x = torch.tensor(
             [[[0.0, 0], [1.0, 2.0]], [[0.0, 0], [3.0, 4.0]], [[0.0, 0], [5.0, 6.0]]]
@@ -4929,7 +4880,6 @@ class GraphModule(torch.nn.Module):
                 get_scan_combine_fn("add", True), x, 0, combine_mode="generic"
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
     def test_associative_scan_wrong_pytree(self):
         def fct_wrong_pytree(x, y):
             return {
@@ -4948,6 +4898,14 @@ class GraphModule(torch.nn.Module):
             "Combine_fn received wrong number of arguments.*",
         ):
             associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
+class AssociativeScanTestsDevice(TestCase):
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
 
     def _check_autograd(self, result, result_exp, autograd_param):
         grad_param = [p for p in autograd_param if p.requires_grad]
@@ -4998,12 +4956,10 @@ class GraphModule(torch.nn.Module):
         kwargs_fake["compile_mode"] = "fake"
         return kwargs_fake
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -5014,7 +4970,7 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
             )
         ),
@@ -5032,7 +4988,7 @@ class GraphModule(torch.nn.Module):
     #     ),
     # )
     def test_associative_scan_compile(
-        self, combine_mode, reverse, compile_mode, device, autograd
+        self, device, combine_mode, reverse, compile_mode, autograd
     ):
         x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
         kwargs = {
@@ -5081,12 +5037,10 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(result, results_torch)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -5097,13 +5051,13 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
             )
         ),
     )
     def test_associative_scan_dim(
-        self, combine_mode, compile_mode, reverse, device, autograd
+        self, device, combine_mode, compile_mode, reverse, autograd
     ):
         import random
 
@@ -5137,15 +5091,17 @@ class GraphModule(torch.nn.Module):
                     results_torch.append(op_pt(x, 0))
                 self.assertEqual(results, results_torch)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @unittest.expectedFailure
-    def test_associative_scan_dim_shape_failure(self, compile_mode, combine_mode):
+    def test_associative_scan_dim_shape_failure(
+        self, device, compile_mode, combine_mode
+    ):
         num_dims = [2]
         for num_dim in num_dims:
             shapes = [9 for _ in range(num_dim)]
             rnd_scan_dim = 0
-            x = torch.randn(*shapes, device=torch.device("cuda"))
+            x = torch.randn(*shapes, device=device)
 
             kwargs = {
                 "dim": rnd_scan_dim,
@@ -5160,9 +5116,9 @@ class GraphModule(torch.nn.Module):
                 inputs=x,
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_pointwise_mixed_device_lowering_error(self):
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
+    def test_associative_scan_pointwise_mixed_device_lowering_error(self, device):
         def combine_fn(x, y):
             return (x[0] + y[0], x[1] + y[1])
 
@@ -5174,17 +5130,15 @@ class GraphModule(torch.nn.Module):
 
         from torch._inductor.exc import InductorError
 
-        a = torch.randn(8, 4, device="cuda")
+        a = torch.randn(8, 4, device=device)
         b = torch.randn(8, 4, device="cpu")
         with self.assertRaisesRegex(InductorError, "is not supported on cpu"):
             torch.compile(M(), fullgraph=True)(a, b)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -5195,13 +5149,13 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
             )
         ),
     )
     def test_associative_scan_tuple(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
         y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
@@ -5222,14 +5176,12 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else inp,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_associative_scan_expand_in_combine_fn(
-        self, compile_mode, reverse, device, autograd
+        self, device, compile_mode, reverse, autograd
     ):
         x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
 
@@ -5251,14 +5203,12 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (x,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_associative_scan_non_contiguous_tensor(
-        self, compile_mode, reverse, device, autograd
+        self, device, compile_mode, reverse, autograd
     ):
         x = (
             torch.arange(30, device=device, dtype=torch.float32, requires_grad=autograd)
@@ -5283,12 +5233,10 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (x,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -5299,13 +5247,13 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
             )
         ),
     )
     def test_associative_scan_complex_pytree(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
         y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
@@ -5327,12 +5275,10 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (x, y, z),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -5343,13 +5289,13 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
             )
         ),
     )
     def test_associative_scan_downstream_scan_matmul(
-        self, combine_mode, compile_mode, reverse, device, autograd
+        self, device, combine_mode, compile_mode, reverse, autograd
     ):
         def first_chain_fct(scan_fct, inp, **kwargs):
             o = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
@@ -5375,12 +5321,10 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -5391,13 +5335,13 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
             )
         ),
     )
     def test_associative_scan_downstream_scan_scan(
-        self, combine_mode, compile_mode, reverse, device, autograd
+        self, device, combine_mode, compile_mode, reverse, autograd
     ):
         def first_chain_fct(scan_fct, inp, **kwargs):
             o1 = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
@@ -5424,13 +5368,11 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse_first", [False, True])
     @parametrize("same_direction", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -5441,7 +5383,7 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
             )
         ),
@@ -5454,11 +5396,11 @@ class GraphModule(torch.nn.Module):
     )
     def test_associative_scan_downstream_scan_scan_different_dim(
         self,
+        device,
         combine_mode,
         compile_mode,
         reverse_first,
         same_direction,
-        device,
         autograd,
     ):
         reverse_second = reverse_first if same_direction else not reverse_first
@@ -5490,15 +5432,14 @@ class GraphModule(torch.nn.Module):
 
     # TODO: Does not work because of the usage of vmap within associative_scan
     # TODO: Re-enable additional parameters again once this issues has been resolved
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @unittest.expectedFailure
-    def test_associative_scan_nested(self):
+    def test_associative_scan_nested(self, device):
         combine_mode = "pointwise"
         compile_mode = "eager"
         reverse_first = False
         same_direction = False
-        device = torch.device("cuda")
 
         reverse_second = reverse_first if same_direction else not reverse_first
 
@@ -5538,15 +5479,13 @@ class GraphModule(torch.nn.Module):
             inputs=inp,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("loop_type", ["for"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_associative_scan_loop_in_combine_fn(
-        self, compile_mode, loop_type, reverse, device, autograd
+        self, device, compile_mode, loop_type, reverse, autograd
     ):
         def combine_fn(x, y):
             cnt = torch.zeros_like(y[0, :])
@@ -5590,14 +5529,13 @@ class GraphModule(torch.nn.Module):
 
     # TODO: Does not work because of the usage of vmap within associative_scan
     # TODO: Re-enable additional parameters again once this issues has been resolved
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @unittest.expectedFailure
-    def test_associative_scan_loop_in_combine_fn_failure(self):
+    def test_associative_scan_loop_in_combine_fn_failure(self, device):
         compile_mode = "none"
         loop_type = "while"
         reverse = False
-        device = torch.device("cuda")
 
         def combine_fn(x, y):
             _cnt = torch.zeros_like(y[0, :])
@@ -5625,23 +5563,21 @@ class GraphModule(torch.nn.Module):
             inputs=inp,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of compile_mode=compile_dynamic_shape
     # as the current implementation does not support lifted arguments
     @decorateIf(
         unittest.skip,
         lambda params: (
-            params["device"] == torch.device("cpu")
+            params["device"] == "cpu"
             or params["compile_mode"] == "compile_dynamic_shape"
         ),
     )
     def test_associative_scan_cond_in_combine_fn(
-        self, compile_mode, reverse, device, autograd
+        self, device, compile_mode, reverse, autograd
     ):
         def combine_fn(x, y):
             val = cond(torch.sum(y) > 0.0, lambda y: y.clone(), lambda y: 1.0 - y, (y,))
@@ -5666,13 +5602,12 @@ class GraphModule(torch.nn.Module):
 
     # TODO: Does not work because of the usage of vmap within associative_scan
     # TODO: Re-enable additional parameters again once this issues has been resolved
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @unittest.expectedFailure
-    def test_associative_scan_map_in_combine_fn(self):
+    def test_associative_scan_map_in_combine_fn(self, device):
         compile_mode = "none"
         reverse = False
-        device = torch.device("cuda")
 
         def combine_fn(x, y):
             def body(x, y):
@@ -5698,14 +5633,12 @@ class GraphModule(torch.nn.Module):
             inputs=inp,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_associative_scan_vmap_in_combine_fn(
-        self, compile_mode, reverse, device, autograd
+        self, device, compile_mode, reverse, autograd
     ):
         def combine_fn(x, y):
             def body(x):
@@ -5732,20 +5665,18 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of associative_scan and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     @decorateIf(
         unittest.skip,
-        lambda params: (params["device"] == torch.device("cpu")),
+        lambda params: (params["device"] == "cpu"),
     )
     def test_associative_scan_non_pointwise_generic(
-        self, reverse, compile_mode, device, autograd
+        self, device, reverse, compile_mode, autograd
     ):
         x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
 
@@ -5764,12 +5695,10 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (x,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -5780,13 +5709,13 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
             )
         ),
     )
     def test_associative_scan_binary_operator(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         state_dim = 20
         timesteps = 10
@@ -5811,12 +5740,10 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else elements,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_associative_scan_different_input_size(self, compile_mode, reverse, device):
+    def test_associative_scan_different_input_size(self, device, compile_mode, reverse):
         batch = 5
         hidden_dim = 3
         length = 10
@@ -5849,27 +5776,19 @@ class GraphModule(torch.nn.Module):
             inputs=elements,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_different_input_size_wrong_dim(self):
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
+    def test_associative_scan_different_input_size_wrong_dim(self, device):
         batch = 5
         hidden_dim = 3
         length = 10
         dstate = 7
 
-        deltaA = torch.randn(
-            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
-        )
-        deltaB_u = torch.randn(
-            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
-        )
-        C = torch.randn((batch, dstate, length), device=torch.device("cuda"))
-        x = torch.randn(
-            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
-        )
-        y = torch.randn(
-            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
-        )
+        deltaA = torch.randn((batch, hidden_dim, length, dstate), device=device)
+        deltaB_u = torch.randn((batch, hidden_dim, length, dstate), device=device)
+        C = torch.randn((batch, dstate, length), device=device)
+        x = torch.randn((batch, hidden_dim, length, dstate), device=device)
+        y = torch.randn((batch, hidden_dim, length, dstate), device=device)
         elements = (x, deltaA, deltaB_u, C, y)
 
         with self.assertRaisesRegex(
@@ -5883,12 +5802,10 @@ class GraphModule(torch.nn.Module):
                 combine_mode="pointwise",
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
@@ -5898,7 +5815,7 @@ class GraphModule(torch.nn.Module):
         lambda params: (params["combine_mode"] == "pointwise"),
     )
     def test_associative_scan_freevars_simple(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         H = torch.rand(2, device=device, requires_grad=autograd)
 
@@ -5936,12 +5853,10 @@ class GraphModule(torch.nn.Module):
                 autograd_param=None if not autograd else (inp, *param),
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
@@ -5951,7 +5866,7 @@ class GraphModule(torch.nn.Module):
         lambda params: (params["combine_mode"] == "pointwise"),
     )
     def test_associative_scan_freevars_nested(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         H1 = torch.rand(4, 5, device=device, requires_grad=autograd)
         H2 = torch.rand(4, 1, device=device, requires_grad=autograd)
@@ -6013,12 +5928,10 @@ class GraphModule(torch.nn.Module):
                 autograd_param=None if not autograd else (inp, *param),
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
@@ -6028,7 +5941,7 @@ class GraphModule(torch.nn.Module):
         lambda params: (params["combine_mode"] == "pointwise"),
     )
     def test_associative_scan_freevars_fct(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         def additional_fct_no_add_inp(x, y):
             return x * y
@@ -6054,14 +5967,12 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_associative_scan_freevars_fct_generic(
-        self, compile_mode, reverse, device, autograd
+        self, device, compile_mode, reverse, autograd
     ):
         def additional_fct_no_add_inp(x, y):
             return x * y
@@ -6094,12 +6005,10 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
@@ -6109,7 +6018,7 @@ class GraphModule(torch.nn.Module):
         lambda params: (params["combine_mode"] == "pointwise"),
     )
     def test_associative_scan_freevars_shape_check(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         H = torch.eye(2, device=device, requires_grad=True)
 
@@ -6133,11 +6042,9 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("autograd", [False, True])
     # Skipping the combine_mode=pointwise
@@ -6148,7 +6055,7 @@ class GraphModule(torch.nn.Module):
         lambda params: (params["combine_mode"] == "pointwise"),
     )
     def test_associative_scan_freevars_pytree(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         xf = torch.randn(2, 2, device=device, requires_grad=autograd)
         yf = torch.randn(2, 2, device=device, requires_grad=autograd)
@@ -6189,12 +6096,10 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (*pytree.tree_leaves(inp),),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
@@ -6204,14 +6109,14 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
                 or torch.version.hip
             )
         ),
     )
     def test_associative_scan_partial_grad(
-        self, combine_mode, compile_mode, reverse, device
+        self, device, combine_mode, compile_mode, reverse
     ):
         import random
 
@@ -6249,12 +6154,10 @@ class GraphModule(torch.nn.Module):
                 autograd_param=inp,
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
@@ -6264,14 +6167,14 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
                 or torch.version.hip
             )
         ),
     )
     def test_associative_scan_partial_grad_no_grad(
-        self, combine_mode, compile_mode, reverse, device
+        self, device, combine_mode, compile_mode, reverse
     ):
         def mul_single_nograd(x, y):
             xy1 = x[0] * y[0]
@@ -6298,10 +6201,9 @@ class GraphModule(torch.nn.Module):
             autograd_param=inp[0:1],
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_combine_fn_wrong_meta_in_combine_fn(self):
-        device = torch.device("cuda")
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
+    def test_associative_scan_combine_fn_wrong_meta_in_combine_fn(self, device):
         B, N, C, H, W = 3, 3, 2, 3, 3
         x = torch.randn(B, N, C, H, W, device=device)
 
@@ -6309,9 +6211,7 @@ class GraphModule(torch.nn.Module):
             return (x + y).to(torch.int64)
 
         def fct_wrong_device(x, y):
-            return (x + y).to(
-                torch.device("cpu") if device.type == "cuda" else torch.device("cuda")
-            )
+            return (x + y).to("cpu")
 
         def fct_wrong_stride(x, y):
             return (x + y).to(memory_format=torch.channels_last)
@@ -6323,10 +6223,9 @@ class GraphModule(torch.nn.Module):
             ):
                 associative_scan(fct, x, 0)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_non_pointwise(self):
-        device = torch.device("cuda")
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
+    def test_associative_scan_non_pointwise(self, device):
         x = torch.randn(3, 10, 2, device=device)
         with self.assertRaisesRegex(
             # Should be:
@@ -6340,10 +6239,8 @@ class GraphModule(torch.nn.Module):
                 combine_mode="pointwise",
             )
 
-    @requires_cuda
-    def test_associative_scan_input_mutation(self):
-        device = torch.device("cuda")
-
+    @onlyAccelerator
+    def test_associative_scan_input_mutation(self, device):
         def fct_input_mutation(x, y):
             x.add_(1)
             return x + y
@@ -6359,10 +6256,8 @@ class GraphModule(torch.nn.Module):
         ):
             associative_scan(fct_input_mutation, x, 0)
 
-    @requires_cuda
-    def test_associative_scan_input_output_alias(self):
-        device = torch.device("cuda")
-
+    @onlyAccelerator
+    def test_associative_scan_input_output_alias(self, device):
         def fct_input_output_alias(x, y):
             return x[0], x[1] + y[1]
 
@@ -6379,11 +6274,9 @@ class GraphModule(torch.nn.Module):
         ):
             associative_scan(fct_input_output_alias, inp, 0)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_output_output_alias(self):
-        device = torch.device("cuda")
-
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
+    def test_associative_scan_output_output_alias(self, device):
         def fct_output_output_alias(x, y):
             c = x[0] + y[1]
             return c, c
@@ -10962,8 +10855,14 @@ class GraphModule(torch.nn.Module):
         compiled = torch.compile(g, backend=backend, dynamic=True, fullgraph=True)
         self.assertEqual(compiled(5, 7), g(5, 7))
 
-    @requires_cuda
-    @parametrize("device", ["cuda", "cpu"])
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
+class TestControlFlowTracedDevice(TestCase):
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
+
     def test_cond_input_mutation(self, device):
         predicate_true = torch.tensor(True, device=device)
         predicate_false = torch.tensor(False, device=device)
@@ -10985,10 +10884,18 @@ class GraphModule(torch.nn.Module):
             output = torch.compile(fn)(predicate_true, data)
             self.assertEqual(output, org_data + 1)
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
+
+@unittest.skipIf(
+    not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+    "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+)
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
+class TestControlFlowTracedCUDA(TestCase):
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
+
     def test_cond_traced_not_nested_cudagraphs(self):
         def true_fn(x):
             return x.sin()
@@ -11016,10 +10923,6 @@ class GraphModule(torch.nn.Module):
             [x, false_pred],
         )
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
     def test_cond_pin_memory_cudagraphs(self):
         # Make sure that pinned host memory allocations get assigned
         # to a private pool correctly during stream capture, even
@@ -11057,10 +10960,6 @@ class GraphModule(torch.nn.Module):
             [x, false_pred],
         )
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
     def test_cond_traced_triply_nested_cudagraphs(self):
         def level3_true(x):
             return x.sin()
@@ -11104,10 +11003,6 @@ class GraphModule(torch.nn.Module):
             _check_compile_cudagraph_backend(self, f, args)
             _check_compile_many_backends_with_cudagraph(self, f, args)
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
     def test_while_loop_traced_cudagraphs(self):
         def f(x, limit):
             init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
@@ -11126,10 +11021,6 @@ class GraphModule(torch.nn.Module):
         _check_compile_cudagraph_backend(self, f, [x, limit])
         _check_compile_many_backends_with_cudagraph(self, f, [x, limit])
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
     def test_while_loop_cuda_graph_replay_uses_runtime_condition(self):
         def cond_fn(acc, iteration, limit):
             return iteration < limit
@@ -11173,10 +11064,6 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(x, torch.ones_like(x))
             self.assertEqual(iteration, torch.zeros_like(iteration))
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
     def test_while_loop_cudagraph_kwargs_error(self):
         def cond_fn(iteration):
             return iteration < 1
@@ -11203,10 +11090,6 @@ class GraphModule(torch.nn.Module):
                     {"unexpected": True},
                 )
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
     def test_while_loop_cudagraph_body_pytree_mismatch_error(self):
         def cond_fn(iteration):
             return iteration < 1
@@ -11227,10 +11110,6 @@ class GraphModule(torch.nn.Module):
             ):
                 torch.ops.higher_order.while_loop(cond_fn, body_fn, (iteration,), ())
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
     def test_cond_inside_while_loop_cudagraphs(self):
         def f(x, limit):
             init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
@@ -11256,10 +11135,6 @@ class GraphModule(torch.nn.Module):
         _check_compile_cudagraph_backend(self, f, [x, limit])
         _check_compile_many_backends_with_cudagraph(self, f, [x, limit])
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
     def test_while_loop_inside_cond_cudagraphs(self):
         def add_loop(x, limit):
             init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
@@ -11295,10 +11170,6 @@ class GraphModule(torch.nn.Module):
             _check_compile_cudagraph_backend(self, f, [x, pred, limit])
             _check_compile_many_backends_with_cudagraph(self, f, [x, pred, limit])
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
     def test_cond_traced_record_stream_reuse(self):
         torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:True"
@@ -11638,6 +11509,8 @@ class TestAutoFunctionalizeControlFlow(TestCase):
         ):
             control_flow.map(body_fn, xs, buf)
 
+
+class TestAutoFunctionalizeControlFlowDevice(TestCase):
     def check(self, gen_fn, args, device, dynamic) -> torch.fx.GraphModule:
         args = pytree.tree_map(lambda t: t.to(device=device), args)
 
@@ -11682,9 +11555,7 @@ class TestAutoFunctionalizeControlFlow(TestCase):
             self.assertEqual(mod0._buffers[k], mod2._buffers[k])
         return backend.fw_graphs[0]
 
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_input_mutation(self, device, dynamic):
         class M(torch.nn.Module):
@@ -11702,7 +11573,7 @@ class TestAutoFunctionalizeControlFlow(TestCase):
             torch.randn(3, 4, requires_grad=True),
         )
         fw_gm = self.check(M, (x, y), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
@@ -11737,9 +11608,7 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_buffer_mutation(self, device, dynamic):
         class M(torch.nn.Module):
@@ -11761,7 +11630,7 @@ class <lambda>(torch.nn.Module):
 
         p, x = torch.tensor(True), torch.randn(1, requires_grad=True)
         fw_gm = self.check(M, (p, x), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
@@ -11804,9 +11673,7 @@ class <lambda>(torch.nn.Module):
             )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/181947")
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_union_input_mutation(self, device, dynamic):
         class M(torch.nn.Module):
@@ -11832,7 +11699,7 @@ class <lambda>(torch.nn.Module):
             torch.randn(1, requires_grad=False),
         )
         fw_gm = self.check(M, (x, y), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
@@ -11877,9 +11744,7 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("dynamic", [True, False])
     def test_while_loop_auto_functionalize_buffer_mutation(self, device, dynamic):
         class M(torch.nn.Module):
@@ -11904,7 +11769,7 @@ class <lambda>(torch.nn.Module):
 
         x = torch.tensor([2.0, 1.0], requires_grad=False)
         fw_gm = self.check(M, (x,), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
@@ -11943,9 +11808,7 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("dynamic", [True, False])
     def test_while_loop_auto_functionalize_multiple_buffer_mutation(
         self, device, dynamic
@@ -11969,7 +11832,7 @@ class <lambda>(torch.nn.Module):
 
         x = torch.tensor([3.0, 2.0, 1.0, 1.0], requires_grad=False)
         fw_gm = self.check(M, (x,), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
@@ -12003,9 +11866,7 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("dynamic", [True, False])
     def test_while_loop_auto_functionalize_buffer_in_cond(self, device, dynamic):
         class M(torch.nn.Module):
@@ -12025,7 +11886,7 @@ class <lambda>(torch.nn.Module):
 
         x = torch.tensor([0.0, 0.0], requires_grad=False)
         fw_gm = self.check(M, (x,), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
@@ -12054,9 +11915,7 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton")
     @parametrize("dynamic", [True, False])
     def test_while_loop_auto_functionalize_captured_tensor_mutation(
         self, device, dynamic
@@ -12077,7 +11936,7 @@ class <lambda>(torch.nn.Module):
         y = torch.ones(4, requires_grad=False)
 
         fw_gm = self.check(M, (x, y), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
             print(normalize_gm(fw_gm.print_readable(print_output=False)))
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
@@ -12709,7 +12568,7 @@ class DynamicCondModel(torch.nn.Module):
     not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
 )
-class TestControlFlowNN(TestCase):
+class TestControlFlowNNCUDA(TestCase):
     def test_cond_in_NN(self):
         model = DynamicCondModel().cuda()
 
@@ -12731,7 +12590,7 @@ class TestControlFlowNN(TestCase):
     not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
 )
-class TestControlFlowAndRNG(TestCase):
+class TestControlFlowAndRNGCUDA(TestCase):
     @parametrize("rng_func", ["custom_generator", "default_generator"])
     def test_rng_with_conditional_nodes_errors(self, rng_func):
         pred = torch.tensor(True, device="cuda")
@@ -12782,12 +12641,19 @@ class TestControlFlowAndRNG(TestCase):
 
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
+instantiate_device_type_tests(TestControlFlowTracedDevice, globals(), allow_xpu=True)
+instantiate_parametrized_tests(TestControlFlowTracedCUDA)
 instantiate_parametrized_tests(TestAutoFunctionalizeControlFlow)
+instantiate_device_type_tests(
+    TestAutoFunctionalizeControlFlowDevice, globals(), allow_xpu=True
+)
 
 instantiate_parametrized_tests(TestControlFlow)
+instantiate_device_type_tests(TestControlFlowDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(AssociativeScanTests)
+instantiate_device_type_tests(AssociativeScanTestsDevice, globals(), allow_xpu=True)
 
-instantiate_parametrized_tests(TestControlFlowAndRNG)
+instantiate_parametrized_tests(TestControlFlowAndRNGCUDA)
 
 if __name__ == "__main__":
     run_tests()
