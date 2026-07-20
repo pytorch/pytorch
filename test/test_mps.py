@@ -2836,6 +2836,34 @@ class TestMPS(TestCaseMPS):
         # Regression test for https://github.com/pytorch/pytorch/issues/96113
         torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/190491: small
+    # per-row variance with small eps used to collapse rstd to rsqrt(eps) on MPS.
+    @parametrize("axis_size", [8, 8192])
+    def test_layer_norm_small_variance(self, axis_size):
+        a, eps = 1e-4, 1e-9  # var = a^2 = 1e-8, far below the old 1e-6 clamp
+        row = torch.tensor([a, -a] * (axis_size // 2), dtype=torch.float32)
+        cpu_x = row.repeat(4, 1)
+        weight = torch.rand(axis_size)
+        bias = torch.rand(axis_size)
+        cpu_y = F.layer_norm(cpu_x, (axis_size,), weight, bias, eps)
+        mps_y = F.layer_norm(
+            cpu_x.to('mps'), (axis_size,), weight.to('mps'), bias.to('mps'), eps)
+        self.assertEqual(mps_y, cpu_y)
+
+    # The row base offset (tg_id * axis_size) overflows 32 bits for tensors with
+    # more than 2**32 elements; check a row past that boundary still normalizes.
+    @serialTest()
+    @largeTensorTest("18GB", device="mps")
+    @parametrize("axis_size", [4096, 8192])  # 4096 -> single_row, 8192 -> looped
+    def test_layer_norm_large_tensor_indexing(self, axis_size):
+        M = 2**32 // axis_size + 1  # last row starts at element offset >= 2**32
+        x = torch.randn(M, axis_size, dtype=torch.bfloat16, device="mps")
+        mps_y = F.layer_norm(x, (axis_size,))
+        # layer_norm is row-independent, so validate just the last row (whose
+        # offset overflows uint32) against CPU without a full-tensor CPU pass.
+        cpu_last = F.layer_norm(x[-1].float().cpu(), (axis_size,))
+        self.assertEqual(mps_y[-1].float().cpu(), cpu_last, atol=1e-2, rtol=1e-2)
+
     def test_ifft(self):
         # See: https://github.com/pytorch/pytorch/issues/124096
         device = torch.device("mps")
