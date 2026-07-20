@@ -3,6 +3,8 @@
 #ifdef USE_C10D_NCCL
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
@@ -15,9 +17,6 @@
 
 namespace c10d::nccl2 {
 
-// Initialize the static counter
-int NCCLBootstrap::counter_ = 0;
-
 const std::string kUniqueidXchgMethodAuto = "auto";
 const std::string kUniqueidXchgMethodTCPStore = "tcpstore";
 const std::string kUniqueidXchgMethodDefault = kUniqueidXchgMethodAuto;
@@ -27,21 +26,17 @@ NCCLBootstrap::NCCLBootstrap(
     c10::Device device,
     int rank,
     int comm_size,
+    uint64_t generation,
     std::shared_ptr<NcclApi> nccl_api,
-    std::shared_ptr<CudaApi> cuda_api,
     std::chrono::milliseconds timeout)
     : timeout_(timeout),
+      generation_(generation),
       store_(std::move(store)),
       created_internal_store_(false),
       device_(device),
       nccl_api_(std::move(nccl_api)),
-      cuda_api_(std::move(cuda_api)) {
-  // Rank/size come from the c10d Backend ctor. Upstream torchcomms queried
-  // these from TORCHCOMM_RANK/SIZE env (query_ranksize); under c10d they are
-  // known explicitly, so we use them directly.
-  rank_ = rank;
-  comm_size_ = comm_size;
-
+      rank_(rank),
+      comm_size_(comm_size) {
   const char* uniqueid_xchg_env =
       std::getenv("TORCHCOMM_NCCL_BOOTSTRAP_UNIQUEID_EXCHANGE_METHOD");
   if (uniqueid_xchg_env == nullptr) {
@@ -59,57 +54,23 @@ NCCLBootstrap::NCCLBootstrap(
       [](unsigned char c) { return std::tolower(c); });
 
   if (device_.index() == -1) {
-    int device_count;
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->getDeviceCount(&device_count),
-        "Failed to get CUDA device count");
-
-    device_ = c10::Device(c10::kCUDA, rank_ % device_count);
+    const auto device_count = c10::cuda::device_count_ensure_non_zero();
+    device_ = c10::Device(
+        c10::kCUDA, static_cast<c10::DeviceIndex>(rank_ % device_count));
     TC_LOG(INFO) << "User did not provide device ID; using device cuda:"
                  << static_cast<int>(device_.index());
   }
 
-  CUDA_CHECK(
-      cuda_api_,
-      cuda_api_->setDevice(device_.index()),
-      fmt::format("Failed to set device to {}", device_.index()));
+  c10::cuda::CUDAGuard gpuGuard(device_);
 
-  // Allocate CUDA memory for a single float32 value used in barrier operations
-  CUDA_CHECK(
-      cuda_api_,
-      cuda_api_->malloc(&barrier_buffer_, sizeof(float)),
-      "Failed to allocate barrier buffer");
-}
-
-NCCLBootstrap::~NCCLBootstrap() noexcept {
-  if (barrier_buffer_ != nullptr) {
-    CUDA_CHECK_IGNORE(
-        cuda_api_,
-        cuda_api_->free(barrier_buffer_),
-        "Failed to free barrier buffer");
-    barrier_buffer_ = nullptr;
-  }
-}
-
-std::string NCCLBootstrap::getNCCLStoreKey() {
-  std::string key = fmt::format("{}{}", getNCCLStoreKeyPrefix(), counter_);
-  counter_++;
-  return key;
-}
-
-std::string NCCLBootstrap::getNCCLStoreKeyPrefix() {
-  return "nccl_storekey_";
-};
-
-int NCCLBootstrap::getNCCLStoreKeyCounter() {
-  return counter_;
+  barrier_buffer_ =
+      c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
 }
 
 ncclUniqueId NCCLBootstrap::exchangeUniqueIdStore() {
   ncclUniqueId uniqueId;
 
-  auto key = getNCCLStoreKey();
+  auto key = fmt::format("nccl_storekey_{}", generation_);
   if (rank_ == 0) {
     // Generate unique ID on rank 0
     ncclResult_t ncclErr = nccl_api_->getUniqueId(&uniqueId);
@@ -173,10 +134,10 @@ void NCCLBootstrap::cleanupTCPStore(ncclComm_t nccl_comm) {
     // object.
     store_.reset();
 
-    auto stream = cuda_api_->getCurrentCUDAStream(device_.index());
+    auto stream = at::cuda::getCurrentCUDAStream(device_.index());
     ncclResult_t result = nccl_api_->allReduce(
-        barrier_buffer_,
-        barrier_buffer_,
+        barrier_buffer_.get(),
+        barrier_buffer_.get(),
         1,
         ncclFloat32,
         ncclSum,
@@ -187,10 +148,7 @@ void NCCLBootstrap::cleanupTCPStore(ncclComm_t nccl_comm) {
                     << nccl_api_->getErrorString(result);
     }
 
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->streamSynchronize(stream),
-        "Stream synchronization failed");
+    stream.synchronize();
   }
 }
 
@@ -290,6 +248,7 @@ void populateNcclConfigFromHints(
 ncclComm_t NCCLBootstrap::createNcclComm(
     const std::string& name,
     const std::unordered_map<std::string, std::string>& hints) {
+  c10::cuda::CUDAGuard gpuGuard(device_);
   ncclUniqueId uniqueId;
   ncclComm_t nccl_comm = nullptr;
 
