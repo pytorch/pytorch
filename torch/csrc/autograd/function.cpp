@@ -44,9 +44,15 @@ void fire_node_creation_hooks(const c10::intrusive_ptr<Node>& node) {
   if (C10_LIKELY(state.stack.empty())) {
     return;
   }
-  if (state.is_firing || node->node_creation_hooks_fired()) {
+  if (state.is_firing) {
     return;
   }
+  // Every creation path fires a given node exactly once by construction;
+  // this asserts that invariant rather than deduping at runtime.
+  TORCH_INTERNAL_ASSERT(
+      !node->node_creation_hooks_fired(),
+      "node creation hooks fired twice for ",
+      node->name());
   node->set_node_creation_hooks_fired();
   at::impl::NodeCreationHooks::set_is_firing(true);
   auto guard = c10::make_scope_exit(

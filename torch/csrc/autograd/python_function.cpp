@@ -662,7 +662,8 @@ static void _wrap_outputs(
     PyObject* raw_output,
     PyObject* outputs,
     bool is_executable,
-    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context) {
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    c10::intrusive_ptr<Node>* attached_node) {
   auto cdata_if_executable = is_executable ? self->cdata : nullptr;
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (is_executable) {
@@ -775,7 +776,8 @@ static void _wrap_outputs(
       jvp_user_function,
       to_save_if_setup_context,
       view_as_self_fn,
-      self->pure_view);
+      self->pure_view,
+      attached_node);
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -1187,13 +1189,15 @@ PyObject* process_outputs(
       is_executable);
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
+  c10::intrusive_ptr<Node> attached_node;
   _wrap_outputs(
       grad_fn,
       unpacked.input_vars,
       raw_output,
       outputs,
       is_executable,
-      to_save_if_setup_context);
+      to_save_if_setup_context,
+      &attached_node);
   _trace_post_record(
       node, op_obj, unpacked.input_vars, outputs, is_inplace, unpack_output);
 
@@ -1202,6 +1206,10 @@ PyObject* process_outputs(
   // we save them.
   if (is_executable) {
     _save_variables(tensors_to_save, grad_fn, outputs.get(), num_outputs);
+    // Fire only after saved variables are stored on the node.
+    if (attached_node) {
+      fire_node_creation_hooks(attached_node);
+    }
   } else {
     // Remove unnecessary attributes
     Py_CLEAR(grad_fn->to_save);

@@ -416,8 +416,8 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
     return thread_id_;
   }
 
-  // Used by fire_node_creation_hooks to ensure hooks run at most once per
-  // node, even when the node is attached to multiple outputs.
+  // Used by fire_node_creation_hooks to assert that each node fires exactly
+  // once; every creation path guarantees single-firing by construction.
   bool node_creation_hooks_fired() const noexcept {
     return node_creation_hooks_fired_;
   }

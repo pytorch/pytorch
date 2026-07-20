@@ -11433,6 +11433,74 @@ for shape in [(1,), ()]:
             fn = view.grad_fn
         self.assertIn(fn, nodes)
 
+    def test_node_creation_hook_saved_tensors_populated(self):
+        # Hooks fire only after saved tensors have been stored on the node.
+        a = torch.randn(2, requires_grad=True)
+        b = torch.randn(2, requires_grad=True)
+        saved = []
+        with torch.autograd.graph.node_creation_hook(
+            lambda node: saved.append((node._saved_self, node._saved_other))
+        ):
+            a * b
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0][0], a)
+        self.assertEqual(saved[0][1], b)
+
+    def test_node_creation_hook_saved_tensors_populated_custom_function(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, gO):
+                (x,) = ctx.saved_tensors
+                return gO * 2
+
+        a = torch.randn(2, requires_grad=True)
+        saved = []
+        with torch.autograd.graph.node_creation_hook(
+            lambda node: saved.append(node.saved_tensors)
+        ):
+            Func.apply(a)
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0], (a,))
+
+    def test_node_creation_hook_inplace_on_view_fires_on_copy_slices(self):
+        # In-place ops on views rebase the base's history onto a CopySlices
+        # node that wraps the op's backward node. The hook must fire on the
+        # composed CopySlices, never on the wrapped inner node. The view's
+        # own grad_fn is regenerated as a new AsStridedBackward0 node and
+        # legitimately fires too.
+        a = torch.randn(4, requires_grad=True).clone()
+        v = a[:2]
+        nodes = []
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            v.mul_(2)
+        self.assertEqual(
+            [n.name() for n in nodes],
+            ["AsStridedBackward0", "torch::autograd::CopySlices"],
+        )
+        self.assertIs(nodes[0], v.grad_fn)
+        self.assertIs(nodes[1], a.grad_fn)
+
+    def test_node_creation_hook_fallback_multi_output_fires_once(self):
+        # A custom op without an autograd formula goes through the
+        # not-implemented fallback, which attaches one shared grad_fn to all
+        # differentiable outputs in a loop. The hook must fire exactly once
+        # for that shared node, not once per output.
+        with torch.library._scoped_library("_test_nch_fallback", "FRAGMENT") as lib:
+            lib.define("foo(Tensor a) -> (Tensor, Tensor)")
+            lib.impl("foo", lambda a: (a.detach().clone(), a.detach().clone()), "CPU")
+            a = torch.randn(2, requires_grad=True)
+            nodes = []
+            with torch.autograd.graph.node_creation_hook(nodes.append):
+                out1, out2 = torch.ops._test_nch_fallback.foo(a)
+            self.assertIs(out1.grad_fn, out2.grad_fn)
+            self.assertEqual(len(nodes), 1)
+            self.assertIs(nodes[0], out1.grad_fn)
+
     def test_node_creation_hook_no_fire_outside_context(self):
         nodes = []
         a = torch.randn(2, requires_grad=True)
