@@ -49,15 +49,14 @@ def _computation_node_key(
     return (2, node.graph._target_to_str(node.target), input_indices)
 
 
-def _canonical_node_key(
-    node: fx.Node, canonical_idx: dict[fx.Node, int]
-) -> object:
+def _canonical_node_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> object:
     """Canonical heap key for get_attr, output, and computation nodes.
 
     Callers must handle placeholder nodes themselves (the ordering strategy
     differs between Dynamo and export) and never pass them here.
     """
-    assert node.op != "placeholder"
+    if node.op == "placeholder":
+        raise AssertionError("callers must handle placeholder nodes themselves")
     if node.op == "get_attr":
         return (1, str(node.target))
     elif node.op == "output":
