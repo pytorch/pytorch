@@ -160,7 +160,7 @@ void trailing_matrix_update(
   // Construct TRSM scalar_t** arrays {
   constexpr int threads = 64;
   int blocks = (batch_count + threads - 1) / threads;
-  build_trsm_ptr_kernel<scalar_t><<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+  build_trsm_ptr_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     dA, matrix_stride, lda, batch_count,
     ws.dL11_array, ws.dA12_array,
     diag_offset, panel_width
@@ -170,7 +170,7 @@ void trailing_matrix_update(
 
   constexpr auto one = static_cast<scalar_t>(1);
   constexpr auto neg_one = static_cast<scalar_t>(-1);
-  at::cuda::blas::trsmBatched<scalar_t>(
+  at::cuda::blas::trsmBatched(
     handle,
     CUBLAS_SIDE_LEFT, CUBLAS_FILL_MODE_LOWER,
     CUBLAS_OP_N, CUBLAS_DIAG_UNIT,
@@ -364,6 +364,10 @@ laswp_rowparallel_kernel(
   }
 }
 
+// Parallel swap can be done over an opaque type,
+// so double and cfloat share the same dispatch.
+template <int N> struct alignas(N) OpaqueType { char data[N]; };
+
 // Parallel pivot application using permutation vector.
 // Gathers permuted rows into shared memory (strided access),
 // then copies them back (coalesced write).
@@ -378,7 +382,8 @@ void batched_apply_pivots_parallel(
   int nb,
   const int* dipiv,
   int ipiv_stride,
-  LUWorkspace<scalar_t>& ws,
+  const int* dpivinfo,
+  int pivinfo_stride,
   int col_lo,
   int col_hi,
   int batch_count
@@ -391,9 +396,9 @@ void batched_apply_pivots_parallel(
   size_t shmem = nb * swp_width * sizeof(scalar_t);
   auto grid = dim3(col_tiles, 1, batch_count);
 
-  laswp_rowparallel_kernel<scalar_t><<<grid, nb, shmem, at::cuda::getCurrentCUDAStream()>>>(
+  laswp_rowparallel_kernel<<<grid, nb, shmem, at::cuda::getCurrentCUDAStream()>>>(
     dA, matrix_stride, lda,
-    ws.pivinfo, ws.pivinfo_stride,
+    dpivinfo, pivinfo_stride,
     col_start, nb,
     ncols, col_lo, swp_width
   );
@@ -670,7 +675,7 @@ void lu_batched_panel_recursive(
   }
   // Base case: use fused register-resident panel if possible, else fall back
   if (nb <= recnb) {
-    if (try_launch_fused_panel_register_resident<scalar_t>(
+    if (try_launch_fused_panel_register_resident(
           dA, matrix_stride, lda, m,
           col_start, nb, dipiv, ipiv_stride, dinfo, batch_count)) {
       return;
@@ -698,7 +703,7 @@ void lu_batched_panel_recursive(
   auto n2 = nb - n1;
 
   // 1. Factor left half: columns [col_start, col_start + n1)
-  lu_batched_panel_recursive<scalar_t>(
+  lu_batched_panel_recursive(
     handle,
     dA, matrix_stride, lda, m,
     col_start, n1,
@@ -707,23 +712,24 @@ void lu_batched_panel_recursive(
   );
 
   // 2. Apply left-half pivots to right half columns [col_start + n1, col_start + nb)
+  using opaque_t = OpaqueType<sizeof(scalar_t)>;
   setup_pivinfo(m, col_start, n1, dipiv, ipiv_stride, ws.pivinfo, ws.pivinfo_stride, batch_count);
-  batched_apply_pivots_parallel<scalar_t>(
-    dA, matrix_stride, lda, m,
+  batched_apply_pivots_parallel(
+    reinterpret_cast<opaque_t*>(dA), matrix_stride, lda, m,
     col_start, n1,
     dipiv, ipiv_stride,
-    ws,
+    ws.pivinfo, ws.pivinfo_stride,
     col_start + n1, col_start + nb, batch_count
   );
 
   // 3. TRSM + GEMM: trailing update
-  trailing_matrix_update<scalar_t>(
+  trailing_matrix_update(
     handle, dA, matrix_stride, ws, lda,
     col_start, n1, n2, m - col_start - n1, batch_count
   );
 
   // 4. Factor right half: columns [col_start + n1, col_start + nb)
-  lu_batched_panel_recursive<scalar_t>(
+  lu_batched_panel_recursive(
     handle,
     dA, matrix_stride, lda, m,
     col_start + n1, n2,
@@ -733,11 +739,11 @@ void lu_batched_panel_recursive(
 
   // 5. Apply right-half pivots back to left half columns [col_start, col_start + n1)
   setup_pivinfo(m, col_start + n1, n2, dipiv, ipiv_stride, ws.pivinfo, ws.pivinfo_stride, batch_count);
-  batched_apply_pivots_parallel<scalar_t>(
-    dA, matrix_stride, lda, m,
+  batched_apply_pivots_parallel(
+    reinterpret_cast<opaque_t*>(dA), matrix_stride, lda, m,
     col_start + n1, n2,
     dipiv, ipiv_stride,
-    ws,
+    ws.pivinfo, ws.pivinfo_stride,
     col_start, col_start + n1, batch_count
   );
 }
@@ -782,7 +788,7 @@ void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Te
       auto actual_nb = std::min(nb, min_mn - j);
 
       // 1. Panel factorization
-      lu_batched_panel_recursive<scalar_t>(
+      lu_batched_panel_recursive(
         handle,
         dA, matrix_stride, lda, m,
         j, actual_nb,
@@ -792,25 +798,26 @@ void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Te
 
       // 2. Propagate pivots to columns outside the panel (row-parallel)
       //    Left side: cols [0, j)
+      using opaque_t = OpaqueType<sizeof(scalar_t)>;
       setup_pivinfo(m, j, actual_nb, dipiv, ipiv_stride, ws.pivinfo, ws.pivinfo_stride, batch_count);
-      batched_apply_pivots_parallel<scalar_t>(
-        dA, matrix_stride, lda, m,
+      batched_apply_pivots_parallel(
+        reinterpret_cast<opaque_t*>(dA), matrix_stride, lda, m,
         j, actual_nb,
         dipiv, ipiv_stride,
-        ws,
+        ws.pivinfo, ws.pivinfo_stride,
         0, j, batch_count
       );
       //    Right side: cols [j + actual_nb, n)
-      batched_apply_pivots_parallel<scalar_t>(
-        dA, matrix_stride, lda, m,
+      batched_apply_pivots_parallel(
+        reinterpret_cast<opaque_t*>(dA), matrix_stride, lda, m,
         j, actual_nb,
         dipiv, ipiv_stride,
-        ws,
+        ws.pivinfo, ws.pivinfo_stride,
         j + actual_nb, n, batch_count
       );
 
       // 3. Trailing matrix update
-      trailing_matrix_update<scalar_t>(
+      trailing_matrix_update(
         handle, dA, matrix_stride, ws, lda,
         j, actual_nb, n - j - actual_nb, m - j - actual_nb, batch_count
       );
