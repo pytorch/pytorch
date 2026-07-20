@@ -3964,6 +3964,19 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(out_cpu_val, ref, atol=0, rtol=0)
 
     @onlyCUDA
+    def test_masked_fill_tensor_value_no_host_sync(self, device):
+        dst = torch.arange(10, dtype=torch.float, device=device)
+        mask = (dst % 2 == 0)
+        val = torch.tensor(3.5, device=device)
+        ref = dst.clone().masked_fill_(mask, 3.5)
+        out = dst.clone()
+
+        with CudaSyncGuard("error"):
+            out.masked_fill_(mask, val)
+
+        self.assertEqual(out, ref, atol=0, rtol=0)
+
+    @onlyCUDA
     def test_masked_fill_tensor_value_cuda_graph(self, device):
         # A device value used to go through value.item(), whose device-to-host
         # sync is illegal during CUDA graph capture. Reading the value
