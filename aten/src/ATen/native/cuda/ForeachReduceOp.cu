@@ -1,6 +1,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
+#include <cstring>
 #include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
@@ -21,8 +22,8 @@
 #include <ATen/ops/_foreach_norm_native.h>
 #include <ATen/ops/_foreach_powsum_native.h>
 
+#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_native.h>
-#include <ATen/ops/full.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -51,6 +52,56 @@ struct TensorListAddresses {
   const void* addresses[MAX_TENSORS_PER_KERNEL];
 };
 
+// Compact, ragged scratch layout for foreach reductions.
+// multi_tensor_apply skips empty tensors and writes partials in non-empty
+// tensor order, so partials are stored at prefix offsets over the non-empty
+// tensors rather than in a rectangular (ntensors x max_chunks) buffer. The
+// rectangular buffer sizes every tensor to the largest tensor's chunk count,
+// which wastes allocation and fill time for ragged lists (e.g. one large
+// embedding alongside many small parameters).
+//
+// chunk_offsets holds num_nonempty+1 prefix offsets (chunk_offsets[0]==0,
+// chunk_offsets[num_nonempty]==total_chunks); a tensor's chunk count is the
+// adjacent difference, so a single small host-to-device buffer serves both the
+// producer (partial write location) and the cleanup (per-tensor slice bounds).
+struct ForeachReductionChunks {
+  Tensor chunk_offsets;
+  int64_t total_chunks;
+  size_t num_nonempty;
+};
+
+inline ForeachReductionChunks compute_foreach_reduction_chunks(
+    TensorList tensors,
+    const TensorOptions& options) {
+  const size_t ntensors = tensors.size();
+  std::vector<int64_t> offsets_host;
+  offsets_host.reserve(ntensors + 1);
+  int64_t total_chunks = 0;
+  for (const auto t : c10::irange(ntensors)) {
+    const auto numel = tensors[t].numel();
+    if (numel == 0) {
+      continue;
+    }
+    offsets_host.push_back(total_chunks);
+    total_chunks += (numel + kChunkSize - 1) / kChunkSize;
+  }
+  const size_t num_nonempty = offsets_host.size();
+  offsets_host.push_back(total_chunks);
+
+  auto offsets_cpu = at::empty(
+      {static_cast<int64_t>(num_nonempty + 1)},
+      at::TensorOptions().dtype(at::kLong).device(at::kCPU).pinned_memory(
+          true));
+  std::memcpy(
+      offsets_cpu.mutable_data_ptr<int64_t>(),
+      offsets_host.data(),
+      (num_nonempty + 1) * sizeof(int64_t));
+  return ForeachReductionChunks{
+      offsets_cpu.to(options.device(), /*non_blocking=*/true),
+      total_chunks,
+      num_nonempty};
+}
+
 template <
     typename T,
     int depth = 1,
@@ -61,7 +112,7 @@ struct LpMaxFunctor {
       int64_t chunk_size,
       TensorListMetadata<depth>& tl,
       T* output_per_tensor_ptr,
-      const int max_chunks_per_tensor) {
+      const int64_t* chunk_offsets) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
     auto n = tl.numel_for_tensor[tensor_loc];
@@ -110,7 +161,7 @@ struct LpMaxFunctor {
 
     if (threadIdx.x == 0) {
       output_per_tensor_ptr
-          [(tl.start_tensor_this_launch + tensor_loc) * max_chunks_per_tensor +
+          [chunk_offsets[tl.start_tensor_this_launch + tensor_loc] +
            chunk_idx] = final_val;
     }
   }
@@ -120,12 +171,15 @@ template <typename T>
 __global__ void lpmax_cleanup(
     const T* output_per_tensor,
     TensorListAddresses addr_struct,
-    int max_chunks_per_tensor) {
+    const int64_t* chunk_offsets,
+    int base_tensor) {
   __shared__ T vals[512];
-  const T* output_this_tensor =
-      output_per_tensor + blockIdx.x * max_chunks_per_tensor;
+  const int64_t g = base_tensor + blockIdx.x;
+  const int64_t offset = chunk_offsets[g];
+  const T* output_this_tensor = output_per_tensor + offset;
+  const int64_t num_chunks = chunk_offsets[g + 1] - offset;
   T val = std::numeric_limits<T>::lowest();
-  for (size_t i = threadIdx.x; i < max_chunks_per_tensor; i += blockDim.x) {
+  for (int32_t i = threadIdx.x; i < num_chunks; i += blockDim.x) {
     val = max_propagate_nan(val, output_this_tensor[i]);
   }
   T final_val = at::native::cuda_utils::BlockReduceMax(val, vals);
@@ -151,18 +205,11 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   }
 
   const size_t ntensors = tensors.size();
-  int max_chunks_per_tensor = -1;
-
-  for (const auto t : c10::irange(ntensors)) {
-    int max_chunks_this_tensor =
-        (tensors[t].numel() + kChunkSize - 1) / kChunkSize;
-    if (max_chunks_this_tensor > max_chunks_per_tensor) {
-      max_chunks_per_tensor = max_chunks_this_tensor;
-    }
-  }
   const auto options = tensors[0].options();
+  const auto chunk_meta = compute_foreach_reduction_chunks(tensors, options);
+  const int64_t* chunk_offsets_ptr =
+      chunk_meta.chunk_offsets.const_data_ptr<int64_t>();
 
-  // Initialize output_per_tensor with lowest value
   Tensor output_per_tensor;
 
   std::vector<at::Tensor> vec_res;
@@ -186,41 +233,40 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
       tensor_lists[0][0].scalar_type(),
       "foreach_tensor_max_cuda_scalar_type",
       [&]() {
-        // Initialize intermediate buffer with lowest()
-        output_per_tensor = at::full(
-            {static_cast<int64_t>(ntensors) * max_chunks_per_tensor},
-            std::numeric_limits<scalar_t>::lowest(),
-            options);
+        output_per_tensor = at::empty({chunk_meta.total_chunks}, options);
 
         multi_tensor_apply<1>(
             tensor_lists,
             LpMaxFunctor<scalar_t>(),
             output_per_tensor.mutable_data_ptr<scalar_t>(),
-            max_chunks_per_tensor);
+            chunk_offsets_ptr);
 
         C10_CUDA_KERNEL_LAUNCH_CHECK();
         const at::cuda::OptionalCUDAGuard device_guard(
             device_of(output_per_tensor));
         auto stream = at::cuda::getCurrentCUDAStream();
 
-        const size_t num_kernels = ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
+        const size_t num_kernels =
+            ceil_div(chunk_meta.num_nonempty, MAX_TENSORS_PER_KERNEL);
         for (const auto i : c10::irange(num_kernels)) {
           const size_t num_tensors_this_kernel =
-              (i < num_kernels - 1 || ntensors % MAX_TENSORS_PER_KERNEL == 0)
+              (i < num_kernels - 1 ||
+               chunk_meta.num_nonempty % MAX_TENSORS_PER_KERNEL == 0)
               ? MAX_TENSORS_PER_KERNEL
-              : (ntensors % MAX_TENSORS_PER_KERNEL);
+              : (chunk_meta.num_nonempty % MAX_TENSORS_PER_KERNEL);
 
           TensorListAddresses addr_struct;
           for (const auto j : c10::irange(num_tensors_this_kernel)) {
             addr_struct.addresses[j] = vec_res[i * MAX_TENSORS_PER_KERNEL + j]
                                            .mutable_data_ptr<scalar_t>();
           }
+          const int base_tensor = static_cast<int>(i * MAX_TENSORS_PER_KERNEL);
 
           lpmax_cleanup<scalar_t><<<num_tensors_this_kernel, 512, 0, stream>>>(
-              output_per_tensor.const_data_ptr<scalar_t>() +
-                  i * MAX_TENSORS_PER_KERNEL * max_chunks_per_tensor,
+              output_per_tensor.const_data_ptr<scalar_t>(),
               addr_struct,
-              max_chunks_per_tensor);
+              chunk_offsets_ptr,
+              base_tensor);
         }
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
@@ -260,7 +306,7 @@ struct LpNormFunctor {
       int64_t chunk_size,
       TensorListMetadata<depth>& tl,
       out_opmath_t* output_per_tensor_ptr,
-      const int max_chunks_per_tensor) {
+      const int64_t* chunk_offsets) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
     auto n = tl.numel_for_tensor[tensor_loc];
@@ -332,7 +378,7 @@ struct LpNormFunctor {
 
     if (threadIdx.x == 0) {
       output_per_tensor_ptr
-          [(tl.start_tensor_this_launch + tensor_loc) * max_chunks_per_tensor +
+          [chunk_offsets[tl.start_tensor_this_launch + tensor_loc] +
            chunk_idx] = final_val;
     }
   }
@@ -347,13 +393,16 @@ template <
 __global__ void lpnorm_cleanup(
     const out_opmath_t* output_per_tensor,
     TensorListAddresses addr_struct,
-    int max_chunks_per_tensor) {
+    const int64_t* chunk_offsets,
+    int base_tensor) {
   __shared__ out_opmath_t vals[512];
 
-  const out_opmath_t* output_this_tensor =
-      output_per_tensor + blockIdx.x * max_chunks_per_tensor;
+  const int64_t g = base_tensor + blockIdx.x;
+  const int64_t offset = chunk_offsets[g];
+  const out_opmath_t* output_this_tensor = output_per_tensor + offset;
+  const int64_t num_chunks = chunk_offsets[g + 1] - offset;
   out_opmath_t val = 0;
-  for (size_t i = threadIdx.x; i < max_chunks_per_tensor; i += blockDim.x) {
+  for (int32_t i = threadIdx.x; i < num_chunks; i += blockDim.x) {
     if constexpr (norm_type == NormType::LInf) {
       val = max_propagate_nan(val, output_this_tensor[i]);
     } else {
@@ -447,22 +496,15 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
     double p,
     std::optional<ScalarType> dtype) {
   const size_t ntensors = tensors.size();
-  int max_chunks_per_tensor = -1;
-
-  for (const auto t : c10::irange(ntensors)) {
-    int max_chunks_this_tensor =
-        (tensors[t].numel() + kChunkSize - 1) / kChunkSize;
-    if (max_chunks_this_tensor > max_chunks_per_tensor) {
-      max_chunks_per_tensor = max_chunks_this_tensor;
-    }
-  }
   const auto options = tensors[0].options();
+  const auto chunk_meta = compute_foreach_reduction_chunks(tensors, options);
+  const int64_t* chunk_offsets_ptr =
+      chunk_meta.chunk_offsets.const_data_ptr<int64_t>();
   const ScalarType output_dtype =
       dtype.has_value() ? dtype.value() : tensors[0].scalar_type();
   const ScalarType output_per_tensor_dtype = toOpMathType(output_dtype);
-  auto output_per_tensor = at::zeros(
-      {static_cast<int64_t>(ntensors) * max_chunks_per_tensor},
-      options.dtype(output_per_tensor_dtype));
+  auto output_per_tensor = at::empty(
+      {chunk_meta.total_chunks}, options.dtype(output_per_tensor_dtype));
 
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
@@ -493,19 +535,19 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
                     tensor_lists,
                     LpNormFunctor<scalar_t, NormType::L0, out_t>(),
                     output_per_tensor.template mutable_data_ptr<out_opmath_t>(),
-                    max_chunks_per_tensor);
+                    chunk_offsets_ptr);
               } else if (p == static_cast<double>(1)) {
                 multi_tensor_apply<1>(
                     tensor_lists,
                     LpNormFunctor<scalar_t, NormType::L1, out_t>(),
                     output_per_tensor.template mutable_data_ptr<out_opmath_t>(),
-                    max_chunks_per_tensor);
+                    chunk_offsets_ptr);
               } else if (p == static_cast<double>(2)) {
                 multi_tensor_apply<1>(
                     tensor_lists,
                     LpNormFunctor<scalar_t, NormType::L2, out_t>(),
                     output_per_tensor.template mutable_data_ptr<out_opmath_t>(),
-                    max_chunks_per_tensor);
+                    chunk_offsets_ptr);
               } else if constexpr (support_infinity) {
                 if (p == std::numeric_limits<double>::infinity()) {
                   multi_tensor_apply<1>(
@@ -513,7 +555,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
                       LpNormFunctor<scalar_t, NormType::LInf, out_t>(),
                       output_per_tensor
                           .template mutable_data_ptr<out_opmath_t>(),
-                      max_chunks_per_tensor);
+                      chunk_offsets_ptr);
                 }
               }
               C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -522,13 +564,13 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
               auto stream = at::cuda::getCurrentCUDAStream();
 
               const size_t num_kernels =
-                  ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
+                  ceil_div(chunk_meta.num_nonempty, MAX_TENSORS_PER_KERNEL);
               for (const auto i : c10::irange(num_kernels)) {
                 const size_t num_tensors_this_kernel =
                     (i < num_kernels - 1 ||
-                     ntensors % MAX_TENSORS_PER_KERNEL == 0)
+                     chunk_meta.num_nonempty % MAX_TENSORS_PER_KERNEL == 0)
                     ? MAX_TENSORS_PER_KERNEL
-                    : (ntensors % MAX_TENSORS_PER_KERNEL);
+                    : (chunk_meta.num_nonempty % MAX_TENSORS_PER_KERNEL);
 
                 TensorListAddresses addr_struct;
                 for (const auto j : c10::irange(num_tensors_this_kernel)) {
@@ -536,44 +578,42 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
                       vec_res[i * MAX_TENSORS_PER_KERNEL + j]
                           .template mutable_data_ptr<out_t>();
                 }
+                const int base_tensor =
+                    static_cast<int>(i * MAX_TENSORS_PER_KERNEL);
 
                 if (p == static_cast<double>(0)) {
                   lpnorm_cleanup<scalar_t, NormType::L0, out_t, apply_root>
                       <<<num_tensors_this_kernel, 512, 0, stream>>>(
                           output_per_tensor
-                                  .template const_data_ptr<out_opmath_t>() +
-                              i * MAX_TENSORS_PER_KERNEL *
-                                  max_chunks_per_tensor,
+                              .template const_data_ptr<out_opmath_t>(),
                           addr_struct,
-                          max_chunks_per_tensor);
+                          chunk_offsets_ptr,
+                          base_tensor);
                 } else if (p == static_cast<double>(1)) {
                   lpnorm_cleanup<scalar_t, NormType::L1, out_t, apply_root>
                       <<<num_tensors_this_kernel, 512, 0, stream>>>(
                           output_per_tensor
-                                  .template const_data_ptr<out_opmath_t>() +
-                              i * MAX_TENSORS_PER_KERNEL *
-                                  max_chunks_per_tensor,
+                              .template const_data_ptr<out_opmath_t>(),
                           addr_struct,
-                          max_chunks_per_tensor);
+                          chunk_offsets_ptr,
+                          base_tensor);
                 } else if (p == static_cast<double>(2)) {
                   lpnorm_cleanup<scalar_t, NormType::L2, out_t, apply_root>
                       <<<num_tensors_this_kernel, 512, 0, stream>>>(
                           output_per_tensor
-                                  .template const_data_ptr<out_opmath_t>() +
-                              i * MAX_TENSORS_PER_KERNEL *
-                                  max_chunks_per_tensor,
+                              .template const_data_ptr<out_opmath_t>(),
                           addr_struct,
-                          max_chunks_per_tensor);
+                          chunk_offsets_ptr,
+                          base_tensor);
                 } else if constexpr (support_infinity) {
                   if (p == std::numeric_limits<double>::infinity()) {
                     lpnorm_cleanup<scalar_t, NormType::LInf, out_t, apply_root>
                         <<<num_tensors_this_kernel, 512, 0, stream>>>(
                             output_per_tensor
-                                    .template const_data_ptr<out_opmath_t>() +
-                                i * MAX_TENSORS_PER_KERNEL *
-                                    max_chunks_per_tensor,
+                                .template const_data_ptr<out_opmath_t>(),
                             addr_struct,
-                            max_chunks_per_tensor);
+                            chunk_offsets_ptr,
+                            base_tensor);
                   }
                 }
                 C10_CUDA_KERNEL_LAUNCH_CHECK();
