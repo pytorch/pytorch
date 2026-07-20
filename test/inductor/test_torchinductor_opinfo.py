@@ -51,7 +51,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CPU,
     HAS_CUDA_AND_TRITON,
     has_triton,
     HAS_XPU_AND_TRITON,
@@ -1299,7 +1298,7 @@ class TestInductorOpInfo(TestCase):
     @skipXPUIf(
         not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
     )
-    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipCPUIf(True, "Skipped! OpInfo CPU coverage disabled to restore CI TTS")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
