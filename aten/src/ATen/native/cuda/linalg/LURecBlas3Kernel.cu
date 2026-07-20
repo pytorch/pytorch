@@ -41,16 +41,7 @@ namespace {
 constexpr int SWP_WIDTH = 4;
 
 // Max possible panel width for the register-resident panel LU factozization.
-// Capped for smaller binary.
 constexpr int MAX_RECNB = 32;
-
-template <int LO, int HI, typename F>
-void range_dispatch(int val, F&& f) {
-  if constexpr (LO <= HI) {
-    if (val == LO) { f(std::integral_constant<int, LO>{}); }
-    else { range_dispatch<LO + 1, HI>(val, std::forward<F>(f)); }
-  }
-}
 
 // Nb values for the base case in the recursive call,
 // when dispatching to the register-resident panel LU kernel
@@ -415,12 +406,13 @@ void batched_apply_pivots_parallel(
 // in-register scale and rank-1 update. One global read at start, one write at end.
 // blockDim.x = nrows (number of rows in the submatrix), one block per batch.
 // Constraint: nrows <= 1024 (max threads per block).
-template <typename scalar_t, int NB>
+template <typename scalar_t>
 __global__ void
 batched_panel_register_resident_fused_kernel(
   scalar_t* __restrict__ dA, int64_t matrix_stride,
   int lda, int m,
   int col_start,
+  int nb,
   int ipiv_stride,
   int* __restrict__ dipiv,
   int* __restrict__ dinfo
@@ -441,22 +433,22 @@ batched_panel_register_resident_fused_kernel(
   // sipiv[NB]   - pivot indices
   extern __shared__ char smem_raw[];
   scalar_t* spivrow = reinterpret_cast<scalar_t*>(smem_raw);
-  real_t* sabsval = reinterpret_cast<real_t*>(spivrow + NB);
+  real_t* sabsval = reinterpret_cast<real_t*>(spivrow + nb);
   int* sargmax = reinterpret_cast<int*>(sabsval + nrows);
   int* sipiv = reinterpret_cast<int*>(sargmax + nrows);
 
   // Each thread owns its full row stored in registers
-  scalar_t rA[NB];
+  scalar_t rA[MAX_RECNB];
   #pragma unroll
-  for (int i = 0; i < NB; ++i) {
+  for (int i = 0; i < nb; ++i) {
     rA[i] = (tid < nrows)
       ? A[LinOff(col_start + tid, col_start + i, lda)]
       : static_cast<scalar_t>(0);
   }
 
-  if (tid < NB) { sipiv[tid] = 0; };
+  if (tid < nb) { sipiv[tid] = 0; };
 
-  for (int i = 0, ir = i + tid, irows = nrows; i < NB; ++i, ++ir, --irows) {
+  for (int i = 0, ir = i + tid, irows = nrows; i < nb; ++i, ++ir, --irows) {
     // 1. Write abs value to shared memory using current logical row position
     sabsval[curr_row] = std::abs(rA[i]);
     sargmax[tid] = tid;
@@ -492,7 +484,7 @@ batched_panel_register_resident_fused_kernel(
     // 3. Pivot row broadcasts its values to shared memory
     if (curr_row == argmax) {
       #pragma unroll
-      for (int j = 0; j < NB; ++j) { spivrow[j] = rA[j]; }
+      for (int j = 0; j < nb; ++j) { spivrow[j] = rA[j]; }
     }
     __syncthreads();
 
@@ -509,7 +501,7 @@ batched_panel_register_resident_fused_kernel(
     if (curr_row > i) {
       rA[i] /= spivrow[i];
       #pragma unroll
-      for (int j = i + 1; j < NB; ++j) {
+      for (int j = i + 1; j < nb; ++j) {
         rA[j] -= rA[i] * spivrow[j];
       }
     }
@@ -519,14 +511,14 @@ batched_panel_register_resident_fused_kernel(
   if (tid == 0) { dinfo[batch] = linfo; }
 
   // Write pivots (1-based, absolute)
-  if (tid < NB) {
+  if (tid < nb) {
     dipiv[batch * ipiv_stride + col_start + tid] = sipiv[tid] + col_start + 1;
   }
 
   // Write back results using curr_row
   if (tid < nrows) {
     #pragma unroll
-    for (int i = 0; i < NB; ++i) {
+    for (int i = 0; i < nb; ++i) {
       A[LinOff(col_start + curr_row, col_start + i, lda)] = rA[i];
     }
   }
@@ -552,14 +544,9 @@ bool try_launch_fused_panel_register_resident(
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  // Any nb in [1, MAX_RECNB] can appear as the base case (from recursive halving
-  // or from the outer loop's min(nb_outer, n-j) remainder), so cover all values.
-  range_dispatch<1, MAX_RECNB>(nb, [&](auto IC) {
-    constexpr int NB = decltype(IC)::value;
-    batched_panel_register_resident_fused_kernel<scalar_t, NB><<<grid, threads, shmem, stream>>>(
-      dA, matrix_stride, lda, m, col_start, ipiv_stride, dipiv, dinfo
-    );
-  });
+  batched_panel_register_resident_fused_kernel<scalar_t><<<grid, threads, shmem, stream>>>(
+    dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
+  );
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return true;
 }
@@ -675,7 +662,7 @@ void lu_batched_panel_recursive(
     } else {
       recnb = tuning.recnb_reg.nb_cdouble;
     }
-    // Cap for smaller binary
+    // Cap for less register pressure
     recnb = std::min(recnb, MAX_RECNB);
   } else {
     // Colserial panel LU kernel
