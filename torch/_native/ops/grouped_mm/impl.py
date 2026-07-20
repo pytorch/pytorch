@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import functools
+
 import torch
 
 from ... import cutedsl_utils as cu
 
 
+@functools.cache
+def _is_sm12x_device_index(device_index: int) -> bool:
+    major, _ = torch.cuda.get_device_capability(device_index)
+    return major == 12
+
+
 def _valid_2d_or_3d_strides(t: torch.Tensor) -> bool:
-    if t.data_ptr() % 16 != 0:
+    if t.const_data_ptr() % 16 != 0:  # pyrefly: ignore[missing-attribute]
         return False
     alignment = 16 // t.element_size()
     if t.dim() == 3 and t.stride(0) % alignment != 0:
@@ -44,11 +52,7 @@ def _grouped_mm_sm12x_cond(
         return False
     if mat2.device != self.device or offs.device != self.device:
         return False
-    is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
-    if is_cow(self) or is_cow(mat2) or is_cow(offs):
-        return False
-    major, _ = torch.cuda.get_device_capability(self.device)
-    if major != 12:
+    if not _is_sm12x_device_index(self.device.index):
         return False
     # QuACK only supports 2D/2D and 2D/3D grouped GEMM
     if self.dim() != 2:
@@ -96,10 +100,10 @@ def _grouped_mm_sm12x_impl(
     bias: torch.Tensor | None = None,
     out_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
-    from torch._vendor.quack.grouped_gemm import grouped_mm_sm12x
+    from .quack_impl import grouped_mm_sm12x
 
     if offs is None:
-        raise RuntimeError("offs must be provided")
+        raise ValueError("offs must be provided")
     zero = torch.zeros(1, dtype=torch.int32, device=offs.device)
     cu_seqlens = torch.cat((zero, offs))
 

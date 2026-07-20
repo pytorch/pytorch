@@ -1,30 +1,35 @@
-# Copyright (c) 2025, Tri Dao.
 # mypy: allow-untyped-defs
-"""Small QuACK GEMM facade used by torch._native grouped GEMM overrides."""
+"""QuACK grouped GEMM implementation for the SM120 aten::_grouped_mm override."""
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import Any, NamedTuple, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import torch
 from torch import Tensor
-
 from torch._native.instrumentation import instrument_cutedsl_compile
-
-from .cache import jit_cache
-from .cute_dsl_utils import get_device_capacity, get_max_active_clusters
-from .gemm_config import GemmConfig
-from .gemm_default_epi import GemmDefaultEpiMixin, GemmDefaultSm120
-from .gemm_tvm_ffi_utils import (
+from torch._vendor.quack.cache import jit_cache
+from torch._vendor.quack.cute_dsl_utils import (
+    get_device_capacity,
+    get_max_active_clusters,
+)
+from torch._vendor.quack.gemm_config import GemmConfig
+from torch._vendor.quack.gemm_default_epi import GemmDefaultEpiMixin, GemmDefaultSm120
+from torch._vendor.quack.gemm_tvm_ffi_utils import (
     compile_gemm_kernel,
     get_dtypes,
     get_majors,
     make_fake_gemm_tensors,
-    make_fake_varlen_args,
     make_fake_scheduler_args,
+    make_fake_varlen_args,
     make_scheduler_args,
     make_varlen_args,
 )
+from torch.utils.dlpack import ReadOnlyTensorWrapper
 
 
 def _sm120_default_config() -> GemmConfig:
@@ -107,7 +112,7 @@ def _compile_sm120_grouped_mm_varlen(
 
 
 class _GroupedGemmPlan(NamedTuple):
-    compiled_fn: object
+    compiled_fn: Callable[..., Any]
     epi_static: object
     scheduler_static: object | None
     max_active_clusters: int
@@ -212,17 +217,17 @@ def grouped_mm_sm12x(A: Tensor, B: Tensor, cu_seqlens: Tensor) -> Tensor:
 
     if varlen_k:
         out_shape = (cu_seqlens.numel() - 1, A.shape[0], B.shape[-1])
-        varlen_args = make_varlen_args(None, cu_seqlens, None)
+        varlen_args = make_varlen_args(None, ReadOnlyTensorWrapper(cu_seqlens), None)
     else:
         out_shape = (A.shape[0], B.shape[-1])
-        varlen_args = make_varlen_args(cu_seqlens, None, None)
+        varlen_args = make_varlen_args(ReadOnlyTensorWrapper(cu_seqlens), None, None)
 
     out = _empty_grouped_mm_output(out_shape, A.dtype, A.device)
     out_lower = out.permute(1, 2, 0) if varlen_k else out
     plan = _plan(A, B_lower, out_lower, varlen_m=varlen_m, varlen_k=varlen_k)
     plan.compiled_fn(
-        A,
-        B_lower,
+        ReadOnlyTensorWrapper(A),
+        ReadOnlyTensorWrapper(B_lower),
         out_lower,
         None,
         plan.epi_static,
