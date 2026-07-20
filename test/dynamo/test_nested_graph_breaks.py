@@ -1821,6 +1821,76 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result[1].shape, (2,))
         self.assertTrue(result[0].requires_grad)
 
+    def test_tree_map_only_graph_break_preserves_structure(self):
+        from torch.utils._pytree import tree_map_only
+
+        def map_fn(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        def fn(x, y):
+            return tree_map_only(torch.Tensor, map_fn, [x, y])
+
+        x, y = torch.randn(3), torch.randn(2)
+        result = torch.compile(fn, backend="eager")(x, y)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], x + 1)
+        self.assertEqual(result[1], y + 1)
+
+    def test_tree_map_functools_partial_graph_break_preserves_structure(self):
+        import functools
+
+        from torch.utils._pytree import tree_map
+
+        def add_bias(bias, x):
+            torch._dynamo.graph_break()
+            return x + bias
+
+        def fn(x, y):
+            return tree_map(functools.partial(add_bias, 1), [x, y])
+
+        x, y = torch.randn(3), torch.randn(2)
+        result = torch.compile(fn, backend="eager")(x, y)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], x + 1)
+        self.assertEqual(result[1], y + 1)
+
+    def test_tree_map_no_grad_wrapped_graph_break_preserves_structure(self):
+        from torch.utils._pytree import tree_map
+
+        def map_fn(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        def fn(x, y):
+            return tree_map(torch.no_grad()(map_fn), [x, y])
+
+        x, y = torch.randn(3), torch.randn(2)
+        result = torch.compile(fn, backend="eager")(x, y)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], x + 1)
+        self.assertEqual(result[1], y + 1)
+
+    def test_tree_map_no_grad_nested_fn_graph_break_preserves_structure(self):
+        from torch.utils._pytree import tree_map
+
+        def fn(x, y):
+            def map_fn(t):
+                torch._dynamo.graph_break()
+                return t + 1
+
+            return tree_map(torch.no_grad()(map_fn), [x, y])
+
+        x, y = torch.randn(3), torch.randn(2)
+        result = torch.compile(fn, backend="eager")(x, y)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], x + 1)
+        self.assertEqual(result[1], y + 1)
+
     def test_cxx_pytree_treespec_leaf_namespace(self):
         import torch.utils._cxx_pytree as cxx_pytree
 

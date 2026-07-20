@@ -1574,6 +1574,15 @@ class InstructionTranslatorBase(
                 allow_nested_graph_breaks=allow_nested_graph_breaks,
             )
 
+    @contextlib.contextmanager
+    def suppress_nested_graph_breaks(self):
+        prev = self._suppress_nested_graph_breaks
+        self._suppress_nested_graph_breaks = True
+        try:
+            yield
+        finally:
+            self._suppress_nested_graph_breaks = prev
+
     def get_line_of_code_header(self, lineno: int | None = None) -> str:
         if lineno is None:
             lineno = self.lineno
@@ -5381,7 +5390,7 @@ class InstructionTranslatorBase(
         self.has_no_inlined_calls = True
         self.parent = None
         self.is_child_tracer_active = False
-        self._tree_map_fast_path_active = False
+        self._suppress_nested_graph_breaks = False
         self.debug_locals = []
 
         self.package = package
