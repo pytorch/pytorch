@@ -45,6 +45,7 @@ else:
     from torch.distributed import config as dist_config
     from torch.distributed.distributed_c10d import (
         _get_default_group,
+        _rank_not_in_group,
         _register_process_group_opaque_type,
         _resolve_process_group,
         get_backend,
@@ -569,7 +570,7 @@ else:
                     split_ranks=pg_ranks_by_dim.tolist(),
                     group_desc=group_desc,
                 )
-                if dim_group is None:
+                if _rank_not_in_group(dim_group):
                     return None
                 return dim_group.group_name
 

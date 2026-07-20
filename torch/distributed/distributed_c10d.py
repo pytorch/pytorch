@@ -6096,7 +6096,7 @@ def split_group(
     pg_options: Any | None = None,
     group_desc: str | None = None,
     backend: str | Backend | None = None,
-) -> ProcessGroup | None:
+) -> ProcessGroup:
     """
     Create a new process group split from the given parent process group.
 
@@ -6136,7 +6136,9 @@ def split_group(
 
     Returns:
         ProcessGroup if the current rank is within one split/subgroup given by split_ranks,
-        or None if the current rank is not part of any split_ranks`.
+        or ``GroupMember.NON_GROUP_MEMBER`` if the current rank is not part of any
+        ``split_ranks``. Note this matches the sentinel returned by :func:`new_group` for
+        non-members; it is not ``None`` (which downstream APIs treat as the default group).
 
     """
     # check inputs
@@ -6279,7 +6281,9 @@ def split_group(
         device_types=device_types_filter,
     )
     if split_pg is None:
-        return None
+        # Non-member: return the same sentinel as new_group (not None, which
+        # downstream collectives would treat as the default group).
+        return GroupMember.NON_GROUP_MEMBER  # pyrefly: ignore[bad-return]
 
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
     split_pg.bound_device_id = device_id  # type: ignore[union-attr]
@@ -6604,7 +6608,7 @@ def _new_group_with_tag(
                 "MPI backend doesn't support use_local_synchronization=True"
             )
         if ranks is not None and get_rank() not in ranks:
-            return None
+            return GroupMember.NON_GROUP_MEMBER
 
     # checks the input ranks
     if ranks is not None:

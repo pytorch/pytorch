@@ -1226,6 +1226,29 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_comm_split_group_non_member_returns_sentinel(self):
+        # A rank left out of every split must get back GroupMember.NON_GROUP_MEMBER,
+        # the same sentinel new_group returns for non-members -- NOT None. Returning
+        # None would be unsafe: downstream collectives treat group=None as the
+        # default/WORLD group, so a non-member passing it in would silently run a
+        # WORLD collective instead of a no-op.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+
+        # Single split containing only rank 0; every other rank is a non-member.
+        ng = c10d.split_group(pg, [[0]])
+        if self.rank == 0:
+            self.assertIsInstance(ng, dist.ProcessGroup)
+            self.assertEqual(dist.get_process_group_ranks(ng), [0])
+        else:
+            self.assertEqual(ng, c10d.GroupMember.NON_GROUP_MEMBER)
+            self.assertIsNotNone(ng)
+
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_group_mixed_backend(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.
@@ -7418,7 +7441,8 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
             dist.broadcast(tensor2, 7, group=ng2)
             self.assertEqual(tensor2, torch.full((1,), 7))
         else:
-            self.assertEqual(ng2, None)
+            # Non-members get the same sentinel as new_group, not None.
+            self.assertEqual(ng2, c10d.GroupMember.NON_GROUP_MEMBER)
         # a barrier and a cuda sync before destroying all pgs.
         dist.barrier(pg)
         torch.cuda.synchronize()
