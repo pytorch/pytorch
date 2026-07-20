@@ -1127,6 +1127,9 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
                 "snapshot",  # the allocator generated a memory snapshot
                 # useful to correlate a previously taken
                 # snapshot with this trace
+                "annotate",  # metadata was attached to a live allocation
+                # via _annotate_memory. 'addr' is the allocation's base
+                # address and 'user_metadata' holds the annotation
             ]
             addr: int  # not present for OOM
             frames: List[Frame]
@@ -1231,6 +1234,41 @@ def _get_memory_metadata() -> str:
     """
     # pyrefly: ignore [missing-attribute]
     return torch._C._cuda_getMemoryMetadata()
+
+
+def _annotate_memory(data_ptr: int, metadata: str):
+    """
+    Attach metadata to an existing (live) allocation, post facto.
+
+    Unlike :func:`_set_memory_metadata`, which stamps metadata onto trace
+    events as they are generated, this records a dedicated ``annotate`` trace
+    event for an allocation that already exists. This is useful when the
+    information only becomes available after the allocation happened, e.g.
+    noting that a tensor was packed into the autograd graph. Metadata recorded
+    at allocation time is not modified; annotations accumulate as separate
+    trace entries keyed to the allocation's address, each carrying the
+    annotation string as its ``user_metadata`` and a stack trace of the
+    annotation site (subject to the ``context`` setting of
+    :func:`_record_memory_history`). The pytorch.org/memory_viz visualizer
+    shows annotations alongside the allocation's own metadata.
+
+    ``data_ptr`` must be the base address of a live allocation, e.g. the
+    result of ``tensor.untyped_storage().data_ptr()``. Passing the result of
+    ``tensor.data_ptr()`` for a view with a nonzero ``storage_offset`` will
+    raise, as will passing a pointer that is not a live allocation of the
+    caching allocator.
+
+    If memory history recording is not enabled (see
+    :func:`_record_memory_history`), this has no observable effect. It is only
+    supported by the native caching allocator; with other backends (e.g.
+    ``cudaMallocAsync`` or a pluggable allocator) it is silently ignored.
+
+    Args:
+        data_ptr (int): Base device pointer of the live allocation to annotate.
+        metadata (str): Annotation string to record.
+    """
+    # pyrefly: ignore [missing-attribute]
+    torch._C._cuda_annotateMemory(data_ptr, metadata)
 
 
 def _save_segment_usage(filename="output.svg", snapshot=None):
