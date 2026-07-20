@@ -12,16 +12,21 @@ import torch
 RankType = int | torch.SymInt
 
 
+class RNGIndexBlock(typing.NamedTuple):
+    """A strided set of contiguous indices in a flattened logical RNG stream."""
+
+    start_index: int | torch.SymInt
+    block_size: int | torch.SymInt
+    block_stride: int | torch.SymInt
+    num_blocks: int | torch.SymInt
+
+
 @typing.runtime_checkable
 class StatefulRNGTensor(typing.Protocol):
-    """Plain tensor metadata for replaying logical global RNG indices.
-
-    Each ``rng_index_blocks`` entry contains ``(start_index, block_size,
-    block_stride, num_blocks)``.
-    """
+    """Plain tensor metadata for replaying logical global RNG indices."""
 
     rng_global_numel: int
-    rng_index_blocks: tuple[tuple[int, int, int, int], ...]
+    rng_index_blocks: tuple[RNGIndexBlock, ...]
 
 
 log = logging.getLogger(__name__)
