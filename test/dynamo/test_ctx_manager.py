@@ -1776,7 +1776,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(fn(inp), opt_fn(inp))
 
     def test_store_attr_graph_break_key_error(self):
-        # STORE_ATTR on dummy should result in graph break
         def dummy():
             pass
 
@@ -1787,9 +1786,9 @@ class GraphModule(torch.nn.Module):
             return x + 4
 
         inp = torch.ones(3)
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(inp), opt_fn(inp))
-        self.assertGreater(len(counters["graph_break"]), 0)
+        self.assertEqual(dummy.attr1, inp + 2)
 
     @parametrize("gb", (True, False))
     def test_functorch_low_level(self, gb):
