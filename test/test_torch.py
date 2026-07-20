@@ -10980,6 +10980,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
                 torch.utils.swap_tensors(t1, t2)
 
+    @skipIfTorchDynamo(
+        "asserts exact tensor weakref counts; torch.compile holds transient "
+        "WeakIdRefs on traced tensors (#190165)"
+    )
     def test_swap_allows_tensor_weakref(self):
         from torch.utils.weak import TensorWeakRef
 
