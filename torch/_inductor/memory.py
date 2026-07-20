@@ -6,7 +6,7 @@ import dataclasses
 import heapq
 import logging
 import math
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, TypedDict, TypeVar
 
 import torch
 from torch._environment import is_fbcode
@@ -29,6 +29,8 @@ from .dependencies import WeakDep
 
 
 torch_log = logging.getLogger(__name__)
+
+_TupleT = TypeVar("_TupleT", tuple[float, float], tuple[float, float, float])
 
 
 @dataclasses.dataclass
@@ -643,8 +645,8 @@ class _LpmfReadyQueue:
     scan's selection exactly.
     """
 
-    _INF2 = (math.inf, math.inf)
-    _INF3 = (math.inf, math.inf, math.inf)
+    _INF2: tuple[float, float] = (math.inf, math.inf)
+    _INF3: tuple[float, float, float] = (math.inf, math.inf, math.inf)
 
     def __init__(self, nodes: list[BaseSchedulerNode]) -> None:
         order = sorted(nodes, key=lambda n: (n.mpi_node.size, n.mpi_node.index))
@@ -652,12 +654,17 @@ class _LpmfReadyQueue:
         self._by_index: dict[int, BaseSchedulerNode] = {
             n.mpi_node.index: n for n in nodes
         }
-        self._sizes = [n.mpi_node.size for n in order]
-        self._n = len(nodes)
-        self._partial = [self._INF2] * (2 * self._n)
-        self._full = [self._INF3] * (2 * self._n)
+        self._sizes: list[int] = [n.mpi_node.size for n in order]
+        self._n: int = len(nodes)
+        self._partial: list[tuple[float, float]] = [self._INF2] * (2 * self._n)
+        self._full: list[tuple[float, float, float]] = [self._INF3] * (2 * self._n)
 
-    def _write(self, pos: int, partial: tuple, full: tuple) -> None:
+    def _write(
+        self,
+        pos: int,
+        partial: tuple[float, float],
+        full: tuple[float, float, float],
+    ) -> None:
         i = pos + self._n
         self._partial[i] = partial
         self._full[i] = full
@@ -679,7 +686,9 @@ class _LpmfReadyQueue:
     def remove(self, node: BaseSchedulerNode) -> None:
         self._write(self._slot[node], self._INF2, self._INF3)
 
-    def _range_min(self, tree: list, lo: int, hi: int, inf: tuple) -> tuple:
+    def _range_min(
+        self, tree: list[_TupleT], lo: int, hi: int, inf: _TupleT
+    ) -> _TupleT:
         res = inf
         lo += self._n
         hi += self._n
