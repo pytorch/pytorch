@@ -16,7 +16,11 @@ from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import (
+    FakeTensor,
+    is_fake_tensor,
+    maybe_get_fake_mode,
+)
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
     FunctionalTensor,
@@ -335,8 +339,8 @@ def _set_compilation_env():
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     fake_mode_det = None
     for inp in pytree.tree_leaves(inputs):
-        if isinstance(inp, FakeTensor):
-            fake_mode_det = inp.fake_mode
+        if is_fake_tensor(inp):
+            fake_mode_det = maybe_get_fake_mode(inp)
             break
 
     fake_mode: AbstractContextManager = nullcontext()
@@ -456,7 +460,7 @@ def _collect_fake_inputs(inputs):
                             val
                         ) or torch._C._functorch.is_functionaltensor(val):
                             val = torch._C._functorch.get_unwrapped(val)
-                        if not isinstance(val, FakeTensor):
+                        if not is_fake_tensor(val):
                             raise AssertionError(
                                 f"Expected FakeTensor after unwrapping, got {type(val)}"
                             )
@@ -466,14 +470,14 @@ def _collect_fake_inputs(inputs):
                             unwrapped_input = getattr(val, attr_name)
                             if not isinstance(unwrapped_input, torch.Tensor):
                                 continue
-                            if not isinstance(unwrapped_input, FakeTensor):
+                            if not is_fake_tensor(unwrapped_input):
                                 raise AssertionError(
                                     f"Expected FakeTensor after unwrapping, got {type(unwrapped_input)}"
                                 )
                             inputs_fake.append(unwrapped_input)
                     else:
                         # This is the standard case of a TensorVariable
-                        if not isinstance(val, FakeTensor):
+                        if not is_fake_tensor(val):
                             raise AssertionError(
                                 f"Expected FakeTensor, got {type(val)}"
                             )
