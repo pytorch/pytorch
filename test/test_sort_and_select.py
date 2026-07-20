@@ -58,7 +58,7 @@ class TestSortAndSelect(TestCase):
         for k in range(1, SIZE):
             self.assertTrue(
                 check_order(mxx[:, k - 1], mxx[:, k]),
-                f"torch.sort ({order}) values unordered for {task}",
+                lambda msg: f"{msg}\ntorch.sort ({order}) values unordered for {task}",
             )
 
         seen = set()
@@ -871,7 +871,7 @@ class TestSortAndSelect(TestCase):
                     vals, idx = a.topk(k, dim=1, largest=largest)
                     self.assertTrue(
                         (idx >= 0).all().item() and (idx < slice_size).all().item(),
-                        f"OOB index from topk k={k} slice_size={slice_size} "
+                        lambda msg: f"{msg}\nOOB index from topk k={k} slice_size={slice_size} "
                         f"dtype={dtype} largest={largest}",
                     )
                     ref = a.gather(1, idx)
