@@ -982,6 +982,44 @@ std::string ConcretePyInterpreterVTable::name() const {
 
 namespace {
 
+// Cache Python imports as leaked handles: a plain function-local
+// `static py::object` would run its destructor at interpreter shutdown and
+// decref after finalization. Mirrors DEFINE_CACHING_PYTHON_IMPORT_GETTER in
+// python_variable.cpp.
+#if IS_PYBIND_2_13_PLUS
+#define DEFINE_CACHED_PYTHON_IMPORT(name, import_expr)                     \
+  py::handle name() {                                                      \
+    PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object> \
+        storage;                                                           \
+    return storage                                                         \
+        .call_once_and_store_result(                                       \
+            []() -> py::object { return import_expr; })                    \
+        .get_stored();                                                     \
+  }
+#else
+#define DEFINE_CACHED_PYTHON_IMPORT(name, import_expr)             \
+  py::handle name() {                                              \
+    static py::handle storage = py::object(import_expr).release(); \
+    return storage;                                                \
+  }
+#endif
+
+DEFINE_CACHED_PYTHON_IMPORT(
+    get_meta_table,
+    py::module::import("torch._decomp").attr("meta_table"))
+DEFINE_CACHED_PYTHON_IMPORT(
+    get_decomposition_table,
+    py::module::import("torch._decomp").attr("decomposition_table"))
+DEFINE_CACHED_PYTHON_IMPORT(
+    get_op_implementations_checks,
+    py::module::import("torch._subclasses.fake_impls")
+        .attr("op_implementations_checks"))
+DEFINE_CACHED_PYTHON_IMPORT(
+    get_cached_fast_op_impls,
+    py::module::import("torch._subclasses.fake_impls")
+        .attr("get_fast_op_impls")())
+
+#undef DEFINE_CACHED_PYTHON_IMPORT
 
 // Returns a per-output converter that stamps a callback's result tensors as
 // C++ fakes on the op's common device.
@@ -1058,13 +1096,10 @@ bool ConcretePyInterpreterVTable::fake_try_decomp(
   py::gil_scoped_acquire gil;
   py::handle py_op = getTorchApiFunction(op);
 
-  static py::object meta_table =
-      py::module::import("torch._decomp").attr("meta_table");
-  if (meta_table.contains(py_op)) {
+  if (get_meta_table().contains(py_op)) {
     return false;
   }
-  static py::object decomp_table =
-      py::module::import("torch._decomp").attr("decomposition_table");
+  py::handle decomp_table = get_decomposition_table();
   if (!decomp_table.contains(py_op)) {
     return false;
   }
@@ -1092,9 +1127,7 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
   // Match Python FakeTensorMode: iterate op_implementations_checks which
   // includes both the dict lookup (dispatch_to_op_implementations_dict) and
   // pattern-based checks (constructors, like-ops, etc.).
-  static py::object op_impl_checks =
-      py::module::import("torch._subclasses.fake_impls")
-          .attr("op_implementations_checks");
+  py::handle op_impl_checks = get_op_implementations_checks();
 
   auto mode = c10::impl::FakeTensorModeTLS::get_state();
   TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
@@ -1139,9 +1172,7 @@ bool ConcretePyInterpreterVTable::fake_try_fast_op_impls(
   py::gil_scoped_acquire gil;
   py::handle py_op = getTorchApiFunction(op);
 
-  static py::object fast_op_impls =
-      py::module::import("torch._subclasses.fake_impls")
-          .attr("get_fast_op_impls")();
+  py::handle fast_op_impls = get_cached_fast_op_impls();
   if (!fast_op_impls.contains(py_op)) {
     return false;
   }
@@ -1208,7 +1239,8 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     auto meta_obj = converter.attr("to_meta_tensor")(real);
     meta_tensor = py::cast<at::Tensor>(std::move(meta_obj));
   }
-  meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(real.device());
+  meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(
+      real.device());
   meta_tensor.unsafeGetTensorImpl()->set_fake_tensor_mode(std::move(mode));
   return meta_tensor.getIntrusivePtr();
 }
