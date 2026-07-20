@@ -844,8 +844,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: acosh_out
-    MPS: acosh_out_mps
+    CPU, CUDA, XPU, MPS: acosh_out
   tags: pointwise
 # arccosh, alias for acosh
 
@@ -877,8 +876,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: asinh_out
-    MPS: asinh_out_mps
+    CPU, CUDA, XPU, MPS: asinh_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: asinh_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: asinh_sparse_csr_out
   tags: pointwise
@@ -912,8 +910,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: atanh_out
-    MPS: atanh_out_mps
+    CPU, CUDA, XPU, MPS: atanh_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: atanh_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: atanh_sparse_csr_out
   tags: pointwise
@@ -3333,8 +3330,7 @@
 
 - func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, MTIA, XPU: nan_to_num_out
-    MPS: nan_to_num_out_mps
+    CPU, CUDA, MTIA, XPU, MPS: nan_to_num_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: nan_to_num_sparse_out
   tags: pointwise
 
@@ -4549,7 +4545,7 @@
     CPU, CUDA, XPU: _pdist_backward
   autogen: _pdist_backward.out
 
-- func: cosine_similarity(Tensor x1, Tensor x2, int dim=1, float eps=1e-08) -> Tensor
+- func: cosine_similarity(Tensor x1, Tensor x2, int dim=1, float eps=1e-08, bool keepdim=False) -> Tensor
   variants: function
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
@@ -6619,6 +6615,11 @@
   variants: function
   dispatch:
     CUDA: _philox_key_fold_in_cuda
+
+- func: _philox_key_fold_in.Tensor(Tensor key, Tensor data) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _philox_key_fold_in_tensor_cuda
 
 - func: _philox_normal_(Tensor(a!) self, Tensor key, float mean=0, float std=1) -> Tensor(a!)
   variants: function, method
@@ -9505,12 +9506,12 @@
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
-    CPU, CUDA: geqrf_out
+    CPU, CUDA, MPS: geqrf_out
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   variants: method, function
   dispatch:
-    CPU, CUDA: geqrf
+    CPU, CUDA, MPS: geqrf
 
 # orgqr, alias for linalg_householder_product
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
@@ -14704,8 +14705,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_qr_out
-    MPS: linalg_qr_out_mps
+    CPU, CUDA, MPS: linalg_qr_out
 
 - func: linalg_polar(Tensor A) -> (Tensor U, Tensor H)
   python_module: linalg
@@ -14716,7 +14716,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_polar_out
+    CPU, CUDA, MPS: linalg_polar_out
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg

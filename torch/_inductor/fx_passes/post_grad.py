@@ -1753,6 +1753,25 @@ def cat_splitwithsizes_replace(match, input_):
     return input_
 
 
+# reciprocal(sqrt(x)) -> rsqrt(x): an unconditional algebraic identity
+# (1 / sqrt(x) == rsqrt(x)) that saves one op per element in the generated kernel.
+@register_graph_pattern(
+    CallFunction(
+        aten.reciprocal.default,
+        CallFunction(aten.sqrt.default, KeywordArg("x")),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+)
+def reciprocal_sqrt_to_rsqrt(match: Match, x):
+    """reciprocal(sqrt(x)) -> rsqrt(x)"""
+
+    def repl(x):
+        return aten.rsqrt(x)
+
+    match.replace_by_example(repl, [x])
+
+
 def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
@@ -1801,6 +1820,30 @@ def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
+    mat1, mat2 = match.args
+    inp_val = inp.meta["val"]
+    mat1_val = mat1.meta["val"]
+    mat2_val = mat2.meta["val"]
+    if inp_val.dtype != mat1_val.dtype or inp_val.dtype != mat2_val.dtype:
+        return False
+    if inp_val.device != mat1_val.device or inp_val.device != mat2_val.device:
+        return False
+    beta = match.kwargs.get("beta", 1)
+    if inp_val.device.type != "cuda" and beta == 0:
+        mm_shape = mat1_val.shape[0], mat2_val.shape[1]
+        if not is_expandable_to(inp_val.shape, mm_shape):
+            return False
+
+    output = match.output_node()
+    if not _is_bias_like_addmm_input(inp, output):
+        return False
+    return all(is_pointwise_use(use) for use in output.users)
+
+
+def should_prefer_unfused_baddbmm(match):
+    inp = match.kwargs["inp"]
+    if not is_gpu(inp.meta["val"].device.type):
+        return False
 
     output = match.output_node()
     if not _is_bias_like_addmm_input(inp, output):
@@ -1840,13 +1883,60 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         ):
             return
 
+    drop_input_for_beta_zero = inp.meta["val"].device.type == "cuda"
+
     def repl(inp, x1, x2, alpha, beta):
+        if alpha == 0 and beta == 0 and drop_input_for_beta_zero:
+            return x1.new_zeros((x1.shape[0], x2.shape[1]))
         mm_result = x1 @ x2
         if alpha != 1:
             mm_result = alpha * mm_result
+        if beta == 0 and drop_input_for_beta_zero:
+            return mm_result
         if beta != 1:
             inp = beta * inp
         return inp + mm_result
+
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.baddbmm,
+        KeywordArg("inp"),
+        Arg(),
+        Arg(),
+        beta=KeywordArg("beta"),
+        alpha=KeywordArg("alpha"),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[2],
+    extra_check=should_prefer_unfused_baddbmm,
+)
+def unfuse_bias_baddbmm_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
+    if config.keep_addmm_fused_for_half_dtypes and inp.meta["val"].dtype in (
+        torch.bfloat16,
+        torch.float16,
+    ):
+        if inp.meta["val"].device.type != "xpu":
+            return
+        if not (
+            inp.op == "call_function"
+            and inp.target is torch.ops.prims.convert_element_type.default
+            and inp.args[0].meta["val"].dtype.is_floating_point
+            and torch.finfo(inp.args[0].meta["val"].dtype).bits
+            > torch.finfo(inp.meta["val"].dtype).bits
+        ):
+            return
+
+    def repl(inp, x1, x2, alpha, beta):
+        bmm_result = torch.bmm(x1, x2)
+        if alpha != 1:
+            bmm_result = alpha * bmm_result
+        if beta != 1:
+            inp = beta * inp
+        return inp + bmm_result
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
@@ -1901,6 +1991,62 @@ def addmm(match, mat1, mat2, *, inp):
         return aten.addmm(inp, mat1, mat2)
 
     match.replace_by_example(repl, [inp, mat1, mat2])
+
+
+def _is_addcdiv_fma_eligible(match: Match) -> bool:
+    """Guards for the addcdiv FMA re-fusion pass."""
+    # aten.addcdiv requires floating-point self; check inp, not output, because
+    # aten.div promotes integers to float so the output is float even for int inp.
+    inp_val = match.kwargs["inp"].meta.get("val")
+    if not (isinstance(inp_val, torch.Tensor) and inp_val.dtype.is_floating_point):
+        return False
+    # tl.fma / div_rn are Triton GPU-only
+    out_val = match.output_node().meta.get("val")
+    if not (
+        isinstance(out_val, torch.Tensor) and out_val.device.type in ("cuda", "xpu")
+    ):
+        return False
+    # aten.addcdiv requires all tensor args to be floating-point; integer
+    # constants and SymInts can appear as t1/t2 in decomposed graphs.
+    for key in ("t1", "t2"):
+        node = match.kwargs.get(key)
+        val = node.meta.get("val") if isinstance(node, torch.fx.Node) else node
+        if not (isinstance(val, torch.Tensor) and val.dtype.is_floating_point):
+            return False
+    # aten.addcdiv requires a scalar value, not a tensor
+    return not isinstance(match.kwargs.get("value"), torch.fx.Node)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.add.Tensor,
+        KeywordArg("inp"),
+        CallFunction(
+            aten.mul.Tensor,
+            CallFunction(aten.div.Tensor, KeywordArg("t1"), KeywordArg("t2")),
+            KeywordArg("value"),
+        ),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[2],
+    extra_check=_is_addcdiv_fma_eligible,
+)
+def _fuse_addcdiv_to_fma(match: Match, inp, t1, t2, value) -> None:
+    """Re-fuse ``inp + (t1/t2)*value`` back into ``aten.addcdiv``.
+
+    torch.addcdiv is CompositeImplicitAutograd: it decomposes into
+    aten.div + aten.mul + aten.add before Inductor sees the graph, making the
+    FMA-aware lowering in lowering.py unreachable.  Re-inserting a single
+    aten.addcdiv node lets that lowering fire (tl.fma + triton.language.div_rn).
+    """
+
+    def repl(
+        inp: torch.Tensor, t1: torch.Tensor, t2: torch.Tensor, value
+    ) -> torch.Tensor:
+        return torch.ops.aten.addcdiv(inp, t1, t2, value=value)
+
+    counters["inductor"]["addcdiv_fma_fused"] += 1
+    match.replace_by_example(repl, [inp, t1, t2, value])
 
 
 def register_partial_reduction_pattern():
