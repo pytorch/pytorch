@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfWindows,
     skipIfXpu,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -1078,7 +1079,6 @@ class CompiledOptimizerTests(TestCase):
             self.assertEqual(param, param_ref)
 
 
-@skipIfRocm(msg="ROCm may have different numerical behavior")
 @requires_gpu_and_triton
 class CompiledOptimizerBitwiseTests(TestCase):
     """
@@ -1128,7 +1128,13 @@ class CompiledOptimizerBitwiseTests(TestCase):
                 ]
                 expected = fn(start, end)
                 actual = torch.compile(fn)(start, end)
-                self.assertEqual(actual, expected, atol=0, rtol=0)
+                # On ROCm the fp16 lerp path (libdevice) can differ from eager
+                # by a single ULP; fp32/fp64 remain bitwise identical. Allow a
+                # 1-ULP fp16 tolerance there instead of skipping the whole test.
+                atol = rtol = 0
+                if TEST_WITH_ROCM and torch.float16 in dtypes:
+                    atol = rtol = 1e-3
+                self.assertEqual(actual, expected, atol=atol, rtol=rtol)
 
     @staticmethod
     def _test_optimizer_bitwise(
@@ -1207,7 +1213,6 @@ for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
 
 
 def _make_bitwise_test(optim_cls, kernel_count=None, **optim_kwargs):
-    @skipIfRocm(msg="ROCm may have different numerical behavior")
     @skipIfXpu(msg="AttributeError, torch-xpu-ops: #2999")
     @requires_gpu_and_triton
     @config.patch(
