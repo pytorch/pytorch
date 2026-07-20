@@ -3,7 +3,9 @@
 import copy
 import unittest
 
+import torch
 import torch._dynamo as torchdynamo
+import torch.utils._pytree as pytree
 from torch._export import config
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import (
@@ -11,13 +13,17 @@ from torch._export.db.examples import (
     get_rewrite_cases,
 )
 from torch.export import export
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
     run_tests,
     TestCase,
 )
+
+
+def _to_device(obj, device):
+    return pytree.tree_map_only(torch.Tensor, lambda x: x.to(device), obj)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
@@ -29,18 +35,20 @@ class ExampleTests(TestCase):
         filter_examples_by_support_level(SupportLevel.SUPPORTED).items(),
         name_fn=lambda name, case: f"case_{name}",
     )
-    def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
-        model = case.model
+    def test_exportdb_supported(self, device, name: str, case: ExportCase) -> None:
+        model = copy.deepcopy(case.model)
+        if isinstance(model, torch.nn.Module):
+            model = model.to(device)
 
-        args_export = case.example_args
-        kwargs_export = case.example_kwargs
+        args_export = _to_device(copy.deepcopy(case.example_args), device)
+        kwargs_export = _to_device(copy.deepcopy(case.example_kwargs), device)
         args_model = copy.deepcopy(args_export)
         kwargs_model = copy.deepcopy(kwargs_export)
         with config.patch(use_new_tracer_experimental=True):
             exported_program = export(
                 model,
-                case.example_args,
-                case.example_kwargs,
+                args_export,
+                kwargs_export,
                 dynamic_shapes=case.dynamic_shapes,
                 strict=True,
             )
@@ -52,7 +60,7 @@ class ExampleTests(TestCase):
         )
 
         if case.extra_args is not None:
-            args = case.extra_args
+            args = _to_device(copy.deepcopy(case.extra_args), device)
             args_model = copy.deepcopy(args)
             self.assertEqual(
                 exported_program.module()(*args),
@@ -64,8 +72,12 @@ class ExampleTests(TestCase):
         filter_examples_by_support_level(SupportLevel.NOT_SUPPORTED_YET).items(),
         name_fn=lambda name, case: f"case_{name}",
     )
-    def test_exportdb_not_supported(self, name: str, case: ExportCase) -> None:
-        model = case.model
+    def test_exportdb_not_supported(self, device, name: str, case: ExportCase) -> None:
+        model = copy.deepcopy(case.model)
+        if isinstance(model, torch.nn.Module):
+            model = model.to(device)
+        args = _to_device(copy.deepcopy(case.example_args), device)
+        kwargs = _to_device(copy.deepcopy(case.example_kwargs), device)
         # pyre-ignore
         with self.assertRaises(
             (torchdynamo.exc.Unsupported, AssertionError, RuntimeError)
@@ -73,8 +85,8 @@ class ExampleTests(TestCase):
             with config.patch(use_new_tracer_experimental=True):
                 _ = export(
                     model,
-                    case.example_args,
-                    case.example_kwargs,
+                    args,
+                    kwargs,
                     dynamic_shapes=case.dynamic_shapes,
                     strict=True,
                 )
@@ -94,19 +106,24 @@ class ExampleTests(TestCase):
             name_fn=lambda name, case: f"case_{name}_{case.name}",
         )
         def test_exportdb_not_supported_rewrite(
-            self, name: str, rewrite_case: ExportCase
+            self, device, name: str, rewrite_case: ExportCase
         ) -> None:
+            model = copy.deepcopy(rewrite_case.model)
+            if isinstance(model, torch.nn.Module):
+                model = model.to(device)
+            args = _to_device(copy.deepcopy(rewrite_case.example_args), device)
+            kwargs = _to_device(copy.deepcopy(rewrite_case.example_kwargs), device)
             # pyre-ignore
             export(
-                rewrite_case.model,
-                rewrite_case.example_args,
-                rewrite_case.example_kwargs,
+                model,
+                args,
+                kwargs,
                 dynamic_shapes=rewrite_case.dynamic_shapes,
                 strict=True,
             )
 
 
-instantiate_parametrized_tests(ExampleTests)
+instantiate_device_type_tests(ExampleTests, globals())
 
 
 if __name__ == "__main__":
