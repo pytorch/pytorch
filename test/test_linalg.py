@@ -5757,7 +5757,7 @@ class TestLinalg(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                     f(torch.empty(1, 2, 2), pivot=False)
 
-    @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "Tested on CUDA only")
+    @skipIfRocm
     @slowTest
     @onlyCUDA
     @skipCUDAIfNoCusolver
@@ -5830,7 +5830,7 @@ class TestLinalg(TestCase):
             self.assertEqual(info[4], 18)
             self.assertTrue(info[1] == info[3] == 0)
 
-    @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "Tested on CUDA only")
+    @skipIfRocm
     @onlyCUDA
     @skipCUDAIfNoCusolver
     @setLinalgBackendsToDefaultFinally
