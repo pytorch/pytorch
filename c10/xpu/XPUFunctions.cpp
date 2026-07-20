@@ -135,7 +135,7 @@ inline void initGlobalDevicePoolState() {
           ") is not officially supported by PyTorch XPU. Running workloads on this device may result in unexpected behavior.\n",
           "For stable and fully supported execution, please use GPUs based on Intel Arc (Alchemist) series or newer.\n",
           "Refer to the hardware prerequisites for more information: ",
-          "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/get_start_xpu.rst#hardware-prerequisite");
+          "https://docs.pytorch.org/docs/main/notes/get_start_xpu.html#hardware-prerequisite");
     }
   }
 

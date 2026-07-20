@@ -108,7 +108,7 @@ from torch._inductor.utils import (
     XPU_KERNEL_FORMAT,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_reference_type
+from torch._library.opaque_object import is_opaque_symbolic_type
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -881,12 +881,12 @@ class FxGraphCachePickler(pickle.Pickler):
             # I have not worked out the details for everything else
             # but I'm sure we could
             if (
-                opaque_object.is_opaque_type(cls)
+                opaque_object.is_custom_class(cls)
                 and opaque_object.should_hoist(cls)
                 and not opaque_object.has_members(cls)
             ):
                 return (_ident, (t.script_class_name,))
-            if opaque_object.is_opaque_type(cls):
+            if opaque_object.is_custom_class(cls):
                 # Opaque types (e.g., DeviceMesh) may have cyclic references
                 # that fast-mode pickling cannot handle.  Disable fast mode
                 # before the subtree is pickled so the memo table tracks cycles.
@@ -994,6 +994,7 @@ def torch_key() -> bytes:
                 # a hash representing the state of the source code.
                 extra_files = (
                     "codegen/aoti_runtime/interface.cpp",
+                    "codegen/aoti_runtime/streams.h",
                     "script.ld",
                 )
                 inductor_root = os.path.dirname(__file__)
@@ -1418,7 +1419,7 @@ class FxGraphHashDetails:
         processed_inputs: list[InputType | HashableOpaqueValue] = []
         seen_opaques: dict[int, HashableOpaqueValue] = {}
         for inp in example_inputs:
-            if is_opaque_reference_type(type(inp)):
+            if is_opaque_symbolic_type(type(inp)):
                 if id(inp) not in seen_opaques:
                     seen_opaques[id(inp)] = HashableOpaqueValue(len(seen_opaques))
                 processed_inputs.append(seen_opaques[id(inp)])
