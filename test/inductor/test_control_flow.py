@@ -254,6 +254,16 @@ class CondModels:
 
             return y.sum() - torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
 
+    class MismatchedOutputSizeInnerDim(torch.nn.Module):
+        def forward(self, p, x, y):
+            def true_fn(x, y):
+                return x * 2
+
+            def false_fn(x, y):
+                return y.clone()
+
+            return torch.cond(p, true_fn, false_fn, (x, y))
+
     class FunctionalCall(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -805,6 +815,22 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
                 torch.randn(10, 20),
             },
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    def test_cond_mismatched_branch_output_size_inner_dim(self, device, dynamic):
+        # inner dim mismatch puts an unbacked symbol in the merged
+        # output strides, which must not leak into subgraph codegen
+        self._run_test(
+            model=CondModels.MismatchedOutputSizeInnerDim(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 21),
+            ),
             device=device,
             dynamic=dynamic,
         )
