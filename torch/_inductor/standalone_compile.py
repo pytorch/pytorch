@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import itertools
 import logging
 import os
 import pickle
@@ -505,7 +506,7 @@ def _resolve_fake_mode(
         # keys, and fall back to scanning every node since a make_fx fake may live only on
         # an interior node. maybe_get_fake_mode also unwraps a traceable wrapper subclass.
         output_nodes = [n for n in nodes if isinstance(n, torch.fx.Node)]
-        for node in [*output_nodes, *gm.graph.nodes]:
+        for node in itertools.chain(output_nodes, gm.graph.nodes):
             for key in ("example_value", "val"):
                 maybe_fake_mode = maybe_get_fake_mode(node.meta.get(key))
                 if maybe_fake_mode is not None:

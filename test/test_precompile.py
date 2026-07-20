@@ -554,12 +554,12 @@ class TestPrecompile(TestCase):
             self.assertEqual(cg, ig)
 
     def test_eager_param_ordering_agrees_with_inductor(self):
-        # The eager driver has its OWN _extract_param_buffers copy (in
-        # _EAGER_DRIVER_SOURCE), most prone to silent drift from
+        # Both backends now emit the same _extract_param_buffers (from
+        # torch._precompile_driver), which must stay in sync with
         # torch._precompile._intern_param_buffers. The test above cross-checks only the
         # cached vs inductor-inlined paths; cross-check the EAGER backend too, on the same
         # multi-module + tied-weight + backward step, so an ordering divergence in the
-        # eager copy shows as a scattered-grad mismatch against the inductor cached path.
+        # shared driver shows as a scattered-grad mismatch against the inductor cached path.
         torch.manual_seed(0)
         a = torch.nn.Linear(4, 4, bias=False)
         b = torch.nn.Linear(4, 4, bias=False)
@@ -1875,9 +1875,14 @@ class TestPrecompile(TestCase):
         # them to ONE symbol, so they are equal by construction AND a runtime size mismatch
         # is LOUDLY rejected. (b) Two INDEPENDENTLY marked dims (no shared shape_id)
         # combined elementwise bake a SILENT equal-size assumption: unlike eager, a runtime
-        # mismatch is NOT loudly rejected (there is no deferred assert) -- the artifact runs
-        # and returns the FIRST input's shape. This documents the "give equal-must-be-equal
-        # dims a shared shape_id" limitation rather than asserting silent-wrong is correct.
+        # mismatch is NOT loudly rejected -- NOT because the constraint is unrecoverable, but
+        # because precompile does not harvest it: the capture ShapeEnv DOES record the
+        # equality as a deferred runtime assert (Eq(u0, u1)), yet only the decorator's
+        # min/max feed USER_INPUT_BOUNDS, so the driver never enforces the relational assert.
+        # The artifact runs and returns the FIRST input's shape. This documents the "give
+        # equal-must-be-equal dims a shared shape_id" limitation (and would flip to a loud
+        # failure if that harvesting gap is later closed) rather than asserting silent-wrong
+        # is correct.
         m = torch.nn.Linear(4, 4).eval()
         # (a) shared shape_id -> equality enforced.
         xs = torch.randn(8, 4)
