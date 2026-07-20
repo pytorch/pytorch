@@ -358,7 +358,6 @@ function(torch_compile_options libname)
 
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
-        ${MSVC_RUNTIME_LIBRARY_OPTION}
         $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
         /EHsc
         /bigobj>

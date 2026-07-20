@@ -972,7 +972,6 @@ endif()
 
 # Compile exposed libraries.
 if(USE_ROCM)
-  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
   add_library(torch_hip ${Caffe2_HIP_SRCS})
   # Use CXX linker (clang-cl) which handles MSVC-style link flags natively.
@@ -981,7 +980,6 @@ if(USE_ROCM)
   if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
     target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
   endif()
-  set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
   # TODO: Not totally sure if this is live or not
   if(USE_NCCL)
@@ -1000,7 +998,6 @@ if(USE_ROCM)
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
 elseif(USE_CUDA)
-  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   list(APPEND Caffe2_GPU_SRCS ${GENERATED_CXX_TORCH_CUDA})
   if(CUDA_SEPARABLE_COMPILATION)
     # Separate compilation fails when kernels using `thrust::sort_by_key`
@@ -1018,7 +1015,6 @@ elseif(USE_CUDA)
         ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
         ${Caffe2_GPU_CU_SRCS} ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
   endif()
-  set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 

@@ -311,7 +311,6 @@ cmake_dependent_option(USE_NCCL_EP "Build NCCL EP contrib library" OFF
                        "USE_NCCL;USE_CUDA" OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
-option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
                        OFF)
@@ -322,7 +321,6 @@ option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build."
        OFF)
 
-option(USE_PROF "Use profiling" OFF)
 option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
 option(USE_EIGEN_SPARSE "Use Eigen Sparse Matrices" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
@@ -358,8 +356,6 @@ cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
-cmake_dependent_option(USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF "USE_MKLDNN"
-                       OFF)
 option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
 cmake_dependent_option(
   USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
