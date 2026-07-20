@@ -1624,6 +1624,11 @@ op_db: list[OpInfo] = [
         skips=(
             # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # hipSOLVER ldl_solve uses hipsolverDnXsytrs, which requires ROCm >= 7.14.
+            DecorateInfo(
+                unittest.skip("hipsolverDnXsytrs requires ROCm >= 7.14"),
+                active_if=TEST_WITH_ROCM and ROCM_VERSION < (7, 14),
+            ),
         ),
     ),
     OpInfo(
