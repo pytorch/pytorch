@@ -122,9 +122,11 @@ at::Tensor _weight_int8pack_mm_cuda(
   auto N = w_int8.size(0); // output dim
 
   // Ensure inputs are in the correct types for the kernel
-  auto x_f32 = x.to(at::kFloat).contiguous();
+  auto x_f32 = x.to(
+      at::kFloat, /*non_blocking=*/false, /*copy=*/false, at::MemoryFormat::Contiguous);
   auto w_int8_contiguous = w_int8.contiguous();
-  auto scale_f32 = scale.to(at::kFloat).contiguous();
+  auto scale_f32 = scale.to(
+      at::kFloat, /*non_blocking=*/false, /*copy=*/false, at::MemoryFormat::Contiguous);
 
   // --- Allocate output ---
   auto out = at::empty({B, N}, x_f32.options());
