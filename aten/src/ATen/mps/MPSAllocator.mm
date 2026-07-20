@@ -493,8 +493,7 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   // low watermark limit has been reached
   params.has_memory_pressure = !(pool.usage & UsageFlags::SMALL) && getLowWatermarkValue() <= 0;
   const HeapTier tier = getHeapTier(alloc_size, params.has_memory_pressure);
-  params.use_placement =
-      !(pool.usage & (UsageFlags::SMALL | UsageFlags::SCALAR)) && (tier == HeapTier::LARGE || tier == HeapTier::XLARGE);
+  params.use_placement = tier == HeapTier::LARGE || tier == HeapTier::XLARGE;
 
   // first, try to get a block from the existing pool.
   bool block_found = get_free_buffer(params);
