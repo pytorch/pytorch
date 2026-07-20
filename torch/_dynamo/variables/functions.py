@@ -2355,9 +2355,10 @@ class SkipFunctionVariable(VariableTracker):
             return VariableTracker.build(tx, result)
 
         def unimplemented_direct_disable_call(api_name: str) -> Never:
-            # The registry linter records concrete entries from the helper call
-            # sites below. Use an alias here so the parameterized helper body is
-            # not recorded as a generic `{api_name}` entry.
+            # The registry linter keys off this helper name and records concrete
+            # entries from the call sites below. Use an alias here so the
+            # parameterized helper body is not recorded as a generic
+            # `{api_name}` entry.
             _unimplemented = unimplemented
             _unimplemented(
                 gb_type=f"Call to `{api_name}()`",
