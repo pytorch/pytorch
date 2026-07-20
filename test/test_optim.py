@@ -2089,12 +2089,13 @@ class TestOptimRenewed(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     @parametrize("hook_type", ["pre", "post"])
     def test_step_global_hook(self, device, dtype, optim_info, hook_type):
+        # total number of times the hook has been called
         count = 0
+        # marks that the optimizer's step body has executed
         body_ran = False
 
         def closure():
             nonlocal body_ran
-            # marks that the optimizer's step body has executed
             body_ran = True
             return 1
 
