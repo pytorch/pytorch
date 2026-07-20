@@ -248,7 +248,6 @@ class FusedNormalizedReadsWrites:
 
 @dataclasses.dataclass(frozen=True)
 class _FusedNodeView:
-    # Temporary ghstack sync marker; removed before the final submit.
     nodes: Sequence["BaseSchedulerNode"]
     read_writes: ReadWrites
     group: Any
