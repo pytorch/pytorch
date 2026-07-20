@@ -428,6 +428,8 @@ def reset_provenance_globals() -> Iterator[None]:
     # consume it during export_chrome_trace, which then clears it.
     _inductor_kernel_provenance_debug_handle = 0
     _inductor_kernel_extern_info = {}
+    from torch._inductor.kernel_trace import reset_kernel_trace_globals
+    reset_kernel_trace_globals()
 
     try:
         yield

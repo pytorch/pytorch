@@ -2095,6 +2095,18 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             },
             payload_fn=lambda: graph.inductor_provenance_stack_traces_str,
         )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_triton_kernel_trace",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_kernel_trace_str,
+        )
+        # Record for profiler consumption on cache hit
+        if graph.inductor_kernel_trace_str:
+            from torch._inductor.kernel_trace import set_last_emitted_trace
+            set_last_emitted_trace(graph.inductor_kernel_trace_str)
         if (
             get_metrics_context().in_progress()
             and graph.inductor_provenance_stack_traces_str
@@ -3534,6 +3546,16 @@ end
             with open(kernel_info_json, "w") as f:
                 f.write(json.dumps(kernel_info, indent=4))
             generated_files.append(kernel_info_json)
+
+            trace_json = json.dumps(
+                torch._inductor.kernel_trace.create_triton_kernel_trace_json(), indent=4
+            )
+            trace_path = os.path.join(
+                wrapper_path_operator.parent, "triton_kernel_trace.json"
+            )
+            with open(trace_path, "w") as f:
+                f.write(trace_json)
+            generated_files.append(trace_path)
 
         if config.aot_inductor.package:
             # We want to return the directory that contains all the AOTI

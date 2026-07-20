@@ -6092,6 +6092,8 @@ class CppScheduling(BaseScheduling):
             # pyrefly: ignore [bad-argument-type]
             kernel_name,
         )
+        from torch._inductor.kernel_trace import set_kernel_physical_trace
+        set_kernel_physical_trace(node_schedule, kernel_name, debug_handle, is_extern=False)
         wrapper.write_provenance_debug_handle(kernel_name, debug_handle)
 
 

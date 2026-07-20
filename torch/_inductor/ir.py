@@ -7123,6 +7123,8 @@ class ExternKernel(InputsKernel):
             debug_handle = set_kernel_post_grad_provenance_tracing(
                 self, kernel_name, is_extern=True
             )
+            from .kernel_trace import set_kernel_physical_trace
+            set_kernel_physical_trace(self, kernel_name, debug_handle, is_extern=True)
             wrapper.write_provenance_debug_handle(kernel_name, debug_handle)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:

@@ -1684,6 +1684,7 @@ class _InProcessFxCompile(FxCompile):
                     # Dump provenance artifacts for debugging trace
                     inductor_provenance_tracking_node_mappings = None
                     inductor_kernel_stack_trace_str = None
+                    inductor_kernel_trace_str = None
                     if config.effective_provenance_tracking_level() != 0:
                         inductor_provenance_tracking_node_mappings = json.dumps(
                             torch._inductor.debug.dump_inductor_provenance_info()
@@ -1691,6 +1692,12 @@ class _InProcessFxCompile(FxCompile):
                         inductor_kernel_stack_trace_str = json.dumps(
                             torch._inductor.debug._inductor_kernel_stack_trace
                         )
+                        inductor_kernel_trace_str = json.dumps(
+                            torch._inductor.kernel_trace.create_triton_kernel_trace_json()
+                        )
+                        # Record for profiler consumption (both cache-miss and cache-hit populate this)
+                        if inductor_kernel_trace_str:
+                            torch._inductor.kernel_trace.set_last_emitted_trace(inductor_kernel_trace_str)
                         trace_structured(
                             "artifact",
                             metadata_fn=lambda: {
@@ -1706,6 +1713,14 @@ class _InProcessFxCompile(FxCompile):
                                 "encoding": "json",
                             },
                             payload_fn=lambda: inductor_kernel_stack_trace_str,
+                        )
+                        trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "inductor_triton_kernel_trace",
+                                "encoding": "json",
+                            },
+                            payload_fn=lambda: inductor_kernel_trace_str,
                         )
                         if inductor_kernel_stack_trace_str:
                             metrics_context = get_metrics_context()
@@ -1862,6 +1877,7 @@ class _InProcessFxCompile(FxCompile):
                         compiled_fn_runner,
                         inductor_provenance_tracking_node_mappings,
                         inductor_kernel_stack_trace_str,
+                        inductor_kernel_trace_str,
                     )
 
 

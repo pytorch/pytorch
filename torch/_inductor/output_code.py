@@ -550,6 +550,7 @@ class CompiledFxGraph(OutputCode):
     extern_libs_key: str | None
     inductor_provenance_mapping_str: str | None
     inductor_provenance_stack_traces_str: str | None
+    inductor_kernel_trace_str: str | None
     kernel_free_cudagraph: bool
 
     cudagraph_info: CudagraphCachedInfo | None
@@ -591,6 +592,7 @@ class CompiledFxGraph(OutputCode):
         compiled_fn_runner: CompiledFnRunner | None = None,
         inductor_provenance_mapping_str: str | None = None,
         inductor_provenance_stack_traces_str: str | None = None,
+        inductor_kernel_trace_str: str | None = None,
     ) -> None:
         self.current_callable = current_callable
         self.compiled_fn_runner = compiled_fn_runner
@@ -607,6 +609,7 @@ class CompiledFxGraph(OutputCode):
         self.inductor_post_grad_graph_str = inductor_post_grad_graph_str
         self.inductor_provenance_mapping_str = inductor_provenance_mapping_str
         self.inductor_provenance_stack_traces_str = inductor_provenance_stack_traces_str
+        self.inductor_kernel_trace_str = inductor_kernel_trace_str
         self.cache_linemap = graph.cache_linemap
         # TODO - ordered set
         self.device_types = OrderedSet(graph.device_types)
