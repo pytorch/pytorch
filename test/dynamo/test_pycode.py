@@ -36,8 +36,8 @@ class TestPycode(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             pycode_str,
             """\
-__arg0 = self._modules['linear']._parameters['weight']
-__arg1 = self._modules['linear']._parameters['bias']
+__arg0 = self._modules['linear']._parameters['bias']
+__arg1 = self._modules['linear']._parameters['weight']
 __arg2 = x
 __graph_out = __compiled_fn_<ID>(__arg0, __arg1, __arg2)
 __stack0 = __graph_out[0]
@@ -102,8 +102,8 @@ __ret = __stack0""",
             """\
 def __generate_func__():
     def __dynamo_func__(self, x):
-        __arg0 = self._modules['linear']._parameters['weight']
-        __arg1 = self._modules['linear']._parameters['bias']
+        __arg0 = self._modules['linear']._parameters['bias']
+        __arg1 = self._modules['linear']._parameters['weight']
         __arg2 = x
         __graph_out = __compiled_fn_<ID>(__arg0, __arg1, __arg2)
         __stack0 = __graph_out[0]

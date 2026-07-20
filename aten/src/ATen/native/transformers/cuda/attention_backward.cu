@@ -28,6 +28,7 @@
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/empty_permuted.h>
+#include <ATen/ops/pad.h>
 #include <ATen/ops/_cudnn_attention_backward.h>
 #include <ATen/ops/_cudnn_attention_backward_native.h>
 #include <ATen/ops/_flash_attention_backward.h>
@@ -67,6 +68,34 @@
 #endif
 
 namespace at::native {
+
+namespace {
+
+int64_t mem_eff_attention_backward_bias_alignment(const Tensor& bias) {
+  return bias.element_size() == 4 ? 4 : 8;
+}
+
+bool has_mem_eff_attention_bias_alignment(const Tensor& bias, int64_t alignment) {
+  for (const auto dim : c10::irange(bias.dim() - 1)) {
+    if (bias.stride(dim) % alignment != 0) {
+      return false;
+    }
+  }
+  return bias.stride(-1) == 1;
+}
+
+Tensor ensure_mem_eff_attention_bias_alignment(const Tensor& bias) {
+  const auto alignment = mem_eff_attention_backward_bias_alignment(bias);
+  if (bias.dim() != 4 || has_mem_eff_attention_bias_alignment(bias, alignment)) {
+    return bias;
+  }
+
+  const auto last_dim_size = bias.size(-1);
+  const auto pad_count = alignment - (last_dim_size % alignment);
+  return at::pad(bias, {0, pad_count}).slice(-1, 0, last_dim_size);
+}
+
+} // namespace
 
 std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const Tensor& grad_out,
@@ -217,8 +246,9 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
     }
 
     const bool is_nested = cum_seq_q.defined();
-    const int64_t max_seqlen_batch_q = query.size(2);
-    const int64_t max_seqlen_batch_k = key.size(2);
+    TORCH_CHECK(
+        !is_nested || max_q > 128,
+        "cuDNN varlen attention does not support query sequence length <= 128.");
 
     if (!is_nested) {
       const int64_t batch_size = query.size(0);
@@ -235,12 +265,12 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
       if (attn_bias_.has_value()) {
         const auto bias_dim = attn_bias_.value().dim();
         if (bias_dim == 2) {
-          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_q, max_k});
         } else if (bias_dim == 3) {
-          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_q, max_k});
         } else {
           TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
-          attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
+          attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_q, max_k});
         }
       }
 
@@ -285,11 +315,11 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
       if (attn_bias_.has_value()) {
         const auto bias_dim = attn_bias_.value().dim();
         if (bias_dim == 2) {
-          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_q, max_k});
         } else if (bias_dim == 3) {
-          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_q, max_k});
         } else {
-          attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
+          attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_q, max_k});
           TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
         }
       }
@@ -304,8 +334,8 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
         num_heads_q,
         num_heads_k,
         num_heads_v,
-        max_seqlen_batch_q,
-        max_seqlen_batch_k,
+        max_q,
+        max_k,
         head_dim_qk,
         head_dim_v,
         softmax_scale,
@@ -1013,7 +1043,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   // std::optional to undefined tensor
   std::optional<Tensor> kernel_bias;
   if (attn_bias_chunk.has_value() && attn_bias_chunk.value().defined()) {
-    kernel_bias = attn_bias_chunk.value();
+    kernel_bias = ensure_mem_eff_attention_bias_alignment(attn_bias_chunk.value());
   }
   // Will add with signauter changes for dropout and bias
   // We are only handling Dense inputs, but this should be passed

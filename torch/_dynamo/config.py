@@ -175,8 +175,8 @@ use_lazy_graph_module = (
 assume_static_by_default = True
 
 # Internal: Shape specification patched during tracing by enter_exit_hooks.
-# Set via torch.compile(shapes_spec=...), not directly by users.
-_shapes_spec = None
+# Set via torch.compile(dynamic_shapes=...), not directly by users.
+_dynamic_shapes_spec = None
 
 # This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
 # with assume_static_by_default=True.
@@ -565,9 +565,11 @@ enable_trace_unittest = False
 # Enable tracing LOAD_BUILD_CLASS bytecode
 enable_trace_load_build_class = False
 
-# Enable tracing generator functions lazily. If False, Dynamo will exhaust
-# generators upon first execution. And if True, the generator will be accessed lazily
-enable_faithful_generator_behavior = True
+enable_faithful_generator_behavior = Config(  # type: ignore[var-annotated]
+    default=True,
+    deprecated=True,
+    deprecation_message="does not do anything, generators are always traced lazily",
+)
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
@@ -922,6 +924,11 @@ inline_single_use_invoke_subgraph: bool = True
 # - True: always clear regardless of backend
 # - False: never clear regardless of backend
 invalidate_compile_context_weakrefs: bool | None = None
+
+# Reorder and rename output graph nodes into a canonical topological order so
+# that structurally equivalent graphs (e.g., same model traced with different
+# dict iteration orders across distributed ranks) produce identical FX graphs.
+canonicalize_output_graph_node_order: bool = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F403

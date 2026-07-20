@@ -24,14 +24,20 @@ class ControlDeps(HigherOrderOperator):
     """
     Higher-order operator that enforces ordering by making dependencies explicit.
 
-    Schema: control_deps(additional_deps, target, *args, **kwargs) -> result
+    Schema: control_deps(additional_deps, subgraph, *args, **kwargs) -> result
     where:
     - additional_deps: tuple of tensors that must be computed before this op
+      (ordering-only, not a real data use)
     - subgraph: GraphModule containing the exact operation to execute
-    - args/kwargs: arguments for the target function
+    - *args: pass-through arguments forwarded to the subgraph
 
-    This ensures all tensors in additional_deps are computed before the target
-    executes, creating explicit scheduling dependencies.
+    Semantics:
+    - All tensors in additional_deps are computed before the subgraph executes.
+    - Pass-through args (inputs returned unchanged by the subgraph) are
+      versioned: future readers are ordered after all subgraph operations
+      via a rename chain (OrderingOutput).  This ensures that consumers of
+      a pass-through value cannot be scheduled before the subgraph's sync
+      ops (e.g. wait_event) complete.
     """
 
     def __init__(self) -> None:
