@@ -3684,8 +3684,7 @@ class SIMDScheduling(BaseScheduling):
             is_persistent_reduction = (
                 features.is_reduction()
                 and V.choices.should_use_persistent_reduction(
-                    features.with_tiling_scores(tiling_scores),
-                    cooperative_reduction=False,
+                    features, cooperative_reduction=False
                 )
             )
             node_schedule_map[pn] = NodeInfo(
@@ -4599,36 +4598,10 @@ class SIMDScheduling(BaseScheduling):
         if not any(n.is_template() for n in nodes):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            coalesce_analysis = None
-            if (
-                self.scheduler
-                and torch._inductor.config.triton.coalesce_tiling_analysis
-                and all(
-                    isinstance(
-                        n, (scheduler.FusedSchedulerNode, scheduler.SchedulerNode)
-                    )
-                    for n in nodes
-                )
-            ):
-                coalesce_node = (
-                    nodes[0]
-                    if len(nodes) == 1
-                    else scheduler.FusedSchedulerNode(self.scheduler, list(nodes))
-                )
-                coalesce_analysis = coalesce_node.get_coalesce_analysis()
-            features = SIMDKernelFeatures(
-                node_schedule, numel, rnumel, coalesce_analysis
-            )
-            tiling, tiling_scores = self.get_tiling_and_scores(
-                node_schedule,
-                numel,
-                rnumel,
-                coalesce_analysis,
-            )
+            tiling = self.select_tiling(node_schedule, numel, rnumel)
             kernel = self.kernel_type(
                 tiling,
-                features=features,
-                tiling_scores=tiling_scores,
+                features=SIMDKernelFeatures(node_schedule, numel, rnumel),
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
             # Collect config_patches from operations
