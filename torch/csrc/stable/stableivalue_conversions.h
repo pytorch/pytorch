@@ -804,7 +804,7 @@ struct ToImpl<torch::stable::Device> {
 };
 
 // Specialization for std::string
-// Returns an std::string; the string in val is deleted.
+// Returns a std::string which owns its memory; the string in val is deleted.
 template <>
 struct ToImpl<std::string> {
   static std::string call(
@@ -818,7 +818,7 @@ struct ToImpl<std::string> {
     STABLE_TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle, &data));
     const auto str = std::string(data, length);
 
-    // delete the old string before returning new string
+    // delete the old string
     STABLE_TORCH_ERROR_CODE_CHECK(torch_delete_string(handle));
     return str;
   }
