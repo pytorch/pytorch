@@ -3383,6 +3383,16 @@ def native_group_norm(
         + f"but got input of shape {input.shape} and num_groups = {num_groups}",
     )
 
+    # Match contiguous behavior of eager implementation.  Only necessary for ref tests.
+    mem_fmt = (
+        torch.contiguous_format
+        if input.device.type != "cpu"
+        else utils.suggest_memory_format(input)
+    )
+    input = input.contiguous(memory_format=mem_fmt)
+    weight = weight.contiguous() if weight is not None else None
+    bias = bias.contiguous() if bias is not None else None
+
     computation_dtype = utils.get_computation_dtype(input.dtype)
     input_acc = _maybe_convert_to_dtype(input, computation_dtype)
     # num_channels / num_groups and flattened inner dimension are the reduction axes
