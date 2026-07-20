@@ -1570,6 +1570,19 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
             ),
+            # Since #186388 removed a Dynamo graph break, more of this op's
+            # forward-AD runs through inductor, whose float32 codegen for the
+            # householder_product JVP differs from the reference by ~1.3e-5,
+            # just past the default tolerance. The drift is deterministic on
+            # some CI GPUs (e.g. a10g) and absent on others; eager is
+            # unaffected.
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=2e-4, rtol=1e-4)}),
+                "TestCompositeCompliance",
+                "test_forward_ad",
+                device_type="cuda",
+                active_if=TEST_WITH_TORCHINDUCTOR,
+            ),
             DecorateInfo(
                 unittest.skip("Skipped! Flaky"),
                 "TestFwdGradients",
