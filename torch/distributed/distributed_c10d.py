@@ -28,6 +28,7 @@ from typing import (
     overload,
     Protocol,
     TYPE_CHECKING,
+    TypeAlias,
     TypeVar,
 )
 from typing_extensions import deprecated, NotRequired, TypedDict, TypeIs
@@ -372,6 +373,7 @@ PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
 # We'd like calls to unsupported ops to error out accordingly,
 # rather than returning garbage values.
 _ReduceOp = ReduceOp | ReduceOp.RedOpType
+_NonGroupMember: TypeAlias = Literal[-100]
 _T = TypeVar("_T")
 
 
@@ -472,7 +474,7 @@ class Backend(str):  # noqa: SLOT000
         FAKE: ProcessGroup.BackendType.CUSTOM,
     }
 
-    def __new__(cls, name: str) -> "Backend":
+    def __new__(cls, name: str) -> str:
         """Create and return a new instance of the class."""
         if not isinstance(name, str):
             raise ValueError("Backend constructor parameter must be string-ish")
@@ -480,7 +482,7 @@ class Backend(str):  # noqa: SLOT000
 
         if value == Backend.UNDEFINED:
             value = name.lower()
-        return cast(Backend, value)
+        return value
 
     @classmethod
     def _ensure_backend_registered(cls, name: str) -> None:
@@ -813,10 +815,9 @@ def _register_builtin_xccl_backend() -> None:
 class BackendConfig:
     """Backend configuration class."""
 
-    def __init__(self, backend: Backend) -> None:
+    def __init__(self, backend: str | Backend) -> None:
         """Init."""
-        self.device_backend_map: dict[str, Backend] = {}
-        # pyrefly: ignore [bad-assignment]
+        self.device_backend_map: dict[str, str] = {}
         backend = str(backend)
         normalized_backend = backend.lower()
 
@@ -886,7 +887,6 @@ class BackendConfig:
                         f"Invalid device:backend pairing: \
                                      {device_backend_pair_str}. {backend_str_error_message}"
                     )
-                # pyrefly: ignore [bad-assignment]
                 device, backend = device_backend_pair
                 if device in self.device_backend_map:
                     raise ValueError(
@@ -903,7 +903,7 @@ class BackendConfig:
             f"{device}:{backend}" for device, backend in self.device_backend_map.items()
         )
 
-    def get_device_backend_map(self) -> dict[str, Backend]:
+    def get_device_backend_map(self) -> dict[str, str]:
         """Return backend map of the device."""
         return self.device_backend_map
 
@@ -1090,7 +1090,7 @@ class _CollOp:
 # Use them through the _world object to make sure the _world override mechanism
 _pg_map: dict[ProcessGroup, tuple[str, Store]] = {}
 _pg_names: dict[ProcessGroup, GroupName] = {}
-_pg_group_ranks: dict[ProcessGroup, dict[int, int]] = {}
+_pg_group_ranks: dict[ProcessGroup | _NonGroupMember, dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
 _pg_backend_config: dict[ProcessGroup, str] = {}
 _group_count = 0
@@ -1152,7 +1152,9 @@ class _World:
         return _pg_names
 
     @property
-    def pg_group_ranks(self) -> dict[ProcessGroup, dict[int, int]]:
+    def pg_group_ranks(
+        self,
+    ) -> dict[ProcessGroup | _NonGroupMember, dict[int, int]]:
         """
         Process group's global rank to local rank mapping.
 
@@ -1259,10 +1261,10 @@ class group(metaclass=_WorldMeta):
 class GroupMember(metaclass=_WorldMeta):
     """Group member class."""
 
-    NON_GROUP_MEMBER: Final[Literal[-100]] = -100
+    NON_GROUP_MEMBER: Final[_NonGroupMember] = -100
 
 
-def _get_default_timeout(backend: Backend) -> timedelta:
+def _get_default_timeout(backend: str) -> timedelta:
     # see note on nccl vs other backend timeout (constants.py)
     if backend == Backend.NCCL:
         if not isinstance(default_pg_nccl_timeout, timedelta):
@@ -1522,8 +1524,8 @@ def _store_based_barrier(
 
 
 def _rank_not_in_group(
-    group: ProcessGroup | C10DBackend | Literal[-100] | None,
-) -> TypeIs[Literal[-100]]:
+    group: ProcessGroup | C10DBackend | _NonGroupMember | None,
+) -> TypeIs[_NonGroupMember]:
     """Check if the current process's rank is not in a given group."""
     if group is None:
         return False
@@ -1904,7 +1906,7 @@ def get_backend_config(group: ProcessGroup | None = None) -> str:
     return str(not_none(backend_config))
 
 
-def get_backend(group: ProcessGroup | None = None) -> Backend:
+def get_backend(group: ProcessGroup | None = None) -> str:
     """
     Return the backend of the given process group.
 
@@ -2376,7 +2378,7 @@ def init_process_group(
                 qualified["cpu"] = cpu_be
         backend = ",".join(f"{d}:{b}" for d, b in qualified.items())
 
-    # Convert string into `Backend` type
+    # Normalize the backend name.
     backend = Backend(backend)
 
     if timeout is None:
@@ -2449,10 +2451,7 @@ def init_process_group(
         raise AssertionError("Default process group creation returned a nonmember")
     _update_default_pg(default_pg)
 
-    _world.pg_group_ranks[GroupMember.WORLD] = {  # type: ignore[index]
-        i: i
-        for i in range(GroupMember.WORLD.size())  # type: ignore[attr-defined]
-    }
+    _world.pg_group_ranks[default_pg] = {i: i for i in range(default_pg.size())}
     _backend = _world.pg_map[not_none(GroupMember.WORLD)][0]
     _default_pg_init_method = init_method
 
@@ -2531,7 +2530,7 @@ def _new_process_group_helper(
     group_size: int,
     group_rank: int | None,
     global_ranks_in_group: list[int],
-    backend: Backend,
+    backend: str,
     store: Store,
     group_name: GroupName,
     backend_options: object | None = None,
@@ -2540,7 +2539,7 @@ def _new_process_group_helper(
     device_id: torch.device | None = None,
     group_desc: str | None = None,
     enable_reconfigure: bool = False,
-) -> tuple[ProcessGroup | Literal[-100], Store | None]:
+) -> tuple[ProcessGroup | _NonGroupMember, Store | None]:
     """
     Create a new distributed process group.
 
@@ -2820,7 +2819,7 @@ def _new_process_group_helper(
 
 
 def destroy_process_group(
-    group: ProcessGroup | Literal[-100] | None = None,
+    group: ProcessGroup | _NonGroupMember | None = None,
 ) -> None:
     """
     Destroy a given process group, and deinitialize the distributed package.
@@ -2921,7 +2920,7 @@ def destroy_process_group(
 
 
 def _abort_process_group(
-    group: ProcessGroup | Literal[-100] | None = None,
+    group: ProcessGroup | _NonGroupMember | None = None,
 ) -> None:
     """
     Abort a given process group. If group.WORLD (i.e. `None`) is given, all
@@ -3367,7 +3366,7 @@ def _coalescing_manager(
         if op0 is all_reduce:
             tensors = [op.tensor for op in op_list]
             all_reduce_opts = AllreduceCoalescedOptions()
-            all_reduce_opts.reduceOp = cast(ReduceOp, not_none(op_list[0].redop))
+            all_reduce_opts.reduceOp = not_none(op_list[0].redop)
             all_reduce_opts.asyncOp = async_ops
             work = group.allreduce_coalesced(tensors, all_reduce_opts)
         elif op0 is all_gather_single:
@@ -3386,7 +3385,7 @@ def _coalescing_manager(
                 inputs.append(op.tensor)
                 outputs.append(not_none(op.dst_tensor))
             reduce_opts = ReduceScatterOptions()
-            reduce_opts.reduceOp = cast(ReduceOp, not_none(op_list[0].redop))
+            reduce_opts.reduceOp = not_none(op_list[0].redop)
             reduce_opts.asyncOp = async_ops
             work = group.reduce_scatter_single_coalesced(outputs, inputs, reduce_opts)
         else:
@@ -3410,7 +3409,7 @@ def _coalescing_manager(
 
 class _TimeEstimator:
     def __init__(self) -> None:
-        self.estimated_time = cast(float, None)
+        self.estimated_time: float | None = None
 
 
 @contextlib.contextmanager
@@ -3727,7 +3726,7 @@ def all_reduce(
         tensor = torch.view_as_real(tensor)
 
     opts = AllreduceOptions()
-    opts.reduceOp = cast(ReduceOp, op)
+    opts.reduceOp = op
     opts.asyncOp = async_op
     if group is None:
         group = _get_default_group()
@@ -3761,7 +3760,7 @@ def all_reduce(
     category=FutureWarning,
 )
 def all_reduce_coalesced(
-    tensors: torch.Tensor | list[torch.Tensor],
+    tensors: list[torch.Tensor],
     op: _ReduceOp = ReduceOp.SUM,
     group: ProcessGroup | None = None,
     async_op: bool = False,
@@ -3824,7 +3823,7 @@ def all_reduce_coalesced(
     tensors = [t if not t.is_complex() else torch.view_as_real(t) for t in tensors]
 
     opts = AllreduceCoalescedOptions()
-    opts.reduceOp = cast(ReduceOp, op)
+    opts.reduceOp = op
     opts.asyncOp = async_op
     group = group or _get_default_group()
     work = group.allreduce_coalesced(tensors, opts)
@@ -3891,7 +3890,7 @@ def reduce(
         return None
 
     opts = ReduceOptions()
-    opts.reduceOp = cast(ReduceOp, op)
+    opts.reduceOp = op
     opts.rootRank = group_dst
     opts.asyncOp = async_op
     work = group.reduce([tensor], opts)
@@ -5485,7 +5484,7 @@ def reduce_scatter(
         return None
 
     opts = ReduceScatterOptions()
-    opts.reduceOp = cast(ReduceOp, op)
+    opts.reduceOp = op
     opts.asyncOp = async_op
 
     group = group or _get_default_group()
@@ -5603,7 +5602,7 @@ def reduce_scatter_single(
         return None
 
     opts = ReduceScatterOptions()
-    opts.reduceOp = cast(ReduceOp, op)
+    opts.reduceOp = op
     opts.asyncOp = async_op
 
     group = group or _get_default_group()
@@ -6215,7 +6214,7 @@ def _process_group_name(ranks: Sequence[int], use_hashed_name: bool) -> GroupNam
     return pg_name
 
 
-def _get_backend_from_str(backend: str | None = None) -> Backend:
+def _get_backend_from_str(backend: str | None = None) -> str:
     # Default to the same backend as the global process group
     #  if backend is not specified.
     if not backend:
@@ -6475,7 +6474,7 @@ def new_group(
     group_desc: str | None = None,
     device_id: torch.device | None = None,
     sort_ranks: bool = True,
-) -> ProcessGroup | Literal[-100]:
+) -> ProcessGroup | _NonGroupMember:
     """
     Create a new distributed group.
 
@@ -6606,7 +6605,7 @@ def _new_group_via_split_group(
     group_desc: str | None,
     device_id: torch.device | None,
     sort_ranks: bool,
-) -> ProcessGroup | Literal[-100]:
+) -> ProcessGroup | _NonGroupMember:
     """Implement `new_group` semantics on top of `split_group`.
 
     Used on the TorchComms path so subgroup creation goes through
@@ -6714,7 +6713,7 @@ def _new_group_with_tag(
     group_desc: str | None = None,
     device_id: torch.device | None = None,
     sort_ranks: bool = True,
-) -> ProcessGroup | Literal[-100]:
+) -> ProcessGroup | _NonGroupMember:
     """
     Variant of ``new_group`` that exposes tag creation.
 
@@ -6835,7 +6834,7 @@ def _new_group_with_tag(
     )
 
     # Create the global rank to group rank mapping
-    _world.pg_group_ranks[pg_or_nonmember] = {  # type: ignore[index]
+    _world.pg_group_ranks[pg_or_nonmember] = {
         global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
     }
 
@@ -6879,7 +6878,7 @@ def new_subgroups(
     backend: str | Backend | None = None,
     pg_options: object | None = None,
     group_desc: str | None = None,
-) -> tuple[ProcessGroup, list[ProcessGroup | Literal[-100]]]:
+) -> tuple[ProcessGroup, list[ProcessGroup | _NonGroupMember]]:
     """
     Create subgroups of equal size.
 
@@ -6991,8 +6990,8 @@ def new_subgroups_by_enumeration(
     pg_options: object | None = None,
     group_desc: str | None = None,
 ) -> tuple[
-    ProcessGroup | Literal[-100] | None,
-    list[ProcessGroup | Literal[-100]],
+    ProcessGroup | _NonGroupMember | None,
+    list[ProcessGroup | _NonGroupMember],
 ]:
     """
     Create subgroups by dividing the global world.
@@ -7046,8 +7045,8 @@ def new_subgroups_by_enumeration(
     if ranks_per_subgroup_list is None or len(ranks_per_subgroup_list) == 0:
         raise ValueError("The arg 'ranks_per_subgroup_list' cannot be empty")
 
-    subgroups: list[ProcessGroup | Literal[-100]] = []
-    cur_subgroup: ProcessGroup | Literal[-100] | None = None
+    subgroups: list[ProcessGroup | _NonGroupMember] = []
+    cur_subgroup: ProcessGroup | _NonGroupMember | None = None
     # Create a mapping from rank to subgroup to check if there is any subgroup overlap.
     rank_to_ranks_dict: dict[int, list[int]] = {}
     for ranks in ranks_per_subgroup_list:
@@ -7153,7 +7152,7 @@ class _ShrinkGroupInfo(TypedDict):
     group_size: int
     current_rank: int
     group_name: str
-    pg_options_override: NotRequired[object | None]
+    pg_options_override: NotRequired[C10DBackend.Options | None]
 
 
 class _GroupMetadata(TypedDict):
@@ -7170,7 +7169,7 @@ def shrink_group(
     ranks_to_exclude: list[int],
     group: ProcessGroup | None = None,
     shrink_flags: int = SHRINK_DEFAULT,
-    pg_options: object | None = None,
+    pg_options: C10DBackend.Options | None = None,
 ) -> ProcessGroup:
     """
     Shrinks a process group by excluding specified ranks.
@@ -7228,7 +7227,7 @@ def shrink_group(
     new_backend = backend_impl.shrink(
         sorted(excluded_ranks_set),
         shrink_flags,
-        cast(C10DBackend.Options | None, pg_options),
+        pg_options,
     )
 
     # Step 6: Handle cleanup and creation of new process group
@@ -7486,7 +7485,7 @@ def _create_shrunk_process_group(
     # Create process group with new communicator (clone the parent store like split does)
     prefix_store = PrefixStore(
         f"{group_name}/",
-        metadata["store"].clone(),  # pyrefly: ignore[missing-attribute]
+        metadata["store"].clone(),
     )
     new_pg = ProcessGroup(prefix_store, new_group_rank, new_group_size)
 
@@ -7541,8 +7540,10 @@ def _destroy_all_other_groups(exclude_group: ProcessGroup | None = None) -> None
             If None, destroys all process groups.
     """
     # Get list of groups to destroy (avoid modifying dict while iterating)
-    groups_to_destroy = []
+    groups_to_destroy: list[ProcessGroup] = []
     for pg in list(_world.pg_group_ranks.keys()):
+        if not isinstance(pg, ProcessGroup):
+            continue
         if exclude_group is not None and pg == exclude_group:
             continue
         groups_to_destroy.append(pg)
