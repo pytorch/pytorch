@@ -574,16 +574,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
                         "HINT: type",
                         verbose_str,
                         (
-                            "TYPE_MATCH guard should include 'HINT: type' "
-                            f"annotation.\nGuard: {verbose_str}"
+                            lambda msg: f"{msg}\n"
+                            + (
+                                "TYPE_MATCH guard should include 'HINT: type' "
+                                f"annotation.\nGuard: {verbose_str}"
+                            )
                         ),
                     )
                     self.assertIn(
                         "GlobalModule",
                         verbose_str,
                         (
-                            "TYPE_MATCH guard should include type name "
-                            f"'GlobalModule'.\nGuard: {verbose_str}"
+                            lambda msg: f"{msg}\n"
+                            + (
+                                "TYPE_MATCH guard should include type name "
+                                f"'GlobalModule'.\nGuard: {verbose_str}"
+                            )
                         ),
                     )
             for child_mgr in mgr.get_child_managers():
@@ -1525,7 +1531,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             True,
         )
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_ddp_module(self):
         import torch.distributed as dist
 
@@ -1543,13 +1548,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
             def foo(ddp, x):
                 return ddp(x)
 
+            unsupported = frozenset(
+                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            )
             x = torch.randn(10)
             package = CompilePackage(foo)
             torch._dynamo.optimize(
                 package=package,
                 guard_filter_fn=lambda gs: [
-                    x.guard_type not in ("CLOSURE_MATCH", "ID_MATCH", "CLASS_MATCH")
-                    for x in gs
+                    x.guard_type not in unsupported for x in gs
                 ],
             )(foo)(ddp_model, x)
             self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
