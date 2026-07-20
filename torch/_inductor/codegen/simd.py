@@ -4600,30 +4600,20 @@ class SIMDScheduling(BaseScheduling):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
             coalesce_analysis = None
-            if (
-                self.scheduler
-                and torch._inductor.config.triton.coalesce_tiling_analysis
-                and all(
-                    isinstance(
-                        n, (scheduler.FusedSchedulerNode, scheduler.SchedulerNode)
-                    )
-                    for n in nodes
+            if torch._inductor.config.triton.coalesce_tiling_analysis:
+                from torch._inductor.tiling_utils import (
+                    analyze_memory_coalescing_for_nodes,
                 )
-            ):
-                coalesce_node = (
-                    nodes[0]
-                    if len(nodes) == 1
-                    else scheduler.FusedSchedulerNode(self.scheduler, list(nodes))
-                )
-                coalesce_analysis = coalesce_node.get_coalesce_analysis()
+
+                coalesce_analysis = analyze_memory_coalescing_for_nodes(nodes)
             features = SIMDKernelFeatures(
-                node_schedule, numel, rnumel, coalesce_analysis
+                node_schedule, numel, rnumel, coalesce_analysis=coalesce_analysis
             )
             tiling, tiling_scores = self.get_tiling_and_scores(
                 node_schedule,
                 numel,
                 rnumel,
-                coalesce_analysis,
+                features.coalesce_analysis,
             )
             kernel = self.kernel_type(
                 tiling,
