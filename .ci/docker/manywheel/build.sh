@@ -28,7 +28,6 @@ fi
 MANY_LINUX_VERSION=${MANY_LINUX_VERSION:-}
 DOCKERFILE_SUFFIX=${DOCKERFILE_SUFFIX:-}
 OPENBLAS_VERSION=${OPENBLAS_VERSION:-}
-ACL_VERSION=${ACL_VERSION:-}
 
 case ${image} in
     manylinux2_28-builder:cpu)
@@ -127,7 +126,6 @@ docker buildx build \
     ${DOCKER_GPU_BUILD_ARG} \
     --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
     --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
-    --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
     --target "${TARGET}" \
     --progress plain \
     ${output_flag} \

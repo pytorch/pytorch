@@ -27,8 +27,8 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     requires_mkl,
     skipIfXpu,
-    TEST_ACL,
-    xfailIfACL,
+    TEST_MKLDNN_KLEIDIAI_OPS,
+    xfailIfMkldnnKleidiaiOps,
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
@@ -108,11 +108,11 @@ def cal_conv_generated_kernel_number(mod, input, dtype, dim=4, device="cpu"):
     if (
         input.is_contiguous(memory_format=torch.contiguous_format)
         or dtype != torch.float32
-        or (TEST_ACL and dim == 4)
+        or (TEST_MKLDNN_KLEIDIAI_OPS and dim == 4)
     ):
         input_kernel = 1
     if output.is_contiguous(memory_format=torch.contiguous_format) or (
-        TEST_ACL and (dtype == torch.bfloat16 or dtype == torch.half)
+        TEST_MKLDNN_KLEIDIAI_OPS and (dtype == torch.bfloat16 or dtype == torch.half)
     ):
         output_kernel = 1
 
@@ -309,7 +309,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                     match_nodes += 2
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                    0 if TEST_ACL else match_nodes,
+                    0 if TEST_MKLDNN_KLEIDIAI_OPS else match_nodes,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
@@ -397,7 +397,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                     match_nodes += 2
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                    0 if TEST_ACL else match_nodes,
+                    0 if TEST_MKLDNN_KLEIDIAI_OPS else match_nodes,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
@@ -505,7 +505,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                     counters["inductor"][
                         "mkldnn_conv_binary_unary_fusion_matcher_nodes"
                     ],
-                    0 if TEST_ACL else match_nodes,
+                    0 if TEST_MKLDNN_KLEIDIAI_OPS else match_nodes,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 2
@@ -616,7 +616,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                     counters["inductor"][
                         "mkldnn_conv_binary_unary_fusion_matcher_nodes"
                     ],
-                    0 if TEST_ACL else match_nodes,
+                    0 if TEST_MKLDNN_KLEIDIAI_OPS else match_nodes,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_conv_weight_pack_matcher_nodes"], 1
@@ -660,10 +660,10 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         x2 = torch.randn(2, 3)
 
         def matcher_check_fn():
-            match_nodes = 0 if TEST_ACL else 2
+            match_nodes = 2
             self.assertEqual(
                 counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"],
-                match_nodes,
+                0 if TEST_MKLDNN_KLEIDIAI_OPS else match_nodes,
             )
             self.assertEqual(
                 counters["inductor"]["mkldnn_conv_weight_pack_matcher_nodes"], 1
@@ -779,7 +779,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     match_nodes += 2
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                    0 if TEST_ACL else match_nodes,
+                    0 if TEST_MKLDNN_KLEIDIAI_OPS else match_nodes,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 1
@@ -787,7 +787,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
             # only generated 1 kernel for "to_dtype"
-            expected_kernel_count = 2 if TEST_ACL else 1
+            expected_kernel_count = 2 if TEST_MKLDNN_KLEIDIAI_OPS else 1
             if dtype == torch.float32:
                 # In BF32, input is float32, will not generate kernel for "to_dtype"
                 expected_kernel_count -= 1
@@ -908,11 +908,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # we have 2 linears, so we double the matcher_count/nodes
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_count"],
-                    0 if TEST_ACL else 2,
+                    0 if TEST_MKLDNN_KLEIDIAI_OPS else 2,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                    0 if TEST_ACL else match_nodes * 2,
+                    0 if TEST_MKLDNN_KLEIDIAI_OPS else match_nodes * 2,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 2
@@ -924,7 +924,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 folder_matcher_check_fn,
                 check_autocast=dtype,
             )
-            self.assertEqual(metrics.generated_kernel_count, 3 if TEST_ACL else 1)
+            expected_kernel_count = 3 if TEST_MKLDNN_KLEIDIAI_OPS else 1
+            self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
             # we won't fold the bias if bias is not same dtype with weight
             # https://github.com/pytorch/pytorch/pull/129138
             metrics.reset()
@@ -1019,7 +1020,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"][
                         "mkldnn_conv_binary_unary_fusion_matcher_nodes"
                     ],
-                    0 if TEST_ACL else 2,
+                    0 if TEST_MKLDNN_KLEIDIAI_OPS else 2,
                 )
                 reshape_linear_reshape_match_nodes = 3 if len(input_shape) == 3 else 0
                 self.assertEqual(
@@ -1043,7 +1044,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 check_autocast=dtype,
             )
             # only generated 1 kernel for "to_dtype"
-            expected_kernel_count = 2 if TEST_ACL else 1
+            expected_kernel_count = 2 if TEST_MKLDNN_KLEIDIAI_OPS else 1
             if dtype == torch.float32:
                 # In BF32, input is float32, will not generate kernel for "to_dtype"
                 expected_kernel_count -= 1
@@ -1097,7 +1098,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"][
                         "mkldnn_conv_binary_unary_fusion_matcher_nodes"
                     ],
-                    0 if TEST_ACL else 2,
+                    0 if TEST_MKLDNN_KLEIDIAI_OPS else 2,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_linear_weight_pack_matcher_nodes"], 1
@@ -1112,7 +1113,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn,
                 check_autocast=dtype,
             )
-            self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
+            expected_kernel_count = 2 if TEST_MKLDNN_KLEIDIAI_OPS else 1
+            self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     @skipIfXpu(
         msg="Different with CPU, two linears will be concat on XPU for better performance"
@@ -1144,11 +1146,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # Total: 7 + 2 = 9
             self.assertEqual(
                 counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                0 if TEST_ACL else 9,
+                0 if TEST_MKLDNN_KLEIDIAI_OPS else 9,
             )
             self.assertEqual(
                 counters["inductor"]["mkldnn_unary_fusion_matcher_count"],
-                0 if TEST_ACL else 2,
+                0 if TEST_MKLDNN_KLEIDIAI_OPS else 2,
             )
             self.assertEqual(
                 counters["inductor"]["mkldnn_reshape_linear_reshape_matcher_nodes"], 6
@@ -1185,7 +1187,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         def matcher_check_fn():
             self.assertEqual(
                 counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                0 if TEST_ACL else 3,
+                0 if TEST_MKLDNN_KLEIDIAI_OPS else 3,
             )
             self.assertEqual(
                 counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
@@ -1212,7 +1214,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         def matcher_check_fn():
             self.assertEqual(
                 counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                0 if TEST_ACL else 4,
+                0 if TEST_MKLDNN_KLEIDIAI_OPS else 4,
             )
             self.assertEqual(
                 counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
@@ -1249,7 +1251,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn(1, 3, 28, 28)
             self._test_common(mod, (v,), matcher_check_fn)
 
-    @xfailIfACL
+    @xfailIfMkldnnKleidiaiOps
     def test_conv2d_binary_inplace_fusion_pass_cpu(
         self, include_ops=None, exclude_ops=None
     ):
@@ -1301,7 +1303,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         for other, mod in zip(others, [mod_v1, mod_v2]):
             self._test_code_common(mod, (input, other), include_ops, exclude_ops)
 
-    @xfailIfACL
+    @xfailIfMkldnnKleidiaiOps
     def test_conv2d_binary_inplace_fusion_failed_cpu(
         self, include_ops=None, exclude_ops=None
     ):
@@ -1458,7 +1460,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         mod = Model3().to(memory_format=torch.channels_last).eval()
         self._test_code_common(mod, (input,), include_ops, exclude_ops)
 
-    @xfailIfACL
+    @xfailIfMkldnnKleidiaiOps
     def test_reproduce_99842_issue(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1645,7 +1647,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
 
     @requires_mkl
-    @xfailIfACL
+    @xfailIfMkldnnKleidiaiOps
     def test_reproduce_121253_issue_addmm_fusion_check(self):
         class Mod(torch.nn.Module):
             def __init__(self, weight, bias, beta, alpha):
@@ -1808,11 +1810,11 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
         def matcher_check_fn():
             self.assertEqual(
                 counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                0 if TEST_ACL else 9,
+                0 if TEST_MKLDNN_KLEIDIAI_OPS else 9,
             )
             self.assertEqual(
                 counters["inductor"]["mkldnn_unary_fusion_matcher_count"],
-                0 if TEST_ACL else 2,
+                0 if TEST_MKLDNN_KLEIDIAI_OPS else 2,
             )
             self.assertEqual(
                 counters["inductor"]["mkldnn_reshape_linear_reshape_matcher_nodes"], 6

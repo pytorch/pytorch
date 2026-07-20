@@ -1704,7 +1704,6 @@ TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_ONEDNN = torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()
-TEST_ACL = torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_acl_supported()
 TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
@@ -1725,6 +1724,17 @@ TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
 TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
 
 TEST_Z3 = _check_module_exists('z3')
+
+def _test_mkldnn_kleidiai_ops():
+    if not TEST_ONEDNN:
+        return False
+    try:
+        return torch.ops.mkldnn._is_mkldnn_kleidiai_ops_supported()
+    except AttributeError:
+        return False
+
+
+TEST_MKLDNN_KLEIDIAI_OPS = _test_mkldnn_kleidiai_ops()
 
 # DSL availability (lazy evaluation to avoid import overhead)
 class LazyDSLCheck:
@@ -2001,10 +2011,6 @@ def xpassIfTorchDynamo_np(func):
 requires_mkl = unittest.skipUnless(TEST_MKL, "Test requires MKL")
 requires_onednn = unittest.skipUnless(TEST_ONEDNN, "Test requires OneDNN/MKLDNN")
 
-def xfailIfACL(func):
-    return unittest.expectedFailure(func) if TEST_ACL else func
-
-
 def xfailIfTorchDynamo(func):
     return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
 
@@ -2023,6 +2029,10 @@ def xfailIfWindows(func):
 
 def xfailIfROCm(func):
     return unittest.expectedFailure(func) if torch.version.hip is not None else func
+
+
+def xfailIfMkldnnKleidiaiOps(func):
+    return unittest.expectedFailure(func) if TEST_MKLDNN_KLEIDIAI_OPS else func
 
 
 def _is_cpu_device_type(dev) -> bool:
