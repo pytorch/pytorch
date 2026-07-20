@@ -2878,9 +2878,9 @@ class OutputGraph(OutputGraphCommon):
             # so both strict and non-strict export produce the same node order.
             if (
                 config.canonicalize_output_graph_node_order
-                and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
                 and not self.export
                 and not torch.compiler.is_exporting()
+                and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
             ):
                 _canonicalize_graph(self.graph)
 
