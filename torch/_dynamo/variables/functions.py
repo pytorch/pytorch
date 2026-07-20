@@ -2711,7 +2711,10 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         )
 
     def get_real_python_backed_value(self) -> object:
-        return getattr(self.wrapper_obj, self.attr_to_trace)
+        # This VT stands for the wrapper, which is also what self.source
+        # denotes. The inline target is reached via attr_to_trace and is a
+        # different object.
+        return self.wrapper_obj
 
 
 class WrapperUserMethodVariable(WrapperUserFunctionVariable):

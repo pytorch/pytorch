@@ -8169,6 +8169,103 @@ SavedForBackwardsAOTOutput(idx=5)""",
         _ = fn(x)
         self.assertTrue(getattr(self, self._testMethodName).__dict__.get("slow_test"))
 
+    # https://github.com/pytorch/pytorch/issues/190171
+    @parametrize(
+        "kind",
+        ["module_method", "plain_method", "classmethod", "staticmethod", "function"],
+    )
+    def test_getattr_on_compiled_method(self, kind):
+        # torch.compile(obj.meth) stores the bound method in
+        # _torchdynamo_inline. A method owns no __dict__ and forwards lookups to
+        # __func__, so materializing its __dict__ used to raise AttributeError.
+        # staticmethod/function are controls: those are plain functions.
+        class Mod(torch.nn.Module):
+            def meth(self, x):
+                return x
+
+        class Plain:
+            def meth(self, x):
+                return x
+
+            @classmethod
+            def cls_meth(cls, x):
+                return x
+
+            @staticmethod
+            def stat(x):
+                return x
+
+        def free_fn(x):
+            return x
+
+        target = {
+            "module_method": Mod().meth,
+            "plain_method": Plain().meth,
+            "classmethod": Plain.cls_meth,
+            "staticmethod": Plain().stat,
+            "function": free_fn,
+        }[kind]
+        wrapped = torch.compile(target, backend="eager")
+
+        def fn(x):
+            return x + 1, wrapped.__name__, wrapped.__qualname__
+
+        x = torch.zeros(1)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(expected, actual)
+
+    # https://github.com/pytorch/pytorch/issues/190171
+    def test_getfullargspec_on_dynamo_ctx_method(self):
+        # What pytorch-lightning does: rebind a step method to a dynamo-wrapped
+        # version, then introspect its signature from inside the traced region.
+        traced = []
+
+        def takes_param(fn, name):
+            if hasattr(fn, "__wrapped__"):
+                fn = fn.__wrapped__
+            return name in inspect.getfullargspec(fn).args
+
+        class Model(torch.nn.Module):
+            def step(self, x, dataloader_iter=None):
+                traced.append(takes_param(self.step, "dataloader_iter"))
+                return x * 2
+
+            def forward(self, x):
+                return self.step(x)
+
+        model = Model()
+        compiled = torch.compile(model, backend="eager")
+        model.step = compiled.dynamo_ctx(model.step)
+
+        expected = takes_param(model.step, "dataloader_iter")
+        compiled(torch.randn(4))
+        self.assertEqual(traced, [expected])
+
+    @parametrize("kind", ["compile", "lru_cache", "script_if_tracing"])
+    def test_wrapper_function_identity(self, kind):
+        # A wrapper is not the function it wraps. WrapperUserFunctionVariable
+        # stands for the wrapper, so identity must compare against it and not
+        # against the inline target reached via attr_to_trace.
+        from torch.jit import _script_if_tracing
+
+        def g(x):
+            return x + 1
+
+        wrapped = {
+            "compile": lambda: torch.compile(g, backend="eager"),
+            "lru_cache": lambda: functools.lru_cache(g),
+            "script_if_tracing": lambda: _script_if_tracing(g),
+        }[kind]()
+
+        def fn(x):
+            return x + 1, (wrapped is g), (g is wrapped)
+
+        x = torch.zeros(1)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(expected, actual)
+
     def test_elementwise_dtypes_constant_fold(self):
         from torch._prims_common import (
             elementwise_dtypes,
