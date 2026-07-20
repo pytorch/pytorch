@@ -976,7 +976,13 @@ class PaddingTest(TestCaseBase):
         with config.patch({"comprehensive_padding": True}):
             compiled = torch.compile(program, backend="inductor")(x.clone())
 
-        self.assertEqual(eager, compiled)
+        # This reduction sums ~100k fp32 values, so eager and inductor differ
+        # only by floating-point accumulation order. On some backends (e.g. ROCm
+        # MI200) that difference slightly exceeds the default fp32 tolerance, so
+        # use a tolerance appropriate for a large fp32 reduction. The regression
+        # being guarded here is a stride mismatch during compilation, not the
+        # last-ULP numerics.
+        self.assertEqual(eager, compiled, atol=1e-3, rtol=1e-4)
 
 
 if __name__ == "__main__":
