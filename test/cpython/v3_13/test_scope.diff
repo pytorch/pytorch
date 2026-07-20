@@ -1,0 +1,43 @@
+diff --git a/test/cpython/v3_13/test_scope.py b/test/cpython/v3_13/test_scope.py
+index 24a366efc6c..d43ca10614e 100644
+--- a/test/cpython/v3_13/test_scope.py
++++ b/test/cpython/v3_13/test_scope.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_scope.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ import weakref
+ 
+@@ -5,7 +23,7 @@ from test.support import check_syntax_error, cpython_only
+ from test.support import gc_collect
+ 
+ 
+-class ScopeTests(unittest.TestCase):
++class ScopeTests(CPythonTestCase):
+ 
+     def testSimpleNesting(self):
+ 
+@@ -835,5 +853,5 @@ class ScopeTests(unittest.TestCase):
+         with self.assertRaises(TypeError):
+             closure(_MultiplyNested__arg=2)
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    run_tests()
