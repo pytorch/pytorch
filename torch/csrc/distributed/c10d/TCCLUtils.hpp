@@ -38,21 +38,20 @@ class TCCLRegisteredMPSTensor;
 // POD routing info exchanged between peers during QP setup. Serialized by
 // reinterpret_cast to bytes.
 //
-// 32 bytes on macOS arm64: 3 * int (12 bytes, 4-byte aligned) + ibv_gid
-// (16 bytes union). The static_assert in TCCLUtils.cpp catches any platform
-// where this assumption breaks before we send corrupt bytes over the wire.
+// 32 bytes on macOS arm64: 4 * int32 (16 bytes) + uint8[16] (16 bytes). The
+// static_assert in TCCLUtils.cpp catches any platform where this assumption
+// breaks before we send corrupt bytes over the wire.
 struct TCCLDestination {
   int32_t lid;
   int32_t qp_num;
   int32_t psn;
-  int32_t _pad;       // align gid to 16 bytes; ibv_gid is a 16-byte union
-  uint8_t gid[16];    // raw GID bytes
+  // Align gid to 16 bytes - ibv_gid is a 16-byte union
+  int32_t _pad;
+  uint8_t gid[16];
 
 };
 
-// =============================================================================
 // IBV wrapper - singleton dlopen of librdma.dylib
-// =============================================================================
 
 // Process-wide singleton owning the dlopen handle and dlsym'd function
 // pointers for all librdma.dylib control-path symbols. Data-path symbols
@@ -102,9 +101,7 @@ class TORCH_API TCCLIBVWrapper {
   void* handle_ = nullptr;
 };
 
-// =============================================================================
 // Connection - owns one QP plus its supporting context/PD/CQ
-// =============================================================================
 
 // One Connection corresponds to one UC queue pair to one peer-wire. Each
 // instance opens its own ibv_context, allocates its own PD/CQ, and creates
@@ -139,7 +136,7 @@ class TORCH_API TCCLConnection {
   // Transition our QP to RTS using our locally chosen PSN.
   void transitionToRTS();
 
-  // ===== Data-path methods =====
+  // Data-path methods
   // Post a send WR referencing `length` bytes of `buf`'s storage. Caller is
   // responsible for buf having been registered to this Connection's PD via
   // TCCLSharedBuffer::registerToPD(protectionDomain()) at init time.
@@ -153,7 +150,7 @@ class TORCH_API TCCLConnection {
 
   // Post a recv WR referencing `length` bytes of `buf`'s storage. Same
   // registration precondition as postSend. UC requires the recv to be
-  // posted BEFORE the matching send arrives (Apple TN3205 §12.3: credit-based
+  // posted BEFORE the matching send arrives (Apple TN3205 sec. 12.3: credit-based
   // flow control stalls the sender otherwise).
   void postRecv(
       class TCCLSharedBuffer& buf,
@@ -190,20 +187,14 @@ class TORCH_API TCCLConnection {
   TCCLDestination local_destination_{};
 };
 
-// =============================================================================
 // SharedBuffer - page-aligned RDMA-registerable storage
-// =============================================================================
 
-// A fixed-size, page-aligned chunk of host memory that can be registered to
-// one or more protection domains via ibv_reg_mr.
+// A fixed-size, page-aligned host buffer registerable to one or more protection
+// domains via ibv_reg_mr. One per (peer, direction): each rank holds (size_-1)
+// send and (size_-1) recv buffers, each registered to the matching peer's PD.
 //
-// One of these is used per (peer, direction): every rank holds (size_-1) send
-// buffers and (size_-1) recv buffers, each registered to the corresponding
-// peer's PD.
-//
-// Move-only because the underlying allocation and the MR map cannot be
-// safely copied. Default-constructible as an empty buffer (data_=nullptr,
-// size_=0) so vectors of SharedBuffers can be sized first and assigned later.
+// Move-only (allocation + MR map cannot be copied). Default-constructible as an
+// empty buffer so vectors can be sized first and assigned later.
 class TORCH_API TCCLSharedBuffer {
  public:
   // Empty buffer. Useful as a placeholder for the self-slot in
@@ -250,9 +241,7 @@ class TORCH_API TCCLSharedBuffer {
   std::unordered_map<ibv_pd*, ibv_mr*> mrs_;
 };
 
-// =============================================================================
 // Free helpers
-// =============================================================================
 
 // Lists the names of RDMA devices visible to librdma on this host.
 // Loads the singleton TCCLIBVWrapper if not already loaded. Returns an empty
@@ -274,11 +263,10 @@ TORCH_API std::vector<std::string> listRdmaDevices();
 // provided.
 TORCH_API std::string resolveTcclDeviceName(const std::string& explicit_name);
 
-// Resolve the per-peer RDMA device list for this rank. Returns a vector of
-// size `size`; entry [peer] is the device this rank uses to reach `peer`, with
-// the self-slot ([rank]) left empty. In a full Thunderbolt mesh each peer is on
-// a different physical port (different rdma_enX), so a single device cannot
-// drive the group.
+// Resolve the per-peer RDMA device list for this rank. Returns a size-`size`
+// vector; entry [peer] is the device reaching `peer`, self-slot ([rank]) empty.
+// In a full Thunderbolt mesh each peer is on a different port, so one device
+// cannot drive the group.
 //
 // Precedence:
 //   1. TCCL_PEER_DEVICES env - comma-separated list of exactly `size` device
@@ -290,7 +278,7 @@ TORCH_API std::string resolveTcclDeviceName(const std::string& explicit_name);
 //
 // Throws DistBackendError if TCCL_PEER_DEVICES is set but malformed (wrong
 // count, non-empty self-slot, or empty peer slot). Under ring_topology the row
-// is sparse: only the two neighbor slots ((rank±1)%size) may be non-empty and
+// is sparse: only the two neighbor slots ((rank+/-1)%size) may be non-empty and
 // all other slots (incl. self) must be empty - the inverse is enforced too.
 TORCH_API std::vector<std::string> resolveTcclPeerDevices(
     int rank,
@@ -305,15 +293,9 @@ TORCH_API void checkLinkLayer(const std::string& rdma_device);
 
 // Reserve a unique init sequence number that ALL ranks of this PG instance
 // agree on. Used as a key prefix for destination exchange so PG re-init under
-// the same group_name cannot accidentally read stale destinations from a
-// prior incarnation.
-//
-// Only rank 0 reserves the number (Store::add - a server-side atomic on
-// TCPStore, fresh on every (re)creation) and broadcasts it via the Store;
-// every other rank reads rank 0's value. A per-rank
-// Store::add would hand each rank a different post-increment value, so the
-// ranks would build different key prefixes and never find each other. Mirrors
-// NCCL's unique-id broadcast. Returns the agreed counter value (1-indexed).
+// the same group_name cannot read stale destinations from a prior incarnation.
+// Only rank 0 reserves (Store::add) and broadcasts; others read it. Returns the
+// agreed counter value (1-indexed).
 TORCH_API int64_t tcclInitSequence(
     Store& store,
     int rank,

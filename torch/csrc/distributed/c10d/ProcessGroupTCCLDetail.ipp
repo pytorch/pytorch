@@ -1,7 +1,6 @@
 #pragma once
 
-// Template implementations for ProcessGroupTCCLDetail.hpp. Pulled in via
-// the trailing include in that header — do not include directly.
+// Template implementations for ProcessGroupTCCLDetail.hpp.
 
 #ifdef USE_C10D_TCCL
 
@@ -16,7 +15,8 @@
 #include <torch/csrc/distributed/c10d/TCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/exception.h>
 
-#include <infiniband/verbs.h>  // for ibv_wc, IBV_WC_SUCCESS
+// For ibv_wc, IBV_WC_SUCCESS
+#include <infiniband/verbs.h>
 
 namespace c10d {
 
@@ -25,11 +25,9 @@ namespace c10d {
 //   bits 62..32     : reserved
 //   bits 31..0      : peer rank
 //
-// Every collective posts WRs through mesh_exchange using this scheme so
-// completion polling can identify which (peer, direction) a completion is
-// for. At PIPELINE=1 there is one in-flight chunk per (peer, direction), so
-// (direction, peer) fully identifies a completion; the reserved bits leave room
-// to encode extra fields if that changes.
+// At PIPELINE=1 there is one in-flight chunk per (peer, direction), so
+// (direction, peer) fully identifies a completion; reserved bits leave room to
+// grow.
 namespace tccl_wr {
 
 constexpr uint64_t kSendBit = 1ULL << 63;
@@ -52,12 +50,11 @@ inline int peer(uint64_t wr_id) {
 
 } // namespace tccl_wr
 
-// ---- mesh_exchange ---------------------------------------------------------
+// mesh_exchange
 //
-// The one place the UC-ordering discipline (recv posted before send) and the
-// WC-status / duplicate-completion / PG-timeout-watchdog checks live. All four
-// collectives below are thin adapters over this. See the declaration in
-// ProcessGroupTCCLDetail.hpp for the contract.
+// The one place the UC-ordering discipline (recv before send) and the WC-status
+// / duplicate-completion / timeout-watchdog checks live. The mesh collectives
+// are thin adapters over this; contract in the header.
 template <typename SendSrc, typename WantRecv, typename OnRecv>
 void TCCLEngine::mesh_exchange(
     std::size_t total_bytes,
@@ -66,10 +63,10 @@ void TCCLEngine::mesh_exchange(
     OnRecv on_recv) {
   // Ring topology has null connection slots for all non-neighbor peers;
   // mesh_exchange indexes every peer, so reaching it here would null-deref.
-  // Dispatch must force the ring path in ring mode — fail loud if it didn't.
+  // Dispatch must force the ring path in ring mode - fail loud if it didn't.
   TORCH_CHECK(
       !ring_topology_,
-      "TCCL: mesh_exchange invoked under ring topology — a collective's "
+      "TCCL: mesh_exchange invoked under ring topology - a collective's "
       "dispatch failed to select its ring variant (internal error).");
   if (size_ <= 1) {
     return;
@@ -89,7 +86,7 @@ void TCCLEngine::mesh_exchange(
     int expected_completions = 0;
 
     // Step 1: pre-post recvs FIRST. UC requires the recv posted before the
-    // matching send arrives (Apple TN3205 §12.3 credit-based flow control);
+    // matching send arrives (Apple TN3205 sec. 12.3 credit-based flow control);
     // post every recv before any send.
     for (int peer = 0; peer < size_; ++peer) {
       if (peer == rank_) continue;
@@ -174,7 +171,7 @@ void TCCLEngine::mesh_exchange(
                 "TCCL mesh: unexpected or duplicate recv completion for peer ",
                 peer);
             recv_done[peer] = 1;
-            // Recv complete — the peer's chunk is in recv_buffers_[peer].
+            // Recv complete - the peer's chunk is in recv_buffers_[peer].
             on_recv(peer, recv_buffers_[peer].data(), offset, chunk_bytes);
           }
           ++completions_seen;
@@ -218,7 +215,7 @@ void TCCLEngine::mesh_exchange(
   }
 }
 
-// ---- all_reduce ------------------------------------------------------------
+// all_reduce
 template <typename T, typename ReduceOp>
 void TCCLEngine::all_reduce(
     T* data,
@@ -253,14 +250,12 @@ void TCCLEngine::all_reduce(
       });
 }
 
-// ---- ring_step -------------------------------------------------------------
+// ring_step
 //
-// One step of a ring collective: stream `send_bytes` from `send_base` to the
-// right neighbor while streaming `recv_bytes` from the left neighbor, both in
-// kChunkSize pieces with one piece in flight per direction (PIPELINE=1). The
-// recv is posted before the send (UC credit-flow discipline), every completion
-// is status-checked, and a timeout_ watchdog bounds the wait. on_recv handles
-// each received piece (reduce or copy).
+// One ring step: stream `send_bytes` to the right neighbor while streaming
+// `recv_bytes` from the left, in kChunkSize pieces, one in flight per direction
+// (PIPELINE=1). Recv before send (UC credit-flow), every completion
+// status-checked, timeout_ watchdog. on_recv handles each piece (reduce or copy).
 template <typename OnRecv>
 void TCCLEngine::ring_step(
     int send_peer,
@@ -270,10 +265,14 @@ void TCCLEngine::ring_step(
     std::size_t recv_bytes,
     OnRecv on_recv) {
   std::vector<ibv_wc> wcs(8);
-  std::size_t send_off = 0;       // bytes acknowledged sent
-  std::size_t recv_off = 0;       // bytes received and handled
-  std::size_t send_inflight = 0;  // size of the in-flight send piece (0 = none)
-  std::size_t recv_inflight = 0;  // size of the in-flight recv piece (0 = none)
+  // Bytes acknowledged sent
+  std::size_t send_off = 0;
+  // Bytes received and handled
+  std::size_t recv_off = 0;
+  // In-flight send piece size - 0 = none
+  std::size_t send_inflight = 0;
+  // In-flight recv piece size - 0 = none
+  std::size_t recv_inflight = 0;
 
   auto post_recv_piece = [&]() {
     if (recv_inflight == 0 && recv_off < recv_bytes) {
@@ -357,14 +356,12 @@ void TCCLEngine::ring_step(
   }
 }
 
-// ---- ring_all_reduce -------------------------------------------------------
+// ring_all_reduce
 //
 // Bandwidth-optimal ring: reduce-scatter (size_-1 steps) then all-gather
-// (size_-1 steps). At step s the rank sends chunk (rank-s) to the right and
-// receives chunk (rank-s-1) from the left — the chunk it just reduced — so each
-// step depends on the previous (synchronous, no cross-step pipelining yet).
-// Traffic is bounded to the two ring neighbors (the avoidance strategy for
-// large/bf16 messages).
+// (size_-1 steps). Each step depends on the previous (synchronous, no
+// cross-step pipelining yet). Traffic bounded to the two ring neighbors - the
+// avoidance strategy for large/bf16 messages.
 template <typename T, typename ReduceOp>
 void TCCLEngine::ring_all_reduce(
     T* data,
@@ -435,7 +432,7 @@ void TCCLEngine::ring_all_reduce(
   }
 }
 
-// ---- ring_all_gather -------------------------------------------------------
+// ring_all_gather
 inline void TCCLEngine::ring_all_gather(
     const void* in,
     const std::vector<void*>& out_ptrs,
@@ -481,7 +478,7 @@ inline void TCCLEngine::ring_all_gather(
   }
 }
 
-// ---- ring_reduce_scatter ---------------------------------------------------
+// ring_reduce_scatter
 template <typename T, typename ReduceOp>
 void TCCLEngine::ring_reduce_scatter(
     const std::vector<const T*>& in_chunks,
@@ -505,9 +502,8 @@ void TCCLEngine::ring_reduce_scatter(
       "TCCL ring_reduce_scatter requires size_ > 2 (dispatch uses mesh for <=2).");
 
   // Ring reduce-scatter accumulates partials in place, so it needs a mutable
-  // copy of all N input chunks, gathered here from the per-rank pointers (mesh
-  // reduce_scatter reduces straight into `out` and needs no scratch — a fair
-  // cost difference to keep in mind for the bench).
+  // copy of all N input chunks (mesh reduce_scatter reduces straight into `out`
+  // with no scratch).
   std::vector<char> work(static_cast<std::size_t>(N) * chunk_bytes);
   for (int c = 0; c < N; ++c) {
     std::memcpy(
@@ -544,14 +540,12 @@ void TCCLEngine::ring_reduce_scatter(
   std::memcpy(out, chunk(rank_), chunk_bytes);
 }
 
-// ---- ring_broadcast --------------------------------------------------------
+// ring_broadcast
 //
-// Store-and-forward along the ring: chunk by chunk, the root sends to its right;
-// each non-root rank receives a chunk from its left, writes it to the output, and
-// (unless it is the chain tail = root's left neighbour) forwards it to its right.
-// RDMA does not relay, so forwarding is explicit. Per-chunk synchronous, with the
-// recv posted before the matching send (UC credit-flow), a wc.status check, and
-// the PG-timeout watchdog.
+// Store-and-forward along the ring: each non-root rank receives a chunk from its
+// left, writes it, and (unless it is the chain tail = root's left neighbor)
+// forwards it right. RDMA does not relay, so forwarding is explicit. Per-chunk
+// synchronous, recv before send (UC credit-flow), wc.status check, timeout watchdog.
 inline void TCCLEngine::ring_broadcast(
     void* data, std::size_t total_bytes, int root) {
   if (size_ <= 1) {
@@ -562,7 +556,8 @@ inline void TCCLEngine::ring_broadcast(
       size_ > 2,
       "TCCL ring_broadcast requires size_ > 2 (dispatch uses mesh for <=2).");
   const int N = size_;
-  const int pos = ((rank_ - root) % N + N) % N;  // 0 = root ... N-1 = chain tail
+  // 0 = root ... N-1 = chain tail
+  const int pos = ((rank_ - root) % N + N) % N;
   const bool is_root = (pos == 0);
   const bool is_tail = (pos == N - 1);
   const int right = (rank_ + 1) % N;
@@ -598,12 +593,14 @@ inline void TCCLEngine::ring_broadcast(
   std::size_t off = 0;
   while (off < total_bytes) {
     const std::size_t n = std::min(kChunkSize, total_bytes - off);
-    if (!is_root) {  // receive this chunk from the left, write to output
+    // Receive this chunk from the left, write to output
+    if (!is_root) {
       connections_[left]->postRecv(recv_buffers_[left], n, tccl_wr::makeRecv(left));
       poll_one(left, /*want_send=*/false);
       std::memcpy(base + off, recv_buffers_[left].data(), n);
     }
-    if (!is_tail) {  // forward (root: from data; others: the just-received chunk)
+    // Forward - root sends from data, others the just-received chunk
+    if (!is_tail) {
       std::memcpy(send_buffers_[right].data(), base + off, n);
       connections_[right]->postSend(send_buffers_[right], n, tccl_wr::makeSend(right));
       poll_one(right, /*want_send=*/true);
@@ -612,7 +609,7 @@ inline void TCCLEngine::ring_broadcast(
   }
 }
 
-// ---- broadcast -------------------------------------------------------------
+// broadcast
 inline void TCCLEngine::broadcast(
     void* data,
     std::size_t total_bytes,
@@ -652,7 +649,7 @@ inline void TCCLEngine::broadcast(
       });
 }
 
-// ---- all_gather ------------------------------------------------------------
+// all_gather
 inline void TCCLEngine::all_gather(
     const void* in,
     const std::vector<void*>& out_ptrs,
@@ -697,7 +694,7 @@ inline void TCCLEngine::all_gather(
       });
 }
 
-// ---- reduce_scatter --------------------------------------------------------
+// reduce_scatter
 template <typename T, typename ReduceOp>
 void TCCLEngine::reduce_scatter(
     const std::vector<const T*>& in_chunks,
@@ -710,7 +707,7 @@ void TCCLEngine::reduce_scatter(
       "TCCL mesh: reduce_scatter expects size_ input-chunk pointers and a "
       "non-null output.");
 
-  // Seed our output with our own contribution — our chunk destined for rank_.
+  // Seed our output with our own contribution - our chunk destined for rank_.
   // (Out-of-place, so we cannot rely on `out` already holding it the way an
   // in-place ring reduce-scatter would.)
   std::memcpy(
@@ -742,7 +739,7 @@ void TCCLEngine::reduce_scatter(
       });
 }
 
-// ---- point-to-point send / recv -------------------------------------------
+// point-to-point send / recv
 inline void TCCLEngine::p2p_send(
     int dst, const char* in, std::size_t nbytes) {
   TORCH_CHECK_WITH(
@@ -750,8 +747,10 @@ inline void TCCLEngine::p2p_send(
       dst >= 0 && dst < size_ && dst != rank_,
       "TCCL p2p_send: invalid dst ", dst, " (rank ", rank_, ", size ", size_, ").");
   std::vector<ibv_wc> wcs(8);
-  std::size_t off = 0;        // bytes acknowledged sent
-  std::size_t inflight = 0;   // size of the in-flight chunk (0 = none)
+  // Bytes acknowledged sent
+  std::size_t off = 0;
+  // In-flight chunk size - 0 = none
+  std::size_t inflight = 0;
   auto post = [&]() {
     if (inflight == 0 && off < nbytes) {
       inflight = std::min(kChunkSize, nbytes - off);
@@ -784,7 +783,8 @@ inline void TCCLEngine::p2p_send(
       inflight = 0;
       post();
     }
-    deadline = std::chrono::steady_clock::now() + timeout_;  // progress -> reset
+    // Progress -> reset
+    deadline = std::chrono::steady_clock::now() + timeout_;
   }
 }
 
@@ -795,8 +795,10 @@ inline void TCCLEngine::p2p_recv(
       src >= 0 && src < size_ && src != rank_,
       "TCCL p2p_recv: invalid src ", src, " (rank ", rank_, ", size ", size_, ").");
   std::vector<ibv_wc> wcs(8);
-  std::size_t off = 0;        // bytes received and handled
-  std::size_t inflight = 0;   // size of the in-flight chunk (0 = none)
+  // Bytes received and handled
+  std::size_t off = 0;
+  // In-flight chunk size - 0 = none
+  std::size_t inflight = 0;
   auto post = [&]() {
     if (inflight == 0 && off < nbytes) {
       inflight = std::min(kChunkSize, nbytes - off);
@@ -829,11 +831,12 @@ inline void TCCLEngine::p2p_recv(
       inflight = 0;
       post();
     }
-    deadline = std::chrono::steady_clock::now() + timeout_;  // progress -> reset
+    // Progress -> reset
+    deadline = std::chrono::steady_clock::now() + timeout_;
   }
 }
 
-// ---- all-to-all (mesh / direct) -------------------------------------------
+// all-to-all (mesh / direct)
 inline void TCCLEngine::all_to_all(
     const char* send_base,
     char* recv_base,
@@ -930,7 +933,7 @@ inline void TCCLEngine::all_to_all(
   }
 }
 
-// ---- all-to-all (ring / store-and-forward, equal splits) ------------------
+// all-to-all (ring / store-and-forward, equal splits)
 inline void TCCLEngine::ring_all_to_all(
     const char* send_base, char* recv_base, std::size_t seg_bytes) {
   const int N = size_;
@@ -969,7 +972,7 @@ inline void TCCLEngine::ring_all_to_all(
         [&](std::size_t off, const void* src, std::size_t nbytes) {
           std::memcpy(rw + off, src, nbytes);
         });
-    // Peel the last segment of the received block — destined for this rank,
+    // Peel the last segment of the received block - destined for this rank,
     // originated (k hops left) by rank (rank_ - k).
     const int origin = (rank_ - k + N) % N;
     std::memcpy(

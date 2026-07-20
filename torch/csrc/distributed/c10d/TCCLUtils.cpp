@@ -19,10 +19,8 @@
 
 namespace c10d {
 
-// Compile-time check that the layout assumption used by the Store wire
-// format holds. ibv_gid is a 16-byte union (per the standard infiniband
-// header), so TCCLDestination::gid[16] is the right size and our
-// memcpy-based conversion at the verbs boundary is well-defined.
+// Guards the Store wire-format layout: ibv_gid is a 16-byte union, so
+// TCCLDestination::gid[16] matches and the memcpy bridge is well-defined.
 static_assert(
     sizeof(ibv_gid) == 16,
     "ibv_gid is expected to be 16 bytes; TCCLDestination::gid[16] depends "
@@ -48,7 +46,8 @@ constexpr int kQpMaxSge = 1;
 constexpr int kCqCapacity = 64;
 constexpr int kQpPort = 1;
 constexpr int kGidIndex = 1;
-constexpr int kPsn = 7;  // initial packet sequence number
+// Initial packet sequence number
+constexpr int kPsn = 7;
 constexpr int kQpAccessFlags =
     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
 
@@ -70,7 +69,7 @@ ibv_gid bytesToGid(const uint8_t (&src)[16]) {
 bool ifaceHasStaticIPv4(const std::string& bsd_iface) {
   struct ifaddrs* ifaddr = nullptr;
   if (getifaddrs(&ifaddr) != 0) {
-    // Treat as "not found" — the caller will throw with a clear message.
+    // Treat as "not found" - the caller will throw with a clear message.
     return false;
   }
   bool found = false;
@@ -86,7 +85,7 @@ bool ifaceHasStaticIPv4(const std::string& bsd_iface) {
     }
     auto* sin = reinterpret_cast<sockaddr_in*>(ifa->ifa_addr);
     uint32_t host_addr = ntohl(sin->sin_addr.s_addr);
-    // 169.254.0.0/16 — RFC 3927 link-local autoconf. The Thunderbolt RDMA
+    // 169.254.0.0/16 - RFC 3927 link-local autoconf. The Thunderbolt RDMA
     // stack hands these out when no static IP is configured; RTR fails with
     // them as the source GID.
     if ((host_addr & 0xFFFF0000u) == 0xA9FE0000u) {
@@ -101,15 +100,11 @@ bool ifaceHasStaticIPv4(const std::string& bsd_iface) {
 
 } // namespace
 
-// =============================================================================
 // TCCLIBVWrapper
-// =============================================================================
 
 TCCLIBVWrapper::TCCLIBVWrapper() {
-  // RTLD_NOW: resolve all symbols at dlopen time so we fail fast if the
-  // library is missing or incompatible.
-  // RTLD_GLOBAL: makes librdma symbols available to subsequently dlopen'd
-  // libraries
+  // RTLD_NOW: resolve all symbols now, fail fast if the library is bad.
+  // RTLD_GLOBAL: expose librdma symbols to later dlopen'd libraries.
   handle_ = dlopen("librdma.dylib", RTLD_NOW | RTLD_GLOBAL);
   TORCH_CHECK_WITH(
       DistBackendError,
@@ -153,15 +148,13 @@ TCCLIBVWrapper::TCCLIBVWrapper() {
 }
 
 TCCLIBVWrapper& TCCLIBVWrapper::instance() {
-  // Lives for the process lifetime; we deliberately do not dlclose — the
+  // Lives for the process lifetime; we deliberately do not dlclose - the
   // function pointers we hold would dangle if the library unmapped.
   static TCCLIBVWrapper inst;
   return inst;
 }
 
-// =============================================================================
 // listRdmaDevices
-// =============================================================================
 
 std::vector<std::string> listRdmaDevices() {
   auto& ibv = TCCLIBVWrapper::instance();
@@ -196,7 +189,7 @@ std::string resolveTcclDeviceName(const std::string& explicit_name) {
     return std::string(env);
   }
   // Precedence 3: auto-detect. Succeeds iff exactly one device is visible
-  // — the common case on Macs with a single Thunderbolt RDMA fabric.
+  // - the common case on Macs with a single Thunderbolt RDMA fabric.
   auto devices = listRdmaDevices();
   TORCH_CHECK_WITH(
       DistBackendError,
@@ -231,7 +224,7 @@ std::vector<std::string> resolveTcclPeerDevices(
   const int left = (rank - 1 + size) % size;
   const int right = (rank + 1) % size;
   // Which peers this rank is physically cabled to. Mesh: every non-self peer.
-  // Ring: only the two neighbors ((rank±1)%size) — every other slot (incl. self)
+  // Ring: only the two neighbors ((rank+/-1)%size) - every other slot (incl. self)
   // must be empty, so the sparse row round-trips to null connection slots.
   const auto isConnectedPeer = [&](int p) {
     if (p == rank) {
@@ -242,7 +235,7 @@ std::vector<std::string> resolveTcclPeerDevices(
 
   std::vector<std::string> devices(static_cast<size_t>(size));
 
-  // Precedence 1: TCCL_PEER_DEVICES — the rank's row of the device matrix.
+  // Precedence 1: TCCL_PEER_DEVICES - the rank's row of the device matrix.
   // Comma-separated, exactly `size` fields, self-slot empty. The launcher
   // derives it from the auto-discovered hostfile so each peer maps to the
   // physical port (rdma_enX) that is cabled to it. Ring rows are sparse:
@@ -300,7 +293,7 @@ std::vector<std::string> resolveTcclPeerDevices(
     return devices;
   }
 
-  // Precedence 2: a single device for every connected peer — the single-link
+  // Precedence 2: a single device for every connected peer - the single-link
   // case. resolveTcclDeviceName applies its own explicit/env/auto precedence.
   // Under ring topology only the two neighbor slots are filled.
   const std::string one = resolveTcclDeviceName(explicit_name);
@@ -311,9 +304,7 @@ std::vector<std::string> resolveTcclPeerDevices(
   return devices;
 }
 
-// =============================================================================
 // TCCLConnection
-// =============================================================================
 
 namespace {
 
@@ -350,9 +341,9 @@ TCCLConnection::TCCLConnection(const std::string& device_name) {
       "TCCL: failed to open RDMA device '",
       device_name,
       "'. Available devices: see torch.distributed.list_tccl_devices(). ",
-      "If empty, Thunderbolt may be bridged — run `sudo tbtrdmactl unbridge`.");
+      "If empty, Thunderbolt may be bridged - run `sudo tbtrdmactl unbridge`.");
 
-  // PD/CQ/QP allocation: any failure here means we partially constructed —
+  // PD/CQ/QP allocation: any failure here means we partially constructed -
   // call destroy() to free what we did get before rethrowing.
   try {
     pd_ = ibv.alloc_pd(ctx_);
@@ -379,14 +370,15 @@ TCCLConnection::TCCLConnection(const std::string& device_name) {
     qp_init.cap.max_send_sge = kQpMaxSge;
     qp_init.cap.max_recv_sge = kQpMaxSge;
     qp_init.cap.max_inline_data = 0;
-    qp_init.sq_sig_all = 0;  // Only explicitly-signaled sends get a CQE.
+    // Only explicitly-signaled sends get a CQE
+    qp_init.sq_sig_all = 0;
 
     qp_ = ibv.create_qp(pd_, &qp_init);
     TORCH_CHECK_WITH(
         DistBackendError,
         qp_ != nullptr,
         "TCCL: ibv_create_qp(UC) failed. Most common cause on Thunderbolt: "
-        "the device's 10-QP-per-context limit is exhausted (Apple TN3205 §12.1). "
+        "the device's 10-QP-per-context limit is exhausted (Apple TN3205 sec. 12.1). "
         "Spread peers across more devices or reduce num_wires.");
 
     // QP -> INIT (the first transition; INIT->RTR happens once the peer's
@@ -407,10 +399,9 @@ TCCLConnection::TCCLConnection(const std::string& device_name) {
           ret);
     }
 
-    // Populate local routing info now so the caller can publish it via Store
-    // immediately after construction. ibv_query_port reports link state
-    // (must be ACTIVE) and LID; ibv_query_gid at index 1 returns the
-    // IPv4-mapped GID that Thunderbolt uses for addressing.
+    // Populate local routing info for the caller to publish via Store.
+    // ibv_query_port gives link state (must be ACTIVE) and LID; ibv_query_gid at
+    // index 1 gives the IPv4-mapped GID Thunderbolt addresses with.
     ibv_port_attr port_attr{};
     int qp_ret = ibv.query_port(ctx_, kQpPort, &port_attr);
     TORCH_CHECK_WITH(
@@ -480,10 +471,9 @@ void TCCLConnection::swap(TCCLConnection& other) noexcept {
 }
 
 void TCCLConnection::destroy() noexcept {
-  // Teardown order: QP -> CQ -> PD -> context. Each tier depends on the
-  // ones below it, so we unwind in reverse-allocation order. Errors are
-  // intentionally ignored — there's nothing useful we can do on a teardown
-  // failure in a destructor, and throwing from noexcept would call std::terminate.
+  // Teardown QP -> CQ -> PD -> context (reverse-allocation order). Errors are
+  // ignored - nothing useful to do on teardown, and throwing from noexcept
+  // would call std::terminate.
   auto& ibv = TCCLIBVWrapper::instance();
   if (qp_ != nullptr) {
     ibv.destroy_qp(qp_);
@@ -512,7 +502,7 @@ void TCCLConnection::transitionToRTR(const TCCLDestination& remote) {
 
   ibv_qp_attr attr{};
   attr.qp_state = IBV_QPS_RTR;
-  // IBV_MTU_1024 — TN3205 recommends 4096 but it consistently caused RTR
+  // IBV_MTU_1024 - TN3205 recommends 4096 but it consistently caused RTR
   // timeouts on the Thunderbolt RDMA stack; the hardware appears to negotiate
   // 1024 as the supported MTU.
   attr.path_mtu = IBV_MTU_1024;
@@ -552,7 +542,7 @@ void TCCLConnection::transitionToRTR(const TCCLDestination& remote) {
       ", psn=",
       remote.psn,
       ". errno=60 (ETIMEDOUT) usually means the link-layer subnet is not "
-      "configured — call check_tccl_link_layer() before init, or configure a "
+      "configured - call check_tccl_link_layer() before init, or configure a "
       "static /30 on the Thunderbolt interface.");
 }
 
@@ -575,7 +565,7 @@ void TCCLConnection::transitionToRTS() {
       ret);
 }
 
-// ---- TCCLConnection data-path methods --------------------------------------
+// TCCLConnection data-path methods
 
 void TCCLConnection::postSend(
     const TCCLSharedBuffer& buf,
@@ -597,8 +587,8 @@ void TCCLConnection::postSend(
   wr.next = nullptr;
 
   ibv_send_wr* bad = nullptr;
-  // ibv_post_send is inline in <infiniband/verbs.h> — calls through
-  // qp->context->ops, no syscall (Apple TN3205 §12.5).
+  // ibv_post_send is inline in <infiniband/verbs.h> - calls through
+  // qp->context->ops, no syscall (Apple TN3205 sec. 12.5).
   int rc = ibv_post_send(qp_, &wr, &bad);
   TORCH_CHECK_WITH(
       DistBackendError,
@@ -658,7 +648,7 @@ int TCCLConnection::pollCq(int max_completions, ibv_wc* wcs) {
   return n;
 }
 
-// ---- TCCLSharedBuffer ------------------------------------------------------
+// TCCLSharedBuffer
 
 TCCLSharedBuffer::TCCLSharedBuffer(size_t num_bytes) : size_(num_bytes) {
   TORCH_CHECK_WITH(
@@ -735,7 +725,7 @@ void TCCLSharedBuffer::registerToPD(ibv_pd* pd) {
       DistBackendError,
       pd != nullptr,
       "TCCL: registerToPD called with null pd.");
-  // Access flag set (LOCAL_WRITE | REMOTE_READ | REMOTE_WRITE). TN3205 §12.2
+  // Access flag set (LOCAL_WRITE | REMOTE_READ | REMOTE_WRITE). TN3205 sec. 12.2
   // notes LOCAL_WRITE alone is enough for 2-sided UC; the broader set is also
   // valid and is what this backend uses.
   auto& ibv = TCCLIBVWrapper::instance();
@@ -753,7 +743,7 @@ void TCCLSharedBuffer::registerToPD(ibv_pd* pd) {
       ") returned null.");
   auto [it, inserted] = mrs_.emplace(pd, mr);
   if (!inserted) {
-    // Already had an MR for this pd — that's a programming error in our
+    // Already had an MR for this pd - that's a programming error in our
     // caller. Free the new MR and throw.
     ibv.dereg_mr(mr);
     TORCH_CHECK_WITH(
@@ -832,13 +822,11 @@ int64_t tcclInitSequence(
     Store& store,
     int rank,
     std::chrono::milliseconds timeout) {
-  // All ranks must agree on ONE sequence number for this PG instance. Only
-  // rank 0 reserves it via Store::add (a server-side atomic on TCPStore,
-  // fresh on every (re)creation) and broadcasts it via
-  // the Store; every other rank reads rank 0's value. A per-rank Store::add
-  // would return a different post-increment value to each caller, so the
-  // ranks would build different key prefixes and never find each other's
-  // destinations. Mirrors ProcessGroupNCCL's unique-id broadcast.
+  // All ranks must agree on ONE sequence number for this PG instance. Only rank
+  // 0 reserves it (Store::add, a server-side atomic) and broadcasts it; others
+  // read rank 0's value. A per-rank Store::add would hand each caller a
+  // different value, so key prefixes would diverge and ranks never find each
+  // other. Mirrors ProcessGroupNCCL's unique-id broadcast.
   if (rank == 0) {
     const int64_t seq = store.add(kInitCounterKey, 1);
     const std::string s = std::to_string(seq);
@@ -875,9 +863,9 @@ void allgatherDestinationsViaStore(
 
   const size_t bytes_per_rank = local.size() * sizeof(TCCLDestination);
 
-  // Reinterpret_cast to bytes — same pattern as ProcessGroupNCCL.cpp:
-  // 2916-2918 for ncclUniqueId. POD, well-defined, single-platform (macOS
-  // arm64) on both sides.
+  // Reinterpret_cast to bytes - same pattern as ProcessGroupNCCL's
+  // allgatherUniqueNCCLIDs for ncclUniqueId. POD, well-defined, single-platform
+  // (macOS arm64) on both sides.
   std::vector<uint8_t> myBytes(
       reinterpret_cast<const uint8_t*>(local.data()),
       reinterpret_cast<const uint8_t*>(local.data()) + bytes_per_rank);
