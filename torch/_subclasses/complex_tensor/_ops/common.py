@@ -87,6 +87,8 @@ def promote_tensors(
     for t in tensors:
         if isinstance(t, Tensor):
             out_dt = torch.promote_types(out_dt, t.dtype)
+        elif isinstance(t, complex) and not out_dt.is_complex:
+            out_dt = REAL_TO_COMPLEX.get(out_dt, torch.complex64)
 
     prom_dt = PROMOTE_TYPES.get(out_dt, out_dt)
     return out_dt, tuple(
