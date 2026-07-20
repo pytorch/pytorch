@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <string_view>
+
 namespace {
 
 namespace test_str_narrow_single {
@@ -133,6 +135,16 @@ TEST(tryToTest, Double) {
   EXPECT_FALSE(c10::tryToNumber<double>(nullptr).has_value());
 }
 } // namespace test_try_to
+
+namespace test_string_utils_views {
+TEST(StringUtilTest, StripBasenameAndExcludeFileExtension) {
+  EXPECT_EQ(
+      c10::detail::StripBasename(std::string_view("/tmp/foo/bar.txt")),
+      "bar.txt");
+  EXPECT_EQ(
+      c10::detail::ExcludeFileExtension(std::string_view("bar.txt")), "bar");
+}
+} // namespace test_string_utils_views
 
 namespace test_split {
 TEST(SplitTest, NormalCase) {
