@@ -178,6 +178,26 @@ class DecoratorTests(PytreeRegisteringTestCase):
         ep = torch.export.export(M(), (x, y))
         self.assertEqual(ep.module()(x, y), (x + y) * 2.0 + 1)
 
+    def test_disable_under_export_torch_dispatch_skips_annotation(self):
+        # The export fallback (_disable_wrapper_export_call) skips the
+        # fx_traceback annotation when the disabled callable is named
+        # __torch_dispatch__ (an internal detail). Drive that branch by forcing
+        # the export flag and calling a disabled __torch_dispatch__-named
+        # callable through the C export path; it must still run correctly.
+        import torch.compiler
+
+        @torch._dynamo.disable
+        def __torch_dispatch__(a, b):
+            return a + b
+
+        a, b = torch.randn(3), torch.randn(3)
+        prev = torch.compiler._is_exporting_flag
+        torch.compiler._is_exporting_flag = True
+        try:
+            self.assertEqual(__torch_dispatch__(a, b), a + b)
+        finally:
+            torch.compiler._is_exporting_flag = prev
+
     def test_disable_method_reconstruction(self):
         # A @torch._dynamo.disable instance method must bind self via the
         # DisableWrapper descriptor (tp_descr_get); regression for the
