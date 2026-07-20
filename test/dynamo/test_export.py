@@ -4396,7 +4396,6 @@ def forward(self, x):
         opt_gm_edit = torch.compile(gm_edit, backend=test_backend)
         opt_gm_edit(torch.randn(3, 3))
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_torch_inference_mode_ctx(self):
         @torch.inference_mode()
         def fn(x):
