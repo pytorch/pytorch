@@ -41,6 +41,12 @@ on:
   schedule:
     # Run daily at 5:15 AM PST
     - cron: '15 13 * * *'
+  # TODO: remove pull_request trigger after validating ROCm gfx950 benchmark coverage.
+  pull_request:
+    paths:
+      - .github/workflows/vllm-benchmark.yml
+      - .github/workflows/_vllm-build.yml
+      - .github/workflows/_vllm-benchmark.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -55,8 +61,8 @@ jobs:
     outputs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
       docker_image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      torch_cuda_arch_list: '8.0 8.9 9.0 10.0 12.0'
-      build_environment: linux-jammy-cuda13.0-py3.12-gcc11
+      torch_cuda_arch_list: ${{ steps.set-build-parameters.outputs.torch_cuda_arch_list }}
+      build_environment: ${{ steps.set-build-parameters.outputs.build_environment }}
     steps:
       - uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
@@ -71,15 +77,40 @@ jobs:
           path: pytorch/pytorch-integration-testing
           ref: main
 
+      - name: Set build parameters
+        id: set-build-parameters
+        shell: bash
+        run: |
+          set -eux
+
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            {
+              echo "build_environment=linux-jammy-rocm-py3.10-vllm-gfx950"
+              echo "docker_image_name=pytorch-linux-jammy-rocm-n-py3"
+              echo "torch_cuda_arch_list="
+            } >> "${GITHUB_OUTPUT}"
+          else
+            {
+              echo "build_environment=linux-jammy-cuda13.0-py3.12-gcc11"
+              echo "docker_image_name=pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm"
+              echo "torch_cuda_arch_list=8.0 8.9 9.0 10.0 12.0"
+            } >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Set parameters
         working-directory: pytorch/pytorch-integration-testing
         id: set-parameters
         env:
           MODELS: ${{ inputs.models || '' }}
-          # Only need CUDA for now, we can add ROCm later if needed
-          RUNNERS: ${{ inputs.runners || 'h100,b200' }}
+          RUNNERS: ${{ inputs.runners || (github.event_name == 'pull_request' && 'gfx950' || 'h100,b200') }}
         run: |
           set -eux
+
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" && "${RUNNERS}" == "gfx950" && -z "${MODELS}" ]]; then
+            # Disposable PR discovery matrix: run every currently configured ROCm model on gfx950.
+            echo 'benchmark_matrix={"include":[{"runner":"linux.rocm.gpu.ecosystem.gfx950.8","models":"mistralai/mixtral-8x7b-instruct-v0.1"},{"runner":"linux.rocm.gpu.ecosystem.gfx950.8","models":"meta-llama/llama-4-scout-17b-16e-instruct"},{"runner":"linux.rocm.gpu.ecosystem.gfx950.8","models":"meta-llama/llama-4-maverick-17b-128e-instruct-fp8"},{"runner":"linux.rocm.gpu.ecosystem.gfx950.8","models":"google/gemma-3-27b-it"},{"runner":"linux.rocm.gpu.ecosystem.gfx950.8","models":"google/gemma-3-4b-it"},{"runner":"linux.rocm.gpu.ecosystem.gfx950.8","models":"qwen/qwen3-30b-a3b"},{"runner":"linux.rocm.gpu.ecosystem.gfx950.8","models":"qwen/qwen3-8b"},{"runner":"linux.rocm.gpu.ecosystem.gfx950.8","models":"facebook/opt-125m"}]}' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
 
           # The generated matrix is grouped by model and runner
           python .github/scripts/generate_vllm_benchmark_matrix.py \
@@ -91,7 +122,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           path: pytorch/pytorch
-          ref: ${{ inputs.pytorch_commit || inputs.pytorch_branch }}
+          ref: ${{ inputs.pytorch_commit || inputs.pytorch_branch || github.sha }}
           show-progress: false
 
       - name: Compute docker image
@@ -101,7 +132,7 @@ jobs:
         run: |
           set -eux
           DOCKER_TAG=$(git rev-parse HEAD:.ci/docker)
-          IMAGE="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm-${DOCKER_TAG}"
+          IMAGE="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:${{ steps.set-build-parameters.outputs.docker_image_name }}-${DOCKER_TAG}"
           echo "docker-image=${IMAGE}" >> "${GITHUB_OUTPUT}"
 
   build:
@@ -116,7 +147,7 @@ jobs:
       runner: mt-l-x86iavx512-94-768
       docker_image: ${{ needs.set-parameters.outputs.docker_image }}
       build_environment: ${{ needs.set-parameters.outputs.build_environment }}
-      pytorch_branch: ${{ inputs.pytorch_branch }}
+      pytorch_branch: ${{ inputs.pytorch_commit || inputs.pytorch_branch || github.sha }}
       pytorch_commit: ${{ inputs.pytorch_commit }}
       torch_cuda_arch_list: ${{ needs.set-parameters.outputs.torch_cuda_arch_list }}
     secrets: inherit
@@ -137,9 +168,9 @@ jobs:
       runner: ${{ matrix.runner }}
       docker_image: ${{ needs.set-parameters.outputs.docker_image }}
       build_environment: ${{ needs.set-parameters.outputs.build_environment }}
-      pytorch_branch: ${{ inputs.pytorch_branch }}
+      pytorch_branch: ${{ inputs.pytorch_commit || inputs.pytorch_branch || github.sha }}
       pytorch_commit: ${{ inputs.pytorch_commit }}
       models: ${{ matrix.models }}
       compilation_config: ${{ inputs.compilation_config }}
-      refresh_hf_cache: ${{ inputs.refresh_hf_cache || false }}
+      refresh_hf_cache: ${{ github.event_name == 'pull_request' || inputs.refresh_hf_cache || false }}
     secrets: inherit

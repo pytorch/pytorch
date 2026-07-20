@@ -114,6 +114,8 @@ jobs:
           activate-environment: "true"
 
       - name: Install build artifacts
+        env:
+          BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
         shell: bash
         run: |
           set -eux
@@ -123,14 +125,26 @@ jobs:
           # uv yet
           uv pip install pip==25.3
 
+          EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu130
+          if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+            EXTRA_INDEX_URL=https://download.pytorch.org/whl/rocm7.2
+          fi
+
+          WHEELS=(
+            dist/torch-*.whl
+            dist/vision/torchvision-*.whl
+            dist/audio/torchaudio-*.whl
+            dist/ao/torchao-*.whl
+            dist/vllm/vllm-*.whl
+          )
+
+          if compgen -G "dist/deepgemm/deep_gemm-*.whl" > /dev/null; then
+            WHEELS+=(dist/deepgemm/deep_gemm-*.whl)
+          fi
+
           uv pip install \
-            dist/torch-*.whl \
-            dist/vision/torchvision-*.whl \
-            dist/audio/torchaudio-*.whl \
-            dist/ao/torchao-*.whl \
-            dist/vllm/vllm-*.whl \
-            dist/deepgemm/deep_gemm-*.whl \
-            --extra-index-url https://download.pytorch.org/whl/cu130 \
+            "${WHEELS[@]}" \
+            --extra-index-url "${EXTRA_INDEX_URL}" \
             --index-strategy unsafe-best-match
 
       - name: Print some debug information
