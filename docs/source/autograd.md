@@ -409,9 +409,7 @@ You can also define how these saved tensors should be packed / unpacked using ho
 A common application is to trade compute for memory by saving those intermediary results
 to disk or to CPU instead of leaving them on the GPU. This is especially useful if you
 notice your model fits on GPU during evaluation, but not training.
-When writing a ``pack_hook`` that keeps its input tensor, call ``.detach()`` on it first
-to avoid a reference cycle when the saved tensor is a graph output; see
-{ref}`saved-tensors-hooks-doc` for details.
+Also see {ref}`saved-tensors-hooks-doc`.
 
 ```{eval-rst}
 .. autoclass:: torch.autograd.graph.saved_tensors_hooks

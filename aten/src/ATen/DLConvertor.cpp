@@ -393,44 +393,31 @@ void deleter(T* arg) {
 }
 
 // Adds version information for DLManagedTensorVersioned.
-// This is a no-op for the other types. read_only only applies to the versioned
-// struct; the legacy DLManagedTensor has no flags field.
+// This is a no-op for the other types.
 template <class T>
-void fillVersion(T* tensor, bool read_only) {}
+void fillVersion(T* tensor) {}
 
 template <>
 void fillVersion<DLManagedTensorVersioned>(
-    DLManagedTensorVersioned* tensor,
-    bool read_only) {
-  tensor->flags = read_only ? DLPACK_FLAG_BITMASK_READ_ONLY : 0;
+    DLManagedTensorVersioned* tensor) {
+  tensor->flags = 0;
   tensor->version.major = DLPACK_MAJOR_VERSION;
   tensor->version.minor = DLPACK_MINOR_VERSION;
 }
 
 // This function returns a shared_ptr to memory managed DLpack tensor
-// constructed out of ATen tensor. When read_only is set, the data is exported
-// through const_data_ptr() (avoiding a copy-on-write materialization) and the
-// DLPACK_FLAG_BITMASK_READ_ONLY flag is set on the versioned struct.
+// constructed out of ATen tensor
 template <class T>
-T* toDLPackImpl(const Tensor& src, bool read_only) {
+T* toDLPackImpl(const Tensor& src) {
   auto atDLMTensor = std::make_unique<ATenDLMTensor<T>>();
   atDLMTensor->handle = src;
   atDLMTensor->tensor.manager_ctx = atDLMTensor.get();
   atDLMTensor->tensor.deleter = &deleter<T>;
-  // DLTensor::data is a plain void*, so the read-only path const_casts away the
-  // const from const_data_ptr(). This is safe: const_data_ptr() does not
-  // materialize a copy-on-write tensor, and DLPACK_FLAG_BITMASK_READ_ONLY is
-  // set on the versioned struct (see fillVersion) so the consumer is told not
-  // to write through the pointer. The mutable path uses mutable_data_ptr().
   if (src.device().type()  == kMPS) {
-      atDLMTensor->tensor.dl_tensor.data = read_only
-          ? const_cast<void*>(src.storage().data())
-          : src.storage().mutable_data();
+      atDLMTensor->tensor.dl_tensor.data = src.storage().mutable_data();
       atDLMTensor->tensor.dl_tensor.byte_offset = src.storage_offset() * c10::elementSize(src.scalar_type());
   } else {
-      atDLMTensor->tensor.dl_tensor.data = read_only
-          ? const_cast<void*>(src.const_data_ptr())
-          : src.mutable_data_ptr();
+      atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
       atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   }
   atDLMTensor->tensor.dl_tensor.device = torchDeviceToDLDevice(src.device());
@@ -438,14 +425,14 @@ T* toDLPackImpl(const Tensor& src, bool read_only) {
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape = const_cast<int64_t*>(src.sizes().data());
   atDLMTensor->tensor.dl_tensor.strides = const_cast<int64_t*>(src.strides().data());
-  fillVersion(&atDLMTensor->tensor, read_only);
+  fillVersion(&atDLMTensor->tensor);
 
   return &(atDLMTensor.release()->tensor);
 }
 
 // Explicitly instantiate the template above for both classes.
-template DLManagedTensor* toDLPackImpl<DLManagedTensor>(const Tensor&, bool);
-template DLManagedTensorVersioned* toDLPackImpl<DLManagedTensorVersioned>(const Tensor&, bool);
+template DLManagedTensor* toDLPackImpl<DLManagedTensor>(const Tensor&);
+template DLManagedTensorVersioned* toDLPackImpl<DLManagedTensorVersioned>(const Tensor&);
 
 // This function constructs a Tensor from a memory managed DLPack which
 // may be represented as either: DLManagedTensor and DLManagedTensorVersioned.
@@ -489,13 +476,11 @@ template at::Tensor fromDLPackImpl<DLManagedTensorVersioned>(DLManagedTensorVers
 
 } // namespace
 
-void toDLPackNonOwning(const Tensor& src, DLTensor* out, bool read_only) {
+void toDLPackNonOwning(const Tensor& src, DLTensor* out) {
   // Fill in the pre-allocated DLTensor struct with direct pointers
   // This is a non-owning conversion - the caller owns the tensor
   // and must keep it alive for the duration of DLTensor usage
-  // See toDLPackImpl for why the read-only const_cast is safe.
-  out->data = read_only ? const_cast<void*>(src.const_data_ptr())
-                        : src.mutable_data_ptr();
+  out->data = src.data_ptr();
   out->device = torchDeviceToDLDevice(src.device());
   out->ndim = static_cast<int32_t>(src.dim());
   out->dtype = getDLDataType(src);
@@ -507,15 +492,11 @@ void toDLPackNonOwning(const Tensor& src, DLTensor* out, bool read_only) {
 }
 
 DLManagedTensor* toDLPack(const Tensor& src) {
-  return toDLPackImpl<DLManagedTensor>(src, /*read_only=*/false);
+  return toDLPackImpl<DLManagedTensor>(src);
 }
 
 DLManagedTensorVersioned* toDLPackVersioned(const Tensor& src) {
-  return toDLPackImpl<DLManagedTensorVersioned>(src, /*read_only=*/false);
-}
-
-DLManagedTensorVersioned* toDLPackVersionedReadOnly(const Tensor& src) {
-  return toDLPackImpl<DLManagedTensorVersioned>(src, /*read_only=*/true);
+  return toDLPackImpl<DLManagedTensorVersioned>(src);
 }
 
 Tensor fromDLPack(DLManagedTensor* src, std::function<void(void*)> deleter) {

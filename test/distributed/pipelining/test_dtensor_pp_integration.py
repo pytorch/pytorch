@@ -33,6 +33,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTIACCELERATOR,
 )
 
 
@@ -139,8 +140,7 @@ def _loss_fn(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 def _requires_multi_gpu(func):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 4,
-        f"{backend} test requires 4+ GPUs",
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 4+ GPUs"
     )
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -397,7 +397,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
             self.assertEqual(
                 pp_meta.get_diff(ref_meta),
                 [],
-                lambda msg: f"{msg}\nDTensor metadata mismatch for {param_fqn}",
+                f"DTensor metadata mismatch for {param_fqn}",
             )
             pp_for_compare = pp_grad.to_local()
             ref_for_compare = ref_grad.to_local()
@@ -417,12 +417,9 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         stage_module = pp_model.get_submodule(f"layers.{stage_index}")
         for name, param in stage_module.named_parameters():
             param_fqn = f"layers.{stage_index}.{name}"
+            self.assertIsNotNone(param.grad, f"Missing PP grad for {param_fqn}")
             self.assertIsNotNone(
-                param.grad, lambda msg: f"{msg}\nMissing PP grad for {param_fqn}"
-            )
-            self.assertIsNotNone(
-                ref_grads[param_fqn],
-                lambda msg: f"{msg}\nMissing reference grad for {param_fqn}",
+                ref_grads[param_fqn], f"Missing reference grad for {param_fqn}"
             )
             pp_grad = cast(torch.Tensor, param.grad)
             ref_grad = cast(torch.Tensor, ref_grads[param_fqn])

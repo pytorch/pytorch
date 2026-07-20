@@ -125,12 +125,9 @@ def lookup_backend(compiler_fn: str | CompilerFn) -> CompilerFn:
         if compiler_fn not in _BACKENDS:
             _lazy_import()
         if compiler_fn not in _BACKENDS:
-            import difflib
-
             from ..exc import InvalidBackend
 
-            suggestions = difflib.get_close_matches(compiler_fn, list_backends(), n=2)
-            raise InvalidBackend(name=compiler_fn, suggestions=suggestions)
+            raise InvalidBackend(name=compiler_fn)
 
         if compiler_fn not in _COMPILER_FNS:
             entry_point = _BACKENDS[compiler_fn]

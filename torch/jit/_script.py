@@ -1077,10 +1077,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
     for name, sub_module in obj.__dict__.items():
         if name == "_modules":
             for k, v in sub_module.items():
-                # Mirror the elif below: skip already-scripted children (re-assigning
-                # a jit-ignored grandchild back into a ScriptModule would raise).
-                if isinstance(v, torch.nn.Module) and not isinstance(v, ScriptModule):
-                    sub_module[k] = call_prepare_scriptable_func_impl(v, memo)
+                sub_module[k] = call_prepare_scriptable_func_impl(v, memo)
             new_obj_dict[name] = sub_module
         elif isinstance(sub_module, torch.nn.Module) and not isinstance(
             sub_module, ScriptModule

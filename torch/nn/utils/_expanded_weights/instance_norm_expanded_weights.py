@@ -62,7 +62,7 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
                 correction=0,
                 keepdim=False,
             )
-            rstd = torch.rsqrt(var + eps)
+            rstd = 1 / torch.sqrt(var + eps)
 
             # must use native batch norm since it supports all inputs. This may have used cuda or openmi during the forward but
             # it didn't save the metadata, so we don't know during the backward

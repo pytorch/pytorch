@@ -23,11 +23,7 @@ import torch._dynamo.testing
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.lists import BaseListVariable, DequeVariable, RangeVariable
-from torch._library.opaque_object import (
-    CustomClassBase,
-    MemberType,
-    register_custom_class,
-)
+from torch._library.opaque_object import MemberType, OpaqueBase, register_opaque_type
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_GPU
 
 
@@ -731,34 +727,34 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(model, backend="eager")
         self.assertEqual(model(x), compiled(x))
 
-    # --- CustomClassObjectVariable ---
+    # --- TorchScriptObjectVariable ---
 
     def test_opaque_object_getitem(self):
-        class OpaqueScaler(CustomClassBase):
+        class OpaqueScaler(OpaqueBase):
             def __init__(self, scale):
                 self.scale = scale
 
             def apply(self, x):
                 return x * self.scale
 
-        class OpaqueContainer(CustomClassBase):
+        class OpaqueContainer(OpaqueBase):
             def __init__(self, items):
                 self.items = items
 
             def __getitem__(self, idx):
                 return self.items[idx]
 
-        register_custom_class(
+        register_opaque_type(
             OpaqueScaler,
-            typ="symbolic",
+            typ="reference",
             members={
                 "scale": MemberType.USE_REAL,
                 "apply": MemberType.INLINED,
             },
         )
-        register_custom_class(
+        register_opaque_type(
             OpaqueContainer,
-            typ="symbolic",
+            typ="reference",
             members={
                 "items": MemberType.USE_REAL,
                 "__getitem__": MemberType.INLINED,
@@ -1295,9 +1291,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         base = VariableTracker.sq_item_impl
         for cls in (BaseListVariable, RangeVariable, ConstantVariable, DequeVariable):
             self.assertIsNot(
-                cls.sq_item_impl,
-                base,
-                lambda msg: f"{msg}\n{cls.__name__} must override sq_item_impl",
+                cls.sq_item_impl, base, f"{cls.__name__} must override sq_item_impl"
             )
 
 

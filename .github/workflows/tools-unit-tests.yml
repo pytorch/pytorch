@@ -23,7 +23,7 @@ jobs:
       contents: read
       pull-requests: write
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout pytorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -50,7 +50,7 @@ jobs:
       contents: read
       pull-requests: write
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout pytorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main

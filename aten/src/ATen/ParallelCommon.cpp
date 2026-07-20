@@ -41,7 +41,7 @@ size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   } catch (const std::exception& e) {
     std::ostringstream oss;
     oss << "Invalid " << var_name << " variable value, " << e.what();
-    TORCH_WARN(std::move(oss).str());
+    TORCH_WARN(oss.str());
   }
   return def_value;
 }
@@ -97,7 +97,7 @@ std::string get_parallel_info() {
   ss << "Experimental: single thread pool" << std::endl;
   #endif
 
-  return std::move(ss).str();
+  return ss.str();
 }
 
 int intraop_default_num_threads() {

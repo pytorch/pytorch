@@ -52,7 +52,7 @@ from torch._export.serde.serialize import (
     SerializeError,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch._library.opaque_object import get_opaque_type_name, register_custom_class
+from torch._library.opaque_object import get_opaque_type_name, register_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
@@ -71,7 +71,7 @@ from torch.testing._internal.torchbind_impls import init_torchbind_implementatio
 
 
 @dataclass(frozen=True)
-class _OpaqueConfig(torch._custom_class_base.CustomClassBase):
+class _OpaqueConfig(torch._opaque_base.OpaqueBase):
     scale: int
 
     def __fx_repr__(self):
@@ -81,16 +81,16 @@ class _OpaqueConfig(torch._custom_class_base.CustomClassBase):
         )
 
 
-register_custom_class(_OpaqueConfig, typ="constant")
+register_opaque_type(_OpaqueConfig, typ="value")
 
 
-class _OpaqueEngine(torch._custom_class_base.CustomClassBase):
+class _OpaqueEngine(torch._opaque_base.OpaqueBase):
     def __init__(self, multiplier: int):
         super().__init__()
         self.multiplier = multiplier
 
 
-register_custom_class(_OpaqueEngine, typ="symbolic")
+register_opaque_type(_OpaqueEngine, typ="reference")
 
 
 def get_filtered_export_db_tests():
@@ -2407,9 +2407,7 @@ class TestSaveLoad(TestCase):
         loaded_ep = load(buffer)
         loaded_sd = loaded_ep.state_dict
         for name, param in loaded_sd.items():
-            self.assertEqual(
-                param.device.type, "cuda", lambda msg: f"{msg}\n{name} not on cuda"
-            )
+            self.assertEqual(param.device.type, "cuda", f"{name} not on cuda")
         self.assertEqual(m(*inp), loaded_ep.module()(*inp))
 
     def test_from_node_metadata_serialization(self):

@@ -87,7 +87,7 @@ def register_philox_rand():
         device: _device,
         dtype: _dtype,
     ):
-        # stride arg will be useful for distributed usecase. Currently, it's unused.
+        # stride arg will be useful for distributed usecase. Currently, its unused.
         if stride is not None:
             raise AssertionError(f"stride must be None, got {stride}")
         stride = make_contiguous_strides_for(shape)
@@ -105,7 +105,7 @@ def register_philox_rand():
         device: _device,
         dtype: _dtype,
     ):
-        # stride arg will be useful for distributed usecase. Currently, it's unused.
+        # stride arg will be useful for distributed usecase. Currently, its unused.
         if stride is not None:
             raise AssertionError(f"stride must be None, got {stride}")
         if device.type == "cpu":
@@ -410,17 +410,17 @@ def register_graphsafe_rng_dispatch(dispatch_key: "DispatchKey") -> None:
 register_graphsafe_rng_dispatch(DispatchKey.CUDA)
 
 
-# Late-bind CustomClassBaseMeta as Generator's metaclass. This is done here
+# Late-bind OpaqueBaseMeta as Generator's metaclass. This is done here
 # rather than in THPGenerator_init (C++) to avoid making torch._C depend
-# on torch._custom_class_base at init time.
-from torch._custom_class_base import CustomClassBaseMeta
+# on torch._opaque_base at init time.
+from torch._opaque_base import OpaqueBaseMeta
 
 
-torch._C._set_generator_metaclass(CustomClassBaseMeta)
+torch._C._set_generator_metaclass(OpaqueBaseMeta)
 
-torch._library.opaque_object.register_custom_class(
+torch._library.opaque_object.register_opaque_type(
     torch._C.Generator,
-    typ="symbolic",
+    typ="reference",
     guard_fn=lambda gen: [gen.device],
     members={
         "device": torch._library.opaque_object.MemberType.USE_REAL,

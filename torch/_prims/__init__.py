@@ -383,10 +383,6 @@ def _make_prim(
         p.prim_meta_impl = meta
         p.impl_aten = impl_aten
 
-    torch._C._fake_dispatch_register_prim_meta(
-        _prim._schema.name, _prim._schema.overload_name
-    )
-
     return _prim
 
 

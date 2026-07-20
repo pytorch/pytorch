@@ -2982,6 +2982,9 @@ void ProcessGroupGloo::monitoredBarrier(
   waitLoop(sendWorkMap);
 }
 
+void ProcessGroupGloo::setSequenceNumberForGroup() {
+} // Gloo just starts sequence numbers at 0.
+
 uint64_t ProcessGroupGloo::getSequenceNumberForGroup() {
   return seq_;
 }

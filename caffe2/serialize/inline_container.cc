@@ -918,7 +918,7 @@ void PyTorchStreamWriter::writeSerializationId() {
     serialization_id_oss << std::setfill('0') << std::setw(20)
                          << combined_record_name_hash << std::setfill('0')
                          << std::setw(20) << combined_uncomp_crc32_;
-    serialization_id_ = std::move(serialization_id_oss).str();
+    serialization_id_ = serialization_id_oss.str();
     writeRecord(
         kSerializationIdRecordName,
         serialization_id_.c_str(),
