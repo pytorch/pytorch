@@ -8,11 +8,15 @@ from typing import Optional
 
 import torch
 from torch._prims_common import make_contiguous_strides_for
-from torch.distributed import RNGIndexBlock
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
+from torch.distributed._rng_layout import _RNGIndexBlock
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.fx.experimental.symbolic_shapes import (
+    statically_known_false,
+    statically_known_true,
+)
 from torch.types import IntLikeType
 
 
@@ -57,7 +61,7 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
 def _try_compute_stateful_rng_layout(
     spec: DTensorSpec,
     local_tensor: torch.Tensor,
-) -> tuple[IntLikeType, tuple[RNGIndexBlock, ...]] | None:
+) -> tuple[IntLikeType, tuple[_RNGIndexBlock, ...]] | None:
     """Map a supported DTensor shard to logical row-major RNG indices."""
     if spec.mesh.ndim != 1 or len(spec.placements) != 1:
         return None
@@ -71,10 +75,10 @@ def _try_compute_stateful_rng_layout(
     logical_numel: IntLikeType = 1
     for size in spec.shape:
         logical_numel *= size
-    if logical_numel == 0:
+    if statically_known_true(logical_numel == 0):
         return logical_numel, ()
     # The legacy dense-launch replay kernel currently uses a 32-bit grid policy.
-    if logical_numel > torch.iinfo(torch.int32).max:
+    if statically_known_true(logical_numel > torch.iinfo(torch.int32).max):
         return None
 
     placement = spec.placements[0]
@@ -102,7 +106,10 @@ def _try_compute_stateful_rng_layout(
     else:
         return None
 
-    if tuple(local_shape) != tuple(local_tensor.shape):
+    if len(local_shape) != local_tensor.ndim or any(
+        statically_known_false(expected == actual)
+        for expected, actual in zip(local_shape, local_tensor.shape, strict=True)
+    ):
         raise RuntimeError(
             f"Local shape mismatch for {spec.shape}: metadata={local_shape}, "
             f"actual={tuple(local_tensor.shape)}"

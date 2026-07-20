@@ -224,7 +224,7 @@ using detail::CuBlasLtMatmulDescriptor;
 using detail::CuBlasLtMatrixLayout;
 using detail::CuBlasLtMatmulPreference;
 using detail::CublasLtWorkspace;
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 using detail::CuBlasLtGroupedMatrixLayout;
 #endif
 
@@ -1849,7 +1849,11 @@ void scaled_gemm(
   }
   else if (mat1_scale_dtype == kFloat8_e8m0fnu && mat2_scale_dtype == kFloat8_e8m0fnu) {
   #if ROCM_VERSION >= 70000
-            if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
+            std::vector<std::string> mx_archs{"gfx950"};
+  #if ROCM_VERSION >= 71400
+            mx_archs.push_back("gfx1250");
+  #endif
+            if (at::detail::getCUDAHooks().isGPUArch(mx_archs)) {
                 // TODO: add constraints based on hipblaslt internals
                 TORCH_CHECK((m % 16 == 0) && (n % 16 == 0) && (k % 128 == 0),
                            "M, N must be multiples of 16 and K should be multiple of 128 for MX format. "
@@ -2220,7 +2224,7 @@ void grouped_gemm(
     const void *lddArrayDev,
     int batchCount,
     bool use_int64_dims) {
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   const bool sm90 = prop->major == 9;
   TORCH_CHECK(prop->major >= 9 && prop->major < 12, "grouped cublasLtMatmul requires SM 9.0-11.0");
@@ -2305,8 +2309,8 @@ void grouped_gemm(
       " when calling grouped cublasLtMatmul");
   return;
 #else
-  TORCH_CHECK(false, "grouped cublasLtMatmul requires CUDA >= 13.2 and is not supported on ROCm. Current build does not meet these requirements.");
-#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  TORCH_CHECK(false, "grouped cublasLtMatmul requires CUDA >= 13.3 and is not supported on ROCm. Current build does not meet these requirements.");
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 }
 
 template <>

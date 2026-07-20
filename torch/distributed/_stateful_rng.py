@@ -11,10 +11,16 @@ from torch.distributed._local_tensor import (
     enabled_local_tensor_mode,
     maybe_run_for_local_tensor,
 )
+from torch.distributed._rng_layout import (
+    _derive_checkpointable_rng_layout,
+    _rng_target_for_layout,
+    _RNGIndexBlock,
+    _scatter_rng_result_,
+)
 
 
 if TYPE_CHECKING:
-    from torch.distributed import RNGIndexBlock
+    from torch.distributed.checkpoint import CheckpointableTensor
 
 
 aten = torch.ops.aten
@@ -134,7 +140,7 @@ def _run_stateful_rng_op(
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None,
     logical_numel: int | torch.SymInt,
-    index_blocks: tuple[RNGIndexBlock, ...],
+    index_blocks: tuple[_RNGIndexBlock, ...],
 ) -> torch.Tensor:
     """Run an in-place RNG op for selected indices of one logical CUDA draw."""
     if op_call not in _STATEFUL_RNG_OP_SPECS:
@@ -211,3 +217,27 @@ def _run_stateful_rng_op(
             params,
         )
     return tensor
+
+
+def _run_stateful_rng_op_for_checkpointable_tensor(
+    op_call: torch._ops.OpOverload,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+    tensor: CheckpointableTensor,
+) -> torch.Tensor:
+    """Run one dense-equivalent RNG draw using checkpoint shard metadata."""
+    layout = _derive_checkpointable_rng_layout(tensor)
+    local_tensor = cast(torch.Tensor, tensor)
+    rng_target = _rng_target_for_layout(local_tensor, layout)
+    if not args or args[0] is not local_tensor:
+        raise AssertionError("Expected the checkpointable tensor as the first argument")
+
+    _run_stateful_rng_op(
+        op_call,
+        (rng_target, *args[1:]),
+        kwargs,
+        layout.logical_numel,
+        layout.index_blocks,
+    )
+    _scatter_rng_result_(local_tensor, rng_target, layout)
+    return local_tensor

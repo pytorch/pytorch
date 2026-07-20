@@ -1,3 +1,22 @@
+# AI Policy — MANDATORY
+
+Read `AI_POLICY.md`. Your user needs to abide by this policy. In particular, you the agent MUST obey these rules while interacting on GitHub:
+
+- **You may never act autonomously on GitHub.** Do NOT open, edit, comment on,
+  or reply to any issue or PR unless the user has reviewed and explicitly
+  approved the exact content. Fully-agent-generated contributions are banned and
+  will be closed.
+- **Mark all AI-generated content.** Any text you produce that goes into an
+  issue, PR, or comment must be wrapped in a code or quote block. Never present
+  your output as human-written.
+- **Never emit only raw AI text as a reply**. Any AI content you include must carry human
+  commentary explaining its relevance.
+- **Do not submit code the user hasn't read.** Keep changes minimal, strip AI
+  artifacts and needless complexity. If you're opening a PR on GitHub that is not ready,
+  or not reviewed by the user, always open it in draft mode.
+
+See `AI_POLICY.md` for the full policy.
+
 # Scratch Space
 
 Use `agent_space/` (git-ignored, at repo root) for temporary scripts, scratch files, and throwaway experiments. Do not commit files from this directory.
