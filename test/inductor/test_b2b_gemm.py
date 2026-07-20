@@ -7,17 +7,17 @@ from torch._dynamo.utils import counters
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
-@skipIfXpu(msg="Segmentation fault on CI machine")
 class B2BGEMMTest(TestCase):
-    device = GPU_TYPE
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
-    def test_b2b_gemm_left_assoc_good_shape(self):
+    def test_b2b_gemm_left_assoc_good_shape(self, device):
         """
         left_assoc means the pattern is (subgraph(A @ B) @ C)
         good_shape means the sizes are good for b2b_gemm
@@ -42,16 +42,16 @@ class B2BGEMMTest(TestCase):
             return f(m1, m2, m3).to(torch.float16)
 
         f_opt = torch.compile(f)
-        A = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
-        B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
-        C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
+        A = torch.randn((256, 32), device=device, dtype=torch.float16)
+        B = torch.randn((32, 256), device=device, dtype=torch.float16)
+        C = torch.randn((256, 32), device=device, dtype=torch.float16)
         res = f_opt(A, B, C)
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
 
     @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
-    def test_b2b_gemm_right_assoc_good_shape(self):
+    def test_b2b_gemm_right_assoc_good_shape(self, device):
         """
         right_assoc means the pattern is (A @ subgraph(B @ C))
         good_shape means the sizes are good for b2b_gemm
@@ -68,16 +68,16 @@ class B2BGEMMTest(TestCase):
             return f(m1, m2, m3).to(torch.float16)
 
         f_opt = torch.compile(f)
-        A = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
-        B = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
-        C = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
+        A = torch.randn((32, 256), device=device, dtype=torch.float16)
+        B = torch.randn((256, 32), device=device, dtype=torch.float16)
+        C = torch.randn((32, 256), device=device, dtype=torch.float16)
         res = f_opt(A, B, C)
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
 
     @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
-    def test_b2b_gemm_trivial_left_assoc_good_shape(self):
+    def test_b2b_gemm_trivial_left_assoc_good_shape(self, device):
         """
         trivial_left_assoc means the pattern is ((A @ B) @ C)
         good_shape means the sizes are good for b2b_gemm
@@ -93,16 +93,16 @@ class B2BGEMMTest(TestCase):
             return f(m1, m2, m3).to(torch.float16)
 
         f_opt = torch.compile(f)
-        A = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
-        B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
-        C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
+        A = torch.randn((256, 32), device=device, dtype=torch.float16)
+        B = torch.randn((32, 256), device=device, dtype=torch.float16)
+        C = torch.randn((256, 32), device=device, dtype=torch.float16)
         res = f_opt(A, B, C)
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
 
     @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
-    def test_b2b_gemm_trivial_right_assoc_good_shape(self):
+    def test_b2b_gemm_trivial_right_assoc_good_shape(self, device):
         """
         trivial_right_assoc means the pattern is (A @ (B @ C))
         good_shape means the sizes are good for b2b_gemm
@@ -118,16 +118,16 @@ class B2BGEMMTest(TestCase):
             return f(m1, m2, m3).to(torch.float16)
 
         f_opt = torch.compile(f)
-        A = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
-        B = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
-        C = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
+        A = torch.randn((32, 256), device=device, dtype=torch.float16)
+        B = torch.randn((256, 32), device=device, dtype=torch.float16)
+        C = torch.randn((32, 256), device=device, dtype=torch.float16)
         res = f_opt(A, B, C)
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
 
     @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
-    def test_b2b_gemm_bad_pattern_good_shape(self):
+    def test_b2b_gemm_bad_pattern_good_shape(self, device):
         """
         bad_pattern means the code does not contain the supported patterns
         """
@@ -138,9 +138,9 @@ class B2BGEMMTest(TestCase):
             return torch.mm(mm1, mm2)
 
         f_opt = torch.compile(f)
-        A = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
-        B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
-        C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
+        A = torch.randn((256, 32), device=device, dtype=torch.float16)
+        B = torch.randn((32, 256), device=device, dtype=torch.float16)
+        C = torch.randn((256, 32), device=device, dtype=torch.float16)
         res, codes = run_and_get_code(f_opt, A, B, C)
         code = "\n".join(codes)
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
@@ -149,7 +149,7 @@ class B2BGEMMTest(TestCase):
 
     @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
-    def test_b2b_gemm_good_pattern_bad_shape(self):
+    def test_b2b_gemm_good_pattern_bad_shape(self, device):
         """
         bad_shape means the sizes are not good for b2b_gemm
         """
@@ -158,9 +158,9 @@ class B2BGEMMTest(TestCase):
             return torch.mm(torch.mm(m1, m2), m3)
 
         f_opt = torch.compile(f)
-        A = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
-        B = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
-        C = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
+        A = torch.randn((100, 100), device=device, dtype=torch.float16)
+        B = torch.randn((100, 100), device=device, dtype=torch.float16)
+        C = torch.randn((100, 100), device=device, dtype=torch.float16)
         res, codes = run_and_get_code(f_opt, A, B, C)
         code = "\n".join(codes)
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
@@ -169,7 +169,7 @@ class B2BGEMMTest(TestCase):
 
     @unittest.skipIf(os.environ.get("DO_PERF_TEST") != "1", "Perf test not enabled")
     @torch._dynamo.config.patch(recompile_limit=32)
-    def test_plain_b2b_gemm_performance(self):
+    def test_plain_b2b_gemm_performance(self, device):
         """compare torch.compile(f, b2b_gemm = off) with torch.compile(f, b2b_gemm = on)"""
 
         def run_with_b2b_gemm_off(
@@ -203,9 +203,9 @@ class B2BGEMMTest(TestCase):
             print(f"M = {M}".ljust(10), end="")
             for N in Ns:
                 O, P = M, N
-                A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
-                B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
-                C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+                A = torch.randn((M, N), device=device, dtype=torch.float16)
+                B = torch.randn((N, O), device=device, dtype=torch.float16)
+                C = torch.randn((O, P), device=device, dtype=torch.float16)
                 speedup = run_with_b2b_gemm_off(A, B, C) / run_with_b2b_gemm_on(A, B, C)
                 print(f"{round(speedup, 3)}".ljust(10), end="")
                 speedups.append(speedup)
@@ -222,7 +222,7 @@ class B2BGEMMTest(TestCase):
 
     @unittest.skipIf(os.environ.get("DO_PERF_TEST") != "1", "Perf test not enabled")
     @torch._dynamo.config.patch(recompile_limit=32)
-    def test_gelu_b2b_gemm_performance(self):
+    def test_gelu_b2b_gemm_performance(self, device):
         """compare torch.compile(f, b2b_gemm = off) with torch.compile(f, b2b_gemm = on)"""
 
         def run_with_b2b_gemm_off(
@@ -258,9 +258,9 @@ class B2BGEMMTest(TestCase):
             print(f"M = {M}".ljust(10), end="")
             for N in Ns:
                 O, P = M, N
-                A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
-                B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
-                C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+                A = torch.randn((M, N), device=device, dtype=torch.float16)
+                B = torch.randn((N, O), device=device, dtype=torch.float16)
+                C = torch.randn((O, P), device=device, dtype=torch.float16)
                 speedup = run_with_b2b_gemm_off(A, B, C) / run_with_b2b_gemm_on(A, B, C)
                 print(f"{round(speedup, 3)}".ljust(10), end="")
                 speedups.append(speedup)
@@ -277,7 +277,7 @@ class B2BGEMMTest(TestCase):
 
     @unittest.skipIf(os.environ.get("DO_PERF_TEST") != "1", "Perf test not enabled")
     @torch._dynamo.config.patch(recompile_limit=32)
-    def test_gelu_mlp_b2b_gemm_performance(self):
+    def test_gelu_mlp_b2b_gemm_performance(self, device):
         """compare torch.compile(f, b2b_gemm = off) with torch.compile(f, b2b_gemm = on)"""
 
         def run_with_b2b_gemm_off(
@@ -313,9 +313,9 @@ class B2BGEMMTest(TestCase):
             print(f"M = {M}".ljust(10), end="")
             for N in Ns:
                 O, P = N, N
-                A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
-                B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
-                C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+                A = torch.randn((M, N), device=device, dtype=torch.float16)
+                B = torch.randn((N, O), device=device, dtype=torch.float16)
+                C = torch.randn((O, P), device=device, dtype=torch.float16)
                 speedup = run_with_b2b_gemm_off(A, B, C) / run_with_b2b_gemm_on(A, B, C)
                 print(f"{round(speedup, 3)}".ljust(10), end="")
                 speedups.append(speedup)
@@ -331,6 +331,8 @@ class B2BGEMMTest(TestCase):
         # self.assertTrue(average_speedup > 1)
 
 
+instantiate_device_type_tests(B2BGEMMTest, globals(), except_for="cpu")
+
 if __name__ == "__main__":
-    if HAS_GPU:
+    if HAS_TRITON:
         run_tests()
