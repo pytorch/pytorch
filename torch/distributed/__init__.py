@@ -26,7 +26,7 @@ RNGIndexBlock = _TypeAliasType(
 
 
 @typing.runtime_checkable
-class StatefulRNGTensor(typing.Protocol):
+class RNGLayoutTensor(typing.Protocol):
     """Plain tensor metadata for replaying logical global RNG indices."""
 
     rng_global_numel: int | torch.SymInt
