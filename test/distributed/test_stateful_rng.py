@@ -1,15 +1,17 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+from __future__ import annotations
+
 import contextlib
 import unittest
 from functools import partial
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._library.utils import fill_defaults
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed import RNGIndexBlock, StatefulRNGTensor
+from torch.distributed import StatefulRNGTensor
 from torch.distributed._local_tensor import LocalIntNode, LocalTensor, LocalTensorMode
 from torch.distributed._stateful_rng import (
     _is_supported_stateful_rng_op,
@@ -20,6 +22,10 @@ from torch.distributed._stateful_rng import (
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+if TYPE_CHECKING:
+    from torch.distributed import RNGIndexBlock
 
 
 aten = torch.ops.aten
@@ -75,22 +81,22 @@ class TestStatefulRNGTensor(TestCase):
             (
                 "shard_0_rank_0",
                 (slice(0, 3), slice(None)),
-                (RNGIndexBlock(0, 21, 21, 1),),
+                ((0, 21, 21, 1),),
             ),
             (
                 "shard_0_rank_1",
                 (slice(3, 5), slice(None)),
-                (RNGIndexBlock(21, 14, 14, 1),),
+                ((21, 14, 14, 1),),
             ),
             (
                 "shard_1_rank_0",
                 (slice(None), slice(0, 4)),
-                (RNGIndexBlock(0, 4, 7, 5),),
+                ((0, 4, 7, 5),),
             ),
             (
                 "shard_1_rank_1",
                 (slice(None), slice(4, 7)),
-                (RNGIndexBlock(4, 3, 7, 5),),
+                ((4, 3, 7, 5),),
             ),
         )
         init_fns = {
@@ -133,8 +139,8 @@ class TestStatefulRNGTensor(TestCase):
         device = torch.device("cuda")
         global_indices = torch.tensor([2, 3, 7, 8, 12, 13, 20, 21, 22], device=device)
         index_blocks = (
-            RNGIndexBlock(2, 2, 5, 3),
-            RNGIndexBlock(20, 3, 3, 1),
+            (2, 2, 5, 3),
+            (20, 3, 3, 1),
         )
 
         torch.manual_seed(123)
@@ -168,7 +174,7 @@ class TestStatefulRNGTensor(TestCase):
         self._set_rng_metadata(
             actual,
             expected.numel(),
-            (RNGIndexBlock(4, 3, 7, 5),),
+            ((4, 3, 7, 5),),
         )
         with _StatefulRNGMode():
             actual.uniform_(-0.2, 0.3, generator=actual_generator)
@@ -210,7 +216,7 @@ class TestStatefulRNGTensor(TestCase):
                     self._set_rng_metadata(
                         actual,
                         35,
-                        (RNGIndexBlock(4, 3, 7, 5),),
+                        ((4, 3, 7, 5),),
                     )
                     results = []
                     with _StatefulRNGMode():
@@ -256,7 +262,7 @@ class TestStatefulRNGTensor(TestCase):
                 (local_tensor, -0.2, 0.3),
                 {"generator": actual_generator},
                 7,
-                (RNGIndexBlock(2, 3, 3, 1),),
+                ((2, 3, 3, 1),),
             )
 
         self.assertIs(returned, local_tensor)
@@ -289,7 +295,7 @@ class TestStatefulRNGTensor(TestCase):
                 (local_tensor, -0.2, 0.3),
                 {},
                 7,
-                (RNGIndexBlock(rank_local_start, 3, 3, 1),),
+                ((rank_local_start, 3, 3, 1),),
             )
 
         self.assertIs(returned, local_tensor)
@@ -337,7 +343,7 @@ class TestStatefulRNGTensor(TestCase):
                     self._set_rng_metadata(
                         actual,
                         7,
-                        (RNGIndexBlock(2, 3, 3, 1),),
+                        ((2, 3, 3, 1),),
                     )
                     with self.assertRaisesRegex(RuntimeError, error):
                         with _StatefulRNGMode():
