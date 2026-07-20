@@ -26,20 +26,16 @@ namespace c10d {
 namespace {
 
 // MPS staging helpers.
+//
+// Run the collective on a worker thread while the GPU keeps computing: main
+// thread records a non-blocking MPS event (mpsEventRecord), worker blocks on it
+// (mpsEventWait) - neither drains nor blocks the GPU - then reads/writes the
+// tensor via a zero-copy CPU view (mpsSharedCpuView) over unified memory.
 
-// These let the collective run on a worker thread while the GPU keeps
-// computing: the main thread records a non-blocking MPS event
-// (mpsEventRecord), the worker blocks on it (mpsEventWait) so we neither drain
-// nor block the GPU, then reads/writes the tensor via a zero-copy CPU view
-// (mpsSharedCpuView) over the same unified-memory storage.
-
-// Zero-copy CPU view over an MPS tensor's unified shared memory. With
-// MTLStorageModeShared the allocator exposes a CPU pointer via
-// getSharedBufferPtr; from_blob wraps it as a CPU tensor over the same bytes.
-// Uses the storage base pointer (not data_ptr()) because on MPS data_ptr()
-// folds storage_offset into id<MTLBuffer> arithmetic, yielding an address the
-// allocator can't map; views/chunks (e.g. _allgather_base) have non-zero
-// storage_offset, so a raw data_ptr() lookup would fail there.
+// Zero-copy CPU view over an MPS tensor's unified memory: getSharedBufferPtr
+// gives the shared CPU pointer, from_blob wraps it. Uses the storage base
+// pointer, NOT data_ptr() - on MPS data_ptr() folds storage_offset into
+// MTLBuffer arithmetic, unmappable for offset views (e.g. _allgather_base).
 at::Tensor mpsSharedCpuView(const at::Tensor& mpsTensor) {
   auto* allocator = at::mps::getIMPSAllocator();
   const void* storage_ptr = mpsTensor.storage().data_ptr().get();
@@ -67,9 +63,8 @@ at::Tensor mpsSharedCpuView(const at::Tensor& mpsTensor) {
       at::TensorOptions().dtype(mpsTensor.dtype()).device(at::kCPU));
 }
 
-// Non-blocking: encode a signal into the MPS command buffer and commit via
-// commitAndContinue. Returns an event id the worker can synchronize on. Does
-// NOT drain the GPU or hold the MPS serial queue beyond the encode.
+// Non-blocking: encode a signal via commitAndContinue, return an event id.
+// Does NOT drain the GPU or hold the serial queue beyond the encode.
 uint32_t mpsEventRecord() {
   auto& hooks = at::detail::getMPSHooks();
   uint32_t eid = hooks.acquireEvent(false);
@@ -77,9 +72,8 @@ uint32_t mpsEventRecord() {
   return eid;
 }
 
-// Block the calling thread until the GPU reaches the signal recorded by
-// mpsEventRecord() (MTLSharedEvent listener + condition_variable). Returns
-// immediately if the GPU already passed it; releases the event to the pool.
+// Block the calling thread until the GPU reaches the recorded signal, then
+// release the event. Returns immediately if the GPU already passed it.
 void mpsEventWait(uint32_t eid) {
   auto& hooks = at::detail::getMPSHooks();
   hooks.synchronizeEvent(eid);
@@ -102,17 +96,14 @@ inline bool isSupportedReduceDtype(at::ScalarType st) {
       st == at::kLong || st == at::kByte || st == at::kBool;
 }
 
-// AVG (= SUM then ×1/world_size)
+// AVG (= SUM then x 1/world_size)
 // AVG is gated to the float dtypes
 inline bool isFloatReduceDtype(at::ScalarType st) {
   return st == at::kFloat || st == at::kHalf || st == at::kBFloat16;
 }
 
-// Typed mesh allreduce + AVG post-scale. Instantiated for float/Half/BFloat16;
-// Ring-vs-mesh selection for all_reduce (N>2):
-//   bf16       -> ring at ANY size
-//   fp32/fp16  -> ring only >=8MB
-// TCCL_FORCE_ALGO=ring|mesh overrides per-call (mainly benchmarking reasons).
+// Ring-vs-mesh selection for all_reduce (N>2): bf16 -> ring at any size,
+// fp32/fp16 -> ring only >=8MB. TCCL_FORCE_ALGO=ring|mesh overrides per-call.
 inline bool tcclUseRing(
     int worldSize, bool autoEnable, bool isBf16, std::size_t count,
     std::size_t elemBytes, bool forceRing = false) {
@@ -123,12 +114,10 @@ inline bool tcclUseRing(
   if (forceRing) {
     return true;
   }
-  // autoEnable: size/dtype threshold and all_reduce
-  // TCCL_FORCE_ALGO, e.g. for reliability or a ring-cabled cluster).
+  // Auto-heuristic: bf16 any size, else >=8MB
   bool useRing = autoEnable &&
       (isBf16 || count * elemBytes >= 8u * 1024u * 1024u);
   if (const char* f = std::getenv("TCCL_FORCE_ALGO")) {
-    // TCCL_FORCE_ALGO=ring|mesh overrides the auto-heuristic above
     const std::string forced(f);
     if (forced == "ring") {
       useRing = true;
@@ -168,7 +157,8 @@ void runMeshAllreduce(
     case ReduceOp::PRODUCT:
       tcclAllreduceWith<T, TCCLProdOp<T>>(mesh, data, count, worldSize, useRing);
       break;
-    default:  // SUM or AVG
+    // SUM or AVG
+    default:
       tcclAllreduceWith<T, TCCLSumOp<T>>(mesh, data, count, worldSize, useRing);
       break;
   }
@@ -180,10 +170,9 @@ void runMeshAllreduce(
   }
 }
 
-// Typed reduce-scatter core over per-rank input-chunk pointers: in_chunks[p] is
-// this rank's contribution for peer p (count_per_rank elements). Picks
-// ring vs mesh, applies the reduce functor (SUM/MIN/MAX/AVG), and writes
-// count_per_rank elements to `out`.
+// Typed reduce-scatter core: in_chunks[p] is this rank's contribution for peer
+// p (count_per_rank elements). Picks ring vs mesh, applies the reduce functor,
+// writes count_per_rank elements to `out`.
 template <typename T>
 void runReduceScatterChunks(
     TCCLEngine& mesh,
@@ -214,7 +203,8 @@ void runReduceScatterChunks(
       else
         mesh.reduce_scatter<T, TCCLProdOp<T>>(in_chunks, out, count_per_rank, TCCLProdOp<T>{});
       break;
-    default:  // SUM or AVG
+    // SUM or AVG
+    default:
       if (useRing)
         mesh.ring_reduce_scatter<T, TCCLSumOp<T>>(in_chunks, out, count_per_rank, TCCLSumOp<T>{});
       else
@@ -284,7 +274,8 @@ void dispatchReduceScatter(
     case at::kLong: runMeshReduceScatter<int64_t>(mesh, inView, outView, op, worldSize); break;
     case at::kByte: runMeshReduceScatter<uint8_t>(mesh, inView, outView, op, worldSize); break;
     case at::kBool: runMeshReduceScatter<bool>(mesh, inView, outView, op, worldSize); break;
-    default: break;  // unreachable — validated by caller
+    // Unreachable - validated by caller
+    default: break;
   }
 }
 
@@ -306,34 +297,30 @@ void dispatchReduceScatterList(
     case at::kLong: runMeshReduceScatterList<int64_t>(mesh, inChunkViews, outView, op, worldSize); break;
     case at::kByte: runMeshReduceScatterList<uint8_t>(mesh, inChunkViews, outView, op, worldSize); break;
     case at::kBool: runMeshReduceScatterList<bool>(mesh, inChunkViews, outView, op, worldSize); break;
-    default: break;  // unreachable — validated by caller
+    // Unreachable - validated by caller
+    default: break;
   }
 }
 } // namespace
 
-// ---- Options --------------------------------------------------------------
+// Options
 
 ProcessGroupTCCL::Options::Options(std::chrono::milliseconds timeout)
     : Backend::Options(TCCL_BACKEND_NAME, timeout) {}
 
-// ---- TCCLWork -------------------------------------------------------------
+// TCCLWork
 
 ProcessGroupTCCL::TCCLWork::TCCLWork(
     OpType opType, uint64_t seq, std::vector<at::Tensor> outputs)
     : Work(/*rank=*/-1, opType), seq_(seq), outputs_(std::move(outputs)) {
-  // Build the result Future carrying a List[Tensor]. Intentionally NO device
-  // list (unlike ProcessGroupGloo::createFutureAsOutput): a Future's device
-  // list only exists to order the callback against pending async GPU work on
-  // those devices' streams. Here there is nothing to order -- MPS is
-  // single-queue and the collective runs to completion on a CPU worker thread,
-  // so when the Future fires the data is already in place. DDP's reducer still
-  // chains correctly. A device list added ~140 us/op of pure overhead that
-  // synchronizes nothing, so we omit it.
+  // No device list: nothing to order (MPS single-queue, collective completes on
+  // the CPU worker before the Future fires). DDP chaining unaffected. A device
+  // list cost ~140 us/op for zero synchronization.
   future_ = c10::make_intrusive<c10::ivalue::Future>(
       c10::ListType::create(c10::TensorType::get()));
 }
 
-// ---- ProcessGroupTCCL -----------------------------------------------------
+// ProcessGroupTCCL
 
 ProcessGroupTCCL::ProcessGroupTCCL(
     const c10::intrusive_ptr<Store>& store,
@@ -415,7 +402,7 @@ ProcessGroupTCCL::ProcessGroupTCCL(
         " peer(s) = ",
         qps,
         " QPs, exceeding the 10-UC-QP-per-device Thunderbolt limit "
-        "(TN3205 §12.1). Spread peers across more devices (full mesh) or "
+        "(TN3205 sec. 12.1). Spread peers across more devices (full mesh) or "
         "reduce num_wires.");
   }
 
@@ -432,7 +419,8 @@ ProcessGroupTCCL::ProcessGroupTCCL(
   std::vector<TCCLDestination> localDests(connections_.size());
   for (int peer = 0; peer < size; peer++) {
     if (peer == rank || peerDevices[peer].empty()) {
-      continue;  // self, or a non-neighbor in ring topology (no connection)
+      // Self, or a non-neighbor in ring topology - no connection
+      continue;
     }
     for (int wire = 0; wire < num_wires; wire++) {
       const size_t idx = static_cast<size_t>(peer) * num_wires + wire;
@@ -453,7 +441,8 @@ ProcessGroupTCCL::ProcessGroupTCCL(
   recvBuffers_.resize(static_cast<size_t>(size));
   for (int peer = 0; peer < size; peer++) {
     if (peer == rank || peerDevices[peer].empty()) {
-      continue;  // self, or a non-neighbor in ring topology
+      // Self, or a non-neighbor in ring topology
+      continue;
     }
     sendBuffers_[peer] = TCCLSharedBuffer(TCCLEngine::kChunkSize);
     recvBuffers_[peer] = TCCLSharedBuffer(TCCLEngine::kChunkSize);
@@ -479,7 +468,8 @@ ProcessGroupTCCL::ProcessGroupTCCL(
   //    slot p.
   for (int peer = 0; peer < size; peer++) {
     if (peer == rank || peerDevices[peer].empty()) {
-      continue;  // self, or a non-neighbor in ring topology
+      // Self, or a non-neighbor in ring topology
+      continue;
     }
     for (int wire = 0; wire < num_wires; wire++) {
       const size_t myConn =
@@ -493,7 +483,7 @@ ProcessGroupTCCL::ProcessGroupTCCL(
     }
   }
 
-  // 9. Final sync — every rank reaches RTS before any rank may post a send.
+  // 9. Final sync - every rank reaches RTS before any rank may post a send.
   tcclRtsBarrier(
       *store_,
       size,
@@ -517,7 +507,7 @@ ProcessGroupTCCL::~ProcessGroupTCCL() {
   }
 }
 
-// ---- Worker thread --------------------------------------------------------
+// Worker thread
 
 void ProcessGroupTCCL::runLoop() {
   c10::setThreadName("pt_tccl_runloop");
@@ -539,13 +529,12 @@ void ProcessGroupTCCL::runLoop() {
   }
 }
 
-// ---- enqueueCollective ----------------------------------------------------
+// enqueueCollective
 //
-// Shared async scaffold. Mirrors the original allreduce flow: record the MPS
-// event on the calling thread (non-blocking commitAndContinue keeps the serial
-// queue free so autograd / DDP can keep dispatching GPU work in parallel with
-// our RDMA transfer), enqueue a lambda that waits for that event on the worker
-// and runs `fn`, and hand back a TCCLWork the caller blocks on via wait().
+// Shared async scaffold. Record the MPS event on the calling thread
+// (non-blocking commitAndContinue keeps the serial queue free so autograd / DDP
+// overlap the RDMA transfer), enqueue a lambda that waits the event and runs
+// `fn` on the worker, return a TCCLWork the caller blocks on via wait().
 c10::intrusive_ptr<Work> ProcessGroupTCCL::enqueueCollective(
     OpType opType,
     std::vector<at::Tensor> outputs,
@@ -559,8 +548,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::enqueueCollective(
         [mpsEventId, fn = std::move(fn), work]() mutable {
           std::exception_ptr ep;
           try {
-            // Block only this worker thread until the GPU finishes pending
-            // writes to the input tensors; releases the event to the pool.
+            // Block only this worker until the GPU flushes writes to the inputs
             mpsEventWait(mpsEventId);
             fn();
           } catch (...) {
@@ -574,7 +562,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::enqueueCollective(
   return work;
 }
 
-// ---- allreduce ------------------------------------------------------------
+// allreduce
 
 c10::intrusive_ptr<Work> ProcessGroupTCCL::allreduce(
     std::vector<at::Tensor>& tensors,
@@ -659,12 +647,13 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::allreduce(
             runMeshAllreduce<bool>(*engine_, cpuView, op, worldSize);
             break;
           default:
-            break;  // unreachable — validated above
+            // Unreachable - validated above
+            break;
         }
       });
 }
 
-// ---- broadcast ------------------------------------------------------------
+// broadcast
 
 c10::intrusive_ptr<Work> ProcessGroupTCCL::broadcast(
     std::vector<at::Tensor>& tensors,
@@ -698,7 +687,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::broadcast(
       "TCCL broadcast: rootTensor must be 0 (one tensor per rank), got ",
       opts.rootTensor);
 
-  // Byte-copy collective — any dtype. DDP construction broadcasts int32/int64
+  // Byte-copy collective - any dtype. DDP construction broadcasts int32/int64
   // metadata tensors through this path.
   const int root = opts.rootRank;
   return enqueueCollective(
@@ -729,7 +718,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce(
   TORCH_CHECK(false, "ProcessGroupTCCL::reduce ", kNotImplementedHint);
 }
 
-// ---- allgather (list form) ------------------------------------------------
+// allgather (list form)
 
 c10::intrusive_ptr<Work> ProcessGroupTCCL::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -799,7 +788,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::allgather(
       });
 }
 
-// ---- _allgather_base ------------------------------------------------------
+// _allgather_base
 
 c10::intrusive_ptr<Work> ProcessGroupTCCL::_allgather_base(
     at::Tensor& outputBuffer,
@@ -851,7 +840,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::_allgather_base(
       });
 }
 
-// ---- allgather_into_tensor_coalesced (TP all-gather) ----------------------
+// allgather_into_tensor_coalesced (TP all-gather)
 
 c10::intrusive_ptr<Work> ProcessGroupTCCL::allgather_into_tensor_coalesced(
     std::vector<at::Tensor>& outputs,
@@ -918,12 +907,12 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::scatter(
   TORCH_CHECK(false, "ProcessGroupTCCL::scatter ", kNotImplementedHint);
 }
 
-// ---- reduce_scatter (list form) -------------------------------------------
+// reduce_scatter (list form)
 //
-// outputTensors[i] (on this rank) receives the element-wise reduction across
-// ranks of inputTensors[i][rank_]; inputTensors[i] is this rank's world_size
-// contributions (chunk p destined for peer p). The separate input tensors feed
-// the engine directly as per-rank chunk pointers — no pre-gather copy.
+// outputTensors[i] receives the element-wise reduction across ranks of
+// inputTensors[i][rank_]; inputTensors[i] is this rank's world_size
+// contributions (chunk p destined for peer p), fed to the engine directly as
+// per-rank chunk pointers - no pre-gather copy.
 
 c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
@@ -1000,7 +989,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce_scatter(
       });
 }
 
-// ---- _reduce_scatter_base (FSDP reduce_scatter_tensor) --------------------
+// _reduce_scatter_base (FSDP reduce_scatter_tensor)
 
 c10::intrusive_ptr<Work> ProcessGroupTCCL::_reduce_scatter_base(
     at::Tensor& outputBuffer,
@@ -1053,7 +1042,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::_reduce_scatter_base(
       });
 }
 
-// ---- reduce_scatter_tensor_coalesced (TP / sequence-parallel) -------------
+// reduce_scatter_tensor_coalesced (TP / sequence-parallel)
 
 c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor>& outputs,
@@ -1235,7 +1224,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::send(
       dstRank >= 0 && dstRank < size_ && dstRank != rank_,
       "TCCL send: invalid dstRank ", dstRank, " for rank ", rank_,
       " (world size ", size_, ").");
-  // Ring topology only connects the two neighbors ((rank±1)%world); a send to
+  // Ring topology only connects the two neighbors ((rank+/-1)%world); a send to
   // any other rank has a null connection slot.
   TORCH_CHECK_WITH(
       DistBackendError,
@@ -1243,7 +1232,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::send(
           dstRank == (rank_ + 1) % size_ ||
           dstRank == (rank_ - 1 + size_) % size_,
       "TCCL send: ring topology only permits sends to a ring neighbor "
-      "((rank±1)%world); dstRank ", dstRank, " is not a neighbor of rank ",
+      "((rank+/-1)%world); dstRank ", dstRank, " is not a neighbor of rank ",
       rank_, ".");
   // Byte movement - any dtype. tag is accepted but not hardware-matched (UC has
   // no tag matching); ordering is the per-peer FIFO of matched send/recv pairs.
@@ -1277,7 +1266,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::recv(
       srcRank >= 0 && srcRank < size_ && srcRank != rank_,
       "TCCL recv: invalid srcRank ", srcRank, " for rank ", rank_,
       " (world size ", size_, ").");
-  // Ring topology only connects the two neighbors ((rank±1)%world); a recv from
+  // Ring topology only connects the two neighbors ((rank+/-1)%world); a recv from
   // any other rank has a null connection slot.
   TORCH_CHECK_WITH(
       DistBackendError,
@@ -1285,7 +1274,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::recv(
           srcRank == (rank_ + 1) % size_ ||
           srcRank == (rank_ - 1 + size_) % size_,
       "TCCL recv: ring topology only permits recvs from a ring neighbor "
-      "((rank±1)%world); srcRank ", srcRank, " is not a neighbor of rank ",
+      "((rank+/-1)%world); srcRank ", srcRank, " is not a neighbor of rank ",
       rank_, ".");
   return enqueueCollective(
       OpType::RECV,
@@ -1299,13 +1288,12 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::recv(
       });
 }
 
-// ---- barrier --------------------------------------------------------------
+// barrier
 
 c10::intrusive_ptr<Work> ProcessGroupTCCL::barrier(
     const BarrierOptions& /*opts*/) {
-  // No data path — Store::barrier is the optimized server-side primitive.
-  // Each call uses a fresh sequence number so
-  // rapid-fire barriers don't collide on the same key.
+  // No data path - Store::barrier is the optimized server-side primitive.
+  // Fresh sequence number per call so rapid-fire barriers don't collide.
   const uint64_t mySeq = ++barrierSeq_;
   const std::string key = "tccl_barrier_" + std::to_string(mySeq);
 
