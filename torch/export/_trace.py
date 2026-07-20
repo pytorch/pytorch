@@ -656,6 +656,7 @@ def _apply_renames_to_signature(
 ) -> None:
     """Apply a batch of old-name-to-new-name renames to the signature atomically."""
     from torch.export.graph_signature import (
+        ConstantArgument,
         CustomObjArgument,
         SymBoolArgument,
         SymFloatArgument,
@@ -669,6 +670,7 @@ def _apply_renames_to_signature(
         SymIntArgument,
         SymFloatArgument,
         SymBoolArgument,
+        ConstantArgument,
         CustomObjArgument,
         TokenArgument,
     )
@@ -689,8 +691,11 @@ def _canonicalize_export_graph(
     """
     import itertools
 
-    from torch._dynamo.output_graph import _is_safe_to_reorder
-    from torch.fx.passes.canonicalize import _computation_node_key, canonicalize_graph
+    from torch.fx.passes.canonicalize import (
+        _canonical_node_key,
+        canonicalize_graph,
+        is_safe_to_reorder,
+    )
 
     for mod in gm.modules():
         if isinstance(mod, torch.fx.GraphModule):
@@ -703,12 +708,7 @@ def _canonicalize_export_graph(
             ) -> object:
                 if node.op == "placeholder":
                     return (0, next(_ord))
-                elif node.op == "get_attr":
-                    return (1, str(node.target))
-                elif node.op == "output":
-                    return (3,)
-                else:
-                    return _computation_node_key(node, canonical_idx)
+                return _canonical_node_key(node, canonical_idx)
 
             # Unflatten expects nodes from the same nn_module_stack scope to
             # be contiguous.  Treat module-boundary transitions as barriers
@@ -716,7 +716,7 @@ def _canonicalize_export_graph(
             prev_stack: list[tuple[str, ...] | None] = [None]
 
             def _safe(node: torch.fx.Node, _prev: list = prev_stack) -> bool:
-                if not _is_safe_to_reorder(node):
+                if not is_safe_to_reorder(node):
                     _prev[0] = tuple(node.meta.get("nn_module_stack", {}).keys())
                     return False
                 stack = tuple(node.meta.get("nn_module_stack", {}).keys())

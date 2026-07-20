@@ -2117,21 +2117,17 @@ class GraphLowering(torch.fx.Interpreter):
                             result.get_size(), torch.channels_last
                         )
                     if not unbacked_symbols_in_strides and len(strides):
-                        # To avoid converting possible view ops to a copy kernel, we use the previous
-                        # require_exact_strides to handle views. But ultimately it's better to require
-                        # the right strides at the tensor definition.
-                        if n.meta["val"]._is_view() or isinstance(
+                        is_view = n.meta["val"]._is_view() or isinstance(
                             result.data,  # type: ignore[missing-attribute]
                             ir.BaseView,
-                        ):
+                        )
+                        if is_view and not (is_output and config.strict_output_strides):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(strides),
                                 allow_padding=allow_padding,
                             )
                         else:
-                            # Fix for 0-d tensors: if result size is empty,
-                            # strides should also be empty
                             if len(result.get_size()) == 0 and len(strides) > 0:
                                 strides = []
                             result = ir.ExternKernel.require_exact_strides(
@@ -2901,7 +2897,12 @@ class GraphLowering(torch.fx.Interpreter):
             next((d for d in self.device_types if d != "meta"), "cpu"),
         )
 
-        real_inputs = extract_real_inputs()
+        # A const graph has no runtime graph inputs (its weights are read as
+        # constants, not placeholders), so its JIT entry point expects only the
+        # appended constant handles. extract_real_inputs() would return the main
+        # model's params/inputs, producing a handle-count/type mismatch, so pass
+        # an empty input list here and rely solely on the constants below.
+        real_inputs = [] if self.is_const_graph else extract_real_inputs()
 
         def materialize_constant(name: str) -> torch.Tensor:
             constant = self.constants[name]
