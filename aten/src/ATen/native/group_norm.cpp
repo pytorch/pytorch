@@ -17,6 +17,8 @@
 #include <ATen/ops/native_group_norm_backward_native.h>
 #include <ATen/ops/native_group_norm_native.h>
 #include <ATen/ops/var_mean.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_native.h>
 #endif
 
 #include <algorithm>
@@ -72,34 +74,40 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> gamma_maybe_owned =
       at::borrow_from_optional_tensor(gamma_opt);
+  c10::MaybeOwned<Tensor> beta_maybe_owned =
+      at::borrow_from_optional_tensor(beta_opt);
   const Tensor& gamma = *gamma_maybe_owned;
-  const Tensor& beta = beta_opt.value_or(Tensor());
+  const Tensor& beta = *beta_maybe_owned;
 
   // repeated check so expanded weights can call native_group_norm directly but
   // save mean and variance from forward
   check_group_norm_inputs(X, gamma, beta, C, group);
-  auto memory_format = X.device().is_cpu() ?
-      X.suggest_memory_format() : at::MemoryFormat::Contiguous;
-
-  TORCH_CHECK(X.is_contiguous(memory_format));
-
   bool mixed_type = is_mixed_type(X, gamma, beta);
   if (mixed_type) {
     check_mixed_data_type(X, gamma, beta);
   }
 
-  Tensor Y = at::native::empty_like(
-      X,
-      std::nullopt /* dtype */,
-      std::nullopt /* layout */,
-      std::nullopt /* device */,
-      std::nullopt /* pin_memory */,
-      memory_format);
-  const auto dtype = param_scalar_type(X, mixed_type);
-  Tensor mean = at::empty({N, group}, X.options().dtype(dtype));
-  Tensor rstd = at::empty({N, group}, X.options().dtype(dtype));
+  auto memory_format = X.device().is_cpu() ?
+      X.suggest_memory_format() : at::MemoryFormat::Contiguous;
+
+  if (!X.numel()) {
+    return std::make_tuple(
+      at::native::empty_like(X, {}, {}, {}, {}, memory_format),
+      at::zeros({N, group}, X.scalar_type(), {}, X.device(), {}),
+      at::native::full({N, group}, NAN, X.scalar_type(), {}, X.device()));
+  }
+
+  Tensor X_ = X.contiguous(memory_format);
+  Tensor gamma_ = gamma.defined() ? gamma.contiguous() : gamma;
+  Tensor beta_ = beta.defined() ? beta.contiguous() : beta;
+
+  Tensor Y = at::native::empty_like(X_);
+  const auto dtype = param_scalar_type(X_, mixed_type);
+  Tensor mean = at::empty({N, group}, X_.options().dtype(dtype));
+  Tensor rstd = at::empty({N, group}, X_.options().dtype(dtype));
+
   GroupNormKernel(
-      X.device().type(), X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
+      X_.device().type(), X_, gamma_, beta_, N, C, HxW, group, eps, Y, mean, rstd);
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
@@ -125,46 +133,44 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   if (mixed_type) {
     check_mixed_data_type(X, mean, rstd);
   }
+
   auto memory_format = X.device().is_cpu() ?
       X.suggest_memory_format() : at::MemoryFormat::Contiguous;
+  auto dparam_options{(gamma.defined() ?
+      gamma.options() : X.options()).memory_format(MemoryFormat::Contiguous)};
 
-  Tensor dX;
-  Tensor dgamma;
-  Tensor dbeta;
+  if (!X.numel()) {
+    return std::make_tuple(
+        grad_input_mask[0] ? at::native::zeros_like(X, {}, {}, {}, {}, memory_format) : Tensor{},
+        grad_input_mask[1] ? at::zeros({C}, dparam_options) : Tensor{},
+        grad_input_mask[2] ? at::zeros({C}, dparam_options) : Tensor{});
+  }
+
+  auto dY_{dY.contiguous(memory_format)};
+  auto X_{X.contiguous(memory_format)};
+  auto mean_{mean.contiguous()};
+  auto rstd_{rstd.contiguous()};
+  auto gamma_{gamma.defined() ? gamma.contiguous() : gamma};
+
+  Tensor dX{};
   if (grad_input_mask[0]) {
-    dX = at::native::empty_like(
-        X,
-        std::nullopt /* dtype */,
-        std::nullopt /* layout */,
-        std::nullopt /* device */,
-        std::nullopt /* pin_memory */,
-        memory_format);
+    dX = at::native::empty_like(X_);
   }
+  Tensor dgamma{};
   if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(
-        gamma,
-        std::nullopt /* dtype */,
-        std::nullopt /* layout */,
-        std::nullopt /* device */,
-        std::nullopt /* pin_memory */,
-        at::MemoryFormat::Contiguous);
+    dgamma = at::empty({C}, dparam_options);
   }
+  Tensor dbeta{};
   if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(
-        gamma,
-        std::nullopt /* dtype */,
-        std::nullopt /* layout */,
-        std::nullopt /* device */,
-        std::nullopt /* pin_memory */,
-        at::MemoryFormat::Contiguous);
+    dbeta = at::empty({C}, dparam_options);
   }
   GroupNormBackwardKernel(
-      X.device().type(),
-      dY,
-      X,
-      mean,
-      rstd,
-      gamma,
+      X_.device().type(),
+      dY_,
+      X_,
+      mean_,
+      rstd_,
+      gamma_,
       N,
       C,
       HxW,
@@ -196,16 +202,10 @@ Tensor group_norm(
   const auto HxW =
       c10::multiply_integers(input_shape.slice(2));
 
-  const Tensor kEmpty;
-  auto memory_format = input.suggest_memory_format();
-  const auto& X = input.device().is_cpu() || input.is_privateuseone() ?
-                  input.contiguous(memory_format) : input.contiguous();
-  const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
-  const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
-  TORCH_CHECK(!gamma.defined() || gamma.sym_numel() == C);
-  TORCH_CHECK(!beta.defined() || beta.sym_numel() == C);
+  TORCH_CHECK(!weight.defined() || weight.sym_numel() == C);
+  TORCH_CHECK(!bias.defined() || bias.sym_numel() == C);
   return std::get<0>(
-      at::native_group_norm_symint(X, gamma, beta, N, C, HxW, num_groups, eps));
+      at::native_group_norm_symint(input, weight, bias, N, C, HxW, num_groups, eps));
 }
 
 DEFINE_DISPATCH(GroupNormKernel);
@@ -224,7 +224,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   if (std::ranges::any_of(input_shape, [](auto s) { return s == 0; })) {
     return std::make_tuple(
         at::native::empty_like(input),
-        at::native::full({N, group}, NAN, input.scalar_type(), {}, input.device()),
+        at::zeros({N, group}, input.scalar_type(), {}, input.device(), {}),
         at::native::full({N, group}, NAN, input.scalar_type(), {}, input.device()));
   }
 
