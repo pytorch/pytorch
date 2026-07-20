@@ -109,7 +109,7 @@ struct SDPALogicalParams {
       reshaped_attention = attention_.view(
           {batch_size, group_num, group_size, seq_len_q, head_dim_v});
       if (attn_mask_.has_value() && attn_mask_.value().dim() == 4) {
-        reshaped_attn_mask = attn_mask_.value().unsqueeze(2);
+        reshaped_attn_mask = reshaped_attn_mask.unsqueeze(2);
       }
     }
 
