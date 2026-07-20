@@ -80,7 +80,7 @@ SymbolizedTracebacks symbolize(
   // dedup and collect any C++ frames that need symbols for
   for (const auto& e : to_symbolize) {
     for (void* f : e->cpp_frames_) {
-      if (!ip_to_frame_offset.count(f)) {
+      if (!ip_to_frame_offset.contains(f)) {
         ip_to_frame_offset[f] = all_cpp_ips.size();
         all_cpp_ips.push_back(f);
       }
@@ -108,7 +108,7 @@ SymbolizedTracebacks symbolize(
       }
       cur_python = e->python_;
       for (const auto& f : e->frames_) {
-        if (!py_to_frame_offset.count(f)) {
+        if (!py_to_frame_offset.contains(f)) {
           py_to_frame_offset[f] = py_frames_size_++;
           cur_py_frames.push_back(f);
         }

@@ -252,7 +252,7 @@ std::shared_ptr<Graph> genShapeComputeFn(
       *schema_string,
       " with shape compute func: ",
       shape_compute_function_name);
-  if (reused_functions.count(shape_compute_function_name)) {
+  if (reused_functions.contains(shape_compute_function_name)) {
     GRAPH_DEBUG("Registering reused schema");
     graph = reused_functions[shape_compute_function_name];
   } else {

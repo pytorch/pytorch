@@ -467,7 +467,7 @@ void InplaceConverter::ValueTracker::recordSetValue(
   auto* n = new_v->node();
   auto* owning_block = n->owningBlock();
 
-  if (alias_to_value_.find(old_v) == alias_to_value_.end()) {
+  if (!alias_to_value_.contains(old_v)) {
     alias_to_value_[old_v] = old_v;
     value_to_sorted_aliases_[old_v] = {old_v};
   }
@@ -589,7 +589,7 @@ Value* InplaceConverter::ValueTracker::findAliasForValueAtNode(
     Value* v,
     const Node* n) const {
   GRAPH_UPDATE("Finding alias for value:", v->debugName(), " at node ", *n);
-  if (alias_to_value_.find(v) == alias_to_value_.end()) {
+  if (!alias_to_value_.contains(v)) {
     // This value was not affected by any inplace operator.
     return v;
   }
@@ -659,8 +659,7 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
 
     attr_node_fullname_map.insert({n, fullName});
 
-    if (attr_name_value_map.find(fullName) == attr_name_value_map.end() &&
-        attrModule.hasattr(name)) {
+    if (!attr_name_value_map.contains(fullName) && attrModule.hasattr(name)) {
       auto attr = attrModule.attr(name);
       auto type = attrModule.type();
       auto slot = *type->findAttributeSlot(name);
@@ -692,7 +691,7 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
 
     // Create dummy initial value, if initial value does not exist for this
     // attribute.
-    if (attr_name_value_map.find(fullName) == attr_name_value_map.end()) {
+    if (!attr_name_value_map.contains(fullName)) {
       auto* noneNode = graph_->create(prim::Constant);
       noneNode->output()->setType(NoneType::get());
       noneNode->insertBefore(graph_->nodes().front());

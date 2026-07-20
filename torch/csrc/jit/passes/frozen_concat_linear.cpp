@@ -153,7 +153,7 @@ class ConcatLinearLayers {
 
     for (size_t i = 0; i < linear_layer_group.size(); i++) {
       Node* base_node = linear_layer_group[i];
-      if (checked_nodes.count(base_node) != 0) {
+      if (checked_nodes.contains(base_node)) {
         continue;
       }
 
@@ -169,7 +169,7 @@ class ConcatLinearLayers {
       // see if there is anything that we can coalesce `base_node` with.
       for (size_t j = i + 1; j < linear_layer_group.size(); j++) {
         auto node = linear_layer_group[j];
-        if (checked_nodes.count(node) != 0) {
+        if (checked_nodes.contains(node)) {
           continue;
         }
         auto weight = constant_as<Tensor>(node->namedInput("weight")).value();

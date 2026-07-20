@@ -493,7 +493,7 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     adjusted_params.push_back(overload_params[i]);
   }
   for (size_t i = overload_params.size(); i < impl_params.size(); ++i) {
-    if (!defaults.count(impl_params[i].ident().name())) {
+    if (!defaults.contains(impl_params[i].ident().name())) {
       throw(
           ErrorReport(impl_decl.range())
           << "Expected to find default parameter on argument"
@@ -648,7 +648,7 @@ static bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       //          << *item.b.type() << ") " << item.b.internalToPointer() <<
       //          "\n";
 
-      if (visited.count(item.a.internalToPointer())) {
+      if (visited.contains(item.a.internalToPointer())) {
         continue;
       }
       visited.emplace(item.a.internalToPointer());
@@ -1163,7 +1163,7 @@ void initJitScriptBindings(PyObject* module) {
       });
 
   for (const char* mm_name : magic_method_names) {
-    if (special_magic_methods.count(mm_name)) {
+    if (special_magic_methods.contains(mm_name)) {
       object_class.def(mm_name, special_magic_methods[mm_name]);
     } else {
       object_class.def(

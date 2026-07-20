@@ -29,7 +29,7 @@ const std::string& UniqueNameManager::get_unique_name(const VarPtr& v) {
     if (count_v > 0) {
       unique_name += "_" + std::to_string(count_v);
     }
-    if (all_unique_names_.count(unique_name) == 0) {
+    if (!all_unique_names_.contains(unique_name)) {
       all_unique_names_.insert(unique_name);
       auto result = unique_name_mapping_.emplace(v, unique_name);
       return result.first->second;

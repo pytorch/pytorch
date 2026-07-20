@@ -59,8 +59,8 @@ std::vector<BufPtr> LoopNest::getIntermediateBufs() const {
   auto input_bufs = getInputBufs();
   auto bufs = NodeFinder<Buf>::find(root_stmt_);
   for (const auto& buf : bufs) {
-    if (!output_bufs_.count(buf) && !input_bufs.count(buf) &&
-        !result_set.count(buf)) {
+    if (!output_bufs_.contains(buf) && !input_bufs.contains(buf) &&
+        !result_set.contains(buf)) {
       result.push_back(buf);
       result_set.insert(buf);
     }
@@ -141,12 +141,12 @@ std::string sanitizeName(const std::string& input_name) {
 class VarNameSanitizer : public IRMutator {
  public:
   ExprPtr mutate(const BufPtr& v) override {
-    if (seen_bufs_.count(v)) {
+    if (seen_bufs_.contains(v)) {
       return v;
     }
     const std::string& name = v->name_hint();
     auto new_name = sanitizeName(name);
-    if (taken_names_.count(new_name)) {
+    if (taken_names_.contains(new_name)) {
       new_name = getNextAvailableName(new_name);
     }
     v->set_name_hint(new_name);
@@ -156,12 +156,12 @@ class VarNameSanitizer : public IRMutator {
   }
 
   ExprPtr mutate(const VarPtr& v) override {
-    if (seen_vars_.count(v)) {
+    if (seen_vars_.contains(v)) {
       return v;
     }
     const std::string& name = v->name_hint();
     auto new_name = sanitizeName(name);
-    if (taken_names_.count(new_name)) {
+    if (taken_names_.contains(new_name)) {
       new_name = getNextAvailableName(new_name);
     }
     v->set_name_hint(new_name);
@@ -172,7 +172,7 @@ class VarNameSanitizer : public IRMutator {
 
   StmtPtr mutate(const ForPtr& v) override {
     auto new_name = getNextAvailableName(getIndexVarNameAtLevel(level_));
-    if (seen_index_vars_.count(v->var())) {
+    if (seen_index_vars_.contains(v->var())) {
       auto new_var = alloc<Var>("", v->var()->dtype());
       Substitute(v, {{v->var(), new_var}});
     }
@@ -200,7 +200,7 @@ class VarNameSanitizer : public IRMutator {
   std::string getNextAvailableName(const std::string& base_name) {
     std::string name = base_name;
     int counter = 0;
-    while (taken_names_.count(name)) {
+    while (taken_names_.contains(name)) {
       counter++;
       name = base_name + "_" + std::to_string(counter);
     }
@@ -788,7 +788,7 @@ class FunctionInliner : public IRMutator {
     }
     // If the buf_ is in the outputs set, keep its statement intact. Otherwise,
     // remove it.
-    if (v == producer_ && !outputs_.count(buf_)) {
+    if (v == producer_ && !outputs_.contains(buf_)) {
       in_producer_ = true;
       producer_ = to<Store>(IRMutator::mutate(v));
       if (!producer_) {
@@ -874,7 +874,7 @@ static StmtPtr computeInlineImpl(
     const std::unordered_set<BufPtr>& output_bufs) {
   // If buf is used or defined in an ExternalCall, we cannot inline it
   auto buf_load_store_uses = findLoadOrStoreUses(stmt);
-  if (!buf_load_store_uses.count(b)) {
+  if (!buf_load_store_uses.contains(b)) {
     return nullptr;
   }
   for (auto& use : buf_load_store_uses.at(b)) {
@@ -971,7 +971,7 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
       if (stores.size() == 1) {
         if (auto store = to<Store>(stores[0].s)) {
           auto input_as_load = to<Load>(store->value());
-          if (input_as_load && input_bufs.count(input_as_load->buf())) {
+          if (input_as_load && input_bufs.contains(input_as_load->buf())) {
             bufs_to_inline.insert(buf);
             continue;
           }
@@ -1116,7 +1116,7 @@ class StmtDeleter : public IRMutator {
     std::vector<StmtPtr> stmts;
 
     for (const auto& s : v->stmts()) {
-      if (targets_.count(s) == 0) {
+      if (!targets_.contains(s)) {
         StmtPtr ns = s->accept_mutator(this);
         if (ns) {
           stmts.push_back(Stmt::clone(ns));
@@ -1333,7 +1333,7 @@ bool LoopNest::optimizeConditionals() {
       // refers to a loop that is not normalized.
       continue;
     }
-    if (split_fors.count(for_to_split)) {
+    if (split_fors.contains(for_to_split)) {
       // This loop has already been split while optimizing conditionals
       // earlier.
       //
@@ -1694,7 +1694,7 @@ std::vector<ForPtr> LoopNest::distributeLoop(
     auto s = loop->body()->front();
     loop->body()->remove_stmt(s);
     new_loop_body->append_stmt(s);
-    if (pivots.count(s)) {
+    if (pivots.contains(s)) {
       new_loop_bodies.push_back(new_loop_body);
       new_loop_body = alloc<Block>(std::vector<StmtPtr>({}));
     }
@@ -1758,7 +1758,7 @@ static bool doesExprContainAnyVar(
     const ExprPtr& expr,
     const std::unordered_set<VarPtr>& vars) {
   for (const auto& v : VarFinder::find(expr)) {
-    if (vars.count(v)) {
+    if (vars.contains(v)) {
       return true;
     }
   }
@@ -2520,7 +2520,7 @@ void LoopNest::compressBuffer(const BufPtr& buf, const StmtPtr& stmt) {
     for (size_t i = 0; i < indices.size(); ++i) {
       auto index_vars = NodeFinder<Var>::find(indices[i]);
       for (const auto& iv : index_vars) {
-        if (loop_vars.count(iv) == 0) {
+        if (!loop_vars.contains(iv)) {
           // A variable in this index is not in loop_vars.
           // This implies that this dimension cannot be optimized away.
           dims[i] = false;
@@ -2902,7 +2902,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
       enclosing_vars.insert(enclosing_for_stmt->var());
     }
     for (const auto& reduce_arg : reduce_args) {
-      if (enclosing_vars.find(reduce_arg) == enclosing_vars.end()) {
+      if (!enclosing_vars.contains(reduce_arg)) {
         on_reduce_axis = true;
       }
     }
@@ -3299,7 +3299,7 @@ bool LoopNest::rfactor(
   // reductions
   StmtPtr cur = outer_reduction_for;
   while (ForPtr cur_for = to<For>(cur)) {
-    if (!reduce_args.count(cur_for->var())) {
+    if (!reduce_args.contains(cur_for->var())) {
       // output axis inside outer_reduction_for are not allowed
       return false;
     }

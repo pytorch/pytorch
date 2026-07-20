@@ -57,7 +57,7 @@ void ArgumentSpecCreator::scan(
       auto key =
           cls->name()->qualifiedName() + cls->getAttributes().at(i).getName();
       // it is only safe to specialize because someone might have written to it
-      if (!written_slots.count(key)) {
+      if (!written_slots.contains(key)) {
         scan(cls->containedTypes().at(i), depth + 1, written_slots);
       } else {
         instructions_.emplace_back(SKIP);

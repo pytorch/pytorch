@@ -356,15 +356,15 @@ std::vector<uint8_t> FileStore::compareSet(
   // Always refresh since even though the key exists in the cache,
   // it might be outdated
   pos_ = refresh(file, pos_, cache_, deletePrefix_);
-  if ((cache_.count(regKey) == 0 && expectedValue.empty()) ||
-      (cache_.count(regKey) != 0 && cache_[regKey] == expectedValue)) {
+  if ((!cache_.contains(regKey) && expectedValue.empty()) ||
+      (cache_.contains(regKey) && cache_[regKey] == expectedValue)) {
     // if the key does not exist and currentValue arg is empty or
     // the key does exist and current value is what is expected, then set it
     file.seek(0, SEEK_END);
     file.write(regKey);
     file.write(desiredValue);
     return desiredValue;
-  } else if (cache_.count(regKey) == 0) {
+  } else if (!cache_.contains(regKey)) {
     // if the key does not exist
     return expectedValue;
   }
@@ -380,7 +380,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
     File file(path_, O_RDONLY, timeout_);
     auto lock = file.lockShared();
     auto size = file.size();
-    if (cache_.count(regKey) == 0 && size == pos_) {
+    if (!cache_.contains(regKey) && size == pos_) {
       // No new entries; release the shared lock and sleep for a bit
       lock.unlock();
       l.unlock();
@@ -401,7 +401,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
     // Always refresh since even though the key exists in the cache,
     // it might be outdated
     pos_ = refresh(file, pos_, cache_, deletePrefix_);
-    if (cache_.count(regKey) != 0) {
+    if (cache_.contains(regKey)) {
       return cache_[regKey];
     }
   }
@@ -461,7 +461,7 @@ bool FileStore::check(const std::vector<std::string>& keys) {
 
   for (const auto& key : keys) {
     std::string regKey = regularPrefix_ + key;
-    if (cache_.count(regKey) == 0) {
+    if (!cache_.contains(regKey)) {
       return false;
     }
   }

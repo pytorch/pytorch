@@ -21,8 +21,7 @@ void ConstantValueMap::SetRank(
 }
 
 bool ConstantValueMap::HasRank(const std::string& tensorName) {
-  return ConstantValueMap::getInstance().rankMap.find(tensorName) !=
-      ConstantValueMap::getInstance().rankMap.end();
+  return ConstantValueMap::getInstance().rankMap.contains(tensorName);
 }
 
 std::optional<size_t> ConstantValueMap::GetRank(const std::string& tensorName) {
@@ -56,8 +55,7 @@ void ConstantValueMap::SetShape(
 }
 
 bool ConstantValueMap::HasShape(const std::string& tensorName) {
-  return ConstantValueMap::getInstance().shapeMap.find(tensorName) !=
-      ConstantValueMap::getInstance().shapeMap.end();
+  return ConstantValueMap::getInstance().shapeMap.contains(tensorName);
 }
 
 std::optional<c10::SymbolicShape> ConstantValueMap::GetShape(
@@ -75,8 +73,7 @@ void ConstantValueMap::SetValue(
 }
 
 bool ConstantValueMap::HasValue(const std::string& tensorName) {
-  return ConstantValueMap::getInstance().tensorValueMap.find(tensorName) !=
-      ConstantValueMap::getInstance().tensorValueMap.end();
+  return ConstantValueMap::getInstance().tensorValueMap.contains(tensorName);
 }
 
 std::optional<at::Tensor> ConstantValueMap::GetValue(
@@ -165,8 +162,7 @@ void ConstantValueMap::SetTypeReliable(
 }
 
 bool ConstantValueMap::HasTypeReliable(const std::string& tensorName) {
-  return ConstantValueMap::getInstance().typeReliableMap.find(tensorName) !=
-      ConstantValueMap::getInstance().typeReliableMap.end();
+  return ConstantValueMap::getInstance().typeReliableMap.contains(tensorName);
 }
 
 std::optional<bool> ConstantValueMap::GetTypeReliable(
@@ -184,8 +180,8 @@ void ConstantValueMap::SetUseInferredType(
 }
 
 bool ConstantValueMap::HasUseInferredType(const std::string& tensorName) {
-  return ConstantValueMap::getInstance().useInferredTypeMap.find(tensorName) !=
-      ConstantValueMap::getInstance().useInferredTypeMap.end();
+  return ConstantValueMap::getInstance().useInferredTypeMap.contains(
+      tensorName);
 }
 
 std::optional<bool> ConstantValueMap::GetUseInferredType(
@@ -203,8 +199,7 @@ void ConstantValueMap::SetShapeValue(
 }
 
 bool ConstantValueMap::HasShapeValue(const std::string& tensorName) {
-  return ConstantValueMap::getInstance().shapeValueMap.find(tensorName) !=
-      ConstantValueMap::getInstance().shapeValueMap.end();
+  return ConstantValueMap::getInstance().shapeValueMap.contains(tensorName);
 }
 
 std::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
@@ -282,8 +277,7 @@ void ConstantValueMap::PrintMaps() {
   std::cout << "Rank/Shape Map:" << '\n';
   for (const auto& x : ConstantValueMap::getInstance().rankMap) {
     std::stringstream ss;
-    if (ConstantValueMap::getInstance().shapeMap.find(x.first) !=
-        ConstantValueMap::getInstance().shapeMap.end()) {
+    if (ConstantValueMap::getInstance().shapeMap.contains(x.first)) {
       auto shape_symbols =
           ConstantValueMap::getInstance().shapeMap[x.first].sizes();
       if (shape_symbols.has_value()) {
