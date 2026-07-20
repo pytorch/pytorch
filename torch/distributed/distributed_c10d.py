@@ -1019,7 +1019,7 @@ class P2POp:
         group_peer: int | None = None,
     ) -> None:
         """Init."""
-        self.op = cast(Callable[..., Work], op)
+        self.op = op
         self.tensor = tensor
         self.group = _group_or_default_group(group)
         self.peer = _canonicalize_group_rank(
