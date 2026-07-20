@@ -1648,8 +1648,6 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::recv(
       "ucc:recv");
 }
 
-void ProcessGroupUCC::setSequenceNumberForGroup() {}
-
 uint64_t ProcessGroupUCC::getSequenceNumberForGroup() {
   return seq_;
 }

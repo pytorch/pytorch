@@ -39,6 +39,21 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
+from torch._inductor.heuristics.registry import override_template_heuristics
+from torch._inductor.heuristics.template.triton import (
+    BlackwellGPUGemmConfig,
+    CUDAAddmmPersistentTMATemplateConfigHeuristic,
+    CUDAAddMMTemplateConfigHeuristic,
+    CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+    CUDABlackwellPersistentTMATemplateConfigHeuristic,
+    CUDAMMTemplateConfigHeuristic,
+    CUDAPersistentTMATemplateConfigHeuristic,
+    GemmConfig,
+    get_shared_memory_checker_opts,
+    ROCmMMTemplateConfigHeuristic,
+    XPUMMTemplateConfigHeuristic,
+    XPUPersistentTMATemplateConfigHeuristic,
+)
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.runtime.hints import DeviceProperties
@@ -55,21 +70,6 @@ from torch._inductor.select_algorithm import (
     NoValidChoicesError,
     TritonTemplate,
     TritonTemplateCaller,
-)
-from torch._inductor.template_heuristics.registry import override_template_heuristics
-from torch._inductor.template_heuristics.triton import (
-    BlackwellGPUGemmConfig,
-    CUDAAddmmPersistentTMATemplateConfigHeuristic,
-    CUDAAddMMTemplateConfigHeuristic,
-    CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
-    CUDABlackwellPersistentTMATemplateConfigHeuristic,
-    CUDAMMTemplateConfigHeuristic,
-    CUDAPersistentTMATemplateConfigHeuristic,
-    GemmConfig,
-    get_shared_memory_checker_opts,
-    ROCmMMTemplateConfigHeuristic,
-    XPUMMTemplateConfigHeuristic,
-    XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
@@ -550,7 +550,7 @@ class TestMaxAutotune(TestCase):
                 ),
                 fresh_cache(),
                 patch(
-                    "torch._inductor.template_heuristics.triton.get_tma_workspace_arg",
+                    "torch._inductor.heuristics.template.triton.get_tma_workspace_arg",
                     mock_get_tma_workspace_arg,
                 ),
             ):
@@ -617,7 +617,7 @@ class TestMaxAutotune(TestCase):
                 ),
                 fresh_cache(),
                 patch(
-                    "torch._inductor.template_heuristics.triton.get_tma_workspace_arg",
+                    "torch._inductor.heuristics.template.triton.get_tma_workspace_arg",
                     return_value=fake_ws,
                 ),
                 patch.object(TritonBenchmarkRequest, "__init__", spy_init),
@@ -1232,6 +1232,7 @@ class TestMaxAutotune(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_conv_backends": "TRITON",
                 "max_autotune_gemm_search_space": search_space,
             }
         ):
@@ -1794,7 +1795,7 @@ class TestMaxAutotune(TestCase):
 
                         self.assertTrue(
                             divisor_found,
-                            f"Could not find a split in {divisors} in {kernel}",
+                            lambda msg: f"{msg}\nCould not find a split in {divisors} in {kernel}",
                         )
 
             compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
@@ -2044,7 +2045,7 @@ class TestMaxAutotune(TestCase):
         # Force only contiguous choice to test the transform
         with (
             mock.patch(
-                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+                "torch._inductor.heuristics.template.contiguous_mm.use_contiguous"
             ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
@@ -2088,7 +2089,7 @@ class TestMaxAutotune(TestCase):
         # Force contiguous choice to test the transform
         with (
             mock.patch(
-                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+                "torch._inductor.heuristics.template.contiguous_mm.use_contiguous"
             ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
@@ -2150,7 +2151,7 @@ class TestMaxAutotune(TestCase):
             # Test with non-contiguous second matrix - should use contiguous transform
             with (
                 mock.patch(
-                    "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+                    "torch._inductor.heuristics.template.contiguous_mm.use_contiguous"
                 ) as contiguous_mock,
             ):
                 contiguous_mock.return_value = True
@@ -2196,7 +2197,7 @@ class TestMaxAutotune(TestCase):
         # Force contiguous transform
         with (
             mock.patch(
-                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+                "torch._inductor.heuristics.template.contiguous_mm.use_contiguous"
             ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
@@ -2222,11 +2223,11 @@ class TestMaxAutotune(TestCase):
         Verifies that get_template_heuristic returns an instance of our custom class
         and that get_template_configs yields the expected configs.
         """
-        from torch._inductor.kernel.mm import MMKernelInputs
-        from torch._inductor.template_heuristics.registry import (
+        from torch._inductor.heuristics.registry import (
             get_registered_heuristic_class,
             get_template_heuristic,
         )
+        from torch._inductor.kernel.mm import MMKernelInputs
 
         template_uid = torch._inductor.kernel.mm.mm_template.uid
 
@@ -2696,7 +2697,7 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE, requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.template_heuristics.registry.get_template_heuristic"
+            "torch._inductor.heuristics.registry.get_template_heuristic"
         ) as config_mock:
             # Create heuristic instance and modify it before setting as mock return value
             # On ROCm, use ROCmMMTemplateConfigHeuristic; on XPU use XPUMMTemplateConfigHeuristic;
@@ -2838,7 +2839,7 @@ class TestMaxAutotune(TestCase):
                     self.assertIsInstance(
                         choice.layout,
                         expected_layout,
-                        f"Expected {expected_layout.__name__} with max_autotune={max_autotune_enabled}",
+                        lambda msg: f"{msg}\nExpected {expected_layout.__name__} with max_autotune={max_autotune_enabled}",
                     )
             return choices
 
@@ -3156,7 +3157,7 @@ class TestMaxAutotune(TestCase):
 
         self.assertTrue(
             b.numel() > 2**31 - 1,
-            f"Test requires tensor with >2^31 elements, got {b.numel()}",
+            lambda msg: f"{msg}\nTest requires tensor with >2^31 elements, got {b.numel()}",
         )
 
         with config.patch(
@@ -3196,7 +3197,7 @@ class TestMaxAutotune(TestCase):
         expected_offset = 7 * batch * K
         self.assertTrue(
             expected_offset > 2**31 - 1,
-            f"Test requires offset > i32_max, got {expected_offset}",
+            lambda msg: f"{msg}\nTest requires offset > i32_max, got {expected_offset}",
         )
 
         torch._dynamo.mark_dynamic(x, 0)
@@ -3238,7 +3239,7 @@ class TestMaxAutotune(TestCase):
 
         self.assertTrue(
             M * N >= 2**32,
-            f"Test requires M*N >= 2^32 for overflow, got {M * N}",
+            lambda msg: f"{msg}\nTest requires M*N >= 2^32 for overflow, got {M * N}",
         )
 
         with config.patch(
@@ -3280,7 +3281,7 @@ class TestMaxAutotune(TestCase):
 
         self.assertTrue(
             b.numel() > 2**31 - 1,
-            f"Test requires tensor with >2^31 elements, got {b.numel()}",
+            lambda msg: f"{msg}\nTest requires tensor with >2^31 elements, got {b.numel()}",
         )
 
         with config.patch(
@@ -3761,13 +3762,13 @@ class TestTemplateConfigPruning(TestCase):
             if triton_compilation_fails:
                 self.assertTrue(
                     exceeds,
-                    f"Config {c} failed to compile due to shared memory, "
+                    lambda msg: f"{msg}\nConfig {c} failed to compile due to shared memory, "
                     "but the checker predicted it would NOT exceed shared memory limits.",
                 )
             else:
                 self.assertTrue(
                     captured_smem <= smem_estimation,
-                    f"Estimated maximum smem should exceed actual smem used for config {c}",
+                    lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {c}",
                 )
 
 
@@ -4046,12 +4047,12 @@ class TestMaxAutotuneSubproc(TestCase):
         self.assertGreater(
             len(finite_timings_ms),
             0,
-            f"Expected finite autotune benchmark timings, got {benchmark_timings_ms}",
+            lambda msg: f"{msg}\nExpected finite autotune benchmark timings, got {benchmark_timings_ms}",
         )
         self.assertGreater(
             min(finite_timings_ms),
             0.0,
-            f"Expected autotune benchmark timing > 0, got {finite_timings_ms}",
+            lambda msg: f"{msg}\nExpected autotune benchmark timing > 0, got {finite_timings_ms}",
         )
 
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
@@ -4544,7 +4545,10 @@ class TestPrologueFusion(TestCase):
             # upcast preserves zero mask
             FileCheck().check("a =").check_not("tl.where").check("tl.dot").run(code[0])
 
-    @unittest.skip("Triton bug in compilation")
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
     def test_gather_fusion(self):
         M, K, N = (64, 128, 256)
         x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
@@ -4567,6 +4571,96 @@ class TestPrologueFusion(TestCase):
             .check("dot")
             .run(code[0])
         )
+        (
+            FileCheck()
+            .check("tl.load(in_ptr1 + (_loop_invariant_idx_m)")
+            .check("for k_idx")
+            .check_not("tl.load(in_ptr1")
+            .check("tl.dot")
+            .run(code[0])
+        )
+        self.assertEqual(
+            len(re.findall(r"_loop_invariant_A_tmp\d+ = tl\.load", code[0])), 1
+        )
+
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
+    def test_gather_fusion_hoists_both_inputs(self):
+        M, K, N = (64, 128, 256)
+        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
+        y = torch.rand([K, N], dtype=torch.float16, device=GPU_TYPE)
+        idx_m = torch.randperm(M, device=GPU_TYPE)
+        idx_n = torch.randperm(N, device=GPU_TYPE)
+
+        def foo(x, y, idx_m, idx_n):
+            return x[idx_m] @ y[:, idx_n]
+
+        out, code = run_and_get_code(torch.compile(foo), x, y, idx_m, idx_n)
+        self.assertEqual(out, foo(x, y, idx_m, idx_n), atol=0.05, rtol=0.05)
+
+        kernel_code = code[0]
+        loop_start = kernel_code.index("for k_idx")
+        dot_start = kernel_code.index("tl.dot", loop_start)
+        pre_loop = kernel_code[:loop_start]
+        loop_body = kernel_code[loop_start:dot_start]
+
+        self.assertRegex(
+            pre_loop,
+            r"_loop_invariant_A_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_m\)",
+        )
+        self.assertRegex(
+            pre_loop,
+            r"_loop_invariant_B_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_n\)",
+        )
+        self.assertNotRegex(loop_body, r"tl\.load\(in_ptr\d+ \+ \(idx_[mn]\)")
+        self.assertRegex(loop_body, r"_loop_invariant_A_tmp\d+")
+        self.assertRegex(loop_body, r"_loop_invariant_B_tmp\d+")
+        self.assertEqual(
+            len(re.findall(r"_loop_invariant_A_tmp\d+ = tl\.load", kernel_code)), 1
+        )
+        self.assertEqual(
+            len(re.findall(r"_loop_invariant_B_tmp\d+ = tl\.load", kernel_code)), 1
+        )
+
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
+    def test_gather_fusion_hoists_even_k_false(self):
+        M, K, N = (64, 130, 256)
+        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
+        y = torch.rand([K, N], dtype=torch.float16, device=GPU_TYPE)
+        idx_m = torch.randperm(M, device=GPU_TYPE)
+        idx_n = torch.randperm(N, device=GPU_TYPE)
+
+        def foo(x, y, idx_m, idx_n):
+            return x[idx_m] @ y[:, idx_n]
+
+        out, code = run_and_get_code(torch.compile(foo), x, y, idx_m, idx_n)
+        self.assertEqual(out, foo(x, y, idx_m, idx_n), atol=0.05, rtol=0.05)
+
+        kernel_code = code[0]
+        self.assertIn("EVEN_K : tl.constexpr = False", kernel_code)
+        loop_start = kernel_code.index("for k_idx")
+        dot_start = kernel_code.index("tl.dot", loop_start)
+        pre_loop = kernel_code[:loop_start]
+        loop_body = kernel_code[loop_start:dot_start]
+
+        self.assertRegex(
+            pre_loop,
+            r"_loop_invariant_A_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_m\), None",
+        )
+        self.assertRegex(
+            pre_loop,
+            r"_loop_invariant_B_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_n\), None",
+        )
+        self.assertNotRegex(loop_body, r"tl\.load\(in_ptr\d+ \+ \(idx_[mn]\)")
+        self.assertIn("a_mask =", loop_body)
+        self.assertIn("b_mask =", loop_body)
+        self.assertIn(", a_mask", loop_body)
+        self.assertIn(", b_mask", loop_body)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,

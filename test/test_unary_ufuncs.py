@@ -576,6 +576,32 @@ class TestUnaryUfuncs(TestCase):
         )
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
 
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_relu_signed_zero(self, device, dtype):
+        x = torch.tensor([-0.0, 0.0], device=device, dtype=dtype)
+        exp = torch.tensor([True, False], device=device)
+
+        self.assertEqual(torch.signbit(torch.relu(x)), exp)
+        self.assertEqual(torch.signbit(torch.nn.functional.relu(x)), exp)
+
+        y = x.clone()
+        y.relu_()
+        self.assertEqual(torch.signbit(y), exp)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_clamp_signed_zero(self, device, dtype):
+        x = torch.tensor([-0.0, 0.0], device=device, dtype=dtype)
+        exp = torch.signbit(x)
+
+        for name, result in (
+            ("clamp_min", torch.clamp_min(x, 0)),
+            ("clamp_max", torch.clamp_max(x, 0)),
+            ("clamp_min_kwarg", torch.clamp(x, min=0)),
+            ("clamp_min_max_kwarg", torch.clamp(x, min=0, max=1))
+        ):
+            with self.subTest(op=name):
+                self.assertEqual(torch.signbit(result), exp)
+
     @unittest.skipIf(not TEST_SCIPY, "Requires SciPy")
     @dtypes(torch.float, torch.double)
     def test_digamma_special(self, device, dtype):
@@ -925,13 +951,13 @@ class TestUnaryUfuncs(TestCase):
             ("sin", doubles, True, True, "cpu"),
             ("sin", doubles, True, True, "cuda"),
             ("sinh", doubles, True, True, "cpu"),
-            ("sinh", doubles, False, True, "cuda"),
+            ("sinh", doubles, True, True, "cuda"),
             ("sigmoid", doubles, True, True, "cpu"),
             ("sigmoid", doubles, True, True, "cuda"),
             ("logit", doubles, True, True, "cpu"),
             ("logit", doubles, True, True, "cuda"),
             ("sqrt", doubles, True, True, "cpu"),
-            ("sqrt", doubles, False, True, "cuda"),
+            ("sqrt", doubles, True, True, "cuda"),
             ("tan", doubles, True, True, "cpu"),
             ("tan", doubles, True, True, "cuda"),
             ("tanh", doubles, True, True, "cpu"),
@@ -947,7 +973,7 @@ class TestUnaryUfuncs(TestCase):
             has_internal_mem_overlap_check,
             dev,
         ) in unary_mem_overlap_cases:
-            if dev != device:
+            if dev != self.device_type:
                 continue
             out_fn = getattr(torch, fn)
             in_fn = getattr(torch.Tensor, fn + "_")

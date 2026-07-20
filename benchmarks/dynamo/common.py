@@ -423,7 +423,7 @@ def output_json(filename, headers, row):
                     "benchmark_values": [value],
                 }
 
-            print(json.dumps(record), file=f)
+            print(json.dumps(record, default=str), file=f)
 
 
 def get_suite_from_model_iter_fn(model_iter_fn):
@@ -464,6 +464,7 @@ def output_signpost(data, args, suite, error=None):
         "disable_output",
         "export_profiler_trace",
         "profiler_trace_name",
+        "profile_details",
         "explain",
         "stats",
         "print_memory",
@@ -4677,15 +4678,20 @@ def run(runner, args, original_dir=None):
     args.profile_details = {}
     if args.export_profiler_trace:
         if should_profile_details:
+            device_activity = {
+                "cuda": torch.profiler.ProfilerActivity.CUDA,
+                "xpu": torch.profiler.ProfilerActivity.XPU,
+            }
+            activities = [torch.profiler.ProfilerActivity.CPU]
+            for dev in args.devices:
+                if dev in device_activity:
+                    activities.append(device_activity[dev])
             args.profile_details = {
                 "record_shapes": True,
                 "profile_memory": True,
                 "with_stack": True,
                 "with_modules": True,
-                "activities": [
-                    torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
-                ],
+                "activities": activities,
             }
 
         if args.profiler_trace_name is None:
