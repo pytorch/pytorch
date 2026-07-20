@@ -1,9 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import sympy
 
 from torch._inductor.utils import _IntLike, argsort_sym
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from .virtualized import V
 
@@ -12,7 +12,7 @@ def static_eq(a: _IntLike, b: _IntLike) -> bool:
     return V.graph.sizevars.statically_known_equals(a, b)
 
 
-@dataclass
+@dataclass(frozen=True)
 class Term:
     coefficient: _IntLike
     range: _IntLike | None  # None for unbounded
@@ -173,14 +173,15 @@ def check_invertibility(terms: list[Term], var_range: _IntLike | None = None) ->
     if not terms:
         return False
 
-    # The reconstruction formula decomposes y; it does not subtract offsets.
-    if any(static_eq(term.reconstruction_multiplier, 0) for term in terms):
-        return False
-
-    if var_range is not None:
-        for term in terms:
-            if term.range is None:
-                term.range = CeilDiv(var_range, term.reconstruction_multiplier)
+    effective_terms: list[Term] = []
+    for term in terms:
+        if term.range is None and var_range is not None:
+            multiplier = term.reconstruction_multiplier
+            if not V.graph.sizevars.statically_known_multiple_of(var_range, multiplier):
+                return False
+            term = replace(term, range=FloorDiv(var_range, multiplier))
+        effective_terms.append(term)
+    terms = effective_terms
 
     # Coefficients must be strictly decreasing
     coeffs = [t.coefficient for t in terms]
@@ -205,7 +206,8 @@ def check_invertibility(terms: list[Term], var_range: _IntLike | None = None) ->
 
 
 def check_reconstruction_coverage(
-    terms: list[Term], var_range: _IntLike | None = None
+    terms: list[Term],
+    var_range: _IntLike | None = None,
 ) -> bool:
     """Check that terms reconstruct non-overlapping contiguous source ranges."""
     if not terms:
@@ -220,13 +222,7 @@ def check_reconstruction_coverage(
         if not static_eq(term.reconstruction_multiplier, expected_multiplier):
             return False
         if term.range is None:
-            if i != len(ascending_terms) - 1:
-                return False
-            if var_range is None:
-                return True
-            return V.graph.sizevars.statically_known_multiple_of(
-                var_range, expected_multiplier
-            )
+            return i == len(ascending_terms) - 1 and var_range is None
         expected_multiplier = term.reconstruction_multiplier * term.range
 
     if var_range is not None and not static_eq(var_range, expected_multiplier):
