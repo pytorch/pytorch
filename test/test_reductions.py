@@ -3838,7 +3838,7 @@ class TestReductionsOnCPU(TestCase):
         for dim in range(D):
             self.assertEqual(actual_bin_edges[dim], expected_bin_edges[dim])
 
-    def test_histogramdd(self, device, dtype):
+    def test_histogramdd(self):
         shapes = (
             (1, 5),
             (3, 5),
@@ -3894,7 +3894,7 @@ class TestReductionsOnCPU(TestCase):
                 self.assertEqual(bin_edges[dim].is_contiguous(), bins_contig)
             self._test_histogramdd_numpy(values, bin_edges, None, weights, density)
 
-    def test_histogram_error_handling(self, device, dtype):
+    def test_histogram_error_handling(self):
         with self.assertRaisesRegex(RuntimeError, 'not implemented for'):
             values = make_tensor((), dtype=torch.int32, device="cpu")
             torch.histogram(values, 1)
