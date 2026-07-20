@@ -43,19 +43,16 @@ class PyProcessGroup : public ProcessGroup {
     }
   };
 
-#define WORK_OVERRIDE(cname, name, ...)                                       \
-  do {                                                                        \
-    pybind11::gil_scoped_acquire gil;                                         \
-    pybind11::function override =                                             \
-        pybind11::get_override(static_cast<const cname*>(this), #name);       \
-    if (override) {                                                           \
-      auto o = override(__VA_ARGS__);                                         \
-      if (o.is_none()) {                                                      \
-        return c10::intrusive_ptr<Work>();                                    \
-      }                                                                       \
-      return c10::make_intrusive<PyProcessGroup::PyWorkHolder>(std::move(o)); \
-    }                                                                         \
-    return cname::name(__VA_ARGS__);                                          \
+#define WORK_OVERRIDE(cname, name, ...)                                 \
+  do {                                                                  \
+    pybind11::gil_scoped_acquire gil;                                   \
+    pybind11::function override =                                       \
+        pybind11::get_override(static_cast<const cname*>(this), #name); \
+    if (override) {                                                     \
+      auto o = override(__VA_ARGS__);                                   \
+      return c10::make_intrusive<PyWorkHolder>(std::move(o));           \
+    }                                                                   \
+    return cname::name(__VA_ARGS__);                                    \
   } while (false)
 
   // This class is used to wrap a PyWork trampoline with its corresponding
