@@ -237,18 +237,28 @@ def prod(input, axis):
 
 @triton.jit
 def minimum(a, b):
-    mask = a < b
-    if is_floating(a):
-        mask |= a != a
-    return tl.where(mask, a, b)
+    return tl.minimum(a, b, propagate_nan=tl.PropagateNan.ALL)
 
 
 @triton.jit
 def maximum(a, b):
-    mask = a > b
+    return tl.maximum(a, b, propagate_nan=tl.PropagateNan.ALL)
+
+
+@triton.jit
+def _minimum_reduce(a, b):
+    value = minimum(a, b)
     if is_floating(a):
-        mask |= a != a
-    return tl.where(mask, a, b)
+        value = tl.where(a == b, b, value)
+    return value
+
+
+@triton.jit
+def _maximum_reduce(a, b):
+    value = maximum(a, b)
+    if is_floating(a):
+        value = tl.where(a == b, b, value)
+    return value
 
 
 @triton.jit
@@ -258,12 +268,12 @@ def fmaximum(a, b):
 
 @triton.jit
 def min2(a, dim):
-    return tl.reduce(a, dim, minimum)
+    return tl.reduce(a, dim, _minimum_reduce)
 
 
 @triton.jit
 def max2(a, dim):
-    return tl.reduce(a, dim, maximum)
+    return tl.reduce(a, dim, _maximum_reduce)
 
 
 @triton.jit
