@@ -215,10 +215,9 @@ void TensorImpl::set_fake_device(c10::Device fake_device) {
   // where the fake device logic is instead of just calling device_default()
   set_custom_device(true);
 
-  if (fake_device.type() != c10::DeviceType::Meta) {
-    // change backend key from Meta to the fake device
-    _change_backend_component_keys(fake_device);
-  }
+  // change backend key from Meta to the fake device; a no-op when fake_device
+  // is itself meta, since the tensor is already backed by MetaBit
+  _change_backend_component_keys(fake_device);
 }
 
 void TensorImpl::set_and_normalize_fake_device(c10::Device fake_device) {
