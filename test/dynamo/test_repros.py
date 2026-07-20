@@ -6506,6 +6506,21 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
 
         fn(torch.randn(4))
 
+    # https://github.com/pytorch/pytorch/issues/189925
+    def test_io_text_encoding(self):
+        import _io
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            enc_explicit = _io.text_encoding("utf-8")
+            enc_default = _io.text_encoding(None)
+            return torch.sin(x), enc_explicit, enc_default
+
+        x = torch.randn(4)
+        _, enc_explicit, enc_default = fn(x)
+        self.assertEqual(enc_explicit, _io.text_encoding("utf-8"))
+        self.assertEqual(enc_default, _io.text_encoding(None))
+
     # https://github.com/pytorch/pytorch/issues/88813
     def test_return_value_duplication_tensor(self) -> None:
         def fn(val: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -8257,6 +8272,30 @@ SavedForBackwardsAOTOutput(idx=5)""",
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dual_tensor_input_graph_breaks(self):
+        import torch.autograd.forward_ad as fwAD
+
+        def fn(x):
+            return (x**2).sum()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.tensor([0.1, 0.2, 0.3])
+        v = torch.ones(3)
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, v)
+            expected = fwAD.unpack_dual(fn(dual)).tangent
+            out = torch.compile(fn, backend=cnt)(dual)
+            self.assertEqual(fwAD.unpack_dual(out).tangent, expected)
+        self.assertEqual(cnt.frame_count, 0)
+
+        torch._dynamo.reset()
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, v)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "dual tensor input"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(dual)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
