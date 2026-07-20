@@ -27,23 +27,23 @@ static constexpr int64_t kBlockSize = 512;
 // TODO: The values for 32KB can very much be optimized further.
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 13000 && !defined(USE_ROCM)
 
-static constexpr int depth_to_max_tensors[5] = {770, 448, 336, 252, 210};
-static constexpr int depth_to_max_blocks[5] = {2240, 2240, 2240, 2240, 2240};
-static constexpr int depth_to_max_tensors_scalarlist[5] =
+static constexpr int32_t depth_to_max_tensors[5] = {770, 448, 336, 252, 210};
+static constexpr int32_t depth_to_max_blocks[5] =
+    {2240, 2240, 2240, 2240, 2240};
+static constexpr int32_t depth_to_max_tensors_scalarlist[5] =
     {672, 448, 336, 252, 210};
-static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
-    504,
-    420};
+static constexpr int32_t depth_to_max_tensors_scalarlist_of_complex_double[2] =
+    {504, 420};
 using block_index_t = uint16_t;
 
 #else
 
-static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
-static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
-static constexpr int depth_to_max_tensors_scalarlist[5] = {96, 64, 48, 36, 30};
-static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
-    72,
-    60};
+static constexpr int32_t depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
+static constexpr int32_t depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
+static constexpr int32_t depth_to_max_tensors_scalarlist[5] =
+    {96, 64, 48, 36, 30};
+static constexpr int32_t depth_to_max_tensors_scalarlist_of_complex_double[2] =
+    {72, 60};
 using block_index_t = unsigned char;
 
 #endif
@@ -65,46 +65,51 @@ __device__ __forceinline__ void load_store(
 
 template <int n>
 struct TensorListMetadata {
-  const void* addresses[n][depth_to_max_tensors[n - 1]];
-  int64_t numel_for_tensor[depth_to_max_tensors[n - 1]];
-  block_index_t block_to_tensor[depth_to_max_blocks[n - 1]];
-  int block_to_chunk[depth_to_max_blocks[n - 1]];
-  int start_tensor_this_launch;
+  static constexpr int32_t max_tensors_per_launch = depth_to_max_tensors[n - 1];
+  static constexpr int32_t max_blocks_per_launch = depth_to_max_blocks[n - 1];
+  const void* addresses[n][max_tensors_per_launch];
+  int64_t numel_for_tensor[max_tensors_per_launch];
+  block_index_t block_to_tensor[max_blocks_per_launch];
+  int32_t block_to_chunk[max_blocks_per_launch];
+  int32_t start_tensor_this_launch;
 };
 
 template <typename scalar_vals_t, int n>
 struct TensorListScalarListMetadata {
-  const void* addresses[n][depth_to_max_tensors_scalarlist[n - 1]];
-  int64_t numel_for_tensor[depth_to_max_tensors_scalarlist[n - 1]];
-  scalar_vals_t scalar_vals[depth_to_max_tensors_scalarlist[n - 1]];
-  block_index_t block_to_tensor[depth_to_max_blocks[n - 1]];
-  int block_to_chunk[depth_to_max_blocks[n - 1]];
+  static constexpr int32_t max_tensors_per_launch =
+      depth_to_max_tensors_scalarlist[n - 1];
+  static constexpr int32_t max_blocks_per_launch = depth_to_max_blocks[n - 1];
+  const void* addresses[n][max_tensors_per_launch];
+  int64_t numel_for_tensor[max_tensors_per_launch];
+  scalar_vals_t scalar_vals[max_tensors_per_launch];
+  block_index_t block_to_tensor[max_blocks_per_launch];
+  int32_t block_to_chunk[max_blocks_per_launch];
 };
 
 // note(mkozuki): `n` of 1&2 violate the limit of cuda kernel argument size
 // with `c10::complex<double>`
 template <>
 struct TensorListScalarListMetadata<c10::complex<double>, 1> {
-  const void* addresses[1]
-                       [depth_to_max_tensors_scalarlist_of_complex_double[0]];
-  int64_t
-      numel_for_tensor[depth_to_max_tensors_scalarlist_of_complex_double[0]];
-  c10::complex<double>
-      scalar_vals[depth_to_max_tensors_scalarlist_of_complex_double[0]];
-  block_index_t block_to_tensor[depth_to_max_blocks[1 - 1]];
-  int block_to_chunk[depth_to_max_blocks[1 - 1]];
+  static constexpr int32_t max_tensors_per_launch =
+      depth_to_max_tensors_scalarlist_of_complex_double[0];
+  static constexpr int32_t max_blocks_per_launch = depth_to_max_blocks[0];
+  const void* addresses[1][max_tensors_per_launch];
+  int64_t numel_for_tensor[max_tensors_per_launch];
+  c10::complex<double> scalar_vals[max_tensors_per_launch];
+  block_index_t block_to_tensor[max_blocks_per_launch];
+  int32_t block_to_chunk[max_blocks_per_launch];
 };
 
 template <>
 struct TensorListScalarListMetadata<c10::complex<double>, 2> {
-  const void* addresses[2]
-                       [depth_to_max_tensors_scalarlist_of_complex_double[1]];
-  int64_t
-      numel_for_tensor[depth_to_max_tensors_scalarlist_of_complex_double[1]];
-  c10::complex<double>
-      scalar_vals[depth_to_max_tensors_scalarlist_of_complex_double[1]];
-  block_index_t block_to_tensor[depth_to_max_blocks[2 - 1]];
-  int block_to_chunk[depth_to_max_blocks[2 - 1]];
+  static constexpr int32_t max_tensors_per_launch =
+      depth_to_max_tensors_scalarlist_of_complex_double[1];
+  static constexpr int32_t max_blocks_per_launch = depth_to_max_blocks[1];
+  const void* addresses[2][max_tensors_per_launch];
+  int64_t numel_for_tensor[max_tensors_per_launch];
+  c10::complex<double> scalar_vals[max_tensors_per_launch];
+  block_index_t block_to_tensor[max_blocks_per_launch];
+  int32_t block_to_chunk[max_blocks_per_launch];
 };
 
 // NOTE(crcrpar): This is a conservative resolution to handle `state_steps`
@@ -115,12 +120,14 @@ struct TensorListScalarListMetadata<c10::complex<double>, 2> {
 // concern (yet).
 template <int n>
 struct FusedOptimizerTensorListMetadata {
-  const void* addresses[n][depth_to_max_tensors[n - 1]];
-  int64_t numel_for_tensor[depth_to_max_tensors[n - 1]];
-  const void* state_steps_addresses[depth_to_max_tensors[n - 1]];
-  block_index_t block_to_tensor[depth_to_max_blocks[n - 1]];
-  int block_to_chunk[depth_to_max_blocks[n - 1]];
-  int start_tensor_this_launch;
+  static constexpr int32_t max_tensors_per_launch = depth_to_max_tensors[n - 1];
+  static constexpr int32_t max_blocks_per_launch = depth_to_max_blocks[n - 1];
+  const void* addresses[n][max_tensors_per_launch];
+  int64_t numel_for_tensor[max_tensors_per_launch];
+  const void* state_steps_addresses[max_tensors_per_launch];
+  block_index_t block_to_tensor[max_blocks_per_launch];
+  int32_t block_to_chunk[max_blocks_per_launch];
+  int32_t start_tensor_this_launch;
 };
 
 template <typename T, typename U, typename... ArgTypes>
@@ -167,7 +174,8 @@ void multi_tensor_apply(
       "Number of tensor lists has to match the depth.");
   const size_t n_tensors = tensor_lists[0].size();
   using scalar_vals_t = typename T::opmath_t;
-  TensorListScalarListMetadata<scalar_vals_t, depth> tensorListMeta;
+  using metadata_t = TensorListScalarListMetadata<scalar_vals_t, depth>;
+  metadata_t tensorListMeta;
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
@@ -199,12 +207,14 @@ void multi_tensor_apply(
       loc_block_info++;
 
       // a tensor is not considered full unless all its chunks have been
-      // processed
+      // processed. Use the metadata struct's own capacities: the
+      // c10::complex<double> specializations hold fewer tensors than
+      // depth_to_max_tensors_scalarlist to stay within the kernel arg limit.
       const bool tensors_full =
-          (loc_tensor_info == depth_to_max_tensors_scalarlist[depth - 1] &&
+          (loc_tensor_info == metadata_t::max_tensors_per_launch &&
            chunk == chunks - 1);
       const bool blocks_full =
-          (loc_block_info == depth_to_max_blocks[depth - 1]);
+          (loc_block_info == metadata_t::max_blocks_per_launch);
 
       if (tensors_full || blocks_full) {
         record_foreach_mta_launch();
@@ -259,7 +269,8 @@ void multi_tensor_apply(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth.");
   const size_t n_tensors = tensor_lists[0].size();
-  TensorListMetadata<depth> tensorListMeta;
+  using metadata_t = TensorListMetadata<depth>;
+  metadata_t tensorListMeta;
   tensorListMeta.start_tensor_this_launch = 0;
 
   int loc_block_info = 0;
@@ -289,10 +300,10 @@ void multi_tensor_apply(
       loc_block_info++;
 
       const bool tensors_full =
-          (loc_tensor_info == depth_to_max_tensors[depth - 1] &&
+          (loc_tensor_info == metadata_t::max_tensors_per_launch &&
            chunk == chunks - 1);
       const bool blocks_full =
-          (loc_block_info == depth_to_max_blocks[depth - 1]);
+          (loc_block_info == metadata_t::max_blocks_per_launch);
 
       if (tensors_full || blocks_full) {
         record_foreach_mta_launch();
@@ -345,7 +356,8 @@ void multi_tensor_apply_for_fused_optimizer(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth");
   const auto num_tensors = tensor_lists[0].size();
-  FusedOptimizerTensorListMetadata<depth> tensorListMeta;
+  using metadata_t = FusedOptimizerTensorListMetadata<depth>;
+  metadata_t tensorListMeta;
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
@@ -374,9 +386,10 @@ void multi_tensor_apply_for_fused_optimizer(
       loc_block_info++;
 
       const auto tensor_full =
-          (loc_tensor_info == depth_to_max_tensors[depth - 1] &&
+          (loc_tensor_info == metadata_t::max_tensors_per_launch &&
            chunk == chunks - 1);
-      const auto blocks_full = loc_block_info == depth_to_max_blocks[depth - 1];
+      const auto blocks_full =
+          loc_block_info == metadata_t::max_blocks_per_launch;
 
       if (tensor_full || blocks_full) {
         record_foreach_mta_launch();
