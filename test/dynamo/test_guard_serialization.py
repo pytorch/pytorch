@@ -720,6 +720,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # different "bar"
         check_with_meta({"foo": 5, "bar": "world"}, False)
 
+    def test_transparent_subclass_tensor_match(self):
+        # AsyncCollectiveTensor is a transparent traceable wrapper subclass: its
+        # __torch_dispatch__ desugars ops to the inner tensor, so
+        # torch.empty_like(act) returns a plain Tensor and drops the subclass
+        # type. Guard-state serialization must round-trip such an input by
+        # unflattening through the recorded pytype rather than type(meta_tensor)
+        # (which would be torch.Tensor, with no __tensor_unflatten__).
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        def fn(w):
+            return w.sum()
+
+        base = torch.randn(3, 4)
+        ref, loaded = self._test_serialization(
+            "TENSOR_MATCH", fn, AsyncCollectiveTensor(base)
+        )
+        self._test_check_fn(ref, loaded, {"w": AsyncCollectiveTensor(base)}, True)
+
     def test_equals_match(self):
         def fn(x, y):
             # CustomConstantType is registered as a pytree constant so this should
