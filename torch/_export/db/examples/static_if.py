@@ -9,7 +9,7 @@ class StaticIf(torch.nn.Module):
 
     def forward(self, x):
         if len(x.shape) == 3:
-            return x + torch.ones(1, 1, 1)
+            return x + torch.ones(1, 1, 1, device=x.device, dtype=x.dtype)
 
         return x
 
