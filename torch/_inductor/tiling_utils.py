@@ -690,7 +690,7 @@ class VarTiling:
 class CoalesceVarAnalysis:
     # Var -> Memory Score - not strictly the amount of memory
     # because we multiply writes x2
-    # TODO: separate into dataclass that olds mem, dtype, is_write
+    # TODO: separate into dataclass that holds mem, dtype, is_write
     coalesced_by_var: dict[sympy.Expr, int]
 
     uncoalesced_addrs: dict[sympy.Expr, int]
