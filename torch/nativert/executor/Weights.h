@@ -113,17 +113,6 @@ class Weights {
     return hasCachedWeights_;
   }
 
-  // AOTI constant name mapping (original FQN → AOTI constant name).
-  // Set by the parent process after reading from the AOTI model,
-  // serialized with weight export, and used by the child to create
-  // the AOTI container with external constants (zero GPU allocation).
-  const std::unordered_map<std::string, std::string>& getAotiNameMap() const {
-    return aotiNameMap_;
-  }
-  void setAotiNameMap(std::unordered_map<std::string, std::string> map) {
-    aotiNameMap_ = std::move(map);
-  }
-
   std::string toString() const;
 
   WeightVersion version() const {
@@ -159,8 +148,6 @@ class Weights {
   static WeightVersion globalVersion_;
 
   bool hasCachedWeights_ = false;
-
-  std::unordered_map<std::string, std::string> aotiNameMap_;
 
   std::function<bool(const std::string&)> skipSizeCheck_;
   std::function<bool(const std::string&)> skipDtypeCheck_;

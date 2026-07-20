@@ -58,7 +58,7 @@ class _CUDAGraphInputLivenessTracker:
     def __init__(self) -> None:
         self._external_inputs: dict[int, _TrackedTensorInfo] = {}
         self._internal_outputs: set[int] = set()
-        self._memory_snapshots: dict[_POOL_HANDLE, list[dict[str, Any]]] = {}
+        self._memory_snapshot: list[dict[str, Any]] | None = None
         self._dispatch_mode: _TensorTrackingMode | None = None
 
     def start(self) -> None:
@@ -83,14 +83,12 @@ class _CUDAGraphInputLivenessTracker:
         if data_ptr not in self._external_inputs:
             self._internal_outputs.add(data_ptr)
 
-    def check_alive(self, capture_pools: list[_POOL_HANDLE]) -> None:
+    def check_alive(self, capture_pool: _POOL_HANDLE) -> None:
         dead = [
             i
             for i in self._external_inputs.values()
             if not i.is_alive()
-            and not any(
-                self._is_tensor_from_capture_pool(i, pool) for pool in capture_pools
-            )
+            and not self._is_tensor_from_capture_pool(i, capture_pool)
         ]
         if not dead:
             return
@@ -112,11 +110,11 @@ class _CUDAGraphInputLivenessTracker:
         raise RuntimeError("".join(parts))
 
     def _get_memory_snapshot(self, capture_pool: _POOL_HANDLE) -> list[dict[str, Any]]:
-        if capture_pool not in self._memory_snapshots:
-            self._memory_snapshots[capture_pool] = torch.cuda.memory.memory_snapshot(
+        if self._memory_snapshot is None:
+            self._memory_snapshot = torch.cuda.memory.memory_snapshot(
                 capture_pool, include_traces=False
             )
-        return self._memory_snapshots[capture_pool]
+        return self._memory_snapshot
 
     def _is_tensor_from_capture_pool(
         self, tensor: _TrackedTensorInfo, capture_pool: _POOL_HANDLE

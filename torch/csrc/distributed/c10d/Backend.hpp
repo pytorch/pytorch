@@ -504,14 +504,17 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             " does not support monitoredBarrier, only GLOO supports monitored barrier."));
   }
 
-  // Deprecated no-op: sequence numbers now always start at 0 on every rank, so
-  // there is no initial value to agree on. Kept for backward compatibility with
-  // existing callers; it warns and does nothing.
+  // Agrees on an initial sequence number for the whole group by having rank 0
+  // create it and broadcast it to other ranks using the store. Only implemented
+  // for GLOO and NCCL backends currently.
   virtual void setSequenceNumberForGroup() {
-    TORCH_WARN_ONCE(
-        "setSequenceNumberForGroup() is deprecated and is now a no-op; "
-        "sequence numbers always start at 0 on every rank. Remove calls to "
-        "_set_sequence_number_for_group().");
+    auto backendName = getBackendName();
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            backendName,
+            " does not yet support sequence numbers."));
   }
 
   // Retrieves the current sequence number for the whole group, which should be

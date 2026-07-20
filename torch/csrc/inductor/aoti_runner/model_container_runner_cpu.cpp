@@ -16,17 +16,6 @@ AOTIModelContainerRunnerCpu::AOTIModelContainerRunnerCpu(
           "",
           run_single_threaded) {}
 
-AOTIModelContainerRunnerCpu::AOTIModelContainerRunnerCpu(
-    const std::string& model_so_path,
-    size_t num_models,
-    std::unordered_map<std::string, at::Tensor>& constants)
-    : AOTIModelContainerRunner(
-          model_so_path,
-          num_models,
-          "cpu",
-          "",
-          constants) {}
-
 AOTIModelContainerRunnerCpu::~AOTIModelContainerRunnerCpu() = default;
 
 namespace {

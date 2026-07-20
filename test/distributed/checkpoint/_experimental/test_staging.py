@@ -107,7 +107,7 @@ class TestDefaultStager(TestCase):
             ),
         ]
 
-        if torch.accelerator.is_available():
+        if torch.cuda.is_available():
             # Only async staging
             test_cases.append(
                 CheckpointStagerConfig(

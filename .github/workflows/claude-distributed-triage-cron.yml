@@ -21,7 +21,7 @@ on:
 jobs:
   sweep:
     if: github.repository == 'pytorch/pytorch'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: bedrock
     permissions:

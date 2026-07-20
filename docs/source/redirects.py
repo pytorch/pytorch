@@ -159,6 +159,4 @@ redirects = {
         "user_guide/torch_compiler/compile/"
         "programming_model.where_to_apply_compile.html"
     ),
-    # Redirect for removed experimental torch.distributed._dist2 API
-    "distributed._dist2": "distributed.html",
 }

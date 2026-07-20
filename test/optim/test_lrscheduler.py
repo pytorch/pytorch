@@ -2086,11 +2086,8 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[epoch],
                     param_group["lr"],
-                    msg=lambda msg: f"{msg}\n"
-                    + (
-                        "LR is wrong in epoch {}: expected {}, got {}".format(
-                            epoch, target[epoch], param_group["lr"]
-                        )
+                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
+                        epoch, target[epoch], param_group["lr"]
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2214,7 +2211,7 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     t,
                     r,
-                    msg=lambda msg: f"{msg}\nLR is wrong in epoch {epoch}: expected {t}, got {r}",
+                    msg=f"LR is wrong in epoch {epoch}: expected {t}, got {r}",
                     atol=1e-5,
                     rtol=0,
                 )
@@ -2236,11 +2233,8 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[epoch],
                     param_group["lr"],
-                    msg=lambda msg: f"{msg}\n"
-                    + (
-                        "LR is wrong in epoch {}: expected {}, got {}".format(
-                            epoch, target[epoch], param_group["lr"]
-                        )
+                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
+                        epoch, target[epoch], param_group["lr"]
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2254,11 +2248,8 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[epoch],
                     param_group["lr"],
-                    msg=lambda msg: f"{msg}\n"
-                    + (
-                        "LR is wrong in epoch {}: expected {}, got {}".format(
-                            epoch, target[epoch], param_group["lr"]
-                        )
+                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
+                        epoch, target[epoch], param_group["lr"]
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2273,11 +2264,8 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[index],
                     param_group["lr"],
-                    msg=lambda msg: f"{msg}\n"
-                    + (
-                        "LR is wrong in epoch {}: expected {}, got {}".format(
-                            epoch, target[index], param_group["lr"]
-                        )
+                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
+                        epoch, target[index], param_group["lr"]
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2290,11 +2278,8 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[index],
                     param_group["lr"],
-                    msg=lambda msg: f"{msg}\n"
-                    + (
-                        "LR is wrong in epoch {}: expected {}, got {}".format(
-                            epoch, target[index], param_group["lr"]
-                        )
+                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
+                        epoch, target[index], param_group["lr"]
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2317,11 +2302,8 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     targets[epoch][i],
                     param_group["lr"],
-                    msg=lambda msg: f"{msg}\n"
-                    + (
-                        "LR is wrong in epoch {}: expected {}, got {}".format(
-                            epoch, targets[epoch][i], param_group["lr"]
-                        )
+                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
+                        epoch, targets[epoch][i], param_group["lr"]
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2345,11 +2327,8 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[epoch],
                     param_group["lr"],
-                    msg=lambda msg: f"{msg}\n"
-                    + (
-                        "LR is wrong in epoch {}: expected {}, got {}".format(
-                            epoch, target[epoch], param_group["lr"]
-                        )
+                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
+                        epoch, target[epoch], param_group["lr"]
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2395,11 +2374,8 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     lr_target[batch_num],
                     param_group["lr"],
-                    msg=lambda msg: f"{msg}\n"
-                    + (
-                        "LR is wrong in batch_num {}: expected {}, got {}".format(
-                            batch_num, lr_target[batch_num], param_group["lr"]
-                        )
+                    msg="LR is wrong in batch_num {}: expected {}, got {}".format(
+                        batch_num, lr_target[batch_num], param_group["lr"]
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2409,13 +2385,10 @@ class TestLRScheduler(TestCase):
                     self.assertEqual(
                         momentum_target[batch_num],
                         param_group["betas"][0],
-                        msg=lambda msg: f"{msg}\n"
-                        + (
-                            "Beta1 is wrong in batch_num {}: expected {}, got {}".format(
-                                batch_num,
-                                momentum_target[batch_num],
-                                param_group["betas"][0],
-                            )
+                        msg="Beta1 is wrong in batch_num {}: expected {}, got {}".format(
+                            batch_num,
+                            momentum_target[batch_num],
+                            param_group["betas"][0],
                         ),
                         atol=1e-5,
                         rtol=0,
@@ -2424,13 +2397,10 @@ class TestLRScheduler(TestCase):
                     self.assertEqual(
                         momentum_target[batch_num],
                         param_group["momentum"],
-                        msg=lambda msg: f"{msg}\n"
-                        + (
-                            "Momentum is wrong in batch_num {}: expected {}, got {}".format(
-                                batch_num,
-                                momentum_target[batch_num],
-                                param_group["momentum"],
-                            )
+                        msg="Momentum is wrong in batch_num {}: expected {}, got {}".format(
+                            batch_num,
+                            momentum_target[batch_num],
+                            param_group["momentum"],
                         ),
                         atol=1e-5,
                         rtol=0,
@@ -2536,11 +2506,8 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[epoch],
                     param_group["lr"],
-                    msg=lambda msg: f"{msg}\n"
-                    + (
-                        "LR is wrong in epoch {}: expected {}, got {}".format(
-                            epoch, target[epoch], param_group["lr"]
-                        )
+                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
+                        epoch, target[epoch], param_group["lr"]
                     ),
                     atol=1e-5,
                     rtol=0,

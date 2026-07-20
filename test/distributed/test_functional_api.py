@@ -694,7 +694,7 @@ class TestDistributedBackendCollectivesWithWorldSize4(
             self.assertEqual(
                 recvd_tensor,
                 expected,
-                msg=lambda msg: f"{msg}\nExpected {expected} on {self.rank=} (local_rank={rank}), "
+                msg=f"Expected {expected} on {self.rank=} (local_rank={rank}), "
                 f"but received {recvd_tensor} instead.",
             )
 

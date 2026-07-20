@@ -31,7 +31,7 @@ class TestLicense(TestCase):
         ]
         self.assertTrue(
             files,
-            lambda msg: f"{msg}\nNo third-party license files found under {third_party}",
+            f"No third-party license files found under {third_party}",
         )
 
 

@@ -3,7 +3,7 @@
 import contextlib
 import os
 import unittest
-from unittest import mock, skipUnless
+from unittest import skipUnless
 
 import numpy as np
 import sympy
@@ -14,7 +14,6 @@ from torch import nn
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, ir, metrics
-from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
@@ -148,15 +147,10 @@ class ImplDetailTest(MockSchedulerTest):
         old_sizes, old_body = buf.simplify_and_reorder()
 
         # Make sure loop reordering happens here
-        self.assertTrue(
-            tuple(old_sizes[0]) == tuple(reversed(sizes)),
-            lambda msg: f"{msg}\n{old_sizes=}",
-        )
+        self.assertTrue(tuple(old_sizes[0]) == tuple(reversed(sizes)), f"{old_sizes=}")
         new_body = old_body.merge_loops()
         new_sizes = new_body.sizes
-        self.assertTrue(
-            tuple(new_sizes[0]) == (np.prod(sizes),), lambda msg: f"{msg}\n{new_sizes=}"
-        )
+        self.assertTrue(tuple(new_sizes[0]) == (np.prod(sizes),), f"{new_sizes=}")
 
     def test_merge_loops_invalidate_pw_dep_cache(self):
         sizes = (1024, 2048)
@@ -172,94 +166,6 @@ class ImplDetailTest(MockSchedulerTest):
         # we cache pointwise_read_writes result on a scheduler node
         # make sure new_var_ranges is refreshed by invalidating the cache.
         self.assertTrue(len(new_var_ranges) == 1)  # 2 dimensions get merged
-
-    def test_reorder_invalidates_tiling_cache(self):
-        buf = self._create_computed_buffer_ax2()
-        snode = SchedulerNode(V.graph.scheduler, buf)
-
-        with mock.patch.object(
-            SIMDScheduling,
-            "select_tiling",
-            wraps=SIMDScheduling.select_tiling,
-        ) as select_tiling:
-            tiling_before = snode.get_tiling(*snode.group[1])
-            self.assertIs(tiling_before, snode.get_tiling(*snode.group[1]))
-            self.assertEqual(select_tiling.call_count, 1)
-
-            snode.apply_new_loop_order([1, 0])
-            tiling_after = snode.get_tiling(*snode.group[1])
-            self.assertEqual(select_tiling.call_count, 2)
-            self.assertNotEqual(tiling_before, tiling_after)
-
-    def test_read_writes_invalidate_tiling_cache(self):
-        buf = self._create_computed_buffer_ax2()
-        snode = SchedulerNode(V.graph.scheduler, buf)
-
-        with mock.patch.object(
-            SIMDScheduling,
-            "select_tiling",
-            wraps=SIMDScheduling.select_tiling,
-        ) as select_tiling:
-            snode.get_tiling(*snode.group[1])
-            snode.get_tiling(*snode.group[1])
-            self.assertEqual(select_tiling.call_count, 1)
-
-            snode.set_read_writes(snode.read_writes)
-            snode.get_tiling(*snode.group[1])
-            self.assertEqual(select_tiling.call_count, 2)
-
-    def test_tiling_cache_is_per_node(self):
-        snode1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        snode2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        self.assertEqual(snode1.group, snode2.group)
-
-        with mock.patch.object(
-            SIMDScheduling,
-            "select_tiling",
-            wraps=SIMDScheduling.select_tiling,
-        ) as select_tiling:
-            snode1.get_tiling(*snode1.group[1])
-            snode2.get_tiling(*snode2.group[1])
-            snode1.get_tiling(*snode1.group[1])
-            snode2.get_tiling(*snode2.group[1])
-            self.assertEqual(select_tiling.call_count, 2)
-
-    def test_tiling_cache_does_not_require_direct_simd_backend(self):
-        snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-
-        with mock.patch.object(
-            MockScheduler,
-            "get_backend",
-            side_effect=AssertionError("unexpected backend lookup"),
-        ):
-            snode.get_tiling(*snode.group[1])
-
-    def test_tiling_cache_keys_iteration_extents(self):
-        snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-
-        with mock.patch.object(
-            SIMDScheduling, "select_tiling", return_value={}
-        ) as select_tiling:
-            snode.get_tiling(sympy.Integer(1), sympy.Integer(1))
-            snode.get_tiling(sympy.Integer(1), sympy.Integer(1))
-            snode.get_tiling(sympy.Integer(2), sympy.Integer(1))
-            self.assertEqual(select_tiling.call_count, 2)
-
-    def test_fusion_reuses_node_tiling_cache(self):
-        snode1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        snode2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        backend = TritonScheduling(V.graph.scheduler)
-
-        with mock.patch.object(
-            SIMDScheduling,
-            "select_tiling",
-            wraps=SIMDScheduling.select_tiling,
-        ) as select_tiling:
-            self.assertTrue(backend.can_fuse(snode1, snode2))
-            self.assertEqual(select_tiling.call_count, 3)
-
-            self.assertTrue(backend.can_fuse(snode1, snode2))
-            self.assertEqual(select_tiling.call_count, 4)
 
     def test_reorder_modular_indexing(self):
         """
@@ -1748,7 +1654,7 @@ class TestTiling(TestCase):
             self.assertEqual(
                 len(coalesce_analysis.uncoalesced_addrs),
                 1,
-                lambda msg: f"{msg}\nExpected 1 uncoalesced access, got {len(coalesce_analysis.uncoalesced_addrs)}",
+                f"Expected 1 uncoalesced access, got {len(coalesce_analysis.uncoalesced_addrs)}",
             )
 
             # The uncoalesced access should have an INDIRECT symbol
@@ -1758,7 +1664,7 @@ class TestTiling(TestCase):
                 )
                 self.assertTrue(
                     has_indirect,
-                    lambda msg: f"{msg}\nExpected uncoalesced expr {expr} to have INDIRECT symbol",
+                    f"Expected uncoalesced expr {expr} to have INDIRECT symbol",
                 )
 
             # Should have coalesced accesses (idx read + output write)
@@ -1772,7 +1678,7 @@ class TestTiling(TestCase):
             for var in coalesce_analysis.coalesced_by_var:
                 self.assertFalse(
                     symbol_is_type(var, SymT.INDIRECT),
-                    lambda msg: f"{msg}\nINDIRECT symbol {var} should not be in coalesced_by_var",
+                    f"INDIRECT symbol {var} should not be in coalesced_by_var",
                 )
 
             return nodes
@@ -2048,16 +1954,11 @@ class TestIndexInversion(TestCase):
             reconstruction = generate_inverse_formula(expr, p)
 
             if should_invert:
-                self.assertIsNotNone(
-                    reconstruction, lambda msg: f"{msg}\nExpected invertible: {expr}"
-                )
+                self.assertIsNotNone(reconstruction, f"Expected invertible: {expr}")
                 # Test correctness on sample values
                 self._check_expr(expr, reconstruction, test_range)
             else:
-                self.assertIsNone(
-                    reconstruction,
-                    lambda msg: f"{msg}\nExpected non-invertible: {expr}",
-                )
+                self.assertIsNone(reconstruction, f"Expected non-invertible: {expr}")
 
 
 if __name__ == "__main__":

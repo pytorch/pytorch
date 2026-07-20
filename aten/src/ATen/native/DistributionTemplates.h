@@ -20,7 +20,6 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/full.h>
 #include <ATen/ops/view_as_real.h>
-#include <ATen/ops/_assert_async.h>
 #endif
 
 namespace at::native::templates {
@@ -191,17 +190,9 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, std::optional<in
     TORCH_CHECK( \
       !std.is_complex(), \
       "normal expects standard deviation to be non-complex"); \
-    if (std.numel() > 0 && !std.is_meta()) { \
-      if (std.is_cuda()) { \
-        at::_assert_async( \
-          std.min().ge(0), \
-          "normal expects all elements of std >= 0.0"); \
-      } else { \
-        TORCH_CHECK( \
-          std.min().ge(0).item<bool>(), \
-          "normal expects all elements of std >= 0.0"); \
-      } \
-    } \
+    TORCH_CHECK( \
+      std.numel() == 0 || std.is_meta() || std.min().ge(0).item<bool>(), \
+      "normal expects all elements of std >= 0.0"); \
   } while (0)
 
 #define CHECK_NORMAL_STD(std) \

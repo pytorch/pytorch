@@ -113,7 +113,7 @@ class OSSProxyExecutor : public ProxyExecutor {
  public:
   explicit OSSProxyExecutor(
       const std::string& json_path,
-      const std::string& device_str,
+      bool is_cpu,
       std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs =
           std::nullopt);
 

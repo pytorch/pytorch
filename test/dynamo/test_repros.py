@@ -1228,28 +1228,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(y_ref, y_test)
 
-    # https://github.com/pytorch/pytorch/issues/164555
-    def test_out_overload_channels_last(self):
-        def fn():
-            x = torch.ones(2, 2, 2, 3, dtype=torch.bfloat16).to(
-                memory_format=torch.channels_last
-            )
-            out = torch.empty_like(x)
-
-            torch.add(x, x, out=out)
-            return out
-
-        eager_out = fn()
-        for backend in ("eager", "aot_eager"):
-            compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
-            compiled_out = compiled_fn()
-
-            self.assertEqual(eager_out, compiled_out)
-            self.assertEqual(eager_out.stride(), compiled_out.stride())
-            self.assertTrue(
-                compiled_out.is_contiguous(memory_format=torch.channels_last)
-            )
-
     # https://github.com/pytorch/pytorch/issues/168381
     def test_index_select_contiguous_with_compile(self):
         def fn(x):
@@ -4741,49 +4719,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x1.data, x2.data)
         self.assertEqual(y1, y2)
 
-    @requires_cuda
-    def test_tensor_set_data_cross_device(self):
-        def func(x):
-            x.data = x.data.to("cuda")
-            return x + 1
-
-        x_eager = torch.randn(4, device="cpu")
-        x_compiled = x_eager.clone()
-
-        out_eager = func(x_eager)
-        out_compiled = torch.compile(func, backend="eager", fullgraph=True)(x_compiled)
-
-        self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(x_eager.device, x_compiled.device)
-
-    @requires_cuda
-    def test_tensor_set_data_cross_device_shape_mismatch_graphbreaks(self):
-        def func(x):
-            x.data = torch.randn(8, device="cuda")
-            return x + 1
-
-        x = torch.randn(4, device="cpu")
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            torch.compile(func, backend="eager", fullgraph=True)(x)
-
-    @requires_cuda
-    def test_tensor_set_data_cross_device_placeholder_metadata(self):
-        backend = torch._dynamo.testing.EagerAndRecordGraphs()
-
-        def func(x):
-            x.data = x.data.to("cuda")
-            return x + 1
-
-        x = torch.randn(4, device="cpu")
-        torch.compile(func, backend=backend, fullgraph=True)(x)
-
-        gm = backend.graphs[0]
-        for node in gm.graph.nodes:
-            if node.op == "placeholder":
-                ev = node.meta.get("example_value")
-                if isinstance(ev, torch.Tensor):
-                    self.assertEqual(ev.device.type, "cpu")
-
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:
             def __enter__(self):
@@ -7385,7 +7320,7 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
                 k = processed.view(batch_size, 1, seq_len, self.dim).detach()
                 v = processed.view(batch_size, 1, seq_len, self.dim).detach()
 
-                out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)  # noqa: UNSPECIFIED_BACKEND
+                out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
                 out = flex_attention(q, k, v, block_mask=block_mask)
 
                 return out
@@ -8060,7 +7995,7 @@ SavedForBackwardsAOTOutput(idx=5)""",
         # https://github.com/pytorch/pytorch/issues/144211
         # torch.compile(one_hot) should raise on out-of-bounds indices,
         # not silently produce wrong results.
-        one_hot = torch.compile(torch.nn.functional.one_hot, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        one_hot = torch.compile(torch.nn.functional.one_hot, fullgraph=True)
 
         a = torch.arange(0, 5) % 3  # [0, 1, 2, 0, 1]
         with self.assertRaises(RuntimeError):
@@ -8217,7 +8152,7 @@ SavedForBackwardsAOTOutput(idx=5)""",
             warnings.simplefilter("always")
             eager_result = f(size, out_wrong.clone())
 
-        cf = torch.compile(f, dynamic=True)  # noqa: UNSPECIFIED_BACKEND
+        cf = torch.compile(f, dynamic=True)
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
             compiled_result = cf(size, out_wrong.clone())
@@ -8444,7 +8379,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mod = Repro()
         x = torch.arange(9, device=torch.device(device))
 
-        @torch.compile  # noqa: UNSPECIFIED_BACKEND
+        @torch.compile
         def f(x):
             return mod(x)
 
@@ -9410,7 +9345,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         if not has_triton():
             self.skipTest("requires triton")
 
-        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        @torch.compile(fullgraph=True)
         def flex_chunk(q, k, v, block_mask, scale):
             out, aux = flex_attention(
                 q,
@@ -9429,7 +9364,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             d = e0 + e1
             return (out * e0 + new_out * e1) / d, (mx + torch.log(d)).squeeze(-1)
 
-        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        @torch.compile(fullgraph=True)
         def ref_attn(q, k, v, block_mask, scale):
             return flex_attention(q, k, v, block_mask=block_mask, scale=scale)
 
@@ -9539,7 +9474,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             a_stride,
             cloned_stride,
-            lambda msg: f"{msg}\nStrides should match in eager: {a_stride} against {cloned_stride}",
+            f"Strides should match in eager: {a_stride} against {cloned_stride}",
         )
 
         compiled_a_stride, compiled_cloned_stride = torch.compile(fn, backend="eager")(
@@ -9548,7 +9483,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             compiled_a_stride,
             compiled_cloned_stride,
-            lambda msg: f"{msg}\nStrides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
+            f"Strides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
         )
 
 

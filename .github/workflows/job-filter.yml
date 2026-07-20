@@ -37,7 +37,7 @@ on:
 
 jobs:
   compute:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       jobs: ${{ steps.set.outputs.jobs }}
     steps:

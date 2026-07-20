@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import builtins
 import contextlib
 import functools
@@ -6,13 +7,12 @@ import logging
 import math
 import sys
 from collections import defaultdict
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
+from typing import Any, cast, TYPE_CHECKING, TypeGuard
 
 import torch
 import torch.utils._pytree as pytree
-from torch._custom_class_base import CustomClassBase
 from torch._dynamo.source import (
     AttrSource,
     GetItemSource,
@@ -25,7 +25,8 @@ from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_custom_class_obj
+from torch._library.opaque_object import is_opaque_value
+from torch._opaque_base import OpaqueBase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -64,16 +65,10 @@ from torch.utils._sympy.numbers import int_oo
 
 
 if TYPE_CHECKING:
-    from sympy import Expr, Symbol
-
-    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
-    from torch.fx.experimental.symbolic_shapes import SymbolicContext
+    from sympy import Symbol
 
 
 log = logging.getLogger(__name__)
-
-
-_ModuleT = TypeVar("_ModuleT", bound=torch.nn.Module)
 
 
 _DATA_PTR_ACCESS_ERROR = "Cannot access data pointer of Tensor"
@@ -85,9 +80,7 @@ _RAW_TRITON_KERNEL_NON_STRICT_EXPORT_ERROR = (
 )
 
 
-def _is_raw_triton_kernel_data_ptr_error(
-    func: Callable[..., object], exc: RuntimeError
-) -> bool:
+def _is_raw_triton_kernel_data_ptr_error(func, exc: RuntimeError) -> bool:
     if getattr(func, "__name__", None) != "data_ptr":
         return False
     if _DATA_PTR_ACCESS_ERROR not in str(exc):
@@ -105,7 +98,7 @@ class _KeyPath:
     Wraps `KeyPath` to aid `isinstance` checks.
     """
 
-    def __init__(self, kp: KeyPath) -> None:
+    def __init__(self, kp: KeyPath):
         self.kp = kp
 
 
@@ -114,10 +107,10 @@ class _KeyPathTrie:
     Builds a trie of `KeyPath` prefixes mapping to `Source` leaves.
     """
 
-    def __init__(self) -> None:
-        self.root: dict[Any, Any] = {}
+    def __init__(self):
+        self.root = {}
 
-    def add(self, kp: KeyPath, src: Source) -> None:
+    def add(self, kp: KeyPath, src: Source):
         if len(kp) == 0:
             raise AssertionError("KeyPath must not be empty")
         *path, leaf = kp
@@ -140,9 +133,7 @@ class _KeyPathTrie:
         return node, kp
 
 
-def make_sourced_prefixes(
-    nn_module: torch.nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> _KeyPathTrie:
+def make_sourced_prefixes(nn_module, args, kwargs) -> _KeyPathTrie:
     kp_args, kp_kwargs = tree_map_with_path(
         lambda kp, _: _KeyPath(kp),
         (tuple(None for _ in args), {k: None for k in kwargs}),  # noqa: C420
@@ -193,7 +184,7 @@ def key_path_to_source(
     return source
 
 
-def _is_constant_argument(t: object) -> bool:
+def _is_constant_argument(t):
     return t is None or isinstance(t, (float, bool, str))
 
 
@@ -204,12 +195,12 @@ def fakify(
     t_constraints: dict[int, dict[int, Constraint]],
     sources: dict[tuple[int, int], list[Source]],
     sourced_prefixes: _KeyPathTrie | None = None,
-) -> Any:
+):
     source = key_path_to_source(kp, sourced_prefixes=sourced_prefixes)
     if (
         _is_constant_argument(t)
         or isinstance(t, (torch.ScriptObject, torch.nn.Module))
-        or is_custom_class_obj(t)
+        or is_opaque_value(t)
     ):
         return t
 
@@ -254,13 +245,7 @@ def fakify(
     return fake
 
 
-def _create_symbolic_context_for_tensor(
-    t: torch.Tensor,
-    source: Source,
-    t_constraints: dict[int, dict[int, Constraint]],
-    sources: dict[tuple[int, int], list[Source]],
-    mode: FakeTensorMode,
-) -> "SymbolicContext":
+def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode):
     """Helper function to create symbolic context for a tensor."""
     from torch._dynamo.source import AttrSource
     from torch.fx.experimental.symbolic_shapes import (
@@ -290,8 +275,7 @@ def _create_symbolic_context_for_tensor(
     # Handle nested subclasses
     if is_traceable_wrapper_subclass(t):
         # Get inner contexts recursively
-        inner_contexts: dict[str, SymbolicContext] = {}
-        # pyrefly: ignore[missing-attribute]  # TODO traceable wrapper subclasses define __tensor_flatten__
+        inner_contexts = {}
         attrs, _ = type(t).__tensor_flatten__(t)
 
         # Propagate outer tensor constraints to inner tensors if not already present
@@ -302,11 +286,11 @@ def _create_symbolic_context_for_tensor(
                     inner_contexts[attr] = _create_symbolic_context_for_tensor(
                         inner_value, inner_source, t_constraints, sources, mode
                     )
-                case CustomClassBase():
+                case OpaqueBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
                     )
 
         symbolic_context = SubclassSymbolicContext(
@@ -341,7 +325,7 @@ def _create_symbolic_context_for_tensor(
     return symbolic_context
 
 
-def _is_unbacked_symint(symbol: object) -> bool:
+def _is_unbacked_symint(symbol):
     if not isinstance(symbol, torch.SymInt):
         return False
 
@@ -350,12 +334,7 @@ def _is_unbacked_symint(symbol: object) -> bool:
     return symbol.node.shape_env.is_unbacked_symint(symbol.node.expr)
 
 
-def _tensor_min_max(
-    *args: Any,
-    real_callable: Callable[..., object],
-    tensor_callable: Callable[..., object],
-    **kwargs: Any,
-) -> Any:
+def _tensor_min_max(*args, real_callable, tensor_callable, **kwargs):
     """
     This logic is replicated from dynamo/variables/builtin.py
     """
@@ -416,7 +395,7 @@ def _tensor_min_max(
 
 
 @contextmanager
-def _override_builtin_ops() -> Generator[None, None, None]:
+def _override_builtin_ops():
     original_max = builtins.max
     original_min = builtins.min
     original_pow = math.pow
@@ -538,19 +517,12 @@ def _make_fake_inputs_with_spec(
 
 
 def make_fake_inputs(
-    nn_module: torch.nn.Module,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    dynamic_shapes: "dict[str, Any] | tuple[Any, ...] | list[Any] | ShapesSpec | ParamsSpec | None",
-    prefer_deferred_runtime_asserts_over_guards: bool = False,
-) -> tuple[
-    FakeTensorMode,
-    tuple[Any, ...],
-    dict[str, Any],
-    EqualityConstraint,
-    inspect.Signature,
-    dict[str, Any] | tuple[Any, ...] | list[Any] | None,
-]:
+    nn_module,
+    args,
+    kwargs,
+    dynamic_shapes,
+    prefer_deferred_runtime_asserts_over_guards=False,
+):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
     fake inputs created in that mode whose dynamic shape dimensions are constrained
@@ -660,9 +632,7 @@ def make_fake_inputs(
 
         names: dict[str, tuple[int, int]] = {}
         source_pairs: list[tuple[Source, Source]] = []
-        derived_equalities: list[
-            tuple[Source, Source | Symbol, Callable[..., object]]
-        ] = []
+        derived_equalities: list[tuple[Source, Source | Symbol, Callable]] = []
         phantom_symbols: dict[str, Symbol] = {}
         relaxed_sources: set[Source] = set()
         for constraint in constraints:
@@ -698,9 +668,9 @@ def _flatten_dynamic_shapes(
     combined_args: dict[str, Any],
     dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any],
 ) -> list[Any]:
-    flat_shapes: list[Any] = []
+    flat_shapes = []
 
-    def _tree_map_helper(path: KeyPath, t: Any, shape: Any) -> None:
+    def _tree_map_helper(path, t, shape):
         nonlocal flat_shapes
         flat_shapes.append(shape)
 
@@ -728,7 +698,7 @@ def produce_guards_and_solve_constraints(
     dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
-) -> None:
+):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
     and a graph module, produce guards on the fake mode's shape env (raising constraint
@@ -802,8 +772,8 @@ def _constrain_user_specified_dimhint_range(
     symint: torch.SymInt,
     hint: int,
     dim: _DimHint,
-    range_constraints: dict["Expr", "ValueRanges[Expr]"],
-    shape_env: ShapeEnv,
+    range_constraints,
+    shape_env,
     keypath: KeyPath,
     i: int | None = None,
 ) -> str | None:
@@ -877,7 +847,7 @@ def make_constraints(
     combined_args: dict[str, Any],
     dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
     num_lifted_inputs: int,
-) -> dict["Expr", "ValueRanges[Expr]"]:
+):
     """
     Given a fake mode's shape env and user-specified dynamic shapes,
     return the resulting range constraints and equality constraints.
@@ -918,7 +888,7 @@ def make_constraints(
         )
 
     free_symbols = set()
-    range_violations: list[str] = []
+    range_violations = []
     for input_index, node in enumerate(gm.graph.nodes):
         meta_val = node.meta.get("val")
 
@@ -1020,9 +990,7 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
     buffers_parameters = set(m.buffers())
     buffers_parameters.update(m.parameters())
 
-    def inner(
-        m: torch.nn.Module, prefix_atoms: list[str], constants: ConstantAttrMap
-    ) -> None:
+    def inner(m: torch.nn.Module, prefix_atoms: list[str], constants):
         for k, v in m.__dict__.items():
             if isinstance(
                 v,
@@ -1074,7 +1042,7 @@ def _exit_enable_graph_inputs_of_type_nn_module(
 @contextlib.contextmanager
 def _enable_graph_inputs_of_type_nn_module(
     args: tuple[tuple[Any], dict[Any, Any]] | None,
-) -> Generator[None, None, None]:
+):
     if args is None:
         yield
         return
@@ -1092,7 +1060,7 @@ def _fakify_module_inputs(
     args: tuple[Any],
     kwargs: dict[Any, Any],
     fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
-) -> Generator[None, None, None]:
+):
     # This context manager is used to fakify module inputs.
     # Inputs:
     #   args, kwargs: the args and kwargs containing module inputs that haven't been fakified.
@@ -1119,11 +1087,11 @@ def _fakify_module_inputs(
 
 @contextlib.contextmanager
 def _fakify_script_objects(
-    mod: _ModuleT,
+    mod: torch.nn.Module,
     args: Sequence[Any],
     kwargs: dict[Any, Any],
     fake_mode: torch._subclasses.fake_tensor.FakeTensorMode | None,
-) -> Generator[tuple[_ModuleT, Any, Any, ConstantAttrMap, dict[Any, Any]], None, None]:
+):
     # This context manager is used to fakify script objects into FakeScriptObject.
     # Inputs:
     #   mod: the module to be exported, it (and its recursive submodules)'s script object attrs haven't been fakified.
@@ -1143,11 +1111,11 @@ def _fakify_script_objects(
     if pytree.tree_any(lambda obj: isinstance(obj, FakeScriptObject), (args, kwargs)):
         raise AssertionError("args and kwargs shouldn't contain any FakeScriptObject.")
 
-    patched_attr: dict[str, Any] = {}
+    patched_attr = {}
     fake_constant_attrs = ConstantAttrMap()
-    fake_to_real: dict[Any, Any] = {}
+    fake_to_real = {}
 
-    def _maybe_fakify_obj(obj: object) -> FakeScriptObject | torch.ScriptObject:
+    def _maybe_fakify_obj(obj):
         fake_obj = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, obj)
         fake_to_real[fake_obj] = obj
         return fake_obj
@@ -1165,7 +1133,7 @@ def _fakify_script_objects(
         for obj, fqns in constant_attrs.items():
             if torch._library.fake_class_registry._is_script_object(
                 obj
-            ) or is_custom_class_obj(obj):
+            ) or is_opaque_value(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
@@ -1219,9 +1187,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     Usage: TORCHEXPORT_EXTENDED_DEBUG_CURRENT_LOC=1 TORCH_LOGS="+export" ...
     """
 
-    def _override(
-        self, func: Callable[..., object], args: Sequence[Any], kwargs: dict[str, Any]
-    ) -> tuple[Callable[..., object], Sequence[Any], dict[str, Any]]:
+    def _override(self, func, args, kwargs):
         if torch.distributed.is_available():
             from torch.distributed._functional_collectives import (
                 REDUCE_OP_TO_STR,
@@ -1257,7 +1223,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 return torch._refs.tensor, args, kwargs
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
 
-            def is_scalar_tensor_index(item: object) -> TypeGuard[torch.Tensor]:
+            def is_scalar_tensor_index(item):
                 if not isinstance(item, torch.Tensor) or item.ndim != 0:
                     return False
 
@@ -1265,14 +1231,12 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
                 return is_integer_dtype(item.dtype)
 
-            def maybe_tensor_index_item(item: object) -> Any:
+            def maybe_tensor_index_item(item):
                 if is_scalar_tensor_index(item):
                     return item.item()
                 return item
 
-            def rewrite(
-                dim: int, item: Any
-            ) -> tuple[int, tuple[Callable[..., object], list[Any]]] | None:
+            def rewrite(dim, item):
                 # Redirect to torch.select for indexing.
                 if item is None:
                     return dim + 1, (torch.unsqueeze, [dim])
@@ -1340,14 +1304,14 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
                 dim = 0
                 # Sequence rewrites.
-                sequence: list[tuple[Callable[..., object], list[Any]]] = []
+                sequence = []
                 for item in items:
                     if (r := rewrite(dim, item)) is None:
                         return func, args, kwargs
                     dim, call_spec = r
                     sequence.append(call_spec)
 
-                def run() -> Any:
+                def run():
                     # Run sequence.
                     # pyrefly: ignore [bad-index, index-error]
                     t = args[0]
@@ -1359,13 +1323,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
         return func, args, kwargs
 
-    def __torch_function__(
-        self,
-        func: Callable[..., object],
-        types: Sequence[type],
-        args: Sequence[Any] = (),
-        kwargs: dict[str, Any] | None = None,
-    ) -> Any:
+    def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
         if torch.compiler.is_dynamo_compiling():
             return func(*args, **kwargs)

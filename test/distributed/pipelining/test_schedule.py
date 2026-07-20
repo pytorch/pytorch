@@ -162,12 +162,11 @@ class ScheduleTest(TestCase):
             with self.subTest(name=name):
                 schedule_class = get_schedule_class(name)
                 self.assertIsNotNone(
-                    schedule_class,
-                    lambda msg: f"{msg}\nClass for {name} should not be None",
+                    schedule_class, f"Class for {name} should not be None"
                 )
                 self.assertTrue(
                     issubclass(schedule_class, _PipelineSchedule),
-                    lambda msg: f"{msg}\n{name} should be a subclass of _PipelineSchedule",
+                    f"{name} should be a subclass of _PipelineSchedule",
                 )
 
         error_case = ["ScheduleThatDoesNotExist"]
@@ -496,6 +495,7 @@ class TestSchedulePlan(TestCase):
                     for i in range(num_local_stages)
                 ]
                 schedule = ScheduleClass(stages, num_microbatches)
+                _format_pipeline_order(schedule.pipeline_order)
 
                 def stage_to_rank(stage):
                     return stage % group_size
@@ -591,11 +591,7 @@ class TestScheduleCsv(TestCase):
 
         for rank in sch_ref:
             for timestep, (a, b) in enumerate(zip(sch[rank], sch_ref[rank])):
-                self.assertEqual(
-                    a,
-                    b,
-                    lambda msg: f"{msg}\nMismatch at {timestep=}, {a=}, expected {b}",
-                )
+                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
 
 
 instantiate_parametrized_tests(TestScheduleCsv)
@@ -667,7 +663,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
+                    f"Mismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {comms_sch}"
                 ),
             )
@@ -706,7 +702,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
+                    f"Mismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {comms_sch}"
                 ),
             )
@@ -741,7 +737,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
+                    f"Mismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {merged_sch}"
                 ),
             )
@@ -892,7 +888,7 @@ class TestScheduleLowering(TestCase):
                     expected,
                     actual,
                     (
-                        lambda msg: f"{msg}\nMismatch on rank {rank} at position {i}."
+                        f"Mismatch on rank {rank} at position {i}."
                         f"\nExpected: {expected_comms_sch[rank]}"
                         f"\nActual:   {comms_sch[rank]}"
                     ),
@@ -1246,7 +1242,7 @@ class TestScheduleLowering(TestCase):
                     expected,
                     actual,
                     (
-                        lambda msg: f"{msg}\nMismatch on rank {rank} at position {i}."
+                        f"Mismatch on rank {rank} at position {i}."
                         f"\nExpected: {expected_sch[rank]}"
                         f"\nActual:   {result_sch[rank]}"
                     ),
@@ -1330,7 +1326,7 @@ class TestScheduleLowering(TestCase):
             self.assertLess(
                 i,
                 len(non_none) - 1,
-                lambda msg: f"{msg}\nRECV {a} on rank 1 has no following consumer",
+                f"RECV {a} on rank 1 has no following consumer",
             )
             consumer = non_none[i + 1]
             consumer_subs = (
@@ -1354,7 +1350,7 @@ class TestScheduleLowering(TestCase):
                 )
             self.assertTrue(
                 matched,
-                lambda msg: f"{msg}\nRECV {a} on rank 1 is not immediately followed by its "
+                f"RECV {a} on rank 1 is not immediately followed by its "
                 f"consumer (next action: {consumer})",
             )
 
@@ -1412,11 +1408,7 @@ class TestScheduleLowering(TestCase):
 
         for rank in sch_ref:
             for timestep, (a, b) in enumerate(zip(comms_sch[rank], sch_ref[rank])):
-                self.assertEqual(
-                    a,
-                    b,
-                    lambda msg: f"{msg}\nMismatch at {timestep=}, {a=}, expected {b}",
-                )
+                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
 
         simulated_schedule = _simulate_comms_compute(
             comms_sch,

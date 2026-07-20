@@ -359,7 +359,7 @@ class TestValidateCombination(TestCase):
                 self.world_size,
                 mesh,
             )
-        self.assertTrue(is_valid, lambda _m: f"{_m}\nNaN outputs should match: {msg}")
+        self.assertTrue(is_valid, f"NaN outputs should match: {msg}")
 
     def test_integer_output_includes_partial_sum(self):
         """
@@ -377,7 +377,7 @@ class TestValidateCombination(TestCase):
             self.assertIn(
                 "sum",
                 partial_ops,
-                lambda msg: f"{msg}\nP(sum) must be in output placements for {dtype} "
+                f"P(sum) must be in output placements for {dtype} "
                 f"(needed by ops like bucketize with sharded boundaries)",
             )
 
@@ -528,12 +528,12 @@ class TestValidateCombination(TestCase):
                             if should_be_valid:
                                 self.assertTrue(
                                     is_valid,
-                                    lambda _m: f"{_m}\n{op.__name__}: {p1},{p2}->{p_out} should be valid but got: {msg}",
+                                    f"{op.__name__}: {p1},{p2}->{p_out} should be valid but got: {msg}",
                                 )
                             else:
                                 self.assertFalse(
                                     is_valid,
-                                    lambda msg: f"{msg}\n{op.__name__}: {p1},{p2}->{p_out} should be invalid",
+                                    f"{op.__name__}: {p1},{p2}->{p_out} should be invalid",
                                 )
 
     def test_add_alpha_negates_partial_max_to_min(self):
@@ -568,8 +568,7 @@ class TestValidateCombination(TestCase):
                 mesh,
             )
             self.assertTrue(
-                is_valid,
-                lambda _m: f"{_m}\nR,Pmax->Pmin with alpha=-1 should be valid: {msg}",
+                is_valid, f"R,Pmax->Pmin with alpha=-1 should be valid: {msg}"
             )
 
             # R + alpha*P(max) where alpha=-1 should NOT produce P(max)
@@ -598,8 +597,7 @@ class TestValidateCombination(TestCase):
                 mesh,
             )
             self.assertTrue(
-                is_valid,
-                lambda _m: f"{_m}\nPmax,R->Pmax with alpha=-1 should be valid: {msg}",
+                is_valid, f"Pmax,R->Pmax with alpha=-1 should be valid: {msg}"
             )
 
 
@@ -734,7 +732,7 @@ class TestCreatePartialInput(TestCase):
                         self.assertNotEqual(
                             vals[idx],
                             vals[idx + 1],
-                            lambda msg: f"{msg}\nMask should alternate along dim 0 at [{':,'}{j},{k},{l}], "
+                            f"Mask should alternate along dim 0 at [{':,'}{j},{k},{l}], "
                             f"got {vals}",
                         )
 
@@ -760,14 +758,14 @@ class TestCreatePartialInput(TestCase):
             self.assertGreater(
                 max_offset,
                 value_range,
-                lambda msg: f"{msg}\nP({reduce_op}) offset {max_offset:.1f} should exceed "
+                f"P({reduce_op}) offset {max_offset:.1f} should exceed "
                 f"value range {value_range:.1f}",
             )
             # Ranks should disagree on argmin/argmax
             self.assertNotEqual(
                 r0.argmin().item(),
                 r1.argmin().item(),
-                lambda msg: f"{msg}\nP({reduce_op}) ranks should disagree on argmin with adaptive offset",
+                f"P({reduce_op}) ranks should disagree on argmin with adaptive offset",
             )
 
 
@@ -917,7 +915,7 @@ class TestPartialCombinationValidity(TestCase):
                 )
             self.assertFalse(
                 is_valid,
-                lambda _m: f"{_m}\nargmin P({reduce_op})->R should be invalid "
+                f"argmin P({reduce_op})->R should be invalid "
                 f"(index op, ranks disagree): {msg}",
             )
 
@@ -1288,7 +1286,7 @@ class TestCompareOperatorEndToEnd(TestCase):
             self.assertGreater(
                 stats.total_samples,
                 0,
-                lambda msg: f"{msg}\nsplit should have runnable samples, got skip_reasons={stats.skip_reasons}",
+                f"split should have runnable samples, got skip_reasons={stats.skip_reasons}",
             )
             self.assertEqual(len(stats.false_positives), 0)
 
@@ -1313,7 +1311,7 @@ class TestCompareOperatorEndToEnd(TestCase):
                     self.assertGreater(
                         stats.true_positives,
                         0,
-                        lambda msg: f"{msg}\n{name} should have DTensor rules (true_positives > 0), "
+                        f"{name} should have DTensor rules (true_positives > 0), "
                         f"got skip_reasons={stats.skip_reasons}",
                     )
 
@@ -1447,7 +1445,7 @@ class TestMainModule(TestCase):
         self.assertEqual(
             result.returncode,
             0,
-            lambda msg: f"{msg}\nModule exited with code {result.returncode}.\n"
+            f"Module exited with code {result.returncode}.\n"
             f"stderr: {result.stderr[-2000:]}",
         )
         return result.stdout

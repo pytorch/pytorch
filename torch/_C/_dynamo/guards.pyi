@@ -1,6 +1,6 @@
 import enum
 import traceback
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any, TypeAlias
 
 import torch
@@ -24,8 +24,6 @@ class GuardDebugInfo:
     result: bool
     num_guards_executed: int
     user_stack: traceback.StackSummary | None
-
-class LocalState: ...
 
 class GuardManager:
     def check(self, value: Any) -> bool: ...
@@ -409,8 +407,6 @@ class RootGuardManager(GuardManager):
         self, clone_filter_fn: Callable[[GuardManager], bool]
     ) -> RootGuardManager: ...
     def attach_compile_id(self, compile_id: str) -> None: ...
-    def get_local_state(self) -> LocalState: ...
-    def set_local_state(self, local_state: LocalState) -> None: ...
 
 class DictGuardManager(GuardManager):
     def get_key_manager(
@@ -496,12 +492,6 @@ def assert_size_stride(
     item: torch.Tensor,
     size: torch.types._size,
     stride: torch.types._size,
-    op_name: str | None = None,
-) -> None: ...
-def assert_size_stride_grouped(
-    items: Sequence[torch.Tensor],
-    sizes: Sequence[torch.types._size],
-    strides: Sequence[torch.types._size],
     op_name: str | None = None,
 ) -> None: ...
 def assert_alignment(

@@ -38,11 +38,10 @@ jobs:
     needs: get-label-type
     with:
       sync-tag: linux-xpu-n-1-build
-      runner_prefix: "mt-"
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-xpu-n-1-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-1-py3
-      runner: l-x86iavx512-48-384
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      runner: linux.c7i.12xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
@@ -60,11 +59,10 @@ jobs:
     needs: get-label-type
     with:
       sync-tag: linux-xpu-n-build
-      runner_prefix: "mt-"
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-noble-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
-      runner: l-x86iavx512-48-384
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      runner: linux.c7i.12xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 12, runner: "linux.idc.xpu" },
@@ -98,11 +96,10 @@ jobs:
     needs: get-label-type
     with:
       sync-tag: linux-xpu-n-client-build
-      runner_prefix: "mt-"
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-noble-xpu-n-py3.10-client
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3-client
-      runner: l-x86iavx512-48-384
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      runner: linux.c7i.12xlarge
       test-matrix: |
         { include: [
           { config: "smoke_xpu", shard: 1, num_shards: 1, runner: "linux.client.xpu" },

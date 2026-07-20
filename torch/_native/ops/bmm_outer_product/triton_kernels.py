@@ -2,18 +2,9 @@ import triton
 import triton.language as tl
 
 import torch
-from torch._native.instrumentation import instrumented_triton_cache
-
-from ...triton import ConstTensorWrapper
 
 
-def _bmm_log_key(a, b, out, B, M, N, *strides, BLOCK_M, BLOCK_N) -> str:
-    # Receives the kernel's launch args; BLOCK_M/BLOCK_N are the constexprs
-    # that (with shapes/dtype) form the Triton compile key.
-    return f"bmm_outer B={B} M={M} N={N} {a.dtype} BLOCK_M={BLOCK_M} BLOCK_N={BLOCK_N}"
-
-
-@instrumented_triton_cache("aten::bmm", key_fn=_bmm_log_key)
+@triton.jit
 def _bmm_outer_product_kernel(
     A_ptr,
     B_ptr,
@@ -82,11 +73,9 @@ def bmm_outer_product(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 
     BLOCK_M, BLOCK_N = _pick_block_sizes(M, N)
 
-    # a and b are read-only inputs; wrap them so a copy-on-write tensor is read
-    # through const_data_ptr() and not materialized. out is written directly.
     _bmm_outer_product_kernel[(B * triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)](
-        ConstTensorWrapper(a),
-        ConstTensorWrapper(b),
+        a,
+        b,
         out,
         B,
         M,

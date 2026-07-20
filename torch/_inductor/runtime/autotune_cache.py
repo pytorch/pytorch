@@ -53,14 +53,13 @@ from ..remote_cache import (
     RemoteCache,
     RemoteCacheJsonSerde,
 )
-from .hints import InductorMeta
 from .triton_compat import Config, HAS_WARP_SPEC
 
 
 log = logging.getLogger(__name__)
 
 
-_InductorMetaTy = InductorMeta
+_InductorMetaTy = dict[str, object]
 
 
 def inductor_meta_from_config() -> _InductorMetaTy:

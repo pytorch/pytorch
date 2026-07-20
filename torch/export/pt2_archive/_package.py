@@ -27,8 +27,8 @@ from torch._export.serde.serialize import (
     SerializedArtifact,
 )
 from torch._inductor.cpp_builder import normalize_path_separator
-from torch._library.opaque_object import is_custom_class_obj
-from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
+from torch._library.opaque_object import is_opaque_value
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.pt2_archive._package_weights import (
@@ -329,7 +329,7 @@ def _package_aoti_files(
 
 
 def _is_fake_tensor(t: torch.Tensor) -> TypeIs[FakeTensor]:
-    return is_fake_tensor(t)
+    return isinstance(t, FakeTensor)
 
 
 def _is_tensor_subclass(t: torch.Tensor) -> bool:
@@ -499,9 +499,7 @@ def _package_constants(
             else:
                 raw_constants[constant_fqn] = (constant, TensorProperties(constant))
 
-        elif isinstance(constant, torch._C.ScriptObject) or is_custom_class_obj(
-            constant
-        ):
+        elif isinstance(constant, torch._C.ScriptObject) or is_opaque_value(constant):
             custom_objects.append((constant_fqn, constant))
 
         else:

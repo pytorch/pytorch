@@ -26,7 +26,7 @@ import sys
 import textwrap
 from collections.abc import Callable, Sequence
 from importlib import import_module
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch.fx as fx
@@ -53,8 +53,6 @@ from torch.hub import tqdm
 from .. import config
 from ..backends.registry import CompilerFn, lookup_backend, register_debug_backend
 from ..debug_utils import clone_inputs_retaining_gradness
-from ..types import CompilerConfigProvider
-from . import ReproOptions
 
 
 log = logging.getLogger(__name__)
@@ -94,9 +92,7 @@ class WrapBackendDebug:
         if hasattr(unconfigured_compiler_fn, "compiler_name"):
             self.__name__ = unconfigured_compiler_fn.compiler_name  # type: ignore[attr-defined]
         if hasattr(unconfigured_compiler_fn, "get_compiler_config"):
-            self.get_compiler_config = cast(
-                CompilerConfigProvider, unconfigured_compiler_fn
-            ).get_compiler_config
+            self.get_compiler_config = unconfigured_compiler_fn.get_compiler_config  # type: ignore[attr-defined]
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[Any], **kwargs: Any
@@ -432,9 +428,7 @@ def backend_fails(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def run_load_args(
-    options: ReproOptions, mod: torch.nn.Module, load_args: Any
-) -> list[Any]:
+def run_load_args(options: Any, mod: torch.nn.Module, load_args: Any) -> list[Any]:
     if not hasattr(load_args, "_version"):
         log.warning(
             "load_args does not have a _version attribute, please file a bug to PyTorch "
@@ -460,7 +454,7 @@ def run_load_args(
     return args
 
 
-def repro_minify(options: ReproOptions, mod: torch.nn.Module, load_args: Any) -> None:
+def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
     # Setup debug minifier compiler
     if not options.accuracy:
         compiler_fn = lookup_backend("dynamo_minifier_backend")
@@ -494,7 +488,7 @@ def repro_minify(options: ReproOptions, mod: torch.nn.Module, load_args: Any) ->
         opt_mod(*args)
 
 
-def repro_run(options: ReproOptions, mod: torch.nn.Module, load_args: Any) -> None:
+def repro_run(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
     opt_mod = torch._dynamo.optimize(options.backend)(mod)
 
     if options.accuracy != "":
@@ -663,7 +657,7 @@ default settings on this script:
     if len(sys.argv) <= 1:
         args = [command, *sys.argv[1:]]
 
-    options = cast(ReproOptions, parser.parse_args(args))
+    options = parser.parse_args(args)
     COMMAND_FNS = {
         "minify": repro_minify,
         "run": repro_run,

@@ -521,14 +521,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     ep.graph_signature, new_graph_signature
                 )
 
-                constants = {
-                    **ep.constants,
-                    **aten_export_artifact.constants,
-                }
-                constants.update(
-                    _materialize_and_lift_constants(
-                        gm, new_graph_signature, new_fake_constant_attrs
-                    )
+                constants = _materialize_and_lift_constants(
+                    gm, new_graph_signature, new_fake_constant_attrs
                 )
 
                 placeholder_naming_pass(
@@ -577,7 +571,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 if name not in unwrapped_params_buffers:
                     new_state_dict.pop(name)
 
-        return gm, new_graph_signature, new_state_dict, constants
+        return gm, new_graph_signature, new_state_dict
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -818,7 +812,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
-    return gm, new_graph_signature, ep.state_dict, ep.constants
+    return gm, new_graph_signature, ep.state_dict
 
 
 def _remove_unnecessary_copy_op_pass(
@@ -1022,7 +1016,6 @@ def _decompose_exported_program(
         gm,
         new_graph_signature,
         state_dict,
-        constants,
     ) = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         cia_to_decomp=cia_to_decomp,
@@ -1061,7 +1054,7 @@ def _decompose_exported_program(
         range_constraints=new_range_constraints,
         module_call_graph=new_module_call_graph,
         example_inputs=ep.example_inputs,
-        constants=constants,
+        constants=ep.constants,
     )
     return exported_program
 

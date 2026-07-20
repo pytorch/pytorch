@@ -183,10 +183,6 @@ specifying the {class}`DeviceMesh` and {class}`Placement` for the {class}`DTenso
 ```
 
 ```{eval-rst}
-.. autofunction:: linspace
-```
-
-```{eval-rst}
 .. autofunction:: logspace
 ```
 

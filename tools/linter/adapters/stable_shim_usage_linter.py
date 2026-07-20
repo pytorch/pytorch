@@ -129,10 +129,8 @@ def write_shim_function_versions(
         )
         f.write("# DO NOT EDIT MANUALLY.\n\n")
 
-        f.writelines(
-            f"{func_name}: TORCH_VERSION_{major}_{minor}_{patch}\n"
-            for func_name, (major, minor, patch) in sorted_functions
-        )
+        for func_name, (major, minor, patch) in sorted_functions:
+            f.write(f"{func_name}: TORCH_VERSION_{major}_{minor}_{patch}\n")
 
 
 def check_file(

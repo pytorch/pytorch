@@ -23,14 +23,6 @@ void initAOTIRunnerBindings(PyObject* module) {
   py::class_<AOTIModelContainerRunnerCpu>(m, "AOTIModelContainerRunnerCpu")
       .def(py::init<const std::string&, int>())
       .def(
-          py::init<
-              const std::string&,
-              size_t,
-              std::unordered_map<std::string, at::Tensor>&>(),
-          py::arg("model_so_path"),
-          py::arg("num_models"),
-          py::arg("constants"))
-      .def(
           "run",
           &AOTIModelContainerRunnerCpu::run,
           py::arg("inputs"),
@@ -61,9 +53,6 @@ void initAOTIRunnerBindings(PyObject* module) {
           "free_inactive_constant_buffer",
           &AOTIModelContainerRunnerCpu::free_inactive_constant_buffer)
       .def(
-          "did_call_load_constants",
-          &AOTIModelContainerRunnerCpu::did_call_load_constants)
-      .def(
           "update_constant_buffer_from_blob",
           &AOTIModelContainerRunnerCpu::update_constant_buffer_from_blob,
           py::arg("weights_path"));
@@ -83,18 +72,6 @@ void initAOTIRunnerBindings(PyObject* module) {
            const std::string&,
            const std::string&,
            const bool>())
-      .def(
-          py::init<
-              const std::string&,
-              size_t,
-              const std::string&,
-              const std::string&,
-              std::unordered_map<std::string, at::Tensor>&>(),
-          py::arg("model_so_path"),
-          py::arg("num_models"),
-          py::arg("device_str"),
-          py::arg("cubin_dir"),
-          py::arg("constants"))
       .def(
           "run",
           &AOTIModelContainerRunnerCuda::run,
@@ -134,9 +111,6 @@ void initAOTIRunnerBindings(PyObject* module) {
           "free_inactive_constant_buffer",
           &AOTIModelContainerRunnerCuda::free_inactive_constant_buffer)
       .def(
-          "did_call_load_constants",
-          &AOTIModelContainerRunnerCuda::did_call_load_constants)
-      .def(
           "update_constant_buffer_from_blob",
           &AOTIModelContainerRunnerCuda::update_constant_buffer_from_blob,
           py::arg("weights_path"));
@@ -150,18 +124,6 @@ void initAOTIRunnerBindings(PyObject* module) {
            int,
            const std::string&,
            const std::string&>())
-      .def(
-          py::init<
-              const std::string&,
-              size_t,
-              const std::string&,
-              const std::string&,
-              std::unordered_map<std::string, at::Tensor>&>(),
-          py::arg("model_so_path"),
-          py::arg("num_models"),
-          py::arg("device_str"),
-          py::arg("cubin_dir"),
-          py::arg("constants"))
       .def(
           "run",
           &AOTIModelContainerRunnerXpu::run,
@@ -200,9 +162,6 @@ void initAOTIRunnerBindings(PyObject* module) {
       .def(
           "free_inactive_constant_buffer",
           &AOTIModelContainerRunnerXpu::free_inactive_constant_buffer)
-      .def(
-          "did_call_load_constants",
-          &AOTIModelContainerRunnerXpu::did_call_load_constants)
       .def(
           "update_constant_buffer_from_blob",
           &AOTIModelContainerRunnerXpu::update_constant_buffer_from_blob,
@@ -250,9 +209,6 @@ void initAOTIRunnerBindings(PyObject* module) {
       .def(
           "free_inactive_constant_buffer",
           &AOTIModelContainerRunnerMps::free_inactive_constant_buffer)
-      .def(
-          "did_call_load_constants",
-          &AOTIModelContainerRunnerMps::did_call_load_constants)
       .def(
           "update_constant_buffer_from_blob",
           &AOTIModelContainerRunnerMps::update_constant_buffer_from_blob,

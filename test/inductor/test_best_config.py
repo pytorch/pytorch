@@ -69,7 +69,7 @@ class TestKernelBestConfig(TestCase):
             self.assertGreater(
                 len(best_config_files),
                 0,
-                lambda msg: f"{msg}\nNo best_config files found in {tmpdir}. Directory contents: {os.listdir(tmpdir)}",
+                f"No best_config files found in {tmpdir}. Directory contents: {os.listdir(tmpdir)}",
             )
 
             # Validate that each best_config file contains a real triton_cache_hash,
@@ -80,13 +80,13 @@ class TestKernelBestConfig(TestCase):
                 self.assertIn(
                     "triton_cache_hash",
                     data,
-                    lambda msg: f"{msg}\nMissing triton_cache_hash in {os.path.basename(file_path)}",
+                    f"Missing triton_cache_hash in {os.path.basename(file_path)}",
                 )
                 cache_hash = data["triton_cache_hash"]
                 expected_path = os.path.join(triton_cache_dir, cache_hash)
                 self.assertTrue(
                     os.path.exists(expected_path),
-                    lambda msg: f"{msg}\nTriton cache directory missing: {expected_path}",
+                    f"Triton cache directory missing: {expected_path}",
                 )
 
 
