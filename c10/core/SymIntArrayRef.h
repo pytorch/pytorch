@@ -7,39 +7,12 @@
 #include <c10/util/irange.h>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <optional>
 
 namespace c10 {
 using SymIntArrayRef = ArrayRef<SymInt>;
 
-inline bool symIntArrayRefElementIsHeapAllocated(
-    c10::SymIntArrayRef ar,
-    size_t index) {
-#ifdef C10_MOBILE
-  return false;
-#else
-  // SymIntArrayRef can be a view over IntArrayRef storage through
-  // fromIntArrayRefSlow. In that case the bytes use SymInt's inline
-  // representation, but no SymInt objects are alive, so validation must inspect
-  // the shared one-word representation instead of calling SymInt methods.
-  static_assert(sizeof(SymInt) == sizeof(int64_t));
-  int64_t raw_data = 0;
-  std::memcpy(
-      &raw_data,
-      reinterpret_cast<const char*>(ar.data()) + index * sizeof(raw_data),
-      sizeof(raw_data));
-  // This is equivalent to !SymInt::check_range(raw_data), but only the
-  // representation bits participate in the branch.  A signed range comparison
-  // can make Valgrind treat unrelated payload bits as control-flow inputs.
-  const auto raw_bits = static_cast<uint64_t>(raw_data);
-  constexpr uint64_t sign_bit = uint64_t{1} << 63;
-  constexpr uint64_t small_negative_bit = uint64_t{1} << 62;
-  return (raw_bits & sign_bit) != 0 && (raw_bits & small_negative_bit) == 0;
-#endif
-}
-
-[[noreturn]] inline void reportSymIntArrayRefToIntArrayRefError(
+[[noreturn]] C10_NOINLINE inline void reportSymIntArrayRefToIntArrayRefError(
     c10::SymIntArrayRef ar,
     size_t problem_index,
     const char* file,
@@ -87,8 +60,8 @@ inline at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
 
 inline std::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
     c10::SymIntArrayRef ar) {
-  for (const auto i : c10::irange(ar.size())) {
-    if (symIntArrayRefElementIsHeapAllocated(ar, i)) {
+  for (const c10::SymInt& sci : ar) {
+    if (sci.is_heap_allocated()) {
       return std::nullopt;
     }
   }
@@ -101,7 +74,7 @@ inline at::IntArrayRef asIntArrayRefSlow(
     const char* file,
     int64_t line) {
   for (const auto i : c10::irange(ar.size())) {
-    if (C10_UNLIKELY(symIntArrayRefElementIsHeapAllocated(ar, i))) {
+    if (C10_UNLIKELY(ar[i].is_heap_allocated())) {
       reportSymIntArrayRefToIntArrayRefError(ar, i, file, line);
     }
   }

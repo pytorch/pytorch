@@ -1307,6 +1307,180 @@ class TestMPS(TestCaseMPS):
         result_cpu = torch.addmm(bias.cpu().conj(), a.cpu(), b.cpu())
         self.assertEqual(result_cpu, result_mps)
 
+    @staticmethod
+    def _gemv_tol(dtype, inner_dim):
+        scale = math.sqrt(inner_dim / 4096)
+        if dtype == torch.float16:
+            atol = rtol = 1e-2 * scale
+        elif dtype == torch.bfloat16:
+            atol = rtol = 2e-2 * scale
+        else:
+            atol, rtol = 1e-3 * scale, 1e-4 * scale
+        return dict(atol=atol, rtol=max(rtol, torch.finfo(dtype).eps))
+
+    def _gemv_mat(self, rows, cols, dtype, transpose):
+        if transpose:
+            return torch.randn(cols, rows, device="mps", dtype=dtype).t()
+        return torch.randn(rows, cols, device="mps", dtype=dtype)
+
+    def _gemv_check(self, a, b, **tol):
+        out_mps = a @ b
+        out_cpu = a.cpu() @ b.cpu()
+        self.assertEqual(out_cpu, out_mps.cpu(), **tol)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("transpose", [False, True])
+    def test_gemv_mm(self, dtype, transpose):
+        # M==1: (1,K) @ (K,N), matrix operand is B. Ragged shapes exercise the
+        # kernels' K-loop tails and row/column bounds guards.
+        for K, N in [(1, 1), (7, 16), (64, 17), (512, 1000), (2048, 4096), (8192, 256)]:
+            a = torch.randn(1, K, device="mps", dtype=dtype)
+            b = self._gemv_mat(K, N, dtype, transpose)
+            self._gemv_check(a, b, **self._gemv_tol(dtype, K))
+        # N==1: (M,K) @ (K,1), matrix operand is A. Regression guard: a prior bug
+        # passed outlen=N=1 here and computed only the first output row.
+        for M, K in [(1, 1), (16, 7), (17, 64), (1000, 512), (4096, 2048), (256, 8192)]:
+            a = self._gemv_mat(M, K, dtype, transpose)
+            b = torch.randn(K, 1, device="mps", dtype=dtype)
+            self._gemv_check(a, b, **self._gemv_tol(dtype, K))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("case", ["t2d", "t2d_misaligned", "deep_split", "kcap_16", "kcap_8", "kcap_4", "scalar_cols", "vec_clamp"])
+    def test_gemv_t_policy(self, dtype, case):
+        # Pins every gemv_t GemvPolicy branch with shapes whose pick is the
+        # same for any GPU core count: t2d = small-outlen 16-byte-load kernel;
+        # t2d_misaligned = its {16, 1} scalar fallback; deep_split = narrow-tier
+        # {32, 2}; kcap_N = K/min_k_per_simd caps nsimd at N (fp32; lp floors
+        # at 16); scalar_cols = fp32 long-K {32, 1}; vec_clamp = odd leading
+        # dim halves vec to 1.
+        K, N, sliced = {
+            "t2d": (1024, 512, False),
+            "t2d_misaligned": (1024, 512, True),
+            "deep_split": (2048, 2048, False),
+            "kcap_16": (512, 2048, False),
+            "kcap_8": (256, 2048, False),
+            "kcap_4": (128, 2048, False),
+            "scalar_cols": (16384, 2048, False),
+            "vec_clamp": (2048, 2048, True),
+        }[case]
+        a = torch.randn(1, K, device="mps", dtype=dtype)
+        b = torch.randn(K, N + sliced, device="mps", dtype=dtype)
+        if sliced:
+            # Slicing off column 0 leaves an odd leading dim and storage offset.
+            b = b[:, 1:]
+        self._gemv_check(a, b, **self._gemv_tol(dtype, K))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("case", ["narrow", "mid", "wide", "vec_clamp", "strided_x"])
+    def test_gemv_nt_policy(self, dtype, case):
+        # Pins every gemv_nt GemvPolicy branch: narrow/mid/wide straddle both
+        # wide_outlen knees (fp32 {16,4}->{4,4} at 2048, lp {4,8}->{8,8} at
+        # 8192); vec_clamp = odd leading dim halves vec to 1 (plus a K tail);
+        # strided_x = the non-unit-stride x kernel.
+        M, K = {"narrow": (1024, 2048), "mid": (4096, 2048), "wide": (8192, 2048),
+                "vec_clamp": (4096, 1001), "strided_x": (4096, 2048)}[case]
+        a = torch.randn(M, K, device="mps", dtype=dtype)
+        b = torch.randn(K, 2 if case == "strided_x" else 1, device="mps", dtype=dtype)[:, :1]
+        self._gemv_check(a, b, **self._gemv_tol(dtype, K))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("transpose", [False, True])
+    @parametrize("beta", [0.0, 0.5, 1.0])
+    def test_gemv_addmm(self, dtype, transpose, beta):
+        # transpose flips the matrix operand's layout, so both directions hit
+        # both the gemv_t and gemv_nt alpha/beta epilogues; outlen 1000 lands
+        # on the t2d kernel and 2048 on the standard split-K one.
+        alpha = 0.75
+        for M, K, N in [(1, 512, 1000), (1, 512, 2048), (1000, 512, 1), (2048, 512, 1)]:
+            a = torch.randn(1, K, device="mps", dtype=dtype) if M == 1 else self._gemv_mat(M, K, dtype, transpose)
+            b = self._gemv_mat(K, N, dtype, transpose) if N > 1 else torch.randn(K, 1, device="mps", dtype=dtype)
+            bias = torch.randn(M, N, device="mps", dtype=dtype)
+            out_mps = torch.addmm(bias, a, b, alpha=alpha, beta=beta)
+            out_cpu = torch.addmm(bias.cpu(), a.cpu(), b.cpu(), alpha=alpha, beta=beta)
+            self.assertEqual(out_cpu, out_mps.cpu(), **self._gemv_tol(dtype, K))
+
+    def test_gemv_addmm_beta_zero_ignores_bias(self):
+        # beta==0 must not read the bias (may hold NaN), matching addmm semantics.
+        for dtype in (torch.float32, torch.bfloat16):
+            a = torch.randn(1, 512, device="mps", dtype=dtype)
+            b = torch.randn(512, 1000, device="mps", dtype=dtype)
+            bias = torch.full((1, 1000), float("nan"), device="mps", dtype=dtype)
+            out = torch.addmm(bias, a, b, beta=0)
+            self.assertFalse(out.isnan().any().item())
+
+    def test_gemv_addmm_broadcast_bias(self):
+        # Bias broadcasts over the output (scalar / vector) for both directions.
+        for dtype in (torch.float32, torch.bfloat16):
+            a = torch.randn(1, 512, device="mps", dtype=dtype)
+            b = torch.randn(512, 1000, device="mps", dtype=dtype)
+            for bias_shape in [(), (1000,), (1, 1000)]:
+                bias = torch.randn(bias_shape, device="mps", dtype=dtype)
+                out = torch.addmm(bias, a, b)
+                out_cpu = torch.addmm(bias.cpu(), a.cpu(), b.cpu())
+                self.assertEqual(out_cpu, out.cpu(), **self._gemv_tol(dtype, 512))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_gemv_noncontiguous_matrix(self, dtype):
+        # A matrix that is neither row- nor column-major is read with its strides.
+        b = torch.randn(512, 2 * 1000, device="mps", dtype=dtype)[:, ::2]
+        a = torch.randn(1, 512, device="mps", dtype=dtype)
+        self._gemv_check(a, b, **self._gemv_tol(dtype, 512))
+        a2 = torch.randn(1000, 2 * 512, device="mps", dtype=dtype)[:, ::2]
+        b2 = torch.randn(512, 1, device="mps", dtype=dtype)
+        self._gemv_check(a2, b2, **self._gemv_tol(dtype, 512))
+
+    def test_gemv_strided_output_falls_back(self):
+        # Non-unit-stride output is rejected by the gemv gate; the fallback path
+        # must still be correct.
+        a = torch.randn(1, 512, device="mps")
+        b = torch.randn(512, 64, device="mps")
+        out = torch.empty(64, 2, device="mps")[:, 0].unsqueeze(0)  # (1,64), stride(1)=2
+        torch.mm(a, b, out=out)
+        self.assertEqual(a.cpu() @ b.cpu(), out.cpu(), atol=1e-3, rtol=1e-4)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_gemv_mv_addmv(self, dtype):
+        A = torch.randn(1000, 512, device="mps", dtype=dtype)
+        x = torch.randn(512, device="mps", dtype=dtype)
+        tol = self._gemv_tol(dtype, 512)
+        self.assertEqual(A.cpu() @ x.cpu(), torch.mv(A, x).cpu(), **tol)
+        bias = torch.randn(1000, device="mps", dtype=dtype)
+        out = torch.addmv(bias, A, x, alpha=0.5, beta=0.7)
+        out_cpu = torch.addmv(bias.cpu(), A.cpu(), x.cpu(), alpha=0.5, beta=0.7)
+        self.assertEqual(out_cpu, out.cpu(), **tol)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_gemv_linear(self, dtype):
+        # Batch-1 nn.Linear lowers to addmm GEMV with a transposed weight.
+        tol = self._gemv_tol(dtype, 512)
+        x = torch.randn(1, 512, device="mps", dtype=dtype)
+        w = torch.randn(1000, 512, device="mps", dtype=dtype)
+        bias = torch.randn(1000, device="mps", dtype=dtype)
+        out = torch.nn.functional.linear(x, w, bias)
+        out_cpu = torch.nn.functional.linear(x.cpu(), w.cpu(), bias.cpu())
+        self.assertEqual(out_cpu, out.cpu(), **tol)
+
+    @serialTest()
+    @largeTensorTest("5GB", device="mps")
+    @parametrize("layout", ["nn", "tn"])
+    @parametrize("check", ["head", "tail"])
+    def test_gemv_int64_indexing(self, layout, check):
+        # Matrices with > 2**31 elements overflow the kernels' int32 indexing
+        # and must dispatch the _i64 variants; odd N also hits the i64 vec
+        # clamp. tn is the lm_head decode layout (x @ W.t()) + bias epilogue.
+        K, N = 65536, 32769  # max offset 65535*32769 + 32768 > INT32_MAX
+        a = torch.randn(1, K, device="mps", dtype=torch.bfloat16)
+        b = self._gemv_mat(K, N, torch.bfloat16, transpose=layout == "tn")  # 4.3 GB
+        bias = torch.randn(1, N, device="mps", dtype=torch.bfloat16) if layout == "tn" else None
+        got = a @ b if bias is None else torch.addmm(bias, a, b)
+        self.assertFalse(got.isnan().any().item())
+        # CPU reference over a column slice to stay within RAM.
+        sl = slice(0, 2048) if check == "head" else slice(-2048, None)
+        ref = a.float().cpu() @ b[:, sl].float().cpu()
+        if bias is not None:
+            ref += bias[:, sl].float().cpu()
+        self.assertEqual(got[:, sl].float().cpu(), ref, atol=2e-1, rtol=5e-2)
+
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("case", [
         ((1, 64, 12), "inner"),
@@ -7680,6 +7854,41 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(input_cast_cpu, input.to(dtype=dst_dtype))
         helper(torch.half, torch.float)
         helper(torch.float, torch.half)
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/189563
+    @parametrize("src_dtype,dst_dtype", [
+        (torch.float, torch.half),
+        (torch.float, torch.int),
+        (torch.half, torch.float),
+    ])
+    @parametrize("src_offset", [0, 1])
+    def test_cast_mps_to_cpu_preserves_source(self, src_dtype, dst_dtype, src_offset):
+        input_cpu = torch.arange(9, dtype=src_dtype)
+        input_mps = input_cpu.to("mps")
+        source = input_mps[src_offset:]
+
+        # Offset the destination by a 4-byte-aligned, non-page-aligned amount so the
+        # cast writes into the CPU buffer at a nonzero offset.
+        dst_offset = 2 if dst_dtype in (torch.half, torch.bfloat16) else 1
+        output_storage = torch.empty(source.numel() + dst_offset, dtype=dst_dtype)
+        output = output_storage[dst_offset:]
+        self.assertEqual(output.data_ptr() % 4, 0)
+        self.assertNotEqual(output.data_ptr() % os.sysconf("SC_PAGE_SIZE"), 0)
+        output.copy_(source)
+
+        self.assertEqual(output, input_cpu[src_offset:].to(dst_dtype))
+        self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
+
+    def test_cast_mps_to_cpu_preserves_transposed_layout(self):
+        input_cpu = torch.arange(12, dtype=torch.float).reshape(3, 4).t()
+        input_mps = input_cpu.to("mps")
+
+        output_storage = torch.empty(input_cpu.numel() + 2, dtype=torch.half)
+        output = output_storage[2:].as_strided(input_cpu.size(), input_cpu.stride())
+        output.copy_(input_mps)
+
+        self.assertEqual(output, input_cpu.to(torch.half))
+        self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
 
     def test_cast_mps_to_mps(self):
         def helper(src_dtype, dst_dtype):
@@ -16069,6 +16278,14 @@ class TestComplex(TestCase):
                     self.assertEqual(src_mps.cpu(), expected)
                 with self.subTest(src=src_label, dst=dst_label, op="copy_"):
                     self.assertEqual(dst_mps.cpu(), dst_cpu)
+                # A dtype-converting D2H copy must honor the neg bit and leave the
+                # source untouched (regression for
+                # https://github.com/pytorch/pytorch/issues/189563).
+                dst_half = dst_xform(torch.empty(4, 4, dtype=torch.half))
+                dst_half.copy_(src_mps)
+                with self.subTest(src=src_label, dst=dst_label, op="copy_cast"):
+                    self.assertEqual(dst_half, expected.to(torch.half))
+                    self.assertEqual(v.cpu(), v_cpu)
 
     def test_tensor_scalar_binops(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/119088

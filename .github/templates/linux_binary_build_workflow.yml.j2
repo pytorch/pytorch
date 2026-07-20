@@ -48,26 +48,24 @@ name: !{{ build_environment }}
     with GHA's native `container:` directive. They share the same reusable
     workflows but pass `use_container_directive: false` so the build/test
     container is launched via `docker run` from a step instead. -#}
+{%- set release_runner_if = "(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))" %}
 {%- if "aarch64" in build_environment %}
-  {%- set build_runs_on = "linux.arm64.r7g.12xlarge.memory" %}
-  {%- set test_runs_on  = "linux.arm64.2xlarge" %}
+  {%- set build_runs_on = "${{ " ~ release_runner_if ~ " && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}" %}
   {%- set alpine_image  = "arm64v8/alpine" %}
   {%- set timeout_minutes = 420 %}
-  {%- set runner_prefix = "" %}
+  {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
   {%- set use_container_directive = true %}
 {%- elif "s390x" in build_environment %}
   {%- set build_runs_on = "linux.s390x" %}
-  {%- set test_runs_on  = "linux.s390x" %}
   {%- set alpine_image  = "docker.io/s390x/alpine" %}
   {%- set timeout_minutes = 420 %}
   {%- set runner_prefix = "" %}
   {%- set use_container_directive = false %}
 {%- else %}
-  {%- set build_runs_on = "linux.12xlarge.memory.ephemeral" %}
-  {%- set test_runs_on  = "" %}{# CPU/CUDA test runners are picked per-matrix entry below #}
+  {%- set build_runs_on = "${{ " ~ release_runner_if ~ " && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}" %}
   {%- set alpine_image  = "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine" %}
   {%- set timeout_minutes = common.timeout_minutes %}
-  {%- set runner_prefix = "" %}
+  {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
   {%- set use_container_directive = true %}
 {%- endif %}
 
@@ -129,7 +127,18 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      check_experiments: lf
 {%- if pin_docker_image %}
+
   # Computes the manylinux builder image tag suffix at runtime. On release
   # candidate tag pushes (v1.2.3-rc4) it resolves to "-<.ci/docker tree hash>",
   # pinning the build/test/upload jobs to the reproducible image published by
@@ -193,9 +202,7 @@ jobs:
   !{{ job_name }}:
     name: !{{ job_name }}
     if: !{{ owner_if }}
-{%- if pin_docker_image %}
-    needs: get-docker-tag
-{%- endif %}
+    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}]
     runs-on: "!{{ runner_prefix }}!{{ build_runs_on }}"
     timeout-minutes: !{{ timeout_minutes }}
     container:
@@ -257,9 +264,7 @@ jobs:
     name: ${{ matrix.build_name }}-build
     if: !{{ owner_if }}
     uses: ./.github/workflows/_binary-build-linux.yml
-{%- if pin_docker_image %}
-    needs: get-docker-tag
-{%- endif %}
+    needs: {% if pin_docker_image %}[get-label-type, get-docker-tag]{% else %}get-label-type{% endif %}
     strategy:
       fail-fast: false
       matrix:
@@ -313,7 +318,7 @@ jobs:
   manywheel-test:
     name: ${{ matrix.build_name }}-test
     if: !{{ owner_if }}
-    needs: [{%- if pin_docker_image %}get-docker-tag, {% endif %}{%- if matrix_standard_configs %}manywheel-build, {% endif %}{%- for n in unified_job_names %}!{{ n }}{%- if not loop.last %}, {% endif %}{%- endfor %}]
+    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}{%- if matrix_standard_configs %}, manywheel-build{%- endif %}{%- for n in unified_job_names %}, !{{ n }}{%- endfor %}]
     uses: ./.github/workflows/_binary-test-linux.yml
     strategy:
       fail-fast: false
@@ -321,13 +326,13 @@ jobs:
         include:
         {%- for config in test_standard_configs %}
           {%- if "aarch64" in build_environment %}
-          {%- set _runs_on = "linux.arm64.2xlarge" %}
+          {%- set _runs_on = "l-arm64g3-16-62" %}
           {%- elif "s390x" in build_environment %}
           {%- set _runs_on = "linux.s390x" %}
           {%- elif config['gpu_arch_type'] == "cuda" %}
-          {%- set _runs_on = "linux.g4dn.4xlarge.nvidia.gpu" %}
+          {%- set _runs_on = "l-x86iavx512-29-115-t4" %}
           {%- else %}
-          {%- set _runs_on = "linux.4xlarge" %}
+          {%- set _runs_on = "l-x86iavx512-16-128" %}
           {%- endif %}
           - desired_python: "!{{ config['python_version'] }}"
             desired_cuda: "!{{ config['desired_cuda'] }}"
@@ -362,7 +367,7 @@ jobs:
   manywheel-test-rocm:
     name: ${{ matrix.build_name }}-test
     if: !{{ owner_if }}
-    needs: [{%- if pin_docker_image %}get-docker-tag, {% endif %}manywheel-build]
+    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}, manywheel-build]
     uses: ./.github/workflows/_binary-test-rocm-linux.yml
     strategy:
       fail-fast: false
@@ -394,7 +399,7 @@ jobs:
   manywheel-test-xpu:
     name: ${{ matrix.build_name }}-test
     if: !{{ owner_if }}
-    needs: [{%- if pin_docker_image %}get-docker-tag, {% endif %}manywheel-build]
+    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}, manywheel-build]
     uses: ./.github/workflows/_binary-test-xpu-linux.yml
     strategy:
       fail-fast: false
@@ -465,7 +470,9 @@ jobs:
     name: ${{ matrix.build_name }}-extract
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: [manywheel-build]
-    runs-on: "linux.4xlarge"
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: python:3.11
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -484,6 +491,8 @@ jobs:
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
       LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
     steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -498,10 +507,10 @@ jobs:
       - name: Extract libtorch from wheel
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          mkdir -p "${RUNNER_TEMP}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
+            --output-dir "${RUNNER_TEMP}/libtorch_output" \
             --platform linux \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT"
