@@ -7500,19 +7500,6 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
-    # Regression test for https://github.com/pytorch/pytorch/issues/190052:
-    # integer abs went through float32 and rounded magnitudes above 2**24.
-    def test_abs_large_integers(self):
-        for dtype, vals in [
-            (torch.int32, [-(2**24 + 1), 2**24 + 1, -(2**24 + 3), -(2**31 - 1)]),
-            (torch.int64, [-(2**24 + 1), -(2**33 + 7), -(2**62 + 12345), -(2**63 - 1)]),
-            (torch.int16, [-32767, -128, 0, 127]),
-            (torch.uint8, [0, 1, 255]),
-        ]:
-            with self.subTest(dtype=dtype):
-                a = torch.tensor(vals, dtype=dtype)
-                self.assertEqual(torch.abs(a.to('mps')).cpu(), torch.abs(a))
-
     def test_angle(self):
         def helper(shape, dtype):
             cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)

@@ -1875,9 +1875,14 @@ class TestPrecompile(TestCase):
         # them to ONE symbol, so they are equal by construction AND a runtime size mismatch
         # is LOUDLY rejected. (b) Two INDEPENDENTLY marked dims (no shared shape_id)
         # combined elementwise bake a SILENT equal-size assumption: unlike eager, a runtime
-        # mismatch is NOT loudly rejected (there is no deferred assert) -- the artifact runs
-        # and returns the FIRST input's shape. This documents the "give equal-must-be-equal
-        # dims a shared shape_id" limitation rather than asserting silent-wrong is correct.
+        # mismatch is NOT loudly rejected -- NOT because the constraint is unrecoverable, but
+        # because precompile does not harvest it: the capture ShapeEnv DOES record the
+        # equality as a deferred runtime assert (Eq(u0, u1)), yet only the decorator's
+        # min/max feed USER_INPUT_BOUNDS, so the driver never enforces the relational assert.
+        # The artifact runs and returns the FIRST input's shape. This documents the "give
+        # equal-must-be-equal dims a shared shape_id" limitation (and would flip to a loud
+        # failure if that harvesting gap is later closed) rather than asserting silent-wrong
+        # is correct.
         m = torch.nn.Linear(4, 4).eval()
         # (a) shared shape_id -> equality enforced.
         xs = torch.randn(8, 4)
