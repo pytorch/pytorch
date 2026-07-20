@@ -147,7 +147,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
         !is_macos_at_least(MacOSVersion::MACOS_27_0);
     const bool add_bias_after = is_bias_defined && decompose_bias;
     const Tensor kernel_bias = add_bias_after ? Tensor() : bias;
-    if (needs_nd_workaround(input) && (!kernel_bias.defined() || kernel_bias.dim() <= 1)) {
+    if (input.dim() > 2 && (!kernel_bias.defined() || kernel_bias.dim() <= 1)) {
       auto input2d = input.flatten(0, -2);
       auto output2d = output.flatten(0, -2);
       _mps_linear_nograph(input2d, weight, kernel_bias, output2d);
