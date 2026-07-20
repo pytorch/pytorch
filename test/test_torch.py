@@ -1062,8 +1062,8 @@ class TestTorchDeviceType(TestCase):
             small2 = torch.randn(*dims_small2, device=device).float()
             small2_expanded = small2.expand(*dims_full)
 
-        if small.is_cuda and fn in ['map', 'map2']:
-            # map and map2 are not implemented on CUDA tensors
+        if small.device.type != 'cpu' and fn in ['map', 'map2']:
+            # map and map2 are only implemented on CPU tensors
             return
 
         if hasattr(large_expanded, fn):
