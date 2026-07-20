@@ -459,6 +459,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cudaErrorInvalidResourceHandle", "hipErrorInvalidResourceHandle"),
     ("CUDA_ERROR_NOT_READY", "hipErrorNotReady"),
     ("cudaErrorNotReady", "hipErrorNotReady"),
+    ("CUDA_ERROR_STREAM_CAPTURE_INVALIDATED", "hipErrorStreamCaptureInvalidated"),
+    ("cudaErrorStreamCaptureInvalidated", "hipErrorStreamCaptureInvalidated"),
     ("CUDA_ERROR_ILLEGAL_ADDRESS", "hipErrorIllegalAddress"),
     ("cudaErrorIllegalAddress", "hipErrorIllegalAddress"),
     ("CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES", "hipErrorLaunchOutOfResources"),

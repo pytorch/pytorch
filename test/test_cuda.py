@@ -2953,6 +2953,79 @@ torch.cuda.synchronize()
             after, baseline, "Leaked CUDA/RNG allocations after failed capture test"
         )
 
+    @skipIfRocmVersionLessThan((7, 14))
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "memory_snapshot does not track cudaMallocAsync"
+    )
+    def test_graph_failed_capture_releases_pool(self):
+        """A capture that fails partway must not leak its private pool.
+
+        reset() used to release the pool's use_count reference only after a
+        *successful* capture, so an exception during capture left the pool
+        permanently retained and its segments reserved until process exit,
+        poisoning later tests' memory accounting (gh-188439).
+        """
+        if TEST_WITH_ROCM and self.expandable_segments:
+            self.skipTest(
+                "ROCm expandable segments has known issue with graph capture recovery - #179911"
+            )
+        # Reap earlier tests' garbage first: a cycle-trapped CUDAGraph whose
+        # destructor fired mid-capture below would invalidate our captures,
+        # and freeing already-released pools now keeps cudaFree out of the
+        # capture windows.
+        gc.collect()
+        torch.cuda.empty_cache()
+        baseline_pools = {s["segment_pool_id"] for s in torch.cuda.memory_snapshot()}
+
+        # Case 1: exception in the capture body. torch.cuda.graph.__exit__
+        # still calls capture_end(), which re-raises after cudaStreamEndCapture
+        # reports the invalidated capture.
+        g1 = torch.cuda.CUDAGraph()
+        with self.assertRaises(RuntimeError):
+            with torch.cuda.graph(g1):
+                x = torch.ones(2**20, device="cuda")
+                x.sum().item()  # synchronization is illegal during capture
+
+        # Case 2: capture abandoned without ever reaching capture_end()
+        # (manual/C++ path); reset() must abort the live capture itself.
+        # The RNG op registers generator capture state that reset() must
+        # also unwind.
+        g2 = torch.cuda.CUDAGraph()
+        with torch.cuda.stream(torch.cuda.Stream()):
+            g2.capture_begin()
+            y = torch.randn(2**20, device="cuda")
+            g2.reset()
+
+        # Case 3: two graphs sharing a pool; the failed capture must drop
+        # only its own reference, leaving the healthy graph replayable.
+        pool = torch.cuda.graph_pool_handle()
+        g_ok = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g_ok, pool=pool):
+            ok_out = torch.ones(64, device="cuda") * 2
+        g_bad = torch.cuda.CUDAGraph()
+        with self.assertRaises(RuntimeError):
+            with torch.cuda.graph(g_bad, pool=pool):
+                z = torch.ones(2**20, device="cuda")
+                z.sum().item()  # synchronization is illegal during capture
+        g_ok.replay()
+        self.assertEqual(ok_out.sum().item(), 128.0)
+
+        del g1, g2, g_ok, g_bad, x, y, z, ok_out
+        gc.collect()
+        torch.cuda.empty_cache()
+        leaked = [
+            s["segment_pool_id"]
+            for s in torch.cuda.memory_snapshot()
+            if s["segment_pool_id"] != (0, 0)
+            and s["segment_pool_id"] not in baseline_pools
+        ]
+        self.assertEqual(leaked, [], "failed captures leaked private-pool segments")
+        # The allocator and the stream must remain usable.
+        torch.randn(8, device="cuda").sum().item()
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
