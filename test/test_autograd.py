@@ -7245,6 +7245,34 @@ Done""",
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
 
+    def test_gradcheck_forward_ad_zero_numel_input(self):
+        # https://github.com/pytorch/pytorch/issues/190436
+        # Emulates device kernels whose jvp for a zero-element input is not
+        # bitwise-exactly zero: fast mode must skip such inputs instead of
+        # comparing against an atol scaled down to zero by sum(u) == 0
+        class NoisyJvpFn(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x.sum() + y.sum()
+
+            @staticmethod
+            def jvp(ctx, x_t, y_t):
+                return x_t.sum() + y_t.sum() + 1e-9
+
+        x = torch.rand(5, 0, dtype=torch.double, requires_grad=True)
+        y = torch.rand(3, dtype=torch.double, requires_grad=True)
+        self.assertTrue(
+            gradcheck(
+                NoisyJvpFn.apply,
+                (x, y),
+                check_forward_ad=True,
+                check_backward_ad=False,
+                check_undefined_grad=False,
+                check_batched_grad=False,
+                fast_mode=True,
+            )
+        )
+
     def test_gradcheck_forward_ad_runs_with_no_requires_grad(self):
         # Currently requires_grad is used as a easy way for gradcheck to know
         # which inputs of the function are meant to be differentiable

@@ -1665,6 +1665,14 @@
       ]
     }
   ],
+  "GB6441": [
+    {
+      "Gb_type": "unsupported torch.cuda.MemPool attribute",
+      "Context": "torch.cuda.MemPool.{name}",
+      "Explanation": "Dynamo only supports reading torch.cuda.MemPool.id.",
+      "Hints": []
+    }
+  ],
   "GB0116": [
     {
       "Gb_type": "Unexpected type in sourceless builder",
@@ -1700,6 +1708,17 @@
       "Explanation": "This abstract method must be implemented",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB1576": [
+    {
+      "Gb_type": "COW tensor check on Python tensor subclass",
+      "Context": "torch._C._is_cow_tensor on Python tensor subclass",
+      "Explanation": "Dynamo cannot safely evaluate COW state for Python tensor subclasses because their storage semantics are controlled by __torch_dispatch__.",
+      "Hints": [
+        "Avoid checking COW state on tensor subclasses inside ",
+        "torch.compile regions."
       ]
     }
   ],
@@ -2078,6 +2097,17 @@
       ]
     }
   ],
+  "GB0998": [
+    {
+      "Gb_type": "source-less COW tensor check",
+      "Context": "torch._C._is_cow_tensor on source-less tensor",
+      "Explanation": "Dynamo cannot safely guard COW state for an intermediate tensor without a source.",
+      "Hints": [
+        "Avoid checking COW state on intermediate tensors inside ",
+        "torch.compile regions."
+      ]
+    }
+  ],
   "GB0143": [
     {
       "Gb_type": "Unsupported conversion for slice assignment",
@@ -2176,6 +2206,17 @@
       "Hints": [
         "Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8587": [
+    {
+      "Gb_type": "COW tensor check after COW-state-changing op",
+      "Context": "torch._C._is_cow_tensor after _lazy_clone",
+      "Explanation": "Dynamo cannot safely fold a COW state check after an op in the current graph may have changed that tensor's COW state.",
+      "Hints": [
+        "Move the COW state check before _lazy_clone or outside ",
+        "the torch.compile region."
       ]
     }
   ],
@@ -4243,6 +4284,22 @@
       ]
     }
   ],
+  "GB2473": [
+    {
+      "Gb_type": "torch.cuda.use_mem_pool graph break",
+      "Context": "str(self)",
+      "Explanation": "Dynamo doesn't support graph breaks inside torch.cuda.use_mem_pool.",
+      "Hints": []
+    }
+  ],
+  "GB4996": [
+    {
+      "Gb_type": "torch.cuda.use_mem_pool with non-constant device",
+      "Context": "device={device}",
+      "Explanation": "Dynamo requires the device argument to torch.cuda.use_mem_pool to be a Python constant.",
+      "Hints": []
+    }
+  ],
   "GB6604": [
     {
       "Gb_type": "Missing CALL_INTRINSIC_2 handler",
@@ -4647,6 +4704,17 @@
       "Explanation": "P2P compilation is disabled.",
       "Hints": [
         "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable."
+      ]
+    }
+  ],
+  "GB5282": [
+    {
+      "Gb_type": "COW tensor check after mutation",
+      "Context": "torch._C._is_cow_tensor after tensor mutation",
+      "Explanation": "Dynamo cannot safely fold a COW state check after the tensor's state may have changed inside the compiled frame.",
+      "Hints": [
+        "Move the COW state check before tensor mutations or ",
+        "outside the torch.compile region."
       ]
     }
   ],
@@ -5289,6 +5357,35 @@
       "Explanation": "Expected at least one branch.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB7020": [
+    {
+      "Gb_type": "COW tensor check during export",
+      "Context": "torch._C._is_cow_tensor during export",
+      "Explanation": "Dynamo cannot safely export COW-state-dependent control flow because COW state is not represented in the exported graph.",
+      "Hints": [
+        "Avoid checking COW state inside torch.export regions."
+      ]
+    }
+  ],
+  "GB7905": [
+    {
+      "Gb_type": "COW tensor check on FakeTensor",
+      "Context": "torch._C._is_cow_tensor on FakeTensor",
+      "Explanation": "Dynamo cannot safely evaluate COW state from a FakeTensor because COW state is not represented in FakeTensor metadata.",
+      "Hints": [
+        "Avoid checking COW state on FakeTensors inside ",
+        "torch.compile regions."
+      ]
+    },
+    {
+      "Gb_type": "COW tensor check on FakeTensor",
+      "Context": "torch._C._is_cow_tensor on FakeTensor",
+      "Explanation": "Dynamo cannot safely evaluate COW state from a FakeTensor because COW state is not represented in FakeTensor metadata.",
+      "Hints": [
+        "Avoid checking COW state inside torch.export regions."
       ]
     }
   ],
@@ -6042,6 +6139,16 @@
       "Explanation": "torch.compile does not support sparse tensor creation functions like {fn_name}. Sparse tensors require specialized handling that is not yet implemented in the compiler.",
       "Hints": [
         "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
+      ]
+    }
+  ],
+  "GB0375": [
+    {
+      "Gb_type": "Attempted to wrap a dual tensor input",
+      "Context": "",
+      "Explanation": "torch.compile does not support input tensors that carry a forward-mode AD tangent; compiled code would silently drop the tangent.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ]

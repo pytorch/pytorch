@@ -458,6 +458,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             raise NotImplementedError(f"{self} has no type") from None
 
     def python_type_name(self) -> str:
+        """
+        Return the type name for the Python type this VariableTracker represents.
+
+        Mirrors CPython's tp_name slot (PyTypeObject.tp_name). In Python 3.10+,
+        type.__name__ matches CPython's tp_name exactly (e.g., "list", "NoneType").
+
+        Note: There are no external callers outside torch._dynamo that rely on this.
+        Internal uses should prefer this over hardcoded type name strings.
+        """
         try:
             return self.python_type().__name__
         except NotImplementedError:
@@ -1052,6 +1061,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             if name == "__rmul__":
                 return slot_wrapper_mul(tx, self, args[0], reverse=True)
             return slot_wrapper_imul(tx, self, args[0])
+        elif name in ("__matmul__", "__rmatmul__", "__imatmul__"):
+            if kwargs or len(args) != 1:
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[f"expected 1 argument, got {len(args)}"],
+                )
+
+            if name == "__matmul__":
+                return self.nb_matrix_multiply_impl(tx, args[0])
+            if name == "__rmatmul__":
+                return self.nb_matrix_multiply_impl(tx, args[0], reverse=True)
+            return self.nb_inplace_matrix_multiply_impl(tx, args[0])
         elif name == "__lshift__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
             #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
@@ -1773,6 +1795,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_multiply slot. Default: graph-breaks."""
         return self._nb_slot_not_implemented("nb_inplace_multiply_impl", other)
+
+    def nb_matrix_multiply_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_matrix_multiply slot. Default: graph-breaks.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rmatmul__`` instead of ``__matmul__``).
+        """
+        return self._nb_slot_not_implemented(
+            "nb_matrix_multiply_impl", other, reverse=reverse
+        )
+
+    def nb_inplace_matrix_multiply_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_matrix_multiply slot. Default: graph-breaks."""
+        return self._nb_slot_not_implemented("nb_inplace_matrix_multiply_impl", other)
 
     def sq_repeat_impl(
         self,
