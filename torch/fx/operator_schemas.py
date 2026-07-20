@@ -119,7 +119,7 @@ def _torchscript_schema_to_signature_impl(
         if name == "from":
             if kind != Parameter.POSITIONAL_OR_KEYWORD:
                 raise AssertionError(f"Expected POSITIONAL_OR_KEYWORD, got {kind}")
-            # ParameterKind type is internal implementation detail to inspec package
+            # ParameterKind type is internal implementation detail to inspect package
             # which makes it hard to do type annotation
             kind = Parameter.POSITIONAL_ONLY  # type: ignore[assignment]
             # This renders all previous arguments to positional only
@@ -248,7 +248,7 @@ def get_signature_for_torch_op(
     if isinstance(op, OpOverload):
         schemas = [op._schema]
     elif isinstance(op, OpOverloadPacket):
-        schemas = [getattr(op, overload)._schema for overload in op.overloads()]
+        schemas = [overload._schema for overload in op.op_overloads()]
     else:
         override = _manual_overrides.get(op)
         if override:

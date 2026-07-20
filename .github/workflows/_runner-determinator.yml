@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: Check whether the workflow owner can use ARC runners
 
 on:
@@ -59,6 +60,9 @@ on:
       use-arc:
         description: Whether to use ARC runners
         value: ${{ jobs.runner-determinator.outputs.use-arc }}
+      amd-do-label-type:
+        description: Runner prefix for the "amd-do" experiment (empty when not enabled)
+        value: ${{ jobs.runner-determinator.outputs.amd-do-label-type }}
       ci-docker-hash:
         description: "Git tree hash of .ci/docker, used as the suffix of CI docker image tags"
         value: ${{ jobs.runner-determinator.outputs.ci-docker-hash }}
@@ -74,6 +78,7 @@ jobs:
       runner-type: ${{ steps.set-runner-info.outputs.runner-type }}
       runner-label: ${{ steps.set-runner-info.outputs.runner-label }}
       use-arc: ${{ steps.set-condition.outputs.use-arc }}
+      amd-do-label-type: ${{ steps.set-condition.outputs.amd-do-label-type }}
       ci-docker-hash: ${{ steps.ci-docker-hash.outputs.ci-docker-hash }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

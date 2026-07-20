@@ -829,7 +829,7 @@ def autograd_would_have_decomposed(
 
     Why do we need to apply these decompositions later?  When inference mode is
     on, the autograd key is bypassed entirely, so a lower level mode cannot rely
-    on the decomposition have been applied.  It's easy to accidentally never apply
+    on the decomposition having been applied.  It's easy to accidentally never apply
     the decomposition, resulting in an operator showing up in a graph that
     is unexpected.
 

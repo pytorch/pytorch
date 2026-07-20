@@ -8,6 +8,7 @@ import functorch
 import torch
 import torch._inductor.config as config
 import torch.autograd
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -391,6 +392,34 @@ class FusionTests(TestCase):
 
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """120""")
+
+    @requires_gpu_and_triton
+    @config.patch({"force_disable_caches": True, "triton.multi_kernel": 0})
+    def test_aot_autograd_cse_preserves_reduction_fusion(self):
+        def fn(x):
+            return x.abs().max(), x.abs().mean(), x.square().mean()
+
+        def count_kernels(requires_grad):
+            torch._dynamo.reset()
+            metrics.reset()
+            x = torch.rand((1024, 32768), device=DEVICE, requires_grad=requires_grad)
+            result = torch.compile(fn, fullgraph=True, dynamic=False)(x)
+            expected = fn(x)
+            self.assertEqual(result, expected)
+            get_interface_for_device(DEVICE).synchronize()
+            forward_kernel_count = metrics.generated_kernel_count
+            if requires_grad:
+                result_sum = result[0] + result[1] + result[2]
+                expected_sum = expected[0] + expected[1] + expected[2]
+                (result_grad,) = torch.autograd.grad(result_sum, (x,))
+                (expected_grad,) = torch.autograd.grad(expected_sum, (x,))
+                self.assertEqual(result_grad, expected_grad)
+            return forward_kernel_count
+
+        inference_kernel_count = count_kernels(requires_grad=False)
+        autograd_kernel_count = count_kernels(requires_grad=True)
+
+        self.assertEqual(autograd_kernel_count, inference_kernel_count)
 
     def test_horizontal_reduction_pointwise2(self):
         def f(a, b):

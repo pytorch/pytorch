@@ -37,6 +37,7 @@ from torch.distributed.pipelining.schedules import (
     F,
     get_schedule_class,
     I,
+    PipelineScheduleMulti,
     PipelineScheduleSingle,
     RECV_B,
     RECV_F,
@@ -45,7 +46,11 @@ from torch.distributed.pipelining.schedules import (
     UNSHARD,
     W,
 )
-from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
+from torch.distributed.pipelining.stage import (
+    _PipelineStageBase,
+    _RecvInfo,
+    PipelineStage,
+)
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
@@ -87,6 +92,57 @@ class MockPipelineStage(_PipelineStageBase):
         pass
 
 
+def _make_adjacency_stage(
+    stage_index, num_stages, group_rank, args_recv_info, act_send_info
+):
+    """Factory for a minimal mock stage used by adjacency-guard tests."""
+
+    class _AdjacencyTestStage(MockPipelineStage):
+        def __init__(self):
+            super().__init__(
+                num_stages=num_stages,
+                group_size=num_stages,
+                group_rank=group_rank,
+            )
+            self.stage_index = stage_index
+            self.device = "cpu"
+
+        def _get_init_p2p_neighbors_ops(self):
+            return []
+
+        def _prepare_forward_infra(self, *args, **kwargs):
+            self.args_recv_info = args_recv_info
+            self.act_send_info = act_send_info
+            return tuple()
+
+        def _prepare_backward_infra(self, *args, **kwargs):
+            return None
+
+        def clear_runtime_states(self):
+            return None
+
+        def get_fwd_recv_ops(self, mb_index):
+            return []
+
+        def get_fwd_send_ops(self, mb_index):
+            return []
+
+        def get_bwd_recv_ops(self, mb_index):
+            return []
+
+        def get_bwd_send_ops(self, mb_index):
+            return []
+
+    return _AdjacencyTestStage()
+
+
+def _run_adjacency_validation(stage, num_stages):
+    """Run one step of PipelineScheduleMulti to trigger adjacency validation."""
+    schedule = PipelineScheduleMulti([stage], n_microbatches=1)
+    schedule.pipeline_order = {i: [None] for i in range(num_stages)}
+    schedule.step()
+
+
 class ScheduleTest(TestCase):
     def test_get_schedule_class(self):
         # List of all expected schedule names
@@ -118,6 +174,34 @@ class ScheduleTest(TestCase):
             # Test that the original name is included in the error message
             with self.assertRaisesRegex(ValueError, f"{name}"):
                 get_schedule_class(name)
+
+    def test_adjacency_guard_rejects_nonadjacent_send(self):
+        # Stage 0 sending to stage 2 (skip connection)
+        stage = _make_adjacency_stage(0, 3, 0, {0: tuple()}, {0: [2]})
+        with self.assertRaisesRegex(RuntimeError, "adjacent-stage communication"):
+            _run_adjacency_validation(stage, 3)
+
+    def test_adjacency_guard_rejects_nonadjacent_recv(self):
+        # Stage 3 receiving from stage 0 (non-adjacent)
+        stage = _make_adjacency_stage(
+            3,
+            4,
+            3,
+            {0: (_RecvInfo("x", source=0, buffer=None, tensor_meta=None),)},
+            {},
+        )
+        with self.assertRaisesRegex(RuntimeError, "adjacent-stage communication"):
+            _run_adjacency_validation(stage, 4)
+
+    def test_adjacency_guard_allows_adjacent_send(self):
+        # Stage 0 -> stage 1 is valid
+        stage = _make_adjacency_stage(0, 3, 0, {0: tuple()}, {0: [1]})
+        _run_adjacency_validation(stage, 3)
+
+    def test_adjacency_guard_allows_empty_recv_middle_stage(self):
+        # Middle stage with no recv is fine (no non-adjacent peers)
+        stage = _make_adjacency_stage(1, 3, 1, {0: tuple()}, {0: [2]})
+        _run_adjacency_validation(stage, 3)
 
     @parametrize(
         "ScheduleClass",
@@ -1679,11 +1763,17 @@ class TestBatchP2P(TestCase):
     """Tests that _batch_p2p dispatches homogeneous ops individually to avoid
     head-of-line blocking, while still batching mixed ops for deadlock avoidance."""
 
-    def _make_p2p_op(self, op, group_peer=0):
+    def _make_p2p_op(self, op, group_peer=0, group=None):
         p = MagicMock()
         p.op = op
         p.tensor = torch.zeros(1)
-        p.group = MagicMock()
+        # Ops in a single _batch_p2p call normally share one group; tests pass an
+        # explicit shared group. _batch_p2p splits a list spanning multiple groups
+        # into one batch per group (per-direction PP comms), covered separately.
+        p.group = group if group is not None else MagicMock()
+        # _batch_p2p groups/orders ops by group_name, so give each group a stable
+        # string name (identity-derived) rather than a MagicMock attribute.
+        p.group.group_name = f"pg_{id(p.group)}"
         p.tag = 0
         p.group_peer = group_peer
         return p
@@ -1695,7 +1785,10 @@ class TestBatchP2P(TestCase):
     @patch("torch.distributed.pipelining.schedules.dist.isend")
     def test_all_isend_dispatched_individually(self, mock_isend, mock_batch):
         mock_isend.return_value = MagicMock()
-        ops = [self._make_p2p_op(mock_isend, group_peer=i) for i in range(3)]
+        group = MagicMock()
+        ops = [
+            self._make_p2p_op(mock_isend, group_peer=i, group=group) for i in range(3)
+        ]
 
         result = _batch_p2p(ops)
 
@@ -1711,7 +1804,10 @@ class TestBatchP2P(TestCase):
     @patch("torch.distributed.pipelining.schedules.dist.irecv")
     def test_all_irecv_dispatched_individually(self, mock_irecv, mock_batch):
         mock_irecv.return_value = MagicMock()
-        ops = [self._make_p2p_op(mock_irecv, group_peer=i) for i in range(3)]
+        group = MagicMock()
+        ops = [
+            self._make_p2p_op(mock_irecv, group_peer=i, group=group) for i in range(3)
+        ]
 
         result = _batch_p2p(ops)
 
@@ -1728,9 +1824,10 @@ class TestBatchP2P(TestCase):
     @patch("torch.distributed.pipelining.schedules.dist.isend")
     def test_mixed_ops_use_batch(self, mock_isend, mock_irecv, mock_batch):
         mock_batch.return_value = [MagicMock(), MagicMock()]
+        group = MagicMock()
         ops = [
-            self._make_p2p_op(mock_isend, group_peer=0),
-            self._make_p2p_op(mock_irecv, group_peer=1),
+            self._make_p2p_op(mock_isend, group_peer=0, group=group),
+            self._make_p2p_op(mock_irecv, group_peer=1, group=group),
         ]
 
         result = _batch_p2p(ops)
@@ -1739,6 +1836,31 @@ class TestBatchP2P(TestCase):
         mock_isend.assert_not_called()
         mock_irecv.assert_not_called()
         self.assertEqual(len(result), 2)
+
+    @patch("torch.distributed.pipelining.schedules.dist.batch_isend_irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.isend")
+    def test_mixed_ops_split_per_group(self, mock_isend, mock_irecv, mock_batch):
+        """A mixed op list spanning multiple groups (per-direction PP comms) is
+        issued as one batch_isend_irecv per group, so each direction runs on its
+        own communicator instead of sharing one FIFO."""
+        mock_batch.side_effect = lambda ops: [MagicMock() for _ in ops]
+        g_fwd, g_bwd = MagicMock(), MagicMock()
+        ops = [
+            self._make_p2p_op(mock_isend, group_peer=1, group=g_fwd),
+            self._make_p2p_op(mock_irecv, group_peer=1, group=g_fwd),
+            self._make_p2p_op(mock_isend, group_peer=2, group=g_bwd),
+            self._make_p2p_op(mock_irecv, group_peer=2, group=g_bwd),
+        ]
+
+        result = _batch_p2p(ops)
+
+        self.assertEqual(mock_batch.call_count, 2)
+        mock_batch.assert_any_call([ops[0], ops[1]])
+        mock_batch.assert_any_call([ops[2], ops[3]])
+        mock_isend.assert_not_called()
+        mock_irecv.assert_not_called()
+        self.assertEqual(len(result), 4)
 
 
 if __name__ == "__main__":

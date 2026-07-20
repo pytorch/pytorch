@@ -36,6 +36,7 @@ from torch.distributed.tensor._redistribute import (
     _FlattenedTransformInfo,
     _gen_transform_infos,
     _optimize_transform_infos,
+    _redistribute_cost_sort_key,
     _TransformInfo,
     disable_redistribute_transform_optimization,
     redistribute_local_tensor,
@@ -43,11 +44,13 @@ from torch.distributed.tensor._redistribute import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _MaskPartial, _StridedShard
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -643,6 +646,40 @@ class RedistributeTest(DTensorContinuousTestBase):
         self.assertEqual(shard_tensor.placements[0].dim, 1)
         reshard_tensor = shard_tensor.redistribute(device_mesh, shard_minus_spec)
         self.assertEqual(reshard_tensor.placements[0].dim, 1)
+
+    def test_shard_to_replicate_local_tensor_contiguous(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/173041.
+        # When the sharded dim is not evenly divisible by world_size the unpad
+        # step in Shard._to_replicate_tensor uses narrow(), which on a non-leading
+        # dim produces a non-contiguous view. The resulting local tensor then
+        # breaks downstream view ops (e.g. inside parallelized nn.Linear).
+        device_mesh = self.build_device_mesh()
+
+        # world_size=4 here, so sizes like 13/14/15/31 are uneven on the sharded dim.
+        test_cases = [
+            # (shape, shard_dim)
+            ((4, 13, 8), 1),
+            ((4, 14, 8), 1),
+            ((4, 15, 8), 1),
+            ((3, 31, 10), 1),  # shape from the original issue repro
+            ((4, 8, 13), 2),
+            ((13, 8), 0),
+            ((8, 13), 1),
+        ]
+
+        for shape, shard_dim in test_cases:
+            full_tensor = torch.randn(shape, device=self.device_type)
+            dt_rep = distribute_tensor(full_tensor, device_mesh, [Replicate()])
+            dt_shard = dt_rep.redistribute(device_mesh, [Shard(shard_dim)])
+            dt_back_rep = dt_shard.redistribute(device_mesh, [Replicate()])
+
+            self.assertTrue(
+                dt_back_rep._local_tensor.is_contiguous(),
+                f"Local tensor should be contiguous after Shard({shard_dim})->Replicate "
+                f"for shape {shape}. Got stride {dt_back_rep._local_tensor.stride()}",
+            )
+            self.assertTrue(dt_back_rep.is_contiguous())
+            self.assertEqual(dt_back_rep.to_local(), full_tensor)
 
     def test_redistribute_uneven_sharding(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
@@ -1375,6 +1412,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             expected_total_combination *= math.factorial(N)
             self.assertEqual(len(all_combinations), expected_total_combination)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/168197")
     def test_ordered_distribute_all_combination(self):
         """Exhaustively test all possible sharding combinations and verify correctness"""
         torch.manual_seed(21)
@@ -1497,6 +1535,19 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
                             f"{tensor_shape=}, {src_order=}, {dst_order=}, {intermediate_order=}",
                         )
 
+    def test_redistribute_cost_sort_key_uses_unbacked_hint(self):
+        shape_env = ShapeEnv()
+        unbacked = shape_env.create_unbacked_symint()
+        shape_env.var_to_hint_override[unbacked.node.expr] = 8
+
+        lower_cost = 1000000.0 * (unbacked / 87.7) + 7.2
+        higher_cost = 1000000.0 * (2 * unbacked / 87.7) + 7.8
+
+        self.assertLess(
+            _redistribute_cost_sort_key(lower_cost),
+            _redistribute_cost_sort_key(higher_cost),
+        )
+
     def test_redistribute_partial_to_different_partial_not_supported(self):
         # Test that redistributing from one Partial type to another raises an error
         device_mesh = self.build_device_mesh()
@@ -1507,7 +1558,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             (Partial("sum"),),
             tensor_meta=TensorMeta(
                 local_tensor.size(),
-                local_tensor.stride,
+                local_tensor.stride(),
                 local_tensor.dtype,
             ),
         )
@@ -1516,7 +1567,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             (Partial("avg"),),
             tensor_meta=TensorMeta(
                 local_tensor.size(),
-                local_tensor.stride,
+                local_tensor.stride(),
                 local_tensor.dtype,
             ),
         )

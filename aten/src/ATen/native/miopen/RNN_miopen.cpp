@@ -627,7 +627,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         output.transpose_(0, 1);
     }
 
-    return std::make_tuple(output, hy, cy, reserve, weight_buf);
+    return std::make_tuple(
+        std::move(output),
+        std::move(hy),
+        std::move(cy),
+        std::move(reserve),
+        std::move(weight_buf));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(

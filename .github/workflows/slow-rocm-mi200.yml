@@ -1,3 +1,4 @@
+# Owner(s): ["module: rocm"]
 # This workflow is dedicated to host slow jobs that are run only periodically because
 # they are too slow to run in every commit.  The list of slow tests can be found in
 # https://github.com/pytorch/test-infra/blob/generated-stats/stats/slow-tests.json
@@ -55,8 +56,8 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2", owners: ["module:rocm"] },
-          { config: "slow", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2", owners: ["module:rocm"] },
+          { config: "slow", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi210.1", owners: ["module:rocm"] },
+          { config: "slow", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi210.1", owners: ["module:rocm"] },
         ]}
     secrets: inherit
 

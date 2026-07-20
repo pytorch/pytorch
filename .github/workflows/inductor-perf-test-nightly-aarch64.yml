@@ -1,3 +1,4 @@
+# Owner(s): ["module: arm"]
 name: inductor-perf-nightly-aarch64
 
 on:
@@ -82,7 +83,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: linux.arm64.${{ needs.get-label-type.outputs.runner-config }}.4xlarge
       build-environment: linux-jammy-aarch64-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc15-inductor-benchmarks
       test-matrix: |
         { include: [
           { config: "inductor_huggingface_perf_cpu_aarch64", shard: 1, num_shards: 9, runner: "${{ needs.get-label-type.outputs.runner-label }}" },

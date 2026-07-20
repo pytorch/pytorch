@@ -45,6 +45,7 @@ else:
     from torch.distributed import config as dist_config
     from torch.distributed.distributed_c10d import (
         _get_default_group,
+        _register_process_group_opaque_type,
         _resolve_process_group,
         get_backend,
         get_process_group_ranks,
@@ -75,7 +76,7 @@ else:
     def _get_pg_from_name(mesh: "DeviceMesh", name: str) -> ProcessGroup:
         """
         This method allows us to torch.compile through DeviceMesh and lift its
-        PGs a inputs to the graph since all PGs will have a source from the
+        PGs as inputs to the graph since all PGs will have a source from the
         DeviceMesh through the `_pg_registry`.
         This will be moved to the DeviceMesh backend object once we separate
         DeviceMesh into the frontend and backend.
@@ -1237,7 +1238,7 @@ else:
             return self._coordinate_on_dim
 
         def _sym_get_coordinate(self, index: int) -> IntLikeType:
-            import torch.distributed.config as config
+            import torch.compiler.config as config
             from torch._guards import detect_fake_mode
 
             if (
@@ -1676,19 +1677,7 @@ def _register_distributed_opaque_types():
 
     from torch._library.opaque_object import MemberType, register_opaque_type
 
-    register_opaque_type(
-        ProcessGroup,
-        typ="reference",
-        members={
-            "size": MemberType.USE_REAL,
-            "rank": MemberType.USE_REAL,
-            "_get_backend_name": MemberType.USE_REAL,
-            "group_name": MemberType.USE_REAL,
-            "group_desc": MemberType.USE_REAL,
-            "__eq__": MemberType.USE_REAL,
-            "__ne__": MemberType.USE_REAL,
-        },
-    )
+    _register_process_group_opaque_type()
 
     register_opaque_type(
         DeviceMesh,

@@ -41,10 +41,8 @@
 #include <ATen/ops/all.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/cat.h>
-#include <ATen/ops/cholesky.h>
 #include <ATen/ops/cholesky_inverse.h>
 #include <ATen/ops/cholesky_inverse_native.h>
-#include <ATen/ops/cholesky_native.h>
 #include <ATen/ops/cholesky_solve.h>
 #include <ATen/ops/cholesky_solve_native.h>
 #include <ATen/ops/clone.h>
@@ -499,7 +497,7 @@ TORCH_META_FUNC(linalg_ldl_factor_ex)
 
   // prefer column major strides
   auto ld_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig=*/true);
-  set_output_strided(0, shape, ld_strides, self.options(), {}); // LD
+  set_output_strided(0, shape, ld_strides, self.options()); // LD
 
   set_output_contiguous(
       1, shape.slice(0, ndim - 1), self.options().dtype(ScalarType::Int)); // pivots
@@ -545,7 +543,7 @@ TORCH_META_FUNC(linalg_ldl_solve)
 
   // prefer column major strides
   auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*f_contig=*/true);
-  set_output_strided(0, B_broadcast_size, result_strides, B.options(), {});
+  set_output_strided(0, B_broadcast_size, result_strides, B.options());
 }
 
 TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
@@ -561,15 +559,15 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
 
     // make column major strides for BLAS
     const auto solution_strides = at::native::batched_matrix_contiguous_strides(self_broadcast_size, /*f-contig=*/true);
-    set_output_raw_strided(0, self_broadcast_size, solution_strides, self.options(), {});
+    set_output_raw_strided(0, self_broadcast_size, solution_strides, self.options());
 
     // make column major strides for BLAS
     auto clone_A_strides = at::native::batched_matrix_contiguous_strides(A_broadcast_size, /*f_contig=*/true);
-    set_output_raw_strided(1, A_broadcast_size, clone_A_strides, A.options(), {});
+    set_output_raw_strided(1, A_broadcast_size, clone_A_strides, A.options());
   } else if (A.layout() == Layout::SparseCsr || A.layout() == Layout::SparseBsr) {
     // no broadcasting for non-strided layout
-    set_output_raw_strided(0, self.sizes(), {}, self.options(), {}); // make row major strides for Sparse BLAS
-    set_output_raw_strided(1, {0}, {}, self.options(), {}); // return 0-sized tensor
+    set_output_raw_strided(0, self.sizes(), {}, self.options()); // make row major strides for Sparse BLAS
+    set_output_raw_strided(1, {0}, {}, self.options()); // return 0-sized tensor
   } else if (A.layout() == Layout::SparseCsc) {
       TORCH_CHECK_VALUE(false, "triangular_solve: unsupported sparse layout.");
   } else {
@@ -605,14 +603,14 @@ TORCH_META_FUNC(_linalg_solve_ex)(const Tensor& A,
   // row major for mps implementation
   auto result_strides = at::native::batched_matrix_contiguous_strides(result_shape, /*f_contig=*/A.device().type() != at::kMPS? left : false);
 
-  set_output_strided(0, result_shape, result_strides, B.options(), {});
+  set_output_strided(0, result_shape, result_strides, B.options());
 
   auto shape = A.sizes();
   auto ndim = shape.size();
 
   // LU, row major for mps
   auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/A.device().type() != at::kMPS? true : false);
-  set_output_strided(1, shape, LU_strides, A.options(), {});
+  set_output_strided(1, shape, LU_strides, A.options());
 
   // pivots
   set_output_contiguous(2, shape.slice(0, ndim - 1), A.options().dtype(kInt));
@@ -628,7 +626,7 @@ TORCH_META_FUNC(linalg_inv_ex)(const Tensor& A, bool check_errors) {
   auto shape = A.sizes();
 
   auto result_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/true);
-  set_output_strided(0, shape, result_strides, A.options(), {});
+  set_output_strided(0, shape, result_strides, A.options());
   set_output_contiguous(
       1, shape.slice(0, shape.size() - 2), A.options().dtype(ScalarType::Int)); // info
 }
@@ -642,16 +640,16 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
 
   // row major for MPS device, otherwise column major strides for BLAS
   auto LU_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/A.device().type() != at::kMPS);
-  set_output_strided(0, sizes, LU_strides, A.options(), {});
+  set_output_strided(0, sizes, LU_strides, A.options());
 
   // Set sizes to the size of pivots
   sizes.pop_back();
   sizes.back() = std::min(m, n);
-  set_output_contiguous(1, sizes, A.options().dtype(kInt), {});
+  set_output_contiguous(1, sizes, A.options().dtype(kInt));
 
   // Set sizes to the size of info
   sizes.pop_back();
-  set_output_contiguous(2, sizes, A.options().dtype(kInt), {});
+  set_output_contiguous(2, sizes, A.options().dtype(kInt));
 }
 
 TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
@@ -684,7 +682,7 @@ TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
   auto B_broadcast_size = std::get<0>(at::native::_linalg_broadcast_batch_dims(B, LU));
   auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*f_contig=*/left);
 
-  set_output_strided(0, B_broadcast_size, result_strides, B.options(), {});
+  set_output_strided(0, B_broadcast_size, result_strides, B.options());
 }
 
 TORCH_META_FUNC(linalg_cholesky_ex)(const Tensor& A,
@@ -698,7 +696,7 @@ TORCH_META_FUNC(linalg_cholesky_ex)(const Tensor& A,
 
   // L
   auto L_strides = at::native::batched_matrix_contiguous_strides(A_shape, /*f-contig*=*/true);
-  set_output_strided(0, A_shape, L_strides, A.options(), {});
+  set_output_strided(0, A_shape, L_strides, A.options());
 
   // info
   set_output_contiguous(1, A_shape.slice(0, ndim - 2), A.options().dtype(ScalarType::Int));
@@ -719,16 +717,16 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
     auto Q_shape = A_shape;
     Q_shape.end()[-1] = reduced_mode ? k : m;
     auto Q_strides = at::native::batched_matrix_contiguous_strides(Q_shape, /*f-contig*=*/true);
-    set_output_strided(0, Q_shape, Q_strides, A.options(), {});
+    set_output_strided(0, Q_shape, Q_strides, A.options());
   } else {
-    set_output_raw_strided(0, {0}, {}, A.options(), {});
+    set_output_raw_strided(0, {0}, {}, A.options());
   }
 
   // For readability
   auto R_shape = std::move(A_shape);
   R_shape.end()[-2] = (reduced_mode || !compute_q) ? k : m;
   auto R_strides = at::native::batched_matrix_contiguous_strides(R_shape, /*f-contig*=*/true);
-  set_output_strided(1, R_shape, R_strides, A.options(), {});
+  set_output_strided(1, R_shape, R_strides, A.options());
 }
 
 
@@ -748,7 +746,7 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
   if (compute_uv) {
     sizes.back() = full_matrices ? m : k;
     auto U_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
-    set_output_strided(0, sizes, U_strides, A.options(), {});
+    set_output_strided(0, sizes, U_strides, A.options());
 
     // Prepare sizes for Vh
     sizes.end()[-2] = full_matrices ? n : k;
@@ -758,16 +756,16 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
     // expect F-contig matrices, but they compute V rather than Vh
     const bool use_cusolver = at::native::svd_uses_cusolver(A);
     auto Vh_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
-    set_output_strided(2, sizes, Vh_strides, A.options(), {});
+    set_output_strided(2, sizes, Vh_strides, A.options());
   } else {
-    set_output_raw_strided(0, {0}, {}, A.options(), {});
-    set_output_raw_strided(2, {0}, {}, A.options(), {});
+    set_output_raw_strided(0, {0}, {}, A.options());
+    set_output_raw_strided(2, {0}, {}, A.options());
   }
 
   // Prepare sizes for S. S is always real, even when A is complex.
   sizes.pop_back();
   sizes.end()[-1] = k;
-  set_output_contiguous(1, sizes, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
+  set_output_contiguous(1, sizes, A.options().dtype(c10::toRealValueType(A.scalar_type())));
 }
 
 TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_data, bool unpack_pivots) {
@@ -783,26 +781,38 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
   const auto n = sizes.cend()[-1];
   const auto k = std::min(m, n);
 
+  if (unpack_pivots) {
+    // pivots is produced by lu_factor and must have shape (*LU.shape[:-2], min(m, n)).
+    // Without this check, a mismatched pivots tensor leads to out-of-bounds reads in
+    // the unpack_pivots kernel.
+    auto expected_pivots_sizes = LU.sizes().vec();
+    expected_pivots_sizes.pop_back();
+    expected_pivots_sizes.back() = k;
+    TORCH_CHECK_VALUE(pivots.sizes() == IntArrayRef(expected_pivots_sizes),
+        "Expected LU_pivots to have shape ", IntArrayRef(expected_pivots_sizes),
+        " but got ", pivots.sizes(), " instead.");
+  }
+
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (unpack_pivots) {
-    set_output_raw_strided(0, sizes, {}, LU.options(), {});
+    set_output_raw_strided(0, sizes, {}, LU.options());
   } else {
-    set_output_raw_strided(0, {0}, {}, LU.options(), {});
+    set_output_raw_strided(0, {0}, {}, LU.options());
   }
 
   if (unpack_data) {
     // L.shape[-2:] == (m, k)
     sizes.end()[-1] = k;
-    set_output_raw_strided(1, sizes, {}, LU.options(), {});
+    set_output_raw_strided(1, sizes, {}, LU.options());
 
     // U.shape[-2:] == (k, n)
     sizes.end()[-2] = k;
     sizes.end()[-1] = n;
-    set_output_raw_strided(2, sizes, {}, LU.options(), {});
+    set_output_raw_strided(2, sizes, {}, LU.options());
   } else {
-    set_output_raw_strided(1, {0}, {}, LU.options(), {});
-    set_output_raw_strided(2, {0}, {}, LU.options(), {});
+    set_output_raw_strided(1, {0}, {}, LU.options());
+    set_output_raw_strided(2, {0}, {}, LU.options());
   }
 }
 
@@ -816,14 +826,14 @@ TORCH_META_FUNC(_linalg_eigh)(const Tensor& A,
   if (compute_v) {
     // eigenvectors
     auto V_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/true);
-    set_output_strided(1, shape, V_strides, A.options(), {});
+    set_output_strided(1, shape, V_strides, A.options());
   } else {
-    set_output_raw_strided(1, {0}, {}, A.options(), {});
+    set_output_raw_strided(1, {0}, {}, A.options());
   }
 
   // eigenvalues
   shape.pop_back();
-  set_output_contiguous(0, shape, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
+  set_output_contiguous(0, shape, A.options().dtype(c10::toRealValueType(A.scalar_type())));
 }
 
 TORCH_META_FUNC(linalg_lu)(const Tensor& A, bool pivot) {
@@ -837,19 +847,19 @@ TORCH_META_FUNC(linalg_lu)(const Tensor& A, bool pivot) {
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (pivot) {
-    set_output_raw_strided(0, sizes, {}, A.options(), {});
+    set_output_raw_strided(0, sizes, {}, A.options());
   } else {
-    set_output_raw_strided(0, {0}, {}, A.options(), {});
+    set_output_raw_strided(0, {0}, {}, A.options());
   }
 
   // L.shape[-2:] == (m, k)
   sizes.end()[-1] = k;
-  set_output_raw_strided(1, sizes, {}, A.options(), {});
+  set_output_raw_strided(1, sizes, {}, A.options());
 
   // U.shape[-2:] == (k, n)
   sizes.end()[-2] = k;
   sizes.end()[-1] = n;
-  set_output_raw_strided(2, sizes, {}, A.options(), {});
+  set_output_raw_strided(2, sizes, {}, A.options());
 }
 
 } // namespace at::meta
@@ -1760,62 +1770,6 @@ Tensor& cholesky_solve_out(const Tensor& self, const Tensor& A, bool upper, Tens
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 DEFINE_DISPATCH(cholesky_stub);
-
-Tensor cholesky(const Tensor &self, bool upper) {
-   TORCH_WARN_ONCE(
-    "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be ",
-    "removed in a future PyTorch release.\n",
-    "L = torch.cholesky(A)\n",
-    "should be replaced with\n",
-    "L = torch.linalg.cholesky(A)\n",
-    "and\n"
-    "U = torch.cholesky(A, upper=True)\n",
-    "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).mH\n"
-    "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
-  );
-  if (self.numel() == 0) {
-    return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  squareCheckInputs(self, "cholesky");
-
-  auto raw_cholesky_output = cloneBatchedColumnMajor(self);
-  auto info_shape = IntArrayRef(
-      self.sizes().cbegin(), self.sizes().cend() - 2); // self.shape[:-2]
-  auto info = at::empty({info_shape}, self.options().dtype(kInt));
-
-  // fill the raw_cholesky_output with the result
-  cholesky_stub(self.device().type(), raw_cholesky_output, info, upper);
-
-  at::_linalg_check_errors(info, "cholesky", self.dim() == 2);
-
-  if (upper) {
-    return raw_cholesky_output.triu_();
-  } else {
-    return raw_cholesky_output.tril_();
-  }
-}
-
-Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
-   TORCH_WARN_ONCE(
-    "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be ",
-    "removed in a future PyTorch release.\n",
-    "L = torch.cholesky(A)\n",
-    "should be replaced with\n",
-    "L = torch.linalg.cholesky(A)\n",
-    "and\n"
-    "U = torch.cholesky(A, upper=True)\n",
-    "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).mH\n"
-    "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
-  );
-  checkSameDevice("cholesky", result, self);
-  checkLinalgCompatibleDtype("cholesky", result, self);
-  Tensor result_tmp = at::cholesky(self, upper);
-  at::native::resize_output(result, result_tmp.sizes());
-  result.copy_(result_tmp);
-  return result;
-}
 
 TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
                                         bool upper,
@@ -3519,16 +3473,17 @@ static std::string get_default_lstsq_driver(std::optional<std::string_view> driv
     static std::unordered_set<std::string_view> allowed_drivers = {
       "gels", "gelsy", "gelsd", "gelss"
     };
-    if (input.device() == at::kCPU) {
+    // CUDA supports only the 'gels' driver; CPU and MPS support all four.
+    if (input.is_cuda()) {
+      TORCH_CHECK(
+        driver_str == "gels",
+        "torch.linalg.lstsq: `driver` other than `gels` is not supported on CUDA"
+      );
+    } else { // CPU and MPS
       TORCH_CHECK(
         allowed_drivers.find(driver_str) != allowed_drivers.end(),
         "torch.linalg.lstsq: parameter `driver` should be one of "
         "(gels, gelsy, gelsd, gelss)"
-      );
-    } else { // else if (input.is_cuda())
-      TORCH_CHECK(
-        driver_str == "gels",
-        "torch.linalg.lstsq: `driver` other than `gels` is not supported on CUDA"
       );
     }
   } else {

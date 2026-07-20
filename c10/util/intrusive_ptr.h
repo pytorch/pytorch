@@ -983,9 +983,7 @@ class weak_intrusive_ptr final {
   }
 
   void swap(weak_intrusive_ptr& rhs) noexcept {
-    TTarget* tmp = target_;
-    target_ = rhs.target_;
-    rhs.target_ = tmp;
+    std::swap(target_, rhs.target_);
   }
 
   // NB: This should ONLY be used by the std::hash implementation

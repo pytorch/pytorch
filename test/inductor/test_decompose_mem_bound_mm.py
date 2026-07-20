@@ -12,6 +12,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     is_navi3_arch,
     parametrize,
     patch_test_members,
@@ -388,6 +389,8 @@ class TestDecomposeMemMM(TestCase):
             )
             counters.clear()
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/153736")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/153735")
     @unittest.skip
     @parametrize("m,k,n, should_decompose", [(20480, 5, 2, True)])
     @parametrize("has_bias", [True, False])

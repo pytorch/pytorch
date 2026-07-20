@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 name: inductor-periodic
 
 on:
@@ -30,7 +31,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc
+      check_experiments: arc,amd-do
       opt_out_experiments: lf
 
   periodic-dynamo-benchmarks-build:
@@ -46,21 +47,6 @@ jobs:
       cuda-arch-list: '8.0;8.6'
       test-matrix: |
         { include: [
-          { config: "dynamo_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
@@ -92,7 +78,6 @@ jobs:
       build-environment: ${{ needs.periodic-dynamo-benchmarks-build.outputs.build-environment }}
       docker-image: ${{ needs.periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-dynamo-benchmarks-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.periodic-dynamo-benchmarks-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
@@ -103,36 +88,22 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: rocm-periodic-dynamo-benchmarks-build
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-default-label-prefix
     with:
-      build-environment: linux-jammy-rocm-py3.10-mi355
+      build-environment: linux-jammy-rocm-py3.10-mi350
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |
         { include: [
-          { config: "dynamo_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamo_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamo_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamo_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamo_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
         ]}
     secrets: inherit
 
@@ -179,7 +150,6 @@ jobs:
       build-environment: ${{ needs.inductor-smoke-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-smoke-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-smoke-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.inductor-smoke-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
@@ -187,8 +157,8 @@ jobs:
     secrets: inherit
 
 
-  periodic-dynamo-benchmarks-cpu-build:
-    name: periodic-dynamo-benchmarks-cpu-build
+  periodic-inductor-benchmarks-cpu-build:
+    name: periodic-inductor-benchmarks-cpu-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
     with:
@@ -242,17 +212,16 @@ jobs:
       cuda-version: cpu
     secrets: inherit
 
-  periodic-dynamo-benchmarks-cpu-test:
-    name: periodic-dynamo-benchmarks-cpu-test
+  periodic-inductor-benchmarks-cpu-test:
+    name: periodic-inductor-benchmarks-cpu-test
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - periodic-dynamo-benchmarks-cpu-build
+      - periodic-inductor-benchmarks-cpu-build
       - get-default-label-prefix
     with:
-      build-environment: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.build-environment }}
-      docker-image: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.docker-image }}
-      test-matrix: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.test-matrix-osdc }}
+      build-environment: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.test-matrix }}
       use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11

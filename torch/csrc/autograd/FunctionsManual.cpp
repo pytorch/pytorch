@@ -99,8 +99,10 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
   TORCH_CHECK(
       range.second - range.first == t.size(),
       "inconsistent range for TensorList output");
-  std::copy(
-      t.begin(), t.end(), out.begin() + static_cast<int64_t>(range.first));
+  std::copy( // NOLINT(modernize-use-ranges)
+      t.begin(),
+      t.end(),
+      out.begin() + static_cast<int64_t>(range.first));
 }
 
 Tensor copysign_tensor_self_backward(
@@ -599,9 +601,10 @@ Tensor pow_backward_exponent(
   auto grad_lambda = [](const Tensor& a, const Scalar& b) {
     return (a * b.log()).conj();
   };
-  auto base_ = exponent.is_complex() && !base.isComplex()
-      ? base.toComplexDouble()
-      : base;
+  auto promoted_dtype = at::result_type(base, exponent);
+  auto base_ = at::isComplexType(promoted_dtype)
+      ? Scalar(base.toComplexDouble())
+      : Scalar(base.toDouble());
   if (base.equal(0.0)) {
     auto cond = [](const auto& exp) {
       if (exp.is_complex()) {
@@ -663,17 +666,20 @@ Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
 }
 
 template <typename T>
-Tensor mul_tensor_backward(const Tensor& grad, T other, ScalarType self_st) {
+Tensor mul_tensor_backward(
+    const Tensor& grad,
+    const T& other,
+    ScalarType self_st) {
   auto out = grad * other.conj();
   return handle_r_to_c(self_st, std::move(out));
 }
-template Tensor mul_tensor_backward(const Tensor&, Tensor, ScalarType);
-template Tensor mul_tensor_backward(const Tensor&, Scalar, ScalarType);
+template Tensor mul_tensor_backward(const Tensor&, const Tensor&, ScalarType);
+template Tensor mul_tensor_backward(const Tensor&, const Scalar&, ScalarType);
 
 template <typename T>
 Tensor div_tensor_self_backward(
     const Tensor& grad,
-    T other,
+    const T& other,
     ScalarType self_st,
     const std::optional<std::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
@@ -685,12 +691,12 @@ Tensor div_tensor_self_backward(
 }
 template Tensor div_tensor_self_backward(
     const Tensor&,
-    Tensor,
+    const Tensor&,
     ScalarType,
     const std::optional<std::string_view>&);
 template Tensor div_tensor_self_backward(
     const Tensor&,
-    Scalar,
+    const Scalar&,
     ScalarType,
     const std::optional<std::string_view>&);
 
@@ -807,6 +813,7 @@ Tensor mean_backward(
 std::vector<c10::SymInt> reverse_list_symint(const c10::SymIntArrayRef list) {
   auto result = std::vector<c10::SymInt>();
   result.reserve(list.size());
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (auto iter = list.rbegin(); iter != list.rend(); iter++) {
     result.push_back(*iter);
   }
@@ -816,8 +823,9 @@ std::vector<c10::SymInt> reverse_list_symint(const c10::SymIntArrayRef list) {
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
   auto result = std::vector<int64_t>();
   result.reserve(list.size());
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (auto iter = list.rbegin(); iter != list.rend(); iter++) {
-    result.push_back(*iter);
+    result.emplace_back(*iter);
   }
   return result;
 }
@@ -1796,7 +1804,10 @@ Tensor repeat_backward(
     Tensor grad,
     c10::SymIntArrayRef repeats,
     c10::SymIntArrayRef input_shape) {
-  auto find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
+  auto find_iter = std::find( // NOLINT(modernize-use-ranges)
+      repeats.cbegin(),
+      repeats.cend(),
+      0);
   if (find_iter != repeats.cend()) {
     return at::zeros_symint(input_shape, grad.options());
   }
@@ -2284,8 +2295,8 @@ Tensor split_backward(
   const auto& dim_size = sym_sizes[dim];
   auto num_splits = grads.size();
   std::vector<c10::SymInt> split_sizes(num_splits, split_size);
-  split_sizes[num_splits - 1] =
-      split_size - (split_size * c10::SymInt(num_splits) - dim_size);
+  split_sizes[num_splits - 1] = split_size -
+      (split_size * c10::SymInt(static_cast<int64_t>(num_splits)) - dim_size);
   return split_with_sizes_backward(grads, split_sizes, dim, sym_sizes, options);
 }
 
@@ -3195,10 +3206,10 @@ static bool _maybe_overlapping_memory(
   if (!sizes.empty()) {
     std::vector<std::size_t> argsort(sizes.size());
     std::iota(argsort.begin(), argsort.end(), 0);
-    std::sort(
-        argsort.begin(), argsort.end(), [&](std::size_t i, std::size_t j) {
-          return strides[i] < strides[j];
-        });
+    std::sort( // NOLINT(modernize-use-ranges)
+        argsort.begin(),
+        argsort.end(),
+        [&](std::size_t i, std::size_t j) { return strides[i] < strides[j]; });
 
     c10::SymInt max_index_in_slice = 0;
     for (auto i : argsort) {
@@ -3646,7 +3657,7 @@ Tensor svd_backward(
   // action is free and proper (as U(1)^k \iso (S^1)^k is compact). For this
   // reason, pi : St_k(C^n) x U(n) -> M forms a principal bundle.
   //
-  // To think about M, consider the case case k = 1. The, we have the bundle
+  // To think about M, consider the case k = 1. Then, we have the bundle
   // pi : St_1(C^n) x U(1) -> M
   // now, St_1(C^n) are just vectors of norm 1 in C^n. That's exactly the sphere
   // of dimension 2n-1 in C^n \iso R^{2n} S^{2n-1} = { z \in C^n | z^H z = 1}.
@@ -4464,7 +4475,8 @@ std::tuple<Tensor, Tensor> slogdet_jvp(
     return std::make_tuple(at::imag(trAinvE) * (i * sign), at::real(trAinvE));
   } else {
     return std::make_tuple(
-        at::_efficientzerotensor(sign.sizes(), sign.options()), trAinvE);
+        at::_efficientzerotensor(sign.sizes(), sign.options()),
+        std::move(trAinvE));
   }
 }
 
@@ -5127,8 +5139,8 @@ std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
 
   const auto input_shape = input.sizes();
   const auto input_ndim = input.dim();
-  const int normalized_ndim = normalized_shape.size();
-  const int axis = input_ndim - normalized_ndim;
+  const auto normalized_ndim = static_cast<int64_t>(normalized_shape.size());
+  const auto axis = input_ndim - normalized_ndim;
 
   int64_t N_rms = 1;
   for (int i = 0; i < normalized_ndim; ++i) {
@@ -5219,9 +5231,9 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const std::optional<Tensor>& gamma,
-    c10::SymInt N,
+    const c10::SymInt& N,
     const c10::SymInt& C,
-    c10::SymInt HxW,
+    const c10::SymInt& HxW,
     int64_t group,
     double eps,
     std::array<bool, 3> grad_input_mask) {
@@ -5238,9 +5250,9 @@ infinitely_differentiable_native_group_norm_backward(
   Tensor ds;
   Tensor db;
   if (dY.defined()) {
-    dY_tensor = dY.reshape_symint({N, G, D, std::move(HxW)});
-    ds = (dY_tensor * X_tensor).sum(3).unsqueeze_(-1);
-    db = dY_tensor.sum(3).unsqueeze_(-1);
+    dY_tensor = dY.reshape_symint({N, G, D, HxW});
+    ds = (dY_tensor * X_tensor).sum(3, /* keepdim */ true);
+    db = dY_tensor.sum(3, /* keepdim */ true);
   }
   if (grad_input_mask[0]) {
     Tensor gamma_tensor;
@@ -5258,31 +5270,27 @@ infinitely_differentiable_native_group_norm_backward(
     if (dY.defined()) {
       const Tensor a =
           isDefined(gamma) ? rstd_tensor * gamma_tensor : rstd_tensor;
-      Tensor b = (isDefined(gamma) ? (ds * gamma_tensor).sum(2) : ds.sum(2))
-                     .unsqueeze_(-2);
-      Tensor c = (isDefined(gamma) ? (db * gamma_tensor).sum(2) : db.sum(2))
-                     .unsqueeze_(-2);
+      Tensor b = (isDefined(gamma) ? (ds * gamma_tensor) : ds)
+                     .sum(2, /* keepdim */ true);
+      Tensor c = (isDefined(gamma) ? (db * gamma_tensor) : db)
+                     .sum(2, /* keepdim */ true);
       b = (c * mean_tensor - b) * rstd_cube * s;
       c = -b * mean_tensor - c * rstd_tensor * std::move(s);
       dX = a * dY_tensor + b * X_tensor + c;
       if (dmean.defined() && drstd.defined()) {
-        dX += var_mean_backward(
-            dvar,
-            dmean.view_symint({std::move(N), G, 1, 1}),
-            X_tensor,
-            IntArrayRef{2, 3},
-            0,
-            true);
+        dX = dX +
+            var_mean_backward(
+                 dvar,
+                 dmean.view_symint({N, G, 1, 1}),
+                 X_tensor,
+                 {2, 3},
+                 0,
+                 true);
       }
       dX = dX.reshape_as(X);
     } else if (dmean.defined() && drstd.defined()) {
       dX = var_mean_backward(
-               dvar,
-               dmean.view_symint({std::move(N), G, 1, 1}),
-               X_tensor,
-               IntArrayRef{2, 3},
-               0,
-               true)
+               dvar, dmean.view_symint({N, G, 1, 1}), X_tensor, {2, 3}, 0, true)
                .reshape_as(X);
     }
   }
@@ -5323,7 +5331,8 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           at::_trilinear(*i1, *i2, grad_out, expand1, expand2, sumdim, expand3);
   }
-  return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
+  return std::tuple<Tensor, Tensor, Tensor>(
+      std::move(grad_i1), std::move(grad_i2), std::move(grad_i3));
 }
 
 Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
@@ -5368,7 +5377,7 @@ Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
 // in pads])
 Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad) {
   auto negated_pad = pad.vec();
-  std::transform(
+  std::transform( // NOLINT(modernize-use-ranges)
       negated_pad.cbegin(),
       negated_pad.cend(),
       negated_pad.begin(),
@@ -5876,7 +5885,8 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
     }
   }
 
-  return std::make_tuple(self_grad, std::move(tau_grad), std::move(other_grad));
+  return std::make_tuple(
+      std::move(self_grad), std::move(tau_grad), std::move(other_grad));
 }
 
 std::tuple<Tensor, Tensor> polar_backward(
@@ -6121,7 +6131,7 @@ Tensor linalg_lu_solve_jvp(
             /*unitriangular*/ true)
             .matmul(P.mT());
     // dX = op_2(R^H) + S
-    return (left ? R.mH() : std::move(R)) + S;
+    return (left ? R.mH() : R) + S;
   }
 }
 
@@ -6677,8 +6687,8 @@ Tensor group_norm_jvp(
   int64_t N = input_p.size(0);
   int64_t C = input_p.size(1);
 
-  auto input_t_reshaped = input_t.view({1, N * groups, N ? -1 : 1});
-  auto input_p_reshaped = input_p.view({1, N * groups, N ? -1 : 1});
+  auto input_t_reshaped = input_t.reshape({1, N * groups, N ? -1 : 1});
+  auto input_p_reshaped = input_p.reshape({1, N * groups, N ? -1 : 1});
 
   auto result_t = batch_norm_jvp(
                       input_p_reshaped,
@@ -6720,7 +6730,7 @@ Tensor group_norm_mean_jvp(
     int64_t groups) {
   int64_t N = input_t.size(0);
   std::array<int64_t, 3> view_shape = {1, N * groups, N ? -1 : 1};
-  auto input_t_reshaped = input_t.view(view_shape);
+  auto input_t_reshaped = input_t.reshape(view_shape);
   return input_t_reshaped.mean({2}, false).view_as(mean_p);
 }
 
@@ -6734,8 +6744,8 @@ Tensor group_norm_invstd_jvp(
 
   std::vector<int64_t> view_shape = {1, N * groups, N ? -1 : 1};
 
-  auto input_t_reshaped = input_t.view(view_shape);
-  auto input_p_reshaped = input_p.view(view_shape);
+  auto input_t_reshaped = input_t.reshape(view_shape);
+  auto input_p_reshaped = input_p.reshape(view_shape);
 
   return _invstd_jvp(
              input_t_reshaped,
@@ -7207,7 +7217,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
   // in tools/autograd/gen_variable_type.py
 
   if (!grad.defined()) {
-    return std::make_tuple(grad_self, grad_src);
+    return std::make_tuple(std::move(grad_self), std::move(grad_src));
   }
 
   if (reduce == "sum") {
@@ -7308,7 +7318,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
   // and should be covered here
 
   if (!grad.defined()) {
-    return std::make_tuple(grad_self, grad_src);
+    return std::make_tuple(std::move(grad_self), std::move(grad_src));
   }
 
   if (reduce == "prod") {
@@ -7587,12 +7597,13 @@ static Tensor gs_bound_coord(
     return at::zeros_like(idx);
   }
   auto x = idx.to(at::kDouble);
-  double span, min_v;
+  double span{};
+  double min_v{};
   if (align_corners) {
-    span = size - 1;
+    span = static_cast<double>(size - 1);
     min_v = 0.0;
   } else {
-    span = size;
+    span = static_cast<double>(size);
     min_v = -0.5;
   }
   // Native formula: in = idx - min_v (= idx + 0.5 for no-align_corners).
@@ -7613,7 +7624,8 @@ static std::pair<Tensor, Tensor> gs_compute_coords(
     int64_t size,
     GridSamplerPadding padding_mode,
     bool align_corners) {
-  double unnorm_scale = align_corners ? (size - 1) / 2.0 : size / 2.0;
+  double unnorm_scale =
+      static_cast<double>(align_corners ? size - 1 : size) / 2.0;
   Tensor ix = align_corners ? (coord + 1) * unnorm_scale
                             : (coord + 1) * unnorm_scale - 0.5;
   Tensor padding_grad;
@@ -7630,7 +7642,8 @@ static std::pair<Tensor, Tensor> gs_compute_coords(
         "Unknown padding mode: ",
         static_cast<int64_t>(padding_mode));
     double twice_low = align_corners ? 0.0 : -1.0;
-    double twice_high = align_corners ? 2.0 * (size - 1) : 2.0 * size - 1.0;
+    double twice_high =
+        static_cast<double>(2 * size) - (align_corners ? 2.0 : 1.0);
     if (twice_high <= twice_low) {
       auto z = at::zeros_like(ix);
       return {z, z};
@@ -7930,8 +7943,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     // would be wrong: for border/reflection modes it zeroes gix_mult at
     // boundaries, making ggG_x/y = 0 where native still has nonzero
     // sensitivity.
-    double x_scale = align_corners ? (W - 1) / 2.0 : W / 2.0;
-    double y_scale = align_corners ? (H - 1) / 2.0 : H / 2.0;
+    auto x_scale = static_cast<double>(align_corners ? W - 1 : W) / 2.0;
+    auto y_scale = static_cast<double>(align_corners ? H - 1 : H) / 2.0;
     auto x_raw = align_corners ? (grid.select(-1, 0) + 1) * x_scale
                                : (grid.select(-1, 0) + 1) * x_scale - 0.5;
     auto y_raw = align_corners ? (grid.select(-1, 1) + 1) * y_scale

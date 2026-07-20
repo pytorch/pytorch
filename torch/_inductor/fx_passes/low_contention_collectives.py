@@ -183,7 +183,10 @@ def _is_compute_or_contains_compute(node, graph_module):
     if node.op == "call_function" and isinstance(node.target, ControlDeps):
         subgraph_node = node.args[1] if len(node.args) > 1 else None
         if isinstance(subgraph_node, torch.fx.Node) and subgraph_node.op == "get_attr":
-            assert isinstance(subgraph_node.target, str)
+            if not isinstance(subgraph_node.target, str):
+                raise AssertionError(
+                    f"expected str get_attr target, got {type(subgraph_node.target)}"
+                )
             subgraph = getattr(graph_module, subgraph_node.target, None)
             if isinstance(subgraph, torch.fx.GraphModule):
                 for n in subgraph.graph.nodes:
