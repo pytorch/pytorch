@@ -1496,6 +1496,21 @@ class CallMethodVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        try:
+            val = self.as_python_constant()
+            return VariableTracker.build(tx, hasattr(val, name))
+        except (AsPythonConstantNotImplementedError, AttributeError):
+            pass
+        try:
+            if hasattr(self.python_type(), name):
+                return VariableTracker.build(tx, True)
+        except NotImplementedError:
+            pass
+        return super().call_obj_hasattr(tx, name)
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
