@@ -328,7 +328,7 @@ void launchKernel(
       cgh.parallel_for(parallelWorkSize, *kernelPtr);
     }
   };
-  auto event = queuePtr->submit(cgf);
+  queuePtr->submit(cgf);
 }
 
 /* Load the kernel into memory (called during torch.compile), and
