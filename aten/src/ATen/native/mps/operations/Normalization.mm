@@ -2,6 +2,7 @@
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorUtils.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -958,7 +959,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   auto rstd = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
 
   auto input_shape = input.sizes();
-  int axis_size = static_cast<int>(N);
+  uint64_t axis_size = static_cast<uint64_t>(N);
   float epsilon_buf = static_cast<float>(eps);
   int use_weight_buf = weight.defined() ? 1 : 0;
   int use_bias_buf = bias.defined() ? 1 : 0;
@@ -971,27 +972,42 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() != kLong, "Not implemented for long on MPS");
   @autoreleasepool {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
-      // which kernel variant to use based on the normalized axis N size
       const int N_READS = 4;
       auto metalType = mps::scalarToMetalTypeString(input);
-      id<MTLComputePipelineState> layerNormKernel = nil;
-      if (axis_size <= 1024 * N_READS) {
-        layerNormKernel = mps::lib.getPipelineStateForFunc("layer_norm_single_row_" + metalType);
-      } else {
-        layerNormKernel = mps::lib.getPipelineStateForFunc("layer_norm_looped_" + metalType);
-      }
+      // Use 32-bit index math unless the tensor is too large for it.
+      const bool use32 = at::native::canUse32BitIndexMath(*X) && at::native::canUse32BitIndexMath(out);
+      const char* idx_str = use32 ? "i32" : "i64";
+      const char* variant = axis_size <= 1024 * N_READS ? "single_row" : "looped";
+      id<MTLComputePipelineState> layerNormKernel =
+          mps::lib.getPipelineStateForFunc(fmt::format("layer_norm_{}_{}_{}", variant, idx_str, metalType));
       id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:layerNormKernel];
 
-      mps::mtl_setArgs(computeEncoder, *X, out, mean, rstd, axis_size, epsilon_buf, use_weight_buf, use_bias_buf);
-      if (use_weight_and_bias_buf) {
-        mps::mtl_setArgs<8>(computeEncoder, *gamma, *bias_contig);
-      } else if (use_weight_buf) {
-        mps::mtl_setArgs<8>(computeEncoder, *gamma);
-      } else if (use_bias_buf) {
-        mps::mtl_setArgs<9>(computeEncoder, *bias_contig);
+      auto setLayerNormArgs = [&](auto idx_tag) {
+        using IDX_T = decltype(idx_tag);
+        mps::mtl_setArgs(computeEncoder,
+                         *X,
+                         out,
+                         mean,
+                         rstd,
+                         static_cast<IDX_T>(axis_size),
+                         epsilon_buf,
+                         use_weight_buf,
+                         use_bias_buf);
+        if (use_weight_and_bias_buf) {
+          mps::mtl_setArgs<8>(computeEncoder, *gamma, *bias_contig);
+        } else if (use_weight_buf) {
+          mps::mtl_setArgs<8>(computeEncoder, *gamma);
+        } else if (use_bias_buf) {
+          mps::mtl_setArgs<9>(computeEncoder, *bias_contig);
+        }
+      };
+      if (use32) {
+        setLayerNormArgs(uint32_t{});
+      } else {
+        setLayerNormArgs(uint64_t{});
       }
-      MTLSize numThreads = MTLSizeMake(std::min((axis_size + N_READS - 1) / N_READS, 1024), 1, 1);
+      MTLSize numThreads = MTLSizeMake(std::min<uint64_t>((axis_size + N_READS - 1) / N_READS, 1024), 1, 1);
       MTLSize numThreadgroups = MTLSizeMake(M, 1, 1);
       [computeEncoder dispatchThreadgroups:numThreadgroups threadsPerThreadgroup:numThreads];
     });
