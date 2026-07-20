@@ -162,6 +162,62 @@ class DecoratorTests(PytreeRegisteringTestCase):
         with self.assertRaises(TypeError):
             call_with_disable()
 
+    def test_disable_dynamo_fast_path(self):
+        # torch._compile._disable_dynamo routes fully-recursive, non-export calls
+        # through call_with_disable. Verify results are correct and Dynamo still
+        # treats the callee as disabled (graph break, not traced into), and that
+        # recursive=False still works via the DisableContext fallback.
+        from torch._compile import _disable_dynamo
+
+        @_disable_dynamo
+        def inner(x):
+            return x + 1
+
+        def fn(x):
+            return torch.cos(inner(torch.sin(x)))
+
+        x = torch.randn(3)
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=cnts)(x), ref)
+        # inner is disabled -> graph break around it -> two compiled frames.
+        self.assertEqual(cnts.frame_count, 2)
+
+        @_disable_dynamo(recursive=False)
+        def inner_nonrecursive(x):
+            return x + 1
+
+        self.assertEqual(inner_nonrecursive(x), x + 1)
+
+        # recursive=False takes the DisableContext fallback (not the fast path);
+        # it must also work under torch.compile.
+        def fn_nr(x):
+            return torch.cos(inner_nonrecursive(torch.sin(x)))
+
+        cnts_nr = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn_nr, backend=cnts_nr)(x), fn_nr(x))
+
+    def test_disable_dynamo_under_export(self):
+        # Under export, _disable_dynamo takes the DisableContext fallback (the
+        # fast path is guarded by `not is_exporting()`); verify a disabled helper
+        # still produces correct results in the exported program. (The
+        # fx_traceback disable annotation itself is covered by test_export.py's
+        # test_uplift_common_custom_meta_with_multiple_calls, which exercises the
+        # custom_op dispatch path where the annotation surfaces.)
+        from torch._compile import _disable_dynamo
+
+        @_disable_dynamo
+        def helper(x):
+            return x + 1
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return helper(x) * 2
+
+        x = torch.randn(3)
+        ep = torch.export.export(M(), (x,))
+        self.assertEqual(ep.module()(x), (x + 1) * 2)
+
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
             pass
