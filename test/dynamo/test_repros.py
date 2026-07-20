@@ -5133,6 +5133,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     # https://github.com/pytorch/pytorch/issues/162151
     def test_compile_errors_on_overlapping_copy_with_different_strides(self):
+        from torch._inductor.fx_passes.post_grad import _static_int
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        self.assertIsNone(_static_int(shape_env.create_unbacked_symint()))
+
         def foo(x):
             x = x.permute(2, 1, 0)
             x[0] += 1
@@ -5167,6 +5173,82 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 actual = torch.compile(
                     expanded_copy, backend="inductor", dynamic=dynamic
                 )(x)
+            self.assertEqual(actual, expected)
+
+        def functional_expanded_destination_copy(x):
+            return torch.ops.aten.copy.default(x.expand(2, 2), x[:1].expand(2, 2))
+
+        for dynamic in (False, True):
+            x = torch.arange(1.0).reshape(1, 1)
+            expected = functional_expanded_destination_copy(x)
+            with fresh_cache():
+                actual = torch.compile(
+                    functional_expanded_destination_copy,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x)
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual.stride(), expected.stride())
+            self.assertEqual(
+                actual.untyped_storage().nbytes(),
+                expected.untyped_storage().nbytes(),
+            )
+
+        def functional_copy_computed_source_preserves_destination_storage(x):
+            return torch.ops.aten.copy.default(x[2:4], x[2:4] + 10)
+
+        def functional_copy_preserves_hidden_destination_bytes(x):
+            dst_storage = x + 0
+            src_storage = x + 100
+            copied = torch.ops.aten.copy.default(
+                dst_storage.as_strided((1,), (1,), 0),
+                src_storage.as_strided((1,), (1,), 0),
+            )
+            return copied.as_strided((1,), (1,), 7)
+
+        def as_strided_scatter_after_copy_fallback(x, src):
+            copied = torch.ops.aten.copy.default(x[2:4], x[2:4] + 10)
+            scattered = torch.as_strided_scatter(copied, src, (1,), (1,), 0)
+            return scattered.as_strided((1,), (1,), 0)
+
+        for dynamic in (False, True):
+            x = torch.arange(8.0)
+            expected = functional_copy_computed_source_preserves_destination_storage(x)
+            with fresh_cache():
+                actual = torch.compile(
+                    functional_copy_computed_source_preserves_destination_storage,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x)
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual.stride(), expected.stride())
+            self.assertEqual(actual.storage_offset(), expected.storage_offset())
+            self.assertEqual(
+                actual.untyped_storage().nbytes(),
+                expected.untyped_storage().nbytes(),
+            )
+            self.assertEqual(
+                actual.as_strided((1,), (1,), 7),
+                expected.as_strided((1,), (1,), 7),
+            )
+
+            expected = functional_copy_preserves_hidden_destination_bytes(x)
+            with fresh_cache():
+                actual = torch.compile(
+                    functional_copy_preserves_hidden_destination_bytes,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x)
+            self.assertEqual(actual, expected)
+
+            src = torch.tensor([99.0])
+            expected = as_strided_scatter_after_copy_fallback(x, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    as_strided_scatter_after_copy_fallback,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x, src)
             self.assertEqual(actual, expected)
 
         def size_one_stride_copy(x):
@@ -5208,6 +5290,34 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 )(x)
             self.assertEqual(actual, expected)
 
+        def non_affine_source_copy(x):
+            src = x.repeat(2) * 3 + 1
+            x[4:44].copy_(src[3:43])
+            return x
+
+        for dynamic in (False, True):
+            x = torch.arange(64.0).square()
+            expected = non_affine_source_copy(x.clone())
+            with fresh_cache():
+                actual = torch.compile(
+                    non_affine_source_copy, backend="inductor", dynamic=dynamic
+                )(x)
+            self.assertEqual(actual, expected)
+
+        def indirect_source_copy(x, idx):
+            x.copy_(x[idx])
+            return x
+
+        for dynamic in (False, True):
+            x = torch.arange(4.0)
+            idx = torch.tensor([3, 2, 1, 0])
+            expected = indirect_source_copy(x.clone(), idx)
+            with fresh_cache():
+                actual = torch.compile(
+                    indirect_source_copy, backend="inductor", dynamic=dynamic
+                )(x, idx)
+            self.assertEqual(actual, expected)
+
         def slice_scatter_source_copy(x):
             src = torch.slice_scatter(x, x[:-1], dim=0, start=1, end=x.shape[0])
             x.copy_(src)
@@ -5221,6 +5331,146 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                     slice_scatter_source_copy, backend="inductor", dynamic=dynamic
                 )(x)
             self.assertEqual(actual, expected)
+
+        def assert_same_tensor_and_storage(actual, expected):
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual.stride(), expected.stride())
+            self.assertEqual(actual.storage_offset(), expected.storage_offset())
+            self.assertEqual(
+                actual.untyped_storage().nbytes(),
+                expected.untyped_storage().nbytes(),
+            )
+
+        def direct_hidden_storage_as_strided(y):
+            return y.as_strided((1,), (1,), 7)
+
+        def chained_hidden_storage_as_strided(y):
+            z = y.as_strided((1,), (1,), 7)
+            return z.as_strided((1,), (1,), 0) + 1
+
+        def computed_view_as_strided_suffix(x):
+            y = x + 1
+            return y[2:4].as_strided((1,), (1,), 7)
+
+        def permuted_computed_view_as_strided_suffix(x):
+            y = (x + 1).reshape(2, 3, 4).permute(2, 1, 0)
+            return y[0].as_strided((1,), (1,), 5)
+
+        for dynamic in (False, True):
+            base = torch.arange(8.0)
+            y = base[:1]
+            expected = direct_hidden_storage_as_strided(y)
+            with fresh_cache():
+                actual = torch.compile(
+                    direct_hidden_storage_as_strided,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(y)
+            assert_same_tensor_and_storage(actual, expected)
+
+            expected = chained_hidden_storage_as_strided(y)
+            with fresh_cache():
+                actual = torch.compile(
+                    chained_hidden_storage_as_strided,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(y)
+            assert_same_tensor_and_storage(actual, expected)
+
+            x = torch.arange(10.0)
+            expected = computed_view_as_strided_suffix(x)
+            with fresh_cache():
+                actual = torch.compile(
+                    computed_view_as_strided_suffix,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x)
+            self.assertEqual(actual, expected)
+            with torch._inductor.config.patch(pattern_matcher=False), fresh_cache():
+                actual = torch.compile(
+                    computed_view_as_strided_suffix,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x)
+            self.assertEqual(actual, expected)
+
+            x = torch.arange(24.0)
+            expected = permuted_computed_view_as_strided_suffix(x)
+            with fresh_cache():
+                actual = torch.compile(
+                    permuted_computed_view_as_strided_suffix,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x)
+            self.assertEqual(actual, expected)
+            with torch._inductor.config.patch(pattern_matcher=False), fresh_cache():
+                actual = torch.compile(
+                    permuted_computed_view_as_strided_suffix,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x)
+            self.assertEqual(actual, expected)
+
+        def mixed_dtype_copy_hidden_storage_as_strided(dst, src):
+            copied = torch.ops.aten.copy.default(dst, src)
+            return copied.as_strided((1,), (1,), 7)
+
+        for dynamic in (False, True):
+            base = torch.arange(8.0)
+            dst = base[:2].view(torch.float16)[:2]
+            src = torch.arange(2.0)
+            expected = mixed_dtype_copy_hidden_storage_as_strided(dst, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    mixed_dtype_copy_hidden_storage_as_strided,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(dst, src)
+            assert_same_tensor_and_storage(actual, expected)
+
+        def dtype_view_hidden_storage_copy(dst_base, src):
+            dst = dst_base.view(torch.float16).as_strided((1,), (1,), 14)
+            return torch.ops.aten.copy.default(dst, src)
+
+        for dynamic in (False, True):
+            with fresh_cache():
+                compiled = torch.compile(
+                    dtype_view_hidden_storage_copy,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )
+                dst_base = torch.zeros(10, dtype=torch.float32)
+                src = torch.tensor([3.0], dtype=torch.float32)
+                expected = dtype_view_hidden_storage_copy(dst_base, src)
+                actual = compiled(dst_base, src)
+                assert_same_tensor_and_storage(actual, expected)
+
+                base = torch.arange(10, dtype=torch.float32)
+                with self.assertRaisesRegex(
+                    (
+                        RuntimeError,
+                        torch._dynamo.exc.BackendCompilerFailed,
+                    ),
+                    "some elements of the input tensor and the written-to tensor",
+                ):
+                    compiled(base, base[7:8])
+
+        def as_strided_scatter_after_hidden_as_strided(y, src):
+            z = y.as_strided((1,), (1,), 7)
+            return torch.as_strided_scatter(z, src, (1,), (1,), 0)
+
+        for dynamic in (False, True):
+            base = torch.arange(8.0)
+            y = base[:1]
+            src = torch.tensor([9.0])
+            expected = as_strided_scatter_after_hidden_as_strided(y, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    as_strided_scatter_after_hidden_as_strided,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(y, src)
+            assert_same_tensor_and_storage(actual, expected)
 
         def as_strided_scatter_source_copy(x):
             src = torch.as_strided_scatter(x, x[1:3], (2,), (1,), 0)
@@ -5261,14 +5511,172 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         for dynamic in (False, True):
             x = torch.arange(6.0)
-            expected = view_as_strided_scatter_source(x.clone())
+            expected = view_as_strided_scatter_source(x)
             with fresh_cache():
                 actual = torch.compile(
                     view_as_strided_scatter_source,
                     backend="inductor",
                     dynamic=dynamic,
                 )(x)
-            self.assertEqual(actual, expected)
+            assert_same_tensor_and_storage(actual, expected)
+
+        def direct_view_as_strided_scatter_suffix(y, src):
+            scattered = torch.as_strided_scatter(y, src, (1,), (1,), 0)
+            return scattered.as_strided((1,), (1,), 7)
+
+        for dynamic in (False, True):
+            base = torch.arange(8.0)
+            y = base[:1]
+            src = torch.tensor([9.0])
+            expected = direct_view_as_strided_scatter_suffix(y, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    direct_view_as_strided_scatter_suffix,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(y, src)
+            assert_same_tensor_and_storage(actual, expected)
+
+        def direct_view_as_strided_scatter_return(y, src):
+            return torch.as_strided_scatter(y, src, (1,), (1,), 0)
+
+        for dynamic in (False, True):
+            base = torch.arange(8.0)
+            y = base[:1]
+            src = torch.tensor([9.0])
+            expected = direct_view_as_strided_scatter_return(y, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    direct_view_as_strided_scatter_return,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(y, src)
+            assert_same_tensor_and_storage(actual, expected)
+            self.assertEqual(
+                actual.as_strided((1,), (1,), 7),
+                expected.as_strided((1,), (1,), 7),
+            )
+
+        def dtype_view_as_strided_scatter_return(y, src):
+            return torch.as_strided_scatter(y.view(torch.int16), src, (1,), (1,), 0)
+
+        for dynamic in (False, True):
+            base = torch.arange(8.0)
+            y = base[:1]
+            src = torch.tensor([9], dtype=torch.int16)
+            expected = dtype_view_as_strided_scatter_return(y, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    dtype_view_as_strided_scatter_return,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(y, src)
+            assert_same_tensor_and_storage(actual, expected)
+            self.assertEqual(
+                actual.as_strided((1,), (1,), 15),
+                expected.as_strided((1,), (1,), 15),
+            )
+
+        def dtype_view_slice_as_strided_scatter_suffix(x, src):
+            scattered = torch.as_strided_scatter(
+                x[:1].view(torch.int16), src, (1,), (1,), 0
+            )
+            return scattered.as_strided((1,), (1,), 15)
+
+        for dynamic in (False, True):
+            x = torch.arange(8.0)
+            src = torch.tensor([9], dtype=torch.int16)
+            expected = dtype_view_slice_as_strided_scatter_suffix(x, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    dtype_view_slice_as_strided_scatter_suffix,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x, src)
+            assert_same_tensor_and_storage(actual, expected)
+
+        def prims_as_strided_scatter_suffix(y, src):
+            scattered = torch.ops.prims.as_strided_scatter.default(y, src, [1], [1], 0)
+            return scattered.as_strided((1,), (1,), 7)
+
+        for dynamic in (False, True):
+            base = torch.arange(8.0)
+            y = base[:1]
+            src = torch.tensor([9.0])
+            expected = prims_as_strided_scatter_suffix(y, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    prims_as_strided_scatter_suffix,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(y, src)
+            assert_same_tensor_and_storage(actual, expected)
+
+        def strided_view_as_strided_scatter_hole(y, src):
+            scattered = torch.as_strided_scatter(y, src, (1,), (1,), 0)
+            return scattered.as_strided((1,), (1,), 1)
+
+        for dynamic in (False, True):
+            base = torch.arange(8.0)
+            y = base[::2]
+            src = torch.tensor([9.0])
+            expected = strided_view_as_strided_scatter_hole(y, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    strided_view_as_strided_scatter_hole,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(y, src)
+            assert_same_tensor_and_storage(actual, expected)
+
+        def hidden_offset_as_strided_scatter_prefix(x, src):
+            scattered = torch.as_strided_scatter(x[1:3], src, (1,), (1,))
+            return scattered.as_strided((1,), (1,), 0)
+
+        for dynamic in (False, True):
+            x = torch.arange(8.0)[2:]
+            src = torch.tensor([9.0])
+            expected = hidden_offset_as_strided_scatter_prefix(x, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    hidden_offset_as_strided_scatter_prefix,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x, src)
+            assert_same_tensor_and_storage(actual, expected)
+
+        def middle_slice_as_strided_scatter_suffix(x, src):
+            y = x[3:4]
+            scattered = torch.as_strided_scatter(y, src, (1,), (1,), 0)
+            return scattered.as_strided((1,), (1,), 7)
+
+        for dynamic in (False, True):
+            x = torch.arange(8.0)
+            src = torch.tensor([9.0])
+            expected = middle_slice_as_strided_scatter_suffix(x, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    middle_slice_as_strided_scatter_suffix,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x, src)
+            assert_same_tensor_and_storage(actual, expected)
+
+        def row_as_strided_scatter_source(x, src):
+            y = x[1]
+            return torch.as_strided_scatter(y, src, (1,), (1,), 0)
+
+        for dynamic in (False, True):
+            x = torch.arange(8.0).reshape(2, 4)
+            src = torch.tensor([9.0])
+            expected = row_as_strided_scatter_source(x, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    row_as_strided_scatter_source,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x, src)
+            assert_same_tensor_and_storage(actual, expected)
 
         def offset_as_strided_scatter_source(x, src):
             y = x[1::2]
@@ -5277,16 +5685,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for dynamic in (False, True):
             x = torch.arange(8.0)
             src = torch.tensor([9.0, 8.0])
-            expected = offset_as_strided_scatter_source(x.clone(), src)
+            expected = offset_as_strided_scatter_source(x, src)
             with fresh_cache():
                 actual = torch.compile(
                     offset_as_strided_scatter_source,
                     backend="inductor",
                     dynamic=dynamic,
                 )(x, src)
-            self.assertEqual(actual, expected)
-            self.assertEqual(actual.stride(), expected.stride())
-            self.assertEqual(actual.storage_offset(), expected.storage_offset())
+            assert_same_tensor_and_storage(actual, expected)
 
         def offset_as_strided_scatter_then_view(x, src):
             y = x[1::2]
@@ -5296,10 +5702,38 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for dynamic in (False, True):
             x = torch.arange(8.0)
             src = torch.tensor([9.0, 8.0])
-            expected = offset_as_strided_scatter_then_view(x.clone(), src)
+            expected = offset_as_strided_scatter_then_view(x, src)
             with fresh_cache():
                 actual = torch.compile(
                     offset_as_strided_scatter_then_view,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x, src)
+            assert_same_tensor_and_storage(actual, expected)
+
+        def expanded_as_strided_scatter_source(x, src):
+            return torch.as_strided_scatter(x, src, (1,), (1,), 0)
+
+        for dynamic in (False, True):
+            x = torch.zeros(1).expand(3)
+            src = torch.tensor([9.0])
+            expected = expanded_as_strided_scatter_source(x, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    expanded_as_strided_scatter_source,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x, src)
+            self.assertEqual(actual, expected)
+
+        for dynamic in (False, True):
+            base = torch.arange(5.0)
+            x = base[2:3].expand(3)
+            src = torch.tensor([9.0])
+            expected = expanded_as_strided_scatter_source(x, src)
+            with fresh_cache():
+                actual = torch.compile(
+                    expanded_as_strided_scatter_source,
                     backend="inductor",
                     dynamic=dynamic,
                 )(x, src)
@@ -5430,12 +5864,99 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 )(x)
             self.assertEqual(actual, expected)
 
+        def large_rectangular_disjoint_copy(x):
+            x[:32, :32].copy_(x[:32, 32:64])
+            return x
+
+        for dynamic in (False, True):
+            x = torch.arange(65 * 128.0).reshape(65, 128)
+            expected = large_rectangular_disjoint_copy(x.clone())
+            with fresh_cache():
+                actual = torch.compile(
+                    large_rectangular_disjoint_copy,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x)
+            self.assertEqual(actual, expected)
+
+        def large_row_rectangular_disjoint_copy(x):
+            x[:, :64].copy_(x[:, 64:])
+            return x
+
+        for dynamic in (False, True):
+            x = torch.arange(513 * 128.0).reshape(513, 128)
+            expected = large_row_rectangular_disjoint_copy(x.clone())
+            with fresh_cache():
+                actual = torch.compile(
+                    large_row_rectangular_disjoint_copy,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x)
+            self.assertEqual(actual, expected)
+
         def functional_implicit_broadcast_copy(x):
             return torch.ops.aten.copy.default(x, x[0:1])
 
         def inplace_implicit_broadcast_copy(x):
             x.copy_(x[0:1])
             return x
+
+        for fn in (functional_implicit_broadcast_copy, inplace_implicit_broadcast_copy):
+            for dynamic in (False, True):
+                x = torch.arange(16.0).reshape(4, 4)
+                expected = fn(x.clone())
+                with fresh_cache():
+                    actual = torch.compile(fn, backend="inductor", dynamic=dynamic)(
+                        x.clone()
+                    )
+                self.assertEqual(actual, expected)
+
+        def large_disjoint_broadcast_copy(x):
+            x.as_strided((40000,), (2,), 0).copy_(x[1:2])
+            return x
+
+        def large_lattice_disjoint_broadcast_copy(x):
+            n = 16385
+            stride0 = 2 * n + 1
+            x.as_strided((2, n), (stride0, 2), 0).copy_(x[1:2])
+            return x
+
+        def large_lattice_disjoint_expanded_broadcast_copy(x):
+            n = 16385
+            stride0 = 2 * n + 1
+            x.as_strided((2, n), (stride0, 2), 0).copy_(x[1:2].expand(2, n))
+            return x
+
+        for dynamic in (False, True):
+            x = torch.arange(80001.0)
+            expected = large_disjoint_broadcast_copy(x.clone())
+            with fresh_cache():
+                actual = torch.compile(
+                    large_disjoint_broadcast_copy,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x.clone())
+            self.assertEqual(actual, expected)
+
+            n = 16385
+            stride0 = 2 * n + 1
+            x = torch.arange(2 * stride0, dtype=torch.float32)
+            expected = large_lattice_disjoint_broadcast_copy(x.clone())
+            with fresh_cache():
+                actual = torch.compile(
+                    large_lattice_disjoint_broadcast_copy,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x.clone())
+            self.assertEqual(actual, expected)
+            expected = large_lattice_disjoint_expanded_broadcast_copy(x.clone())
+            with fresh_cache():
+                actual = torch.compile(
+                    large_lattice_disjoint_expanded_broadcast_copy,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x.clone())
+            self.assertEqual(actual, expected)
 
         def shifted_expanded_copy(x):
             dst = x.as_strided((2, 2), (2, 1))
@@ -5505,6 +6026,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             x.__setitem__(slice(None, -1), x[1:])
             return x
 
+        def large_shifted_partial_copy(x):
+            x[2::2].copy_(x[:-2:2])
+            return x
+
         x = torch.arange(4.0)
         with fresh_cache():
             compiled = torch.compile(
@@ -5523,8 +6048,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 compiled(x)
 
         for fn in (
-            functional_implicit_broadcast_copy,
-            inplace_implicit_broadcast_copy,
             functional_shifted_copy,
             inplace_shifted_copy,
             functional_copy,
@@ -5547,6 +6070,186 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                     "some elements of the input tensor and the written-to tensor",
                 ):
                     compiled(x)
+
+        for backend in ("aot_eager", "inductor"):
+            for dynamic in (False, True):
+                x = torch.arange(140002.0)
+                ctx = (
+                    fresh_cache() if backend == "inductor" else contextlib.nullcontext()
+                )
+                with ctx:
+                    compiled = torch.compile(
+                        large_shifted_partial_copy,
+                        backend=backend,
+                        dynamic=dynamic,
+                    )
+                    with self.assertRaisesRegex(
+                        (
+                            RuntimeError,
+                            torch._dynamo.exc.BackendCompilerFailed,
+                        ),
+                        "some elements of the input tensor and the written-to tensor",
+                    ):
+                        compiled(x)
+
+        def same_storage_different_itemsize_copy(x):
+            x.view(torch.float32).copy_(x[:4])
+            return x
+
+        for dynamic in (False, True):
+            x = torch.arange(8, dtype=torch.float16)
+            with fresh_cache():
+                compiled = torch.compile(
+                    same_storage_different_itemsize_copy,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )
+                with self.assertRaisesRegex(
+                    (
+                        RuntimeError,
+                        torch._dynamo.exc.BackendCompilerFailed,
+                    ),
+                    "some elements of the input tensor and the written-to tensor",
+                ):
+                    compiled(x)
+
+        def disjoint_same_storage_different_itemsize_copy(x):
+            x[:2].copy_(x[4:].view(torch.float32))
+            return x
+
+        for dynamic in (False, True):
+            x = torch.arange(8, dtype=torch.float16)
+            expected = disjoint_same_storage_different_itemsize_copy(x.clone())
+            with fresh_cache():
+                actual = torch.compile(
+                    disjoint_same_storage_different_itemsize_copy,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x.clone())
+            self.assertEqual(actual, expected)
+
+        for dynamic, numel in itertools.product((False, True), (2, 257, 65537)):
+            x = torch.arange(4 * numel + 4, dtype=torch.float16)
+
+            def interleaved_disjoint_different_itemsize_copy_n(x):
+                dst = x.as_strided((numel,), (4,), 0)
+                src = x.view(torch.float32).as_strided((numel,), (2,), 1)
+                dst.copy_(src)
+                return x
+
+            expected = interleaved_disjoint_different_itemsize_copy_n(x.clone())
+            with fresh_cache():
+                actual = torch.compile(
+                    interleaved_disjoint_different_itemsize_copy_n,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x.clone())
+            self.assertEqual(actual, expected)
+
+        def cross_input_different_itemsize_copy(dst, src):
+            dst.copy_(src)
+            return dst
+
+        def functional_cross_input_copy(dst, src):
+            return torch.ops.aten.copy.default(dst, src)
+
+        for fn in (cross_input_different_itemsize_copy, functional_cross_input_copy):
+            for dynamic in (False, True):
+                with fresh_cache():
+                    compiled = torch.compile(fn, backend="inductor", dynamic=dynamic)
+                    dst = torch.zeros(2)
+                    src = torch.arange(2.0)
+                    expected = fn(dst.clone(), src)
+                    self.assertEqual(compiled(dst, src), expected)
+
+                    base = torch.arange(4.0)
+                    with self.assertRaisesRegex(
+                        (
+                            RuntimeError,
+                            torch._dynamo.exc.BackendCompilerFailed,
+                        ),
+                        "some elements of the input tensor and the written-to tensor",
+                    ):
+                        compiled(base[:2], base[1:3])
+
+        for dynamic in (False, True):
+            dst = torch.zeros(2, dtype=torch.float16)
+            src = torch.arange(2, dtype=torch.float32)
+            expected = cross_input_different_itemsize_copy(dst.clone(), src)
+            with fresh_cache():
+                actual = torch.compile(
+                    cross_input_different_itemsize_copy,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(dst, src)
+            self.assertEqual(actual, expected)
+
+        for dynamic in (False, True):
+            with fresh_cache():
+                compiled = torch.compile(
+                    cross_input_different_itemsize_copy,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )
+                dst = torch.zeros(2, dtype=torch.float16)
+                src = torch.arange(2, dtype=torch.float32)
+                expected = cross_input_different_itemsize_copy(dst.clone(), src)
+                self.assertEqual(compiled(dst, src), expected)
+                base = torch.arange(4, dtype=torch.float32)
+                dst = base.view(torch.float16)[:2]
+                src = base[:2]
+                with self.assertRaisesRegex(
+                    (
+                        RuntimeError,
+                        torch._dynamo.exc.BackendCompilerFailed,
+                    ),
+                    "some elements of the input tensor and the written-to tensor",
+                ):
+                    compiled(dst, src)
+
+        def graph_input_dtype_view_copy(dst_base, src):
+            dst_base.view(torch.float16)[:2].copy_(src)
+            return dst_base
+
+        def graph_input_dtype_view_functional_copy(dst_base, src):
+            return torch.ops.aten.copy.default(dst_base.view(torch.float16)[:2], src)
+
+        for fn in (graph_input_dtype_view_copy, graph_input_dtype_view_functional_copy):
+            for dynamic in (False, True):
+                with fresh_cache():
+                    compiled = torch.compile(fn, backend="inductor", dynamic=dynamic)
+                    dst_base = torch.zeros(4, dtype=torch.float32)
+                    src = torch.arange(2, dtype=torch.float32)
+                    expected = fn(dst_base.clone(), src)
+                    self.assertEqual(compiled(dst_base, src), expected)
+
+                    base = torch.arange(4, dtype=torch.float32)
+                    with self.assertRaisesRegex(
+                        (
+                            RuntimeError,
+                            torch._dynamo.exc.BackendCompilerFailed,
+                        ),
+                        "some elements of the input tensor and the written-to tensor",
+                    ):
+                        compiled(base, base[:2])
+
+        def symbolic_disjoint_as_strided_copy(x):
+            base = x.reshape(-1)
+            n = x.shape[0]
+            dst = torch.as_strided(base, (n,), (2,), 0)
+            src = torch.as_strided(base, (n,), (3,), 1)
+            return torch.ops.aten.copy.default(dst, src)
+
+        for dynamic in (False, True):
+            x = torch.arange(6.0).reshape(2, 3)
+            expected = symbolic_disjoint_as_strided_copy(x.clone())
+            with fresh_cache():
+                actual = torch.compile(
+                    symbolic_disjoint_as_strided_copy,
+                    backend="inductor",
+                    dynamic=dynamic,
+                )(x.clone())
+            self.assertEqual(actual, expected)
 
     # https://github.com/pytorch/pytorch/issues/146598
     @unittest.expectedFailure
@@ -6922,6 +7625,21 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
             return torch.sin(x)
 
         fn(torch.randn(4))
+
+    # https://github.com/pytorch/pytorch/issues/189925
+    def test_io_text_encoding(self):
+        import _io
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            enc_explicit = _io.text_encoding("utf-8")
+            enc_default = _io.text_encoding(None)
+            return torch.sin(x), enc_explicit, enc_default
+
+        x = torch.randn(4)
+        _, enc_explicit, enc_default = fn(x)
+        self.assertEqual(enc_explicit, _io.text_encoding("utf-8"))
+        self.assertEqual(enc_default, _io.text_encoding(None))
 
     # https://github.com/pytorch/pytorch/issues/88813
     def test_return_value_duplication_tensor(self) -> None:
@@ -8675,6 +9393,30 @@ SavedForBackwardsAOTOutput(idx=5)""",
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dual_tensor_input_graph_breaks(self):
+        import torch.autograd.forward_ad as fwAD
+
+        def fn(x):
+            return (x**2).sum()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.tensor([0.1, 0.2, 0.3])
+        v = torch.ones(3)
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, v)
+            expected = fwAD.unpack_dual(fn(dual)).tangent
+            out = torch.compile(fn, backend=cnt)(dual)
+            self.assertEqual(fwAD.unpack_dual(out).tangent, expected)
+        self.assertEqual(cnt.frame_count, 0)
+
+        torch._dynamo.reset()
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, v)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "dual tensor input"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(dual)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     @serialTest()
@@ -10097,6 +10839,32 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             torch.bfloat16,
             "expected scalar type BFloat16 but found Long",
         )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_device_context_matmul_avoids_native_bmm_router_graph_break(self):
+        torch._dynamo.utils.counters.clear()
+
+        @torch.compile(backend="inductor", dynamic=False)
+        def fn(q, k):
+            with torch.device("cuda"):
+                a = torch.reshape(q, [-1, 8, 1, 32])
+                return torch.matmul(a, k)
+
+        q = torch.randn(64, 8 * 32, device="cuda", dtype=torch.float16)
+        k = torch.randn(1, 8, 32, 128, device="cuda", dtype=torch.float16)
+
+        out = fn(q, k)
+        torch.cuda.synchronize()
+        self.assertEqual(out.shape, (64, 8, 1, 128))
+
+        graph_break_reasons = "\n".join(
+            torch._dynamo.utils.counters["graph_break"].keys()
+        )
+        # The native router should not run trace-unsafe eager predicates here.
+        # If it does, the COW probe on the reshaped operand graph-breaks before
+        # it can fold or install a guard.
+        self.assertNotIn("_is_cow_tensor", graph_break_reasons)
+        self.assertNotIn("call_boxed", graph_break_reasons)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")

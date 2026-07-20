@@ -40,6 +40,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     FakeTensorDeviceMismatchError,
     FakeTensorMode,
+    in_kernel_invocation_manager,
     is_fake_tensor,
     MetadataMismatchError,
     unset_fake_temporarily,
@@ -2016,6 +2017,21 @@ def forward(self, x_1):
 
         self.assertTrue(isinstance(copy_out, FakeTensor))
         self.assertEqual(copy_out.shape, expected_shape)
+
+    @skipIfTorchDynamo("tests raw FakeTensor meta kernel, not dynamo")
+    def test_aten_copy_symbolic_storage_offset(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        with FakeTensorMode(shape_env=shape_env) as fake_mode:
+            x = torch.empty_strided((8,), (1,))
+            y = torch.as_strided(x, (2,), (1,), u0)
+            z = torch.as_strided(x, (2,), (1,), u0)
+            copy_out = torch.ops.aten.copy.default(y, y)
+            with in_kernel_invocation_manager(fake_mode):
+                y.copy_(z)
+
+        self.assertTrue(isinstance(copy_out, FakeTensor))
+        self.assertEqual(copy_out.shape, y.shape)
 
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"

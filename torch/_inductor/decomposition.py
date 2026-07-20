@@ -129,6 +129,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
+    aten.as_strided_scatter,  # need input storage layout intact for Inductor lowering
     aten.silu,  # inductor uses exact eager decomposition
     aten.split.Tensor,  # inductor lowers this directly
     aten.squeeze,  # inductor lowers this directly
@@ -463,7 +464,16 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    def add_input(out: torch.Tensor) -> torch.Tensor:
+        if alpha != 1:
+            out = alpha * out
+        if beta != 1:
+            return out + beta * self
+        return out + self
+
     if mat1.device.type not in ["cpu", "mps"]:
+        if beta == 0 and mat1.device.type == "cuda":
+            return NotImplemented
         if (
             statically_known_true(mat1.size(-1) == 1)
             and statically_known_true(mat1.size(0) != 1)
@@ -471,7 +481,7 @@ def addmm(
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = mat1 * mat2
-            return alpha * out + beta * self
+            return add_input(out)
 
     if self.device.type == "cpu":
         if statically_known_true(mat1.size(0) == 1) and statically_known_true(

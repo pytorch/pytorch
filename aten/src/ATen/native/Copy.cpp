@@ -17,6 +17,10 @@
 #include <ATen/metal/Context.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
+#include <algorithm>
+#include <numeric>
+#include <optional>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -139,6 +143,9 @@ bool is_supported_device(Device device) {
 namespace at::native {
 
 static bool has_symbolic_sizes_or_strides(const Tensor& t) {
+  if (t.sym_storage_offset().is_symbolic()) {
+    return true;
+  }
   for (const auto& size : t.sym_sizes()) {
     if (size.is_symbolic()) {
       return true;
@@ -152,43 +159,104 @@ static bool has_symbolic_sizes_or_strides(const Tensor& t) {
   return false;
 }
 
-static bool copy_allows_same_start_expanded_src(
+static std::optional<bool> maybe_guard_bool(const c10::SymBool& value) {
+  if (!value.has_hint()) {
+    return std::nullopt;
+  }
+  return TORCH_GUARD_OR_FALSE(value);
+}
+
+static std::optional<bool> has_same_storage_byte_offset(
     const Tensor& self,
     const Tensor& src) {
-  if (has_symbolic_sizes_or_strides(self) ||
-      has_symbolic_sizes_or_strides(src)) {
-    return false;
-  }
-  if (self.layout() != kStrided || src.layout() != kStrided ||
-      self.scalar_type() != src.scalar_type() ||
-      self.is_conj() != src.is_conj() || self.is_neg() != src.is_neg() ||
-      self.dim() != src.dim() || !self.sizes().equals(src.sizes())) {
-    return false;
-  }
-
   const auto* self_impl = self.unsafeGetTensorImpl();
   const auto* src_impl = src.unsafeGetTensorImpl();
   const auto& self_storage = self_impl->unsafe_storage();
   if (!self_storage ||
-      !self_storage.is_alias_of(src_impl->unsafe_storage()) ||
-      self_impl->data() != src_impl->data()) {
+      !self_storage.is_alias_of(src_impl->unsafe_storage())) {
+    return false;
+  }
+  const auto self_offset =
+      self.sym_storage_offset() *
+      c10::SymInt(static_cast<int64_t>(self.itemsize()));
+  const auto src_offset =
+      src.sym_storage_offset() *
+      c10::SymInt(static_cast<int64_t>(src.itemsize()));
+  return maybe_guard_bool(self_offset.sym_eq(src_offset));
+}
+
+static bool copy_allows_same_start_expanded_src(
+    const Tensor& self,
+    const Tensor& src) {
+  if (self.layout() != kStrided || src.layout() != kStrided ||
+      self.scalar_type() != src.scalar_type() ||
+      self.is_conj() != src.is_conj() || self.is_neg() != src.is_neg() ||
+      src.dim() > self.dim()) {
     return false;
   }
 
+  const auto same_start = has_same_storage_byte_offset(self, src);
+  if (!same_start || !*same_start) {
+    return false;
+  }
+
+  const auto self_strides = self.sym_strides();
+  const auto self_sizes = self.sym_sizes();
+  const auto src_strides = src.sym_strides();
+  const auto src_sizes = src.sym_sizes();
   bool has_expanded_src_dim = false;
-  for (const auto i : c10::irange(src.dim())) {
-    if (src.sizes()[i] <= 1) {
+
+  for (const auto offset : c10::irange(self.dim())) {
+    const auto self_dim = self.dim() - 1 - offset;
+    const auto has_src_dim = offset < src.dim();
+    const auto self_size_gt_one =
+        maybe_guard_bool(self_sizes[self_dim].sym_gt(1));
+    if (!self_size_gt_one) {
+      return false;
+    }
+    if (!has_src_dim) {
+      if (*self_size_gt_one) {
+        has_expanded_src_dim = true;
+      }
       continue;
     }
-    if (src.strides()[i] == 0) {
+
+    const auto src_dim = src.dim() - 1 - offset;
+    const auto sizes_equal =
+        maybe_guard_bool(self_sizes[self_dim].sym_eq(src_sizes[src_dim]));
+    if (sizes_equal && *sizes_equal) {
+      if (!*self_size_gt_one) {
+        continue;
+      }
+      const auto src_stride_zero =
+          maybe_guard_bool(src_strides[src_dim].sym_eq(0));
+      if (!src_stride_zero) {
+        return false;
+      }
+      if (*src_stride_zero) {
+        has_expanded_src_dim = true;
+        continue;
+      }
+      const auto strides_equal =
+          maybe_guard_bool(self_strides[self_dim].sym_eq(src_strides[src_dim]));
+      if (!strides_equal || !*strides_equal) {
+        return false;
+      }
+      continue;
+    }
+
+    const auto src_size_one = maybe_guard_bool(src_sizes[src_dim].sym_eq(1));
+    if (src_size_one && *src_size_one) {
+      if (!*self_size_gt_one) {
+        continue;
+      }
       has_expanded_src_dim = true;
       continue;
     }
-    if (self.strides()[i] != src.strides()[i]) {
-      return false;
-    }
+
+    return false;
   }
-  return has_expanded_src_dim;
+  return has_expanded_src_dim || self.dim() != src.dim();
 }
 
 static bool copy_has_same_start_expanded_alias(
@@ -203,12 +271,8 @@ static bool copy_has_same_start_expanded_alias(
     return false;
   }
 
-  const auto* self_impl = self.unsafeGetTensorImpl();
-  const auto* src_impl = src.unsafeGetTensorImpl();
-  const auto& self_storage = self_impl->unsafe_storage();
-  if (!self_storage ||
-      !self_storage.is_alias_of(src_impl->unsafe_storage()) ||
-      self_impl->data() != src_impl->data()) {
+  const auto same_start = has_same_storage_byte_offset(self, src);
+  if (!same_start || !*same_start) {
     return false;
   }
 
@@ -221,17 +285,436 @@ static bool copy_has_same_start_expanded_alias(
   return false;
 }
 
+static bool copy_has_same_data(const Tensor& self, const Tensor& src) {
+  if (self.scalar_type() != src.scalar_type() ||
+      self.is_conj() != src.is_conj() || self.is_neg() != src.is_neg()) {
+    return false;
+  }
+  const auto same_start = has_same_storage_byte_offset(self, src);
+  if (!same_start || !*same_start) {
+    return false;
+  }
+  const auto sizes_equal = maybe_guard_bool(
+      c10::sym_equals(self.sym_sizes(), src.sym_sizes()));
+  if (!sizes_equal || !*sizes_equal) {
+    return false;
+  }
+  const auto strides_equal = maybe_guard_bool(
+      c10::sym_equals(self.sym_strides(), src.sym_strides()));
+  return strides_equal && *strides_equal;
+}
+
+static bool tensors_alias_same_storage(const Tensor& self, const Tensor& src) {
+  const auto* self_impl = self.unsafeGetTensorImpl();
+  const auto* src_impl = src.unsafeGetTensorImpl();
+  const auto& self_storage = self_impl->unsafe_storage();
+  return self_storage && self_storage.is_alias_of(src_impl->unsafe_storage());
+}
+
+static std::optional<std::pair<int64_t, int64_t>> accessed_byte_range(
+    const Tensor& tensor) {
+  if (has_symbolic_sizes_or_strides(tensor)) {
+    return std::nullopt;
+  }
+  if (tensor.numel() == 0) {
+    return std::pair<int64_t, int64_t>{0, 0};
+  }
+
+  int64_t min_offset = tensor.storage_offset();
+  int64_t max_offset = tensor.storage_offset();
+  for (const auto i : c10::irange(tensor.dim())) {
+    const auto size = tensor.size(i);
+    if (size <= 1) {
+      continue;
+    }
+    const auto delta = (size - 1) * tensor.stride(i);
+    min_offset += std::min<int64_t>(delta, 0);
+    max_offset += std::max<int64_t>(delta, 0);
+  }
+
+  const auto itemsize = static_cast<int64_t>(tensor.itemsize());
+  return std::pair<int64_t, int64_t>{
+      min_offset * itemsize,
+      max_offset * itemsize + itemsize};
+}
+
+static bool has_statically_disjoint_byte_ranges(
+    const Tensor& self,
+    const Tensor& src) {
+  const auto self_range = accessed_byte_range(self);
+  const auto src_range = accessed_byte_range(src);
+  if (!self_range || !src_range) {
+    return false;
+  }
+  return self_range->second <= src_range->first ||
+      src_range->second <= self_range->first;
+}
+
+static int64_t positive_mod(int64_t numerator, int64_t denominator) {
+  const auto remainder = numerator % denominator;
+  return remainder < 0 ? remainder + denominator : remainder;
+}
+
+static int64_t byte_stride_gcd(const Tensor& tensor) {
+  int64_t result = 0;
+  const auto itemsize = static_cast<int64_t>(tensor.itemsize());
+  for (const auto dim : c10::irange(tensor.dim())) {
+    if (tensor.size(dim) <= 1 || tensor.stride(dim) == 0) {
+      continue;
+    }
+    auto byte_stride = tensor.stride(dim) * itemsize;
+    if (byte_stride < 0) {
+      byte_stride = -byte_stride;
+    }
+    result = std::gcd(result, byte_stride);
+  }
+  return result;
+}
+
+static bool has_statically_disjoint_byte_residue(
+    const Tensor& self,
+    const Tensor& src) {
+  if (has_symbolic_sizes_or_strides(self) ||
+      has_symbolic_sizes_or_strides(src)) {
+    return false;
+  }
+  const auto combined_gcd =
+      std::gcd(byte_stride_gcd(self), byte_stride_gcd(src));
+  if (combined_gcd == 0) {
+    return false;
+  }
+
+  const auto self_itemsize = static_cast<int64_t>(self.itemsize());
+  const auto src_itemsize = static_cast<int64_t>(src.itemsize());
+  const auto self_start = self.storage_offset() * self_itemsize;
+  const auto src_start = src.storage_offset() * src_itemsize;
+  const auto residue = positive_mod(self_start - src_start, combined_gcd);
+  const auto distance = std::min(residue, combined_gcd - residue);
+  return distance >= std::max(self_itemsize, src_itemsize);
+}
+
+static std::optional<std::pair<int64_t, int64_t>> residual_byte_range(
+    const Tensor& tensor,
+    int64_t excluded_dim) {
+  if (has_symbolic_sizes_or_strides(tensor)) {
+    return std::nullopt;
+  }
+  if (tensor.numel() == 0) {
+    return std::pair<int64_t, int64_t>{0, 0};
+  }
+
+  const auto itemsize = static_cast<int64_t>(tensor.itemsize());
+  int64_t min_offset = tensor.storage_offset() * itemsize;
+  int64_t max_offset = min_offset;
+  for (const auto dim : c10::irange(tensor.dim())) {
+    if (dim == excluded_dim || tensor.size(dim) <= 1) {
+      continue;
+    }
+    const auto delta = (tensor.size(dim) - 1) * tensor.stride(dim) * itemsize;
+    min_offset += std::min<int64_t>(delta, 0);
+    max_offset += std::max<int64_t>(delta, 0);
+  }
+  return std::pair<int64_t, int64_t>{min_offset, max_offset + itemsize};
+}
+
+static bool has_statically_disjoint_byte_bands(
+    const Tensor& self,
+    const Tensor& src) {
+  if (has_symbolic_sizes_or_strides(self) ||
+      has_symbolic_sizes_or_strides(src)) {
+    return false;
+  }
+
+  const auto self_itemsize = static_cast<int64_t>(self.itemsize());
+  const auto src_itemsize = static_cast<int64_t>(src.itemsize());
+  for (const auto self_dim : c10::irange(self.dim())) {
+    if (self.size(self_dim) <= 1) {
+      continue;
+    }
+    const auto self_byte_stride = self.stride(self_dim) * self_itemsize;
+    if (self_byte_stride <= 0) {
+      continue;
+    }
+    for (const auto src_dim : c10::irange(src.dim())) {
+      if (src.size(src_dim) <= 1) {
+        continue;
+      }
+      const auto src_byte_stride = src.stride(src_dim) * src_itemsize;
+      if (src_byte_stride != self_byte_stride) {
+        continue;
+      }
+
+      const auto self_range = residual_byte_range(self, self_dim);
+      const auto src_range = residual_byte_range(src, src_dim);
+      if (!self_range || !src_range) {
+        continue;
+      }
+      if (self_range->second <= src_range->first ||
+          src_range->second <= self_range->first) {
+        const auto union_start =
+            std::min(self_range->first, src_range->first);
+        const auto union_end =
+            std::max(self_range->second, src_range->second);
+        if (union_end - union_start <= self_byte_stride) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+struct ByteTensorDim {
+  int64_t size;
+  int64_t stride;
+};
+
+static bool may_have_byte_offset(
+    const std::vector<ByteTensorDim>& dims,
+    int64_t target,
+    int64_t remaining_checks) {
+  int64_t min_offset = 0;
+  int64_t max_offset = 0;
+  int64_t stride_gcd = 0;
+  for (const auto& dim : dims) {
+    const auto delta = (dim.size - 1) * dim.stride;
+    min_offset += std::min<int64_t>(delta, 0);
+    max_offset += std::max<int64_t>(delta, 0);
+    stride_gcd = std::gcd(stride_gcd, std::abs(dim.stride));
+  }
+  if (target < min_offset || target > max_offset) {
+    return false;
+  }
+  if (stride_gcd != 0 && positive_mod(target, stride_gcd) != 0) {
+    return false;
+  }
+  if (dims.empty()) {
+    return target == 0;
+  }
+  if (dims.size() == 1) {
+    const auto stride = dims[0].stride;
+    if (stride == 0 || target % stride != 0) {
+      return target == 0;
+    }
+    const auto index = target / stride;
+    return index >= 0 && index < dims[0].size;
+  }
+
+  auto iter = std::min_element(
+      dims.begin(),
+      dims.end(),
+      [](const auto& lhs, const auto& rhs) { return lhs.size < rhs.size; });
+  if (iter->size > remaining_checks) {
+    return true;
+  }
+  const auto dim = *iter;
+  std::vector<ByteTensorDim> remaining_dims;
+  remaining_dims.reserve(dims.size() - 1);
+  for (const auto& other : dims) {
+    if (&other != &*iter) {
+      remaining_dims.push_back(other);
+    }
+  }
+  const auto next_checks = remaining_checks / std::max<int64_t>(dim.size, 1);
+  for (const auto index : c10::irange(dim.size)) {
+    if (may_have_byte_offset(
+            remaining_dims, target - index * dim.stride, next_checks)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool tensor_may_access_first_byte_offset(
+    const Tensor& tensor,
+    int64_t target_byte_offset) {
+  if (has_symbolic_sizes_or_strides(tensor)) {
+    return true;
+  }
+  constexpr int64_t kMaxSingletonMembershipChecks = 32768;
+  const auto itemsize = static_cast<int64_t>(tensor.itemsize());
+  std::vector<ByteTensorDim> dims;
+  dims.reserve(tensor.dim());
+  for (const auto dim : c10::irange(tensor.dim())) {
+    if (tensor.size(dim) <= 1 || tensor.stride(dim) == 0) {
+      continue;
+    }
+    dims.push_back(
+        ByteTensorDim{tensor.size(dim), tensor.stride(dim) * itemsize});
+  }
+  const auto relative_target =
+      target_byte_offset - tensor.storage_offset() * itemsize;
+  return may_have_byte_offset(
+      dims, relative_target, kMaxSingletonMembershipChecks);
+}
+
+static bool tensor_may_access_byte_interval(
+    const Tensor& tensor,
+    int64_t begin,
+    int64_t end) {
+  const auto itemsize = static_cast<int64_t>(tensor.itemsize());
+  for (auto candidate = begin - itemsize + 1; candidate < end; ++candidate) {
+    if (tensor_may_access_first_byte_offset(tensor, candidate)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static std::optional<std::pair<int64_t, int64_t>> singleton_byte_interval(
+    const Tensor& tensor) {
+  if (has_symbolic_sizes_or_strides(tensor) || tensor.numel() == 0) {
+    return std::nullopt;
+  }
+  for (const auto dim : c10::irange(tensor.dim())) {
+    if (tensor.size(dim) > 1 && tensor.stride(dim) != 0) {
+      return std::nullopt;
+    }
+  }
+  const auto start =
+      tensor.storage_offset() * static_cast<int64_t>(tensor.itemsize());
+  return std::pair<int64_t, int64_t>{
+      start, start + static_cast<int64_t>(tensor.itemsize())};
+}
+
+static bool has_statically_disjoint_singleton_interval(
+    const Tensor& self,
+    const Tensor& src) {
+  if (has_symbolic_sizes_or_strides(self) ||
+      has_symbolic_sizes_or_strides(src)) {
+    return false;
+  }
+  const auto src_interval = singleton_byte_interval(src);
+  if (src_interval) {
+    if (!tensor_may_access_byte_interval(
+            self, src_interval->first, src_interval->second)) {
+      return true;
+    }
+  }
+  const auto self_interval = singleton_byte_interval(self);
+  if (self_interval) {
+    if (!tensor_may_access_byte_interval(
+            src, self_interval->first, self_interval->second)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static std::optional<std::vector<std::pair<int64_t, int64_t>>>
+accessed_byte_intervals(const Tensor& tensor) {
+  constexpr int64_t kMaxExactOverlapCheckElements = 32768;
+  if (has_symbolic_sizes_or_strides(tensor)) {
+    return std::nullopt;
+  }
+  if (tensor.numel() > kMaxExactOverlapCheckElements) {
+    return std::nullopt;
+  }
+
+  std::vector<std::pair<int64_t, int64_t>> intervals;
+  intervals.reserve(tensor.numel());
+  if (tensor.numel() == 0) {
+    return intervals;
+  }
+
+  const auto itemsize = static_cast<int64_t>(tensor.itemsize());
+  std::vector<int64_t> index(tensor.dim(), 0);
+  for (const auto linear : c10::irange(tensor.numel())) {
+    (void)linear;
+    auto element_offset = tensor.storage_offset();
+    for (const auto dim : c10::irange(tensor.dim())) {
+      element_offset += index[dim] * tensor.stride(dim);
+    }
+    const auto begin = element_offset * itemsize;
+    intervals.emplace_back(begin, begin + itemsize);
+
+    for (auto dim = tensor.dim(); dim > 0; --dim) {
+      const auto idx = dim - 1;
+      index[idx]++;
+      if (index[idx] < tensor.size(idx)) {
+        break;
+      }
+      index[idx] = 0;
+    }
+  }
+
+  std::sort(intervals.begin(), intervals.end());
+  return intervals;
+}
+
+static std::optional<bool> has_exact_byte_overlap(
+    const Tensor& self,
+    const Tensor& src) {
+  auto self_intervals = accessed_byte_intervals(self);
+  auto src_intervals = accessed_byte_intervals(src);
+  if (!self_intervals || !src_intervals) {
+    return std::nullopt;
+  }
+
+  auto self_iter = self_intervals->begin();
+  auto src_iter = src_intervals->begin();
+  while (self_iter != self_intervals->end() &&
+         src_iter != src_intervals->end()) {
+    if (self_iter->second <= src_iter->first) {
+      ++self_iter;
+      continue;
+    }
+    if (src_iter->second <= self_iter->first) {
+      ++src_iter;
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+static bool has_too_hard_partial_overlap(
+    const Tensor& self,
+    const Tensor& src) {
+  if (has_symbolic_sizes_or_strides(self) ||
+      has_symbolic_sizes_or_strides(src) ||
+      !tensors_alias_same_storage(self, src) ||
+      has_statically_disjoint_byte_ranges(self, src)) {
+    return false;
+  }
+
+  const auto exact_overlap = has_exact_byte_overlap(self, src);
+  if (exact_overlap) {
+    return *exact_overlap;
+  }
+
+  if (has_statically_disjoint_byte_bands(self, src)) {
+    return false;
+  }
+
+  if (has_statically_disjoint_singleton_interval(self, src)) {
+    return false;
+  }
+
+  if (has_statically_disjoint_byte_residue(self, src)) {
+    return false;
+  }
+
+  return true;
+}
+
 static void assert_no_partial_overlap_for_copy(
     const Tensor& self,
     const Tensor& src) {
   const auto lap = at::get_overlap_status(self, src);
   const auto allowed_expanded_src =
       copy_allows_same_start_expanded_src(self, src);
+  const auto same_start_expanded_alias =
+      copy_has_same_start_expanded_alias(self, src);
+  const auto too_hard_storage_alias =
+      lap == at::MemOverlapStatus::TooHard &&
+      has_too_hard_partial_overlap(self, src);
+  const auto copy_overlap_ok =
+      allowed_expanded_src ||
+      (lap != at::MemOverlapStatus::Partial && !same_start_expanded_alias &&
+       !too_hard_storage_alias);
   TORCH_CHECK(
-      (lap != at::MemOverlapStatus::Partial &&
-       !(copy_has_same_start_expanded_alias(self, src) &&
-         !allowed_expanded_src)) ||
-          allowed_expanded_src,
+      copy_overlap_ok,
       "unsupported operation: some elements of the input tensor and "
       "the written-to tensor refer to a single memory location. "
       "Please clone() the tensor before performing the operation.");
@@ -357,16 +840,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   // Exit early if self and src are views of the same data
-  const bool is_same_data = (
-      self.is_alias_of(src) &&
-      self.storage_offset() == src.storage_offset() &&
-      self.strides().equals(src.strides()) &&
-      self.sizes().equals(src.sizes()) &&
-      self.scalar_type() == src.scalar_type() &&
-      self.is_conj() == src.is_conj() &&
-      self.is_neg() == src.is_neg()
-    );
-  if (is_same_data) {
+  if (copy_has_same_data(self, src)) {
     return self;
   }
 

@@ -197,6 +197,11 @@ force_stride_order = make_prim(
     eager_force_stride,
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
 )
+clone_preserve_storage = make_prim(
+    "inductor_clone_preserve_storage(Tensor input) -> Tensor",
+    lambda input: input.clone(),
+    doc="Clone a computed tensor and materialize its full logical storage before view lowering",
+)
 _unsafe_index_put_ = make_prim(
     "_unsafe_index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
     lambda self, indices, values, accumulate=False: torch.ops.aten.index_put_(

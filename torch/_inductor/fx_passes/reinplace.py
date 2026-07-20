@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 import logging
+import math
 import operator
 from collections import defaultdict
 from collections.abc import Callable, Sequence
@@ -80,6 +81,14 @@ def graph_call_function(graph: torch.fx.Graph, fn, *args, **kwargs):
         node.meta["unbacked_bindings"] = symbol_to_path
 
     return node
+
+
+def _copy_overlap_error() -> RuntimeError:
+    return RuntimeError(
+        "unsupported operation: some elements of the input tensor and "
+        "the written-to tensor refer to a single memory location. "
+        "Please clone() the tensor before performing the operation."
+    )
 
 
 @dataclass
@@ -244,6 +253,315 @@ def _node_has_internal_overlap(inp: Any) -> bool:
         return True
 
 
+def _static_int(x: object) -> int | None:
+    try:
+        return int(x)  # type: ignore[arg-type]
+    except (GuardOnDataDependentSymNode, TypeError, ValueError):
+        return None
+
+
+def _same_storage_byte_offset(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    lhs_offset = _static_int(lhs.storage_offset())
+    rhs_offset = _static_int(rhs.storage_offset())
+    return (
+        lhs_offset is not None
+        and rhs_offset is not None
+        and lhs_offset * lhs.element_size() == rhs_offset * rhs.element_size()
+    )
+
+
+def _copy_same_mapping(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    return (
+        lhs.dtype == rhs.dtype
+        and lhs.size() == rhs.size()
+        and lhs.stride() == rhs.stride()
+        and _same_storage_byte_offset(lhs, rhs)
+    )
+
+
+def _copy_allows_same_start_expanded_src(dst: torch.Tensor, src: torch.Tensor) -> bool:
+    if src.dim() > dst.dim() or dst.dtype != src.dtype:
+        return False
+    if not _same_storage_byte_offset(dst, src):
+        return False
+
+    has_expanded_src_dim = False
+    dst_sizes = list(dst.size())
+    dst_strides = list(dst.stride())
+    src_sizes = list(src.size())
+    src_strides = list(src.stride())
+    for offset in range(dst.dim()):
+        dst_dim = dst.dim() - 1 - offset
+        dst_size = _static_int(dst_sizes[dst_dim])
+        if dst_size is None:
+            return False
+        if offset >= src.dim():
+            if dst_size > 1:
+                has_expanded_src_dim = True
+            continue
+
+        src_dim = src.dim() - 1 - offset
+        src_size = _static_int(src_sizes[src_dim])
+        src_stride = _static_int(src_strides[src_dim])
+        dst_stride = _static_int(dst_strides[dst_dim])
+        if src_size is None or src_stride is None or dst_stride is None:
+            return False
+
+        if dst_size == src_size:
+            if dst_size <= 1:
+                continue
+            if src_stride == 0:
+                has_expanded_src_dim = True
+                continue
+            if dst_stride != src_stride:
+                return False
+            continue
+
+        if src_size == 1:
+            if dst_size > 1:
+                has_expanded_src_dim = True
+            continue
+
+        return False
+
+    return has_expanded_src_dim or dst.dim() != src.dim()
+
+
+def _tensor_byte_range(val: torch.Tensor) -> tuple[int, int] | None:
+    storage_offset = _static_int(val.storage_offset())
+    sizes = [_static_int(size) for size in val.size()]
+    strides = [_static_int(stride) for stride in val.stride()]
+    if (
+        storage_offset is None
+        or any(size is None for size in sizes)
+        or any(stride is None for stride in strides)
+    ):
+        return None
+    if val.numel() == 0:
+        return 0, 0
+
+    itemsize = val.element_size()
+    min_offset = storage_offset
+    max_offset = storage_offset
+    for size, stride in zip(sizes, strides):
+        if size is None or stride is None or size <= 1:
+            continue
+        delta = (size - 1) * stride
+        min_offset += min(delta, 0)
+        max_offset += max(delta, 0)
+    return min_offset * itemsize, max_offset * itemsize + itemsize
+
+
+def _tensor_residual_byte_range(
+    val: torch.Tensor, excluded_dim: int
+) -> tuple[int, int] | None:
+    storage_offset = _static_int(val.storage_offset())
+    sizes = [_static_int(size) for size in val.size()]
+    strides = [_static_int(stride) for stride in val.stride()]
+    if (
+        storage_offset is None
+        or any(size is None for size in sizes)
+        or any(stride is None for stride in strides)
+    ):
+        return None
+
+    itemsize = val.element_size()
+    start = storage_offset * itemsize
+    min_offset = start
+    max_offset = start
+    for dim, (size, stride) in enumerate(zip(sizes, strides)):
+        if dim == excluded_dim or size is None or stride is None or size <= 1:
+            continue
+        delta = (size - 1) * stride * itemsize
+        min_offset += min(delta, 0)
+        max_offset += max(delta, 0)
+    return min_offset, max_offset + itemsize
+
+
+def _tensors_have_disjoint_byte_bands(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    lhs_sizes = [_static_int(size) for size in lhs.size()]
+    rhs_sizes = [_static_int(size) for size in rhs.size()]
+    lhs_strides = [_static_int(stride) for stride in lhs.stride()]
+    rhs_strides = [_static_int(stride) for stride in rhs.stride()]
+    if (
+        any(size is None for size in lhs_sizes)
+        or any(size is None for size in rhs_sizes)
+        or any(stride is None for stride in lhs_strides)
+        or any(stride is None for stride in rhs_strides)
+    ):
+        return False
+
+    lhs_itemsize = lhs.element_size()
+    rhs_itemsize = rhs.element_size()
+    for lhs_dim, (lhs_size, lhs_stride) in enumerate(zip(lhs_sizes, lhs_strides)):
+        if lhs_size is None or lhs_stride is None or lhs_size <= 1:
+            continue
+        lhs_byte_stride = lhs_stride * lhs_itemsize
+        if lhs_byte_stride <= 0:
+            continue
+        for rhs_dim, (rhs_size, rhs_stride) in enumerate(zip(rhs_sizes, rhs_strides)):
+            if rhs_size is None or rhs_stride is None or rhs_size <= 1:
+                continue
+            rhs_byte_stride = rhs_stride * rhs_itemsize
+            if rhs_byte_stride != lhs_byte_stride:
+                continue
+            lhs_range = _tensor_residual_byte_range(lhs, lhs_dim)
+            rhs_range = _tensor_residual_byte_range(rhs, rhs_dim)
+            if lhs_range is None or rhs_range is None:
+                continue
+            if lhs_range[1] <= rhs_range[0] or rhs_range[1] <= lhs_range[0]:
+                union_start = min(lhs_range[0], rhs_range[0])
+                union_end = max(lhs_range[1], rhs_range[1])
+                if union_end - union_start <= lhs_byte_stride:
+                    return True
+    return False
+
+
+def _byte_stride_gcd(val: torch.Tensor) -> int | None:
+    sizes = [_static_int(size) for size in val.size()]
+    strides = [_static_int(stride) for stride in val.stride()]
+    if any(size is None for size in sizes) or any(stride is None for stride in strides):
+        return None
+
+    result = 0
+    for size, stride in zip(sizes, strides):
+        if size is None or stride is None or size <= 1 or stride == 0:
+            continue
+        result = math.gcd(result, abs(stride * val.element_size()))
+    return result
+
+
+def _tensors_have_disjoint_byte_residue(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    lhs_offset = _static_int(lhs.storage_offset())
+    rhs_offset = _static_int(rhs.storage_offset())
+    lhs_gcd = _byte_stride_gcd(lhs)
+    rhs_gcd = _byte_stride_gcd(rhs)
+    if lhs_offset is None or rhs_offset is None or lhs_gcd is None or rhs_gcd is None:
+        return False
+    combined_gcd = math.gcd(lhs_gcd, rhs_gcd)
+    if combined_gcd == 0:
+        return False
+
+    lhs_start = lhs_offset * lhs.element_size()
+    rhs_start = rhs_offset * rhs.element_size()
+    residue = (lhs_start - rhs_start) % combined_gcd
+    distance = min(residue, combined_gcd - residue)
+    return distance >= max(lhs.element_size(), rhs.element_size())
+
+
+_COPY_OVERLAP_EXACT_MAX_ELEMENTS = 65536
+
+
+def _byte_intervals_for_tensor(
+    val: torch.Tensor,
+) -> list[tuple[int, int]] | None:
+    sizes = [_static_int(size) for size in val.size()]
+    strides = [_static_int(stride) for stride in val.stride()]
+    storage_offset = _static_int(val.storage_offset())
+    if (
+        storage_offset is None
+        or any(size is None for size in sizes)
+        or any(stride is None for stride in strides)
+    ):
+        return None
+
+    concrete_sizes = [size for size in sizes if size is not None]
+    concrete_strides = [stride for stride in strides if stride is not None]
+    numel = 1
+    for size in concrete_sizes:
+        numel *= size
+        if numel > _COPY_OVERLAP_EXACT_MAX_ELEMENTS:
+            return None
+
+    itemsize = val.element_size()
+    intervals = []
+    for point in itertools.product(*(range(size) for size in concrete_sizes)):
+        storage_index = storage_offset + sum(
+            index * stride for index, stride in zip(point, concrete_strides)
+        )
+        start = storage_index * itemsize
+        intervals.append((start, start + itemsize))
+    return intervals
+
+
+def _byte_interval_sets_are_disjoint(
+    lhs: list[tuple[int, int]], rhs: list[tuple[int, int]]
+) -> bool:
+    lhs = sorted(lhs)
+    rhs = sorted(rhs)
+    lhs_idx = rhs_idx = 0
+    while lhs_idx < len(lhs) and rhs_idx < len(rhs):
+        lhs_start, lhs_end = lhs[lhs_idx]
+        rhs_start, rhs_end = rhs[rhs_idx]
+        if lhs_end <= rhs_start:
+            lhs_idx += 1
+        elif rhs_end <= lhs_start:
+            rhs_idx += 1
+        else:
+            return False
+    return True
+
+
+def _tensors_have_exact_disjoint_byte_intervals(
+    lhs: torch.Tensor, rhs: torch.Tensor
+) -> bool:
+    lhs_intervals = _byte_intervals_for_tensor(lhs)
+    rhs_intervals = _byte_intervals_for_tensor(rhs)
+    if lhs_intervals is None or rhs_intervals is None:
+        return False
+    return _byte_interval_sets_are_disjoint(lhs_intervals, rhs_intervals)
+
+
+def _aliasing_mutation_copy_may_overlap(dst: torch.Tensor, src: torch.Tensor) -> bool:
+    if _copy_same_mapping(dst, src) or _copy_allows_same_start_expanded_src(dst, src):
+        return False
+
+    dst_range = _tensor_byte_range(dst)
+    src_range = _tensor_byte_range(src)
+    if (
+        dst_range is not None
+        and src_range is not None
+        and (dst_range[1] <= src_range[0] or src_range[1] <= dst_range[0])
+    ):
+        return False
+    if _tensors_have_disjoint_byte_bands(dst, src):
+        return False
+    if _tensors_have_disjoint_byte_residue(dst, src):
+        return False
+    if _tensors_have_exact_disjoint_byte_intervals(dst, src):
+        return False
+    return True
+
+
+def _fake_view_for_scatter_dst(node: torch.fx.Node) -> torch.Tensor | None:
+    if node.target not in _SCATTER_OP_TO_VIEW or len(node.args) < 1:
+        return None
+    inp = node.args[0]
+    if not isinstance(inp, torch.fx.Node):
+        return None
+    view_target = _SCATTER_OP_TO_VIEW[node.target]
+    fake_args, fake_kwargs = pytree.tree_map(
+        lambda arg: arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg,
+        (node.args[2:], node.kwargs),
+    )
+    fake_mode = detect_fake_mode((inp.meta["val"], fake_args, fake_kwargs))
+    with (
+        fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+        if fake_mode and fake_mode.shape_env
+        else nullcontext()
+    ):
+        return view_target(inp.meta["val"], *fake_args, **fake_kwargs)
+
+
+def _check_aliasing_mutation_overlap(node: torch.fx.Node, src: torch.fx.Node) -> None:
+    dst_val = _fake_view_for_scatter_dst(node)
+    if dst_val is None:
+        raise _copy_overlap_error()
+    src_val = src.meta["val"]
+    if _aliasing_mutation_copy_may_overlap(dst_val, src_val):
+        raise _copy_overlap_error()
+
+
 def _scatter_input_has_internal_overlap(node: torch.fx.Node) -> bool:
     if len(node.args) < 1:
         return False
@@ -271,10 +589,33 @@ def _scatter_input_has_nonzero_storage_offset(node: torch.fx.Node) -> bool:
         return True
 
 
+def _node_is_graph_input_view(node: torch.fx.Node) -> bool:
+    while isinstance(node, torch.fx.Node):
+        if node.op == "placeholder":
+            return True
+        if node.op != "call_function" or not _is_view_op(node.target):
+            return False
+        base = node.args[0]
+        if not isinstance(base, torch.fx.Node):
+            return False
+        node = base
+    return False
+
+
+def _scatter_input_is_graph_input_view(node: torch.fx.Node) -> bool:
+    if len(node.args) < 1 or not isinstance(node.args[0], torch.fx.Node):
+        return False
+    return _node_is_graph_input_view(node.args[0])
+
+
 def _scatter_needs_functional_preserve_strides(node: torch.fx.Node) -> bool:
-    return _scatter_uses_as_strided_view(
-        node
-    ) and _scatter_input_has_nonzero_storage_offset(node)
+    return _scatter_uses_as_strided_view(node) and (
+        _scatter_input_has_nonzero_storage_offset(node)
+        or (
+            _scatter_input_is_graph_input_view(node)
+            and not _scatter_input_has_internal_overlap(node)
+        )
+    )
 
 
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
@@ -296,7 +637,7 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
             or _scatter_input_has_internal_overlap(node)
             or _scatter_needs_functional_preserve_strides(node)
         ):
-            return bool(node.meta.get("copy_overlap_from_aliasing_mutation"))
+            return False
         return True
 
     if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
@@ -305,7 +646,7 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     # If the output is copied back into the input, this forces both to be
     # realized as the output is a user of the input.
     if _scatter_copied_back_to_input_with_aliasing_src(node):
-        return bool(node.meta.get("copy_overlap_from_aliasing_mutation"))
+        return False
     if inp.op in ("placeholder", "get_attr") and any(  # type: ignore[union-attr]
         user.target is aten.copy_.default and user.args[0] is inp for user in node.users
     ):
@@ -325,7 +666,7 @@ def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
             _scatter_input_aliasing_src(node)
             or _scatter_input_has_internal_overlap(node)
             or _scatter_needs_functional_preserve_strides(node)
-        ) and not node.meta.get("copy_overlap_from_aliasing_mutation")
+        )
         use_mutation = node.target is _inplace_generalized_scatter or (
             scatter_always_uses_mutation(node)
             and not keep_functional_for_public_scatter
@@ -336,8 +677,6 @@ def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
                 new_node = _decompose_scatter_mutating(graph, node)
             else:
                 new_node = _decompose_scatter_functional(graph, node)
-            if node.meta.get("copy_overlap_from_aliasing_mutation"):
-                new_node.meta["copy_overlap_from_aliasing_mutation"] = True
 
         node.replace_all_uses_with(new_node)
         graph.erase_node(node)
@@ -425,6 +764,11 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
 
         if not can_fuse():
             with graph.inserting_before(node):
+                aliasing_mutation = from_aliasing_mutation(node, inp, src)
+                if aliasing_mutation:
+                    if not isinstance(src, torch.fx.Node):
+                        raise AssertionError(f"expected FX node src, got {type(src)}")
+                    _check_aliasing_mutation_overlap(node, src)
                 new_node = graph_call_function(
                     graph,
                     _generalized_scatter,
@@ -432,14 +776,17 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                     src,
                     [scatter_view_op],
                 )
-                if from_aliasing_mutation(node, inp, src):
-                    new_node.meta["copy_overlap_from_aliasing_mutation"] = True
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
             return
 
         _src_inp, src_src, src_scatter_view_op = src.args  # type: ignore[union-attr]
         with graph.inserting_before(src):  # type: ignore[arg-type]
+            aliasing_mutation = from_aliasing_mutation(node, inp, src)
+            if aliasing_mutation:
+                if not isinstance(src, torch.fx.Node):
+                    raise AssertionError(f"expected FX node src, got {type(src)}")
+                _check_aliasing_mutation_overlap(node, src)
             new_node = graph_call_function(
                 graph,
                 _generalized_scatter,
@@ -447,10 +794,6 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                 src_src,
                 [scatter_view_op, *src_scatter_view_op],  # type: ignore[misc]
             )
-            if from_aliasing_mutation(node, inp, src) or src.meta.get(  # type: ignore[union-attr]
-                "copy_overlap_from_aliasing_mutation"
-            ):
-                new_node.meta["copy_overlap_from_aliasing_mutation"] = True
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
 

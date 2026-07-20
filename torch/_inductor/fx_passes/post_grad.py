@@ -3,6 +3,7 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
@@ -21,11 +22,21 @@ from torch._inductor.custom_graph_pass import (
 )
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
-from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
-from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch._prims_common import (
+    compute_required_storage_length,
+    is_boolean_dtype,
+    is_expandable_to,
+    is_integer_dtype,
+)
+from torch.fx.experimental.symbolic_shapes import (
+    GuardOnDataDependentSymNode,
+    statically_known_true,
+    sym_eq,
+)
+from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config, ir, pattern_matcher  # noqa: F401
+from .. import config, inductor_prims, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
@@ -266,6 +277,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
+    GraphTransformObserver(gm, "preserve_as_strided_view_storage").apply_graph_pass(
+        preserve_as_strided_view_storage
+    )
+
     if config._micro_pipeline_tp:
         micro_pipeline_tp_pass(gm.graph)
 
@@ -462,6 +477,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
     GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
         decompose_auto_functionalized
+    )
+    GraphTransformObserver(gm, "reject_dtype_view_copy_aliases").apply_graph_pass(
+        reject_dtype_view_copy_aliases
     )
     GraphTransformObserver(gm, "decompose_scan_to_while_loop").apply_gm_pass(
         decompose_scan_to_while_loop
@@ -1148,6 +1166,25 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
     )
 
 
+def same_strided_storage_meta(node1: torch.fx.Node, node2: torch.fx.Node) -> bool:
+    val1 = node1.meta.get("val")
+    val2 = node2.meta.get("val")
+    if not (
+        isinstance(val1, torch.Tensor)
+        and isinstance(val2, torch.Tensor)
+        and val1.layout == torch.strided
+        and val2.layout == torch.strided
+    ):
+        return False
+    if not torch._C._has_storage(val1) or not torch._C._has_storage(val2):
+        return False
+    return statically_known_true(
+        sym_eq(val1.storage_offset(), val2.storage_offset())
+    ) and statically_known_true(
+        sym_eq(val1.untyped_storage().nbytes(), val2.untyped_storage().nbytes())
+    )
+
+
 noop_registry: dict[Any, Any] = {}
 
 
@@ -1309,6 +1346,14 @@ def remove_noop_ops(graph: torch.fx.Graph):
                     and dst.kwargs.get("pin_memory") is True
                 ):
                     continue
+                if not isinstance(dst, torch.fx.Node):
+                    continue
+                if (
+                    get_node_storage(dst) != get_node_storage(src)
+                    or not same_meta(dst, src)
+                    or not same_strided_storage_meta(dst, src)
+                ):
+                    continue
 
             # Don't introduce new aliasing between inputs and outputs.
             # See fx_passes/README.md for a discussion of why this is
@@ -1366,6 +1411,111 @@ def remove_assert_ops(graph: torch.fx.Graph):
         op="call_function", target=torch.ops.aten._assert_tensor_metadata.default
     ):
         graph.erase_node(node)
+
+
+def _view_base_node(node: torch.fx.Node) -> torch.fx.Node | None:
+    if node.op != "call_function" or not _is_view_op(node.target) or not node.args:
+        return None
+    base = node.args[0]
+    return base if isinstance(base, torch.fx.Node) else None
+
+
+def _required_storage_bytes(
+    size: Sequence[Any], stride: Sequence[Any], storage_offset: Any, element_size: int
+):
+    if pytree.tree_any(
+        lambda arg: isinstance(arg, torch.fx.Node), (size, stride, storage_offset)
+    ):
+        return None
+    # pyrefly: ignore [bad-argument-type]
+    return compute_required_storage_length(size, stride, storage_offset) * element_size
+
+
+def _node_required_storage_bytes(node: torch.fx.Node):
+    val = node.meta.get("val")
+    if not isinstance(val, torch.Tensor):
+        return None
+    return _required_storage_bytes(
+        val.size(), val.stride(), val.storage_offset(), val.element_size()
+    )
+
+
+def _storage_guard_or_false(expr: Any) -> bool:
+    if statically_known_true(expr):
+        return True
+    try:
+        return V.graph.sizevars.guard_or_false(expr)
+    except (AttributeError, GuardOnDataDependentSymNode, TypeError):
+        pass
+    try:
+        return bool(V.graph.sizevars.shape_env.evaluate_expr(expr))
+    except (AttributeError, GuardOnDataDependentSymNode, TypeError):
+        return False
+
+
+def _storage_int_hint(expr: Any) -> int | None:
+    try:
+        return int(expr)
+    except (GuardOnDataDependentSymNode, TypeError, ValueError):
+        return None
+
+
+def _storage_leq(left: Any, right: Any) -> bool:
+    if _storage_guard_or_false(left <= right):
+        return True
+    left_hint = _storage_int_hint(left)
+    right_hint = _storage_int_hint(right)
+    return left_hint is not None and right_hint is not None and left_hint <= right_hint
+
+
+def preserve_as_strided_view_storage(graph: torch.fx.Graph) -> None:
+    for node in list(graph.nodes):
+        if (
+            node.op != "call_function"
+            or node.target is not aten.as_strided.default
+            or len(node.args) < 4
+            or not isinstance(node.args[0], torch.fx.Node)
+            or node.args[3] is None
+        ):
+            continue
+
+        inp = node.args[0]
+        inp_val = inp.meta.get("val")
+        if not isinstance(inp_val, torch.Tensor):
+            continue
+        output_storage_bytes = _required_storage_bytes(
+            node.args[1], node.args[2], node.args[3], inp_val.element_size()
+        )
+        if output_storage_bytes is None:
+            continue
+
+        view_chain = []
+        root = inp
+        while True:
+            base = _view_base_node(root)
+            if base is None:
+                break
+            view_chain.append(root)
+            root = base
+
+        if not view_chain or root.op in ("placeholder", "get_attr"):
+            continue
+        root_val = root.meta.get("val")
+        if not isinstance(root_val, torch.Tensor):
+            continue
+        root_storage_bytes = _node_required_storage_bytes(root)
+        if root_storage_bytes is None or not _storage_leq(
+            output_storage_bytes, root_storage_bytes
+        ):
+            continue
+
+        first_view = view_chain[-1]
+        with graph.inserting_after(root):
+            clone = graph.call_function(inductor_prims.clone_preserve_storage, (root,))
+            clone.meta["val"] = root_val.clone()
+        first_view.update_arg(0, clone)
+
+    graph.lint()
 
 
 def apply_pass_to_subgraphs(pass_fn: Callable[[fx.Graph], None], graph: fx.Graph):
@@ -1530,6 +1680,232 @@ def fix_auto_functionalized_dtype_views(graph: torch.fx.Graph) -> None:
 
         if len(keep) != len(only_clone_these):
             node.meta["only_clone_these_tensors"] = keep
+
+
+_COPY_OVERLAP_EXACT_MAX_ELEMENTS = 65536
+
+
+def _static_int(x: object) -> int | None:
+    try:
+        return int(x)  # type: ignore[arg-type]
+    except (GuardOnDataDependentSymNode, TypeError, ValueError):
+        return None
+
+
+def _byte_intervals_for_tensor(
+    val: torch.Tensor,
+) -> list[tuple[int, int]] | None:
+    sizes = [_static_int(size) for size in val.size()]
+    strides = [_static_int(stride) for stride in val.stride()]
+    storage_offset = _static_int(val.storage_offset())
+    if (
+        storage_offset is None
+        or any(size is None for size in sizes)
+        or any(stride is None for stride in strides)
+    ):
+        return None
+
+    concrete_sizes = [size for size in sizes if size is not None]
+    concrete_strides = [stride for stride in strides if stride is not None]
+    numel = 1
+    for size in concrete_sizes:
+        numel *= size
+        if numel > _COPY_OVERLAP_EXACT_MAX_ELEMENTS:
+            return None
+
+    itemsize = val.element_size()
+    intervals = []
+    for point in itertools.product(*(range(size) for size in concrete_sizes)):
+        storage_index = storage_offset + sum(
+            index * stride for index, stride in zip(point, concrete_strides)
+        )
+        start = storage_index * itemsize
+        intervals.append((start, start + itemsize))
+    return intervals
+
+
+def _byte_interval_sets_are_disjoint(
+    lhs: list[tuple[int, int]], rhs: list[tuple[int, int]]
+) -> bool:
+    lhs = sorted(lhs)
+    rhs = sorted(rhs)
+    lhs_idx = rhs_idx = 0
+    while lhs_idx < len(lhs) and rhs_idx < len(rhs):
+        lhs_start, lhs_end = lhs[lhs_idx]
+        rhs_start, rhs_end = rhs[rhs_idx]
+        if lhs_end <= rhs_start:
+            lhs_idx += 1
+        elif rhs_end <= lhs_start:
+            rhs_idx += 1
+        else:
+            return False
+    return True
+
+
+def _tensors_have_exact_disjoint_byte_intervals(
+    lhs: torch.Tensor, rhs: torch.Tensor
+) -> bool:
+    lhs_intervals = _byte_intervals_for_tensor(lhs)
+    rhs_intervals = _byte_intervals_for_tensor(rhs)
+    if lhs_intervals is None or rhs_intervals is None:
+        return False
+    return _byte_interval_sets_are_disjoint(lhs_intervals, rhs_intervals)
+
+
+def _byte_stride_gcd(val: torch.Tensor) -> int | None:
+    sizes = [_static_int(size) for size in val.size()]
+    strides = [_static_int(stride) for stride in val.stride()]
+    if any(size is None for size in sizes) or any(stride is None for stride in strides):
+        return None
+
+    result = 0
+    for size, stride in zip(sizes, strides):
+        if size is None or stride is None or size <= 1 or stride == 0:
+            continue
+        result = math.gcd(result, abs(stride * val.element_size()))
+    return result
+
+
+def _tensors_have_disjoint_byte_residue(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    lhs_offset = _static_int(lhs.storage_offset())
+    rhs_offset = _static_int(rhs.storage_offset())
+    lhs_gcd = _byte_stride_gcd(lhs)
+    rhs_gcd = _byte_stride_gcd(rhs)
+    if lhs_offset is None or rhs_offset is None or lhs_gcd is None or rhs_gcd is None:
+        return False
+    combined_gcd = math.gcd(lhs_gcd, rhs_gcd)
+    if combined_gcd == 0:
+        return False
+
+    lhs_start = lhs_offset * lhs.element_size()
+    rhs_start = rhs_offset * rhs.element_size()
+    residue = (lhs_start - rhs_start) % combined_gcd
+    distance = min(residue, combined_gcd - residue)
+    return distance >= max(lhs.element_size(), rhs.element_size())
+
+
+def _tensor_residual_byte_range(
+    val: torch.Tensor, excluded_dim: int
+) -> tuple[int, int] | None:
+    sizes = [_static_int(size) for size in val.size()]
+    strides = [_static_int(stride) for stride in val.stride()]
+    storage_offset = _static_int(val.storage_offset())
+    if (
+        storage_offset is None
+        or any(size is None for size in sizes)
+        or any(stride is None for stride in strides)
+    ):
+        return None
+
+    itemsize = val.element_size()
+    start = storage_offset * itemsize
+    min_offset = start
+    max_offset = start
+    for dim, (size, stride) in enumerate(zip(sizes, strides)):
+        if dim == excluded_dim or size is None or stride is None or size <= 1:
+            continue
+        delta = (size - 1) * stride * itemsize
+        min_offset += min(delta, 0)
+        max_offset += max(delta, 0)
+    return min_offset, max_offset + itemsize
+
+
+def _tensors_have_disjoint_byte_bands(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    lhs_sizes = [_static_int(size) for size in lhs.size()]
+    rhs_sizes = [_static_int(size) for size in rhs.size()]
+    lhs_strides = [_static_int(stride) for stride in lhs.stride()]
+    rhs_strides = [_static_int(stride) for stride in rhs.stride()]
+    if (
+        any(size is None for size in lhs_sizes)
+        or any(size is None for size in rhs_sizes)
+        or any(stride is None for stride in lhs_strides)
+        or any(stride is None for stride in rhs_strides)
+    ):
+        return False
+
+    lhs_itemsize = lhs.element_size()
+    rhs_itemsize = rhs.element_size()
+    for lhs_dim, (lhs_size, lhs_stride) in enumerate(zip(lhs_sizes, lhs_strides)):
+        if lhs_size is None or lhs_stride is None or lhs_size <= 1:
+            continue
+        lhs_byte_stride = lhs_stride * lhs_itemsize
+        if lhs_byte_stride <= 0:
+            continue
+        for rhs_dim, (rhs_size, rhs_stride) in enumerate(zip(rhs_sizes, rhs_strides)):
+            if rhs_size is None or rhs_stride is None or rhs_size <= 1:
+                continue
+            rhs_byte_stride = rhs_stride * rhs_itemsize
+            if rhs_byte_stride != lhs_byte_stride:
+                continue
+            lhs_range = _tensor_residual_byte_range(lhs, lhs_dim)
+            rhs_range = _tensor_residual_byte_range(rhs, rhs_dim)
+            if lhs_range is None or rhs_range is None:
+                continue
+            if lhs_range[1] <= rhs_range[0] or rhs_range[1] <= lhs_range[0]:
+                union_start = min(lhs_range[0], rhs_range[0])
+                union_end = max(lhs_range[1], rhs_range[1])
+                if union_end - union_start <= lhs_byte_stride:
+                    return True
+    return False
+
+
+def reject_dtype_view_copy_aliases(graph: torch.fx.Graph) -> None:
+    for node in graph.nodes:
+        if (
+            not (
+                (
+                    node.op == "call_function"
+                    and node.target in (aten.copy.default, aten.copy_.default)
+                )
+                or (node.op == "call_method" and node.target == "copy_")
+            )
+            or len(node.args) < 2
+            or not isinstance(node.args[0], torch.fx.Node)
+            or not isinstance(node.args[1], torch.fx.Node)
+        ):
+            continue
+        self, src = node.args[:2]
+        self_storage = get_node_storage(self)
+        src_storage = get_node_storage(src)
+        self_val = self.meta["val"]
+        src_val = src.meta["val"]
+        if self_val.element_size() == src_val.element_size():
+            continue
+        if self_storage is None or src_storage is None or self_storage != src_storage:
+            continue
+        if statically_known_true(sym_eq(self_val.numel(), 0)) or statically_known_true(
+            sym_eq(src_val.numel(), 0)
+        ):
+            continue
+        self_start = self_val.storage_offset() * self_val.element_size()
+        self_end = (
+            compute_required_storage_length(
+                self_val.size(), self_val.stride(), self_val.storage_offset()
+            )
+            * self_val.element_size()
+        )
+        src_start = src_val.storage_offset() * src_val.element_size()
+        src_end = (
+            compute_required_storage_length(
+                src_val.size(), src_val.stride(), src_val.storage_offset()
+            )
+            * src_val.element_size()
+        )
+        if statically_known_true(self_end <= src_start) or statically_known_true(
+            src_end <= self_start
+        ):
+            continue
+        if _tensors_have_disjoint_byte_residue(self_val, src_val):
+            continue
+        if _tensors_have_disjoint_byte_bands(self_val, src_val):
+            continue
+        if _tensors_have_exact_disjoint_byte_intervals(self_val, src_val):
+            continue
+        raise RuntimeError(
+            "unsupported operation: some elements of the input tensor and "
+            "the written-to tensor refer to a single memory location. "
+            "Please clone() the tensor before performing the operation."
+        )
 
 
 def decompose_auto_functionalized(graph):
@@ -1753,6 +2129,25 @@ def cat_splitwithsizes_replace(match, input_):
     return input_
 
 
+# reciprocal(sqrt(x)) -> rsqrt(x): an unconditional algebraic identity
+# (1 / sqrt(x) == rsqrt(x)) that saves one op per element in the generated kernel.
+@register_graph_pattern(
+    CallFunction(
+        aten.reciprocal.default,
+        CallFunction(aten.sqrt.default, KeywordArg("x")),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+)
+def reciprocal_sqrt_to_rsqrt(match: Match, x):
+    """reciprocal(sqrt(x)) -> rsqrt(x)"""
+
+    def repl(x):
+        return aten.rsqrt(x)
+
+    match.replace_by_example(repl, [x])
+
+
 def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
@@ -1801,6 +2196,19 @@ def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
+    mat1, mat2 = match.args
+    inp_val = inp.meta["val"]
+    mat1_val = mat1.meta["val"]
+    mat2_val = mat2.meta["val"]
+    if inp_val.dtype != mat1_val.dtype or inp_val.dtype != mat2_val.dtype:
+        return False
+    if inp_val.device != mat1_val.device or inp_val.device != mat2_val.device:
+        return False
+    beta = match.kwargs.get("beta", 1)
+    if inp_val.device.type != "cuda" and beta == 0:
+        mm_shape = mat1_val.shape[0], mat2_val.shape[1]
+        if not is_expandable_to(inp_val.shape, mm_shape):
+            return False
 
     output = match.output_node()
     if not _is_bias_like_addmm_input(inp, output):
@@ -1851,10 +2259,16 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         ):
             return
 
+    drop_input_for_beta_zero = inp.meta["val"].device.type == "cuda"
+
     def repl(inp, x1, x2, alpha, beta):
+        if alpha == 0 and beta == 0 and drop_input_for_beta_zero:
+            return x1.new_zeros((x1.shape[0], x2.shape[1]))
         mm_result = x1 @ x2
         if alpha != 1:
             mm_result = alpha * mm_result
+        if beta == 0 and drop_input_for_beta_zero:
+            return mm_result
         if beta != 1:
             inp = beta * inp
         return inp + mm_result

@@ -1850,7 +1850,7 @@ def make_channels_last_1d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 3
     for idx in (1, -1, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1870,7 +1870,7 @@ def make_channels_last_2d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 4
     for idx in (1, -1, -2, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1889,7 +1889,7 @@ def make_channels_last_3d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 5
     for idx in (1, -1, -2, -3, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -2174,27 +2174,7 @@ def layout_or_default(layout: torch.layout | None) -> torch.layout:
     return layout if layout is not None else torch.strided
 
 
-def _has_internal_overlap_for_clone_preserve_strides(x):
-    from torch.fx.experimental.symbolic_shapes import (
-        free_unbacked_symbols,
-        guard_or_false,
-    )
-
-    if not free_unbacked_symbols(x):
-        return torch._debug_has_internal_overlap(x) == 1
-
-    return any(
-        guard_or_false(size > 1) and guard_or_false(stride == 0)
-        for size, stride in zip(x.size(), x.stride())
-    )
-
-
 def clone_preserve_strides(x):
-    # Match at::native::clone_preserve_strides: overlapping inputs cannot
-    # preserve their strides because later scatter writes would alias.
-    if _has_internal_overlap_for_clone_preserve_strides(x):
-        return x.clone()
-
     needed_size = compute_required_storage_length(
         x.size(), x.stride(), x.storage_offset()
     )

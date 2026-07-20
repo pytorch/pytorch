@@ -1,8 +1,8 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/TensorBase.h>
+#include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/irange.h>
 #include <optional>
-#include <string>
 
 namespace at {
 
@@ -71,16 +71,10 @@ static bool same_address_mapping(const TensorImpl* a, const TensorImpl* b) {
   return true;
 }
 
-static bool has_expanded_dim(const TensorImpl* t) {
-  for (const auto i : c10::irange(t->dim())) {
-    if (t->sizes()[i] > 1 && t->strides()[i] == 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static bool has_symbolic_sizes_or_strides(const TensorImpl* t) {
+  if (t->sym_storage_offset().is_symbolic()) {
+    return true;
+  }
   for (const auto& size : t->sym_sizes()) {
     if (size.is_symbolic()) {
       return true;
@@ -99,6 +93,16 @@ static std::optional<bool> maybe_guard_bool(const c10::SymBool& value) {
     return std::nullopt;
   }
   return TORCH_GUARD_OR_FALSE(value);
+}
+
+static std::optional<bool> same_storage_byte_offset(
+    const TensorImpl* a,
+    const TensorImpl* b) {
+  const auto a_offset =
+      a->sym_storage_offset() * c10::SymInt(static_cast<int64_t>(a->itemsize()));
+  const auto b_offset =
+      b->sym_storage_offset() * c10::SymInt(static_cast<int64_t>(b->itemsize()));
+  return maybe_guard_bool(a_offset.sym_eq(b_offset));
 }
 
 static MemOverlapStatus symbolic_same_start_overlap(
@@ -156,6 +160,10 @@ static MemOverlapStatus get_overlap_status_impl(
     const TensorImpl* a,
     const TensorImpl* b) {
   if (a == b) return MemOverlapStatus::Full;
+  if (a == c10::UndefinedTensorImpl::singleton() ||
+      b == c10::UndefinedTensorImpl::singleton()) {
+    return MemOverlapStatus::TooHard;
+  }
   const auto has_symbolic_sizes_strides =
       a->has_symbolic_sizes_strides() || b->has_symbolic_sizes_strides() ||
       has_symbolic_sizes_or_strides(a) || has_symbolic_sizes_or_strides(b);
@@ -164,22 +172,24 @@ static MemOverlapStatus get_overlap_status_impl(
   }
   if (a->layout() == kStrided && b->layout() == kStrided) {
     const auto& a_storage = a->unsafe_storage();
-    if (a_storage && a_storage.is_alias_of(b->unsafe_storage()) &&
-        a->data() == b->data()) {
-      if (has_symbolic_sizes_strides) {
-        return symbolic_same_start_overlap(a, b);
+    if (a_storage && a_storage.is_alias_of(b->unsafe_storage())) {
+      const auto same_start = same_storage_byte_offset(a, b);
+      if (!same_start) {
+        return MemOverlapStatus::TooHard;
       }
-      // Even when the views are not non-overlapping-and-dense, two aliases that
-      // start at the same address overlap in at least their first element.
-      // When the per-element address mapping differs, this is a partial overlap
-      // and in-place TensorIterator ops cannot safely pick an execution order.
-      if (same_address_mapping(a, b)) {
-        return MemOverlapStatus::Full;
-      }
-      if (has_expanded_dim(a) || has_expanded_dim(b)) {
+      if (*same_start) {
+        if (has_symbolic_sizes_strides) {
+          return symbolic_same_start_overlap(a, b);
+        }
+        // Even when the views are not non-overlapping-and-dense, two aliases that
+        // start at the same address overlap in at least their first element.
+        // When the per-element address mapping differs, this is a partial overlap
+        // and in-place TensorIterator ops cannot safely pick an execution order.
+        if (same_address_mapping(a, b)) {
+          return MemOverlapStatus::Full;
+        }
         return MemOverlapStatus::Partial;
       }
-      return MemOverlapStatus::Partial;
     }
   }
   if (has_symbolic_sizes_strides) {
@@ -195,10 +205,12 @@ static MemOverlapStatus get_overlap_status_impl(
   // which we will miss.
   const auto& a_storage = a->unsafe_storage();
   if (a_storage && a_storage.is_alias_of(b->unsafe_storage())) {
-    const auto a_begin = static_cast<const char*>(a->data());
-    const auto a_end = a_begin + a->numel() * a->itemsize();
-    const auto b_begin = static_cast<const char*>(b->data());
-    const auto b_end = b_begin + b->numel() * b->itemsize();
+    const auto a_itemsize = static_cast<int64_t>(a->itemsize());
+    const auto b_itemsize = static_cast<int64_t>(b->itemsize());
+    const auto a_begin = a->storage_offset() * a_itemsize;
+    const auto a_end = a_begin + a->numel() * a_itemsize;
+    const auto b_begin = b->storage_offset() * b_itemsize;
+    const auto b_end = b_begin + b->numel() * b_itemsize;
 
     if (a_begin == b_begin && a_end == b_end) {
       return (a->strides() == b->strides()) ?
@@ -212,15 +224,7 @@ static MemOverlapStatus get_overlap_status_impl(
 }
 
 MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
-  try {
-    return get_overlap_status_impl(a, b);
-  } catch (const c10::Error& e) {
-    if (std::string(e.what_without_backtrace())
-            .find("symbolic sizes/strides") != std::string::npos) {
-      return MemOverlapStatus::TooHard;
-    }
-    throw;
-  }
+  return get_overlap_status_impl(a, b);
 }
 
 void assert_no_partial_overlap(const TensorBase& a, const TensorBase& b) {

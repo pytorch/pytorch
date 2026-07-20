@@ -67,6 +67,7 @@ from torch.utils._sympy.functions import (
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
+from .dependencies import MemoryDep, StarDep
 from .ir import (
     BaseView,
     DtypeView,
@@ -1718,6 +1719,8 @@ def as_strided(
     *,
     storage_offset_relative_to_input_storage=True,
 ):
+    orig_x = x
+    orig_storage_offset = storage_offset
     explicit_storage_offset = (
         storage_offset is not None and storage_offset_relative_to_input_storage
     )
@@ -1744,6 +1747,12 @@ def as_strided(
         convert_symint_to_expr(storage_offset) if storage_offset is not None else 0
     )
     storage_data = storage.data if isinstance(storage, ir.StorageBox) else storage
+    if storage_offset_relative_to_input_storage and isinstance(
+        storage_data, ir.FallbackKernel
+    ):
+        return fallback_handler(aten.as_strided.default)(
+            orig_x, size, stride, orig_storage_offset
+        )
     if explicit_storage_offset and isinstance(storage_data, ir.InputBuffer):
         # Runtime graph input pointers already include the input tensor's
         # storage_offset(), but explicit as_strided offsets are storage-relative.
@@ -1758,6 +1767,18 @@ def as_strided(
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset),
     )
+    if V.graph.sizevars.statically_known_true(
+        sympy.Gt(new_layout.storage_size(), old_layout.storage_size())
+    ):
+        if storage_offset_relative_to_input_storage and isinstance(
+            storage_data, (ir.InputBuffer, ir.FallbackKernel)
+        ):
+            return fallback_handler(aten.as_strided.default)(
+                orig_x, size, stride, orig_storage_offset
+            )
+        raise NotImplementedError(
+            "as_strided view exceeds the storage extent known to Inductor"
+        )
     return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
 
@@ -3799,9 +3820,6 @@ make_fallback(aten.masked_scatter_backward)
 make_fallback(aten.view_as_complex, require_contiguous)
 make_fallback(aten.angle)  # needs complex
 
-# Needs efficentzerotensor
-make_fallback(aten._efficientzerotensor)
-
 # Needs Sparse
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
@@ -3916,6 +3934,8 @@ make_fallback(aten._weight_norm_interface_backward.default, require_contiguous)
 # Register with type_promotion_kind None.
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
 _COPY_OVERLAP_EXACT_MAX_ELEMENTS = 65536
+_COPY_OVERLAP_EXACT_MAX_COMPARISONS = 65536
+_COPY_OVERLAP_EXACT_MAX_DYNAMIC_HINT = 8
 
 
 def _raise_copy_overlap_error() -> NoReturn:
@@ -3923,6 +3943,74 @@ def _raise_copy_overlap_error() -> NoReturn:
         "unsupported operation: some elements of the input tensor and "
         "the written-to tensor refer to a single memory location. "
         "Please clone() the tensor before performing the operation."
+    )
+
+
+def _input_storage(x: IRNode) -> ir.StorageBox | None:
+    try:
+        storage, _ = ir.as_storage_and_layout(x, freeze=False)
+    except NotImplementedError:
+        if isinstance(x, TensorBox):
+            x = x.data
+        while isinstance(x, BaseView):
+            x = x.unwrap_view()
+        if isinstance(x, ir.StorageBox):
+            storage = x
+        else:
+            return None
+    if (
+        isinstance(storage, ir.StorageBox)
+        and isinstance(storage.data, ir.InputBuffer)
+        and storage.is_input_buffer()
+    ):
+        return storage
+    return None
+
+
+def _input_storage_name(x: IRNode) -> str | None:
+    storage = _input_storage(x)
+    if storage is None:
+        return None
+    return storage.get_name()
+
+
+def _has_nonzero_graph_input_storage_offset(x: IRNode) -> bool:
+    name = _input_storage_name(x)
+    if name is None:
+        return False
+    offset = V.graph.graph_input_storage_offsets.get(name, sympy.S.Zero)
+    return not V.graph.sizevars.statically_known_equals(offset, 0)
+
+
+def _is_graph_input_fallback_view(x: IRNode) -> bool:
+    if isinstance(x, TensorBox):
+        x = x.data
+    while isinstance(x, BaseView):
+        x = x.unwrap_view()
+    if isinstance(x, ir.StorageBox):
+        x = x.data
+    if not isinstance(x, ir.FallbackKernel):
+        return False
+    if (
+        x.op_overload
+        not in (
+            aten.view.dtype,
+            aten.as_strided.default,
+        )
+        or not x.inputs
+    ):
+        return False
+    inp = x.inputs[0]
+    return isinstance(inp, ir.IRNode) and _copy_root_is_graph_input(inp)
+
+
+def _has_fallback_storage(x: IRNode) -> bool:
+    try:
+        storage, _ = ir.as_storage_and_layout(x, freeze=False)
+    except NotImplementedError:
+        return False
+    return isinstance(storage, ir.StorageBox) and isinstance(
+        storage.data, ir.FallbackKernel
     )
 
 
@@ -3940,6 +4028,8 @@ def _same_root_reindex(
 
     try:
         storage, layout = ir.as_storage_and_layout(x, freeze=False)
+        if isinstance(layout, ir.FlexibleLayout):
+            layout = layout.get_fixed_layout_without_freezing()
         return (
             storage,
             [sympy.expand(layout.make_indexer()(index_symbols))],
@@ -3962,11 +4052,15 @@ def _same_root_reindex(
 def _same_copy_root(a: IRNode, b: IRNode) -> bool:
     if a is b:
         return True
-    return (
+    if (
         isinstance(a, ir.StorageBox)
         and isinstance(b, ir.StorageBox)
         and a.data is b.data
-    )
+    ):
+        return True
+    a_name = _copy_root_name(a)
+    b_name = _copy_root_name(b)
+    return a_name is not None and a_name == b_name
 
 
 def _copy_root_name(root: IRNode) -> str | None:
@@ -3976,15 +4070,41 @@ def _copy_root_name(root: IRNode) -> str | None:
         return None
 
 
+def _copy_root_is_graph_input(root: IRNode) -> bool:
+    name = _copy_root_name(root)
+    if name is not None and name in V.graph.graph_inputs:
+        return True
+    if isinstance(root, ir.StorageBox):
+        root = root.data
+    if not isinstance(root, ir.FallbackKernel):
+        return False
+    if (
+        root.op_overload
+        not in (
+            aten.view.dtype,
+            aten.as_strided.default,
+        )
+        or not root.inputs
+    ):
+        return False
+    inp = root.inputs[0]
+    return isinstance(inp, ir.IRNode) and _copy_root_is_graph_input(inp)
+
+
+def _copy_inplace_needs_native_graph_input_overlap_check(
+    self: IRNode, src: IRNode
+) -> bool:
+    self_root, _, _ = _same_root_reindex(self)
+    src_root, _, _ = _same_root_reindex(src)
+    return (
+        not _same_copy_root(self_root, src_root)
+        and _copy_root_is_graph_input(self_root)
+        and _copy_root_is_graph_input(src_root)
+    )
+
+
 def _depends_on_index(index: Sequence[sympy.Expr], symbol: sympy.Symbol) -> bool:
     return any(symbol in expr.free_symbols for expr in index)
-
-
-def _copy_dim_may_have_multiple_elements(size: sympy.Expr) -> bool:
-    sizevars = V.graph.sizevars
-    if sizevars.statically_known_leq(size, 1):
-        return False
-    return sizevars.evaluate_expr(sympy.Gt(size, 1), fallback_value=True)
 
 
 def _index_bounds(
@@ -4001,16 +4121,54 @@ def _index_bounds(
         upper = lower
         for symbol, size in zip(symbols, sizes):
             coeff = sympy.expand(expr).coeff(symbol)
-            if coeff == 0:
-                continue
             if symbol in sympy.expand(expr - coeff * symbol).free_symbols:
                 return None
+            if coeff == 0:
+                continue
             if sizevars.evaluate_expr(sympy.Ge(coeff, 0), fallback_value=True):
                 upper += coeff * (size - 1)
             else:
                 lower += coeff * (size - 1)
         bounds.append((sympy.expand(lower), sympy.expand(upper)))
     return bounds
+
+
+def _byte_range_bounds(
+    index: Sequence[sympy.Expr],
+    symbols: Sequence[sympy.Symbol],
+    sizes: Sequence[sympy.Expr],
+    itemsize: int,
+) -> tuple[sympy.Expr, sympy.Expr] | None:
+    bounds = _index_bounds(
+        [sympy.expand(expr * itemsize) for expr in index], symbols, sizes
+    )
+    if bounds is None or len(bounds) != 1:
+        return None
+    first_byte, last_first_byte = bounds[0]
+    return first_byte, sympy.expand(last_first_byte + itemsize)
+
+
+def _statically_known_disjoint_byte_ranges(
+    self_index: Sequence[sympy.Expr],
+    self_symbols: Sequence[sympy.Symbol],
+    self_size: Sequence[sympy.Expr],
+    self_itemsize: int,
+    src_index: Sequence[sympy.Expr],
+    src_symbols: Sequence[sympy.Symbol],
+    src_size: Sequence[sympy.Expr],
+    src_itemsize: int,
+) -> bool:
+    self_bounds = _byte_range_bounds(self_index, self_symbols, self_size, self_itemsize)
+    src_bounds = _byte_range_bounds(src_index, src_symbols, src_size, src_itemsize)
+    if self_bounds is None or src_bounds is None:
+        return False
+
+    self_start, self_end = self_bounds
+    src_start, src_end = src_bounds
+    sizevars = V.graph.sizevars
+    return sizevars.statically_known_true(
+        sympy.Le(self_end, src_start)
+    ) or sizevars.statically_known_true(sympy.Le(src_end, self_start))
 
 
 def _affine_index_base_and_strides(
@@ -4084,10 +4242,10 @@ def _residue_interval(
     varying_dim = None
     for dim, symbol in enumerate(symbols):
         coeff = sympy.expand(expr).coeff(symbol)
-        if coeff == 0:
-            continue
         if symbol in sympy.expand(expr - coeff * symbol).free_symbols:
             return None
+        if coeff == 0:
+            continue
         if coeff == 1:
             if varying_dim is not None:
                 return None
@@ -4142,6 +4300,139 @@ def _statically_known_disjoint_residue_intervals(
     return False
 
 
+def _remove_dim(
+    symbols: Sequence[sympy.Symbol],
+    sizes: Sequence[sympy.Expr],
+    dim: int,
+) -> tuple[list[sympy.Symbol], list[sympy.Expr]]:
+    return (
+        [symbol for i, symbol in enumerate(symbols) if i != dim],
+        [size for i, size in enumerate(sizes) if i != dim],
+    )
+
+
+def _statically_known_disjoint_affine_bands(
+    self_index: Sequence[sympy.Expr],
+    self_symbols: Sequence[sympy.Symbol],
+    self_size: Sequence[sympy.Expr],
+    src_index: Sequence[sympy.Expr],
+    src_symbols: Sequence[sympy.Symbol],
+    src_size: Sequence[sympy.Expr],
+) -> bool:
+    self_affine = _affine_index_base_and_strides(self_index, self_symbols)
+    src_affine = _affine_index_base_and_strides(src_index, src_symbols)
+    if self_affine is None or src_affine is None:
+        return False
+
+    sizevars = V.graph.sizevars
+    self_expr = sympy.expand(self_index[0])
+    src_expr = sympy.expand(src_index[0])
+    _, self_strides = self_affine
+    _, src_strides = src_affine
+    for self_dim, self_stride in enumerate(self_strides):
+        if not sizevars.statically_known_true(sympy.Gt(self_stride, 0)):
+            continue
+        for src_dim, src_stride in enumerate(src_strides):
+            if not sizevars.statically_known_equals(self_stride, src_stride):
+                continue
+
+            self_residual = sympy.expand(
+                self_expr - self_stride * self_symbols[self_dim]
+            )
+            src_residual = sympy.expand(src_expr - src_stride * src_symbols[src_dim])
+            self_res_symbols, self_res_size = _remove_dim(
+                self_symbols, self_size, self_dim
+            )
+            src_res_symbols, src_res_size = _remove_dim(src_symbols, src_size, src_dim)
+            self_bounds = _index_bounds(
+                [self_residual], self_res_symbols, self_res_size
+            )
+            src_bounds = _index_bounds([src_residual], src_res_symbols, src_res_size)
+            if self_bounds is None or src_bounds is None:
+                continue
+
+            self_min, self_max = self_bounds[0]
+            src_min, src_max = src_bounds[0]
+            if sizevars.statically_known_true(sympy.Lt(self_max, src_min)):
+                union_min, union_max = self_min, src_max
+            elif sizevars.statically_known_true(sympy.Lt(src_max, self_min)):
+                union_min, union_max = src_min, self_max
+            else:
+                continue
+
+            if sizevars.statically_known_true(
+                sympy.Lt(sympy.expand(union_max - union_min), self_stride)
+            ):
+                return True
+
+    return False
+
+
+def _statically_known_disjoint_byte_bands(
+    self_index: Sequence[sympy.Expr],
+    self_symbols: Sequence[sympy.Symbol],
+    self_size: Sequence[sympy.Expr],
+    self_itemsize: int,
+    src_index: Sequence[sympy.Expr],
+    src_symbols: Sequence[sympy.Symbol],
+    src_size: Sequence[sympy.Expr],
+    src_itemsize: int,
+) -> bool:
+    self_affine = _affine_index_base_and_strides(self_index, self_symbols)
+    src_affine = _affine_index_base_and_strides(src_index, src_symbols)
+    if self_affine is None or src_affine is None:
+        return False
+
+    sizevars = V.graph.sizevars
+    self_expr = sympy.expand(self_index[0] * self_itemsize)
+    src_expr = sympy.expand(src_index[0] * src_itemsize)
+    _, self_strides = self_affine
+    _, src_strides = src_affine
+    for self_dim, self_stride in enumerate(self_strides):
+        self_byte_stride = sympy.expand(self_stride * self_itemsize)
+        if not sizevars.statically_known_true(sympy.Gt(self_byte_stride, 0)):
+            continue
+        for src_dim, src_stride in enumerate(src_strides):
+            src_byte_stride = sympy.expand(src_stride * src_itemsize)
+            if not sizevars.statically_known_equals(self_byte_stride, src_byte_stride):
+                continue
+
+            self_residual = sympy.expand(
+                self_expr - self_byte_stride * self_symbols[self_dim]
+            )
+            src_residual = sympy.expand(
+                src_expr - src_byte_stride * src_symbols[src_dim]
+            )
+            self_res_symbols, self_res_size = _remove_dim(
+                self_symbols, self_size, self_dim
+            )
+            src_res_symbols, src_res_size = _remove_dim(src_symbols, src_size, src_dim)
+            self_bounds = _index_bounds(
+                [self_residual], self_res_symbols, self_res_size
+            )
+            src_bounds = _index_bounds([src_residual], src_res_symbols, src_res_size)
+            if self_bounds is None or src_bounds is None:
+                continue
+
+            self_start, self_last_start = self_bounds[0]
+            src_start, src_last_start = src_bounds[0]
+            self_end = sympy.expand(self_last_start + self_itemsize)
+            src_end = sympy.expand(src_last_start + src_itemsize)
+            if sizevars.statically_known_true(sympy.Le(self_end, src_start)):
+                union_start, union_end = self_start, src_end
+            elif sizevars.statically_known_true(sympy.Le(src_end, self_start)):
+                union_start, union_end = src_start, self_end
+            else:
+                continue
+
+            if sizevars.statically_known_true(
+                sympy.Le(sympy.expand(union_end - union_start), self_byte_stride)
+            ):
+                return True
+
+    return False
+
+
 def _index_ranges_may_overlap(
     self_index: Sequence[sympy.Expr],
     self_symbols: Sequence[sympy.Symbol],
@@ -4172,6 +4463,10 @@ def _index_ranges_may_overlap(
         self_index, self_symbols, self_size, src_index, src_symbols, src_size
     ):
         return False
+    if _statically_known_disjoint_affine_bands(
+        self_index, self_symbols, self_size, src_index, src_symbols, src_size
+    ):
+        return False
 
     for (self_min, self_max), (src_min, src_max) in zip(self_bounds, src_bounds):
         if not sizevars.evaluate_expr(sympy.Le(self_min, src_max), fallback_value=True):
@@ -4181,11 +4476,29 @@ def _index_ranges_may_overlap(
     return True
 
 
-def _guarded_index_hint(expr: sympy.Expr) -> int:
+def _static_index_hint(expr: sympy.Expr) -> int | None:
+    expr = sympy.expand(expr)
+    if isinstance(expr, sympy.Integer):
+        return int(expr)
+    if isinstance(expr, int):
+        return expr
+    return None
+
+
+def _guarded_index_hint(expr: sympy.Expr) -> int | None:
+    expr = sympy.expand(expr)
+    hint = _static_index_hint(expr)
+    if hint is not None:
+        return hint
     sizevars = V.graph.sizevars
-    hint = sizevars.guarding_hint_or_throw(expr)
+    try:
+        hint = sizevars.guarding_hint_or_throw(expr)
+    except GuardOnDataDependentSymNode:
+        return None
+    if hint > _COPY_OVERLAP_EXACT_MAX_DYNAMIC_HINT:
+        return None
     if not sizevars.evaluate_expr(sympy.Eq(expr, hint), fallback_value=False):
-        raise GuardOnDataDependentSymNode(sympy.Eq(expr, hint))
+        return None
     return hint
 
 
@@ -4193,31 +4506,40 @@ def _exact_index_values(
     index: Sequence[sympy.Expr],
     symbols: Sequence[sympy.Symbol],
     sizes: Sequence[sympy.Expr],
-) -> OrderedSet[tuple[int, ...]] | None:
+) -> OrderedSet[tuple[sympy.Expr, ...]] | None:
     size_hints = []
     numel = 1
-    try:
-        for size in sizes:
-            hint = _guarded_index_hint(size)
-            if hint < 0:
-                return None
-            numel *= hint
-            if numel > _COPY_OVERLAP_EXACT_MAX_ELEMENTS:
-                return None
-            size_hints.append(hint)
+    for size in sizes:
+        hint = _guarded_index_hint(size)
+        if hint is None or hint < 0:
+            return None
+        numel *= hint
+        if numel > _COPY_OVERLAP_EXACT_MAX_ELEMENTS:
+            return None
+        size_hints.append(hint)
 
-        values = OrderedSet()
-        for point in itertools.product(*(range(size) for size in size_hints)):
-            replacements = dict(zip(symbols, point))
-            values.add(
-                tuple(
-                    _guarded_index_hint(sympy.expand(expr.xreplace(replacements)))
-                    for expr in index
-                )
-            )
-        return values
-    except GuardOnDataDependentSymNode:
-        return None
+    values = OrderedSet()
+    for point in itertools.product(*(range(size) for size in size_hints)):
+        replacements = dict(zip(symbols, point))
+        values.add(tuple(sympy.expand(expr.xreplace(replacements)) for expr in index))
+    return values
+
+
+def _statically_known_disjoint_index_values(
+    self_value: tuple[sympy.Expr, ...],
+    src_value: tuple[sympy.Expr, ...],
+    cache: dict[tuple[sympy.Expr, ...], bool],
+) -> bool:
+    sizevars = V.graph.sizevars
+    diffs = tuple(
+        sympy.expand(self_expr - src_expr)
+        for self_expr, src_expr in zip(self_value, src_value)
+    )
+    if diffs not in cache:
+        cache[diffs] = any(
+            sizevars.statically_known_true(sympy.Ne(diff, 0)) for diff in diffs
+        )
+    return cache[diffs]
 
 
 def _exact_index_ranges_overlap(
@@ -4234,19 +4556,94 @@ def _exact_index_ranges_overlap(
     src_values = _exact_index_values(src_index, src_symbols, src_size)
     if src_values is None:
         return None
-    return not self_values.isdisjoint(src_values)
-
-
-def _has_expanded_mapping(
-    index: Sequence[sympy.Expr],
-    symbols: Sequence[sympy.Symbol],
-    sizes: Sequence[sympy.Expr],
-) -> bool:
+    if len(self_values) * len(src_values) > _COPY_OVERLAP_EXACT_MAX_COMPARISONS:
+        return None
+    disjoint_cache: dict[tuple[sympy.Expr, ...], bool] = {}
     return any(
-        _copy_dim_may_have_multiple_elements(size)
-        and not _depends_on_index(index, symbol)
-        for symbol, size in zip(symbols, sizes)
+        not _statically_known_disjoint_index_values(
+            self_value, src_value, disjoint_cache
+        )
+        for self_value in self_values
+        for src_value in src_values
     )
+
+
+def _exact_byte_intervals_are_disjoint(
+    self_index: Sequence[sympy.Expr],
+    self_symbols: Sequence[sympy.Symbol],
+    self_size: Sequence[sympy.Expr],
+    self_itemsize: int,
+    src_index: Sequence[sympy.Expr],
+    src_symbols: Sequence[sympy.Symbol],
+    src_size: Sequence[sympy.Expr],
+    src_itemsize: int,
+) -> bool | None:
+    if len(self_index) != 1 or len(src_index) != 1:
+        return None
+    self_values = _exact_index_values(self_index, self_symbols, self_size)
+    if self_values is None:
+        return None
+    src_values = _exact_index_values(src_index, src_symbols, src_size)
+    if src_values is None:
+        return None
+
+    sizevars = V.graph.sizevars
+    static_self_intervals = []
+    static_src_intervals = []
+    all_static = True
+    for self_value in self_values:
+        self_start = sympy.expand(self_value[0] * self_itemsize)
+        self_end = sympy.expand(self_start + self_itemsize)
+        if isinstance(self_start, sympy.Integer) and isinstance(
+            self_end, sympy.Integer
+        ):
+            static_self_intervals.append((int(self_start), int(self_end)))
+        else:
+            all_static = False
+            break
+    if all_static:
+        for src_value in src_values:
+            src_start = sympy.expand(src_value[0] * src_itemsize)
+            src_end = sympy.expand(src_start + src_itemsize)
+            if isinstance(src_start, sympy.Integer) and isinstance(
+                src_end, sympy.Integer
+            ):
+                static_src_intervals.append((int(src_start), int(src_end)))
+            else:
+                all_static = False
+                break
+    if all_static:
+        static_self_intervals.sort()
+        static_src_intervals.sort()
+        self_idx = src_idx = 0
+        while self_idx < len(static_self_intervals) and src_idx < len(
+            static_src_intervals
+        ):
+            self_start, self_end = static_self_intervals[self_idx]
+            src_start, src_end = static_src_intervals[src_idx]
+            if self_end <= src_start:
+                self_idx += 1
+            elif src_end <= self_start:
+                src_idx += 1
+            else:
+                return False
+        return True
+
+    if len(self_values) * len(src_values) > _COPY_OVERLAP_EXACT_MAX_COMPARISONS:
+        return None
+
+    for self_value in self_values:
+        self_start = sympy.expand(self_value[0] * self_itemsize)
+        self_end = sympy.expand(self_start + self_itemsize)
+        for src_value in src_values:
+            src_start = sympy.expand(src_value[0] * src_itemsize)
+            src_end = sympy.expand(src_start + src_itemsize)
+            if not (
+                sizevars.statically_known_true(sympy.Le(self_end, src_start))
+                or sizevars.statically_known_true(sympy.Le(src_end, self_start))
+            ):
+                return False
+    return True
 
 
 def _copy_allows_same_start_expanded_src(
@@ -4258,28 +4655,47 @@ def _copy_allows_same_start_expanded_src(
     src_size: Sequence[sympy.Expr],
 ) -> bool:
     sizevars = V.graph.sizevars
-    if len(self_symbols) != len(src_symbols) or not (
-        sizevars.statically_known_list_equals(self_size, src_size)
-    ):
+    if len(src_symbols) > len(self_symbols):
         return False
-    if _has_expanded_mapping(self_index, self_symbols, self_size):
-        return False
-
     replacements: dict[sympy.Symbol, sympy.Expr] = {}
     has_expanded_src_dim = False
-    for self_symbol, src_symbol, size in zip(self_symbols, src_symbols, src_size):
-        if sizevars.statically_known_leq(size, 1):
-            replacements[self_symbol] = sympy.S.Zero
-            replacements[src_symbol] = sympy.S.Zero
-            continue
-        if not _depends_on_index(src_index, src_symbol):
-            has_expanded_src_dim = True
-            replacements[self_symbol] = sympy.S.Zero
-            replacements[src_symbol] = sympy.S.Zero
-            continue
-        replacements[src_symbol] = self_symbol
 
-    if not has_expanded_src_dim:
+    for offset in range(len(self_symbols)):
+        self_dim = len(self_symbols) - 1 - offset
+        self_symbol = self_symbols[self_dim]
+        self_dim_size = self_size[self_dim]
+        if offset >= len(src_symbols):
+            if not sizevars.statically_known_leq(self_dim_size, 1):
+                has_expanded_src_dim = True
+            replacements[self_symbol] = sympy.S.Zero
+            continue
+
+        src_dim = len(src_symbols) - 1 - offset
+        src_symbol = src_symbols[src_dim]
+        src_dim_size = src_size[src_dim]
+        if sizevars.statically_known_equals(self_dim_size, src_dim_size):
+            if sizevars.statically_known_leq(self_dim_size, 1):
+                replacements[self_symbol] = sympy.S.Zero
+                replacements[src_symbol] = sympy.S.Zero
+                continue
+            if not _depends_on_index(src_index, src_symbol):
+                has_expanded_src_dim = True
+                replacements[self_symbol] = sympy.S.Zero
+                replacements[src_symbol] = sympy.S.Zero
+                continue
+            replacements[src_symbol] = self_symbol
+            continue
+
+        if sizevars.statically_known_equals(src_dim_size, 1):
+            if not sizevars.statically_known_leq(self_dim_size, 1):
+                has_expanded_src_dim = True
+            replacements[self_symbol] = sympy.S.Zero
+            replacements[src_symbol] = sympy.S.Zero
+            continue
+
+        return False
+
+    if not has_expanded_src_dim and len(self_symbols) == len(src_symbols):
         return False
 
     remapped_self_index = [
@@ -4372,7 +4788,48 @@ def _read_dep_matches_write_mapping(
     )
 
 
-def _copy_has_aliasing_copyback_origin(x: IRNode) -> bool:
+def _fallback_copy_default_is_unsafe_alias(copy_node: ir.FallbackKernel) -> bool:
+    if len(copy_node.inputs) < 2:
+        return True
+    dst, src = copy_node.inputs[:2]
+    if not isinstance(dst, IRNode) or not isinstance(src, IRNode):
+        return True
+    dst_root, dst_index, dst_symbols = _same_root_reindex(dst)
+    src_root, src_index, src_symbols = _same_root_reindex(src)
+    if not _same_copy_root(dst_root, src_root):
+        return False
+    dst_size = dst.get_size()
+    src_size = src.get_size()
+    if not _index_ranges_may_overlap(
+        dst_index, dst_symbols, dst_size, src_index, src_symbols, src_size
+    ):
+        return False
+    exact_overlap = _exact_index_ranges_overlap(
+        dst_index, dst_symbols, dst_size, src_index, src_symbols, src_size
+    )
+    if exact_overlap is not None and not exact_overlap:
+        return False
+    if _same_mapping_ignoring_size_one_dims(
+        dst_index, dst_symbols, dst_size, src_index, src_symbols, src_size
+    ):
+        return False
+    dst_start = [
+        sympy.expand(expr.xreplace(dict.fromkeys(dst_symbols, sympy.S.Zero)))
+        for expr in dst_index
+    ]
+    src_start = [
+        sympy.expand(expr.xreplace(dict.fromkeys(src_symbols, sympy.S.Zero)))
+        for expr in src_index
+    ]
+    return not (
+        V.graph.sizevars.statically_known_list_equals(dst_start, src_start)
+        and _copy_allows_same_start_expanded_src(
+            dst_index, dst_symbols, dst_size, src_index, src_symbols, src_size
+        )
+    )
+
+
+def _contains_unsafe_fallback_copy_default(x: IRNode) -> bool:
     seen = OrderedSet()
 
     def visit(node: object) -> bool:
@@ -4381,20 +4838,19 @@ def _copy_has_aliasing_copyback_origin(x: IRNode) -> bool:
             return False
         seen.add(node_id)
 
-        if any(
-            origin.meta.get("copy_overlap_from_aliasing_mutation")
-            for origin in getattr(node, "origins", ())
-        ):
-            return True
-
-        data = getattr(node, "data", None)
-        return data is not None and visit(data)
+        if isinstance(node, TensorBox):
+            return visit(node.data)
+        if isinstance(node, ir.StorageBox):
+            return visit(node.data)
+        if isinstance(node, BaseView):
+            return visit(node.unwrap_view())
+        if isinstance(node, ir.FallbackKernel):
+            if node.op_overload is aten.copy.default:
+                return _fallback_copy_default_is_unsafe_alias(node)
+            return any(visit(inp) for inp in node.inputs if isinstance(inp, IRNode))
+        return False
 
     return visit(x)
-
-
-def _is_aliasing_copyback_source(src: IRNode) -> bool:
-    return _copy_has_aliasing_copyback_origin(src)
 
 
 def _copy_reads_overlap(
@@ -4415,19 +4871,17 @@ def _copy_reads_overlap(
 
     for dep in reads:
         dep_name = getattr(dep, "name", None)
-        try:
-            dep_index = dep.index
-        except NotImplementedError:
+        if dep_name != root_name:
             continue
-        dep_symbols = getattr(dep, "var_names", None)
-        dep_size = getattr(dep, "size", None)
-        if (
-            dep_name != root_name
-            or dep_index is None
-            or dep_symbols is None
-            or dep_size is None
-        ):
-            continue
+        if isinstance(dep, StarDep):
+            return True
+        if not isinstance(dep, MemoryDep):
+            return True
+        if dep.is_indirect():
+            return True
+        dep_index = dep.index
+        dep_symbols = dep.var_names
+        dep_size = dep.size
 
         dep_index = [sympy.expand(dep_index)]
         dep_symbols = list(dep_symbols)
@@ -4474,13 +4928,57 @@ def _raise_if_copy_has_partial_overlap(self: IRNode, src: IRNode) -> bool:
         reads_overlap = _copy_reads_overlap(
             self_root, self_index, self_symbols, self.get_size(), src
         )
-        if reads_overlap and _is_aliasing_copyback_source(src):
+        if reads_overlap and (
+            _copy_root_is_graph_input(src_root)
+            or _contains_unsafe_fallback_copy_default(src)
+        ):
             _raise_copy_overlap_error()
         return reads_overlap
 
     sizevars = V.graph.sizevars
     self_size = self.get_size()
     src_size = src.get_size()
+    if any(sizevars.statically_known_equals(size, 0) for size in self_size):
+        return False
+    if any(sizevars.statically_known_equals(size, 0) for size in src_size):
+        return False
+    if self.get_dtype().itemsize != src.get_dtype().itemsize:
+        if _statically_known_disjoint_byte_ranges(
+            self_index,
+            self_symbols,
+            self_size,
+            self.get_dtype().itemsize,
+            src_index,
+            src_symbols,
+            src_size,
+            src.get_dtype().itemsize,
+        ):
+            return False
+        if _statically_known_disjoint_byte_bands(
+            self_index,
+            self_symbols,
+            self_size,
+            self.get_dtype().itemsize,
+            src_index,
+            src_symbols,
+            src_size,
+            src.get_dtype().itemsize,
+        ):
+            return False
+        exact_disjoint = _exact_byte_intervals_are_disjoint(
+            self_index,
+            self_symbols,
+            self_size,
+            self.get_dtype().itemsize,
+            src_index,
+            src_symbols,
+            src_size,
+            src.get_dtype().itemsize,
+        )
+        if exact_disjoint:
+            return False
+        _raise_copy_overlap_error()
+
     same_mapping = _same_mapping_ignoring_size_one_dims(
         self_index, self_symbols, self_size, src_index, src_symbols, src_size
     )
@@ -4519,24 +5017,7 @@ def _raise_if_copy_has_partial_overlap(self: IRNode, src: IRNode) -> bool:
 def copy(self, src, non_blocking=False):
     if not isinstance(src, ir.IRNode):
         src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
-    _raise_if_copy_has_partial_overlap(self, src)
-
-    x = src
-    if self.get_device() != src.get_device():
-        x = to_device(x, self.get_device())
-    if self.get_dtype() != src.get_dtype():
-        x = to_dtype(x, self.get_dtype())
-
-    if self.get_size() != src.get_size():
-        out = expand(x, self.get_size())
-        result = clone(out)
-    else:
-        result = clone(x)
-
-    self_layout = self.maybe_get_layout()
-    if self_layout is not None and self_layout.is_pinned:
-        _realize_as_pinned(result)
-    return result
+    return fallback_handler(aten.copy.default)(self, src, non_blocking)
 
 
 @register_lowering(aten.clone)
@@ -4544,12 +5025,20 @@ def clone(x, *, memory_format=None):
     # Don't materialize the layout here based on memory_format,
     # as we want to give the scheduler opportunity to perform layout optimization.
     # Let the downstream op handle the input stride as needed.
-    return Pointwise.create(
+    result = Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=x.make_loader(),
         ranges=list(x.get_size()),
     )
+    return result
+
+
+@register_lowering(inductor_prims.clone_preserve_storage, type_promotion_kind=None)
+def clone_preserve_storage(x):
+    result = clone(x)
+    result.realize()
+    return result
 
 
 def _realize_as_pinned(result):
@@ -5142,6 +5631,17 @@ def full(size, fill_value, **kwargs):
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
+@register_lowering(aten._efficientzerotensor, type_promotion_kind=None)
+def _efficientzerotensor(
+    size, *, dtype=None, layout=None, device=None, pin_memory=False
+):
+    assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+    dtype = torch.get_default_dtype() if dtype is None else decode_dtype(dtype)
+    with torch.utils._python_dispatch._disable_current_modes():
+        scalar = torch.zeros((), dtype=dtype, device=decode_device(device))
+    return expand(V.graph.add_tensor_constant(scalar), size)
+
+
 @register_lowering(aten.gather, type_promotion_kind=None)
 def gather(x, dim, index, sparse_grad=False):
     # sparse_grad doesn't affect forward computation,
@@ -5635,6 +6135,7 @@ def clamp(a, min, max):
     return ops.maximum(min, ops.minimum(max, a))
 
 
+@register_lowering(prims.as_strided_scatter.default, type_promotion_kind=None)
 @register_lowering(aten.as_strided_scatter, type_promotion_kind=None)
 def as_strided_scatter(self, src, size, stride, storage_offset=None):
     """Lower 1D as_strided_scatter while preserving clone storage layout."""
@@ -5649,6 +6150,15 @@ def as_strided_scatter(self, src, size, stride, storage_offset=None):
         and not V.graph.sizevars.statically_known_leq(input_size, 1)
         for input_size, input_stride in zip(self_size, layout.stride)
     )
+    if (
+        _input_storage_name(self) is not None
+        or _has_nonzero_graph_input_storage_offset(self)
+        or _is_graph_input_fallback_view(self)
+        or _has_fallback_storage(self)
+    ) and not input_has_internal_overlap:
+        return fallback_handler(aten.as_strided_scatter.default)(
+            self, src, size, stride, storage_offset
+        )
 
     scatter_stride = convert_symint_to_expr(stride[0])
     if not V.graph.sizevars.statically_known_equals(scatter_stride, 1):
@@ -5685,16 +6195,21 @@ def as_strided_scatter(self, src, size, stride, storage_offset=None):
 
     if not input_has_internal_overlap:
         try:
-            storage, storage_layout = ir.as_storage_and_layout(self, freeze=False)
+            storage, _ = ir.as_storage_and_layout(self, freeze=False)
         except NotImplementedError:
             return fallback_handler(aten.as_strided_scatter.default)(
                 self, original_src, size, stride, storage_offset
             )
-        storage_loader = storage.make_loader()
+        if storage.get_dtype() != self.get_dtype():
+            return fallback_handler(aten.as_strided_scatter.default)(
+                self, original_src, size, stride, storage_offset
+            )
+        storage_layout = storage.get_layout()
+        storage_name = storage.get_name()
 
         def storage_inner_fn(idx):
             storage_index = sympy.expand(idx[0])
-            return scatter_value(storage_index, storage_loader([storage_index]))
+            return scatter_value(storage_index, ops.load(storage_name, storage_index))
 
         storage_result = Pointwise.create(
             device=self.get_device(),
@@ -5721,16 +6236,35 @@ def as_strided_scatter(self, src, size, stride, storage_offset=None):
         storage_index = sympy.expand(idx[0])
         return scatter_value(storage_index, self_loader(idx))
 
-    result = Pointwise.create(
+    if input_has_internal_overlap:
+        pointwise = Pointwise(
+            device=self.get_device(),
+            dtype=self.get_dtype(),
+            inner_fn=inner_fn,
+            ranges=list(self_size),
+        )
+        buffer = ir.ComputedBuffer(
+            name=None,
+            layout=ir.FixedLayout(
+                layout.device,
+                layout.dtype,
+                list(self_size),
+                [sympy.S.One],
+                sympy.S.Zero,
+                layout.is_pinned,
+            ),
+            data=pointwise,
+        )
+        buffer.name = V.graph.register_buffer(buffer)
+        V.graph.register_operation(buffer)
+        return TensorBox.create(buffer)
+
+    return Pointwise.create(
         device=self.get_device(),
         dtype=self.get_dtype(),
         inner_fn=inner_fn,
         ranges=list(self_size),
     )
-    if input_has_internal_overlap:
-        result.realize()
-        result.freeze_layout_with_exact_strides([1])
-    return result
 
 
 @register_lowering(aten.scatter, type_promotion_kind=None)
@@ -8316,6 +8850,10 @@ def copy_(dst, src, non_blocking=False):
     if dst is src:
         # dst.copy_(dst) can happen from the reinplacing pass
         return dst
+    if _copy_inplace_needs_native_graph_input_overlap_check(
+        dst, src
+    ) or _has_fallback_storage(dst):
+        return fallback_handler(aten.copy_.default)(dst, src, non_blocking)
     materialize_src = _raise_if_copy_has_partial_overlap(dst, src)
 
     src = to_device(src, dst.get_device())
@@ -9214,6 +9752,11 @@ maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
 register_lowering(aten.clamp_max)(minimum)
+register_op_dtype_propagation_rules(
+    "fmaximum",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    override_return_dtype=None,
+)
 neg = register_pointwise(aten.neg)
 abs = register_pointwise(aten.abs)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
