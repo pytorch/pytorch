@@ -114,6 +114,46 @@ class TestUnittest(torch._dynamo.test_case.TestCase):
         self.assertIn("OK", proc.stdout)
         self.assertNotIn("Unexpected success, please remove", proc.stdout)
 
+    def test_dynamo_expected_failure_does_not_swallow_keyboard_interrupt(self):
+        proc = self._run_python_with_dynamo(
+            """
+            import sys
+            from torch.testing._internal import dynamo_test_failures
+            from torch.testing._internal.common_utils import TestCase, run_tests
+
+            class SyntheticExpectedFailureInterrupt(TestCase):
+                def test_interrupts(self):
+                    raise KeyboardInterrupt()
+
+            key = "SyntheticExpectedFailureInterrupt.test_interrupts"
+            dynamo_test_failures.dynamo_expected_failures.add(key)
+            sys.argv = [sys.argv[0], key]
+            run_tests()
+            """
+        )
+        self.assertNotEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("KeyboardInterrupt", proc.stdout)
+
+    def test_dynamo_skip_does_not_swallow_keyboard_interrupt(self):
+        proc = self._run_python_with_dynamo(
+            """
+            import sys
+            from torch.testing._internal import dynamo_test_failures
+            from torch.testing._internal.common_utils import TestCase, run_tests
+
+            class SyntheticSkipInterrupt(TestCase):
+                def test_interrupts(self):
+                    raise KeyboardInterrupt()
+
+            key = "SyntheticSkipInterrupt.test_interrupts"
+            dynamo_test_failures.dynamo_skips.add(key)
+            sys.argv = [sys.argv[0], key]
+            run_tests()
+            """
+        )
+        self.assertNotEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("KeyboardInterrupt", proc.stdout)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
