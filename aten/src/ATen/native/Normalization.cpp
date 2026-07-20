@@ -582,7 +582,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     if (weight.defined()) out = out * weight[0];
     if (bias.defined()) out = out + bias[0];
     return std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t>(
-        out, save_mean, save_invstd, reserve, 0);
+        std::move(out),
+        std::move(save_mean),
+        std::move(save_invstd),
+        std::move(reserve),
+        0);
   }
 
   if (running_mean.defined()) {

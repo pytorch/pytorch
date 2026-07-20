@@ -149,6 +149,33 @@ class TestScatterOpt(TestCase):
         over_estimate = M * torch.float.itemsize + M * N * torch.float.itemsize
         self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes + over_estimate)
 
+    def test_dtype_preserved(self):
+        """
+        The full+scatter -> pointwise rewrite must preserve the const tensor's
+        dtype. torch.where with Python scalar branches promotes to the default
+        float dtype (float32), so for a low-precision const tensor (e.g. f16)
+        the rewrite previously produced a float32 result. This is exactly the
+        pattern emitted by nll_loss_backward / cross_entropy backward on f16
+        inputs.
+        """
+        M, N = 1024, 2048
+
+        for dtype in (torch.float16, torch.bfloat16):
+            metrics.reset()
+
+            def f(x):
+                y = torch.full([M, N], 3.14, dtype=dtype)
+                y.scatter_(1, x.unsqueeze(1), 2.718)
+                return y
+
+            x = torch.randint(0, N, (M,), dtype=torch.int64)
+            expect = f(x)
+            actual = torch.compile(f)(x)
+            self.assertEqual(expect.dtype, dtype)
+            self.assertEqual(actual.dtype, dtype, f"dtype not preserved for {dtype}")
+            self.assertTrue(same(expect, actual, tol=1e-2), f"{expect=}\n{actual=}\n")
+            self.check_metric()
+
     def test_cross_entropy_loss(self):
         """
         Match full+scatter in CEL and replaces it with a pointwise.

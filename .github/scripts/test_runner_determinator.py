@@ -917,7 +917,7 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         self.assertEqual("mt-", result.prefix)
         self.assertTrue(result.use_arc)
 
-    def test_arc_takes_precedence_over_lf(self) -> None:
+    def test_arc_combined_with_lf_returns_lf_prefix(self) -> None:
         settings_text = """
         experiments:
             lf:
@@ -931,7 +931,7 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
 
         """
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("mt-", result.prefix)
+        self.assertEqual("lf-", result.prefix)
         self.assertTrue(result.use_arc)
 
     @patch("random.uniform", return_value=10)
@@ -1074,6 +1074,89 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         )
         self.assertEqual("", result.prefix)
 
+    @patch("random.uniform", return_value=10)
+    def test_workflows_all_with_exclusion(self, mock_uniform: Mock) -> None:
+        """workflows: ALL,-excluded enables every workflow except the excluded one."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+                workflows: ALL,-periodic
+        ---
+
+        Users:
+        @User1,otherExp
+
+        """
+        self.assertEqual(
+            "lf.",
+            rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
+            ).prefix,
+        )
+        self.assertEqual(
+            "",
+            rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name="periodic"
+            ).prefix,
+        )
+
+    @patch("random.uniform", return_value=10)
+    def test_workflows_exclusion_name_with_space(self, mock_uniform: Mock) -> None:
+        """Exclusions match the github.workflow name verbatim, including spaces."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+                workflows: ALL,-B200 Smoke Tests
+        ---
+
+        Users:
+        @User1,otherExp
+
+        """
+        self.assertEqual(
+            "",
+            rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name="B200 Smoke Tests"
+            ).prefix,
+        )
+        self.assertEqual(
+            "lf.",
+            rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
+            ).prefix,
+        )
+
+    @patch("random.uniform", return_value=10)
+    def test_workflows_exclusion_only_acts_as_denylist(
+        self, mock_uniform: Mock
+    ) -> None:
+        """workflows with only exclusions enables every non-excluded workflow."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+                workflows: -periodic
+        ---
+
+        Users:
+        @User1,otherExp
+
+        """
+        self.assertEqual(
+            "lf.",
+            rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
+            ).prefix,
+        )
+        self.assertEqual(
+            "",
+            rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name="periodic"
+            ).prefix,
+        )
+
     def test_parse_workflows_setting(self) -> None:
         settings_text = """
         ```
@@ -1103,6 +1186,66 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
             rd.parse_workflow_list("pull, trunk , periodic, "),
         )
         self.assertEqual(set(), rd.parse_workflow_list(""))
+
+
+class TestRunnerDeterminatorAmdDoExperiment(TestCase):
+    AMD_DO_SETTINGS = """
+        experiments:
+            amd-do:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,amd-do
+        @User2,lf
+
+        """
+
+    def test_amd_do_opted_in_returns_prefix(self) -> None:
+        result = rd.get_runner_prefix(self.AMD_DO_SETTINGS, ["User1"], USER_BRANCH)
+        self.assertEqual("amd-do-", result.amd_do_prefix)
+        # amd-do is exposed via its own output, not folded into the shared prefix
+        self.assertEqual("", result.prefix)
+
+    def test_amd_do_not_enabled_returns_empty_prefix(self) -> None:
+        result = rd.get_runner_prefix(self.AMD_DO_SETTINGS, ["User2"], USER_BRANCH)
+        self.assertEqual("", result.amd_do_prefix)
+        self.assertEqual("", result.prefix)
+
+    def test_amd_do_with_arc_keeps_both(self) -> None:
+        settings_text = """
+        experiments:
+            arc:
+                rollout_perc: 0
+            amd-do:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,arc,amd-do
+
+        """
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("mt-", result.prefix)
+        self.assertTrue(result.use_arc)
+        self.assertEqual("amd-do-", result.amd_do_prefix)
+
+    def test_amd_do_with_lf_keeps_both(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            amd-do:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf,amd-do
+
+        """
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("lf.", result.prefix)
+        self.assertEqual("amd-do-", result.amd_do_prefix)
 
 
 if __name__ == "__main__":

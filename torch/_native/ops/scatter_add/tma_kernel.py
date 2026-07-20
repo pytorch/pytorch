@@ -59,13 +59,19 @@ import cutlass.pipeline as pipeline
 from cutlass import BFloat16, const_expr, Float16, Float32, Int32, Int64
 
 import torch
-from torch._vendor.quack.cache_utils import jit_cache
+from torch._vendor.quack.cache import jit_cache
 
 from ._ptx import cvta_smem, make_bulk_reduce_add
 
 
 _MAX_CHUNK_BYTES = 512
 _THREADS_PER_CTA = 32  # one warp per CTA
+# cp.async.bulk requires 128B-aligned smem destinations.
+_SMEM_ALIGN_BYTES = 128
+
+
+def _round_up(x: int, m: int) -> int:
+    return (x + m - 1) // m * m
 
 
 _TORCH_TO_CUTE = {
@@ -121,6 +127,14 @@ def _make_kernel(
     # partial final chunk handled by TMA OOB clamp.
     num_chunks = (N + chunk_elems - 1) // chunk_elems
 
+    # 2-stage pipeline buffer is laid out column-major; stage i starts
+    # at offset i * stage_stride_elems * elem_bytes, so the stride must
+    # round chunk_bytes up to a multiple of _SMEM_ALIGN_BYTES. Otherwise
+    # stage 1 is misaligned and the kernel faults the first time a CTA
+    # writes it. Bites both chunk_bytes < 128 (small D) and chunk_bytes
+    # not a multiple of 128 (e.g. fp32 N=36 -> 144 B).
+    stage_stride_elems = _round_up(chunk_elems, _SMEM_ALIGN_BYTES // elem_bytes)
+
     @cute.kernel
     def _kernel(
         tma_atom: cute.CopyAtom,
@@ -156,8 +170,8 @@ def _make_kernel(
         smem = cutlass.utils.SmemAllocator()
         sBuf = smem.allocate_tensor(
             dtype,
-            cute.make_layout((chunk_elems, 2)),
-            128,
+            cute.make_layout((chunk_elems, 2), stride=(1, stage_stride_elems)),
+            _SMEM_ALIGN_BYTES,
         )
         mbar_storage = smem.allocate_array(cutlass.Uint64, num_elems=2 * 2)
 
@@ -230,9 +244,7 @@ def _make_kernel(
 
                     if pair_count > Int32(0):
                         pipe.consumer_wait(consumer_state)
-                        cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(
-                            chunk_elems
-                        )
+                        cbuf_ptr = sBuf[None, consumer_state.index].iterator
 
                         # Partial-chunk handling: actual valid element
                         # count is min(chunk_elems, N - off). TMA
@@ -264,7 +276,7 @@ def _make_kernel(
         if tidx == Int32(0):
             if pair_count > Int32(0):
                 pipe.consumer_wait(consumer_state)
-                cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(chunk_elems)
+                cbuf_ptr = sBuf[None, consumer_state.index].iterator
 
                 off = prev_chunk_idx * Int32(chunk_elems)
                 cur_elems = Int32(N) - off

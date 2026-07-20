@@ -531,7 +531,7 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
     # scores: [b, h_q, s_k, s_q] @ gradOut: [b, h_q, s_q, d_v] -> gradV: [b, h_q, s_k, d_v]
     total_flops += bmm_flop((b * h_q, s_k, s_q), (b * h_q, s_q, d_v))
 
-    # Step 3: We propagate th gradients through the k @ v operation
+    # Step 3: We propagate the gradients through the k @ v operation
     # gradScores: [b, h_q, s_q, s_k] @ k: [b, h_q, s_k, d_q] -> gradQ: [b, h_q, s_q, d_q]
     total_flops += bmm_flop((b * h_q, s_q, s_k), (b * h_q, s_k, d_q))
     # q: [b, h_q, d_q, s_q] @ gradScores: [b, h_q, s_q, s_k] -> gradK: [b, h_q, d_q, s_k]

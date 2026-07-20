@@ -10,9 +10,10 @@ import sys
 import tempfile
 import textwrap
 import traceback
+import types
 import unittest
 import warnings
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.cuda
@@ -33,6 +34,8 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
+    skipIfTorchDynamo,
+    TEST_WITH_ASAN,
 )
 from torch.utils._device import set_device
 from torch.utils._pytree import tree_all_only, tree_any
@@ -120,6 +123,7 @@ class TestCheckpoint(TestCase):
 
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/97402")
     def test_checkpoint_trigger(self):
         class Net(nn.Module):
             def __init__(self) -> None:
@@ -594,6 +598,7 @@ class TestCheckpoint(TestCase):
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
 
+    @unittest.skipIf(TEST_WITH_ASAN, "https://github.com/pytorch/pytorch/issues/84937")
     def test_random_seed(self):
         def run():
             dataloader = torch.utils.data.DataLoader(
@@ -1032,6 +1037,57 @@ class TestTryImport(TestCase):
     def test_import_missing(self):
         missing_module = try_import("missing_module")
         self.assertIsNone(missing_module)
+
+
+class TestUtilsInternal(TestCase):
+    def test_max_clock_rate_falls_back_to_pynvml_when_nvidia_smi_missing(self):
+        def nvsmi(_query):
+            raise FileNotFoundError("nvidia-smi")
+
+        triton = types.ModuleType("triton")
+        triton_testing = types.ModuleType("triton.testing")
+        cast(Any, triton_testing).nvsmi = nvsmi
+        cast(Any, triton).testing = triton_testing
+
+        pynvml = types.ModuleType("pynvml")
+        cast(Any, pynvml).NVML_CLOCK_SM = 1
+        calls = []
+
+        def nvmlDeviceGetMaxClockInfo(handle, clock_type):
+            calls.append(("max_clock", handle, clock_type))
+            return 1980
+
+        def nvmlShutdown():
+            calls.append("shutdown")
+
+        cast(Any, pynvml).nvmlDeviceGetMaxClockInfo = nvmlDeviceGetMaxClockInfo
+        cast(Any, pynvml).nvmlShutdown = nvmlShutdown
+
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.dict(
+                    sys.modules,
+                    {
+                        "triton": triton,
+                        "triton.testing": triton_testing,
+                        "pynvml": pynvml,
+                    },
+                ),
+                unittest.mock.patch.object(torch.version, "hip", None),
+                unittest.mock.patch.object(
+                    torch.cuda, "_get_pynvml_handler", return_value="handle"
+                ) as get_pynvml_handler,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(), 1980)
+                get_pynvml_handler.assert_called_once_with()
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
+        self.assertEqual(
+            calls,
+            [("max_clock", "handle", 1), "shutdown"],
+        )
 
 
 @deprecated()

@@ -64,7 +64,7 @@ SourceRange getPythonInterpreterSourceRange() {
     }
   }
 
-  auto stack_trace_text = stack_trace.str();
+  auto stack_trace_text = std::move(stack_trace).str();
   auto source =
       std::make_shared<Source>(stack_trace_text, source_filename, source_line);
   return SourceRange(source, 0, stack_trace_text.size());

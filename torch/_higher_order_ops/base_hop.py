@@ -12,9 +12,9 @@ from torch._higher_order_ops.utils import (
     HopInstance,
     materialize_as_graph,
     reenter_make_fx,
+    register_fake,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -65,7 +65,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         self.py_autograd_impl(self._call_Autograd)
         self.py_functionalize_impl(self._call_Functionalize)
         self.py_impl(ProxyTorchDispatchMode)(self._call_ProxyTorchDispatchMode)
-        self.py_impl(FakeTensorMode)(self._call_FakeTensorMode)
+        register_fake(self, self._fake_impl, skip_cache=True)
         self.py_impl(DispatchKey.CompositeExplicitAutograd)(
             self._call_CompositeExplicitAutograd
         )
@@ -127,10 +127,8 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             tracer=proxy_mode.tracer,  # type: ignore[arg-type]
         )
 
-    def _call_FakeTensorMode(self, mode, subgraph, *operands, **kwargs):
-        # TODO: this should probably route through FakeTensorMode to reuse caching
-        with mode:
-            return subgraph(*operands)
+    def _fake_impl(self, subgraph, *operands, **kwargs):
+        return subgraph(*operands)
 
     # NOTE [Support input mutation of hops]
     # To support input mutation, hop's subgraph must be functionalized because many inductor passes are

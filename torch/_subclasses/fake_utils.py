@@ -148,20 +148,23 @@ def try_convert_fake_to_real(
             out.append(t)
             continue
 
-        unhinted = False
+        contains_unhinted = False
 
         def map_symint(s: torch.SymInt | int) -> int:
-            nonlocal unhinted
+            nonlocal contains_unhinted
             if not isinstance(s, torch.SymInt):
                 return s
-            unhinted = unhinted if not unhinted else s.node.has_hint()
-            return s.node.hint
+            hint = s.hint
+            if hint is None:
+                contains_unhinted = True
+                return 0  # unused: caller bails (contains_unhinted) and discards this
+            return hint
 
         stor_offset = map_symint(t.storage_offset())
         size = [map_symint(s) for s in t.shape]
         stride = [map_symint(s) for s in t.stride()]
 
-        if unhinted:
+        if contains_unhinted:
             out.append(t)
             continue
 

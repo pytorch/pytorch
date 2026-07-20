@@ -403,9 +403,13 @@ tlparse==0.4.0
 filelock==3.20.3
 #Description: required for inductor testing
 
-cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin"
-#Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. Note "Any fix in the latest bindings would be backported to the prior major version" means that only the newest version of cuda-bindings will get fixes. Depending on the latest version of 12.x is okay because all 12.y versions will be supported via "CUDA minor version compatibility". Pytorch builds against 13.z versions of cuda toolkit work with 12.x versions of cuda-bindings as well because newer drivers work with old toolkits.
+cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin"
+#Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. PyTorch CI CUDA builds use CUDA 13, so depend on the matching cuda-bindings major while allowing minor updates within that major.
 #test that import: test_cuda.py
+
+cupti-python>13.0 ; platform_system == "Linux" and (platform_machine == "x86_64" or platform_machine == "aarch64") and python_version < "3.14"
+#Description: required for the experimental CUPTI monitor (torch.profiler._cupti_monitor). >13.0 to match CUDA 13.x toolkits. cupti-python only ships Linux x86_64/aarch64 CPython wheels (no 3.14/free-threaded yet), so guard to those.
+#test that import: test_profiler.py
 
 setuptools-git-versioning==2.1.0
 scikit-build==0.18.1
@@ -417,5 +421,15 @@ tqdm>=4.66.0
 #Description: progress bar library required for dynamo benchmarks
 #test that import: benchmarks/dynamo/*
 
-aiohttp==3.13.4
+aiohttp==3.14.1
 #Description: required for torch.distributed.debug
+
+spin==0.17
+#Description: required for testing spin commands
+#Pinned versions: 0.17
+#test that import: spincli/test_spin.py
+
+uv
+#Description: required for running spin commands via uvx
+#Pinned version:
+#test that import:

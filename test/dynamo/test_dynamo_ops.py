@@ -13,8 +13,10 @@ from torch._dynamo.comptime import comptime, ComptimeContext
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
+    skip,
+    skipOps,
 )
-from torch.testing._internal.common_methods_invocations import op_db, skip, skipOps
+from torch.testing._internal.common_methods_invocations import op_db
 
 
 # Ops that fail the inplace requires_grad propagation test for known reasons
@@ -54,11 +56,7 @@ class TestTensorMetaProp(torch._dynamo.test_case.TestCase):
     """
 
     @ops([op for op in op_db if op.get_inplace() is not None])
-    @skipOps(
-        "TestTensorMetaProp",
-        "test_inplace_ops_propagate_requires_grad_metadata",
-        test_inplace_ops_propagate_requires_grad_metadata_skips,
-    )
+    @skipOps(test_inplace_ops_propagate_requires_grad_metadata_skips)
     def test_inplace_ops_propagate_requires_grad_metadata(self, device, dtype, op):
         """
         Test that inplace ops from OpInfo propagate requires_grad correctly.

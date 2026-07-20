@@ -169,7 +169,7 @@ Example::
     )
 
     args_and_kwargs = {
-        # argument name sufficies separated by double underscore will
+        # argument name suffixes separated by double underscore will
         # be removed in the final documentation string.
         "sum": (("dim",), ("keepdim=False", "dtype=None", "mask=None")),
         "prod": (("dim",), ("keepdim=False", "dtype=None", "mask=None")),
@@ -1679,6 +1679,7 @@ def _std_var(
                 else compute_dtype
             )
             count = count.to(real_dtype)
+            # pyrefly: ignore [no-matching-overload]
             count = torch.subtract(count, correction)
             count = torch.maximum(count, count.new_zeros([]))
         output = torch.divide(total, count).to(dtype=dtype)

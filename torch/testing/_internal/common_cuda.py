@@ -104,14 +104,12 @@ def evaluate_platform_supports_cudnn_attention():
     return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
 
 def evaluate_platform_supports_green_context():
-    if IS_WINDOWS:
+    from torch.cuda.green_contexts import _ensure_supported
+    try:
+        _ensure_supported()
+        return True
+    except RuntimeError:
         return False
-    if not _get_torch_cuda_version() >= (12, 8):
-        return False
-    driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
-    if driver_version is None:
-        return False
-    return int(driver_version.split('.')[0]) >= 570
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
@@ -157,14 +155,13 @@ PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_support
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
 def evaluate_platform_supports_workqueue_config():
-    if IS_WINDOWS:
+    from torch.cuda.green_contexts import _ensure_supported, _ensure_workqueue_supported
+    try:
+        _ensure_supported()
+        _ensure_workqueue_supported()
+        return True
+    except RuntimeError:
         return False
-    if not _get_torch_cuda_version() >= (13, 1):
-        return False
-    driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
-    if driver_version is None:
-        return False
-    return int(driver_version.split('.')[0]) >= 590
 
 PLATFORM_SUPPORTS_WORKQUEUE_CONFIG: bool = LazyVal(lambda: evaluate_platform_supports_workqueue_config())
 
@@ -413,15 +410,7 @@ def _check_cusparse_generic_available():
     return not TEST_WITH_ROCM
 
 def _check_hipsparse_generic_available():
-    if not TEST_WITH_ROCM:
-        return False
-    if not torch.version.hip:
-        return False
-
-    rocm_version = str(torch.version.hip)
-    rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
-    rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
-    return not (rocm_version_tuple is None or rocm_version_tuple < (5, 1))
+    return TEST_WITH_ROCM and torch.version.hip is not None
 
 
 TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()

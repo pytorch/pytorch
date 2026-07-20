@@ -371,7 +371,8 @@ jobs:
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
-            --libtorch-variant "$LIBTORCH_VARIANT"
+            --libtorch-variant "$LIBTORCH_VARIANT" \
+            --arch !{{ lt_config["arch"] }}
       - uses: !{{ common.upload_artifact_action }}
         if: always()
         with:

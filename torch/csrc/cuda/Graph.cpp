@@ -57,16 +57,23 @@ void THCPGraph_init(PyObject* module) {
           "capture_end",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::capture_end))
       .def(
+          "capture_end_pre",
+          torch::wrap_pybind_function_no_gil(
+              &at::cuda::CUDAGraph::capture_end_pre))
+      .def(
+          "capture_end_post",
+          torch::wrap_pybind_function_no_gil(
+              &at::cuda::CUDAGraph::capture_end_post))
+      .def(
           "instantiate",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::instantiate))
+      .def_property_readonly(
+          "_has_graph_exec", &at::cuda::CUDAGraph::has_graph_exec)
       .def(
           "register_generator_state",
-          [](::at::cuda::CUDAGraph& self, py::handle raw_generator) {
-            auto generator = THPGenerator_Unwrap(raw_generator.ptr());
-            // We've unwrapped Python object to C++ object,
-            // so we could release GIL before calling into C++
-            py::gil_scoped_release release;
-            return self.register_generator_state(generator);
+          [](::at::cuda::CUDAGraph& self, py::handle /*raw_generator*/) {
+            TORCH_WARN_DEPRECATION(
+                "CUDAGraph.register_generator_state() is deprecated, and will be removed in a future PyTorch release. It is now a no-op and can be safely removed from your code.");
           },
           py::arg("generator"))
       .def(
@@ -79,18 +86,9 @@ void THCPGraph_init(PyObject* module) {
           "pool",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::pool))
       .def(
-          "debug_dump",
-          torch::wrap_pybind_function_no_gil(
-              &::at::cuda::CUDAGraph::debug_dump))
-      .def(
           "enable_debug_mode",
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::enable_debug_mode))
-      .def(
-          "debug_dump",
-          torch::wrap_pybind_function_no_gil(
-              &::at::cuda::CUDAGraph::debug_dump),
-          py::arg("debug_path"))
       .def(
           "raw_cuda_graph",
           [](::at::cuda::CUDAGraph& self) {

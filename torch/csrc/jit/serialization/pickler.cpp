@@ -135,7 +135,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     }
     err << ". Please define serialization methods via def_pickle() for "
            "this class.";
-    TORCH_CHECK(false, err.str());
+    TORCH_CHECK(false, std::move(err).str());
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
     TORCH_CHECK(

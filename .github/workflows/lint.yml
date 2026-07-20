@@ -57,7 +57,7 @@ jobs:
       )
     with:
       runner: mt-l-x86iamx-8-16
-      docker-image: ghcr.io/pytorch/test-infra:cuda-x86_64-810d48d
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-linter-${{ needs.get-label-type.outputs.ci-docker-hash }}
       script: |
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         if [ "$CHANGED_FILES" = "*" ]; then
@@ -66,6 +66,8 @@ jobs:
           export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT $CHANGED_FILES"
         fi
         export CLANG=1
+        # Cap parallelism to the pod's CPU budget; os.cpu_count() overcounts on k8s and OOMs.
+        export MAX_JOBS="$(nproc --ignore=2)"
         .github/scripts/lintrunner.sh
 
   # NOTE: mypy needs its own job because it depends on --all-files, without assessing all files it sometimes
@@ -84,7 +86,7 @@ jobs:
       )
     with:
       runner: mt-l-x86iamx-8-16
-      docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-linter-${{ needs.get-label-type.outputs.ci-docker-hash }}
       script: |
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         echo "Running pyrefly"
@@ -96,10 +98,12 @@ jobs:
     needs: [get-label-type, get-changed-files]
     with:
       runner: mt-l-x86iamx-8-16
-      docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-linter-${{ needs.get-label-type.outputs.ci-docker-hash }}
       script: |
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         echo "Running all other linters"
+        # Cap parallelism to the pod's CPU budget; os.cpu_count() overcounts on k8s and OOMs.
+        export MAX_JOBS="$(nproc --ignore=2)"
         if [ "$CHANGED_FILES" = '*' ]; then
           ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY --all-files" .github/scripts/lintrunner.sh
         else
@@ -112,7 +116,7 @@ jobs:
     uses: ./.github/workflows/_lint.yml
     with:
       runner: mt-l-x86iamx-8-16
-      docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-linter-${{ needs.get-label-type.outputs.ci-docker-hash }}
       script: |
         # Ensure no non-breaking spaces
         # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
@@ -162,7 +166,7 @@ jobs:
     uses: ./.github/workflows/_lint.yml
     with:
       runner: mt-l-x86iamx-8-16
-      docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-linter-${{ needs.get-label-type.outputs.ci-docker-hash }}
       script: |
         # Regenerate workflows
         .github/scripts/generate_ci_workflows.py
@@ -193,7 +197,7 @@ jobs:
     uses: ./.github/workflows/_lint.yml
     with:
       runner: mt-l-x86iamx-8-16
-      docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-linter-${{ needs.get-label-type.outputs.ci-docker-hash }}
       script: |
         # Regenerate ToCs and check that they didn't change
         set -eu
@@ -226,7 +230,7 @@ jobs:
     uses: ./.github/workflows/_lint.yml
     with:
       runner: mt-l-x86iamx-8-16
-      docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-linter-${{ needs.get-label-type.outputs.ci-docker-hash }}
       script: |
         # Test tools
         PYTHONPATH=$(pwd) pytest tools/stats
@@ -327,6 +331,7 @@ jobs:
     uses: ./.github/workflows/_link_check.yml
     with:
       runner: ${{ needs.get-label-type.outputs.label-type }}
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-linter-${{ needs.get-label-type.outputs.ci-docker-hash }}
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
   doc-redirects-check:

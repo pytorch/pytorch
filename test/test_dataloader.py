@@ -16,6 +16,7 @@ import tempfile
 import time
 import unittest
 import warnings
+from unittest import mock
 
 import torch
 import torch.utils.data.datapipes as dp
@@ -34,6 +35,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfNoDill,
+    skipIfRocm,
     skipIfXpu,
     slowTest,
     TEST_CUDA,
@@ -1104,10 +1106,10 @@ def _test_get_worker_info():
         worker_init_fn=_test_worker_info_init_fn,
     )
     it = iter(dataloader)
+    worker_pids = [w.pid for w in it._workers]
     data = []
     for d in it:
         data.append(d)  # noqa: PERF402
-    worker_pids = [w.pid for w in it._workers]
     data = torch.cat(data, 0)
     for d in data:
         # each `d` is a [worker_id, worker_pid] pair, which is set in
@@ -3108,6 +3110,7 @@ class TestDataLoaderDeviceType(TestCase):
 
             next(iter(loader))
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179979")
     @parametrize(
         "context",
         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
@@ -3388,6 +3391,110 @@ except RuntimeError as e:
 """,
             ]
         )
+
+    @unittest.skipIf(not TEST_CUDA, "pin_memory requires CUDA")
+    def test_persistent_workers_pin_memory_atexit_registered_once(self):
+        import atexit
+        import weakref
+
+        cleanup_callback = dataloader._MultiProcessingDataLoaderIter._clean_up_persistent_workers_atexit
+        register_spy = mock.Mock(wraps=atexit.register)
+        persistent_workers_atexit = weakref.WeakSet()
+
+        with (
+            mock.patch("atexit.register", register_spy),
+            mock.patch.object(
+                dataloader, "_persistent_workers_atexit_registered", False
+            ),
+            mock.patch.object(
+                dataloader, "_persistent_workers_atexit", persistent_workers_atexit
+            ),
+        ):
+            for _ in range(8):
+                loader = self._get_data_loader(
+                    self.dataset, batch_size=2, num_workers=1, pin_memory=True
+                )
+                it = iter(loader)
+                next(it)
+                loader_ref = weakref.ref(loader)
+                it_ref = weakref.ref(it)
+                del it
+                del loader
+                gc.collect()
+                self.assertIsNone(it_ref())
+                self.assertIsNone(loader_ref())
+
+        self.assertEqual(len(persistent_workers_atexit), 0)
+        self.assertEqual(
+            sum(
+                1
+                for call in register_spy.call_args_list
+                if call.args and call.args[0] is cleanup_callback
+            ),
+            1,
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "pin_memory requires CUDA")
+    def test_persistent_workers_pin_memory_atexit_uses_iterator_shutdown(self):
+        import weakref
+
+        with (
+            mock.patch.object(
+                dataloader, "_persistent_workers_atexit_registered", True
+            ),
+            mock.patch.object(
+                dataloader, "_persistent_workers_atexit", weakref.WeakSet()
+            ),
+        ):
+            loader = self._get_data_loader(
+                self.dataset, batch_size=2, num_workers=1, pin_memory=True
+            )
+            it = iter(loader)
+            next(it)
+
+            shutdown_workers_spy = mock.Mock(wraps=it._shutdown_workers)
+
+            with mock.patch.object(
+                it,
+                "_shutdown_workers",
+                shutdown_workers_spy,
+            ):
+                dataloader._MultiProcessingDataLoaderIter._clean_up_persistent_workers_atexit()
+
+            self.assertEqual(shutdown_workers_spy.call_count, 1)
+
+    @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
+    @unittest.skipIf(not IS_LINUX, "fd counting is only reliable on Linux")
+    @unittest.skipIf(not TEST_CUDA, "pin_memory requires CUDA")
+    def test_persistent_workers_pin_memory_fd_does_not_grow_linearly(self):
+        proc = psutil.Process()
+
+        def run_loader_once() -> None:
+            import weakref
+
+            loader = self._get_data_loader(
+                self.dataset,
+                batch_size=2,
+                num_workers=1,
+                pin_memory=True,
+            )
+            it = iter(loader)
+            next(it)
+            loader_ref = weakref.ref(loader)
+            it_ref = weakref.ref(it)
+            del it
+            del loader
+            gc.collect()
+            self.assertIsNone(it_ref())
+            self.assertIsNone(loader_ref())
+            time.sleep(0.05)
+
+        run_loader_once()
+        baseline_fds = proc.num_fds()
+        for _ in range(15):
+            run_loader_once()
+        after_fds = proc.num_fds()
+        self.assertLessEqual(after_fds, baseline_fds + 8)
 
     def test_dataset_not_reset(self):
         dataset = DummyDataset()

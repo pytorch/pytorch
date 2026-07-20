@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
     parametrize,
+    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
@@ -259,6 +260,7 @@ class TestCustomOpAutoTune(TestCase):
         )
         return a, b, bias
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/171519")
     def test_decompose_k_custom_op_autotune_dynamic_config_for_input_shape(self):
         """Test decompose_k autotuning with epilogue fusion(matmul+bias+relu+scale) and
         dynamic config generation based on matmul input shapes.
@@ -580,6 +582,7 @@ class TestCustomOpAutoTune(TestCase):
             print("[Dynamic] No dispatch logic found (unexpected for dynamic shapes)")
         self.assertTrue(dispatch_dynamic, "Dynamic shapes should have dispatch logic")
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179943")
     @skipIfXpu
     def test_benchmark_with_cudagraphs_uses_cuda_graph_benchmarking(self):
         """Test that benchmark_with_cudagraphs flag causes CUDA graph benchmarking to be used."""
@@ -1438,7 +1441,7 @@ class TestCustomOpAutoTune(TestCase):
 
         # Clear everything first
         torch.cuda.synchronize()
-        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda._clear_cublas_workspaces()
 
         # Create test tensors and establish baseline with some mm activity
         a = torch.randn(256, 256, device=self.device, dtype=self.dtype)
@@ -1483,7 +1486,7 @@ class TestCustomOpAutoTune(TestCase):
 
         # Clear everything first
         torch.cuda.synchronize()
-        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda._clear_cublas_workspaces()
 
         # Create test tensors
         a = torch.randn(256, 256, device=self.device, dtype=self.dtype)
