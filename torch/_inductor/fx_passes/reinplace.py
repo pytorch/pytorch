@@ -659,14 +659,16 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     scatter_copy_back_info
                 )
                 copy_args_to_copy_nodes_via_views[(mutated_arg, src_base)] = node
-                copy_args_to_scatter_view_copy_back_patterns[(mutated_arg, src_base)] = (
-                    ScatterViewCopyBackPattern(
-                        scatter_node=src,
-                        scatter_is_redundant=only_user_is_given_copy_node,
-                    )
+                copy_args_to_scatter_view_copy_back_patterns[
+                    (mutated_arg, src_base)
+                ] = ScatterViewCopyBackPattern(
+                    scatter_node=src,
+                    scatter_is_redundant=only_user_is_given_copy_node,
                 )
 
-    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node, mutated_arg, ignored_users=None):
+    def any_use_of_views_after_node(
+        node, shared_view_nodes, *, copy_node, mutated_arg, ignored_users=None
+    ):
         node_loc = node_order[node]
         copy_node_loc = node_order[copy_node] if copy_node is not None else None
 
@@ -773,8 +775,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             ):
                 return False
 
-            ignored_users = set()
-            if pattern := copy_args_to_scatter_view_copy_back_patterns.get((mutated_arg, node)):
+            ignored_users = OrderedSet()
+            if pattern := copy_args_to_scatter_view_copy_back_patterns.get(
+                (mutated_arg, node)
+            ):
                 ignored_users.add(pattern.scatter_node)
 
             if any_use_of_views_after_node(
