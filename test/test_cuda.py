@@ -3283,6 +3283,143 @@ torch.cuda.synchronize()
         self.assertEqual(len(instantiated), 2)
 
     @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_replay_hooks(self):
+        x = torch.randn(8, device="cuda")
+
+        # replay hooks fire start-then-end, in registration order, on every
+        # replay; removable, and a no-op (hot path) once removed.
+        events: list[str] = []
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            x + 1
+        start_handle = g.register_replay_start_hook(lambda _g: events.append("start"))
+        end_handle = g.register_replay_end_hook(lambda _g: events.append("end"))
+        g.replay()
+        g.replay()
+        self.assertEqual(events, ["start", "end", "start", "end"])
+        end_handle.remove()
+        events.clear()
+        g.replay()
+        self.assertEqual(events, ["start"])
+        start_handle.remove()
+        events.clear()
+        g.replay()
+        self.assertEqual(events, [])
+
+        # end hook fires even if the launch raises (start balanced by end), and
+        # the launch error still propagates.
+        events.clear()
+        g.register_replay_start_hook(lambda _g: events.append("start"))
+        g.register_replay_end_hook(lambda _g: events.append("end"))
+        with unittest.mock.patch.object(
+            torch._C._CUDAGraph, "replay", side_effect=RuntimeError("boom")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                g.replay()
+        self.assertEqual(events, ["start", "end"])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        torch.cuda.graphs._cuda_runtime is None,
+        "graph destroy callbacks require the cuda-bindings package",
+    )
+    def test_graph_destroy_callback(self):
+        import gc
+        import time
+
+        def wait_for(pred, timeout=5.0):
+            # The user-object destructor runs asynchronously on a CUDA driver
+            # thread (cudaUserObjectNoDestructorSync), so poll for it.
+            end = time.time() + timeout
+            while time.time() < end and not pred():
+                time.sleep(0.005)
+            return pred()
+
+        x = torch.randn(8, device="cuda")
+
+        # fires once when the graph is destroyed (reset), not on capture/replay.
+        fired = []
+        g = torch.cuda.CUDAGraph()
+        g.register_graph_destroy_callback(lambda: fired.append(1))
+        with torch.cuda.graph(g):
+            x + 1
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(fired, [])  # not on capture or replay
+        g.reset()
+        self.assertTrue(wait_for(lambda: fired == [1]), fired)  # on destruction
+
+        # fires via garbage collection of the wrapper too.
+        gc_fired = []
+        g2 = torch.cuda.CUDAGraph()
+        g2.register_graph_destroy_callback(lambda: gc_fired.append(1))
+        with torch.cuda.graph(g2):
+            x + 1
+        del g2
+        gc.collect()
+        self.assertTrue(wait_for(lambda: gc_fired == [1]), gc_fired)
+
+        # remove() before capture deregisters.
+        removed = []
+        g3 = torch.cuda.CUDAGraph()
+        handle = g3.register_graph_destroy_callback(lambda: removed.append(1))
+        handle.remove()
+        with torch.cuda.graph(g3):
+            x + 1
+        g3.reset()
+        self.assertFalse(wait_for(lambda: removed == [1], timeout=0.5), removed)
+
+        # registering after capture ends is rejected.
+        g4 = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g4):
+            x + 1
+        with self.assertRaisesRegex(RuntimeError, "before the graph's capture ends"):
+            g4.register_graph_destroy_callback(lambda: None)
+
+        # keep_graph=True: fires once both the template and exec are destroyed by
+        # reset(), not on instantiate/replay.
+        kept_fired = []
+        g5 = torch.cuda.CUDAGraph(keep_graph=True)
+        g5.register_graph_destroy_callback(lambda: kept_fired.append(1))
+        with torch.cuda.graph(g5, capture_error_mode="relaxed"):
+            x + 1
+        g5.instantiate()
+        g5.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(kept_fired, [])
+        g5.reset()
+        self.assertTrue(wait_for(lambda: kept_fired == [1]), kept_fired)
+
+        # multiple callbacks all fire on destruction.
+        multi = []
+        g6 = torch.cuda.CUDAGraph()
+        g6.register_graph_destroy_callback(lambda: multi.append("a"))
+        g6.register_graph_destroy_callback(lambda: multi.append("b"))
+        with torch.cuda.graph(g6):
+            x + 1
+        g6.reset()
+        self.assertTrue(wait_for(lambda: sorted(multi) == ["a", "b"]), multi)
+
+        # re-capturing after reset() re-arms: a fresh callback fires on the next
+        # destruction (reset clears the prior registration).
+        rearm = []
+        g7 = torch.cuda.CUDAGraph()
+        g7.register_graph_destroy_callback(lambda: rearm.append("first"))
+        with torch.cuda.graph(g7):
+            x + 1
+        g7.reset()
+        self.assertTrue(wait_for(lambda: rearm == ["first"]), rearm)
+        g7.register_graph_destroy_callback(lambda: rearm.append("second"))
+        with torch.cuda.graph(g7):
+            x + 1
+        g7.reset()
+        self.assertTrue(wait_for(lambda: rearm == ["first", "second"]), rearm)
+
+    @unittest.skipIf(
         not TEST_CUDA_GRAPH,
         "CUDA >= 11.0 / ROCm >= 7.0 required for external events in cuda graphs",
     )
