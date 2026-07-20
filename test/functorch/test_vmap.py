@@ -1220,7 +1220,6 @@ class TestVmapAPI(TestCase):
         if not expected.allclose(out):
             raise AssertionError("Expected func3 output to be close to vmap output")
 
-    @unittest.skip("Somehow, vmap and autocast do not work on CPU")
     def test_vmap_autocast_cpu(self):
         self._test_vmap_autocast("cpu")
 
