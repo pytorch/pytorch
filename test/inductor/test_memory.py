@@ -609,6 +609,39 @@ class TestLpmfReadyQueue(TestCase):
                     q.add(nd, mtf[nd])
                     active.add(nd)
 
+    def test_select_matches_linear_scan_negative_gap(self):
+        # memory_gap = max_memory - live_memory can go negative once the
+        # scheduler has overshot its budget, so select() must still match the
+        # linear scan when gap < size for every node in the ready set.
+        rng = random.Random(1)
+        for _ in range(300):
+            n = rng.randint(1, 40)
+            nodes = [self._Node(i, rng.randint(1, 50)) for i in range(n)]
+            q = memory._LpmfReadyQueue(nodes)
+            mtf, active = {}, set()
+            for nd in nodes:
+                if rng.random() < 0.7:
+                    mtf[nd] = rng.randint(0, 50)
+                    q.add(nd, mtf[nd])
+                    active.add(nd)
+            if not active:
+                mtf[nodes[0]] = 0
+                q.add(nodes[0], 0)
+                active.add(nodes[0])
+            for _ in range(30):
+                gap = rng.randint(-60, 60)
+                self.assertIs(q.select(gap), self._argmin(active, mtf, gap))
+                r = rng.random()
+                if r < 0.3 and len(active) > 1:
+                    victim = rng.choice(list(active))
+                    q.remove(victim)
+                    active.discard(victim)
+                elif r < 0.7:
+                    nd = rng.choice(nodes)
+                    mtf[nd] = rng.randint(0, 50)
+                    q.add(nd, mtf[nd])
+                    active.add(nd)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
