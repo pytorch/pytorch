@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import torch
 from torch._library.utils import fill_defaults
-from torch.distributed import StatefulRNGTensor
+from torch.distributed import RNGIndexBlock, StatefulRNGTensor
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -26,7 +26,7 @@ def _validate_normal_std(op_args: list[object]) -> None:
 def _run_stateful_rng_op(
     tensor: torch.Tensor,
     global_numel: int,
-    index_blocks: tuple[tuple[int, int, int, int], ...],
+    index_blocks: tuple[RNGIndexBlock, ...],
     flat_slice_op_call: torch._ops.OpOverload,
     generator: torch.Generator | None,
     *op_args: object,
@@ -39,10 +39,10 @@ def _run_stateful_rng_op(
     return flat_slice_op_call(
         tensor,
         global_numel,
-        [start_index for start_index, _, _, _ in index_blocks],
-        [block_size for _, block_size, _, _ in index_blocks],
-        [block_stride for _, _, block_stride, _ in index_blocks],
-        [num_blocks for _, _, _, num_blocks in index_blocks],
+        [block.start_index for block in index_blocks],
+        [block.block_size for block in index_blocks],
+        [block.block_stride for block in index_blocks],
+        [block.num_blocks for block in index_blocks],
         *op_args,
         generator=generator,
     )
@@ -97,7 +97,7 @@ class TestStatefulRNGTensor(TestCase):
     def _set_rng_metadata(
         tensor: torch.Tensor,
         global_numel: int,
-        index_blocks: tuple[tuple[int, int, int, int], ...],
+        index_blocks: tuple[RNGIndexBlock, ...],
     ) -> None:
         setattr(tensor, "rng_global_numel", global_numel)  # noqa: B010
         setattr(tensor, "rng_index_blocks", index_blocks)  # noqa: B010
@@ -107,10 +107,26 @@ class TestStatefulRNGTensor(TestCase):
         device = torch.device("cuda")
         global_shape = (5, 7)
         layouts = (
-            ("shard_0_rank_0", (slice(0, 3), slice(None)), ((0, 21, 21, 1),)),
-            ("shard_0_rank_1", (slice(3, 5), slice(None)), ((21, 14, 14, 1),)),
-            ("shard_1_rank_0", (slice(None), slice(0, 4)), ((0, 4, 7, 5),)),
-            ("shard_1_rank_1", (slice(None), slice(4, 7)), ((4, 3, 7, 5),)),
+            (
+                "shard_0_rank_0",
+                (slice(0, 3), slice(None)),
+                (RNGIndexBlock(0, 21, 21, 1),),
+            ),
+            (
+                "shard_0_rank_1",
+                (slice(3, 5), slice(None)),
+                (RNGIndexBlock(21, 14, 14, 1),),
+            ),
+            (
+                "shard_1_rank_0",
+                (slice(None), slice(0, 4)),
+                (RNGIndexBlock(0, 4, 7, 5),),
+            ),
+            (
+                "shard_1_rank_1",
+                (slice(None), slice(4, 7)),
+                (RNGIndexBlock(4, 3, 7, 5),),
+            ),
         )
         init_fns = {
             "normal": partial(torch.nn.init.normal_, mean=0.1, std=0.02),
@@ -148,7 +164,10 @@ class TestStatefulRNGTensor(TestCase):
     def test_multiple_index_blocks_match_dense(self):
         device = torch.device("cuda")
         global_indices = torch.tensor([2, 3, 7, 8, 12, 13, 20, 21, 22], device=device)
-        index_blocks = ((2, 2, 5, 3), (20, 3, 3, 1))
+        index_blocks = (
+            RNGIndexBlock(2, 2, 5, 3),
+            RNGIndexBlock(20, 3, 3, 1),
+        )
 
         torch.manual_seed(123)
         expected = torch.empty(24, device=device).normal_(0.1, 0.02)
@@ -172,7 +191,9 @@ class TestStatefulRNGTensor(TestCase):
 
         actual_generator = torch.Generator(device=device).manual_seed(123)
         actual = torch.empty((5, 3), device=device)
-        self._set_rng_metadata(actual, expected.numel(), ((4, 3, 7, 5),))
+        self._set_rng_metadata(
+            actual, expected.numel(), (RNGIndexBlock(4, 3, 7, 5),)
+        )
         with _StatefulRNGMode():
             actual.normal_(0.1, 0.02, generator=actual_generator)
 
@@ -200,7 +221,7 @@ class TestStatefulRNGTensor(TestCase):
                 reference.set_state(before)
 
                 actual = torch.empty(3, device=device)
-                self._set_rng_metadata(actual, 7, ((2, 3, 3, 1),))
+                self._set_rng_metadata(actual, 7, (RNGIndexBlock(2, 3, 3, 1),))
                 with self.assertRaisesRegex(RuntimeError, "std >= 0.0"):
                     with _StatefulRNGMode():
                         actual.normal_(0.0, -1.0, generator=generator)
