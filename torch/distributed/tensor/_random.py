@@ -109,7 +109,7 @@ def _try_compute_stateful_rng_layout(
         )
 
     if shard_dim is None:
-        return logical_numel, (RNGIndexBlock(0, logical_numel, logical_numel, 1),)
+        return logical_numel, ((0, logical_numel, logical_numel, 1),)
 
     start_index: IntLikeType = 0
     for offset, stride in zip(global_offset, global_stride):
@@ -119,9 +119,7 @@ def _try_compute_stateful_rng_layout(
     block_count: IntLikeType = 1
     for size in local_shape[:shard_dim]:
         block_count *= size
-    return logical_numel, (
-        RNGIndexBlock(start_index, block_size, block_stride, block_count),
-    )
+    return logical_numel, ((start_index, block_size, block_stride, block_count),)
 
 
 def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
