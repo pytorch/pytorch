@@ -299,7 +299,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 and "stream_id" in frame
             ):
                 frame["logical_lane"], frame["lane_name"] = _resolve_lane_columns(
-                    self._lane_resolver, frame, self._lane_cache
+                    self._lane_resolver, frame
                 )
             (timed if is_timed else ext).append((kind_str, frame))
         if not timed and not ext:
@@ -626,12 +626,12 @@ def _resolve_annotation_column(resolver, gnid: Any) -> Any:
     return out
 
 
-def _resolve_lane_columns(lane_resolver, frame: dict[str, Any], cache: dict) -> Any:
-    """Per-row (logical_lane, lane_name) for graphed ops, memoized by graph_node_id in
-    ``cache`` (a node's lane is stable once its graph is baked, so it resolves once for the
-    observer's lifetime). Graphed rows (graph_node_id != 0) get the resolver's (lane, name)
-    from a record of that op's fields -- built only on a cache miss; eager rows keep their CUDA
-    stream and no name (the monitor names those "stream N")."""
+def _resolve_lane_columns(lane_resolver, frame: dict[str, Any]) -> Any:
+    """Per-row (logical_lane, lane_name) for graphed ops. Graphed rows (graph_node_id != 0)
+    get the resolver's (lane, name), or keep their CUDA stream when it returns None; eager rows
+    keep their CUDA stream and no name (the monitor names those "stream N"). The resolver is
+    keyed and memoized on graph_node_id by the observer (see CuptiMonitorObserver._lane_resolver),
+    so distinct nodes resolve once for its lifetime."""
     gnid = frame["graph_node_id"]
     n = len(gnid)
     logical = np.array(
@@ -641,10 +641,9 @@ def _resolve_lane_columns(lane_resolver, frame: dict[str, Any], cache: dict) -> 
     for i, g in enumerate(gnid.tolist()):
         if not g:
             continue
-        res = cache.get(g)
-        if res is None:
-            res = cache[g] = lane_resolver({col: frame[col][i] for col in frame})
-        logical[i], names[i] = res
+        res = lane_resolver(g)
+        if res is not None:
+            logical[i], names[i] = res
     return logical, names
 
 
