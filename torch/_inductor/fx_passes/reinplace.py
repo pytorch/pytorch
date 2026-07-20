@@ -203,16 +203,6 @@ _ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
     ]
 )
 
-_FRESH_SCATTER_FACTORY_OPS = OrderedSet(
-    [
-        aten.empty.memory_format,
-        aten.empty_strided.default,
-        aten.empty_like.default,
-        aten.new_empty.default,
-        aten.new_empty_strided.default,
-    ]
-)
-
 
 def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     _, _, view_ops = node.args
@@ -224,19 +214,6 @@ def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     )
 
 
-def scatter_has_fresh_factory_base(node: torch.fx.Node) -> bool:
-    while node.op == "call_function" and node.target in (
-        _generalized_scatter,
-        _inplace_generalized_scatter,
-    ):
-        inp = node.args[0]
-        if not isinstance(inp, torch.fx.Node):
-            return False
-        node = inp
-
-    return node.op == "call_function" and node.target in _FRESH_SCATTER_FACTORY_OPS
-
-
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -245,21 +222,11 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     input and output would have been realized anyway.
 
     """
-    inp, src, _view_ops = node.args
+    inp, _src, _view_ops = node.args
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
         return True
-
-    if isinstance(inp, torch.fx.Node) and scatter_has_fresh_factory_base(inp):
-        return True
-
-    if isinstance(inp, torch.fx.Node) and isinstance(src, torch.fx.Node):
-        inp_val = inp.meta.get("val", None)
-        src_val = src.meta.get("val", None)
-        if isinstance(inp_val, torch.Tensor) and isinstance(src_val, torch.Tensor):
-            if statically_known_true(src_val.numel() < inp_val.numel()):
-                return True
 
     if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
         return True
