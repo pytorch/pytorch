@@ -25,7 +25,7 @@ from torch._C._dynamo.guards import set_is_in_mode_without_ignore_compile_intern
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from torch._custom_class_base import CustomClassBase
+    from torch._opaque_base import OpaqueBase
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -481,7 +481,7 @@ class TraceableWrapperSubclass(Protocol):
 
     @staticmethod
     def __tensor_unflatten__(
-        inner_tensors: Mapping[str, torch.Tensor | CustomClassBase],
+        inner_tensors: Mapping[str, torch.Tensor | OpaqueBase],
         metadata: object,
         outer_size: Sequence[int | torch.SymInt],
         outer_stride: Sequence[int | torch.SymInt],

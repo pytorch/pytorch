@@ -11,7 +11,3 @@
 ```{eval-rst}
 .. autofunction:: to_dlpack
 ```
-
-```{eval-rst}
-.. autoclass:: ReadOnlyTensorWrapper
-```

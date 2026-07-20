@@ -840,16 +840,6 @@ class outer(torch.nn.Module):
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionDynamo(PytreeRegisteringTestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        config.canonicalize_output_graph_node_order = True
-
-    @classmethod
-    def tearDownClass(cls):
-        config.canonicalize_output_graph_node_order = False
-        super().tearDownClass()
-
     def _assert_models_equal(
         self,
         model_expected,
@@ -878,7 +868,7 @@ class TestLeafFunctionDynamo(PytreeRegisteringTestCase):
                 self.assertEqual(
                     expected_grads[name],
                     test_grads[name],
-                    msg=lambda msg: f"{msg}\nGradient mismatch for parameter {name}",
+                    msg=f"Gradient mismatch for parameter {name}",
                 )
 
     def _test_leaf_function_helper(self, mod_class, args_fn, loss_fn):
@@ -935,12 +925,12 @@ class TestLeafFunctionDynamo(PytreeRegisteringTestCase):
                 self.assertEqual(
                     param_eager.grad,
                     param_compile_eager.grad,
-                    msg=lambda msg: f"{msg}\nGradient mismatch for {name_eager} between eager and compile_eager",
+                    msg=f"Gradient mismatch for {name_eager} between eager and compile_eager",
                 )
                 self.assertEqual(
                     param_eager.grad,
                     param_compile_aot.grad,
-                    msg=lambda msg: f"{msg}\nGradient mismatch for {name_eager} between eager and compile_aot",
+                    msg=f"Gradient mismatch for {name_eager} between eager and compile_aot",
                 )
 
             pytree.tree_map(
@@ -2130,7 +2120,6 @@ class GraphModule(torch.nn.Module):
 
         t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3);  primals_3 = None
         addmm: "f32[3, 3]" = torch.ops.aten.addmm.default(primals_2, primals_4, t);  primals_2 = None
-
         t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
         return (getitem, addmm, primals_4, t_1)
 """,

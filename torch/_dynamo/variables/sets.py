@@ -216,15 +216,15 @@ class SetVariable(VariableTracker):
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
-    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
+    def var_getattr(self, tx: "InstructionTranslatorBase", name: str):
         if name == "__class__":
             return VariableTracker.build(tx, self.python_type())
-        return super().getattro_impl(tx, name)
+        return super().var_getattr(tx, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self.python_type(), name))
+        return VariableTracker.build(tx, hasattr(set, name))
 
     def install_set_contains_guard(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
@@ -355,7 +355,18 @@ class SetVariable(VariableTracker):
             py_type = self.python_type()
             return self._fast_set_method(tx, getattr(py_type, name), args, kwargs)
 
-        if name == "add":
+        # Lazy imports to avoid circular dependencies
+        from .dicts import DictItemsVariable, DictKeysVariable
+
+        if name == "__init__":
+            temp_set_vt = SourcelessBuilder.create(tx, set).call_set(
+                tx, *args, **kwargs
+            )
+            tx.output.side_effects.mutation(self)
+            self.items.clear()
+            self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
+            return ConstantVariable.create(None)
+        elif name == "add":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
                     tx,
@@ -534,6 +545,92 @@ class SetVariable(VariableTracker):
             return SourcelessBuilder.create(tx, op.get(name)).call_function(
                 tx, [self, other], {}
             )
+        elif name in ("__and__", "__xor__", "__sub__"):
+            m = {
+                "__and__": "intersection",
+                "__xor__": "symmetric_difference",
+                "__sub__": "difference",
+            }.get(name)
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
+                    ],
+                )
+            if m is None:
+                raise AssertionError(f"Unexpected set method name: {name}")
+            return self.call_method(tx, m, args, kwargs)
+        elif name in ("__rand__", "__rxor__", "__rsub__"):
+            m = {
+                "__rand__": "__and__",
+                "__rxor__": "__xor__",
+                "__rsub__": "__sub__",
+            }.get(name)
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"unsupported operand type(s) for {name}: '{args[0].python_type_name()}' and '{self.python_type_name()}'"
+                    ],
+                )
+            if m is None:
+                raise AssertionError(f"Unexpected reverse set method name: {name}")
+            return args[0].call_method(tx, m, [self], kwargs)
+        elif name in ("__iand__", "__ior__", "__ixor__", "__isub__"):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
+                    ],
+                )
+            m = {
+                "__iand__": "intersection_update",
+                "__ior__": "update",
+                "__ixor__": "symmetric_difference_update",
+                "__isub__": "difference_update",
+            }.get(name)
+            if m is None:
+                raise AssertionError(f"Unexpected inplace set method name: {name}")
+            self.call_method(tx, m, args, kwargs)
+            return self
+        elif name == "__len__":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return VariableTracker.build(tx, len(self.items))
         elif name == "copy":
             if args or kwargs:
                 raise_args_mismatch(
@@ -564,20 +661,6 @@ class SetVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
         raise RuntimeError("Illegal to getitem on a set")
-
-    def tp_init_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
-        temp_set_vt = SourcelessBuilder.create(tx, set).call_set(tx, *args, **kwargs)
-        tx.output.side_effects.mutation(self)
-        self.items.clear()
-        self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
-        return ConstantVariable.create(None)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import SetIterator
@@ -743,7 +826,7 @@ class OrderedSetClassVariable(VariableTracker):
     def as_python_constant(self) -> type[OrderedSet[Any]]:
         return OrderedSet
 
-    def getattro_impl(
+    def var_getattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__new__":
@@ -757,7 +840,7 @@ class OrderedSetClassVariable(VariableTracker):
                 self, name, py_type=type(getattr(OrderedSet, name)), source=attr_source
             )
         else:
-            return super().getattro_impl(tx, name)
+            return super().var_getattr(tx, name)
 
     def call_method(
         self,
@@ -946,6 +1029,9 @@ class FrozensetVariable(SetVariable):
     ) -> VariableTracker:
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
+        elif name == "__init__":
+            # frozenset is immutable. Calling __init__ again shouldn't have any effect
+            return ConstantVariable.create(None)
         elif name == "copy":
             if args or kwargs:
                 raise_args_mismatch(
@@ -965,15 +1051,6 @@ class FrozensetVariable(SetVariable):
             r = super().call_method(tx, name, args, kwargs)
             return FrozensetVariable(r.items)  # type: ignore[attr-defined]
         return super().call_method(tx, name, args, kwargs)
-
-    def tp_init_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # frozenset is immutable. Calling __init__ again shouldn't have any effect.
-        return ConstantVariable.create(None)
 
     def is_hashable(self) -> bool:
         return True

@@ -211,8 +211,9 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       std::string device_string = serialized_arg_val["type"].get<std::string>();
       if (serialized_arg_val.contains("index") &&
           serialized_arg_val["index"].is_number()) {
-        device_string +=
-            ":" + std::to_string(serialized_arg_val["index"].get<int>());
+        auto index = serialized_arg_val["index"].get<int>();
+        device_string += ":" + std::to_string(index);
+        device_->set_index(static_cast<int8_t>(index));
       }
 
       c10::Device device(device_string);
@@ -614,9 +615,14 @@ std::unique_ptr<OSSCallTorchBindKernel> OSSProxyExecutor::
 
 OSSProxyExecutor::OSSProxyExecutor(
     const std::string& json_path,
-    const std::string& device_str,
+    bool is_cpu,
     std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs) {
-  device_ = std::make_unique<c10::Device>(device_str);
+  if (is_cpu) {
+    device_ = std::make_unique<c10::Device>(c10::DeviceType::CPU);
+  } else {
+    int device_idx = -1;
+    device_ = std::make_unique<c10::Device>(c10::DeviceType::CUDA, device_idx);
+  }
 
   // If custom_objs is provided, use it instead of loading from
   // custom_objs_config.json If custom_objs is not provided, try to load from

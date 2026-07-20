@@ -1,6 +1,5 @@
 # mypy: disable-error-code=import-not-found
 # pyrefly: ignore [import-error, missing-import]
-import cutlass
 import cutlass.cute as cute
 
 
@@ -19,14 +18,7 @@ def ssa_to_indexable(ssa_value: cute.TensorSSA, dtype: str) -> cute.Numeric:
 
 @cute.jit  # type: ignore[misc]
 def ssa_to_fragment(ssa_value: cute.TensorSSA, dtype: str) -> cute.Tensor:
-    """Materialize an SSA vector into a register fragment.
-
-    Casts to the fragment dtype when the SSA dtype differs (e.g. an int64 index
-    expression materialized into an int32 index fragment), since fragment
-    stores require matching element types.
-    """
-    if cutlass.const_expr(ssa_value.dtype != dtype):
-        ssa_value = ssa_value.to(dtype)
+    """Materialize an SSA vector into a register fragment."""
     frag = cute.make_rmem_tensor(ssa_value.shape, dtype)
     frag.store(ssa_value)
     return frag

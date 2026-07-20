@@ -770,7 +770,7 @@ class TestDTensorOptimizer(DTensorTestBase):
         self.assertEqual(
             misses_after_warmup,
             misses_after_steps,
-            lambda msg: f"{msg}\nCache misses increased from {misses_after_warmup} to "
+            f"Cache misses increased from {misses_after_warmup} to "
             f"{misses_after_steps} over 10 steps (expected 0 new misses "
             "after warmup)",
         )

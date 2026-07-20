@@ -27,8 +27,6 @@ class DeadCodeEliminator {
     // clean up unused fork inputs before starting the main algorithm
     eliminateDeadForkInputs(block, recurse);
 
-    memo_.reserve(block->owningGraph()->numNodes());
-
     // Initialize by marking the return node and all its consumed values as live
     mark(block->return_node());
 

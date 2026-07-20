@@ -511,26 +511,22 @@ class TestLookupTable(BaseLookupTableTest):
             if result is None:
                 raise AssertionError(f"Result should not be None for {description}")
             self.assertIn(
-                "triton",
-                result,
-                lambda msg: f"{msg}\nShould have triton result for {description}",
+                "triton", result, f"Should have triton result for {description}"
             )
             self.assertEqual(
-                len(result["triton"]),
-                1,
-                lambda msg: f"{msg}\nShould have 1 config for {description}",
+                len(result["triton"]), 1, f"Should have 1 config for {description}"
             )
             # template_hash should be removed from returned config
             self.assertNotIn(
                 "template_hash",
                 result["triton"][0],
-                lambda msg: f"{msg}\ntemplate_hash should be removed from result for {description}",
+                f"template_hash should be removed from result for {description}",
             )
             # Other config fields should be preserved
             self.assertEqual(
                 result["triton"][0]["BLOCK_M"],
                 128,
-                lambda msg: f"{msg}\nBLOCK_M should be preserved for {description}",
+                f"BLOCK_M should be preserved for {description}",
             )
 
     @parametrize(
@@ -617,7 +613,7 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertEqual(
                 result,
                 {},
-                lambda msg: f"{msg}\nShould return empty dict when expected_found={expected_found}",
+                f"Should return empty dict when expected_found={expected_found}",
             )
 
     def test_device_key_priority(self):

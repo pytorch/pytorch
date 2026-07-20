@@ -201,9 +201,7 @@ class TestIntTuple(TestCase):
                 crd = idx2crd(idx, shape)
                 recovered_idx = crd2idx(crd, shape)
                 self.assertEqual(
-                    recovered_idx,
-                    idx,
-                    lambda msg: f"{msg}\nFailed roundtrip for shape {shape}, idx {idx}",
+                    recovered_idx, idx, f"Failed roundtrip for shape {shape}, idx {idx}"
                 )
 
     def test_idx2crd_crd2idx_roundtrip(self):
@@ -222,9 +220,7 @@ class TestIntTuple(TestCase):
             idx = crd2idx(crd, shape)
             recovered_crd = idx2crd(idx, shape)
             self.assertEqual(
-                recovered_crd,
-                crd,
-                lambda msg: f"{msg}\nFailed roundtrip for crd {crd}, shape {shape}",
+                recovered_crd, crd, f"Failed roundtrip for crd {crd}, shape {shape}"
             )
 
 

@@ -87,6 +87,4 @@ dtype:
 
 accuracy:
   skip:
-    eager_not_deterministic:
-      # Non-deterministic cuDNN conv/batchnorm backward in eager mode.
-      - mobilenetv2_100
+    eager_not_deterministic: []

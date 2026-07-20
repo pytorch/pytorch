@@ -2,8 +2,6 @@
 import copy
 import unittest
 
-import pytest
-
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.ilp_utils import (
@@ -37,21 +35,11 @@ except ImportError:
     sac_milp = None  # type: ignore[assignment]
 
 
-# TODO(multigpu-marker): These tests are single-process but their AC-decision
-# assertions depend on RuntimeEstimator's roofline runtime estimates, which read
-# the live GPU's peak FLOPS / DRAM bandwidth -- so they fail when the runner GPU
-# differs (e.g. L4 vs T4). Temporarily marked multigpu to keep them on the
-# original multi-GPU box until the runtime estimator is pinned to a fixed device
-# spec (torch/_inductor/analysis/device_info.py) to make them hardware-independent.
-@pytest.mark.multigpu
 class TestSACILP(TestCase):
     def setUp(self):
         super().setUp()
         self.device = torch.cuda.current_device()
         self.estimate_mode = "operator-level-cost-model"
-        # Pin the roofline device spec so runtime estimates are deterministic
-        # across the physical GPU the test happens to run on.
-        self.gpu_type = "NVIDIA H100"
 
     def _init_model_input_optimizer(
         self,
@@ -118,7 +106,7 @@ class TestSACILP(TestCase):
         # Initializing optimizer states and warm-up
         _run_one_step()
 
-        runtime_estimator = RuntimeEstimator(gpu_type=self.gpu_type)
+        runtime_estimator = RuntimeEstimator()
         with runtime_estimator(estimate_mode_type=self.estimate_mode):
             _run_one_step()  # We use only one iteration for estimation
         return runtime_estimator
@@ -128,7 +116,7 @@ class TestSACILP(TestCase):
         model: torch.nn.Module,
         inp: torch.Tensor,
     ) -> SACEstimator:
-        sac_estimator = SACEstimator(gpu_type=self.gpu_type)
+        sac_estimator = SACEstimator()
         with sac_estimator(estimate_mode_type=self.estimate_mode):
             loss = model(inp).sum()
         loss.backward()
@@ -184,16 +172,12 @@ class TestSACILP(TestCase):
         expected_ac_candidates = {f"Transformer.layers.{i}" for i in range(4)}
         self.assertTrue(
             set(ac_decisions.keys()).issubset(expected_ac_candidates),
-            lambda msg: f"{msg}\nUnexpected AC modules: "
+            f"Unexpected AC modules: "
             f"{set(ac_decisions.keys()) - expected_ac_candidates}",
         )
         for fqn, ratio in ac_decisions.items():
-            self.assertGreater(
-                ratio, 0, lambda msg: f"{msg}\ndiscard ratio for {fqn} should be > 0"
-            )
-            self.assertLessEqual(
-                ratio, 1, lambda msg: f"{msg}\ndiscard ratio for {fqn} should be <= 1"
-            )
+            self.assertGreater(ratio, 0, f"discard ratio for {fqn} should be > 0")
+            self.assertLessEqual(ratio, 1, f"discard ratio for {fqn} should be <= 1")
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")

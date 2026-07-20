@@ -113,7 +113,7 @@ class TestShardingSpec(TestCase):
                 ),
             ]
         )
-        check_tensor(spec.shards, torch.Size([10, 5]))
+        check_tensor(spec.shards, torch.rand(10, 5).size())
 
         # test row and column sharding
         spec = EnumerableShardingSpec(
@@ -140,7 +140,7 @@ class TestShardingSpec(TestCase):
                 ),
             ]
         )
-        check_tensor(spec.shards, torch.Size([6, 6]))
+        check_tensor(spec.shards, torch.rand(6, 6).size())
 
         # test uneven shard sizes.
         spec = EnumerableShardingSpec(
@@ -167,7 +167,7 @@ class TestShardingSpec(TestCase):
                 ),
             ]
         )
-        check_tensor(spec.shards, torch.Size([6, 6]))
+        check_tensor(spec.shards, torch.rand(6, 6).size())
 
         # test invalid sharding
         with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
@@ -225,7 +225,7 @@ class TestShardingSpec(TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "Rank of tensor is.*but shards rank"):
-            check_tensor(spec.shards, torch.Size([10, 10, 10]))
+            check_tensor(spec.shards, torch.rand(10, 10, 10).size())
 
         spec = EnumerableShardingSpec(
             [
@@ -243,7 +243,7 @@ class TestShardingSpec(TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "exceeds tensor dim"):
-            check_tensor(spec.shards, torch.Size([10, 3]))
+            check_tensor(spec.shards, torch.rand(10, 3).size())
 
         spec = EnumerableShardingSpec(
             [
@@ -261,7 +261,7 @@ class TestShardingSpec(TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "does not match tensor volume"):
-            check_tensor(spec.shards, torch.Size([10, 10]))
+            check_tensor(spec.shards, torch.rand(10, 10).size())
 
     def test_get_split_size(self):
         self.assertEqual(3, get_split_size(11, 4))

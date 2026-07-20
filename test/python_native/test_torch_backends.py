@@ -384,32 +384,29 @@ class TestTorchBackendsPythonNative(RegistryTestMixin, TestCase):
                     # Enable DSL first
                     dsl.enable()
                     self.assertTrue(
-                        dsl.enabled,
-                        lambda msg: f"{msg}\n{dsl_name} should be enabled after enable()",
+                        dsl.enabled, f"{dsl_name} should be enabled after enable()"
                     )
 
                     # Disable DSL
                     dsl.disable()
                     self.assertFalse(
-                        dsl.enabled,
-                        lambda msg: f"{msg}\n{dsl_name} should be disabled after disable()",
+                        dsl.enabled, f"{dsl_name} should be disabled after disable()"
                     )
 
                     # Verify operations are actually deregistered by checking registry state
                     self.assertTrue(
                         pn.is_dsl_disabled(dsl_name),
-                        lambda msg: f"{msg}\n{dsl_name} should be disabled in registry",
+                        f"{dsl_name} should be disabled in registry",
                     )
 
                     # Re-enable and verify registry state
                     dsl.enable()
                     self.assertTrue(
-                        dsl.enabled,
-                        lambda msg: f"{msg}\n{dsl_name} should be enabled after re-enable()",
+                        dsl.enabled, f"{dsl_name} should be enabled after re-enable()"
                     )
                     self.assertFalse(
                         pn.is_dsl_disabled(dsl_name),
-                        lambda msg: f"{msg}\n{dsl_name} should not be disabled in registry after re-enable",
+                        f"{dsl_name} should not be disabled in registry after re-enable",
                     )
 
                 finally:
@@ -442,13 +439,13 @@ class TestTorchBackendsPythonNative(RegistryTestMixin, TestCase):
                         # Verify DSL is actually disabled in registry during context
                         self.assertTrue(
                             pn.is_dsl_disabled(dsl_name),
-                            lambda msg: f"{msg}\n{dsl_name} should be disabled in registry during context",
+                            f"{dsl_name} should be disabled in registry during context",
                         )
 
                     # Verify DSL is re-enabled after context
                     self.assertFalse(
                         pn.is_dsl_disabled(dsl_name),
-                        lambda msg: f"{msg}\n{dsl_name} should be re-enabled in registry after context",
+                        f"{dsl_name} should be re-enabled in registry after context",
                     )
 
                 finally:
@@ -479,7 +476,7 @@ class TestTorchBackendsPythonNative(RegistryTestMixin, TestCase):
                 pn.disable_operations(test_operation)
                 self.assertTrue(
                     pn.is_operation_disabled(test_operation),
-                    lambda msg: f"{msg}\nOperation {test_operation} should be disabled in registry",
+                    f"Operation {test_operation} should be disabled in registry",
                 )
 
                 # Re-enable operation and verify registry state
@@ -487,7 +484,7 @@ class TestTorchBackendsPythonNative(RegistryTestMixin, TestCase):
                 # Note: enable_operations removes from disabled list
                 self.assertFalse(
                     pn.is_operation_disabled(test_operation),
-                    lambda msg: f"{msg}\nOperation {test_operation} should not be disabled in registry after re-enable",
+                    f"Operation {test_operation} should not be disabled in registry after re-enable",
                 )
 
             finally:

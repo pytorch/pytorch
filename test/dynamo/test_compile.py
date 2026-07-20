@@ -293,7 +293,7 @@ class PublicTorchCompilerTests(TestCase):
         self.assertEqual(
             matching,
             True,
-            lambda msg: f"{msg}\nSignatures do not match for function {public_fn_name}() \n Public: {public_sig} \n Private: {private_sig}",
+            f"Signatures do not match for function {public_fn_name}() \n Public: {public_sig} \n Private: {private_sig}",
         )
 
     def test_dynamo_signatures(self):

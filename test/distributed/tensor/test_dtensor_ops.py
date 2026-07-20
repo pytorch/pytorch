@@ -161,7 +161,8 @@ dtensor_fails = {
     xfail("sparse.mm", "reduce"),
     # meta tensor data not allocated yet during tensor_split
     xfail("tensor_split"),
-    xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
+    # output_specs count mismatch in unsafe_split strategy
+    xfail("unsafe_split"),
     # /TODO(whc) debug/triage
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)
@@ -353,9 +354,6 @@ dtensor_fails_no_strategy = {
     xfail("histogramdd"),
     xfail("isin"),
     xfail("linalg.matrix_power"),
-    # Full-matrix op; matrix dims can't be sharded, like matrix_exp/matrix_power.
-    xfail("linalg.matrix_sqrth"),
-    xfail("linalg.polar"),
     xfail("linspace", "tensor_overload"),
     xfail("log_normal"),
     xfail("logspace", "tensor_overload"),
@@ -771,7 +769,6 @@ ops_unbacked_dtensor_dde = {
     skip("broadcast_to"),
     xfail("bucketize"),
     xfail("cartesian_prod"),
-    xfail("combinations"),
     xfail("constant_pad_nd"),
     xfail("cumprod"),
     xfail("diagonal_scatter"),
@@ -860,7 +857,6 @@ ops_unbacked_dtensor_dde = {
     xfail("view"),
     xfail("view_as"),
     xfail("view_as_complex"),
-    xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
 }
 
 
@@ -1005,12 +1001,11 @@ class TestSingleDimStrategies(DTensorOpTestBase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(
         {
-            # Value validation cannot compare nondeterministic or
-            # uninitialized outputs shard-by-shard.
+            # Stochastic: each shard gets independent RNG, so
+            # op(full) != cat(op(shard0), op(shard1)).
             skip("exponential"),
             skip("geometric"),
             skip("log_normal"),
-            skip("nn.functional.rrelu"),
             skip("normal", "in_place"),
             skip("uniform"),
         },
@@ -1103,7 +1098,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
                     tuple(output_placements),
                     mesh,
                 ),
-                lambda msg: f"{msg}\n{op.name}: forward {input_placements} -> {tuple(output_placements)} failed",
+                f"{op.name}: forward {input_placements} -> {tuple(output_placements)} failed",
             )
 
             bwd = validate_sharding_rule_sample_backward(
@@ -1116,7 +1111,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             if bwd is not None:
                 self.assertTrue(
                     bwd,
-                    lambda msg: f"{msg}\n{op.name}: backward {input_placements} failed",
+                    f"{op.name}: backward {input_placements} failed",
                 )
 
 

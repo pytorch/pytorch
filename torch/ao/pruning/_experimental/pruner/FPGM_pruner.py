@@ -51,7 +51,7 @@ class FPGMPruner(BaseStructuredSparsifier):
         Args:
             t (torch.Tensor): tensor representing the parameter to prune
         Returns:
-            distance (torch.Tensor): distance computed across filters
+            distance (torch.Tensor): distance computed across filtters
         """
         dim = 0  # prune filter (row)
 

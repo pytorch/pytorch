@@ -1,6 +1,6 @@
 // Original TunableOp is from onnxruntime.
 // https://github.com/microsoft/onnxruntime/blob/main/onnxruntime/core/framework/tunable.h
-// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/cuda/tunable
+// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/rocm/tunable
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 //
@@ -13,8 +13,6 @@
 #ifdef USE_ROCM
 #include <ATen/cuda/tunable/GemmHipblaslt.h>
 #include <ATen/cuda/tunable/GemmRocblas.h>
-#else
-#include <ATen/cuda/tunable/GemmCublaslt.h>
 #endif
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -207,14 +205,7 @@ inline const char* TypeName(c10::complex<float> v) {
 }
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-class GemmTunableOp
-    : public
-#ifdef USE_ROCM
-          TunableOp<GemmParams<T>>
-#else
-          CublasltGemmTunableOp<T, GemmParams<T>>
-#endif
-{
+class GemmTunableOp : public TunableOp<GemmParams<T>> {
  public:
   GemmTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
@@ -249,14 +240,7 @@ class GemmTunableOp
 };
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-class GemmAndBiasTunableOp
-    : public
-#ifdef USE_ROCM
-          TunableOp<GemmAndBiasParams<T>>
-#else
-          CublasltGemmTunableOp<T, GemmAndBiasParams<T>>
-#endif
-{
+class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>> {
  public:
   GemmAndBiasTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
@@ -284,14 +268,7 @@ class GemmAndBiasTunableOp
 };
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-class GemmStridedBatchedTunableOp
-    : public
-#ifdef USE_ROCM
-          TunableOp<GemmStridedBatchedParams<T>>
-#else
-          CublasltGemmTunableOp<T, GemmStridedBatchedParams<T>>
-#endif
-{
+class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>> {
  public:
   GemmStridedBatchedTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());

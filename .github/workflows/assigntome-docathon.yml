@@ -7,7 +7,7 @@ on:
 
 jobs:
   assign:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       issues: write
     steps:

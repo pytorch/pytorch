@@ -906,11 +906,11 @@ class ProcessGroupOpaqueTypeRegistrationTest(TestCase):
     def test_process_group_is_registered_on_distributed_import(self) -> None:
         from torch._library.opaque_object import (
             get_member_type,
-            is_custom_class,
+            is_opaque_type,
             MemberType,
         )
 
-        self.assertTrue(is_custom_class(dist.ProcessGroup))
+        self.assertTrue(is_opaque_type(dist.ProcessGroup))
         self.assertEqual(
             get_member_type(dist.ProcessGroup, "size"), MemberType.USE_REAL
         )
@@ -1009,9 +1009,6 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    @torch._inductor.config.patch(
-        {"aten_distributed_optimizations.enable_simple_overlap": False}
-    )
     def test_inductor_all_reduce_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
@@ -1421,9 +1418,6 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    @torch._inductor.config.patch(
-        {"aten_distributed_optimizations.enable_simple_overlap": False}
-    )
     def test_inductor_broadcast(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
@@ -1613,7 +1607,7 @@ class ACTCompileTest(TestCase):
                         self.assertNotIsInstance(
                             a,
                             AsyncCollectiveTensor,
-                            lambda msg: f"{msg}\narg {i} is still an ACT — trigger_wait() "
+                            f"arg {i} is still an ACT — trigger_wait() "
                             "was not called before the compiled function",
                         )
                     return gm(*args)

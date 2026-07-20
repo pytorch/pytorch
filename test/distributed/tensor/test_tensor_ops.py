@@ -307,25 +307,6 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         self.assertTrue(res.placements == tuple(replica_spec))
         self.assertEqual(replicate_out.to_local(), expected_dt.to_local())
 
-    def test_eye_out_sharded_rejected(self):
-        mesh = self.build_device_mesh()
-        input_size = (8, 8)
-
-        for placement in (Shard(0), Shard(1)):
-            local_size = list(input_size)
-            local_size[placement.dim] //= self.world_size
-            local_tensor = torch.empty(*local_size, device=self.device_type)
-            dtensor = DTensor.from_local(
-                local_tensor,
-                mesh,
-                [placement],
-                shape=torch.Size(input_size),
-                stride=(input_size[1], 1),
-            )
-
-            with self.assertRaisesRegex(RuntimeError, "no valid sharding strategy"):
-                torch.eye(input_size[0], input_size[1], out=dtensor)
-
     def test_empty_like(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -399,11 +380,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         if not (dist_tensor.shape == (4, 8)):
             raise AssertionError(f"Expected shape (4, 8), got {dist_tensor.shape}")
 
-        comm_mode = CommDebugMode()
-        with comm_mode:
-            ones_like_dt = torch.ones_like(dist_tensor)
-        self.assertEqual(comm_mode.get_total_counts(), 0)
-        self.assertEqual(ones_like_dt.placements, (Replicate(),))
+        ones_like_dt = torch.ones_like(dist_tensor)
         ones_expected = torch.ones(dist_tensor.shape)
         self.assertEqual(ones_expected, ones_like_dt.full_tensor())
 
@@ -432,11 +409,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         if not (dist_tensor.shape == (4, 8)):
             raise AssertionError(f"Expected shape (4, 8), got {dist_tensor.shape}")
 
-        comm_mode = CommDebugMode()
-        with comm_mode:
-            zeros_like_dt = torch.zeros_like(dist_tensor)
-        self.assertEqual(comm_mode.get_total_counts(), 0)
-        self.assertEqual(zeros_like_dt.placements, (Replicate(),))
+        zeros_like_dt = torch.zeros_like(dist_tensor)
         zeros_expected = torch.zeros(dist_tensor.shape)
         self.assertEqual(zeros_expected, zeros_like_dt.full_tensor())
 
@@ -1458,7 +1431,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
     def test_split_on_partial(self):
         self.run_subtests(
             {
-                "reduce_op": ["sum", "avg", "min", "max"],
+                "reduce_op": ["sum", "avg", "product", "min", "max"],
                 "split_size": [2, 3, 4],
                 "split_dim": [0, 1],
             },
@@ -1573,7 +1546,7 @@ class DistBucketizeTest(LocalDTensorTestBase):
 
                 self.assertTrue(
                     result.placements[0].is_replicate(),
-                    lambda msg: f"{msg}\nExpected Replicate output but got {result.placements[0]} "
+                    f"Expected Replicate output but got {result.placements[0]} "
                     f"for Partial({reduce_op}) input",
                 )
                 global_input = partial_input.full_tensor()
@@ -1590,13 +1563,13 @@ class DistBucketizeTest(LocalDTensorTestBase):
 
                 self.assertTrue(
                     result.placements[0].is_partial(),
-                    lambda msg: f"{msg}\nExpected Partial output but got {result.placements[0]} "
+                    f"Expected Partial output but got {result.placements[0]} "
                     f"for Partial({reduce_op}) input",
                 )
                 self.assertEqual(
                     result.placements[0].reduce_op,
                     reduce_op,
-                    lambda msg: f"{msg}\nExpected Partial({reduce_op}) output but got {result.placements[0]}",
+                    f"Expected Partial({reduce_op}) output but got {result.placements[0]}",
                 )
                 expected = torch.bucketize(input_tensor, boundaries)
                 self.assertEqual(result.full_tensor(), expected)
@@ -1657,15 +1630,11 @@ class DistToCopyTest(LocalDTensorTestBase):
                 result = dt.to(target_dtype)
                 p = result.placements[0]
                 if expect_partial:
-                    self.assertTrue(
-                        p.is_partial(),
-                        lambda msg: f"{msg}\n{reduce_op}→{target_dtype}: {p}",
-                    )
+                    self.assertTrue(p.is_partial(), f"{reduce_op}→{target_dtype}: {p}")
                     self.assertEqual(p.reduce_op, reduce_op)
                 else:
                     self.assertTrue(
-                        p.is_replicate(),
-                        lambda msg: f"{msg}\n{reduce_op}→{target_dtype}: {p}",
+                        p.is_replicate(), f"{reduce_op}→{target_dtype}: {p}"
                     )
 
 
@@ -2001,7 +1970,7 @@ class TestNewEmptyStridedUneven(DTensorTestBase):
         self.assertIsNotNone(model._grad_placement)
         self.assertTrue(
             all(isinstance(p, Partial) for p in model._grad_placement),
-            lambda msg: f"{msg}\nExpected Partial grad placement, got {model._grad_placement}",
+            f"Expected Partial grad placement, got {model._grad_placement}",
         )
 
     @with_comms

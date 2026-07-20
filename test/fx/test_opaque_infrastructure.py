@@ -1,13 +1,13 @@
 # Owner(s): ["module: fx"]
 
 import torch
-from torch._library.opaque_object import register_custom_class
+from torch._library.opaque_object import register_opaque_type
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 # Define a simple opaque type for testing
-class OpaqueCounter(torch._custom_class_base.CustomClassBase):
+class OpaqueCounter(torch._opaque_base.OpaqueBase):
     """A simple opaque object that holds a counter."""
 
     def __init__(self, value: int):
@@ -19,7 +19,7 @@ class OpaqueCounter(torch._custom_class_base.CustomClassBase):
 
 
 # Register it as an opaque type (reference semantics for identity/mutation tracking)
-register_custom_class(OpaqueCounter, typ="symbolic")
+register_opaque_type(OpaqueCounter, typ="reference")
 
 
 # Define a wrapper class that holds an opaque object as an attribute
