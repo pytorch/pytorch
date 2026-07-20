@@ -28,7 +28,11 @@ if "CMAKE_BUILD_TYPE" not in os.environ:
 
 
 def build_libtorch(rerun_cmake: bool, cmake_only: bool) -> None:
-    build_dir = REPO_ROOT / "build"
+    # Resolve the build directory relative to the current working directory,
+    # not the repo root: CI invokes this script from a scratch dir to build
+    # libtorch outside the source tree (see .ci/pytorch/build.sh and
+    # macos-test.sh, which pushd into a temp dir first).
+    build_dir = Path.cwd() / "build"
     build_dir.mkdir(exist_ok=True)
 
     cmake = shutil.which("cmake")
@@ -61,8 +65,18 @@ def build_libtorch(rerun_cmake: bool, cmake_only: bool) -> None:
     if cmake_only:
         return
 
-    # Build
-    build_args = [cmake, "--build", ".", "--target", "install"]
+    # Build. Pass --config for multi-config generators (Visual Studio on
+    # Windows); single-config generators like Ninja ignore it. CMAKE_BUILD_TYPE
+    # is always set by the hotpatch above.
+    build_args = [
+        cmake,
+        "--build",
+        ".",
+        "--config",
+        os.environ["CMAKE_BUILD_TYPE"],
+        "--target",
+        "install",
+    ]
     max_jobs = os.getenv("MAX_JOBS")
     if max_jobs is not None:
         build_args += ["-j", max_jobs]
