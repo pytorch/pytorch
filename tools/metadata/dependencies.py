@@ -14,6 +14,8 @@ from __future__ import annotations
 import os
 from typing import Any, TYPE_CHECKING
 
+from _common import get_torch_version
+
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -35,21 +37,6 @@ def _is_truthy(val: str | None) -> bool:
     return val is not None and val.upper() in ("ON", "1", "YES", "TRUE", "Y")
 
 
-def _get_torch_version() -> str:
-    import importlib.util
-    from pathlib import Path
-
-    spec = importlib.util.spec_from_file_location(
-        "generate_torch_version",
-        Path(__file__).resolve().parent.parent / "generate_torch_version.py",
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError("Could not load generate_torch_version.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.get_torch_version()
-
-
 def dynamic_metadata(
     settings: Mapping[str, Any],
     project: Mapping[str, Any],
@@ -63,7 +50,7 @@ def dynamic_metadata(
     # BUILD_PYTHON_ONLY: add libtorch wheel as a dependency
     if _is_truthy(os.environ.get("BUILD_PYTHON_ONLY")):
         libtorch_pkg = os.environ.get("LIBTORCH_PACKAGE_NAME", "torch_no_python")
-        version = _get_torch_version()
+        version = get_torch_version()
         deps.append(f"{libtorch_pkg}=={version}")
 
     # PYTORCH_EXTRA_INSTALL_REQUIREMENTS: pipe-separated PEP 508 strings
