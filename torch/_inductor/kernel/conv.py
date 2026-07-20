@@ -709,11 +709,18 @@ def convolution(
                     num_warps=num_warps,
                     **cfg.kwargs,
                 )
+    # The Triton conv2d backward-input kernels miscompile on CUDA (wrong results
+    # on sm90, ptxas illegal memory access on sm100) with no perf win, so keep
+    # them on ROCm and fall back to ATEN on CUDA. Same rationale as the
+    # convolution_backward lowering. See
+    # https://github.com/pytorch/pytorch/issues/187081.
+    disable_triton_conv_bwd = device_type == "cuda" and not torch.version.hip
     if (
         torch._inductor.utils._use_conv_autotune_backend("TRITON")
         and use_triton_template(layout)
         and transposed
         and ndim == 2
+        and not disable_triton_conv_bwd
     ):
         # ConvTranspose2d is mathematically identical to conv_backward_input:
         # the input plays the role of grad_output and the same weight layout
@@ -1071,6 +1078,12 @@ def convolution_backward_lowering(
 
     device_type = ir.get_device_type(input)
 
+    # The Triton conv2d backward kernels hit a ptxas miscompile (illegal memory
+    # access) on NVIDIA sm100 and show no perf win on CUDA, so keep them on ROCm
+    # only and fall back to ATEN. See
+    # https://github.com/pytorch/pytorch/issues/187081.
+    disable_triton_conv_bwd = device_type == "cuda" and not torch.version.hip
+
     conv_configs = V.choices.get_conv_configs(device_type)
     dtype_size = input.get_dtype().itemsize
 
@@ -1094,7 +1107,8 @@ def convolution_backward_lowering(
         args_w = [input, grad_out]
 
         if (
-            torch._inductor.utils._use_conv_bwd_weight_autotune_backend("TRITON")
+            not disable_triton_conv_bwd
+            and torch._inductor.utils._use_conv_bwd_weight_autotune_backend("TRITON")
             and use_triton_template(layout_dw)
             and not transposed
             and is_zeros(output_padding)
@@ -1148,7 +1162,8 @@ def convolution_backward_lowering(
         args_x = [grad_out, weight]
 
         if (
-            torch._inductor.utils._use_conv_bwd_input_autotune_backend("TRITON")
+            not disable_triton_conv_bwd
+            and torch._inductor.utils._use_conv_bwd_input_autotune_backend("TRITON")
             and use_triton_template(layout_dx)
             and not transposed
             and is_zeros(output_padding)

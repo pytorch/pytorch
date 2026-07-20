@@ -304,7 +304,7 @@ class TensorShelf {
 //   ProcessGroupNCCL pg(store, rank, size);
 //   std::shared_ptr<WorkNCCL> work = pg.allreduce(tensors);
 //
-//   // At this point, NCCL kernel has already by queued successfully
+//   // At this point, NCCL kernel has already been queued successfully
 //   // Now, let current stream wait for the NCCL to finish, this function is
 //   // async operation as well
 //
@@ -938,10 +938,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
-
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store.
-  void setSequenceNumberForGroup() override;
 
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it

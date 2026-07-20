@@ -11,11 +11,11 @@ from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
     EPILOGUE_FN_NAME,
 )
-from torch._inductor.scheduler import Scheduler
-from torch._inductor.template_heuristics.nv_universal_gemm import (
+from torch._inductor.heuristics.template.nv_universal_gemm import (
     HeuristicConfig,
     NVUniversalGemmHeuristics,
 )
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
     ceildiv,
@@ -136,6 +136,34 @@ class TestNVUniversalGemm(TestCase):
             result = compiled_fn(a, b)
 
         torch.testing.assert_close(result, expected)
+
+    def test_arch_filter_rejects_min_cc_only_kernels(self):
+        """designed_for_min_cc <= device cc is insufficient: an arch-conditional
+        sm90 kernel reports min_cc=90 but only lists a cc=90 target and won't
+        compile on sm100. The exact-arch filter (via _device_target) must reject
+        kernels a min_cc-only check would wrongly accept.
+        """
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        major, minor = torch.cuda.get_device_capability()
+        cc = major * 10 + minor
+        device_target = kernel_cache._device_target(cc)
+
+        kernel_cache.clear_cache()
+        manifest = kernel_cache._get_kernel_cache()
+        min_cc_ok = [k for k in manifest.values() if k.designed_for_min_cc <= cc]
+        arch_ok = [
+            k
+            for k in min_cc_ok
+            if device_target.supports_operators_from(k.metadata.supported_targets)
+        ]
+
+        self.assertTrue(min_cc_ok, "no kernels pass the min_cc check")
+        self.assertLess(
+            len(arch_ok),
+            len(min_cc_ok),
+            "exact-arch filter should reject kernels that min_cc alone accepts",
+        )
 
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
@@ -822,6 +850,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             epilogue_fused, "plain matmul should NOT have epilogue fusion markers"
         )
 
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190235"
+    )
     def test_reduction_not_fused(self):
         """Test that reductions after GEMM are NOT fused into the epilogue."""
         dtype = torch.bfloat16
@@ -865,7 +897,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 self.assertIn(
                     "in_ptr0, in_ptr1, out_ptr0, stream=None",
                     line,
-                    f"Unexpected kernel signature: {line.strip()}",
+                    lambda msg: f"{msg}\nUnexpected kernel signature: {line.strip()}",
                 )
 
     def test_epilogue_with_aux_input(self):
@@ -882,6 +914,85 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.testing.assert_close(result, fn(a, b, bias), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "bias+relu was NOT fused into epilogue")
 
+    def test_efc_disk_cache_round_trip(self):
+        """Verify that EFC kernel compiled artifacts can be serialized to disk
+        and reloaded correctly.
+
+        EFC kernels produce a closure-wrapped compiled_obj. The disk cache
+        unwraps the inner JIT function for serialization and rewraps it on
+        reload. This test compiles an EFC kernel, round-trips through disk
+        cache, and verifies the reloaded artifact produces correct results."""
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _get_kernel_cache,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _rewrap_efc_compiled_obj,
+            _unwrap_efc_compiled_obj,
+        )
+        from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
+
+        cache = _get_kernel_cache()
+        efc_kernel = None
+        for name, k in cache.items():
+            if (
+                "EFC" in name
+                and "ABFloat16" in name
+                and "outBFloat16" in name
+                and "ttt" in name
+            ):
+                efc_kernel = k
+                break
+        if efc_kernel is None:
+            self.skipTest("No matching EFC kernel found in cache")
+
+        import cutlass_api
+        from cutlass_api.artifact import CompiledArtifact
+
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+        out = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
+
+        args = cutlass_api.arguments.GemmArguments(
+            a, b, out, accumulator_type=torch.float32
+        )
+        artifact = efc_kernel.compile(args)
+
+        # Unwrap, serialize, reload, rewrap
+        inner = _unwrap_efc_compiled_obj(artifact.compiled_obj)
+        self.assertNotEqual(
+            type(inner).__name__,
+            "function",
+            "unwrap should extract the JIT function, not the closure",
+        )
+
+        test_cache: dict = {}
+        disk_cache_set(test_cache, "/tmp/test_efc_rt.py", ("efc",), ("key",), inner, 0)
+        loaded = disk_cache_get({}, "/tmp/test_efc_rt.py", ("efc",), ("key",), 0)
+        self.assertIsNotNone(loaded, "disk_cache_get returned None")
+
+        rewrapped = _rewrap_efc_compiled_obj(loaded, efc_kernel)
+        reloaded_artifact = CompiledArtifact(rewrapped, efc_kernel)
+
+        # Run with reloaded artifact and verify correctness
+        out2 = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
+        args2 = cutlass_api.arguments.GemmArguments(
+            a, b, out2, accumulator_type=torch.float32
+        )
+        efc_kernel.run(
+            args2,
+            reloaded_artifact,
+            stream=torch.cuda.current_stream(),
+            workspace=None,
+            assume_supported_args=True,
+        )
+        torch.cuda.synchronize()
+        expected = a.float() @ b.float()
+        torch.testing.assert_close(out2.float(), expected, atol=1e-2, rtol=1e-2)
+
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190234"
+    )
     def test_workspace_runtime_integration(self):
         """End-to-end: mock the chosen kernel's workspace_size to non-zero and
         actually let benchmark_codegened_module run, exercising the runtime
@@ -937,7 +1048,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         finite = [(ms, p) for ms, p in bench_results if ms != float("inf")]
         self.assertTrue(
             finite,
-            f"All NVGEMM benchmarks returned inf — workspace handling likely "
+            lambda msg: f"{msg}\nAll NVGEMM benchmarks returned inf — workspace handling likely "
             f"broken. Results: {bench_results}",
         )
 

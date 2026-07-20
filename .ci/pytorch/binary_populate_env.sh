@@ -75,7 +75,7 @@ TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
 TRITON_CONSTRAINT="platform_system == 'Linux' and python_version < '3.15'"
 
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" && ! "$PYTORCH_BUILD_VERSION" =~ .*xpu.* ]]; then
-  TRITON_REQUIREMENT="triton==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
+  TRITON_REQUIREMENT="triton~=${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
   if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
       TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
       TRITON_REQUIREMENT="triton==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
@@ -85,7 +85,7 @@ fi
 
 # Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton rocm package
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*rocm.* && $(uname) == "Linux" ]]; then
-    TRITON_REQUIREMENT="triton-rocm==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
+    TRITON_REQUIREMENT="triton-rocm~=${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
     if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
         TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
         TRITON_REQUIREMENT="triton-rocm==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"

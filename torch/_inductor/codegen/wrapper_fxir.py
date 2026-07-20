@@ -1149,6 +1149,19 @@ class FxConverter:
         call_kwargs = {
             name: self._generate_sym_node(val) for name, val in call_kwargs.items()
         }
+        backend_options = triton_meta.get("backend_options", {})
+        if backend_options:
+            # FXIR executes Triton kernels through the HOP, not the already
+            # materialized CachingAutotuner launcher. Preserve backend option
+            # values in the HOP payload so a direct FXIR run or later Inductor
+            # re-lowering re-enters Triton JIT with the same compiler options
+            # that were used during FXIR precompile/autotune.
+            for name, value in backend_options.items():
+                # If the backend option is also a kernel parameter, call_kwargs
+                # already contains the launch value reconstructed from the Triton
+                # signature/config. Keep that value and only add backend options
+                # that are not otherwise represented in the HOP payload.
+                call_kwargs.setdefault(name, value)
 
         # Store non-graphable kwargs in the side table.
         (
@@ -1156,15 +1169,23 @@ class FxConverter:
             constant_args_idx,
         ) = tracing_triton_hopifier_singleton.store_non_graphable_args(call_kwargs)
 
+        hop_kwargs: dict[str, Any] = {
+            "kernel_idx": kernel.wrapped.kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": wrapper_grid,
+            "tma_descriptor_metadata": {},
+            "kwargs": call_kwargs,
+        }
+        if backend_options:
+            # Keep the FXIR HOP call shape unchanged for normal Inductor
+            # kernels. Some downstream HOP py_impls have fixed keyword-only
+            # signatures and only need launch_kwargs when there are real
+            # Triton backend options to preserve.
+            hop_kwargs["launch_kwargs"] = tuple(backend_options)
+
         triton_node = self.gm.graph.call_function(
             triton_kernel_wrapper_mutation,
-            kwargs={
-                "kernel_idx": kernel.wrapped.kernel_idx,
-                "constant_args_idx": constant_args_idx,
-                "grid": wrapper_grid,
-                "tma_descriptor_metadata": {},
-                "kwargs": call_kwargs,
-            },
+            kwargs=hop_kwargs,
         )
         if extra_options:
             triton_node.meta["extra_options"] = extra_options

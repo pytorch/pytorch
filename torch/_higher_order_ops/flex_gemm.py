@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import dataclasses
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -16,24 +17,68 @@ from torch._ops import HigherOrderOperator
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
-FLEX_GEMM_OP_INPUT_INDICES = {
-    torch.ops.aten.mm.default: (0, 1),
-    torch.ops.aten.addmm.default: (1, 2),
+@dataclasses.dataclass(frozen=True)
+class FlexGemmOpSpec:
+    """Canonical operand positions for a supported FlexGEMM op."""
+
+    name: str
+    mat1_index: int
+    mat2_index: int
+    input_ndim: int
+    bias_index: int | None = None
+
+
+FLEX_GEMM_OP_SPECS = {
+    torch.ops.aten.mm.default: FlexGemmOpSpec("mm", 0, 1, input_ndim=2),
+    torch.ops.aten.addmm.default: FlexGemmOpSpec(
+        "addmm", 1, 2, input_ndim=2, bias_index=0
+    ),
+    torch.ops.aten.bmm.default: FlexGemmOpSpec("bmm", 0, 1, input_ndim=3),
+    torch.ops.aten.baddbmm.default: FlexGemmOpSpec(
+        "baddbmm", 1, 2, input_ndim=3, bias_index=0
+    ),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,
     torch.addmm: torch.ops.aten.addmm.default,
+    torch.bmm: torch.ops.aten.bmm.default,
+    torch.baddbmm: torch.ops.aten.baddbmm.default,
 }
 _SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
 
 
-def supported_flex_gemm_op_names() -> str:
-    return "/".join(
-        op.name().removeprefix("aten::") for op in FLEX_GEMM_OP_INPUT_INDICES
-    )
+_SUPPORTED_FLEX_GEMM_OP_NAMES = "/".join(
+    spec.name for spec in FLEX_GEMM_OP_SPECS.values()
+)
+_PRESERVE_FLEX_GEMM_GEMM_OP = "preserve_flex_gemm_gemm_op"
+
+# Note [Preserving FlexGEMM body GEMMs]
+# FlexGEMM lowering materializes the captured epilogue by finding the body GEMM
+# node whose target matches the HOP-carried gemm_op. Generic graph passes can
+# rewrite batch-size-1 bmm into mm(...).unsqueeze(0), which removes the matching
+# node. This body pass tags FlexGEMM GEMM nodes so bmm_to_mm in joint_graph.py
+# skips them.
 
 
-_SUPPORTED_FLEX_GEMM_OP_NAMES = supported_flex_gemm_op_names()
+def mark_flex_gemm_body_gemm_node(
+    body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
+) -> None:
+    """Mark body GEMMs so Inductor's batch-1 bmm rewrite keeps them matchable."""
+    for node in body_graph.graph.find_nodes(op="call_function", target=gemm_op):
+        node.meta[_PRESERVE_FLEX_GEMM_GEMM_OP] = True
+
+
+FLEX_GEMM_BODY_GRAPH_PASSES: tuple[
+    Callable[[torch.fx.GraphModule, torch._ops.OpOverload], None], ...
+] = (mark_flex_gemm_body_gemm_node,)
+
+
+def apply_flex_gemm_body_graph_passes(
+    body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
+) -> None:
+    """Apply FlexGEMM body annotations before generic Inductor graph passes."""
+    for graph_pass in FLEX_GEMM_BODY_GRAPH_PASSES:
+        graph_pass(body_graph, gemm_op)
 
 
 class FlexGemm(HigherOrderOperator):
@@ -48,7 +93,7 @@ class FlexGemm(HigherOrderOperator):
         gemm_kwargs: dict[str, Any],
         kernel_options: dict[str, Any],
     ) -> Any:
-        if gemm_op not in FLEX_GEMM_OP_INPUT_INDICES:
+        if gemm_op not in FLEX_GEMM_OP_SPECS:
             raise RuntimeError(f"unsupported GEMM op for FlexGEMM: {gemm_op}")
         if not isinstance(gemm_args, (tuple, list)):
             raise RuntimeError(f"gemm_args must be a tuple/list, got {type(gemm_args)}")
@@ -169,6 +214,7 @@ def flex_gemm_proxy_torch_dispatch_mode(
             return body_fn(*flat_body_args)
 
         body_graph = reenter_make_fx(tracing_body_fn)(*flat_args)
+        apply_flex_gemm_body_graph_passes(body_graph, gemm_op)
         _, body_graph_name = unique_graph_id(proxy_mode, prefix="flex_gemm_body_graph")
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
         proxy_args = pytree.tree_map(
