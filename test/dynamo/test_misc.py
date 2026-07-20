@@ -517,6 +517,16 @@ graph():
         self.assertIsNone(result["cc"])
         self.assertEqual(result["get_raised"], "AssertionError")
 
+        # Exercise the set -> restore cycle against the new storage: try_get()
+        # sees the context inside tracing() and returns to the None default after.
+        from torch._guards import tracing
+
+        self.assertIsNone(TracingContext.try_get())
+        tc = TracingContext(None)
+        with tracing(tc):
+            self.assertIs(TracingContext.try_get(), tc)
+        self.assertIsNone(TracingContext.try_get())
+
     def test_compile_non_infra_empty_with_disalloed_dispatch_mode(self):
         from torch.utils._python_dispatch import TorchDispatchMode
 
