@@ -11,9 +11,7 @@ from _cpp_embed_headers import embed_headers
 def write_metallib_headers(metal_filename: str, output_filename: str):
     embedded_headers = embed_headers(metal_filename)
 
-    out_path = Path(output_filename)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w") as out:
+    with open(output_filename, "w") as out:
         out.writelines(
             [
                 "#include <ATen/native/mps/OperationUtils.h>\n",

@@ -264,36 +264,25 @@ struct nextafter_functor {
     return static_cast<T>(::metal::nextafter(a, b));
   }
 
+  // Metal has no bfloat nextafter overload, so open-code the musl algorithm
+  // over the sign-magnitude bit pattern.
   inline bfloat operator()(const bfloat from, const bfloat to) {
-    ushort ufrom = as_type<ushort>(from);
-    ushort uto = as_type<ushort>(to);
-    ushort sign_mask = ushort(1) << 15;
-
     if (from != from || to != to) {
       return from + to;
     }
-
-    if (ufrom == uto) {
-      return from;
+    if (from == to) {
+      return to;
     }
-
-    ushort abs_from = ufrom & ~sign_mask;
-    ushort abs_to = uto & ~sign_mask;
-
-    if (abs_from == 0) {
-      if (abs_to == 0) {
-        return to;
-      }
-      ufrom = (uto & sign_mask) | ushort(1);
-      return as_type<bfloat>(ufrom);
+    ushort ufrom = as_type<ushort>(from);
+    if (from == 0) {
+      ushort r = (as_type<ushort>(to) & (ushort(1) << 15)) | ushort(1);
+      return as_type<bfloat>(r);
     }
-
-    if (abs_from > abs_to || ((ufrom ^ uto) & sign_mask)) {
-      ufrom--;
-    } else {
+    if ((from < to) == (from > 0)) {
       ufrom++;
+    } else {
+      ufrom--;
     }
-
     return as_type<bfloat>(ufrom);
   }
 };
