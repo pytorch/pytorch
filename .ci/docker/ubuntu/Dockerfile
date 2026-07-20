@@ -41,11 +41,7 @@ ENV VIRTUAL_ENV=${VENV_PATH}
 ENV PATH=${VENV_PATH}/bin:$PATH
 COPY requirements-ci.txt requirements-docs.txt /opt/
 COPY ./common/install_python.sh install_python.sh
-COPY ./common/common_utils.sh common_utils.sh
 RUN bash ./install_python.sh && rm install_python.sh /opt/requirements-ci.txt /opt/requirements-docs.txt
-# Installed as jenkins (via pip_install) so the venv stays writable for the
-# test-time reinstall, and with --no-deps to avoid pulling torch in here.
-RUN bash -c "source ./common_utils.sh && pip_install --no-deps spmd-types==0.2.1" && rm common_utils.sh
 
 # Install gcc
 ARG GCC_VERSION

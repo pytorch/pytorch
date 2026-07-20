@@ -238,11 +238,6 @@ case "$tag" in
     HALIDE=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3.12-pallas)
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
-    PALLAS=yes
-    ;;
   pytorch-linux-jammy-cuda12.8-py3.12-pallas)
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.12
@@ -271,15 +266,15 @@ case "$tag" in
     CUDA_VERSION=13.0.2
     CLANG_VERSION=18
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc15)
+  pytorch-linux-jammy-aarch64-py3.10-gcc13)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=15
+    GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc15-inductor-benchmarks)
+  pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=15
+    GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
     INDUCTOR_BENCHMARKS=yes
