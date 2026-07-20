@@ -101,10 +101,10 @@ def _is_supported_stateful_rng_op(
 def _run_stateful_rng_op_rankwise(
     tensor: torch.Tensor,
     logical_numel: int,
-    start_indices: tuple[int | torch.SymInt, ...],
-    block_sizes: tuple[int | torch.SymInt, ...],
-    block_strides: tuple[int | torch.SymInt, ...],
-    block_counts: tuple[int | torch.SymInt, ...],
+    start_indices: list[int | torch.SymInt],
+    block_sizes: list[int | torch.SymInt],
+    block_strides: list[int | torch.SymInt],
+    block_counts: list[int | torch.SymInt],
     kind: int,
     generator: torch.Generator | None,
     generator_state: torch.Tensor | None,
@@ -176,10 +176,15 @@ def _run_stateful_rng_op(
         if generator is not None and enabled_local_tensor_mode()
         else None
     )
-    start_indices = tuple(block.start_index for block in index_blocks)
-    block_sizes = tuple(block.block_size for block in index_blocks)
-    block_strides = tuple(block.block_stride for block in index_blocks)
-    block_counts = tuple(block.num_blocks for block in index_blocks)
+    start_indices: list[int | torch.SymInt] = []
+    block_sizes: list[int | torch.SymInt] = []
+    block_strides: list[int | torch.SymInt] = []
+    block_counts: list[int | torch.SymInt] = []
+    for start_index, block_size, block_stride, num_blocks in index_blocks:
+        start_indices.append(start_index)
+        block_sizes.append(block_size)
+        block_strides.append(block_stride)
+        block_counts.append(num_blocks)
     if generator_state is None:
         aten._philox_distribution_flat_slice_.default(
             tensor,
