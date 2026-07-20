@@ -2185,10 +2185,6 @@ def _apply_kernel_options(
             "Use return_aux=AuxRequest(lse=True) or omit max_scores."
         )
     kernel_options["OUTPUT_MAX"] = output_max
-    if any_inputs_on_cpu_device and output_max:
-        # CPU doesn't support returning max yet
-        # TODO: support CPU for returning max
-        raise NotImplementedError("Returning max scores is not supported on CPU.")
 
     return kernel_options
 
