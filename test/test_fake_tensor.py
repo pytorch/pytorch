@@ -941,6 +941,14 @@ class FakeTensorTest(TestCase):
                     torch._C._dispatch_key_set(y)
                 )
 
+    def test_extra_dispatch_key_masks_include_parse_only_autocast_keys(self):
+        from torch._subclasses import fake_tensor
+
+        for name in ("AutocastXLA", "AutocastMTIA", "AutocastMAIA"):
+            key = torch._C._dispatch_key_parse(name)
+            self.assertTrue(fake_tensor._PROPAGATED_EXTRA_DISPATCH_KEYS.has(key))
+            self.assertTrue(fake_tensor._PHYSICAL_EXTRA_DISPATCH_KEYS.has(key))
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
     def test_mkldnn_to_dense(self):
         from torch._subclasses.functional_tensor import (

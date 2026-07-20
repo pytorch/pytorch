@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import inspect
 import threading
 import typing
 import weakref
@@ -241,7 +242,6 @@ MetaTensorId = NewType("MetaTensorId", int)
 
 _DescriberId = NewType("_DescriberId", int)
 DESCRIBER_NEXT_ID = _DescriberId(0)
-_META_CONVERTER_META_DESC_ATTR = "_meta_converter_meta_desc"
 
 
 class MetaTensorDescriber:
@@ -438,6 +438,9 @@ class MetaTensorDescriber:
                 else None
             )
         elif t.device.type == "xla":
+            # Real XLA wrapper tensors can carry non-XLA physical keys such as
+            # AutocastCUDA. Avoid probing arbitrary real tensors here; fake
+            # tensors already carry the represented key set explicitly.
             dispatch_keys = torch._C._dispatch_keys(t).raw_repr()
         extra_keys = _extra_dispatch_keys_for_tensor(t.device, t)
         extra_dispatch_keys = extra_keys.raw_repr() if extra_keys is not None else None
@@ -653,19 +656,44 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
         return self.func(new_base, symint_visitor_fn, tensor_visitor_fn)
 
 
-# A callback where the device is either optional or required.
+# A callback where the device is either optional or required. MetaConverter can
+# also pass the optional source_desc kwarg when a callback accepts it.
 # All of these satisfy this protocol:
-#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str])
-#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str] = "meta")
-#   def mk(arg: Callable[[], torch.Tensor], device: Optional[Union[torch.device, str]] = None)
+#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str],
+#          source_desc: MetaTensorDesc[Any] | None = None)
+#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str] = "meta",
+#          source_desc: MetaTensorDesc[Any] | None = None)
 class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
     def __call__(
-        self, arg: Callable[[], torch.Tensor], /, *, device: torch.device | str
+        self,
+        arg: Callable[[], torch.Tensor],
+        /,
+        *,
+        device: torch.device | str,
+        source_desc: MetaTensorDesc[Any] | None = None,
     ) -> _TensorT_cov: ...
 
 
 class _MetaTensorCallbackKwargs(TypedDict, total=False):
     device: torch.device | str
+    source_desc: MetaTensorDesc[Any] | None
+
+
+def _callback_accepts_source_desc(callback: Callable[..., Any]) -> bool:
+    try:
+        parameters = inspect.signature(callback).parameters.values()
+    except (TypeError, ValueError):
+        return False
+
+    for parameter in parameters:
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            return True
+        if parameter.name == "source_desc" and parameter.kind in (
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            return True
+    return False
 
 
 # A callback where the device may not be provided (is optional).
@@ -1016,6 +1044,7 @@ class MetaConverter(Generic[_TensorT]):
         cls,
         t: Callable[[], torch.Tensor],
         device: torch.device | str | None = None,
+        source_desc: MetaTensorDesc[Any] | None = None,
     ) -> _TensorT:
         return cls._checked_cast_tensor_t(t())
 
@@ -1114,26 +1143,18 @@ class MetaConverter(Generic[_TensorT]):
         base_callback: _MetaTensorCallbackOptDevice[_TensorT] = functools.partial(
             callback_, device=t.device
         )
+        callback_accepts_source_desc = _callback_accepts_source_desc(callback_)
 
         def callback(
             make_meta_t: Callable[[], torch.Tensor],
             **kwargs: Unpack[_MetaTensorCallbackKwargs],
         ) -> _TensorT:
-            attached_meta_tensors: list[torch.Tensor] = []
-
-            def make_meta_t_with_desc() -> torch.Tensor:
-                meta_t = make_meta_t()
-                if not hasattr(meta_t, _META_CONVERTER_META_DESC_ATTR):
-                    setattr(meta_t, _META_CONVERTER_META_DESC_ATTR, t)
-                    attached_meta_tensors.append(meta_t)
-                return meta_t
-
-            try:
-                return base_callback(make_meta_t_with_desc, **kwargs)
-            finally:
-                for meta_t in attached_meta_tensors:
-                    if getattr(meta_t, _META_CONVERTER_META_DESC_ATTR, None) is t:
-                        delattr(meta_t, _META_CONVERTER_META_DESC_ATTR)
+            if callback_accepts_source_desc:
+                if "source_desc" not in kwargs:
+                    kwargs["source_desc"] = t
+            else:
+                kwargs.pop("source_desc", None)
+            return base_callback(make_meta_t, **kwargs)
 
         if source is None:
             from torch._dynamo.source import ConstantSource
@@ -2339,15 +2360,17 @@ class MetaConverter(Generic[_TensorT]):
                         if t.dispatch_keys is not None
                         else None
                     )
-                    r.extra_dispatch_keys = (  # type: ignore[attr-defined]
-                        torch._C.DispatchKeySet.from_raw_repr(t.extra_dispatch_keys)
-                        if t.extra_dispatch_keys is not None
-                        else (
-                            r.extra_dispatch_keys  # type: ignore[attr-defined]
-                            if t.dispatch_keys is not None
-                            else None
+                    if t.extra_dispatch_keys is not None:
+                        extra_dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(
+                            t.extra_dispatch_keys
                         )
-                    )
+                    elif t.dispatch_keys is not None:
+                        # FakeTensor.__new__ already derived the physical subset
+                        # from the full logical dispatch key set.
+                        extra_dispatch_keys = r.extra_dispatch_keys  # type: ignore[attr-defined]
+                    else:
+                        extra_dispatch_keys = None
+                    r.extra_dispatch_keys = extra_dispatch_keys  # type: ignore[attr-defined]
             # This can be skipped if necessary for performance reasons
             skip_leaf = (
                 t.is_gradtrackingtensor and t.level == GRAD_TENSOR_SENTINEL_VALUE

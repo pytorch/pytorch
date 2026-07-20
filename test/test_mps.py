@@ -15098,7 +15098,7 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertEqual(out, torch.zeros(2, device=device), atol=0, rtol=0)
 
     def test_nextafter(self, device="mps"):
-        for dtype in [torch.float16, torch.float32]:
+        for dtype in [torch.float16, torch.bfloat16, torch.float32]:
             x = torch.tensor([1, -1, 0, 0, 2, -2], device=device, dtype=dtype)
             y = torch.tensor([2, -2, -1, 1, -3, 3], device=device, dtype=dtype)
             na = torch.nextafter(x, y)
@@ -15107,6 +15107,7 @@ class TestAdvancedIndexing(TestCaseMPS):
             # greater is broken on MPS, see https://github.com/pytorch/pytorch/issues/125051
             na_ge_x_cpu = na_cpu > x.cpu()
             self.assertEqual(na_ge_x_mps, na_ge_x_cpu)
+            self.assertEqual(na, na_cpu)
 
 
 class TestRNNMPS(TestCaseMPS):
@@ -15209,6 +15210,57 @@ class TestRNNMPS(TestCaseMPS):
         for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/190057:
+    # dropout=1.0 produced 0 * inf = NaN between layers.
+    def test_lstm_dropout_one(self):
+        torch.manual_seed(0)
+        lstm_cpu = nn.LSTM(4, 4, num_layers=2, dropout=1.0)
+        x = torch.randn(3, 2, 4)
+        out_cpu, _ = lstm_cpu(x)
+        out_mps, _ = copy.deepcopy(lstm_cpu).to("mps")(x.to("mps"))
+        # dropout=1 zeroes the inter-layer input deterministically on both
+        self.assertEqual(out_mps.cpu(), out_cpu)
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/190056:
+    # backward ignored the inter-layer dropout mask. Resetting the device RNG
+    # before every forward pins the mask, making central differences valid.
+    def test_lstm_dropout_backward_matches_finite_differences(self):
+        torch.manual_seed(0)
+        lstm = nn.LSTM(4, 4, num_layers=2, dropout=0.5).to("mps")
+        lstm.train()
+
+        def loss(x):
+            torch.mps.manual_seed(42)
+            out, _ = lstm(x)
+            return out.sum()
+
+        x = torch.randn(3, 2, 4, device="mps", requires_grad=True)
+        loss(x).backward()
+        eps = 1e-2
+
+        for flat_idx in (0, 5, 17):
+            analytic = x.grad.flatten()[flat_idx].item()
+            with torch.no_grad():
+                xp = x.detach().clone()
+                xp.flatten()[flat_idx] += eps
+                xm = x.detach().clone()
+                xm.flatten()[flat_idx] -= eps
+                numeric = ((loss(xp) - loss(xm)) / (2 * eps)).item()
+            self.assertEqual(analytic, numeric, atol=2e-3, rtol=5e-2,
+                             msg=f"input grad mismatch at flat index {flat_idx}")
+
+        # layer-0 weight gradient only reaches the loss through the mask
+        w = lstm.weight_ih_l0
+        analytic_w = w.grad.flatten()[0].item()
+        with torch.no_grad():
+            orig = w.flatten()[0].item()
+            w.flatten()[0] += eps
+            lp = loss(x.detach()).item()
+            w.flatten()[0] = orig - eps
+            lm = loss(x.detach()).item()
+            w.flatten()[0] = orig
+        self.assertEqual(analytic_w, (lp - lm) / (2 * eps), atol=2e-3, rtol=5e-2)
 
     def test_lstm_eval_after_train_same_shape(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180744

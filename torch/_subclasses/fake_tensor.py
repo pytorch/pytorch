@@ -28,12 +28,12 @@ from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
-    _META_CONVERTER_META_DESC_ATTR,
     assert_eq,
     assert_metadata_eq,
     is_sparse_any,
     is_sparse_compressed,
     MetaConverter,
+    MetaTensorDesc,
 )
 from torch._utils import _is_privateuse1_backend_available, render_call
 from torch.fx.immutable_collections import immutable_dict
@@ -125,7 +125,10 @@ _FAKE_TENSOR_BASE_DISPATCH_KEYS_CACHE: dict[tuple[str, int], torch.DispatchKeySe
 
 
 def _maybe_dispatch_key(name: str) -> torch._C.DispatchKey | None:
-    return getattr(torch._C.DispatchKey, name, None)
+    try:
+        return torch._C._dispatch_key_parse(name)
+    except RuntimeError:
+        return None
 
 
 def _dispatch_key_set_from_names(names: Iterable[str]) -> torch.DispatchKeySet:
@@ -676,7 +679,9 @@ class FakeTensorConverter:
         constant = t if make_constant else None
 
         def mk_fake_tensor(
-            make_meta_t: Callable[[], Tensor], device: torch.device | str
+            make_meta_t: Callable[[], Tensor],
+            device: torch.device | str,
+            source_desc: MetaTensorDesc[Any] | None = None,
         ) -> FakeTensor:
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
@@ -687,7 +692,6 @@ class FakeTensorConverter:
             # invocation manager (I think!)
             with no_dispatch():
                 meta_t = make_meta_t()
-                source_desc = getattr(meta_t, _META_CONVERTER_META_DESC_ATTR, None)
                 same_device = (
                     source_desc is not None
                     and torch.device(device) == source_desc.device
@@ -1203,23 +1207,14 @@ class FakeTensor(Tensor):
             dispatch_keys=dispatch_keys,
             extra_dispatch_keys=extra_dispatch_keys,
         )
-        if extra_dispatch_keys is not None:
-            self = Tensor._make_subclass(
-                cls,
-                elem,
-                elem.requires_grad if requires_grad is None else requires_grad,
-                dispatch_device=True,
-                device_for_backend_keys=device,
-                _extra_dispatch_keys=extra_dispatch_keys,
-            )
-        else:
-            self = Tensor._make_subclass(
-                cls,
-                elem,
-                elem.requires_grad if requires_grad is None else requires_grad,
-                dispatch_device=True,
-                device_for_backend_keys=device,
-            )
+        self = Tensor._make_subclass(
+            cls,
+            elem,
+            elem.requires_grad if requires_grad is None else requires_grad,
+            dispatch_device=True,
+            device_for_backend_keys=device,
+            _extra_dispatch_keys=extra_dispatch_keys,
+        )
         if not fake_mode._allow_unsafe_data_ptr_access:
             torch._C._set_throw_on_mutable_data_ptr(self)
         else:

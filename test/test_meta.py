@@ -105,6 +105,15 @@ class TestMetaConverter(TestCase):
     def assertMetadataMatches(self, m1, m2):
         assert_metadata_eq(self.assertEqual, m1, m2)
 
+    def test_callback_without_source_desc(self):
+        x = torch.randn(4)[:]
+
+        def callback(make_meta_t, device):
+            return make_meta_t()
+
+        m = MetaConverter()(x, callback=callback)
+        self.assertMetadataMatches(m, x)
+
     def test_view_of_non_leaf(self):
         x = torch.randn(4, requires_grad=True)
         y = x.neg()

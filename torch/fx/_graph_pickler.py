@@ -29,7 +29,6 @@ from torch._subclasses.fake_tensor import (
     Tensor,
 )
 from torch._subclasses.meta_utils import (
-    _META_CONVERTER_META_DESC_ATTR,
     MetaConverter,
     MetaTensorDesc,
     MetaTensorDescriber,
@@ -565,11 +564,12 @@ class _TensorPickleData:
             metadata = dataclasses.replace(metadata, base=new_base)
 
         def with_fake(
-            make_meta_t: Callable[[], torch.Tensor], device: torch.device | str
+            make_meta_t: Callable[[], torch.Tensor],
+            device: torch.device | str,
+            source_desc: MetaTensorDesc[Any] | None = None,
         ) -> FakeTensor:
             with no_dispatch():
                 meta_t = make_meta_t()
-                source_desc = getattr(meta_t, _META_CONVERTER_META_DESC_ATTR, None)
                 dispatch_keys = (
                     torch._C.DispatchKeySet.from_raw_repr(source_desc.dispatch_keys)
                     if source_desc is not None and source_desc.dispatch_keys is not None
