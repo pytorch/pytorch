@@ -7194,12 +7194,12 @@ class Scheduler:
         ):
             return -1
         if any(
-            set(free_symbols(dep.index)).difference(dep.var_names)
+            OrderedSet(free_symbols(dep.index)).difference(dep.var_names)
             for dep in memory_deps
         ):
             return -1
         if any(
-            set(free_symbols(expr)).difference(iter_vars)
+            OrderedSet(free_symbols(expr)).difference(iter_vars)
             for expr in itertools.chain(read_exprs, write_exprs)
         ):
             return -1
@@ -7219,9 +7219,7 @@ class Scheduler:
 
         flat_var = sympy.Dummy("copy_flat", integer=True, nonnegative=True)
         old_iter_idx = decompose_index(flat_var, old_iter_sizes)
-        flattened_read = sympy_subs(
-            read_exprs[0], dict(zip(iter_vars, old_iter_idx))
-        )
+        flattened_read = sympy_subs(read_exprs[0], dict(zip(iter_vars, old_iter_idx)))
         simplified_terms = [
             sizevars.combine_modular_indexing_pairs(term)
             for term in sympy.Add.make_args(sympy.expand(flattened_read))
@@ -7269,9 +7267,7 @@ class Scheduler:
             node2.restore_loop_state(state)
             return -1
 
-        fusion_log.info(
-            "Shared memory after invertible memory-copy reindex: %d", score
-        )
+        fusion_log.info("Shared memory after invertible memory-copy reindex: %d", score)
         return score
 
     def shared_data_after_reordering_loop(

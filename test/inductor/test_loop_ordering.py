@@ -349,8 +349,8 @@ class LoopOrderingTest(TestCase):
         graph.sizevars.simplify_with_ranges.side_effect = lambda expr, ranges: expr
         graph.sizevars.combine_modular_indexing_pairs.side_effect = lambda expr: expr
         graph.sizevars.shape_env.evaluate_expr.side_effect = lambda expr: bool(expr)
-        graph.sizevars.optimization_hint.side_effect = (
-            lambda expr, fallback=0: int(expr)
+        graph.sizevars.optimization_hint.side_effect = lambda expr, fallback=0: int(
+            expr
         )
         return graph
 
