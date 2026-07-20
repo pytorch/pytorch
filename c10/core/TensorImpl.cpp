@@ -485,10 +485,6 @@ int64_t TensorImpl::storage_offset_custom() const {
         ->sym_storage_offset(this)
         .guard_int(__FILE__, __LINE__);
   }
-  if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
-    // same reasoning as sizes_custom() above
-    return symbolic_shape_meta().storage_offset_.guard_int(__FILE__, __LINE__);
-  }
   return storage_offset_default();
 }
 
