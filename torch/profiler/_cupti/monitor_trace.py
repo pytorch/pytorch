@@ -1431,6 +1431,30 @@ def _build_chrome_counters(counters, base_ns: int) -> list[dict]:
     return meta + out
 
 
+def _gpu_annotation_render_column(
+    trace_window: dict, base_ns: int
+) -> dict[str, Any] | None:
+    """Synthetic ``gpu_annotation`` render-stage column for the pftrace GPU hardware queues,
+    built from the columnar window via the same synthesizer as the chrome gpu_user_annotation
+    events -- so it inherits their graphed-op logical-lane reassignment and lands on the kernels'
+    lane. None when there are no GPU annotations. Kineto emits no gpu_user_annotation in
+    cupti_monitor mode, so cpu_data cannot be the source (the chrome path synthesizes them too)."""
+    gua = _gpu_user_annotation_events(trace_window, base_ns=base_ns)
+    if not gua:
+        return None
+    ts_us = np.asarray([e["ts"] for e in gua], dtype=np.float64)
+    dur_us = np.asarray([e["dur"] for e in gua], dtype=np.float64)
+    a_ts = base_ns + np.round(ts_us * 1000.0).astype(np.int64)
+    a_dur = np.maximum(np.round(dur_us * 1000.0).astype(np.int64), 0)
+    return {
+        "start_ns": a_ts,
+        "end_ns": a_ts + a_dur,
+        "device_id": np.asarray([int(e["pid"]) for e in gua], dtype=np.int64),
+        "stream_id": np.asarray([int(e["tid"]) for e in gua], dtype=np.int64),
+        "name": np.asarray([str(e["name"]) for e in gua], dtype=object),
+    }
+
+
 def _window_to_pftrace(
     cpu_data: dict, trace_window: dict, base_ns: int, output_path: str
 ) -> None:
@@ -1817,68 +1841,15 @@ def _window_to_pftrace(
                 g["gpu_corr"],
             )
         )
-    # GPU-side user annotations (gpu_user_annotation): emit as render stages on their stream's
-    # hardware-queue lane (an "Annotation" stage) so the collective/phase ranges show in the
-    # queues, nesting over the kernels they span. Their tid is the stream id, remapped onto the
-    # graphed kernels' logical lane where reassigned; device comes from the stream -> device map
-    # (the kernels on that stream). They live in cpu_data (Kineto), not the columnar window, so
-    # build a synthetic render-stage column here.
+    # GPU-side user annotations (gpu_user_annotation): emit as render stages (an "Annotation"
+    # stage) on the same hardware-queue lane as the kernels they span, so the collective/phase
+    # ranges nest over them. Synthesized from the columnar window (NOT cpu_data: kineto emits no
+    # gpu_user_annotation in monitor mode -- the chrome path builds them the same way), which
+    # also carries the graphed-op logical-lane reassignment.
     render_columns = columns
-    gua = [
-        e
-        for e in cpu_data.get("traceEvents", [])
-        if isinstance(e, dict)
-        and e.get("ph") == "X"
-        and e.get("cat") == "gpu_user_annotation"
-    ]
-    if gua:
-        stream_to_dev: dict[int, int] = {}
-        # (device, capture stream) -> logical lane for graphed ops, so an annotation on the
-        # capture stream follows its kernels onto the reassigned lane (mirrors chrome).
-        lane_by_stream: dict[tuple[int, int], int] = {}
-        for ks in ("kernel", "gpu_memcpy", "gpu_memset"):
-            kc = columns.get(ks)
-            if kc is None or not len(kc.get("stream_id", ())):
-                continue
-            devs = kc["device_id"].tolist()
-            stms = kc["stream_id"].tolist()
-            lanes = kc["logical_lane"].tolist() if "logical_lane" in kc else None
-            gnids = kc["graph_node_id"].tolist() if lanes is not None else None
-            for j, (sdev, sstm) in enumerate(zip(devs, stms)):
-                stream_to_dev.setdefault(int(sstm), int(sdev))
-                if lanes is not None and gnids[j] and lanes[j] != sstm:
-                    lane_by_stream[(int(sdev), int(sstm))] = int(lanes[j])
-        a_ts = base_ns + np.round(
-            np.asarray([e.get("ts", 0.0) for e in gua], dtype=np.float64) * 1000.0
-        ).astype(np.int64)
-        a_dur = np.maximum(
-            np.round(
-                np.asarray([e.get("dur", 0.0) for e in gua], dtype=np.float64) * 1000.0
-            ).astype(np.int64),
-            0,
-        )
-        a_stream = np.asarray([int(e.get("tid", 0)) for e in gua], dtype=np.int64)
-        a_dev = np.asarray(
-            [stream_to_dev.get(int(t), 0) for t in a_stream.tolist()], dtype=np.int64
-        )
-        if lane_by_stream:
-            a_stream = np.asarray(
-                [
-                    lane_by_stream.get((int(d), int(s)), int(s))
-                    for d, s in zip(a_dev.tolist(), a_stream.tolist())
-                ],
-                dtype=np.int64,
-            )
-        render_columns = {
-            **columns,
-            "gpu_annotation": {
-                "start_ns": a_ts,
-                "end_ns": a_ts + a_dur,
-                "device_id": a_dev,
-                "stream_id": a_stream,
-                "name": np.asarray([str(e.get("name", "")) for e in gua], dtype=object),
-            },
-        }
+    ann_col = _gpu_annotation_render_column(trace_window, base_ns)
+    if ann_col is not None:
+        render_columns = {**columns, "gpu_annotation": ann_col}
     # Graphics context attaches the render stages to the main (first-registered => upid 1)
     # process, matching the reference traces.
     gfx_pid = next((k[1] for k in uuids if isinstance(k, tuple) and k[0] == "p"), 0)

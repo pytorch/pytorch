@@ -625,6 +625,47 @@ class TestCuptiRecords(TestCase):
         self.assertNotEqual(lanes[1], "side comms")  # eager kernel is elsewhere
         self.assertIn("stream", lanes[1])  # eager kept its default "stream N" lane
 
+    def test_pftrace_annotation_column_from_window(self):
+        # pftrace builds its GPU annotation render column from the columnar window (kineto emits
+        # no gpu_user_annotation in monitor mode), placed on the graphed kernels' reassigned
+        # logical lane -- so annotations appear in the hardware queues over their kernels. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _gpu_annotation_render_column
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        trace_window = {
+            "columns": {
+                "external_correlation": {
+                    "correlation_id": i64(11),
+                    "user_external_id": i64(555),
+                },
+                "kernel": {
+                    "correlation_id": i64(11),
+                    "device_id": i64(0),
+                    "stream_id": i64(7),  # graphed replayed on capture stream 7
+                    "start_ns": i64(1000),
+                    "end_ns": i64(2000),
+                    "graph_node_id": i64(101),
+                    "logical_lane": i64(8),  # resolver moved it to lane 8
+                },
+            },
+            "user_annotations": {555: "all_reduce"},
+        }
+        col = _gpu_annotation_render_column(trace_window, base_ns=0)
+        self.assertIsNotNone(col)
+        self.assertEqual(col["name"].tolist(), ["all_reduce"])
+        self.assertEqual(col["device_id"].tolist(), [0])
+        self.assertEqual(col["stream_id"].tolist(), [8])  # on the reassigned logical lane
+        # no annotations in the window -> no column
+        self.assertIsNone(
+            _gpu_annotation_render_column(
+                {"columns": {}, "user_annotations": {}}, base_ns=0
+            )
+        )
+
     def test_chrome_counter_events_from_pm(self):
         # PM counters render as chrome "C" (counter) events in a dedicated per-device
         # "GPU N Counters" process row, separate from the GPU kernel work. No CUDA.
