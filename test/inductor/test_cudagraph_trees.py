@@ -19,7 +19,7 @@ import torch.nn as nn
 from torch._dynamo.backends.debugging import aot_eager_decomp_partition_with_mode
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
-from torch._inductor import config
+from torch._inductor import config, lowering
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import (
@@ -4315,10 +4315,8 @@ if HAS_CUDA_AND_TRITON:
             # 2 graph partitions lead to 2 cudagraph
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
-        @unittest.skip(
-            "Disabled due to CI failures; see "
-            "https://github.com/pytorch/pytorch/issues/190233"
-        )
+        @torch._inductor.config.patch("graph_partition", True)
+        @lowering.force_fallback(torch.ops.prims.device_put.default)
         def test_graph_partition_view_fallback(self):
             def f(x):
                 y = x + 1
@@ -4329,11 +4327,14 @@ if HAS_CUDA_AND_TRITON:
 
             compiled_f = torch.compile(f, mode="reduce-overhead")
 
-            for _ in range(3):
-                x = torch.ones(2, dtype=torch.int32, device="cuda")
+            for i in range(3):
+                x = torch.full((2,), i, dtype=torch.int32, device="cuda")
                 eager_out = f(x)
                 compiled_out = compiled_f(x)
                 self.assertEqual(eager_out, compiled_out)
+
+            # Without the device_put partition, the H2D fallback forms a second graph.
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @torch._inductor.config.patch("graph_partition", True)
         @skipIfRocm
