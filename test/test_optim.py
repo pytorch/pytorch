@@ -143,7 +143,7 @@ class TestOptimRenewed(TestCase):
         * Grads can also be None, empty, or zero-valued, and this should not disrupt training.
     """
 
-    def _make_step_closure(self, data, marker, device, dtype):
+    def _make_step_closure(self, data, marker):
         fired = False
 
         def closure():
@@ -151,7 +151,7 @@ class TestOptimRenewed(TestCase):
             if not fired:
                 data.append(marker)
                 fired = True
-            return torch.tensor(0.0, device=device, dtype=dtype)
+            return 0.0
 
         return closure
 
@@ -2038,38 +2038,15 @@ class TestOptimRenewed(TestCase):
             self.assertTrue(optim.state["ran_load_state_dict_pre_hook2"])
             self.assertTrue(optim.state["ran_load_state_dict_post_hook"])
 
+    @parametrize("hook_type", ["pre", "post"])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_step_post_hook(self, device, dtype, optim_info):
-        def post_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
+    def test_step_hook_order(self, device, dtype, optim_info, hook_type):
+        def hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
             nonlocal data
-            data.append("post")
+            data.append(hook_type)
 
-        params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
-
-        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
-            device, dtype, optim_info
-        )
-        for optim_input in all_optim_inputs:
-            optim = optim_info.optim_cls(params, **optim_input.kwargs)
-            data = []
-
-            hook_handle = optim.register_step_post_hook(post_hook)
-            try:
-                optim.step(self._make_step_closure(data, "step", device, dtype))
-                optim.step(self._make_step_closure(data, "step", device, dtype))
-                # check if post hooks were registered and fired after step
-                self.assertEqual(data, ["step", "post", "step", "post"])
-            finally:
-                hook_handle.remove()
-
-            optim.step(self._make_step_closure(data, "step", device, dtype))
-            self.assertEqual(data, ["step", "post", "step", "post", "step"])
-
-    @optims(optim_db, dtypes=[torch.float32])
-    def test_step_pre_hook(self, device, dtype, optim_info):
-        def pre_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
-            nonlocal data
-            data.append("pre")
+        def expected(marker):
+            return [hook_type, marker] if hook_type == "pre" else [marker, hook_type]
 
         # Create a random 2D tensor for compatibility with Muon.
         params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
@@ -2081,69 +2058,68 @@ class TestOptimRenewed(TestCase):
             optim = optim_info.optim_cls(params, **optim_input.kwargs)
             data = []
 
-            hook_handle = optim.register_step_pre_hook(pre_hook)
+            register_hook = (
+                optim.register_step_pre_hook
+                if hook_type == "pre"
+                else optim.register_step_post_hook
+            )
+            hook_handle = register_hook(hook)
             try:
-                optim.step(self._make_step_closure(data, "step", device, dtype))
-                optim.step(self._make_step_closure(data, "step", device, dtype))
-                # check if pre hooks were registered and fired before step
-                self.assertEqual(data, ["pre", "step", "pre", "step"])
+                optim.step(self._make_step_closure(data, "step"))
+                optim.step(self._make_step_closure(data, "step"))
+                self.assertEqual(data, expected("step") + expected("step"))
             finally:
                 hook_handle.remove()
 
-            optim.step(self._make_step_closure(data, "step", device, dtype))
-            self.assertEqual(data, ["pre", "step", "pre", "step", "step"])
+            optim.step(self._make_step_closure(data, "step"))
+            self.assertEqual(data, expected("step") + expected("step") + ["step"])
 
+    @parametrize("hook_type", ["pre", "post"])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_global_step_post_hook(self, device, dtype, optim_info):
-        def post_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
+    def test_global_step_hook_order(self, device, dtype, optim_info, hook_type):
+        def hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
             nonlocal data
-            data.append("post")
+            data.append(hook_type)
+
+        def expected(marker):
+            return [hook_type, marker] if hook_type == "pre" else [marker, hook_type]
 
         params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
+        other_params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
 
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info
         )
         for optim_input in all_optim_inputs:
             optim = optim_info.optim_cls(params, **optim_input.kwargs)
+            other_optim = SGD(other_params)
             data = []
 
-            hook_handle = register_optimizer_step_post_hook(post_hook)
+            register_hook = (
+                register_optimizer_step_pre_hook
+                if hook_type == "pre"
+                else register_optimizer_step_post_hook
+            )
+            hook_handle = register_hook(hook)
             try:
-                optim.step(self._make_step_closure(data, "step", device, dtype))
-                optim.step(self._make_step_closure(data, "step", device, dtype))
-                self.assertEqual(data, ["step", "post", "step", "post"])
+                optim.step(self._make_step_closure(data, "first_step"))
+                self.assertEqual(data, expected("first_step"))
+                other_optim.step(self._make_step_closure(data, "second_step"))
+                self.assertEqual(
+                    data,
+                    expected("first_step") + expected("second_step"),
+                )
             finally:
                 hook_handle.remove()
 
-            optim.step(self._make_step_closure(data, "step", device, dtype))
-            self.assertEqual(data, ["step", "post", "step", "post", "step"])
-
-    @optims(optim_db, dtypes=[torch.float32])
-    def test_global_step_pre_hook(self, device, dtype, optim_info):
-        def pre_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
-            nonlocal data
-            data.append("pre")
-
-        params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
-
-        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
-            device, dtype, optim_info
-        )
-        for optim_input in all_optim_inputs:
-            optim = optim_info.optim_cls(params, **optim_input.kwargs)
-            data = []
-
-            hook_handle = register_optimizer_step_pre_hook(pre_hook)
-            try:
-                optim.step(self._make_step_closure(data, "step", device, dtype))
-                optim.step(self._make_step_closure(data, "step", device, dtype))
-                self.assertEqual(data, ["pre", "step", "pre", "step"])
-            finally:
-                hook_handle.remove()
-
-            optim.step(self._make_step_closure(data, "step", device, dtype))
-            self.assertEqual(data, ["pre", "step", "pre", "step", "step"])
+            optim.step(self._make_step_closure(data, "first_step"))
+            other_optim.step(self._make_step_closure(data, "second_step"))
+            self.assertEqual(
+                data,
+                expected("first_step")
+                + expected("second_step")
+                + ["first_step", "second_step"],
+            )
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_all_hooks(self, device, dtype, optim_info):
@@ -2192,16 +2168,14 @@ class TestOptimRenewed(TestCase):
             second_post_handle = optim2.register_step_post_hook(local_post_hook)
 
             try:
-                optim.step(self._make_step_closure(data, "first_step", device, dtype))
+                optim.step(self._make_step_closure(data, "first_step"))
                 self.assertListEqual(data, [0, 1, "first_step", 2, 5])
-                optim2.step(
-                    self._make_step_closure(data, "second_step", device, dtype)
-                )
+                optim2.step(self._make_step_closure(data, "second_step"))
                 self.assertListEqual(
                     data,
                     [0, 1, "first_step", 2, 5, 0, 1, "second_step", 2, 5],
                 )
-                optim.step(self._make_step_closure(data, "first_step", device, dtype))
+                optim.step(self._make_step_closure(data, "first_step"))
                 self.assertListEqual(
                     data,
                     [
@@ -2231,8 +2205,8 @@ class TestOptimRenewed(TestCase):
                 second_pre_handle.remove()
                 second_post_handle.remove()
 
-            optim.step(self._make_step_closure(data, "first_step", device, dtype))
-            optim2.step(self._make_step_closure(data, "second_step", device, dtype))
+            optim.step(self._make_step_closure(data, "first_step"))
+            optim2.step(self._make_step_closure(data, "second_step"))
             self.assertListEqual(
                 data,
                 [
