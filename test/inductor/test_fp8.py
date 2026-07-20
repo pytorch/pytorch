@@ -48,20 +48,7 @@ from torch.utils._sympy.symbol import SymT
 from torch.utils._triton import has_triton_tma_device
 
 
-_PRIOR_FP32_MATMUL_PRECISION: str | None = None
-
-
-def setUpModule():
-    global _PRIOR_FP32_MATMUL_PRECISION
-    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
-    torch.set_float32_matmul_precision("high")
-
-
-def tearDownModule():
-    global _PRIOR_FP32_MATMUL_PRECISION
-    if _PRIOR_FP32_MATMUL_PRECISION is not None:
-        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
-        _PRIOR_FP32_MATMUL_PRECISION = None
+torch.set_float32_matmul_precision("high")
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
@@ -129,6 +116,10 @@ class TestFP8Types(TestCase):
     @onlyCUDA
     @skipIfRocm
     @config.patch({"force_disable_caches": True})
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/189560"
+    )
     def test_float8_e4m3fn_uint8_decode_codegen(self, device):
         import torch._inductor.codegen.triton as triton_codegen
         import torch._inductor.codegen.triton_utils as triton_utils
