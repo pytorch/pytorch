@@ -97,17 +97,26 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
         import urllib.request
 
         print(f"Downloading flamegraph.pl to: {flamegraph_script}")
-        with tempfile.NamedTemporaryFile(mode="wb", suffix=".pl") as f:
+        # Download to a temp file next to the target, then atomically move it
+        # into place so a concurrent reader never sees a partial file. The temp
+        # file lives in the same directory (same filesystem) so os.replace is
+        # atomic, and is created with delete=False + manual cleanup: moving a
+        # delete=True NamedTemporaryFile out from under its context manager makes
+        # __exit__ fail to unlink the now-missing file.
+        fd, tmp_name = tempfile.mkstemp(
+            suffix=".pl", dir=os.path.dirname(flamegraph_script) or None
+        )
+        os.close(fd)
+        try:
             urllib.request.urlretrieve(
                 "https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl",
-                f.name,
+                tmp_name,
             )
-            try:
-                os.chmod(f.name, 0o755)
-                os.rename(f.name, flamegraph_script)
-            except OSError:
-                # Ok to skip, the file will be removed by tempfile
-                pass
+            os.chmod(tmp_name, 0o755)
+            os.replace(tmp_name, flamegraph_script)
+        finally:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
     args = [flamegraph_script, "--countname", "bytes"]
     with subprocess.Popen(
         args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding="utf-8"
