@@ -21,12 +21,11 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     parametrize,
-    requires_cuda,
     skipIfMPS,
     skipIfTorchDynamo,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    OpDTypes, expectedFailureMeta, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
+    OpDTypes, onlyCPU, expectedFailureMeta, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
     dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyAccelerator, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
@@ -3190,8 +3189,8 @@ class TestReductions(TestCase):
             torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
             actual)
 
+    @onlyCPU
     @dtypes(torch.float, torch.double)
-    @dtypesIfMPS(torch.float)
     def test_histc_value_corner_cases(self, device, dtype):
         min_val = torch.finfo(dtype).min
         actual = torch.histc(
@@ -3203,6 +3202,16 @@ class TestReductions(TestCase):
             torch.tensor([max_val, max_val, max_val], dtype=dtype, device=device),
             bins=4)
         self.assertEqual(3.0, actual.sum())
+
+    @onlyAccelerator
+    @dtypes(torch.uint8, torch.int8, torch.int, torch.long)
+    def test_histc_min_max_corner_cases_device(self, device, dtype):
+        actual = torch.histc(
+            torch.tensor([1., 2, 1], dtype=dtype, device=device),
+            bins=4, min=5, max=5)
+        self.assertEqual(
+            torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
+            actual)
 
 
     """
@@ -3841,18 +3850,6 @@ as the input tensor excluding its innermost dimension'):
         result_compiled = foo_compile()
         self.assertEqual(result_eager.shape, result_compiled.shape)
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
-
-
-@requires_cuda
-class TestReductionsOnCUDA(TestCase):
-    def test_histc_min_max_corner_cases_cuda(self):
-        for dtype in (torch.uint8, torch.int8, torch.int, torch.long):
-            actual = torch.histc(
-                torch.tensor([1., 2, 1], dtype=dtype, device="cuda"),
-                bins=4, min=5, max=5)
-            self.assertEqual(
-                torch.tensor([2, 0, 0, 1], dtype=dtype, device="cuda"),
-                actual)
 
 class TestReductionsOnCPU(TestCase):
     # TODO: kill map2_ (and similar) uses and update to compare with NumPy
