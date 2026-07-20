@@ -9,9 +9,9 @@ Delegates to tools/generate_torch_version.py which resolves the version from
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
 from typing import Any, TYPE_CHECKING
+
+from _common import get_torch_version
 
 
 if TYPE_CHECKING:
@@ -28,12 +28,4 @@ def dynamic_metadata(
         msg = f"This provider takes no settings, got {sorted(settings)}"
         raise RuntimeError(msg)
 
-    spec = importlib.util.spec_from_file_location(
-        "generate_torch_version",
-        Path(__file__).resolve().parent.parent / "generate_torch_version.py",
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError("Could not load generate_torch_version.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return {"version": mod.get_torch_version()}
+    return {"version": get_torch_version()}
