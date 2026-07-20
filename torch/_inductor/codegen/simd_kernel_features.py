@@ -38,11 +38,15 @@ def tiling_scores_suggest_inner_reduction(
 ) -> bool:
     """Return whether tiling scores justify treating a reduction as inner."""
     sizevars = V.graph.sizevars
-    x_score = max(sizevars.optimization_hint(tiling_scores["x"], fallback=1), 1)
+    non_reduction_score = sum(
+        sizevars.optimization_hint(tiling_scores.get(dim, 0), fallback=0)
+        for dim in ("x", "y", "z")
+    )
+    non_reduction_score = max(non_reduction_score, 1)
     r_score = sizevars.optimization_hint(tiling_scores["r0_"], fallback=0)
-    if r_score >= _INNER_REDUCTION_RATIO * x_score:
+    if r_score >= _INNER_REDUCTION_RATIO * non_reduction_score:
         return True
-    if r_score < _SMALL_INNER_REDUCTION_RATIO * x_score:
+    if r_score < _SMALL_INNER_REDUCTION_RATIO * non_reduction_score:
         return False
 
     # Moderate score ratios are useful while persistent configs can keep XBLOCK=8.
