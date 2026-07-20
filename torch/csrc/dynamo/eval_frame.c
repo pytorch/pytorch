@@ -656,47 +656,224 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
   return set_eval_frame(callback, module);
 }
 
-// call_with_disable(callable, *args, **kwargs)
+// ---------------------------------------------------------------------------
+// DisableWrapper
 //
-// Invoke callable(*args, **kwargs) with Dynamo's frame-evaluation callback
-// disabled for the duration of the call, then restore it. This is the C-level
-// fast path behind torch._dynamo.disable for hot callsites (e.g. custom
-// operators): it forwards the arguments straight through with vectorcall
-// instead of packing them into a tuple/dict, and avoids the Python wrapper
-// layers entirely. The callable must be passed positionally (it is read as
-// args[0]); passing it by keyword raises TypeError.
+// The C-level callable returned by torch._dynamo.disable (the recursive,
+// non-nn.Module, non-class case; see DisableContext.__call__ in
+// torch/_dynamo/eval_frame.py). Calling it toggles Dynamo's frame-evaluation
+// callback off around the wrapped fn and restores it afterwards, as the
+// object's tp_call/vectorcall so the hot path pays for no Python wrapper
+// frame. disable is used around hot callsites (e.g. custom operators), so this
+// per-call cost matters.
 //
 // We call set_eval_frame directly rather than going through the
 // justknobs-guarded _maybe_set_eval_frame: the enable_compiler_set_eval_frame
 // killswitch only matters when Dynamo would otherwise install a callback, in
 // which case `prior` is None here and restoring it leaves the callback cleared.
-static PyObject* call_with_disable(
-    PyObject* module,
-    PyObject* const* args,
-    Py_ssize_t nargs,
-    PyObject* kwnames) {
-  if (nargs < 1) {
-    PyErr_SetString(
-        PyExc_TypeError,
-        "call_with_disable() requires at least the callable to invoke");
-    return NULL;
+//
+// The wrapper carries an instance __dict__ so functools.wraps metadata and the
+// _torchdynamo_* attributes that Dynamo's tracer reads (to graph-break instead
+// of tracing into the callee) live there, exactly as they did on the old
+// Python closure. It is a descriptor (tp_descr_get binds like a function) so a
+// disabled method defined in a class body still receives self.
+// ---------------------------------------------------------------------------
+
+// The eval_frame module, needed by set_eval_frame for its working-thread
+// bookkeeping. Set in torch_c_dynamo_eval_frame_init.
+static PyObject* eval_frame_module = NULL;
+
+// Cached torch.compiler.__dict__ + interned "_is_exporting_flag" key so the hot
+// path reads the export flag with a single dict lookup (no attribute protocol
+// or per-call string allocation). Export rebinds (does not mutate) the flag and
+// we re-read the live dict entry each call, so toggles are always observed.
+//
+// These lazy static caches (is_exporting_dict, is_exporting_key,
+// disable_wrapper_export_call) assume their first initialization happens under
+// the GIL / single-threaded; they are not yet free-threading (NoGIL) safe. A
+// race on first init would at worst leak a reference once, never corrupt state.
+static PyObject* is_exporting_dict = NULL;
+static PyObject* is_exporting_key = NULL;
+// Cached torch._dynamo.eval_frame._disable_wrapper_export_call (lazy import).
+static PyObject* disable_wrapper_export_call = NULL;
+
+typedef struct {
+  PyObject_HEAD
+  vectorcallfunc vectorcall;
+  PyObject* fn;
+  PyObject* dict;
+  PyObject* weakreflist;
+} THPDisableWrapper;
+
+static int disable_wrapper_is_exporting(void) {
+  if (unlikely(is_exporting_dict == NULL)) {
+    PyObject* mod = PyImport_ImportModule("torch.compiler");
+    if (mod == NULL) {
+      PyErr_Clear();
+      return 0;
+    }
+    is_exporting_dict = PyModule_GetDict(mod); // borrowed
+    Py_XINCREF(is_exporting_dict);
+    Py_DECREF(mod);
+    is_exporting_key = PyUnicode_InternFromString("_is_exporting_flag");
+    if (is_exporting_dict == NULL || is_exporting_key == NULL) {
+      PyErr_Clear();
+      Py_CLEAR(is_exporting_dict);
+      Py_CLEAR(is_exporting_key);
+      return 0;
+    }
   }
-  PyObject* fn = args[0];
+  PyObject* flag = PyDict_GetItemWithError(is_exporting_dict, is_exporting_key);
+  if (flag == NULL) {
+    if (PyErr_Occurred()) {
+      PyErr_Clear();
+    }
+    return 0;
+  }
+  return Py_IsTrue(flag);
+}
+
+// Delegate to the Python export fallback as _disable_wrapper_export_call(fn,
+// *args, **kwargs): build a new argument vector with fn prepended.
+static PyObject* disable_wrapper_export_vectorcall(
+    PyObject* fn,
+    PyObject* const* args,
+    size_t nargsf,
+    PyObject* kwnames) {
+  if (disable_wrapper_export_call == NULL) {
+    PyObject* mod = PyImport_ImportModule("torch._dynamo.eval_frame");
+    if (mod == NULL) {
+      return NULL;
+    }
+    disable_wrapper_export_call =
+        PyObject_GetAttrString(mod, "_disable_wrapper_export_call");
+    Py_DECREF(mod);
+    if (disable_wrapper_export_call == NULL) {
+      return NULL;
+    }
+  }
+  Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+  Py_ssize_t nkw = kwnames ? PyTuple_GET_SIZE(kwnames) : 0;
+  Py_ssize_t total = nargs + nkw;
+  PyObject** newargs =
+      (PyObject**)PyMem_Malloc((size_t)(total + 1) * sizeof(PyObject*));
+  if (newargs == NULL) {
+    return PyErr_NoMemory();
+  }
+  newargs[0] = fn;
+  for (Py_ssize_t i = 0; i < total; i++) {
+    newargs[i + 1] = args[i];
+  }
+  PyObject* result = PyObject_Vectorcall(
+      disable_wrapper_export_call, newargs, (size_t)(nargs + 1), kwnames);
+  PyMem_Free(newargs);
+  return result;
+}
+
+static PyObject* THPDisableWrapper_vectorcall(
+    PyObject* self,
+    PyObject* const* args,
+    size_t nargsf,
+    PyObject* kwnames) {
+  THPDisableWrapper* wrapper = (THPDisableWrapper*)self;
+  if (unlikely(disable_wrapper_is_exporting())) {
+    return disable_wrapper_export_vectorcall(
+        wrapper->fn, args, nargsf, kwnames);
+  }
   // Clear the callback; set_eval_frame returns a new reference to the prior one.
-  PyObject* prior = set_eval_frame(Py_None, module);
-  // Forward the remaining positional args and, when present, the keyword args
-  // (whose values sit right after the positionals in `args`, named by kwnames).
-  PyObject* result =
-      PyObject_Vectorcall(fn, args + 1, (size_t)(nargs - 1), kwnames);
-  // Nothing to restore when Dynamo was not active (prior is None) -- the common
-  // custom-op case.
+  // In the common case (Dynamo off) prior is None and set_eval_frame short
+  // circuits without touching thread-local state or the module.
+  PyObject* prior = set_eval_frame(Py_None, eval_frame_module);
+  PyObject* result = PyObject_Vectorcall(wrapper->fn, args, nargsf, kwnames);
   if (prior != Py_None) {
-    PyObject* cleared = set_eval_frame(prior, module);
+    PyObject* cleared = set_eval_frame(prior, eval_frame_module);
     Py_DECREF(cleared);
   }
   Py_DECREF(prior);
   return result;
 }
+
+static PyObject* THPDisableWrapper_new(
+    PyTypeObject* type,
+    PyObject* args,
+    PyObject* kwds) {
+  PyObject* fn = NULL;
+  static char* kwlist[] = {"fn", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "O:DisableWrapper", kwlist, &fn)) {
+    return NULL;
+  }
+  THPDisableWrapper* self = (THPDisableWrapper*)type->tp_alloc(type, 0);
+  if (self == NULL) {
+    return NULL;
+  }
+  self->vectorcall = THPDisableWrapper_vectorcall;
+  self->fn = Py_NewRef(fn);
+  self->dict = NULL;
+  self->weakreflist = NULL;
+  return (PyObject*)self;
+}
+
+static int THPDisableWrapper_traverse(
+    THPDisableWrapper* self,
+    visitproc visit,
+    void* arg) {
+  Py_VISIT(self->fn);
+  Py_VISIT(self->dict);
+  return 0;
+}
+
+static int THPDisableWrapper_clear(THPDisableWrapper* self) {
+  Py_CLEAR(self->fn);
+  Py_CLEAR(self->dict);
+  return 0;
+}
+
+static void THPDisableWrapper_dealloc(THPDisableWrapper* self) {
+  PyObject_GC_UnTrack(self);
+  if (self->weakreflist != NULL) {
+    PyObject_ClearWeakRefs((PyObject*)self);
+  }
+  Py_XDECREF(self->fn);
+  Py_XDECREF(self->dict);
+  Py_TYPE(self)->tp_free((PyObject*)self);
+}
+
+// Bind like a plain function so a disabled method defined in a class body still
+// receives self.
+static PyObject* THPDisableWrapper_descr_get(
+    PyObject* self,
+    PyObject* obj,
+    PyObject* type) {
+  if (obj == NULL || obj == Py_None) {
+    return Py_NewRef(self);
+  }
+  return PyMethod_New(self, obj);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static struct PyGetSetDef THPDisableWrapper_getset[] = {
+    {"__dict__", PyObject_GenericGetDict, PyObject_GenericSetDict, NULL, NULL},
+    {NULL}};
+
+static PyTypeObject THPDisableWrapperType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "torch._C._dynamo.eval_frame.DisableWrapper",
+    .tp_basicsize = sizeof(THPDisableWrapper),
+    .tp_dealloc = (destructor)THPDisableWrapper_dealloc,
+    .tp_vectorcall_offset = offsetof(THPDisableWrapper, vectorcall),
+    .tp_call = PyVectorcall_Call,
+    .tp_getattro = PyObject_GenericGetAttr,
+    .tp_setattro = PyObject_GenericSetAttr,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC |
+        Py_TPFLAGS_HAVE_VECTORCALL,
+    .tp_traverse = (traverseproc)THPDisableWrapper_traverse,
+    .tp_clear = (inquiry)THPDisableWrapper_clear,
+    .tp_weaklistoffset = offsetof(THPDisableWrapper, weakreflist),
+    .tp_getset = THPDisableWrapper_getset,
+    .tp_descr_get = THPDisableWrapper_descr_get,
+    .tp_dictoffset = offsetof(THPDisableWrapper, dict),
+    .tp_new = THPDisableWrapper_new,
+};
 
 static PyObject* set_skip_guard_eval_unsafe(
     PyObject* dummy,
@@ -842,10 +1019,6 @@ static PyObject* set_fullgraph_error_on_nested_compile_py(
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
-    {"call_with_disable",
-     (PyCFunction)(void (*)(void))call_with_disable,
-     METH_FASTCALL | METH_KEYWORDS,
-     NULL},
     {"set_skip_guard_eval_unsafe", set_skip_guard_eval_unsafe, METH_O, NULL},
     {"get_eval_frame_callback", get_eval_frame_callback_py, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_O, NULL},
@@ -907,6 +1080,14 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   if (PyModule_AddType(module, &THPPyInterpreterFrameType) < 0) {
     return NULL;
   }
+
+  if (PyModule_AddType(module, &THPDisableWrapperType) < 0) {
+    return NULL;
+  }
+
+  // Keep a reference for DisableWrapper's tp_call to hand to set_eval_frame
+  // (which needs the module for its working-thread bookkeeping).
+  eval_frame_module = module;
 
   return module;
 }
