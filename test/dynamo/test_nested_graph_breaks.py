@@ -1808,6 +1808,33 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result[0], x + 1)
         self.assertEqual(result[1], y + 1)
 
+    def test_tree_map_graph_break_in_inlined_function(self):
+        """NGB should work on the caller frame after tree_map suppression restores config."""
+        from torch.utils._pytree import tree_map
+
+        def map_fn(t):
+            torch._dynamo.graph_break()
+            return t + 1
+
+        def inner(x, y):
+            a = x + 1
+            result = tree_map(map_fn, [a, y])
+            return result[0] + 2
+
+        def fn(x, y):
+            a = x * 2
+            result = inner(a, y)
+            return result * 3
+
+        x, y = torch.randn(3), torch.randn(2)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        result = torch.compile(fn, backend=backend)(x, y)
+        self.assertEqual(result, (x * 2 + 1 + 1 + 2) * 3)
+        # With NGB on the caller frame, fn's ops merge with inner's ops into
+        # shared partial graphs (4 graphs). Without NGB, inner would run as a
+        # separate frame and produce 6 isolated single-op graphs.
+        self.assertEqual(len(backend.graphs), 4)
+
     def test_cxx_pytree_treespec_leaf_namespace(self):
         import torch.utils._cxx_pytree as cxx_pytree
 
@@ -1821,6 +1848,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         values, specs_equal = torch.compile(fn, backend=cnts)()
         self.assertEqual(values, [1])
         self.assertTrue(specs_equal)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
