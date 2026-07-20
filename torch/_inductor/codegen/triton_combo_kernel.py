@@ -836,7 +836,9 @@ class ComboKernel(Kernel):
                 @triton.jit
             """
         elif sub_kernel.inside_reduction:
-            reduction_hint = sub_kernel.features.get_reduction_hint()
+            reduction_hint = sub_kernel.features.get_reduction_hint(
+                sub_kernel.tiling_scores
+            )
             heuristics_line = f"""
                 @triton_heuristics.{heuristics}(
                     size_hints={size_hints!r},

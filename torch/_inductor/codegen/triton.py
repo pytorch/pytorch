@@ -112,6 +112,7 @@ from .common import (
 )
 from .simd import (
     constant_repr,
+    DerivedIterationRangesRoot,
     IterationRanges,
     IterationRangesEntry,
     IterationRangesRoot,
@@ -119,6 +120,7 @@ from .simd import (
     SIMDKernel,
     SIMDScheduling,
 )
+from .simd_kernel_features import tiling_scores_suggest_inner_reduction
 from .triton_utils import (
     config_of,
     equal_1_arg_indices,
@@ -148,11 +150,6 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
-
-
-# Threshold for detecting inner reductions based on tiling score ratio.
-# If r0_tiling_score / x_tiling_score >= this value, upgrade DEFAULT hint to INNER.
-INNER_REDUCTION_RATIO_THRESHOLD = 8
 
 
 def get_triton_reduction_function(reduction_type):
@@ -2807,13 +2804,46 @@ class FixedTritonConfig:
         return item in self.config
 
 
-class TritonCSE(CSE[TritonCSEVariable, str | tuple[str, str]]):
+TritonCSEKey = str | tuple[str, str]
+LoadIndexBasis = tuple[IterationRangesEntry, ...]
+LoadIndexBases = tuple[LoadIndexBasis | None, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class _UnresolvedLoadIndexState:
+    """First live load, recorded without performing range analysis."""
+
+    index: sympy.Expr
+    result: sympy.Expr
+
+
+@dataclasses.dataclass(frozen=True)
+class _ResolvedLoadIndexState:
+    """Last load result plus split bases resolved from an earlier live load."""
+
+    index: sympy.Expr
+    result: sympy.Expr
+    bases: LoadIndexBases
+
+
+LoadIndexState = _UnresolvedLoadIndexState | _ResolvedLoadIndexState
+
+
+class TritonCSE(CSE[TritonCSEVariable, TritonCSEKey]):
     """
     Subclasses CSE to apply the current load mask to the cache key to avoid CSEing
     variables across separate masked blocks.
     """
 
-    def augment_key(self, cache_key: str) -> str | tuple[str, str]:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._load_index_states: dict[TritonCSEKey, LoadIndexState] = {}
+
+    def invalidate(self, keep_vars: OrderedSet[CSEVariable]) -> None:
+        super().invalidate(keep_vars)
+        self._load_index_states.clear()
+
+    def augment_key(self, cache_key: str) -> TritonCSEKey:
         if mask := V.kernel._load_mask:
             return (cache_key, mask.name)
         else:
@@ -3369,8 +3399,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return True
 
     def should_use_persistent_reduction(self) -> bool:
-        return self.inside_reduction and V.choices.should_use_persistent_reduction(
-            self.features, self.cooperative_reduction
+        if not self.inside_reduction:
+            return False
+        features = self.features.with_tiling_scores(self.tiling_scores)
+        return V.choices.should_use_persistent_reduction(
+            features, self.cooperative_reduction
         )
 
     def want_no_x_dim(self):
@@ -4194,6 +4227,136 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             new_lines.append(l)
         code._lines = new_lines
 
+    def _load_index_split_basis(
+        self, index: sympy.Expr, tree: IterationRangesRoot
+    ) -> LoadIndexBasis | None:
+        """Find split digits that reconstruct a range tree's flat index.
+
+        Each entry is one digit in a mixed-radix index. A complete basis has at
+        least two non-unit digits, starts at divisor 1, and forms a contiguous
+        divisor chain whose total extent equals the root's numel.
+
+        Symbolic lengths are supported when size analysis can prove those
+        identities without guards; otherwise this conservatively returns None.
+        """
+        sizevars = V.graph.sizevars
+        remaining: list[IterationRangesEntry] = []
+        for symbol in index.free_symbols:
+            entry = self.range_tree_nodes.get(symbol)
+            if (
+                entry is not None
+                and entry.root is tree
+                and not sizevars.statically_known_equals(entry.length, sympy.S.One)
+            ):
+                remaining.append(entry)
+        if len(remaining) <= 1:
+            return None
+
+        basis: list[IterationRangesEntry] = []
+        divisor = sympy.S.One
+        # Divisors may be symbolic, so follow the mixed-radix chain with
+        # guarded equality instead of sorting them.
+        while remaining:
+            for i, entry in enumerate(remaining):
+                if sizevars.statically_known_equals(entry.divisor, divisor):
+                    basis.append(entry)
+                    divisor *= entry.length
+                    remaining.pop(i)
+                    break
+            else:
+                return None
+        if not sizevars.statically_known_equals(divisor, tree.numel):
+            return None
+        return tuple(basis)
+
+    def _supports_load_index_basis_reuse(self) -> bool:
+        """Whether this kernel uses a supported shared coordinate scope."""
+        return (
+            self.__class__ is TritonKernel
+            and self.features.is_reduction()
+            and not self.cooperative_reduction
+            and not any(
+                isinstance(tree, DerivedIterationRangesRoot)
+                for tree in self.range_trees
+            )
+        )
+
+    def _resolve_load_index_bases(self, state: LoadIndexState) -> LoadIndexBases:
+        """Return cached bases or derive them from the prior live load."""
+        if isinstance(state, _ResolvedLoadIndexState):
+            return state.bases
+        # A distinct prior load is still in the CSE scope. Discover which
+        # range trees it addressed with complete split coordinates.
+        return tuple(
+            self._load_index_split_basis(state.index, tree) for tree in self.range_trees
+        )
+
+    def _rewrite_full_range_with_basis(
+        self,
+        index: sympy.Expr,
+        tree: IterationRangesRoot,
+        basis: LoadIndexBasis,
+    ) -> sympy.Expr:
+        """Replace a tree's flat symbol with its exact split-coordinate sum."""
+        split_index = sum(
+            (entry.symbol() * entry.divisor for entry in basis), sympy.S.Zero
+        )
+        basis_symbols = OrderedSet([entry.symbol() for entry in basis])
+        replacements: dict[sympy.Symbol, sympy.Expr] = {}
+        sizevars = V.graph.sizevars
+        for symbol in index.free_symbols - basis_symbols:
+            entry = self.range_tree_nodes.get(symbol)
+            # Leave alternate splits alone; only the unsplit full range has
+            # the direct coordinate identity represented by split_index.
+            if entry is None or entry.root is not tree:
+                continue
+            is_full_range = sizevars.statically_known_equals(
+                entry.divisor, sympy.S.One
+            ) and sizevars.statically_known_equals(entry.length, tree.numel)
+            if is_full_range:
+                replacements[symbol] = split_index
+        return sympy_subs(index, replacements) if replacements else index
+
+    def _reuse_load_index_basis(self, name: str, index: sympy.Expr) -> sympy.Expr:
+        """Rewrite a full-range load coordinate to an observed split basis.
+
+        Reduction bodies can use split coordinates while later pointwise work
+        uses one flattened coordinate for the same range root. Looped reductions
+        may reuse a basis within their body; closing the loop invalidates CSE and
+        clears the basis before codegen enters a different scope.
+
+        TritonKernel subclasses and derived iteration families may use separate
+        codegen scopes. Cooperative reductions also use an untested partitioned
+        execution model. Only the base, non-cooperative kernel with base range
+        trees is accepted here.
+        """
+        if not self._supports_load_index_basis_reuse():
+            return index
+
+        cse = cast(TritonCSE, self.cse)
+        # Use the exact buffer/mask scope already defined by TritonCSE.
+        cache_key = cse.augment_key(name)
+        state = cse._load_index_states.get(cache_key)
+        if state is None:
+            # Defer range-tree analysis until another live load from this CSE
+            # scope uses the same buffer with a different index.
+            cse._load_index_states[cache_key] = _UnresolvedLoadIndexState(index, index)
+            return index
+        if state.index == index:
+            return state.result
+
+        bases = self._resolve_load_index_bases(state)
+        result = index
+        for tree, basis in zip(self.range_trees, bases, strict=True):
+            if basis is not None:
+                result = self._rewrite_full_range_with_basis(result, tree, basis)
+        if result != index:
+            result = V.graph.sizevars.simplify_with_ranges(result, self.var_ranges())
+        cse._load_index_states[cache_key] = _ResolvedLoadIndexState(
+            index, result, bases
+        )
+        return result
+
     def partial_accumulate(
         self, name: str, reduction_type, val, extra_meta: dict[str, Any]
     ):
@@ -4209,6 +4372,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         load_counts = self._load_counts
         load_counts[name] += 1
         make_line: Callable[[str], str | DelayReplaceLine] = identity
+        # Align a flat epilogue load with split coordinates already used in the body.
+        index = self._reuse_load_index_basis(name, index)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
         dtype = V.graph.get_dtype(name)
@@ -6415,10 +6580,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 and "x" in tiling_scores
                 and "r0_" in tiling_scores
             ):
-                # large rblock inhibits xblock size, don't attempt if there is a decent amount of
-                # reads coalesced by xblock
-                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
-                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
+                contiguous_red = tiling_scores_suggest_inner_reduction(
+                    tiling_scores, self.features.reduction_numel
+                )
             else:
                 contiguous_red = (
                     self.features.get_reduction_hint(tiling_scores)
