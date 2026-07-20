@@ -768,22 +768,15 @@ class TensorVariable(VariableTracker):
 
         if result is None:
             static_attr = all_tensor_attrs.get(name, None)
+            if static_attr is None:
+                # all_tensor_attrs is computed at import time; check the
+                # actual type for dynamically-added methods (e.g. distributed
+                # wait) and subclass methods.
+                static_attr = getattr(self.class_type, name, None)
             if static_attr is not None and callable(static_attr):
-
                 return CallMethodVariable(
                     self, name, source=self.source and AttrSource(self.source, name)
                 )
-            # For tensor subclasses, check the actual type for methods
-            # not on base Tensor.
-            if self.class_type is not torch.Tensor:
-                subclass_attr = getattr(self.class_type, name, None)
-                if subclass_attr is not None and callable(subclass_attr):
-
-                    return CallMethodVariable(
-                        self,
-                        name,
-                        source=self.source and AttrSource(self.source, name),
-                    )
             raise NotImplementedError
         return result
 
@@ -3152,12 +3145,12 @@ class NumpyNdarrayVariable(TensorVariable):
                 hints=[],
             )
         if result is None:
-            attr = getattr(np.ndarray, name, None)
-            if attr is not None and callable(attr):
-
-                return CallMethodVariable(
-                    self, name, source=self.source and AttrSource(self.source, name)
-                )
+            if np is not None:
+                attr = getattr(np.ndarray, name, None)
+                if attr is not None and callable(attr):
+                    return CallMethodVariable(
+                        self, name, source=self.source and AttrSource(self.source, name)
+                    )
             raise NotImplementedError
         return result
 
