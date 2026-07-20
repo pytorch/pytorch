@@ -282,6 +282,7 @@ cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
                        "USE_CUDNN" OFF)
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
+cmake_dependent_option(USE_HIPSPARSELT "Use hipSPARSELt" ON "USE_ROCM" OFF)
 cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
 # USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
 cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA AND NOT WIN32" OFF)
@@ -310,22 +311,17 @@ cmake_dependent_option(USE_NCCL_EP "Build NCCL EP contrib library" OFF
                        "USE_NCCL;USE_CUDA" OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
-option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
                        OFF)
 cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."
                        ON "USE_CUDA" OFF)
 option(USE_NUMPY "Use NumPy" ON)
-option(USE_OBSERVERS "Use observers module." OFF)
-option(USE_OPENCL "Use OpenCL" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build."
        OFF)
 
-option(USE_PROF "Use profiling" OFF)
 option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
-option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_EIGEN_SPARSE "Use Eigen Sparse Matrices" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
@@ -360,8 +356,6 @@ cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
-cmake_dependent_option(USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF "USE_MKLDNN"
-                       OFF)
 option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
 cmake_dependent_option(
   USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
