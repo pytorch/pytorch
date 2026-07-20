@@ -1685,6 +1685,63 @@ class DecoratorTests(PytreeRegisteringTestCase):
         with self.assertRaisesRegex(Unsupported, "unguardable argument"):
             fn(torch.ones(4), n1)
 
+    def test_assume_constant_result_specialize_args_dataclass_cycle(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Node:
+            val: float
+            other: object = None
+
+        n1 = Node(1.0)
+        n2 = Node(2.0, n1)
+        n1.other = n2
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(n):
+            return n.val
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, n):
+            return x * select(n)
+
+        # A guardable (dataclass) structure containing a true reference cycle
+        # must graph break instead of recursing forever.
+        with self.assertRaisesRegex(Unsupported, "unguardable argument"):
+            fn(torch.ones(4), n1)
+
+    def test_assume_constant_result_specialize_args_diamond_reference(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class P:
+            a: dict
+            b: dict
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(p):
+            return p.a["scale"] + p.b["scale"]
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x, p):
+            return x * select(p)
+
+        # The same dict reachable through two fields is a diamond, not a
+        # cycle, and must not graph break.
+        shared = {"scale": 2.0}
+        for _ in range(2):
+            self.assertEqual(fn(torch.ones(4), P(shared, shared)), torch.ones(4) * 4)
+        self.assertEqual(cnts.frame_count, 1)
+        # Value guards fire when the shared value changes...
+        changed = {"scale": 3.0}
+        self.assertEqual(fn(torch.ones(4), P(changed, changed)), torch.ones(4) * 6)
+        self.assertEqual(cnts.frame_count, 2)
+        # ...including a change reachable only through the second path.
+        self.assertEqual(fn(torch.ones(4), P(shared, changed)), torch.ones(4) * 5)
+        self.assertEqual(cnts.frame_count, 3)
+
     def test_assume_constant_result_specialize_args_unset_dataclass_field(self):
         import dataclasses
 

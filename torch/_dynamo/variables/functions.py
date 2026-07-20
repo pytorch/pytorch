@@ -1871,7 +1871,7 @@ def _install_constant_arg_guards(
     source: Source,
     value: Any,
     name: str,
-    seen: set[int],
+    ancestors: set[int],
     side_effects: "SideEffects",
 ) -> None:
     """
@@ -1899,17 +1899,19 @@ def _install_constant_arg_guards(
     ):
         install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
         return
-    if id(value) in seen:
+    # `ancestors` holds ids only for the objects currently on the recursion
+    # path, so it flags true cycles while an object shared by two paths (a
+    # diamond) is walked once per path, installing guards under each source.
+    if id(value) in ancestors:
         _unguardable_constant_arg(source, value, name, "self-referential structure")
-    seen.add(id(value))
+    ancestors.add(id(value))
     if isinstance(value, (tuple, list)):
         install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
         for i, item in enumerate(value):
             _install_constant_arg_guards(
-                GetItemSource(source, i), item, name, seen, side_effects
+                GetItemSource(source, i), item, name, ancestors, side_effects
             )
-        return
-    if isinstance(value, dict):
+    elif isinstance(value, dict):
         for k in value:
             if not ConstantVariable.is_literal(k):
                 _unguardable_constant_arg(
@@ -1921,10 +1923,9 @@ def _install_constant_arg_guards(
         install_guard(source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
         for k, v in value.items():
             _install_constant_arg_guards(
-                DictGetItemSource(source, k), v, name, seen, side_effects
+                DictGetItemSource(source, k), v, name, ancestors, side_effects
             )
-        return
-    if not isinstance(value, type) and dataclasses.is_dataclass(value):
+    elif not isinstance(value, type) and dataclasses.is_dataclass(value):
         install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
         for field in dataclasses.fields(value):
             if not hasattr(value, field.name):
@@ -1935,11 +1936,12 @@ def _install_constant_arg_guards(
                 AttrSource(source, field.name),
                 getattr(value, field.name),
                 name,
-                seen,
+                ancestors,
                 side_effects,
             )
-        return
-    _unguardable_constant_arg(source, value, name, "no value-guardable structure")
+    else:
+        _unguardable_constant_arg(source, value, name, "no value-guardable structure")
+    ancestors.discard(id(value))
 
 
 def invoke_and_store_as_constant(
