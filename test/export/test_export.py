@@ -18602,7 +18602,6 @@ def forward(self, args_0):
     return (abs_1,)""",
         )
 
-    @testing.expectedFailureStrictV2
     def test_sdpa_gqa(self):
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
