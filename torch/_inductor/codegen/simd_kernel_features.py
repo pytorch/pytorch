@@ -107,6 +107,7 @@ class SIMDKernelFeatures:
     def has_strict_sum_reduction(self) -> bool:
         return any(
             node.node is not None
+            and isinstance(node.node, ir.ComputedBuffer)
             and isinstance(node.node.data, ir.Reduction)
             and node.node.data.strict_sum
             for node in self.reduction_nodes()
@@ -116,6 +117,7 @@ class SIMDKernelFeatures:
     def has_strict_sum_linear_reduction(self) -> bool:
         return any(
             node.node is not None
+            and isinstance(node.node, ir.ComputedBuffer)
             and isinstance(node.node.data, ir.Reduction)
             and node.node.data.strict_sum_linear
             for node in self.reduction_nodes()
@@ -123,13 +125,16 @@ class SIMDKernelFeatures:
 
     @cache_on_self
     def strict_sum_itemsize(self) -> int | None:
-        itemsizes = {
-            node.node.data.src_dtype.itemsize
-            for node in self.reduction_nodes()
-            if node.node is not None
-            and isinstance(node.node.data, ir.Reduction)
-            and node.node.data.strict_sum
-        }
+        itemsizes = OrderedSet(
+            [
+                node.node.data.src_dtype.itemsize
+                for node in self.reduction_nodes()
+                if node.node is not None
+                and isinstance(node.node, ir.ComputedBuffer)
+                and isinstance(node.node.data, ir.Reduction)
+                and node.node.data.strict_sum
+            ]
+        )
         if not itemsizes:
             return None
         if len(itemsizes) != 1:

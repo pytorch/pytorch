@@ -1,12 +1,3 @@
-# CMake build instrumentation wraps all custom commands with ctest
-# --instrument. ATen codegen custom_command in this directory generates
-# a long command that causes ctest to fail with "Argument list too long".
-# Setting RULE_LAUNCH_CUSTOM to empty prevents custom commands in this
-# directory from being wrapped.
-if(PYTORCH_CMAKE_INSTRUMENTATION)
-  set_property(DIRECTORY PROPERTY RULE_LAUNCH_CUSTOM "")
-endif()
-
 # ---[ Generate and install header and cpp files
 include(../cmake/Codegen.cmake)
 
@@ -1513,6 +1504,9 @@ if(USE_ROCM)
   endif()
   if(TARGET ck_sdpa)
     target_compile_definitions(torch_hip PRIVATE USE_ROCM_CK_SDPA)
+  endif()
+  if(USE_HIPSPARSELT)
+    target_compile_definitions(torch_hip PRIVATE USE_HIPSPARSELT)
   endif()
 
   message(INFO "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM} rocshmem_FOUND=${rocshmem_FOUND} rocshmem_VERSION=${rocshmem_VERSION}")

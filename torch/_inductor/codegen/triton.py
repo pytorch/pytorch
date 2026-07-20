@@ -160,16 +160,16 @@ INNER_REDUCTION_RATIO_THRESHOLD = 8
 
 
 def get_triton_reduction_function(reduction_type):
-    use_helper = reduction_type in ("any", "max", "min", "prod")
+    use_helper = reduction_type in ("any", "max", "min", "prod", "fmax")
     module = "triton_helpers" if use_helper else "tl"
-    if reduction_type in ("max", "min"):
+    if reduction_type in ("max", "min", "fmax"):
         return f"{module}.{reduction_type}2"
     else:
         return f"{module}.{reduction_type}"
 
 
 def is_sympy_integer_like(expr: object):
-    """ "
+    """
     Is this expression a Sympy Integer or is it an integer sympy Expr
     containing no free symbols. The latter case can happen with Identity expr.
     """
@@ -633,7 +633,9 @@ class BlockDescriptorOptions:
 
     def has_rindex(self) -> bool:
         return any(
-            TritonSymbols.has_reduction_index_symbol(V.kernel, expr)
+            TritonSymbols.has_reduction_index_symbol(
+                cast("TritonKernel", V.kernel), expr
+            )
             for expr in self.block_shape
         )
 
@@ -1254,7 +1256,9 @@ class TritonCSEVariable(CSEVariable):
                 # however, when index vars are used to compute indices for indirect reads
                 # those reads should subsequently be masked,
                 if (
-                    mask_name := TritonSymbols.mask_name_for_symbol(V.kernel, arg)
+                    mask_name := TritonSymbols.mask_name_for_symbol(
+                        cast("TritonKernel", V.kernel), arg
+                    )
                 ) is not None:
                     self.mask_vars.add(mask_name)
 
@@ -1591,6 +1595,11 @@ class TritonOverrides(OpOverrides):
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
         return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def fmaximum(a, b):
+        return f"tl.maximum({a}, {b})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -2535,7 +2544,15 @@ class TritonKernelOverrides(TritonOverrides):
         # operator to save the branching cost.
         for node in nodes:
             for arg in node.args:
-                if arg.target != "load" or should_unwrap_unspec_arg(arg.args[1]):
+                if (
+                    arg.target != "load"
+                    or should_unwrap_unspec_arg(arg.args[1])
+                    # A load whose producer is fused into this kernel is
+                    # served from the CSE store cache and emits no tl.load,
+                    # so the masked-load `other` would be silently dropped;
+                    # fall back to an explicit tl.where.
+                    or arg.args[1] in V.kernel.cse.store_cache
+                ):
                     need_where = True
                     break
 
@@ -4496,6 +4513,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def matching_dep(dep):
             if prev_node is None:
                 raise AssertionError("prev_node must not be None")
+            if current_node is None:
+                raise AssertionError("current_node must not be None")
             prev_deps = prev_node.read_writes.writes
             if consider_reads:
                 prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
@@ -5520,9 +5539,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     dtype,
                 )
             elif strict_sum_loop:
-                zero = constant_repr(
-                    ir.Reduction.default_accumulator(reduction_type, src_dtype)
-                )
+                zero_val = ir.Reduction.default_accumulator(reduction_type, src_dtype)
+                zero = constant_repr(zero_val)  # pyrefly: ignore [bad-argument-type]
                 masked = self.cse.generate(
                     self.compute,
                     where_cond(value, zero),
@@ -6819,9 +6837,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 raise AssertionError("strict sum reduction requires a source dtype")
             out["numerics"] = "strict"
             out["strict_sum_itemsize"] = itemsize
-            out["strict_sum_linear"] = (
-                self.features.has_strict_sum_linear_reduction()
-            )
+            out["strict_sum_linear"] = self.features.has_strict_sum_linear_reduction()
         if (
             config.benchmark_kernel
             or config.profile_bandwidth

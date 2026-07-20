@@ -66,7 +66,10 @@ class StrictNumericsTest(TestCase):
 
     def _code(self, shape, dim, dtype, **cfg):
         x = torch.randn(*shape, device=GPU_TYPE, dtype=dtype)
-        fn = lambda z: torch.sum(z, dim)
+
+        def fn(z):
+            return torch.sum(z, dim)
+
         with config.patch({"numerics": "strict", **cfg}):
             torch._dynamo.reset()
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
@@ -88,7 +91,10 @@ class StrictNumericsTest(TestCase):
 
     def test_sum_keepdim(self):
         x = torch.randn(64, 300, device=GPU_TYPE)
-        f = lambda z: torch.sum(z, 1, keepdim=True)
+
+        def f(z):
+            return torch.sum(z, 1, keepdim=True)
+
         eager = f(x)
         with config.patch({"numerics": "strict"}):
             torch._dynamo.reset()
@@ -102,7 +108,9 @@ class StrictNumericsTest(TestCase):
 
     def test_dynamic_matches_eager(self):
         # A divisibility hint must not enable split reduction for a dynamic extent.
-        fn = lambda z: torch.sum(z, 1)
+        def fn(z):
+            return torch.sum(z, 1)
+
         with config.patch({"numerics": "strict"}):
             torch._dynamo.reset()
             compiled = torch.compile(fn, fullgraph=True, dynamic=True)
