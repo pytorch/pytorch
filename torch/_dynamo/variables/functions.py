@@ -507,13 +507,11 @@ class BaseUserFunctionVariable(VariableTracker):
             and self.get_filename().endswith("torch/optim/lr_scheduler.py")
         ):
             return ConstantVariable.create(None)
-        # The tree_map fast path doesn't create an InliningIT for tree_map,
-        # so NGB resume functions would miss the tree_map continuation.
         return tx.inline_user_function_return(
             self,
             [*self.self_args(), *args],
             kwargs,
-            allow_nested_graph_breaks=not tx._tree_map_fast_path_active,
+            allow_nested_graph_breaks=not tx._suppress_nested_graph_breaks,
         )
 
     def call_obj_hasattr(
@@ -915,9 +913,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         first_tree = tree_map_args[1]
         rest = tree_map_args[2:]
 
-        prev = tx._tree_map_fast_path_active
-        tx._tree_map_fast_path_active = True
-        try:
+        # The tree_map fast path doesn't create an InliningIT for tree_map,
+        # so NGB resume functions would miss the tree_map continuation.
+        with tx.suppress_nested_graph_breaks():
             if is_tree_map_with_path:
                 return first_tree.call_tree_map_with_path(
                     tx,
@@ -935,8 +933,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     rest,
                     tree_map_kwargs,
                 )
-        finally:
-            tx._tree_map_fast_path_active = prev
 
     def _is_tree_map_function(self) -> bool:
         return (
