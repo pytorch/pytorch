@@ -1471,6 +1471,18 @@ class TestInductorDynamic(DynamicShapesTestCase):
         # Test backward pass as well - this is where the bug manifested
         out_compiled.sum().backward()
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_combinations_dynamic(self):
+        def f(x):
+            return torch.combinations(x, r=2)
+
+        compiled_f = torch.compile(f, fullgraph=True, dynamic=True)
+        for n in [3, 5, 7]:
+            x = torch.randn(n)
+            expected = f(x)
+            actual = compiled_f(x)
+            self.assertEqual(actual, expected)
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 

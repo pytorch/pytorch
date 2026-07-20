@@ -58,8 +58,10 @@ max_block: int = TRITON_MAX_BLOCK["X"]
 def _get_no_split_threshold() -> int:
     if torch.cuda.is_available():
         props = torch.cuda.get_device_properties(torch.cuda.current_device())
-        if props.major is not None and props.major >= 10:
-            return 524288
+        # These tests reduce the whole view to one output, so xnumel is 1.
+        return V.choices._inner_reduction_no_split_threshold(
+            props, xnumel=1, num_sm=props.multi_processor_count
+        )
     return 8192
 
 
@@ -864,12 +866,12 @@ class CommonTemplate:
             self.assertGreaterEqual(
                 block_pointer_count,
                 min_num_block_pointers,
-                f"Too few block descriptors emitted: {block_pointer_count}",
+                lambda msg: f"{msg}\nToo few block descriptors emitted: {block_pointer_count}",
             )
             self.assertLessEqual(
                 block_pointer_count,
                 max_num_block_pointers,
-                f"Too many block descriptors emitted: {block_pointer_count}",
+                lambda msg: f"{msg}\nToo many block descriptors emitted: {block_pointer_count}",
             )
 
         self._assert_reduction_ndims(code, 2)
