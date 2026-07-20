@@ -21,6 +21,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     parametrize,
+    requires_cuda,
     skipIfMPS,
     skipIfTorchDynamo,
     IS_WINDOWS)
@@ -3842,6 +3843,7 @@ as the input tensor excluding its innermost dimension'):
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
 
+@requires_cuda
 class TestReductionsOnCUDA(TestCase):
     def test_histc_min_max_corner_cases_cuda(self):
         for dtype in (torch.uint8, torch.int8, torch.int, torch.long):
