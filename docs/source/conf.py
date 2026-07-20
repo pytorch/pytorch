@@ -1879,8 +1879,6 @@ coverage_ignore_classes = [
     "mode_out",
     "nanmedian",
     "nanmedian_out",
-    "qr",
-    "qr_out",
     "slogdet",
     "slogdet_out",
     "sort",
@@ -2044,8 +2042,6 @@ coverage_ignore_classes = [
     "DLDeviceType",
     # torch.utils.file_baton
     "FileBaton",
-    # torch.utils.flop_counter
-    "FlopCounterMode",
     # torch.utils.hipify.hipify_python
     "CurrentState",
     "GeneratedFileCleaner",

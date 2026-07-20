@@ -515,6 +515,7 @@ aten::_philox_distribution_flat_slice
 aten::_philox_distribution_flat_slice.out
 aten::_philox_distribution_flat_slice_
 aten::_philox_key_fold_in
+aten::_philox_key_fold_in.Tensor
 aten::_philox_key_split
 aten::_philox_normal
 aten::_philox_normal.out

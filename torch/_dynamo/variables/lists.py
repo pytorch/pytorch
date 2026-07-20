@@ -497,31 +497,6 @@ class BaseListVariable(VariableTracker):
                 [self, args[0]],
                 kwargs,
             )
-        elif name in ("__add__", "__iadd__"):
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-
-            if type(self) is not type(args[0]):
-                tp_name = self.python_type_name()
-                other = args[0].python_type_name()
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f'can only concatenate {tp_name} (not "{other}") to {tp_name}'
-                    ],
-                )
-
-            if name == "__add__":
-                return type(self)(self.items + args[0].items)  # type: ignore[attr-defined]
-            else:
-                self.items += args[0].items  # type: ignore[attr-defined]
-                return self
         elif name == "__reversed__":
             # list/tuple/namedtuple __reversed__: reverse iterator over items.
             if args or kwargs:
@@ -796,8 +771,10 @@ class RangeVariable(BaseListVariable):
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L482-L490
-        return VariableTracker.build(tx, self.range_count(item))
+        # range_contains: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/rangeobject.c#L482-L490
+        if maybe_get_python_type(item) in (int, bool):
+            return VariableTracker.build(tx, bool(self.range_count(item)))
+        return iter_contains(self.unpack_var_sequence(tx), item, tx)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L896-L927
@@ -1054,7 +1031,6 @@ class CommonListMethodsVariable(BaseListVariable):
 class ListVariable(CommonListMethodsVariable):
     # PyList_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3776
     _cpython_type = list
-    _has_instance_dict = False
 
     def richcompare_impl(
         self,
@@ -1375,10 +1351,32 @@ class ListVariable(CommonListMethodsVariable):
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
 
+_deque_state_mutating_methods = frozenset(
+    {
+        "append",
+        "appendleft",
+        "extend",
+        "extendleft",
+        "pop",
+        "popleft",
+        "insert",
+        "remove",
+        "clear",
+        "rotate",
+    }
+)
+
+
+# TODO(dynamo-team): Split deque from CommonListMethodsVariable / ListVariable
 class DequeVariable(CommonListMethodsVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
     # tp_hash = PyObject_HashNotImplemented (unhashable)
     _cpython_type = collections.deque
+
+    _nonvar_fields = {
+        "state",
+        *CommonListMethodsVariable._nonvar_fields,
+    }
 
     def richcompare_impl(
         self,
@@ -1426,6 +1424,9 @@ class DequeVariable(CommonListMethodsVariable):
         if self.maxlen.as_python_constant() is not None:
             items = items[-maxlen.as_python_constant() :]
         super().__init__(items, **kwargs)
+        # Mirrors CPython deque->state: bumped on every structural mutation so
+        # deque iterators can detect mutation during iteration.
+        self.state = 0
 
     def python_type(self) -> type:
         return collections.deque
@@ -1462,6 +1463,9 @@ class DequeVariable(CommonListMethodsVariable):
             raise_observed_exception(IndexError, tx, args=["deque index out of range"])
         tx.output.side_effects.mutation(self)
         if value is None:
+            # deque_ass_item_lock_held bumps deque->state only on the delete
+            # path (deque_del_item); the set path (Py_SETREF) does not bump.
+            self.state += 1
             self.items.__delitem__(idx)
         else:
             self.items[idx] = value
@@ -1497,6 +1501,31 @@ class DequeVariable(CommonListMethodsVariable):
         self.call_method(tx, "extend", [other], {})
         return self
 
+    def sq_inplace_repeat_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        # deque_inplace_repeat: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L811
+        if not self.is_mutable():
+            raise AssertionError(
+                f"sq_inplace_repeat_impl reached an immutable {type(self).__name__}; "
+                "every construction site should set mutation_type."
+            )
+        n = count.as_python_constant()
+        try:
+            new_items = self.items * n
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        # A bounded deque drops from the left, keeping the last maxlen items
+        # (maxlen == 0 yields an empty deque).
+        maxlen = self.maxlen.as_python_constant()
+        if maxlen is not None:
+            new_items = new_items[-maxlen:] if maxlen else new_items[:0]
+        tx.output.side_effects.mutation(self)
+        self.items[:] = new_items
+        return self
+
     def debug_repr(self) -> str:
         if self.maxlen.as_python_constant() is None:
             return self.debug_repr_helper("deque([", "])")
@@ -1507,10 +1536,10 @@ class DequeVariable(CommonListMethodsVariable):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = ", ".join(tracked_repr(tx, item) for item in self.items)
         if self.maxlen.as_python_constant() is None:
-            return VariableTracker.build(tx, f"deque([{items}])")
+            return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
         return VariableTracker.build(
             tx,
-            f"deque([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
+            f"{self.python_type_name()}([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
         )
 
     def as_python_constant(self) -> collections.deque[Any]:
@@ -1567,6 +1596,23 @@ class DequeVariable(CommonListMethodsVariable):
         if name == "__init__":
             return self.tp_init_impl(tx, args, kwargs)
 
+        if name == "__reversed__":
+            # deque.__reversed__ returns a _deque_reverse_iterator that snapshots
+            # the current state and detects mutation during iteration.
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return DequeReverseIteratorVariable(
+                list(reversed(self.items)),
+                self,
+                self.state,
+                mutation_type=ValueMutationNew(),
+            )
+
         maxlen = self.maxlen.as_python_constant()
         if maxlen is not None:
             slice_within_maxlen = slice(-maxlen, None)
@@ -1587,6 +1633,8 @@ class DequeVariable(CommonListMethodsVariable):
                 maxlen=self.maxlen,
                 mutation_type=ValueMutationNew(),
             )
+
+        pre_len = len(self.items)
 
         if name == "extendleft" and self.is_mutable() and len(args) > 0:
             if kwargs or len(args) != 1:
@@ -1641,12 +1689,19 @@ class DequeVariable(CommonListMethodsVariable):
         else:
             result = super().call_method(tx, name, args, kwargs)
 
+        # Capture growth before the maxlen clamp: extend/extendleft appended an
+        # item iff the length grew here (the clamp may shrink it back).
+        extend_appended = len(self.items) > pre_len
         if (
             slice_within_maxlen is not None
             and maxlen is not None
             and len(self.items) > maxlen
         ):
             self.items[:] = self.items[slice_within_maxlen]
+        if name in _deque_state_mutating_methods and self.is_mutable():
+            # extend/extendleft with an empty iterable append nothing -> no bump.
+            if name not in ("extend", "extendleft") or extend_appended:
+                self.state += 1
         return result
 
     def call_obj_hasattr(
@@ -1677,6 +1732,7 @@ class DequeVariable(CommonListMethodsVariable):
             raise_args_mismatch(tx, "__init__")
         self.validate_maxlen(tx, new_maxlen)
         tx.output.side_effects.mutation(self)
+        self.state += 1
         self.maxlen = new_maxlen
         self.items.clear()
         if iterable is not None:
@@ -1685,10 +1741,12 @@ class DequeVariable(CommonListMethodsVariable):
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L1886-L1904
-        # TODO(guilhermeleobas): Replace this by a proper DequeIteratorVariable
-        # that keeps track of the maxlen and doesn't allow iterating over more
-        # items than maxlen.
-        return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
+        return DequeIteratorVariable(
+            list(self.items),
+            self,
+            self.state,
+            mutation_type=ValueMutationNew(),
+        )
 
 
 class TupleVariable(BaseListVariable):
@@ -2290,6 +2348,47 @@ class ListIteratorVariable(IteratorVariable):
 class TupleIteratorVariable(ListIteratorVariable):
     # PyTupleIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L1067
     _cpython_type = type(iter(()))
+
+
+class DequeIteratorVariable(ListIteratorVariable):
+    _cpython_type = type(iter(collections.deque()))
+
+    _nonvar_fields = {
+        "saved_state",
+        *ListIteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        items: list[VariableTracker],
+        source_deque: "DequeVariable",
+        saved_state: int,
+        index: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(items, index=index, **kwargs)
+        self.source_deque = source_deque
+        self.saved_state = saved_state
+
+    def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
+        if self.source_deque.state != self.saved_state:
+            raise_observed_exception(
+                RuntimeError, tx, args=["deque mutated during iteration"]
+            )
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mutation(tx)
+        return super().tp_iternext_impl(tx)
+
+    def python_type(self) -> type:
+        return type(iter(collections.deque()))
+
+
+class DequeReverseIteratorVariable(DequeIteratorVariable):
+    _cpython_type = type(reversed(collections.deque()))
+
+    def python_type(self) -> type:
+        return type(reversed(collections.deque()))
 
 
 class RangeIteratorVariable(IteratorVariable):
