@@ -20,7 +20,7 @@ from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config as inductor_config, distributed_autotune
+from .. import config as inductor_config, distributed_autotune, lowering as L
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
@@ -59,6 +59,7 @@ from ..utils import (
 )
 from .mm_common import (
     _is_static_problem,
+    _use_small_mm_pointwise,
     load_kernel_template,
     mm_args,
     mm_grid,
@@ -207,6 +208,17 @@ def check_supported_striding(mat_a, mat_b) -> None:
 
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
+
+
+def _check_addmm_input_metadata(inp, mat1, mat2) -> None:
+    torch._check(
+        inp.get_dtype() == mat1.get_dtype() and inp.get_dtype() == mat2.get_dtype(),
+        lambda: "input dtypes must be the same",
+    )
+    torch._check(
+        inp.get_device() == mat1.get_device() and inp.get_device() == mat2.get_device(),
+        lambda: "all inputs must be on the same device",
+    )
 
 
 def decomposeK(a, b, k_splits):
@@ -378,6 +390,18 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
+
+    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout):
+        counters["inductor"]["decompose_mm_pointwise"] += 1
+        # Clone both to force contiguous strides (#189401): unrolled sum
+        # reduction computes wrong indices for transposed views. Clone both
+        # rather than detecting the transposed side; scheduler fuses the copy.
+        mat1 = L.clone(mat1)
+        mat2 = L.clone(mat2)
+        mat1 = L.unsqueeze(mat1, -1)
+        mat2 = L.unsqueeze(mat2, 0)
+        return L.sum_(L.mul(mat1, mat2), axis=1)
+
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "mm"
 
@@ -613,8 +637,27 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    if beta == 0 and mat1.get_device().type == "cuda":
+        _check_addmm_input_metadata(inp, mat1, mat2)
+        if alpha == 0:
+            _, _, _, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+            return lowerings[aten.full](
+                layout.size,
+                0,
+                dtype=layout.dtype,
+                device=layout.device,
+            )
+        if layout is not None:
+            result = lowerings[aten.mm](mat1, mat2, layout=layout)
+        else:
+            result = lowerings[aten.mm](mat1, mat2)
+        if alpha != 1:
+            result = lowerings[aten.mul](alpha, result)
+        return result
+
     if use_native_matmul(mat1, mat2):
         if beta == 0:
+            _check_addmm_input_metadata(inp, mat1, mat2)
             arg1 = 0
         else:
             arg1 = lowerings[aten.mul](beta, inp)
@@ -723,6 +766,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             alpha=alpha,
             beta=beta,
             input_reorder=[2, 0, 1],
+        )
+
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat1, mat2):
+        from ..codegen.nv_universal_gemm import add_nv_universal_addmm_choices
+
+        # inp is the original (un-expanded) bias, so a 1D row vector routes to
+        # the row-broadcast epilogue impl.
+        add_nv_universal_addmm_choices(
+            choices, layout, kernel_inputs, inp, alpha=alpha, beta=beta
         )
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
