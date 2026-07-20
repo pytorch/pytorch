@@ -14,10 +14,31 @@ import heapq
 import itertools
 from collections.abc import Callable
 
+import torch
 import torch.fx as fx
 
 
 __all__ = ["canonicalize_graph", "rename_nodes_to_canonical"]
+
+
+_IN_PLACE_OPERATORS = frozenset(
+    {
+        "iadd",
+        "iand",
+        "iconcat",
+        "ifloordiv",
+        "ilshift",
+        "imatmul",
+        "imod",
+        "imul",
+        "ior",
+        "ipow",
+        "irshift",
+        "isub",
+        "itruediv",
+        "ixor",
+    }
+)
 
 
 def _computation_node_key(
@@ -26,6 +47,67 @@ def _computation_node_key(
     """Canonical heap key for a computation node (call_function / call_method / call_module)."""
     input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
     return (2, node.graph._target_to_str(node.target), input_indices)
+
+
+def _canonical_node_key(
+    node: fx.Node, canonical_idx: dict[fx.Node, int]
+) -> object:
+    """Canonical heap key for get_attr, output, and computation nodes.
+
+    Callers must handle placeholder nodes themselves (the ordering strategy
+    differs between Dynamo and export) and never pass them here.
+    """
+    assert node.op != "placeholder"
+    if node.op == "get_attr":
+        return (1, str(node.target))
+    elif node.op == "output":
+        return (3,)
+    else:
+        return _computation_node_key(node, canonical_idx)
+
+
+def is_safe_to_reorder(node: fx.Node) -> bool:
+    """Check if a node is safe to reorder during graph canonicalization.
+
+    Builds on Node.is_impure() (used by DCE) with two additional checks for
+    cases it doesn't cover: in-place call_method nodes and non-OpOverload
+    state-changing functions detected by a no-node-arguments heuristic.
+    """
+    if node.op == "call_method":
+        return not node.target.endswith("_")  # pyrefly: ignore[missing-attribute]
+    if node.op == "call_module":
+        return not node.is_impure()
+    if node.op != "call_function":
+        return True
+    if node.is_impure():
+        return False
+    if not isinstance(node.target, torch._ops.OpOverload):
+        name = getattr(node.target, "__name__", "")
+        if name.endswith("_"):
+            return False
+        if (
+            getattr(node.target, "__module__", "") == "_operator"
+            and name in _IN_PLACE_OPERATORS
+        ):
+            return False
+        if isinstance(node.kwargs.get("out"), fx.Node):
+            return False
+        # triton_kernel_wrapper_mutation mutates tensors via kwargs but
+        # is not detected by is_impure() or trailing-underscore checks.
+        if name == "triton_kernel_wrapper_mutation":
+            return False
+        # Non-OpOverload targets with no FX Node arguments are likely
+        # state-changing (e.g., _vmap_increment_nesting,
+        # _set_fwd_grad_enabled). This is intentionally conservative:
+        # pure constant-producing ops would also be treated as barriers,
+        # but those are rare in Dynamo output graphs (constants are
+        # typically lifted as placeholders or get_attr nodes).
+        if not node.all_input_nodes:
+            return False
+        # functorch batch dim ops modify the vmap interpreter stack.
+        if name in ("_add_batch_dim", "_remove_batch_dim"):
+            return False
+    return True
 
 
 def rename_nodes_to_canonical(

@@ -145,12 +145,15 @@ class CooperativeReductionTests(TestCase):
     def run_and_check(self, fn, args, dtype=None, *, expect_kernel_count=1):
         # Cooperative reductions accumulate in a different order than eager, so a
         # single fixed tolerance is too tight for large-magnitude reductions
-        # (e.g. sum over ~1M elements). Scale rtol/atol with the input dtype's
-        # precision, keeping the float64/default path tight.
+        # (e.g. sum over ~1M elements). Scale rtol with the input dtype's
+        # precision, keeping atol tight and the float64/default path tight. sum is
+        # a large-magnitude relative-error problem, so rtol alone covers it; a loose
+        # atol would slash sensitivity for small-magnitude outputs (softmax ~1e-6,
+        # mean over 1M ~1e-3) sharing this parametrization.
         RTOL, ATOL = {
-            torch.float16: (1e-2, 1e-2),
-            torch.bfloat16: (1e-2, 1e-2),
-            torch.float32: (1e-3, 1e-3),
+            torch.float16: (1e-2, 1e-6),
+            torch.bfloat16: (1e-2, 1e-6),
+            torch.float32: (1e-3, 1e-6),
         }.get(dtype, (1e-5, 1e-6))
 
         # Compute the reference in float64 for reduced-precision inputs so the
