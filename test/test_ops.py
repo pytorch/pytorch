@@ -1608,7 +1608,11 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
-        if TEST_WITH_ROCM and getRocmVersion() >= (7, 14) and op.name == "sparse.sampled_addmm":
+        if (
+            TEST_WITH_ROCM
+            and getRocmVersion() >= (7, 14)
+            and op.name == "sparse.sampled_addmm"
+        ):
             self.skipTest("stale sparse.sampled_addmm OpInfo dtypes on ROCm 7.14")
         # Check complex32 support only if the op claims.
         # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.

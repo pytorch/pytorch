@@ -21303,7 +21303,9 @@ if RUN_GPU:
                 "'XBLOCK': 'constexpr'"
             ).run(code[0])
 
-        @skipIfRocmVersionAtLeast([7, 14])  # ck/config.h missing on ROCm 7.14+ wheel stack
+        @skipIfRocmVersionAtLeast(
+            [7, 14]
+        )  # ck/config.h missing on ROCm 7.14+ wheel stack
         @unittest.skipIf(
             not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8)),
             "no scaled_grouped_mm support",

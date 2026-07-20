@@ -19,7 +19,10 @@ if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_distributed import MultiProcessTestCase, skip_if_rocm_ver_atleast_multiprocess
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    skip_if_rocm_ver_atleast_multiprocess,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
