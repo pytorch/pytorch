@@ -1702,6 +1702,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
             // Creates grad according to the "Gradient Layout Contract".
             grad = torch::autograd::utils::clone_obey_contract(
                 bucket_view, variable);
+          } else if (grad.requires_grad()) {
+            grad.copy_(bucket_view);
           } else {
             batched_grad_dsts.push_back(grad);
             batched_grad_srcs.push_back(bucket_view);
