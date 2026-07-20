@@ -5960,6 +5960,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape=shape,
         )
 
+    def emit_split_via_reshape(
+        self,
+        value: CSEVariable,
+        reshape_shape: Sequence[sympy.Expr | int | str],
+        part_names: Sequence[str],
+    ) -> None:
+        reshaped = self._reshape_expr(value, reshape_shape)
+        self.compute.writeline(f"{', '.join(part_names)} = tl.split({reshaped})")
+
     def emit_broadcast_via_reshape(
         self,
         value: CSEVariable,
@@ -5975,10 +5984,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         value (one element per group) to full or half resolution.
         """
         reshaped = self._reshape_expr(value, pre_broadcast_shape)
+        is_float8 = dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        )
+        if is_float8:
+            reshaped = f"{reshaped}.to(tl.uint8, bitcast=True)"
         broadcasted = (
             f"tl.broadcast_to({reshaped}, {triton_shape_str(broadcast_shape)})"
         )
         line = triton_reshape(broadcasted, list(broadcast_shape), list(final_shape))
+        if is_float8:
+            line = f"{line}.to({triton_type(dtype)}, bitcast=True)"
         return self.cse.generate(
             self.compute,
             line,
@@ -7762,6 +7781,7 @@ class FusedUserDefinedTritonKernel(TritonKernel):
 class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
+    supports_sub_parent_epilogue = True
     kernel_type: type[Any] = TritonKernel
     backend_features = OrderedSet(
         [

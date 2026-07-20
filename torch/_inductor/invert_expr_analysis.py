@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import sympy
 
@@ -12,7 +12,7 @@ def static_eq(a: _IntLike, b: _IntLike) -> bool:
     return V.graph.sizevars.statically_known_equals(a, b)
 
 
-@dataclass
+@dataclass(frozen=True)
 class Term:
     coefficient: _IntLike
     range: _IntLike | None  # None for unbounded
@@ -20,7 +20,9 @@ class Term:
     reconstruction_multiplier: _IntLike  # The multiplier needed for reconstruction
 
 
-def generate_inverse_formula(expr: sympy.Expr, var: sympy.Symbol) -> sympy.Expr | None:
+def generate_inverse_formula(
+    expr: sympy.Expr, var: sympy.Symbol, var_range: _IntLike | None = None
+) -> sympy.Expr | None:
     """
      Analyze an expression to see if it matches a specific invertible pattern that we
      know how to reverse.
@@ -62,6 +64,7 @@ def generate_inverse_formula(expr: sympy.Expr, var: sympy.Symbol) -> sympy.Expr 
      Args:
          expr: Expression to analyze (sum of terms with ModularIndexing, FloorDiv, etc.)
          var: The variable being decomposed
+         var_range: Optional exclusive upper bound for nonnegative var
 
      Returns:
          None if not invertible, or the reconstruction expression
@@ -80,10 +83,15 @@ def generate_inverse_formula(expr: sympy.Expr, var: sympy.Symbol) -> sympy.Expr 
     terms = [terms[i] for i in idxs]
 
     # Step 3: Check invertibility conditions
-    if not check_invertibility(terms):
+    if not check_invertibility(terms, var_range):
         return None
 
-    return generate_reconstruction_expr(terms, var)
+    reconstruction = generate_reconstruction_expr(terms, var)
+    if var_range is not None:
+        reconstruction = V.graph.sizevars.simplify_with_ranges(
+            reconstruction, {var: var_range}
+        )
+    return reconstruction
 
 
 def parse_terms(expr: sympy.Expr, var: sympy.Symbol) -> list[Term] | None:
@@ -110,13 +118,7 @@ def parse_single_term(term: sympy.Expr, var: sympy.Symbol) -> Term | None:
     coefficient, expr_parts = term.as_coeff_mul()
 
     if len(expr_parts) == 0:
-        # Pure constant term
-        return Term(
-            coefficient=coefficient,
-            range=1,
-            original_expr=1,
-            reconstruction_multiplier=0,
-        )
+        return None
     elif len(expr_parts) == 1:
         expr = expr_parts[0]
     else:
@@ -154,6 +156,8 @@ def analyze_expression_properties(
         if isinstance(base, ModularIndexing):
             x, inner_div, mod = base.args
             if static_eq(x, var) and static_eq(inner_div, 1):
+                if not V.graph.sizevars.statically_known_multiple_of(mod, divisor):
+                    return None, None
                 range_val = FloorDiv(mod, divisor)
                 return range_val, divisor  # Range is mod//div, multiplier is div
 
@@ -164,10 +168,20 @@ def analyze_expression_properties(
     return None, None
 
 
-def check_invertibility(terms: list[Term]) -> bool:
+def check_invertibility(terms: list[Term], var_range: _IntLike | None = None) -> bool:
     """Check if the terms represent an invertible transformation."""
     if not terms:
         return False
+
+    effective_terms: list[Term] = []
+    for term in terms:
+        if term.range is None and var_range is not None:
+            multiplier = term.reconstruction_multiplier
+            if not V.graph.sizevars.statically_known_multiple_of(var_range, multiplier):
+                return False
+            term = replace(term, range=FloorDiv(var_range, multiplier))
+        effective_terms.append(term)
+    terms = effective_terms
 
     # Coefficients must be strictly decreasing
     coeffs = [t.coefficient for t in terms]
@@ -177,12 +191,42 @@ def check_invertibility(terms: list[Term]) -> bool:
         return False
 
     # Check mixed-radix property: each coeff[i] = coeff[i+1] * range[i+1]
+    ascending_terms = list(reversed(terms))
     expected_coeff = 1
-    for term in reversed(terms):
+    for i, term in enumerate(ascending_terms):
         if not static_eq(term.coefficient, expected_coeff):
             return False
-        if term.range is not None:
-            expected_coeff *= term.range
+        if term.range is None:
+            if i + 1 < len(ascending_terms):
+                return False
+            continue
+        expected_coeff = term.coefficient * term.range
+
+    return check_reconstruction_coverage(terms, var_range)
+
+
+def check_reconstruction_coverage(
+    terms: list[Term],
+    var_range: _IntLike | None = None,
+) -> bool:
+    """Check that terms reconstruct non-overlapping contiguous source ranges."""
+    if not terms:
+        return False
+
+    multipliers = [t.reconstruction_multiplier for t in terms]
+    idxs = argsort_sym(V.graph.sizevars.shape_env, multipliers)
+    ascending_terms = [terms[i] for i in idxs]
+
+    expected_multiplier = 1
+    for i, term in enumerate(ascending_terms):
+        if not static_eq(term.reconstruction_multiplier, expected_multiplier):
+            return False
+        if term.range is None:
+            return i == len(ascending_terms) - 1 and var_range is None
+        expected_multiplier = term.reconstruction_multiplier * term.range
+
+    if var_range is not None and not static_eq(var_range, expected_multiplier):
+        return False
 
     return True
 
