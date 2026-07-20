@@ -117,56 +117,139 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertEqual(inner(x), x + 1)
             self.assertEqual(inner(x), x + 1)
 
-    def test_call_with_disable(self):
-        from torch._C._dynamo.eval_frame import (
-            call_with_disable,
-            get_eval_frame_callback,
-            set_eval_frame,
-        )
+    def test_disable_public_api_returns_disable_wrapper(self):
+        # Both public spellings of the recursive disable return the C-level
+        # DisableWrapper, produce correct results, and are not traced into under
+        # torch.compile (graph break around the disabled callee -> two frames).
+        from torch._C._dynamo.eval_frame import DisableWrapper
 
-        def g(a, b, *, c):
-            return a + b + c
+        for disable in (torch._dynamo.disable, torch.compiler.disable):
+            torch._dynamo.reset()
 
-        x = torch.randn(3)
-        # forwards positional and keyword args, returns the callee's result
-        self.assertEqual(call_with_disable(g, x, x, c=x), g(x, x, c=x))
+            @disable
+            def inner(x):
+                return x + 1
 
-        # the eval-frame callback is unchanged across the call
-        cb = get_eval_frame_callback()
-        call_with_disable(g, x, x, c=x)
-        self.assertIs(get_eval_frame_callback(), cb)
+            self.assertIsInstance(inner, DisableWrapper)
 
-        # exceptions propagate and the callback is still restored
-        def boom(a):
-            raise ValueError("boom")
+            def fn(x, inner=inner):
+                return torch.cos(inner(torch.sin(x)))
 
-        with self.assertRaises(ValueError):
-            call_with_disable(boom, x)
-        self.assertIs(get_eval_frame_callback(), cb)
+            x = torch.randn(4)
+            ref = fn(x)
+            cnts = torch._dynamo.testing.CompileCounter()
+            self.assertEqual(torch.compile(fn, backend=cnts)(x), ref)
+            self.assertEqual(cnts.frame_count, 2)
 
-        # Exercise the prior-is-not-None restore branch: run-only mode (False) is
-        # a non-None callback, so call_with_disable must restore it (on both the
-        # normal and exception paths) rather than leave the handler cleared. Use
-        # run-only rather than a real callback so no compilation is triggered.
-        prev = set_eval_frame(False)
-        try:
-            self.assertEqual(call_with_disable(g, x, x, c=x), g(x, x, c=x))
-            self.assertIs(get_eval_frame_callback(), False)
-            with self.assertRaises(ValueError):
-                call_with_disable(boom, x)
-            self.assertIs(get_eval_frame_callback(), False)
-        finally:
-            set_eval_frame(prev)
+        # recursive=False goes through skip (not DisableWrapper); it must still
+        # work standalone and under torch.compile.
+        torch._dynamo.reset()
 
-        # a callable is required (and must be passed positionally)
-        with self.assertRaises(TypeError):
-            call_with_disable()
+        @torch._dynamo.disable(recursive=False)
+        def inner_nr(x):
+            return x + 1
 
-    def test_disable_dynamo_fast_path(self):
-        # torch._compile._disable_dynamo routes fully-recursive, non-export calls
-        # through call_with_disable. Verify results are correct and Dynamo still
-        # treats the callee as disabled (graph break, not traced into), and that
-        # recursive=False still works via the DisableContext fallback.
+        self.assertNotIsInstance(inner_nr, DisableWrapper)
+        x = torch.randn(4)
+        self.assertEqual(inner_nr(x), x + 1)
+
+        def fn_nr(x):
+            return torch.cos(inner_nr(torch.sin(x)))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn_nr, backend=cnts)(x), fn_nr(x))
+
+    def test_disable_dynamo_under_export(self):
+        # Export takes the DisableWrapper export fallback (guarded by
+        # is_exporting). The C export path rebuilds the argument vector,
+        # prepending fn and forwarding kwnames, so a disabled callee invoked
+        # with both positional AND keyword args must still receive them
+        # correctly. (The fx_traceback disable annotation itself is covered by
+        # test_export.py's test_uplift_common_custom_meta_with_multiple_calls.)
+        @torch._dynamo.disable
+        def helper(a, b, *, scale):
+            return (a + b) * scale
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return helper(x, y, scale=2.0) + 1
+
+        x, y = torch.randn(3), torch.randn(3)
+        ep = torch.export.export(M(), (x, y))
+        self.assertEqual(ep.module()(x, y), (x + y) * 2.0 + 1)
+
+    def test_disable_method_reconstruction(self):
+        # A @torch._dynamo.disable instance method must bind self via the
+        # DisableWrapper descriptor (tp_descr_get); regression for the
+        # "missing 1 required positional argument" failure. Cover both a plain
+        # class and an nn.Module; both graph break around the disabled method.
+        x = torch.randn(4)
+
+        class Plain:
+            def __init__(self, v):
+                self.v = v
+
+            @torch._dynamo.disable
+            def helper(self, x):
+                return x + self.v
+
+        obj = Plain(3)
+
+        def fn(x):
+            return torch.cos(obj.helper(torch.sin(x)))
+
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=cnts)(x), ref)
+        self.assertEqual(cnts.frame_count, 2)
+
+        class Mod(torch.nn.Module):
+            @torch._dynamo.disable
+            def helper(self, x):
+                return x + 1
+
+            def forward(self, x):
+                return torch.cos(self.helper(torch.sin(x)))
+
+        m = Mod()
+        ref = m(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(m, backend=cnts)(x), ref)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_disable_wrapper_integrity(self):
+        # DisableWrapper carries functools.wraps metadata and the _torchdynamo_*
+        # attributes on its instance __dict__, and unwraps correctly.
+        import inspect
+
+        from torch._dynamo.eval_frame import innermost_fn
+
+        def orig(x, y):
+            "orig doc"
+            return x + y
+
+        wrapped = torch._dynamo.disable(orig)
+
+        self.assertEqual(wrapped.__name__, "orig")
+        self.assertEqual(wrapped.__doc__, "orig doc")
+        self.assertIs(wrapped.__wrapped__, orig)
+        # inspect.signature resolves through __wrapped__.
+        self.assertEqual(list(inspect.signature(wrapped).parameters), ["x", "y"])
+
+        self.assertTrue(wrapped._torchdynamo_disable)
+        self.assertIs(wrapped._torchdynamo_orig_callable, orig)
+
+        # innermost_fn unwraps to the original; re-disabling an already-disabled
+        # fn still unwraps to the original callable.
+        self.assertIs(innermost_fn(wrapped), orig)
+        rewrapped = torch._dynamo.disable(wrapped)
+        self.assertIs(innermost_fn(rewrapped), orig)
+        self.assertIs(rewrapped._torchdynamo_orig_callable, orig)
+
+    def test_disable_dynamo_internal_fast_path(self):
+        # torch._compile._disable_dynamo (torch-internal) still disables the
+        # callee and inherits the DisableWrapper fast path: results are correct
+        # and Dynamo graph breaks around it (two compiled frames).
         from torch._compile import _disable_dynamo
 
         @_disable_dynamo
@@ -180,43 +263,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         self.assertEqual(torch.compile(fn, backend=cnts)(x), ref)
-        # inner is disabled -> graph break around it -> two compiled frames.
         self.assertEqual(cnts.frame_count, 2)
-
-        @_disable_dynamo(recursive=False)
-        def inner_nonrecursive(x):
-            return x + 1
-
-        self.assertEqual(inner_nonrecursive(x), x + 1)
-
-        # recursive=False takes the DisableContext fallback (not the fast path);
-        # it must also work under torch.compile.
-        def fn_nr(x):
-            return torch.cos(inner_nonrecursive(torch.sin(x)))
-
-        cnts_nr = torch._dynamo.testing.CompileCounter()
-        self.assertEqual(torch.compile(fn_nr, backend=cnts_nr)(x), fn_nr(x))
-
-    def test_disable_dynamo_under_export(self):
-        # Under export, _disable_dynamo takes the DisableContext fallback (the
-        # fast path is guarded by `not is_exporting()`); verify a disabled helper
-        # still produces correct results in the exported program. (The
-        # fx_traceback disable annotation itself is covered by test_export.py's
-        # test_uplift_common_custom_meta_with_multiple_calls, which exercises the
-        # custom_op dispatch path where the annotation surfaces.)
-        from torch._compile import _disable_dynamo
-
-        @_disable_dynamo
-        def helper(x):
-            return x + 1
-
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return helper(x) * 2
-
-        x = torch.randn(3)
-        ep = torch.export.export(M(), (x,))
-        self.assertEqual(ep.module()(x), (x + 1) * 2)
 
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
