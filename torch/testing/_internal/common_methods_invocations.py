@@ -13669,7 +13669,7 @@ op_db: list[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfMPS=floating_and_complex_types_and(torch.float16),
            dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           backward_dtypesIfXPU=floating_and_complex_types_and(torch.float16),
+           backward_dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stft,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
