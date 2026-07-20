@@ -4256,7 +4256,6 @@ class Scheduler:
         self.user_obj_idx_to_stream_idx: dict[int, int] = {}
         self._populate_stream_assignments()
 
-        self._fusion_memory_context: FusionMemoryContext | None = None
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
@@ -6183,6 +6182,7 @@ class Scheduler:
         template_fusion_nodes: dict[BaseSchedulerNode, list[PendingFusion]],
         fused_nodes: OrderedSet[BaseSchedulerNode],
         is_reorder_round: bool,
+        fusion_memory_context: FusionMemoryContext | None,
     ):
         def resolve_pending_fusions(
             node1: BaseSchedulerNode,
@@ -6238,7 +6238,10 @@ class Scheduler:
                 if (
                     peak_allowed_increase is not None
                     and self.fusion_regresses_estimated_peak_memory(
-                        node1, node2, peak_allowed_increase
+                        fusion_memory_context,
+                        node1,
+                        node2,
+                        peak_allowed_increase,
                     )
                 ):
                     continue
@@ -6338,69 +6341,65 @@ class Scheduler:
             for node in fused_nodes:
                 fusion_log.debug("  %s", node.debug_str_short())
 
-        prev_fusion_memory_context = self._fusion_memory_context
-        peak_allowed_increase = self.fusion_memory_timeline_peak_allowed_increase_bytes()
-        self._fusion_memory_context = None
-        try:
-            # These are potential fusions which we are async compiling,
-            # and which we will benchmark profitability of.
-            # Maps node -> (is_speedup_fn, LambdaFuture, node1, node2)
-            # Only used in the case of benchmark_kernel=True
-            pending_fusions: dict[
-                BaseSchedulerNode,
-                PendingFusion,
-            ] = {}
+        # These are potential fusions which we are async compiling,
+        # and which we will benchmark profitability of.
+        # Maps node -> (is_speedup_fn, LambdaFuture, node1, node2)
+        # Only used in the case of benchmark_kernel=True
+        pending_fusions: dict[
+            BaseSchedulerNode,
+            PendingFusion,
+        ] = {}
 
-            template_fusion_nodes: dict[BaseSchedulerNode, list[PendingFusion]] = {}
-            deferred_prologue_fusions: list[
-                tuple[BaseSchedulerNode, BaseSchedulerNode]
-            ] = []
+        template_fusion_nodes: dict[BaseSchedulerNode, list[PendingFusion]] = {}
+        deferred_prologue_fusions: list[
+            tuple[BaseSchedulerNode, BaseSchedulerNode]
+        ] = []
 
-            possible_fusions = self.get_possible_fusions(
-                nodes,
-                is_reorder_round,
+        possible_fusions = self.get_possible_fusions(
+            nodes,
+            is_reorder_round,
+        )
+
+        fusion_memory_context = None
+        if possible_fusions:
+            peak_allowed_increase = (
+                self.fusion_memory_timeline_peak_allowed_increase_bytes()
+            )
+            if peak_allowed_increase is not None:
+                fusion_memory_context = self._init_fusion_memory_context(nodes)
+            possible_fusions = self.get_possible_fusions_with_highest_priority(
+                possible_fusions, fusion_memory_context
+            )
+            possible_fusions.sort(key=self.score_fusion_key, reverse=True)
+
+        if config.max_autotune_gemm or config.max_autotune:
+            possible_fusions = self._handle_template_overlap(
+                possible_fusions, deferred_prologue_fusions
             )
 
-            if possible_fusions:
-                if peak_allowed_increase is not None:
-                    self._fusion_memory_context = self._init_fusion_memory_context(
-                        nodes
-                    )
-                possible_fusions = self.get_possible_fusions_with_highest_priority(
-                    possible_fusions
-                )
-                possible_fusions.sort(key=self.score_fusion_key, reverse=True)
+        self._try_fusion_pairs(
+            possible_fusions,
+            pending_fusions,
+            template_fusion_nodes,
+            fused_nodes,
+            is_reorder_round,
+            fusion_memory_context,
+        )
+        self._finish_pending_fusions(fused_nodes, pending_fusions)
 
-            if config.max_autotune_gemm or config.max_autotune:
-                possible_fusions = self._handle_template_overlap(
-                    possible_fusions, deferred_prologue_fusions
-                )
+        self._evaluate_pending_template_fusions(template_fusion_nodes, fused_nodes)
+        template_fusion_nodes.clear()
 
+        if deferred_prologue_fusions:
             self._try_fusion_pairs(
-                possible_fusions,
+                deferred_prologue_fusions,
                 pending_fusions,
                 template_fusion_nodes,
                 fused_nodes,
                 is_reorder_round,
+                fusion_memory_context,
             )
-            self._finish_pending_fusions(fused_nodes, pending_fusions)
-
             self._evaluate_pending_template_fusions(template_fusion_nodes, fused_nodes)
-            template_fusion_nodes.clear()
-
-            if deferred_prologue_fusions:
-                self._try_fusion_pairs(
-                    deferred_prologue_fusions,
-                    pending_fusions,
-                    template_fusion_nodes,
-                    fused_nodes,
-                    is_reorder_round,
-                )
-                self._evaluate_pending_template_fusions(
-                    template_fusion_nodes, fused_nodes
-                )
-        finally:
-            self._fusion_memory_context = prev_fusion_memory_context
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
@@ -6984,6 +6983,7 @@ class Scheduler:
 
     def fusion_regresses_estimated_peak_memory(
         self,
+        ctx: FusionMemoryContext | None,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         peak_allowed_increase: int,
@@ -6991,7 +6991,6 @@ class Scheduler:
         """Return true when fusing two nodes would raise the estimated memory peak."""
         from .memory import estimate_region_peak_memory
 
-        ctx = self._fusion_memory_context
         if ctx is None:
             return False
 
@@ -9035,7 +9034,9 @@ class Scheduler:
         )
 
     def get_possible_fusions_with_highest_priority(
-        self, possible_fusions: list[tuple[BaseSchedulerNode, BaseSchedulerNode]]
+        self,
+        possible_fusions: list[tuple[BaseSchedulerNode, BaseSchedulerNode]],
+        fusion_memory_context: FusionMemoryContext | None,
     ) -> list[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
         # Group the possible fusions based on their priority from the backend.
         # Only return the group of possible fusions with highest priority.
@@ -9071,7 +9072,10 @@ class Scheduler:
                     (node1, node2)
                     for node1, node2 in possible_fusions_with_highest_priority
                     if not self.fusion_regresses_estimated_peak_memory(
-                        node1, node2, peak_allowed_increase
+                        fusion_memory_context,
+                        node1,
+                        node2,
+                        peak_allowed_increase,
                     )
                 ]
             if possible_fusions_with_highest_priority:
