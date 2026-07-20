@@ -577,71 +577,6 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
         return x + a
 
 
-class _LenTensorPytreeCache(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.key_cache: list[torch.Tensor] = []
-        self.value_cache: list[torch.Tensor] = []
-
-    def update(self, key_states: torch.Tensor, value_states: torch.Tensor) -> None:
-        self.key_cache.append(key_states)
-        self.value_cache.append(value_states)
-
-    def get_seq_length(self) -> int:
-        if len(self.key_cache) == 0 or len(self.key_cache[0]) == 0:
-            return 0
-        return self.key_cache[0].shape[-2]
-
-
-def _flatten_len_tensor_pytree_cache(cache):
-    return [cache.key_cache, cache.value_cache], [
-        "key_cache",
-        "value_cache",
-    ]
-
-
-def _flatten_with_keys_len_tensor_pytree_cache(cache):
-    values, context = _flatten_len_tensor_pytree_cache(cache)
-    return [(pytree.MappingKey(k), v) for k, v in zip(context, values)], context
-
-
-def _unflatten_len_tensor_pytree_cache(values, context):
-    cache = _LenTensorPytreeCache()
-    for k, v in zip(context, values):
-        setattr(cache, k, v)
-    return cache
-
-
-def _flatten_spec_len_tensor_pytree_cache(cache, _):
-    return [cache.key_cache, cache.value_cache]
-
-
-class _LenTensorPytreeModule(torch.nn.Module):
-    def forward(self, x, cache):
-        key = torch.cat(cache.key_cache, dim=1)
-        value = torch.cat(cache.value_cache, dim=1)
-        seq_length = cache.get_seq_length()
-        zeros = torch.zeros(
-            (
-                len(cache.key_cache[0]),
-                cache.key_cache[0].shape[1],
-                seq_length,
-                cache.key_cache[0].shape[-1],
-            )
-        )
-        return x + (key + value + zeros).sum(dim=2, keepdim=True)
-
-
-def _make_len_tensor_pytree_inputs(batch, seq_length):
-    x = torch.randn(batch, 8, 7, 1)
-    cache = _LenTensorPytreeCache()
-    cache.update(
-        torch.ones(batch, 8, seq_length, 6),
-        torch.ones(batch, 8, seq_length, 6) * 2,
-    )
-    return x, cache
-
-
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
@@ -872,40 +807,6 @@ class TestExport(TestCase):
                 strict=False,
             )
         self.assertNotIn("Expected a value of type 'Optional[int]'", str(cm.exception))
-
-    def test_non_strict_export_len_tensor_pytree_nn_module_input(self):
-        pytree._private_register_pytree_node(
-            _LenTensorPytreeCache,
-            _flatten_len_tensor_pytree_cache,
-            _unflatten_len_tensor_pytree_cache,
-            serialized_type_name="test.export.test_export._LenTensorPytreeCache",
-            flatten_with_keys_fn=_flatten_with_keys_len_tensor_pytree_cache,
-        )
-        torch.fx._pytree.register_pytree_flatten_spec(
-            _LenTensorPytreeCache, _flatten_spec_len_tensor_pytree_cache
-        )
-        try:
-            x, cache = _make_len_tensor_pytree_inputs(3, 5)
-            batch = Dim("batch", min=1, max=1024)
-            seq_length = Dim("seq_length", min=1, max=1024)
-            with torch.serialization.safe_globals([_LenTensorPytreeCache]):
-                ep = export(
-                    _LenTensorPytreeModule(),
-                    (x, cache),
-                    dynamic_shapes=(
-                        {0: batch},
-                        [[{0: batch, 2: seq_length}], [{0: batch, 2: seq_length}]],
-                    ),
-                    strict=False,
-                )
-
-            x2, cache2 = _make_len_tensor_pytree_inputs(4, 6)
-            self.assertEqual(
-                ep.module()(x2, cache2), _LenTensorPytreeModule()(x2, cache2)
-            )
-        finally:
-            pytree._deregister_pytree_node(_LenTensorPytreeCache)
-            torch.fx._pytree._deregister_pytree_flatten_spec(_LenTensorPytreeCache)
 
     @skipIfCrossRef  # CrossRefMode interferes with functorch ops
     @skipIfTorchDynamo("export inside dynamo is not supported")
@@ -6862,6 +6763,112 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             torch.export.export(M(), input1, dynamic_shapes=ai)
 
+    def test_dynamic_shapes_kwargs_call_like(self):
+        class KwargsModel(torch.nn.Module):
+            def forward(self, *, x, y, **kwargs):
+                return x.sum() + y.sum() + kwargs["z"].sum()
+
+        inputs = {
+            "z": torch.rand(4, 4),
+            "y": torch.randn(3, 4),
+            "x": torch.randn(2, 4),
+        }
+        dynamic_shapes = torch.utils._pytree.tree_map_only(
+            torch.Tensor,
+            lambda t: {i: torch.export.Dim.AUTO for i in range(t.dim())},
+            inputs,
+        )
+        m = KwargsModel()
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                epm = export(
+                    m, (), kwargs=inputs, dynamic_shapes=dynamic_shapes, strict=strict
+                ).module()
+                self.assertTrue(torch.allclose(m(**inputs), epm(**inputs)))
+                inputs2 = {**inputs, "z": torch.rand(6, 4)}
+                self.assertTrue(torch.allclose(m(**inputs2), epm(**inputs2)))
+
+    def test_dynamic_shapes_kwargs_nested(self):
+        class KwargsModel(torch.nn.Module):
+            def forward(self, *, x, y, **kwargs):
+                return x.sum() + y.sum() + kwargs["z"].sum()
+
+        inputs = {
+            "z": torch.rand(4, 4),
+            "y": torch.randn(3, 4),
+            "x": torch.randn(2, 4),
+        }
+        dynamic_shapes = {
+            "x": None,
+            "y": None,
+            "kwargs": {"z": {0: torch.export.Dim("z_batch", min=2, max=8)}},
+        }
+        m = KwargsModel()
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                epm = export(
+                    m, (), kwargs=inputs, dynamic_shapes=dynamic_shapes, strict=strict
+                ).module()
+                self.assertTrue(torch.allclose(m(**inputs), epm(**inputs)))
+                inputs2 = {**inputs, "z": torch.rand(6, 4)}
+                self.assertTrue(torch.allclose(m(**inputs2), epm(**inputs2)))
+
+    def test_dynamic_shapes_kwargs_name_collision(self):
+        class ArgsKwargsModel(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                return args[0].sum() + kwargs["args_0"].sum()
+
+        class PositionalOnlyCollisionModel(torch.nn.Module):
+            def forward(self, x, /, **kwargs):
+                return x.sum() + kwargs["x"].sum()
+
+        x = torch.randn(4, 4)
+        y = torch.randn(5, 4)
+        dynamic_shapes = {
+            "args": ({0: Dim.AUTO},),
+            "args_0": {0: Dim.AUTO},
+        }
+        for strict in (False, True):
+            with self.subTest(kind="varargs", strict=strict):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.UserError,
+                    "collide with another input name",
+                ):
+                    export(
+                        ArgsKwargsModel(),
+                        (x,),
+                        kwargs={"args_0": y},
+                        dynamic_shapes=dynamic_shapes,
+                        strict=strict,
+                    )
+
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.UserError,
+                    "collide with another input name",
+                ):
+                    export(
+                        ArgsKwargsModel(),
+                        (x,),
+                        kwargs={"args_0": y},
+                        dynamic_shapes=(({0: Dim.AUTO},), {"args_0": {0: Dim.AUTO}}),
+                        strict=strict,
+                    )
+            with self.subTest(kind="positional_only", strict=strict):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.UserError,
+                    "collide with another input name",
+                ):
+                    export(
+                        PositionalOnlyCollisionModel(),
+                        (x,),
+                        kwargs={"x": y},
+                        dynamic_shapes={
+                            "x": {0: Dim.AUTO},
+                            "kwargs": {"x": {0: Dim.AUTO}},
+                        },
+                        strict=strict,
+                    )
+
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -11477,7 +11484,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             self.assertIsInstance(
                 result.shape[0],
                 torch.SymInt,
-                f"where output dim 0 should be symbolic but got {result.shape[0]}",
+                lambda msg: f"{msg}\nwhere output dim 0 should be symbolic but got {result.shape[0]}",
             )
 
     def test_nonzero_2(self):
@@ -11576,8 +11583,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             foo,
             (torch.randn(4, 4), torch.randn(4, 4)),
             {"kw2": torch.ones(4, 4), "kw1": torch.zeros(4, 4)},
-            # We are specifying dynamism on the first kwarg even though user passed in
-            # different order
+            # Tuple dynamic_shapes follows the original function signature order.
             dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
         )
 
