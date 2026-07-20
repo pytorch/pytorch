@@ -40,6 +40,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -154,6 +155,8 @@ def _train(model, optim, train_steps=1):
 
 
 class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def backend(self):
         curr_backend = dist.get_default_backend_for_device(self.device_type)
@@ -518,6 +521,8 @@ class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
 
 
 class TestNoCPU(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def backend(self):
         return dist.get_default_backend_for_device(self.device_type)
@@ -525,6 +530,8 @@ class TestNoCPU(DTensorTestBase):
     @skip_if_lt_x_gpu(NUM_DEVICES)
     @with_comms
     def test_no_cpu(self):
+        if self.device_type == "cpu":
+            self.skipTest("test_no_cpu requires a non-CPU device")
         with self.assertRaisesRegex(
             AssertionError, r"A CPU backend must be enabled for async save;.*?"
         ):
@@ -533,6 +540,8 @@ class TestNoCPU(DTensorTestBase):
 
 
 class TestInitStateDict(DTensorTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_temp_dir
     def test_init_state_dict(self):
         temp_dir = self.temp_dir
