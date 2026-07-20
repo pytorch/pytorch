@@ -15,7 +15,7 @@ import re
 import tempfile
 from collections.abc import Callable
 from itertools import chain, count
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import Any, Literal, Protocol, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
@@ -42,7 +42,6 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CleanDiv, Max, Min
 from torch.utils._sympy.singleton_int import SingletonInt
-from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, debug as inductor_debug, ir
@@ -106,7 +105,7 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
     return CleanDiv(numerator, denominator)
 
 
-ReuseKey = tuple[torch.device, torch.dtype, str, bool, int]
+ReuseKey = tuple[torch.device, torch.dtype, str, bool, int, tuple[int, int] | None]
 CommBufferReuseKey = tuple[torch.device, torch.dtype, str, "ir.CommBufferType", str]
 BufferLike = ir.Buffer | WorkspaceArg
 FxConversionFunc = Callable[["WrapperLine"], None]
@@ -125,6 +124,7 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
     storage_size = V.graph.get_allocation_storage_size(node)
     alignment = node.get_name() not in V.graph.unaligned_buffers
     stream = V.graph.scheduler.get_buf_stream(node.get_name())
+    mempool = V.graph.scheduler.get_buf_mempool(node.get_name())
     return (
         node.get_device_or_error(),
         node.get_dtype(),
@@ -134,6 +134,7 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
         sympy_str(V.graph.sizevars.simplify(storage_size)),
         alignment,
         stream,
+        mempool,
     )
 
 
@@ -517,6 +518,9 @@ class HasWriteLine(Protocol):
 
 
 class WrapperLine:
+    def codegen(self, code: Any) -> None:
+        raise NotImplementedError(f"Codegen not yet supported for type {type(self)}")
+
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         raise NotImplementedError(f"FX codegen not yet supported for type {type(self)}")
 
@@ -892,6 +896,29 @@ class ExitCudaStreamContextLine(WrapperLine):
             wrapper_code.codegen_exit_cuda_stream_context(code)
 
 
+@dataclasses.dataclass
+class EnterCudaMemPoolContextLine(WrapperLine):
+    """Enter a torch.cuda.use_mem_pool context for scheduler node codegen."""
+
+    mempool_index: int
+    device_index: int
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.writeline(
+            "with torch.cuda.use_mem_pool("
+            f"get_external_object_by_index({self.mempool_index}), "
+            f"device={self.device_index}):"
+        )
+        code.do_indent()
+
+
+class ExitCudaMemPoolContextLine(WrapperLine):
+    """Exit the active torch.cuda.use_mem_pool context."""
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_unindent()
+
+
 class EfficientPeakEstimate:
     def __init__(self):
         from ..memory import estimate_peak_memory, get_freeable_input_buf
@@ -1004,8 +1031,7 @@ class AllocateLine(MemoryPlanningLine):
         if self.comm_buffer:
             self._codegen_comm_buffer(code)
         else:
-            line = self.wrapper.make_buffer_allocation(self.node)
-            code.writeline(line)
+            code.writeline(self.wrapper.make_buffer_allocation(self.node))
 
     def _codegen_comm_buffer(self, code: IndentedBuffer) -> None:
         """Generate allocation code for comm buffers."""
@@ -2046,6 +2072,25 @@ class PythonWrapperCodegen(CodeGen):
     ) -> None:
         raise NotImplementedError
 
+    def codegen_cuda_mempool_enter(self, mempool: tuple[int, int]) -> None:
+        """Generate a CUDA MemPool context around code that may allocate."""
+        if V.graph.cpp_wrapper:
+            raise AssertionError("CUDA MemPool contexts require Python wrapper")
+        import_line = (
+            "from torch._dynamo.graph_bytecode_inputs import "
+            "get_external_object_by_index"
+        )
+        if not self.imports.contains(import_line):
+            self.imports.writeline(import_line)
+        mempool_index, device_index = mempool
+        self.writeline(EnterCudaMemPoolContextLine(mempool_index, device_index))
+
+    def codegen_cuda_mempool_exit(self) -> None:
+        """Generate data structure for exiting the current CUDA MemPool context."""
+        if V.graph.cpp_wrapper:
+            raise AssertionError("CUDA MemPool contexts require Python wrapper")
+        self.writeline(ExitCudaMemPoolContextLine())
+
     def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
             if config.nan_asserts:
@@ -2536,6 +2581,44 @@ class PythonWrapperCodegen(CodeGen):
                 self.estimate_peak = EfficientPeakEstimate()
             self.memory_plan_reuse()
 
+    def maybe_emit_replacement_aliases(
+        self,
+        sym: sympy.Symbol,
+        bound_vars: OrderedSet[sympy.Symbol],
+    ) -> None:
+        # Deferred runtime asserts and graph input metadata can reference
+        # either side of a backed-symbol replacement. Emit aliases so both
+        # the pre-replacement and canonical names are defined. Skip unbacked
+        # symbols - they are defined separately by the unbacked symbol
+        # codegen path.
+        sizevars = getattr(V.graph, "sizevars", None)
+        shape_env = getattr(sizevars, "shape_env", None)
+        if shape_env is None:
+            return
+
+        def is_backed_symbol(s: sympy.Symbol) -> bool:
+            return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+
+        for src, tgt in shape_env.replacements.items():
+            if (
+                tgt == sym
+                and isinstance(src, sympy.Symbol)
+                and src not in bound_vars
+                and is_backed_symbol(src)
+                and is_backed_symbol(sym)
+            ):
+                self.prefix.writeline(f"{src} = {sym}")
+                bound_vars.add(src)
+            elif (
+                src == sym
+                and isinstance(tgt, sympy.Symbol)
+                and tgt not in bound_vars
+                and is_backed_symbol(sym)
+                and is_backed_symbol(tgt)
+            ):
+                self.prefix.writeline(f"{tgt} = {sym}")
+                bound_vars.add(tgt)
+
     def codegen_input_symbol_assignment(
         self,
         name: str,
@@ -2543,113 +2626,28 @@ class PythonWrapperCodegen(CodeGen):
         bound_vars: OrderedSet[sympy.Symbol],
         deferred_symbol_assignments=None,
     ):
-        """Assign symbolic graph inputs and tensor size/stride symbols to locals."""
-        code = self.prefix
-
-        @functools.cache
-        def sizeof(name):
-            code.writeline(f"{name}_size = {name}.size()")
-            return f"{name}_size"
-
-        @functools.cache
-        def strideof(name):
-            code.writeline(f"{name}_stride = {name}.stride()")
-            return f"{name}_stride"
-
-        def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
-            # Deferred runtime asserts and graph input metadata can reference
-            # either side of a backed-symbol replacement. Emit aliases so both
-            # the pre-replacement and canonical names are defined.
-
-            def is_backed_symbol(s: sympy.Symbol) -> bool:
-                return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
-
-            for src, tgt in V.graph.sizevars.shape_env.replacements.items():
-                if (
-                    tgt == sym
-                    and isinstance(src, sympy.Symbol)
-                    and src not in bound_vars
-                    and is_backed_symbol(src)
-                    and is_backed_symbol(sym)
-                ):
-                    code.writeline(f"{src} = {sym}")
-                    bound_vars.add(src)
-                elif (
-                    src == sym
-                    and isinstance(tgt, sympy.Symbol)
-                    and tgt not in bound_vars
-                    and is_backed_symbol(sym)
-                    and is_backed_symbol(tgt)
-                ):
-                    code.writeline(f"{tgt} = {sym}")
-                    bound_vars.add(tgt)
-
-        def codegen_symbol(
-            sym_or_exp: sympy.Symbol | sympy.Expr,
-            base_name: str,
-            name_fn: Callable[[str], str],
-            dim: int,
-            deferred_symbol_assignments=None,
-        ) -> bool:
-            if isinstance(sym_or_exp, sympy.Symbol):
-                if sym_or_exp in bound_vars:
-                    return False
-                code.writeline(f"{sym_or_exp} = {name_fn(base_name)}[{dim}]")
-                bound_vars.add(sym_or_exp)
-                maybe_emit_replacement_aliases(sym_or_exp)
-                return True
-            elif isinstance(sym_or_exp, sympy.Expr):
-                undefined_symbols = [
-                    sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
-                ]
-                if len(undefined_symbols) != 1:
-                    # Skip constants and underdetermined expressions; a later
-                    # input may define the remaining symbols directly.
-                    if (
-                        len(undefined_symbols) > 1
-                        and deferred_symbol_assignments is not None
-                    ):
-
-                        def retry(deferred_symbol_assignments):
-                            return codegen_symbol(
-                                sym_or_exp,
-                                base_name,
-                                name_fn,
-                                dim,
-                                deferred_symbol_assignments,
-                            )
-
-                        deferred_symbol_assignments.append(retry)
-                    return False
-
-                free_symbol = undefined_symbols.pop()
-                base_size_or_stride = name_fn(base_name)
-                dim_value = sympy.Symbol(f"{base_size_or_stride}_{dim}", integer=True)
-                solution = try_solve(sympy.Eq(sym_or_exp, dim_value), free_symbol)
-                if solution is None:
-                    return False
-
-                code.writeline(f"{dim_value} = {base_size_or_stride}[{dim}]")
-                expr = _rewrite_symbol_solution_for_int_codegen(solution[1])
-                code.writeline(f"{free_symbol} = {pexpr(expr)}")
-                bound_vars.add(free_symbol)
-                maybe_emit_replacement_aliases(free_symbol)
-                return True
-            return False
-
         if isinstance(value, sympy.Expr):
-            if not isinstance(value, sympy.Symbol) or value in bound_vars:
+            raw_value = value
+            value = V.graph.sizevars.simplify(raw_value)
+            if isinstance(value, sympy.Symbol) and value not in bound_vars:
+                self.prefix.writeline(f"{value} = {name}")
+                bound_vars.add(value)
+                self.maybe_emit_replacement_aliases(value, bound_vars)
+            if isinstance(raw_value, sympy.Symbol):
+                if raw_value not in bound_vars:
+                    self.prefix.writeline(f"{raw_value} = {name}")
+                    bound_vars.add(raw_value)
                 return
-            code.writeline(f"{value} = {name}")
-            bound_vars.add(value)
-            maybe_emit_replacement_aliases(value)
-        elif isinstance(value, ir.TensorBox):
-            for dim, size in enumerate(value.get_size()):
-                codegen_symbol(size, name, sizeof, dim, deferred_symbol_assignments)
-            for dim, stride in enumerate(value.get_stride()):
-                codegen_symbol(stride, name, strideof, dim, deferred_symbol_assignments)
+            if not isinstance(value, sympy.Symbol):
+                return
         elif isinstance(
-            value, (ir.TorchBindObject, ir.GeneratorState, ir.OpaqueObjectState)
+            value,
+            (
+                ir.TensorBox,
+                ir.TorchBindObject,
+                ir.GeneratorState,
+                ir.OpaqueObjectState,
+            ),
         ):
             return
         else:
@@ -2668,8 +2666,25 @@ class PythonWrapperCodegen(CodeGen):
                 break
             deferred_symbol_assignments = next_deferred_symbol_assignments
 
+    def bind_input_symbol(
+        self,
+        sym: sympy.Symbol,
+        input_name: str,
+        kind: Literal["size", "stride"],
+        dim: int,
+        bound_vars: OrderedSet[sympy.Symbol],
+    ) -> None:
+        if sym in bound_vars:
+            return
+        if kind == "size":
+            self.prefix.writeline(f"{sym} = {input_name}.size()[{dim}]")
+        else:
+            self.prefix.writeline(f"{sym} = {input_name}.stride()[{dim}]")
+        bound_vars.add(sym)
+        self.maybe_emit_replacement_aliases(sym, bound_vars)
+
     def codegen_inputs(self):
-        """Assign all symbolic shapes to locals"""
+        """Assign input symbolic shapes to wrapper-local variables."""
         bound_vars = OrderedSet[sympy.Symbol]()
         # There is a subtle case in the cpp wrapper codegen which requires generating
         # symbol inputs first followed by non-symbol ones.
@@ -2689,16 +2704,147 @@ class PythonWrapperCodegen(CodeGen):
             )
         self._retry_deferred_symbol_assignments(deferred_symbol_assignments)
 
+        @functools.cache
+        def sizeof(name):
+            self.prefix.writeline(f"{name}_size = {name}.size()")
+            return f"{name}_size"
+
+        @functools.cache
+        def strideof(name):
+            self.prefix.writeline(f"{name}_stride = {name}.stride()")
+            return f"{name}_stride"
+
+        def bind_input_expr_symbols(
+            expr: sympy.Symbol | sympy.Expr,
+            input_name: str,
+            kind: Literal["size", "stride"],
+            dim: int,
+            deferred_symbol_assignments=None,
+        ) -> bool:
+            name_fn = sizeof if kind == "size" else strideof
+            if isinstance(expr, sympy.Symbol):
+                if expr in bound_vars:
+                    return False
+                self.prefix.writeline(f"{expr} = {name_fn(input_name)}[{dim}]")
+                bound_vars.add(expr)
+                self.maybe_emit_replacement_aliases(expr, bound_vars)
+                return True
+
+            if not isinstance(expr, sympy.Expr):
+                return False
+
+            undefined_symbols = [
+                sym for sym in expr.free_symbols if sym not in bound_vars
+            ]
+            if len(undefined_symbols) != 1:
+                if (
+                    len(undefined_symbols) > 1
+                    and deferred_symbol_assignments is not None
+                ):
+
+                    def retry(deferred_symbol_assignments):
+                        return bind_input_expr_symbols(
+                            expr,
+                            input_name,
+                            kind,
+                            dim,
+                            deferred_symbol_assignments,
+                        )
+
+                    deferred_symbol_assignments.append(retry)
+                return False
+
+            from torch.utils._sympy.solve import try_solve
+
+            free_symbol = undefined_symbols.pop()
+            base_name = name_fn(input_name)
+            dim_symbol = sympy.Symbol(f"{base_name}_{dim}", integer=True)
+            solution = try_solve(sympy.Eq(expr, dim_symbol), free_symbol)
+            if solution is None:
+                return False
+
+            self.prefix.writeline(f"{dim_symbol} = {base_name}[{dim}]")
+            solution_expr = _rewrite_symbol_solution_for_int_codegen(solution[1])
+            self.prefix.writeline(f"{free_symbol} = {pexpr(solution_expr)}")
+            bound_vars.add(free_symbol)
+            self.maybe_emit_replacement_aliases(free_symbol, bound_vars)
+            return True
+
+        for sym, (input_name, kind, dim) in V.graph.symbolic_input_sources.items():
+            sym = V.graph.sizevars.simplify(sym)
+            if not isinstance(sym, sympy.Symbol):
+                continue
+            if sym in bound_vars:
+                continue
+            if input_name not in graph_inputs:
+                continue
+            self.bind_input_symbol(sym, input_name, kind, dim, bound_vars)
+
+        for input_name, value in inputs:
+            if not isinstance(value, ir.TensorBox):
+                continue
+            is_named_graph_input = input_name in V.graph.graph_input_names
+            bind_assert_symbols = config.size_asserts and (
+                is_named_graph_input and sympy_product(value.get_size()) != 0
+            )
+            for dim, raw_size in enumerate(value.get_size()):
+                if bind_assert_symbols:
+                    bind_input_expr_symbols(
+                        raw_size,
+                        input_name,
+                        "size",
+                        dim,
+                        deferred_symbol_assignments,
+                    )
+                size = V.graph.sizevars.simplify(raw_size)
+                if bind_assert_symbols and size != raw_size:
+                    bind_input_expr_symbols(
+                        size,
+                        input_name,
+                        "size",
+                        dim,
+                        deferred_symbol_assignments,
+                    )
+            for dim, raw_stride in enumerate(value.get_stride()):
+                if bind_assert_symbols:
+                    bind_input_expr_symbols(
+                        raw_stride,
+                        input_name,
+                        "stride",
+                        dim,
+                        deferred_symbol_assignments,
+                    )
+                stride = V.graph.sizevars.simplify(raw_stride)
+                if bind_assert_symbols and stride != raw_stride:
+                    bind_input_expr_symbols(
+                        stride,
+                        input_name,
+                        "stride",
+                        dim,
+                        deferred_symbol_assignments,
+                    )
+        self._retry_deferred_symbol_assignments(deferred_symbol_assignments)
+
         def _verify_input_symbol_assignment(
+            input_name: str,
             value: ir.TensorBox,
             bound_vars: OrderedSet[sympy.Symbol],
         ):
+            is_named_graph_input = input_name in V.graph.graph_input_names
+            verify_assert_symbols = config.size_asserts and (
+                is_named_graph_input and sympy_product(value.get_size()) != 0
+            )
             for expr in chain.from_iterable([value.get_size(), value.get_stride()]):
                 if not isinstance(expr, Expr) or isinstance(expr, sympy.Symbol):
                     continue
+                expr = V.graph.sizevars.simplify(expr)
+                if not isinstance(expr, Expr):
+                    continue
 
                 undefined_symbols = [
-                    sym for sym in expr.free_symbols if sym not in bound_vars
+                    sym
+                    for sym in expr.free_symbols
+                    if sym not in bound_vars and verify_assert_symbols
                 ]
                 if len(undefined_symbols) > 0:
                     raise AssertionError(
@@ -2708,10 +2854,10 @@ class PythonWrapperCodegen(CodeGen):
         # For inputs with size/strides which contain sympy expressions, we can
         # encounter symbols that weren't defined yet. Now, let's check each
         # symbol is defined.
-        for _, value in inputs:
+        for input_name, value in inputs:
             if not isinstance(value, ir.TensorBox):
                 continue
-            _verify_input_symbol_assignment(value, bound_vars)
+            _verify_input_symbol_assignment(input_name, value, bound_vars)
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
