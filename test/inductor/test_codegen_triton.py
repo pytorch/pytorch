@@ -116,9 +116,7 @@ class TestCodegenTriton(InductorTestCase):
         with V.set_choices_handler(CustomChoices()):
             kernel = TritonKernel(
                 {"x": sympy.Integer(4), "r0_": sympy.Integer(512)},
-                features=SIMDKernelFeatures(
-                    [], sympy.Integer(4), sympy.Integer(512)
-                ),
+                features=SIMDKernelFeatures([], sympy.Integer(4), sympy.Integer(512)),
                 tiling_scores=tiling_scores,
                 override_cooperative_reduction=False,
             )
