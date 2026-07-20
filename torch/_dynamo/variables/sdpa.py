@@ -68,7 +68,7 @@ class SDPAParamsVariable(VariableTracker):
     def as_proxy(self) -> Proxy:
         return self.proxy
 
-    def getattro_impl(
+    def var_getattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         import torch._C

@@ -95,13 +95,6 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
 class TestCase(InductorTestCase):
     device = DEVICE
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls._exit_stack.enter_context(
-            torch._dynamo.config.patch(canonicalize_output_graph_node_order=False),
-        )
-
 
 class NumBytesMetricTests(TestCase):
     """

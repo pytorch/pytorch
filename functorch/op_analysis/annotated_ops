@@ -397,6 +397,7 @@ swapdims, alias
 cholesky_solve, linalg
 solve, linalg
 cholesky_inverse, linalg
+qr, linalg
 geqrf, linalg
 orgqr, alias
 ormqr, linalg

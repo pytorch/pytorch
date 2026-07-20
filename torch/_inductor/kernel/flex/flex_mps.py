@@ -6,10 +6,9 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 
-from ...ir import FixedLayout, ShapeAsConstantBuffer, TensorBox
+from ...ir import FixedLayout, TensorBox
 from ...lowering import empty_strided
 from ...select_algorithm import realize_inputs
-from ...utils import expr_fits_within_32bit
 from .common import infer_dense_strides, maybe_realize
 
 
@@ -63,7 +62,11 @@ def lower_mps(
         )
 
     write_lse = bool(kernel_options.get("OUTPUT_LOGSUMEXP", False))
-    write_max = bool(kernel_options.get("OUTPUT_MAX", False))
+    if kernel_options.get("OUTPUT_MAX", False):
+        raise NotImplementedError(
+            "flex_attention on MPS does not yet support returning max scores "
+            "(return_aux=AuxRequest(max_scores=True))."
+        )
 
     dtype = query.get_dtype()
 
@@ -126,40 +129,29 @@ def lower_mps(
 
     scale_val = float(scale)
 
-    # Tensor captures become extra Metal buffers; their sizes/strides are baked
-    # into the index offset math. SymInt captures (from dynamic-shape closures)
-    # become extra packed scalars, evaluated at the call site. maybe_realize
-    # passes SymInts through untouched. `metas` keeps the placeholder order so
-    # the subgraph codegen can bind each capture (tensor or scalar) by position.
+    # Captured tensors become extra Metal buffers; their sizes/strides are baked
+    # into the index offset math. maybe_realize passes SymInts through untouched;
+    # SymInt captures (from dynamic-shape closures) are not supported yet.
     def _capture_meta(items):
-        metas, tensors, scalars = [], [], []
+        metas, tensors = [], []
         for cap in maybe_realize(list(items)):
-            if isinstance(cap, ShapeAsConstantBuffer):
-                cap = cap.expr
-            if isinstance(cap, (int, sympy.Expr)):
-                metas.append(("scalar",))
-                scalars.append(cap)
-                continue
+            if isinstance(cap, sympy.Expr):
+                raise NotImplementedError(
+                    "flex_attention on MPS does not yet support SymInt captures "
+                    "in score_mod/mask_mod (dynamic-shape closures)"
+                )
             metas.append(
                 (
-                    "tensor",
                     [sizevars.guard_int(s) for s in cap.get_size()],
                     [sizevars.guard_int(s) for s in cap.get_stride()],
                     cap.get_dtype(),
                 )
             )
             tensors.append(cap)
-        return metas, tensors, scalars
+        return metas, tensors
 
-    score_meta, score_tensors, score_scalars = _capture_meta(score_mod_other_buffers)
-    mask_meta, mask_tensors, mask_scalars = _capture_meta(mask_mod_other_buffers)
-
-    int32_max = torch.iinfo(torch.int32).max
-    all_scalars = [sympy.sympify(cap) for cap in (*score_scalars, *mask_scalars)]
-    captures_fit_int32 = all(expr_fits_within_32bit(cap) for cap in all_scalars)
-    if captures_fit_int32:
-        for cap in all_scalars:
-            sizevars.check_leq(cap, int32_max)
+    score_meta, score_tensors = _capture_meta(score_mod_other_buffers)
+    mask_meta, mask_tensors = _capture_meta(mask_mod_other_buffers)
 
     shader_source = _generate_metal_shader(
         dtype=dtype,
@@ -173,8 +165,6 @@ def lower_mps(
         score_captured=score_meta,
         mask_captured=mask_meta,
         write_lse=write_lse,
-        write_max=write_max,
-        captures_fit_int32=captures_fit_int32,
     )
 
     out_size = [B, Hq, seq_len_q, v_head_dim]
@@ -234,10 +224,6 @@ def lower_mps(
             *_pad_strides(full_kv_idx_strides, 4),
         ]
 
-    # SymInt captures trail the fixed scalars; order (score then mask) matches
-    # the scalar_capture_names appended in _generate_metal_shader.
-    scalar_args += [*score_scalars, *mask_scalars]
-
     # (num_q_blocks, Hq, B); each threadgroup owns BLOCK_M query rows.
     grid = (
         sympy.ceiling(seq_len_q / BLOCK_M),
@@ -252,13 +238,10 @@ def lower_mps(
     max_scores = empty_strided(
         lse_shape, None, dtype=torch.float32, device=query.get_device()
     )
-    node_inputs = [*realized_inputs]
+    node_inputs = realized_inputs
     if write_lse:
         logsumexp.realize()
-        node_inputs.append(logsumexp)
-    if write_max:
-        max_scores.realize()
-        node_inputs.append(max_scores)
+        node_inputs = [*realized_inputs, logsumexp]
 
     node = MetalFlexAttentionNode(
         layout=layout,
@@ -267,7 +250,7 @@ def lower_mps(
         scalar_args=scalar_args,
         grid=grid,
         block_m=BLOCK_M,
-        num_mutated_outputs=int(write_lse) + int(write_max),
+        mutates_lse=write_lse,
     )
 
     return (TensorBox.create(node), logsumexp, max_scores)

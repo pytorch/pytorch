@@ -117,7 +117,7 @@ def {{kernel_name}}_kernel():
 
         self.assertTrue(
             rendered_code_stripped.startswith("import torch"),
-            lambda msg: f"{msg}\nCode should start with 'import torch', got: {rendered_code_stripped[:50]}",
+            f"Code should start with 'import torch', got: {rendered_code_stripped[:50]}",
         )
         self.assertIn("import cutlass", rendered_code)
         self.assertIn("import cutlass.cute as cute", rendered_code)
@@ -176,8 +176,7 @@ def {{kernel_name}}_kernel():
         for line in lines:
             if line:
                 self.assertFalse(
-                    line.startswith(" "),
-                    lambda msg: f"{msg}\nLine should not be indented: '{line}'",
+                    line.startswith(" "), f"Line should not be indented: '{line}'"
                 )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")

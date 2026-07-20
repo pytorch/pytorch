@@ -270,7 +270,7 @@ class _ContainsBase:
         self.assertEqual(
             has_method,
             self.has_contains,
-            lambda msg: f"{msg}\n{self.thetype.__name__} __contains__ presence mismatch",
+            f"{self.thetype.__name__} __contains__ presence mismatch",
         )
 
     @make_dynamo_test
@@ -281,7 +281,7 @@ class _ContainsBase:
         self.assertEqual(
             has_method,
             self.has_iter,
-            lambda msg: f"{msg}\n{self.thetype.__name__} __iter__ presence mismatch",
+            f"{self.thetype.__name__} __iter__ presence mismatch",
         )
 
     @make_dynamo_test
@@ -292,7 +292,7 @@ class _ContainsBase:
         self.assertEqual(
             has_method,
             self.has_getitem,
-            lambda msg: f"{msg}\n{self.thetype.__name__} __getitem__ presence mismatch",
+            f"{self.thetype.__name__} __getitem__ presence mismatch",
         )
 
 

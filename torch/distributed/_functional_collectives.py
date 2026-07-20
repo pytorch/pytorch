@@ -1814,7 +1814,7 @@ def all_gather_inplace(
 
 def isend_inplace(
     tensor: torch.Tensor,
-    dst: int | None = None,
+    dst: int,
     tag: int = 0,
     group: dist.ProcessGroup | None = None,
     group_dst: int = -1,
@@ -1828,14 +1828,12 @@ def isend_inplace(
             raise ValueError(
                 "Cannot specify both 'dst' and 'group_dst' args as per eager impl"
             )
-        local_dst = group_dst
-    elif dst is not None:
-        local_dst = c10d.get_group_rank(group, dst)
+        global_dst = c10d.get_global_rank(group, group_dst)
     else:
-        raise ValueError("Must specify either 'dst' or 'group_dst'")
+        global_dst = dst
 
     group_name = _resolve_group_name(group)
-    tensor = torch.ops._c10d_functional.isend(tensor, local_dst, tag, group_name)
+    tensor = torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
     if _are_we_tracing():
         return tensor
     return _maybe_wrap_tensor(tensor)
@@ -1843,7 +1841,7 @@ def isend_inplace(
 
 def irecv_inplace(
     tensor: torch.Tensor,
-    src: int | None = None,
+    src: int,
     tag: int = 0,
     group: dist.ProcessGroup | None = None,
     group_src: int = -1,
@@ -1857,13 +1855,11 @@ def irecv_inplace(
             raise ValueError(
                 "Cannot specify both 'src' and 'group_src' args as per eager impl"
             )
-        local_src = group_src
-    elif src is not None:
-        local_src = c10d.get_group_rank(group, src)
+        global_src = c10d.get_global_rank(group, group_src)
     else:
-        raise ValueError("Must specify either 'src' or 'group_src'")
+        global_src = src
     group_name = _resolve_group_name(group)
-    tensor = torch.ops._c10d_functional.irecv(tensor, local_src, tag, group_name)
+    tensor = torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
     return _maybe_wrap_tensor(tensor)
 
 

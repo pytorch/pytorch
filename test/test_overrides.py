@@ -1410,7 +1410,7 @@ class TestResolveName(TestCase):
                 self.assertEqual(
                     eval(torch.overrides.resolve_name(c)),
                     c,
-                    msg=lambda msg: f"{msg}\n{c}, {torch.overrides.resolve_name(c)}"
+                    msg=f"{c}, {torch.overrides.resolve_name(c)}"
                 )
 
 class TestTorchFunctionWarning(TestCase):

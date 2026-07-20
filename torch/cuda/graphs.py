@@ -5,7 +5,7 @@ import gc
 import typing
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import overload, TYPE_CHECKING, TypeAlias, TypeGuard, Union
+from typing import overload, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -25,13 +25,9 @@ except ImportError:
 
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
-    from torch.cuda import _POOL_HANDLE, MemPool
+    from torch.cuda import _POOL_HANDLE
     from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
     from torch.utils.hooks import RemovableHandle
-
-    _GraphPool: TypeAlias = _POOL_HANDLE | MemPool
-else:
-    _GraphPool: TypeAlias = typing.Any
 
 from .._utils import _dummy_type
 
@@ -49,19 +45,6 @@ __all__ = [
 
 _R = TypeVar("_R")
 _P = ParamSpec("_P")
-
-
-def _is_mem_pool(pool: object) -> TypeGuard[MemPool]:
-    mempool_cls = getattr(torch.cuda, "MemPool", None)
-    return mempool_cls is not None and isinstance(pool, mempool_cls)
-
-
-def _get_pool_id(pool: _GraphPool | None) -> _POOL_HANDLE | None:
-    if pool is None:
-        return None
-    if _is_mem_pool(pool):
-        return typing.cast("_POOL_HANDLE", pool.id)
-    return typing.cast("_POOL_HANDLE", pool)
 
 
 if not hasattr(torch._C, "_CudaStreamBase"):
@@ -216,7 +199,7 @@ class CUDAGraph(_CUDAGraph):
 
     def capture_begin(
         self,
-        pool: _GraphPool | None = None,
+        pool: _POOL_HANDLE | None = None,
         capture_error_mode: str = "global",
         check_input_liveness: bool = False,
     ) -> None:
@@ -228,8 +211,7 @@ class CUDAGraph(_CUDAGraph):
 
         Arguments:
             pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
-                :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) or
-                :class:`~torch.cuda.MemPool` that hints this graph may share memory
+                :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory
                 with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
             capture_error_mode (str, optional): specifies the cudaStreamCaptureMode for the graph capture stream.
                 Can be "global", "thread_local" or "relaxed". During cuda graph capture, some actions, such as cudaMalloc,
@@ -248,9 +230,7 @@ class CUDAGraph(_CUDAGraph):
         if self._tracker is not None:
             self._tracker.stop()
             self._tracker = None
-        super().capture_begin(
-            pool=_get_pool_id(pool), capture_error_mode=capture_error_mode
-        )
+        super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
         if check_input_liveness:
             from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
 
@@ -312,7 +292,7 @@ class CUDAGraph(_CUDAGraph):
     def replay(self) -> None:
         r"""Replay the CUDA work captured by this graph."""
         if self._tracker is not None:
-            self._tracker.check_alive(self.pools())
+            self._tracker.check_alive(self.pool())
         # With keep_graph=True the exec graph is instantiated on demand here on
         # the first replay; the C++ replay() requires it to already exist. The
         # annotation remap rides on instantiate(), so it is handled by that call.
@@ -335,17 +315,7 @@ class CUDAGraph(_CUDAGraph):
         This id can optionally be passed to another graph's ``capture_begin``,
         which hints the other graph may share the same memory pool.
         """
-        return torch.cuda._POOL_HANDLE(super().pool())
-
-    def pools(self) -> list[_POOL_HANDLE]:
-        r"""Return opaque tokens for all memory pools retained by this graph."""
-        return [torch.cuda._POOL_HANDLE(pool) for pool in super().pools()]
-
-    def _retain_pool(self, pool: _GraphPool) -> None:
-        pool_id = _get_pool_id(pool)
-        if pool_id is None:
-            raise RuntimeError("CUDAGraph._retain_pool expected a memory pool")
-        return super()._retain_pool(pool_id)
+        return super().pool()
 
     def enable_debug_mode(self) -> None:
         r"""Retain the captured graph (equivalent to ``keep_graph=True``) so it
@@ -572,9 +542,8 @@ class graph:
     Arguments:
         cuda_graph (torch.cuda.CUDAGraph): Graph object used for capture.
         pool (optional): Opaque token (returned by a call to :func:`~torch.cuda.graph_pool_handle()` or
-            :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) or
-            :class:`~torch.cuda.MemPool` hinting this graph's capture may share memory
-            from the specified pool. See :ref:`Graph memory management<graph-memory-management>`.
+            :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) hinting this graph's capture
+            may share memory from the specified pool. See :ref:`Graph memory management<graph-memory-management>`.
         stream (torch.cuda.Stream, optional): If supplied, will be set as the current stream in the context.
             If not supplied, ``graph`` sets its own internal side stream as the current stream in the context.
         capture_error_mode (str, optional): specifies the cudaStreamCaptureMode for the graph capture stream.
@@ -612,7 +581,7 @@ class graph:
     def __init__(
         self,
         cuda_graph: CUDAGraph,
-        pool: _GraphPool | None = None,
+        pool: _POOL_HANDLE | None = None,
         stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
         enable_annotations: bool = False,
@@ -624,10 +593,7 @@ class graph:
         if stream is None and self.__class__.default_capture_stream is None:
             self.__class__.default_capture_stream = torch.cuda.Stream()
 
-        pool_id = _get_pool_id(pool)
-        self.pool: tuple[()] | tuple[_POOL_HANDLE] = (
-            () if pool_id is None else (pool_id,)
-        )
+        self.pool: tuple[()] | tuple[_POOL_HANDLE] = () if pool is None else (pool,)
         self.capture_stream = (
             stream if stream is not None else self.__class__.default_capture_stream
         )
@@ -704,8 +670,7 @@ def make_graphed_callables(
     sample_args: tuple[Tensor, ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: _GraphPool | None = None,
-    capture_error_mode: str = "global",
+    pool: _POOL_HANDLE | None = None,
 ) -> _ModuleOrCallable: ...
 
 
@@ -715,8 +680,7 @@ def make_graphed_callables(
     sample_args: tuple[tuple[Tensor, ...], ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: _GraphPool | None = None,
-    capture_error_mode: str = "global",
+    pool: _POOL_HANDLE | None = None,
 ) -> tuple[_ModuleOrCallable, ...]: ...
 
 
@@ -725,8 +689,7 @@ def make_graphed_callables(
     sample_args: tuple[Tensor, ...] | tuple[tuple[Tensor, ...], ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: _GraphPool | None = None,
-    capture_error_mode: str = "global",
+    pool: _POOL_HANDLE | None = None,
 ) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -758,8 +721,7 @@ def make_graphed_callables(
         allow_unused_input (bool): If False, specifying inputs that were not used when computing outputs
             (and therefore their grad is always zero) is an error. Defaults to False.
         pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
-            :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) or
-            :class:`~torch.cuda.MemPool` that hints this graph may share memory
+            :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory
             with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
 
     .. note::
@@ -853,7 +815,7 @@ def make_graphed_callables(
     fwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
     bwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
 
-    mempool = graph_pool_handle() if pool is None else _get_pool_id(pool)
+    mempool = graph_pool_handle() if pool is None else pool
 
     # Warmup
     # Hopefully prevents cudnn benchmarking and other lazy-initialization cuda work
@@ -895,12 +857,7 @@ def make_graphed_callables(
     per_callable_static_outputs = []
     per_callable_output_unflatten_spec = []
     for func, args, fwd_graph in zip(callables, _sample_args, fwd_graphs):
-        with torch.cuda.graph(
-            fwd_graph,
-            stream=stream,
-            pool=mempool,
-            capture_error_mode=capture_error_mode,
-        ):
+        with torch.cuda.graph(fwd_graph, stream=stream, pool=mempool):
             func_outputs = func(*args)
 
         flatten_outputs, spec = torch.utils._pytree.tree_flatten(func_outputs)
@@ -924,12 +881,7 @@ def make_graphed_callables(
         outputs_grad = tuple(o for o in static_outputs if o.requires_grad)
         grad_inputs = None
         if len(outputs_grad) > 0:
-            with torch.cuda.graph(
-                bwd_graph,
-                stream=stream,
-                pool=mempool,
-                capture_error_mode=capture_error_mode,
-            ):
+            with torch.cuda.graph(bwd_graph, stream=stream, pool=mempool):
                 grad_inputs = torch.autograd.grad(
                     outputs=outputs_grad,
                     inputs=tuple(i for i in static_input_surface if i.requires_grad),

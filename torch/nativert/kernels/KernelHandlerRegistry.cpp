@@ -44,10 +44,10 @@ void updateNodeTargetIfNeeded(Node& node) {
 
 std::unique_ptr<torch::aot_inductor::ProxyExecutor> make_proxy_executor(
     const std::string& filename,
-    const std::string& device_str,
+    bool is_cpu,
     std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs) {
   return std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
-      filename, device_str, std::move(custom_objs));
+      filename, is_cpu, std::move(custom_objs));
 }
 } // namespace
 

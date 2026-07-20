@@ -204,7 +204,7 @@ class TestOrigami(TestCase):
                 self.assertLess(
                     origami_case["benchmark_gpu_calls"],
                     max_autotune_case["benchmark_gpu_calls"],
-                    msg=lambda msg: f"{msg}\nOrigami ({origami_case['benchmark_gpu_calls']} calls) should have fewer "
+                    msg=f"Origami ({origami_case['benchmark_gpu_calls']} calls) should have fewer "
                     f"GPU benchmarks than max_autotune ({max_autotune_case['benchmark_gpu_calls']} calls)",
                 )
 
@@ -346,7 +346,7 @@ class TestOrigami(TestCase):
                 self.assertIn(
                     "topk",
                     str(e).lower(),
-                    msg=lambda msg: f"{msg}\nError should mention topk parameter: {e}",  # noqa: F821
+                    msg=f"Error should mention topk parameter: {e}",
                 )
 
         # Test case 5: Mid-range integer topk
@@ -373,7 +373,7 @@ class TestOrigami(TestCase):
                     self.assertGreaterEqual(
                         result["topk_calls"],
                         0,
-                        msg=lambda msg: f"{msg}\norigami.select_topk_configs should be callable with topk={topk_val}",
+                        msg=f"origami.select_topk_configs should be callable with topk={topk_val}",
                     )
                 except Exception as e:
                     self.fail(f"Compilation failed with valid topk={topk_val}: {e}")
@@ -448,7 +448,7 @@ class TestOrigami(TestCase):
                     fresh_cache(),
                     config.patch(patch_config),
                     mock.patch(
-                        "torch._inductor.heuristics.template.triton.origami",
+                        "torch._inductor.template_heuristics.triton.origami",
                         None,
                     ),
                 ):
@@ -459,18 +459,17 @@ class TestOrigami(TestCase):
                 torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
                 self.assertIsNotNone(compiled)
 
-    def test_origami_module_gate_when_env_var_disabled(self):
-        """Verify origami is not imported/used when TORCHINDUCTOR_ORIGAMI=0.
+    def test_origami_module_gate_when_env_var_unset(self):
+        """Verify origami is not imported/used when TORCHINDUCTOR_ORIGAMI is unset.
 
-        rocm.origami is a load-time-only knob (env-var driven). origami is on by
-        default; setting TORCHINDUCTOR_ORIGAMI=0 disables it. triton.py imports
+        rocm.origami is a load-time-only knob (env-var driven). triton.py imports
         the origami module at module load only when IS_ROCM and config.max_autotune
         and config.rocm.origami are all true; otherwise it sets ``origami = None``.
         Once cached, that decision is final for the process -- flipping
         config.rocm.origami via config.patch() after import has no effect.
 
         This subprocess test exercises the realistic disabled path: a fresh
-        Python process with TORCHINDUCTOR_ORIGAMI=0 must end up with
+        Python process with TORCHINDUCTOR_ORIGAMI unset must end up with
         ``triton.origami is None``, regardless of config.patch() calls afterward.
         """
         import subprocess
@@ -480,7 +479,7 @@ class TestOrigami(TestCase):
             "import os, torch\n"
             "from torch._inductor import config\n"
             "from torch._inductor.template_heuristics import triton as th\n"
-            "assert os.environ.get('TORCHINDUCTOR_ORIGAMI') == '0', 'env var not set to 0'\n"
+            "assert os.environ.get('TORCHINDUCTOR_ORIGAMI') != '1', 'env var leaked'\n"
             "assert th.origami is None, f'expected None, got {th.origami!r}'\n"
             "# Even after flipping the config knob mid-process, origami stays None\n"
             "with config.patch({'rocm.origami': True, 'max_autotune': True}):\n"
@@ -489,7 +488,7 @@ class TestOrigami(TestCase):
         )
 
         env = os.environ.copy()
-        env["TORCHINDUCTOR_ORIGAMI"] = "0"
+        env.pop("TORCHINDUCTOR_ORIGAMI", None)
 
         result = subprocess.run(
             [sys.executable, "-c", snippet],
@@ -501,7 +500,7 @@ class TestOrigami(TestCase):
         self.assertEqual(
             result.returncode,
             0,
-            msg=lambda msg: f"{msg}\nsubprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}",
+            msg=f"subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}",
         )
         self.assertIn("OK", result.stdout)
 

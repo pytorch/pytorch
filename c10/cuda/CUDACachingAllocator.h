@@ -81,8 +81,6 @@ struct SnapshotInfo {
   std::vector<std::vector<CachingDeviceAllocator::TraceEntry>> device_traces;
   std::vector<CachingDeviceAllocator::AnnotationEntry> external_annotations;
   AllocatorConfigInfo config_metadata;
-  std::vector<CachingDeviceAllocator::HostSegmentInfo> host_segments;
-  std::vector<CachingDeviceAllocator::TraceEntry> host_traces;
 };
 
 // returns the pointers freed in the pool
@@ -234,20 +232,7 @@ class CUDAAllocator : public DeviceAllocator {
       const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
   virtual void pushCompileContext(std::string& md) {}
   virtual void popCompileContext() {}
-  // Whether this backend records the string set via setUserMetadata onto
-  // memory-history trace entries. When false, setUserMetadata is a no-op and
-  // getUserMetadata always returns "".
-  virtual bool supportsUserMetadata() {
-    return false;
-  }
-  virtual void setUserMetadata(const std::string& /*metadata*/) {
-    TORCH_WARN_ONCE(
-        name(),
-        " does not support user metadata; the value set via "
-        "torch.cuda.memory._set_memory_metadata is ignored and will not "
-        "appear in memory snapshots. Query "
-        "torch._C._cuda_memoryMetadataSupported() to check support.");
-  }
+  virtual void setUserMetadata(const std::string& metadata) {}
   virtual std::string getUserMetadata() {
     return "";
   }
@@ -536,10 +521,6 @@ inline void enablePeerAccess(
     c10::DeviceIndex dev,
     c10::DeviceIndex dev_to_access) {
   get()->enablePeerAccess(dev, dev_to_access);
-}
-
-inline bool supportsUserMetadata() {
-  return get()->supportsUserMetadata();
 }
 
 inline void setUserMetadata(const std::string& metadata) {

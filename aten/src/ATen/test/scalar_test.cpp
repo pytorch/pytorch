@@ -181,7 +181,7 @@ TEST(TestScalar, TestFormatting) {
   auto format = [] (Scalar a) {
     std::ostringstream str;
     str << a;
-    return std::move(str).str();
+    return str.str();
   };
   ASSERT_EQ("3", format(Scalar(3)));
   ASSERT_EQ("3.1", format(Scalar(3.1)));

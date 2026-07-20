@@ -758,7 +758,7 @@ class AttributePropagator {
 
     auto subgraph = n->g(attr::Subgraph);
     func(subgraph);
-    module_ = std::move(attrModule);
+    module_ = attrModule;
   }
 
   bool moduleEscapes(Module& subModule, std::shared_ptr<Graph>& graph) {

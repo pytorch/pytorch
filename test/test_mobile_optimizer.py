@@ -584,10 +584,8 @@ class TestOptimizer(TestCase):
         # Check that the cloned class has a classname that starts with __torch__.
         self.assertTrue(
             cloned.qualified_name.startswith('__torch__.'),
-            lambda msg: (
-                f"{msg}\nExpected the cloned module's name to start with the string "
-                f"'__torch__.', but got: {cloned.qualified_name}"
-            ),
+            ("Expected the cloned module's name to start with the string "
+             f"'__torch__.', but got: {cloned.qualified_name}"),
         )
 
 

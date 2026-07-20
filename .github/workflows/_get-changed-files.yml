@@ -16,7 +16,7 @@ on:
 
 jobs:
   get-changed-files:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       changed-files: ${{ steps.get-files.outputs.changed-files }}
 

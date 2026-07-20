@@ -323,6 +323,20 @@ T threadgroup_min(threadgroup T* data, T val, unsigned idx, unsigned size) {
   return data[0];
 }
 
+template <typename T>
+float3 threadgroup_welford_reduce(threadgroup T* data, unsigned size) {
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  float m = data[0];
+  float m2 = 0;
+  for (unsigned idx = 1; idx < size; ++idx) {
+    float delta = data[idx] - m;
+    m += delta / (idx + 1);
+    m2 += delta * (data[idx] - m);
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return float3(m, m2, size);
+}
+
 // Each vec3type is tuple of mean, m2 and weight
 template <typename T>
 float3 welford_combine(T a, T b) {
@@ -336,22 +350,14 @@ float3 welford_combine(T a, T b) {
 }
 
 template <typename T>
-float3 threadgroup_welford_combine(
-    threadgroup T* data,
-    unsigned idx,
-    unsigned size) {
-  unsigned stride = 1;
-  while (stride < size) {
-    stride <<= 1;
-  }
-  for (stride >>= 1; stride > 0; stride >>= 1) {
-    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-    if (idx < stride && idx + stride < size) {
-      data[idx] = welford_combine(data[idx], data[idx + stride]);
-    }
+float3 threadgroup_welford_combine(threadgroup T* data, unsigned size) {
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  float3 rc = data[0];
+  for (unsigned idx = 1; idx < size; ++idx) {
+    rc = welford_combine(rc, data[idx]);
   }
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-  return data[0];
+  return rc;
 }
 
 template <typename ARG_T, typename IDX_T>

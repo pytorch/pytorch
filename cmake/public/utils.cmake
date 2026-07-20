@@ -348,11 +348,17 @@ function(torch_compile_options libname)
       set(MSVC_DEBINFO_OPTION "/Zi")
     endif()
 
-    # Add /permissive- flag for conformance mode to the compiler.
-    # This will force more strict check to the code standard.
-    # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/permissive-standards-conformance?view=msvc-170#remarks
-    target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
+    if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 142)
+      # Add /permissive- flag for conformance mode to the compiler.
+      # This will force more strict check to the code standard.
+      # 1. From MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/permissive-standards-conformance?view=msvc-170#remarks
+      #    By default, the /permissive- option is set in new projects created by Visual Studio 2017 version 15.5 and later versions.
+      #    We set the /permissive- flag from VS 2019 (MSVC_TOOLSET_VERSION 142) to avoid compiling issues for old toolkit.
+      # 2. For MSVC VERSION: https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html
+      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
+    endif()
     # This option enables a token-based preprocessor that conforms to C99 and C++11 and later standards.
+    # This option is available since VS 2017.
     # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor" PARENT_SCOPE)
 
@@ -496,7 +502,7 @@ include(CheckCCompilerFlag)
 include(CheckLinkerFlag)
 
 ##############################################################################
-# Check if given flag is supported and append it to provided outputvar
+# CHeck if given flag is supported and append it to provided outputvar
 # Also define HAS_UPPER_CASE_FLAG_NAME variable
 # Usage:
 #   append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
@@ -543,14 +549,9 @@ function(target_compile_options_if_supported target flag)
 endfunction()
 
 # Check if a global link option is supported
-# Also defines HAS_LINKER_UPPER_CASE_FLAG_NAME
-# Usage:
-#   add_link_options_if_supported("--emit-relocs")
 function(add_link_options_if_supported flag)
-  string(TOUPPER "HAS_LINKER${flag}" _FLAG_NAME)
-  string(REGEX REPLACE "[=,-]" "_" _FLAG_NAME "${_FLAG_NAME}")
-  check_linker_flag(C "LINKER:${flag}" ${_FLAG_NAME})
-  if(${_FLAG_NAME})
+  check_linker_flag(C "LINKER:${flag}" _supported)
+  if("${_supported}")
     add_link_options("LINKER:${flag}")
   else()
     message(WARNING "Attempted to use unsupported link option : ${flag}.")
@@ -558,10 +559,8 @@ function(add_link_options_if_supported flag)
 endfunction()
 
 function(target_link_options_if_supported tgt flag)
-  string(TOUPPER "HAS_LINKER${flag}" _FLAG_NAME)
-  string(REGEX REPLACE "[=,-]" "_" _FLAG_NAME "${_FLAG_NAME}")
-  check_linker_flag(C "LINKER:${flag}" ${_FLAG_NAME})
-  if(${_FLAG_NAME})
+  check_linker_flag(C "LINKER:${flag}" _supported)
+  if("${_supported}")
     target_link_options("${tgt}" PRIVATE "LINKER:${flag}")
   else()
     message(WARNING "Attempted to use unsupported link option : ${flag}.")

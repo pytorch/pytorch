@@ -10,7 +10,7 @@ AllenaiLongformerBase,pass,9
 
 
 
-BartForCausalLM,pass,7
+BartForCausalLM,pass,6
 
 
 
@@ -50,11 +50,11 @@ LayoutLMForMaskedLM,pass,5
 
 
 
-M2M100ForConditionalGeneration,pass,4
+M2M100ForConditionalGeneration,pass,11
 
 
 
-MBartForCausalLM,pass,7
+MBartForCausalLM,pass,6
 
 
 
@@ -70,11 +70,11 @@ MobileBertForMaskedLM,pass,3
 
 
 
-OPTForCausalLM,pass,7
+OPTForCausalLM,pass,8
 
 
 
-PLBartForCausalLM,pass,7
+PLBartForCausalLM,pass,6
 
 
 

@@ -121,7 +121,7 @@ def custom_op(
           ``list[int]``, ``list[float]``, ``list[bool]``,
           ``list[torch.types.Number]``
         - Optionals: ``Optional`` of any of the above scalar/tensor types
-        - Types registered via :func:`torch.library.register_custom_class`
+        - Types registered via :func:`torch.library.register_opaque_type`
 
     The following types are supported for the return value:
 
@@ -261,7 +261,6 @@ def custom_op(
                     f"Please make these consistent."
                 )
         result.register_kernel(device_types)(fn)
-        result._opoverload._enable_pyobj_dispatch(True)
         return result
 
     if fn is None:
