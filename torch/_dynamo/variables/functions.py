@@ -4235,6 +4235,13 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
+        if name == "__name__":
+            return variables.ConstantVariable.create(self.descriptor.__name__)
+        return super().getattro_impl(tx, name)
+
     def as_python_constant(self) -> Any:
         obj = self.obj.as_python_constant()
         if isinstance(self.descriptor, types.ClassMethodDescriptorType):
