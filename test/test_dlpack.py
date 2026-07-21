@@ -27,7 +27,12 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.utils.dlpack import DLDeviceType, from_dlpack, to_dlpack
+from torch.utils.dlpack import (
+    DLDeviceType,
+    from_dlpack,
+    ReadOnlyTensorWrapper,
+    to_dlpack,
+)
 
 
 # Wraps a tensor, exposing only DLPack methods:
@@ -896,6 +901,147 @@ class TestTorchDlPack(TestCase):
 instantiate_device_type_tests(
     TestTorchDlPack, globals(), allow_mps=True, allow_xpu=True
 )
+
+
+# ReadOnlyTensorWrapper is an eager, runtime-only export shim that rejects all
+# ops except the DLPack protocol; Dynamo tracing probes it (e.g. descriptor
+# __get__) and trips that rejection, and __dlpack__ does not work under Dynamo
+# anyway (see skips above). These tests are eager-only.
+@skipIfTorchDynamo(
+    "ReadOnlyTensorWrapper is eager-only; __dlpack__ unsupported in dynamo"
+)
+class TestReadOnlyDLPack(TestCase):
+    # These tests exercise the read-only DLPack export path and the
+    # ReadOnlyTensorWrapper subclass. The behavior (const_data_ptr export, the
+    # READ_ONLY flag, copy-on-write preservation, op rejection) is device
+    # independent, so they run on CPU.
+
+    def test_read_only_export_does_not_materialize_cow(self):
+        # Exporting a copy-on-write tensor read-only must not materialize it,
+        # because the export goes through const_data_ptr().
+        base = torch.arange(8, dtype=torch.float32)
+        clone = base._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(base))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
+        # const_data_ptr() is the pointer the read-only export actually hands
+        # out (storage base + view offset) and does not materialize COW, so it
+        # is the right thing to compare against. _data_address would only match
+        # when storage_offset() == 0.
+        data_before = clone.const_data_ptr()
+        clone.__dlpack__(max_version=(1, 0), read_only=True)
+
+        # Still copy-on-write, same data pointer, source untouched too.
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+        self.assertTrue(torch._C._is_cow_tensor(base))
+        self.assertEqual(clone.const_data_ptr(), data_before)
+
+    def test_writable_export_materializes_cow(self):
+        # Control: the default (writable) export goes through data_ptr(), which
+        # materializes a copy-on-write tensor. This guards against the read-only
+        # test passing for the wrong reason.
+        base = torch.arange(8, dtype=torch.float32)
+        clone = base._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
+        clone.__dlpack__(max_version=(1, 0))
+        self.assertFalse(torch._C._is_cow_tensor(clone))
+
+    def test_read_only_requires_versioned(self):
+        # read_only cannot be represented on the legacy (unversioned) struct.
+        x = torch.arange(4, dtype=torch.float32)
+        with self.assertRaisesRegex(BufferError, "versioned DLPack"):
+            x.__dlpack__(read_only=True)
+        with self.assertRaisesRegex(BufferError, "versioned DLPack"):
+            x.__dlpack__(max_version=(0, 8), read_only=True)
+
+    def test_wrapper_shares_storage(self):
+        x = torch.arange(8, dtype=torch.float32)
+        ro = ReadOnlyTensorWrapper(x)
+        self.assertIsInstance(ro, torch.Tensor)
+        # Use a disabled-subclass guard to read the address without tripping the
+        # op-rejection logic.
+        with torch._C.DisableTorchFunctionSubclass():
+            self.assertEqual(ro.data_ptr(), x.data_ptr())
+
+    def test_wrapper_routes_fast_path_to_const_api(self):
+        # tvm-ffi / CuteDSL read __dlpack_c_exchange_api__ off the type. The
+        # wrapper must expose the const (read-only) exchange API, not the
+        # default writable one.
+        def _ptr(capsule):
+            import ctypes
+
+            get = ctypes.pythonapi.PyCapsule_GetPointer
+            get.restype = ctypes.c_void_p
+            get.argtypes = [ctypes.py_object, ctypes.c_char_p]
+            return get(capsule, b"dlpack_exchange_api")
+
+        wrapper_api = _ptr(ReadOnlyTensorWrapper.__dlpack_c_exchange_api__)
+        const_api = _ptr(torch._C._const_dlpack_exchange_api())
+        default_api = _ptr(torch._C._dlpack_exchange_api())
+        tensor_api = _ptr(torch.Tensor.__dlpack_c_exchange_api__)
+
+        self.assertEqual(wrapper_api, const_api)
+        self.assertNotEqual(wrapper_api, default_api)
+        self.assertEqual(tensor_api, default_api)
+
+    def test_wrapper_allows_dlpack_methods(self):
+        x = torch.arange(8, dtype=torch.float32)
+        ro = ReadOnlyTensorWrapper(x)
+        # __dlpack_device__ and __dlpack__ must work; round-trip must be exact.
+        self.assertEqual(ro.__dlpack_device__(), x.__dlpack_device__())
+        back = from_dlpack(ro)
+        self.assertEqual(back, x)
+        with torch._C.DisableTorchFunctionSubclass():
+            self.assertEqual(back.data_ptr(), x.data_ptr())
+
+    def test_wrapper_forbids_other_operations(self):
+        x = torch.arange(8, dtype=torch.float32).reshape(2, 4)
+        ro = ReadOnlyTensorWrapper(x)
+        ops = [
+            lambda: ro + 1,
+            lambda: ro * 2,
+            lambda: ro @ ro.T,
+            lambda: ro.sum(),
+            lambda: ro.clone(),
+            lambda: ro.reshape(8),
+            lambda: ro.mul_(2),
+            lambda: ro.data_ptr(),
+            lambda: ro.to(torch.float64),
+            lambda: torch.add(ro, ro),
+        ]
+        for op in ops:
+            with self.assertRaisesRegex(RuntimeError, "only supports DLPack export"):
+                op()
+
+    def _require_numpy_versioned_dlpack(self):
+        # Read-only export requires the versioned (DLPack 1.0) protocol. NumPy
+        # only consumes versioned capsules from 2.1 onwards; older NumPy has
+        # from_dlpack but errors on a versioned capsule ("PyCapsule_GetPointer
+        # called with incorrect name"). Return the numpy module or skip.
+        np = __import__("numpy")
+        version = tuple(int(p) for p in np.__version__.split(".")[:2])
+        if version < (2, 1):
+            self.skipTest("numpy too old to consume versioned DLPack capsules")
+        return np
+
+    def test_wrapper_numpy_export_is_read_only(self):
+        # NumPy honors DLPACK_FLAG_BITMASK_READ_ONLY: a wrapped tensor exported
+        # to NumPy must be non-writeable, while a plain tensor is writeable.
+        np = self._require_numpy_versioned_dlpack()
+        x = torch.arange(8, dtype=torch.float32)
+        self.assertTrue(np.from_dlpack(x).flags.writeable)
+        self.assertFalse(np.from_dlpack(ReadOnlyTensorWrapper(x)).flags.writeable)
+
+    def test_wrapper_numpy_export_does_not_materialize_cow(self):
+        np = self._require_numpy_versioned_dlpack()
+        base = torch.arange(8, dtype=torch.float32)
+        clone = base._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+        arr = np.from_dlpack(ReadOnlyTensorWrapper(clone))
+        self.assertFalse(arr.flags.writeable)
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
 
 if __name__ == "__main__":
     run_tests()

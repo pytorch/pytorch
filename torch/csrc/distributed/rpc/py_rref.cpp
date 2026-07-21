@@ -11,7 +11,7 @@
 
 namespace torch::distributed::rpc {
 
-/////////////////////  Pickle/Unpickle Helplers ////////////////////////////
+/////////////////////  Pickle/Unpickle Helpers ////////////////////////////
 
 namespace {
 
@@ -75,7 +75,7 @@ TypePtr tryInferTypeWithTypeHint(
         " is not a subtype of the type hint: ",
         type_qualified_name.qualifiedName(),
         ", did you pass a valid interface type?\n",
-        subtype_check_msg.str());
+        std::move(subtype_check_msg).str());
     return type_hint_ptr;
   } else {
     TORCH_CHECK(
@@ -110,7 +110,7 @@ TypePtr tryInferTypeWithTypeHint(
   }
 
   // Otherwise it's a pure pyobject, create the RRef
-  // that holds an IValue of an pyobject.
+  // that holds an IValue of a pyobject.
   return PyObjectType::get();
 }
 
