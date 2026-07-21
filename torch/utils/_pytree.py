@@ -618,9 +618,9 @@ def _private_register_pytree_node(
     for the Python pytree only. End-users should use :func:`register_pytree_node`
     instead.
     """
-    from torch._library.opaque_object import is_opaque_type
+    from torch._library.opaque_object import is_custom_class
 
-    if isinstance(cls, type) and is_opaque_type(cls):
+    if isinstance(cls, type) and is_custom_class(cls):
         # TODO: remove this allowance once downstream callers stop calling
         # register_constant on Enum subclasses. Enums are now natively
         # supported as opaque value types and don't need pytree registration.

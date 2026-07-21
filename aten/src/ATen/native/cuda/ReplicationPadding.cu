@@ -242,19 +242,25 @@ void replication_pad2d_backward_out_cuda_template(
   const auto padR = paddingSize[1];
   const auto padT = paddingSize[2];
   const auto padB = paddingSize[3];
+  int dimc = 0;
   int dimh = 1;
   int dimw = 2;
 
   int numInputDims = input.dim();
   if (numInputDims == 4) {
+    dimc++;
     dimh++;
     dimw++;
   }
+  const auto ichannel = input.size(dimc);
   const auto iheight = input.size(dimh);
   const auto iwidth = input.size(dimw);
   const auto oheight = iheight + padT + padB;
   const auto owidth  = iwidth + padL + padR;
 
+  TORCH_CHECK(ichannel == gradOutput.size(dimc),
+      "gradOutput channel unexpected. Expected: ", ichannel, ", Got: ",
+      gradOutput.size(dimc));
   TORCH_CHECK(owidth == gradOutput.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
       gradOutput.size(dimw));

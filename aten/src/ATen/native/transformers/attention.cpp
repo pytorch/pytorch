@@ -531,6 +531,9 @@ inline void validate_sdpa_input(
       "Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: ",
       query_.dim(), " key.dim: ", key.dim(), " and value.dim: ", value.dim(), " instead.");
   if (attn_mask_.has_value()){
+    TORCH_CHECK(
+      !is_causal,
+      "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
     auto mask_dtype = attn_mask_->dtype();
     TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == at::kFloat || mask_dtype == query_.dtype(),
       "Expected attn_mask dtype to be bool or float or to match query dtype, but got attn_mask.dtype: ",
@@ -633,6 +636,18 @@ at::Tensor post_process_flash_output(
 
 bool should_compute_logsumexp(const Tensor& query, const Tensor& key, const Tensor& value) {
   const bool any_inputs_require_grad = query.requires_grad() || key.requires_grad() || value.requires_grad();
+  const bool gradmode_enabled = at::GradMode::is_enabled();
+  return any_inputs_require_grad && gradmode_enabled;
+}
+
+bool should_compute_logsumexp_with_attn_mask(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& attn_mask) {
+  const bool any_inputs_require_grad = query.requires_grad() ||
+      key.requires_grad() || value.requires_grad() ||
+      (attn_mask.has_value() && attn_mask->requires_grad());
   const bool gradmode_enabled = at::GradMode::is_enabled();
   return any_inputs_require_grad && gradmode_enabled;
 }
@@ -754,6 +769,7 @@ Tensor scaled_dot_product_attention(
   auto attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
     case SDPBackend::cudnn_attention: {
+      // cuDNN SDPA backward does not support an attn_bias gradient.
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
@@ -778,10 +794,10 @@ Tensor scaled_dot_product_attention(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
     case SDPBackend::efficient_attention: {
-      bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       if (attn_mask.has_value()) {
         attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
       }
+      bool compute_logsumexp = should_compute_logsumexp_with_attn_mask(query_, key, value, attn_mask);
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
       return std::get<0>(out_and_lse);
