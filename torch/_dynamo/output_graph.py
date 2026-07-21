@@ -569,9 +569,9 @@ def _canonicalize_graph(graph: fx.Graph) -> None:
     Delegates to ``torch.fx.passes.canonicalize.canonicalize_graph`` with
     Dynamo-specific key generation and barrier detection.
     """
-    from torch.fx.passes.canonicalize import canonicalize_graph, is_safe_to_reorder
+    from torch.fx.passes.canonicalize import _is_safe_to_reorder, canonicalize_graph
 
-    canonicalize_graph(graph, _canonical_key, is_safe_to_reorder)
+    canonicalize_graph(graph, _canonical_key, _is_safe_to_reorder)
 
 
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:

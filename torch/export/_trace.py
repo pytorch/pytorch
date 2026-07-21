@@ -3,6 +3,7 @@
 import dataclasses
 import functools
 import inspect
+import itertools
 import logging
 import re
 import sys
@@ -107,6 +108,11 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeInfo
+from torch.fx.passes.canonicalize import (
+    _canonical_node_key,
+    _is_safe_to_reorder,
+    canonicalize_graph,
+)
 from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
@@ -117,7 +123,11 @@ from .exported_program import (
     ModuleCallEntry,
     ModuleCallSignature,
 )
-from .graph_signature import _convert_to_export_graph_signature, ExportGraphSignature
+from .graph_signature import (
+    _convert_to_export_graph_signature,
+    ArgumentSpec,
+    ExportGraphSignature,
+)
 
 
 log = logging.getLogger(__name__)
@@ -654,29 +664,34 @@ def _apply_renames_to_signature(
     signature: ExportGraphSignature,
     renamed: dict[str, str],
 ) -> None:
-    """Apply a batch of old-name-to-new-name renames to the signature atomically."""
-    from torch.export.graph_signature import (
-        ConstantArgument,
-        CustomObjArgument,
-        SymBoolArgument,
-        SymFloatArgument,
-        SymIntArgument,
-        TensorArgument,
-        TokenArgument,
-    )
-
-    arg_types = (
-        TensorArgument,
-        SymIntArgument,
-        SymFloatArgument,
-        SymBoolArgument,
-        ConstantArgument,
-        CustomObjArgument,
-        TokenArgument,
-    )
+    """Apply a batch of old-name-to-new-name renames to the signature."""
     for spec in [*signature.input_specs, *signature.output_specs]:
-        if isinstance(spec.arg, arg_types) and spec.arg.name in renamed:
-            spec.arg.name = renamed[spec.arg.name]
+        arg = spec.arg
+        if isinstance(arg, ArgumentSpec) and arg.name in renamed:
+            arg.name = renamed[arg.name]
+
+
+class _ExportSafeToReorder:
+    """Barrier predicate for export canonicalization.
+
+    Wraps ``_is_safe_to_reorder`` with an additional constraint: nodes from
+    different ``nn_module_stack`` scopes are never reordered past each other,
+    because ``unflatten`` expects nodes within the same module scope to be
+    contiguous.
+    """
+
+    def __init__(self) -> None:
+        self._prev_stack: tuple[str, ...] | None = None
+
+    def __call__(self, node: torch.fx.Node) -> bool:
+        if not _is_safe_to_reorder(node):
+            self._prev_stack = tuple(node.meta.get("nn_module_stack", {}).keys())
+            return False
+        stack = tuple(node.meta.get("nn_module_stack", {}).keys())
+        if stack != self._prev_stack:
+            self._prev_stack = stack
+            return False
+        return True
 
 
 def _canonicalize_export_graph(
@@ -689,14 +704,6 @@ def _canonicalize_export_graph(
     canonical names so that strict and non-strict export produce identical
     graphs.  Updates ``signature`` to reflect the new node names.
     """
-    import itertools
-
-    from torch.fx.passes.canonicalize import (
-        _canonical_node_key,
-        canonicalize_graph,
-        is_safe_to_reorder,
-    )
-
     for mod in gm.modules():
         if isinstance(mod, torch.fx.GraphModule):
             placeholder_ord = itertools.count()
@@ -710,25 +717,10 @@ def _canonicalize_export_graph(
                     return (0, next(_ord))
                 return _canonical_node_key(node, canonical_idx)
 
-            # Unflatten expects nodes from the same nn_module_stack scope to
-            # be contiguous.  Treat module-boundary transitions as barriers
-            # so canonicalization never reorders across them.
-            prev_stack: list[tuple[str, ...] | None] = [None]
-
-            def _safe(node: torch.fx.Node, _prev: list = prev_stack) -> bool:
-                if not is_safe_to_reorder(node):
-                    _prev[0] = tuple(node.meta.get("nn_module_stack", {}).keys())
-                    return False
-                stack = tuple(node.meta.get("nn_module_stack", {}).keys())
-                if stack != _prev[0]:
-                    _prev[0] = stack
-                    return False
-                return True
-
             renamed = canonicalize_graph(
                 mod.graph,
                 _key,
-                _safe,
+                _ExportSafeToReorder(),
                 skip_rename_ops=frozenset({"placeholder"}),
             )
             if mod is gm and renamed:
