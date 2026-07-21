@@ -3,6 +3,7 @@
 import copy
 import functools
 import io
+import unittest
 from copy import deepcopy
 
 import torch
@@ -47,9 +48,11 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_fsdp import FSDPTestContinuous, MLP, MLPStack
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     MI200_ARCH,
     parametrize,
     run_tests,
+    TEST_WITH_ROCM,
     TEST_XPU,
     xfailIf,
 )
@@ -311,6 +314,9 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
             optim.step()
             ref_optim.step()
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/125644"
+    )
     @skip_if_lt_x_gpu(2)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1881
     @with_temp_dir
@@ -572,7 +578,9 @@ class TestNew2dParallelTraining(DTensorContinuousTestBase):
                         continue
                     if type(p2) is DTensor:
                         p2 = p2.redistribute(p2.device_mesh, [Replicate()]).to_local()
-                    self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
+                    self.assertTrue(
+                        torch.allclose(p1, p2), lambda msg: f"{msg}\n{p1} vs {p2}"
+                    )
 
     @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_state_enable_extension(self):

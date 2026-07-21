@@ -13,8 +13,6 @@ list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix)
 
-cmake_policy(SET CMP0012 NEW)
-
 #############################################
 
 set(ATen_CPU_SRCS)
@@ -37,8 +35,6 @@ set(ATen_HIP_TEST_SRCS)
 set(ATen_HIP_INCLUDE)
 set(ATen_MPS_SRCS)
 set(ATen_MPS_TEST_SRCS)
-set(ATen_XPU_SRCS)
-set(ATen_XPU_INCLUDE)
 set(ATen_XPU_TEST_SRCS)
 set(ATen_VULKAN_TEST_SRCS)
 set(ATen_CPU_DEPENDENCY_LIBS)
@@ -52,7 +48,6 @@ set(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory"
 set(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
 set(MEM_EFF_ATTENTION_CUDA_SOURCES)
 
-set(TH_LINK_STYLE STATIC)
 set(TH_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_BINARY_DIR}/src
@@ -77,36 +72,18 @@ if(USE_CUDA AND USE_ROCM)
 endif()
 
 if(USE_ROCM)
-  # TODO: AT_HIP_ENABLED (change this once we represent HIP as HIP in
-  # ATen proper)
-  set(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THH)
   message("ROCm is enabled.")
 elseif(USE_CUDA)
-  set(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THC)
 else()
   message("disabling CUDA because USE_CUDA is set false")
-  set(AT_CUDA_ENABLED 0)
 endif()
 
 if(NOT USE_NNPACK)
   set(AT_NNPACK_ENABLED 0)
 else()
   set(AT_NNPACK_ENABLED 1)
-endif()
-
-if(NOT USE_CUSPARSELT)
-  set(AT_CUSPARSELT_ENABLED 0)
-else()
-  set(AT_CUSPARSELT_ENABLED 1)
-endif()
-
-# Add hipSPARSELt support flag if the package is available.
-if(USE_ROCM AND hipsparselt_FOUND)
-  set(AT_HIPSPARSELT_ENABLED 1)
-else()
-  set(AT_HIPSPARSELT_ENABLED 0)
 endif()
 
 list(APPEND ATen_CPU_INCLUDE
@@ -128,7 +105,6 @@ set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
 set(ATen_MPS_SRCS ${ATen_MPS_SRCS} PARENT_SCOPE)
 set(ATen_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS} PARENT_SCOPE)
 set(ATen_HIP_SRCS_W_SORT_BY_KEY ${ATen_HIP_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
-set(ATen_XPU_SRCS ${ATen_XPU_SRCS} PARENT_SCOPE)
 set(ATen_XPU_TEST_SRCS ${ATen_XPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_NVRTC_STUB_SRCS ${ATen_NVRTC_STUB_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)

@@ -34,7 +34,7 @@ void XNNCompiler::compileModel(
   TORCH_CHECK(xnn_status_success == status, "Failed to create xnn subgraph");
 
   // mapping from old ids to new created value ids
-  // The old ids that were serialied were generated AoT, since
+  // The old ids that were serialized were generated AoT, since
   // we are re-defining tensor values, the defined IDs could be
   // different from the ones generated AoT, as a result, we need
   // a new mapping from the old ids to the newly created ones

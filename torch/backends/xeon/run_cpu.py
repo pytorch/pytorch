@@ -156,7 +156,7 @@ class _CPUinfo:
             # Sample output of: `lscpu --parse=CPU,Core,Socket,Node`
             #
             # # The following is the parsable format, which can be fed to other
-            # # programs. Each different item in every column has an unique ID
+            # # programs. Each different item in every column has a unique ID
             # # starting from zero.
             # # CPU,Core,Socket,Node
             # 0,0,0,0
@@ -236,7 +236,7 @@ class _CPUinfo:
         Check whether all cores in core_list are in the same NUMA node.
 
         Cross NUMA will reduce performance.
-        We strongly advice to not use cores on different nodes.
+        We strongly advise to not use cores on different nodes.
         """
         cores_numa_map = self.logical_core_node_map
         numa_ids = []

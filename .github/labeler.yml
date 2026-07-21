@@ -122,9 +122,6 @@
 - test/distributed/tensor/**
 - torch/distributed/tensor/**
 
-"ciflow/vllm":
-- .github/ci_commit_pins/vllm.txt
-
 "ci-refresh-hf-cache":
 - .github/ci_commit_pins/vllm.txt
 - .ci/docker/ci_commit_pins/timm.txt
@@ -189,8 +186,10 @@
 - test/distributed/**/*mem*
 - test/distributed/**/*mem*/**
 
-"no-runner-experiments":
+"ciflow/docker":
 - .ci/docker/**
+- .github/workflows/docker-builds.yml
+- .lintrunner.toml
 
 "ciflow/torchtitan":
 # torchtitan commit pin updates

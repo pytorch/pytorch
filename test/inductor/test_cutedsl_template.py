@@ -117,7 +117,7 @@ def {{kernel_name}}_kernel():
 
         self.assertTrue(
             rendered_code_stripped.startswith("import torch"),
-            f"Code should start with 'import torch', got: {rendered_code_stripped[:50]}",
+            lambda msg: f"{msg}\nCode should start with 'import torch', got: {rendered_code_stripped[:50]}",
         )
         self.assertIn("import cutlass", rendered_code)
         self.assertIn("import cutlass.cute as cute", rendered_code)
@@ -176,7 +176,8 @@ def {{kernel_name}}_kernel():
         for line in lines:
             if line:
                 self.assertFalse(
-                    line.startswith(" "), f"Line should not be indented: '{line}'"
+                    line.startswith(" "),
+                    lambda msg: f"{msg}\nLine should not be indented: '{line}'",
                 )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
@@ -671,6 +672,67 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
 
                 result = CuteDSLOpOverrides.minimum(mock_cse_a, mock_cse_b)
                 self.assertIsInstance(result, CSEVariable)
+
+                # Unary math ops
+                result = CuteDSLOpOverrides.rsqrt(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.exp2(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.log2(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.log10(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.tan(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.acos(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.asin(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.atan(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.floor(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                # Binary math ops
+                result = CuteDSLOpOverrides.atan2(mock_cse_a, mock_cse_b)
+                self.assertIsInstance(result, CSEVariable)
+
+                # Logical ops
+                result = CuteDSLOpOverrides.logical_xor(mock_cse_a, mock_cse_b)
+                self.assertIsInstance(result, CSEVariable)
+
+            body = kernel.body.getvalue()
+
+            # Arithmetic ops
+            self.assertIn("(tensor_a + tensor_b)", body)
+            self.assertIn("(tensor_a * tensor_b)", body)
+            self.assertIn("(tensor_a / tensor_b)", body)
+
+            # Unary math ops
+            self.assertIn("cute.math.sqrt(tensor_a)", body)
+            self.assertIn("cute.math.rsqrt(tensor_a)", body)
+            self.assertIn("cute.math.exp2(tensor_a)", body)
+            self.assertIn("cute.math.log2(tensor_a)", body)
+            self.assertIn("cute.math.log10(tensor_a)", body)
+            self.assertIn("cute.math.tan(tensor_a)", body)
+            self.assertIn("cute.math.acos(tensor_a)", body)
+            self.assertIn("cute.math.asin(tensor_a)", body)
+            self.assertIn("cute.math.atan(tensor_a)", body)
+            self.assertIn("cute.math.floor(tensor_a)", body)
+
+            # Binary math ops
+            self.assertIn("cute.math.atan2(tensor_a, tensor_b)", body)
+
+            # Logical ops
+            self.assertIn("(tensor_a ^ tensor_b)", body)
 
         scalar_result = CuteDSLOpOverrides._ensure_tensor_ssa(
             "5.0", mock_cse_a, is_tensor=False
