@@ -2302,9 +2302,7 @@ class SkipFunctionVariable(VariableTracker):
             guard_on_source = source
             guard_on_value = value
 
-            while inspect.getattr_static(
-                guard_on_value, "_torchdynamo_orig_callable", False
-            ):
+            while getattr(guard_on_value, "_torchdynamo_orig_callable", False):
                 guard_on_value = guard_on_value._torchdynamo_orig_callable
                 guard_on_source = AttrSource(
                     guard_on_source, "_torchdynamo_orig_callable"
@@ -2686,11 +2684,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         # (the wrapper's original callable matches the root frame's code).
         is_inner_torch_compile = (
             self.attr_to_trace == "_torchdynamo_inline"
-            and inspect.getattr_static(self.wrapper_obj, "_is_torch_compile", False)
+            and getattr(self.wrapper_obj, "_is_torch_compile", False)
             and getattr(
-                inspect.getattr_static(
-                    self.wrapper_obj, "_torchdynamo_orig_callable", None
-                ),
+                getattr(self.wrapper_obj, "_torchdynamo_orig_callable", None),
                 "__code__",
                 None,
             )
