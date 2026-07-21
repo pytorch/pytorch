@@ -708,9 +708,9 @@ class _LpmfReadyQueue:
         if prefix > 0:
             best = self._range_min(self._partial, 0, prefix, self._INF2)
             if best[0] != math.inf:
-                return self._by_index[best[1]]
+                return self._by_index[int(best[1])]
         best_full = self._range_min(self._full, 0, self._n, self._INF3)
-        return self._by_index[best_full[2]]
+        return self._by_index[int(best_full[2])]
 
 
 def topological_sort_lpmf(
