@@ -992,8 +992,7 @@ void passEventsToKineto(
     if (activity) {
 #ifdef USE_KINETO
       activity->addMetadata(
-          libkineto::GenericMetadataFields::kEvIdx,
-          static_cast<int64_t>(i));
+          libkineto::GenericMetadataFields::kEvIdx, static_cast<int64_t>(i));
 #endif
 
       // In the normal (synchronous) path, kineto_activity_ is set later
