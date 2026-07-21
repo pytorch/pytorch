@@ -1016,6 +1016,16 @@
       "Hints": []
     }
   ],
+  "GB9493": [
+    {
+      "Gb_type": "C-implemented special method without VariableTracker model",
+      "Context": "name={name}, type={self.python_type_name()}, attr={type_attr}",
+      "Explanation": "'{self.python_type_name()}' implements '{name}' in C and Dynamo has no model for it.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0068": [
     {
       "Gb_type": "Illegal method invocation in strict mode",

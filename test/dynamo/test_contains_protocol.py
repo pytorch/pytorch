@@ -800,6 +800,56 @@ class DictViewContainsTest(torch._dynamo.test_case.TestCase):
             _ = 0 in d.values()
 
 
+class ContainsNoneWithIter:
+    """__contains__ = None blocks the slot even though __iter__ exists."""
+
+    __contains__ = None
+
+    def __iter__(self):
+        return iter([1, 2, 3])
+
+
+class ContainsPropertyAttrError:
+    """Pre-3.14 slot_sq_contains PROPAGATES a bind-time AttributeError
+    (unlike slot_tp_iter, which blanket-clears lookup errors)."""
+
+    @property
+    def __contains__(self):  # noqa: PLE0302
+        raise AttributeError("gone")
+
+    def __iter__(self):
+        return iter([1, 2, 3])
+
+
+class ContainsNonBool:
+    def __contains__(self, item):
+        return 2
+
+
+@torch._dynamo.config.patch(enable_trace_unittest=True)
+class TestSpecialMethodContainsRegressions(torch._dynamo.test_case.TestCase):
+    """slot_sq_contains lookup semantics (Objects/typeobject.c)."""
+
+    @make_dynamo_test
+    def test_contains_none_is_not_a_container(self):
+        raised = False
+        try:
+            _ = 1 in ContainsNoneWithIter()
+        except TypeError as e:
+            raised = True
+            self.assertIn("is not a container", str(e))
+        self.assertTrue(raised)
+
+    @make_dynamo_test
+    def test_contains_property_attribute_error_propagates(self):
+        with self.assertRaises(AttributeError):
+            _ = 1 in ContainsPropertyAttrError()
+
+    @make_dynamo_test
+    def test_contains_nonbool_return_coerced_to_bool(self):
+        self.assertIs(1 in ContainsNonBool(), True)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
