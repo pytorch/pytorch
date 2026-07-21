@@ -2495,6 +2495,29 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(mps_w.cpu(), cpu_w)
         self.assertEqual(mps_b.cpu(), cpu_b)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/190054:
+    # fp32 gamma/beta with an fp16/bf16 input was reinterpreted at the input
+    # dtype in forward, and backward aborted in the MPSGraph verifier.
+    def test_layer_norm_mixed_dtype_affine(self):
+        for in_dtype in (torch.float16, torch.bfloat16):
+            with self.subTest(dtype=in_dtype):
+                x_cpu = torch.randn(4, 8, dtype=in_dtype, requires_grad=True)
+                w_cpu = torch.randn(8, dtype=torch.float32, requires_grad=True)
+                b_cpu = torch.randn(8, dtype=torch.float32, requires_grad=True)
+                out_cpu = torch.nn.functional.layer_norm(x_cpu, (8,), w_cpu, b_cpu)
+                out_cpu.backward(torch.ones_like(out_cpu))
+
+                x = x_cpu.detach().clone().to('mps').requires_grad_()
+                w = w_cpu.detach().clone().to('mps').requires_grad_()
+                b = b_cpu.detach().clone().to('mps').requires_grad_()
+                out = torch.nn.functional.layer_norm(x, (8,), w, b)
+                out.backward(torch.ones_like(out))
+
+                self.assertEqual(out.cpu(), out_cpu, atol=2e-2, rtol=2e-2)
+                self.assertEqual(x.grad.cpu(), x_cpu.grad, atol=2e-2, rtol=2e-2)
+                self.assertEqual(w.grad.cpu(), w_cpu.grad, atol=2e-2, rtol=2e-2)
+                self.assertEqual(b.grad.cpu(), b_cpu.grad, atol=2e-2, rtol=2e-2)
+
     def test_norm(self):
         a = torch.arange(9, dtype=torch.float, device="mps") - 4
         b = a.reshape((3, 3))
