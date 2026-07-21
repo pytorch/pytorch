@@ -75,13 +75,13 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
-    build,
     GetSet,
+    getset_build,
+    getset_read,
     Member,
     Method,
     MethodFlags,
     NO_SUCH_SUBOBJ,
-    read,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -454,10 +454,10 @@ class FrameSummaryVariable(VariableTracker):
     # traceback.FrameSummary is pure-Python with __slots__ (Lib/traceback.py);
     # each slot is exposed as a read-only member_descriptor.
     tp_members = {
-        "lineno": Member(build(lambda s: s.frame_summary.lineno)),
-        "filename": Member(build(lambda s: s.frame_summary.filename)),
-        "name": Member(build(lambda s: s.frame_summary.name)),
-        "line": Member(build(lambda s: s.frame_summary.line)),
+        "lineno": Member(getset_build(lambda s: s.frame_summary.lineno)),
+        "filename": Member(getset_build(lambda s: s.frame_summary.filename)),
+        "name": Member(getset_build(lambda s: s.frame_summary.name)),
+        "line": Member(getset_build(lambda s: s.frame_summary.line)),
     }
 
 
@@ -537,7 +537,7 @@ class TracebackVariable(VariableTracker):
     tp_getset = {
         "tb_next": GetSet(_get_tb_next, _set_tb_next),
         "tb_lineno": GetSet(_get_tb_lineno, None),
-        "frame_summary": GetSet(read(lambda s: s.frame_summary)),
+        "frame_summary": GetSet(getset_read(lambda s: s.frame_summary)),
     }
 
     def getattro_impl(
@@ -668,8 +668,8 @@ class ExceptionVariable(VariableTracker):
     ) -> VariableTracker:
         if name == "__setattr__":
             attr = args[0].as_python_constant()
-            # Writable attributes route through their tp_getset setter.
-            getset = self.tp_getset.get(attr)
+            # Writable attributes route through their tp_getset/tp_members setter.
+            getset = self.lookup_tp_getset_member(attr)
             if getset is not None and getset.setter is not None:
                 result = getset.setter(self, tx, args[1])
                 if result is not None:
@@ -755,14 +755,18 @@ class ExceptionVariable(VariableTracker):
         )
 
     tp_getset = {
-        "__class__": GetSet(build(lambda s: s.exc_type)),
-        "__context__": GetSet(read(lambda s: s.__context__), _set_context),
-        "__cause__": GetSet(read(lambda s: s.__cause__), _set_cause),
-        "__suppress_context__": GetSet(
-            read(lambda s: s.__suppress_context__), _set_suppress_context
-        ),
-        "__traceback__": GetSet(read(lambda s: s.__traceback__), _set_traceback),
+        "__class__": GetSet(getset_build(lambda s: s.exc_type)),
+        "__context__": GetSet(getset_read(lambda s: s.__context__), _set_context),
+        "__cause__": GetSet(getset_read(lambda s: s.__cause__), _set_cause),
+        "__traceback__": GetSet(getset_read(lambda s: s.__traceback__), _set_traceback),
         "args": GetSet(_get_args, None),
+    }
+    # __suppress_context__ is a writable PyMemberDef on BaseException, not a
+    # getset, so it lives in tp_members.
+    tp_members = {
+        "__suppress_context__": Member(
+            getset_read(lambda s: s.__suppress_context__), _set_suppress_context
+        ),
     }
 
     def str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -796,6 +800,73 @@ class ExceptionVariable(VariableTracker):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
         return VariableTracker.build(tx, self.debug_repr())
+
+
+class StopIterationVariable(ExceptionVariable):
+    def __init__(
+        self,
+        exc_type: Any,
+        args: list[VariableTracker],
+        init_kwargs: dict[str, VariableTracker] | None = None,
+        source: Source | None = None,
+        mutation_type: MutationType | None = None,
+    ) -> None:
+        self.value = args[0] if args else variables.ConstantVariable.create(None)
+        super().__init__(exc_type, args, init_kwargs, source, mutation_type)
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "value":
+            return self.value
+        return super().getattro_impl(tx, name)
+
+
+class _KwargAttrExceptionVariable(ExceptionVariable):
+    # Base for exceptions whose constructor accepts keyword-only attributes that
+    # default to None (e.g. NameError's `name`, AttributeError's `name`/`obj`).
+    # Subclasses list the attribute names in `_kwarg_attrs`; they are popped from
+    # init_kwargs, exposed via getattr, and restored on reconstruct.
+    _kwarg_attrs: tuple[str, ...] = ()
+
+    def __init__(
+        self,
+        exc_type: Any,
+        args: list[VariableTracker],
+        init_kwargs: dict[str, VariableTracker] | None = None,
+        source: Source | None = None,
+        mutation_type: MutationType | None = None,
+    ) -> None:
+        init_kwargs = dict(init_kwargs) if init_kwargs else {}
+        none = variables.ConstantVariable.create(None)
+        self._attrs = {name: init_kwargs.pop(name, none) for name in self._kwarg_attrs}
+        super().__init__(exc_type, args, init_kwargs, source, mutation_type)
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name in self._attrs:
+            return self._attrs[name]
+        return super().getattro_impl(tx, name)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        super().reconstruct(codegen)
+        for name, val in self._attrs.items():
+            if not (istype(val, ConstantVariable) and val.value is None):
+                codegen.dup_top()
+                codegen(val)
+                codegen.extend_output(codegen.rot_n(2))
+                codegen.store_attr(name)
+
+
+class AttributeErrorVariable(_KwargAttrExceptionVariable):
+    # https://docs.python.org/3/library/exceptions.html#AttributeError
+    _kwarg_attrs = ("name", "obj")
+
+
+class NameErrorVariable(_KwargAttrExceptionVariable):
+    # https://docs.python.org/3/library/exceptions.html#NameError
+    _kwarg_attrs = ("name",)
 
 
 class UnknownVariable(VariableTracker):
@@ -2331,12 +2402,17 @@ class LoggingLoggerVariable(VariableTracker):
         if method in ignore_set or function in ignore_set:
             return variables.ConstantVariable.create(None)
 
+        logger_cls = type(self.value)
+        logger_cls_name = f"{logger_cls.__module__}.{logger_cls.__qualname__}"
         unimplemented(
             gb_type="logging.Logger method not supported for non-export cases",
             context=f"method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
             explanation="logging.Logger methods are not supported for non-export cases.",
             hints=[
-                "Add the logging method to `torch._dynamo.config.ignore_logging_functions`.",
+                "If you do not need this logging side effect, add the exact method being called to `torch._dynamo.config.ignore_logging_functions`. Dynamo will skip the call and return `None`.",
+                f"For example, for `logger.{name}(...)`, use `torch._dynamo.config.ignore_logging_functions.add(logger.{name})`. If `{name}` is defined on the logger class, add the class method `{logger_cls_name}.{name}` to ignore this method for all instances of that class.",
+                f"Dynamo does not trace into logging.Logger method bodies, so only the method you call directly (`{name}`) is checked against the ignore set. Ignoring a method that `{name}` calls internally has no effect.",
+                "If you need the log side effect to run, then you can try one of (1) `torch._higher_order_ops.print(...)`, (2) wrap the logging call in a custom op (marked as mutable), or (3) preserve the logging contents and move the logging call outside the compiled region.",
             ],
         )
 
@@ -2560,7 +2636,7 @@ class ContextVarVariable(VariableTracker):
             raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
 
     # contextvars.ContextVar.name is a read-only member.
-    tp_members = {"name": Member(build(lambda s: s.cv_obj.name))}
+    tp_members = {"name": Member(getset_build(lambda s: s.cv_obj.name))}
 
 
 class RandomClassVariable(VariableTracker):

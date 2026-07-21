@@ -163,6 +163,22 @@ _libs: dict[tuple[str, str], torch.library.Library] = {}
 # and consumers control exactly when and where overrides take effect.
 _native_decomp_overrides: dict[object, Callable] = {}
 
+
+def _has_cow_tensor(*args, **kwargs) -> bool:
+    def is_cow_tensor(arg) -> bool:
+        if isinstance(arg, torch.Tensor):
+            return torch._C._is_cow_tensor(arg)  # pyrefly: ignore[missing-attribute]
+        if isinstance(arg, (list, tuple)):
+            return any(is_cow_tensor(item) for item in arg)
+        if isinstance(arg, dict):
+            return any(is_cow_tensor(item) for item in arg.values())
+        return False
+
+    return any(is_cow_tensor(arg) for arg in args) or any(
+        is_cow_tensor(arg) for arg in kwargs.values()
+    )
+
+
 # store graph structures
 _GraphsType = dict[tuple[str, str], list[_OverrideNode]]
 _graphs: _GraphsType = {}
@@ -919,7 +935,24 @@ def _register_overrides_from_graph(
                 return getattr(torch.ops._native, impl_name)(*args, **kwargs)
         return _NO_MATCH
 
-    def eager_router(keyset, *args, _fallback=fallback_kernel, **kwargs):
+    def eager_router(
+        keyset, *args, _fallback=fallback_kernel, _aten_overload=overload, **kwargs
+    ):
+        # This branch is only safe while Dynamo is actively tracing this Python
+        # router. The broader compile-session flag can be true when this router
+        # executes eagerly; redispatching to aten there would re-enter us.
+        #
+        # COW state is guarded by Dynamo's _is_cow_tensor handler but is not
+        # modeled in the compiled graph. If a COW input reaches this router,
+        # keep the existing eager path so COW-preserving fallback semantics are
+        # maintained instead of compiling through aten and materializing it.
+        if (
+            torch.compiler.is_dynamo_compiling()
+            and _aten_overload is not None
+            and not _has_cow_tensor(*args, **kwargs)
+        ):
+            return _aten_overload(*args, **kwargs)
+
         result = _dispatch(args, kwargs, swallow_cond_exceptions=False)
         if result is _NO_MATCH:
             return _fallback.call_boxed(keyset, *args, **kwargs)

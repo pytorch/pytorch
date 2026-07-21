@@ -2573,7 +2573,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ),
             f"&{tmp_name}",
         ]
-        # We return the lines instead of writing here because writing here is bug prune.
+        # We return the lines instead of writing here because writing here is bug prone.
         # If you write aoti_torch__alloc_from_pool lines, you must write the RAIIAtenTensorHandle
         # as well, otherwise you get memory leaks
         allocations_to_write = [
@@ -3304,7 +3304,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ) -> str | None | _OUTPUT_ARGS_TYPE:
             if out is None:
                 return None
-            if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
+            if isinstance(
+                out, (ir.MultiOutput, ir._CollectiveKernel, ir.FallbackKernel)
+            ):
                 return out.get_name()
             if isinstance(out, ir.MutationOutput):
                 mutated_buf_names = out.get_mutation_names()
