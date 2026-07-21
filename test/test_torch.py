@@ -6625,29 +6625,8 @@ class TestTorchDeviceType(TestCase):
             torch.normal(tensor2345, tensor120, out=output345)
 
     @onlyAccelerator
-    def test_tensor_set_errors(self, device):
+    def test_tensor_set_errors_cross_device(self, device):
         f_cpu = torch.randn((2, 3), dtype=torch.float32)
-        d_cpu = torch.randn((2, 3), dtype=torch.float64)
-
-        storage_offset = 0x41414141
-        with self.assertRaisesRegex(RuntimeError, "out of bounds for storage of size"):
-            t = torch.randn(1)
-            t.set_(t.untyped_storage(), storage_offset, t.size())
-
-        # if size changes, set_ will resize the storage inplace
-        t = torch.randn(1)
-        size = torch.Size([2, 3])
-        t.set_(t.untyped_storage(), storage_offset, size)
-        self.assertEqual(t.storage_offset(), storage_offset)
-        self.assertEqual(t.untyped_storage().nbytes(), (storage_offset + size[0] * size[1]) * 4)
-
-        # change dtype
-        self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu.storage()))
-        self.assertRaises(RuntimeError,
-                          lambda: f_cpu.set_(d_cpu.storage(), 0, d_cpu.size(), d_cpu.stride()))
-        self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu))
-
-        # change device
         f_dev = torch.randn((2, 3), dtype=torch.float32, device=device)
 
         # cpu -> device
@@ -6757,7 +6736,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_pickle_generator(self, device):
         generator = torch.Generator(device=device).manual_seed(12345)
-        if self.device_type == "cuda":
+        if self.device_type != "cpu":
             generator.set_offset(100)
         torch.randn((100, 100), generator=generator, device=device)  # progress the RNG state
 
@@ -6765,7 +6744,7 @@ class TestTorchDeviceType(TestCase):
 
         self.assertEqual(generator.device, reserialized.device)
         self.assertEqual(generator.initial_seed(), reserialized.initial_seed())
-        if self.device_type == "cuda":
+        if self.device_type != "cpu":
             self.assertEqual(generator.get_offset(), reserialized.get_offset())
         torch.testing.assert_close(generator.get_state(), reserialized.get_state())
 
@@ -6794,10 +6773,10 @@ class TestTorchDeviceType(TestCase):
             # Low-precision types (float16, bfloat16) on GPU have non-deterministic
             # accumulation order, leading to larger rounding differences.
             # See: https://github.com/pytorch/pytorch/issues/91184
-            if self.device_type == 'cuda' and dtype in (torch.half, torch.bfloat16):
+            if self.device_type != 'cpu' and dtype in (torch.half, torch.bfloat16):
                 # Relaxed tolerance for low-precision GPU accumulation
                 atol, rtol = 1e-1, 1e-1
-            elif self.device_type == 'cuda':
+            elif self.device_type != 'cpu':
                 atol, rtol = 1e-2, 1e-2
             else:
                 # scatter_add uses fp32 as accumulate type, while index_add doesn't.
@@ -7399,6 +7378,28 @@ class TestTorch(TestCase):
         t2 = torch.tensor([False, False], dtype=torch.bool)
         t1.set_(t2)
         self.assertEqual(t1.storage()._cdata, t2.storage()._cdata)
+
+    def test_tensor_set_errors(self):
+        f_cpu = torch.randn((2, 3), dtype=torch.float32)
+        d_cpu = torch.randn((2, 3), dtype=torch.float64)
+
+        storage_offset = 0x41414141
+        with self.assertRaisesRegex(RuntimeError, "out of bounds for storage of size"):
+            t = torch.randn(1)
+            t.set_(t.untyped_storage(), storage_offset, t.size())
+
+        # if size changes, set_ will resize the storage inplace
+        t = torch.randn(1)
+        size = torch.Size([2, 3])
+        t.set_(t.untyped_storage(), storage_offset, size)
+        self.assertEqual(t.storage_offset(), storage_offset)
+        self.assertEqual(t.untyped_storage().nbytes(), (storage_offset + size[0] * size[1]) * 4)
+
+        # change dtype
+        self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu.storage()))
+        self.assertRaises(RuntimeError,
+                          lambda: f_cpu.set_(d_cpu.storage(), 0, d_cpu.size(), d_cpu.stride()))
+        self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu))
 
     def test_element_size(self):
         byte = torch.ByteStorage().element_size()
