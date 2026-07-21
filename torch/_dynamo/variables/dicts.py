@@ -56,10 +56,10 @@ from .base import (
     AttributeMutationNew,
     AttrMutationKind,
     GetSet,
+    getset_read,
     Method,
     MethodFlags,
     NO_SUCH_SUBOBJ,
-    read,
     ValueMutationNew,
     VariableTracker,
 )
@@ -1070,21 +1070,20 @@ class DictViewVariable(VariableTracker):
     # dictview_mapping getset returns a read-only mappingproxy of the underlying
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
     tp_getset = {
-        "mapping": GetSet(read(lambda s: MappingProxyVariable(s.dv_dict))),
+        "mapping": GetSet(getset_read(lambda s: MappingProxyVariable(s.dv_dict))),
     }
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.kv == "keys":
             items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
-            return VariableTracker.build(tx, f"dict_keys([{items}])")
-        if self.kv == "values":
+        elif self.kv == "values":
             items = ", ".join(tracked_repr(tx, value) for value in self.view_items)
-            return VariableTracker.build(tx, f"dict_values([{items}])")
-        items = ", ".join(
-            f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
-            for key, value in self.view_items
-        )
-        return VariableTracker.build(tx, f"dict_items([{items}])")
+        else:  # items
+            items = ", ".join(
+                f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
+                for key, value in self.view_items
+            )
+        return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
     def dict_view_reversed(self, tx, args, kwargs):
         # dict_keys/values/items __reversed__: reverse insertion order.

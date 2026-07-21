@@ -84,11 +84,11 @@ index cd8ee596..3e453ecd 100644
 +	// if it doesn't exist, search
 +	if (!fp) {
 +
-+	char self_path[ PATH_MAX ];
++	char self_path[ PATH_MAX + 1 ];
 +	ssize_t count;
 +	ssize_t i;
 +
-+	count = readlink( "/proc/self/exe", self_path, PATH_MAX );
++	count = readlink( "/proc/self/exe", self_path, sizeof(self_path) - 1 );
 +	if (count > 0) {
 +		self_path[count] = '\0';
 +

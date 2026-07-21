@@ -204,13 +204,6 @@ file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/fla
 if(USE_FLASH_ATTENTION)
   # Now building CK by default
   if(USE_ROCM)
-    if(DEFINED ENV{USE_ROCM_CK_SDPA})
-        if(ENV{USE_ROCM_CK_SDPA} EQUAL 1)
-          caffe2_update_option(USE_ROCM_CK_SDPA ON)
-        endif()
-    elseif(NOT WIN32)
-      caffe2_update_option(USE_ROCM_CK_SDPA ON)
-    endif()
     # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
     # are in PYTORCH_ROCM_ARCH; otherwise the ck_sdpa target ends up with an
     # empty HIP_ARCHITECTURES and CMake errors out.
@@ -578,10 +571,6 @@ elseif(APPLE AND USE_PYTORCH_METAL)
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
 else()
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
-endif()
-
-if(USE_CUDA AND USE_ROCM)
-  message(FATAL_ERROR "ATen doesn't not currently support simultaneously building with CUDA and ROCM")
 endif()
 
 if(USE_CUDA)
