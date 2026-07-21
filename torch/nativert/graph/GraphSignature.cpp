@@ -39,6 +39,8 @@ bool isSymbolicOutput(const torch::_export::Argument& arg) {
 }
 
 bool hasSymbolicElement(const torch::_export::Argument& arg) {
+  // Readable alias for tuple-container sites; isSymbolicOutput recurses through
+  // AS_TUPLE and answers whether any nested element names a graph value.
   return isSymbolicOutput(arg);
 }
 

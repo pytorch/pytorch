@@ -1,4 +1,5 @@
 #include <c10/util/Enumerate.h>
+#include <c10/util/string_view.h>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 #include <torch/nativert/graph/Serialization.h>
@@ -21,13 +22,21 @@ bool isHigherOrderOperandTuple(
   if (!inputName.empty()) {
     return false;
   }
-  if (target == "torch.ops.higher_order.while_loop") {
+  static constexpr std::string_view prefix = "torch.ops.higher_order.";
+  if (!c10::starts_with(target, prefix)) {
+    return false;
+  }
+  const auto opName = target.substr(prefix.size());
+  // These unnamed positional tuple slots mirror export's serialized schemas
+  // for NativeRT-supported HOPs. They must become inputs, not attributes,
+  // because HigherOrderKernel consumes them as list-valued operands.
+  if (opName == "while_loop") {
     return inputIndex == 2 || inputIndex == 3;
   }
-  if (target == "torch.ops.higher_order.cond") {
+  if (opName == "cond") {
     return inputIndex == 3;
   }
-  if (target == "torch.ops.higher_order.run_const_graph") {
+  if (opName == "run_const_graph") {
     return inputIndex == 1;
   }
   return false;
