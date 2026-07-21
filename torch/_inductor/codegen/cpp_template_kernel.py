@@ -515,7 +515,7 @@ class CppTemplateKernel(CppKernel):
                                 in all_read_names
                                 and orig_src[gemm_idx].get_name() not in all_read_names
                             ):
-                                # Epilogue might directly read the MultiOutput, Locallize MultiOutput to the local Buffer
+                                # Epilogue might directly read the MultiOutput, Localize MultiOutput to the local Buffer
                                 # if this MultiOutput has not been stored by in-template epilogue
                                 # otherwise, use the cse store cache if it will be stored before used
                                 global_buffers.append(multi_output_buffers[gemm_idx])
