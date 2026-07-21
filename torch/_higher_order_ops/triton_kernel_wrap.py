@@ -874,8 +874,8 @@ def get_tma_stores(
                     if Param(idx=i) in tma_stores:
                         result.add(inp)
             else:
-                if op.name in TMA_STORE_OPS:
-                    result.update(op.args[idx] for idx in TMA_STORE_OPS[op.name](op))
+                if op.name in _TMA_STORE_OPS:
+                    result.update(op.args[idx] for idx in _TMA_STORE_OPS[op.name](op))
 
     for val in list(result):
         if val in ops:
@@ -911,7 +911,8 @@ class ReadWriteIndexes(Protocol):
     def __call__(self, op: Op) -> list[int]: ...
 
 
-def _safe_at_least_one_arg(op: Op) -> list[int]:
+def _first_arg(op: Op) -> list[int]:
+    """Return the first argument index after checking that it exists."""
     if len(op.args) < 1:
         raise AssertionError(f"{op.name} expected at least 1 arg, got {len(op.args)}")
     return [0]
@@ -921,25 +922,25 @@ def _safe_at_least_one_arg(op: Op) -> list[int]:
 # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
 # All the OPs that have MemWrite trait.
 # What if Triton exposed this?
-TMA_STORE_OPS: dict[str, ReadWriteIndexes] = {
-    "tt.experimental_descriptor_store": _safe_at_least_one_arg,
-    "tt.descriptor_store": _safe_at_least_one_arg,
+_TMA_STORE_OPS: dict[str, ReadWriteIndexes] = {
+    "tt.experimental_descriptor_store": _first_arg,
+    "tt.descriptor_store": _first_arg,
 }
 
-WRITE_OPS: dict[str, ReadWriteIndexes] = {
-    "tt.store": lambda op: [0],
-    "tt.atomic_cas": lambda op: [0],
-    "tt.atomic_rmw": lambda op: [0],
-    "tt.experimental_tensormap_create": lambda op: [0],
-    **TMA_STORE_OPS,  # TMA stores are write ops
+_WRITE_OPS: dict[str, ReadWriteIndexes] = {
+    "tt.store": _first_arg,
+    "tt.atomic_cas": _first_arg,
+    "tt.atomic_rmw": _first_arg,
+    "tt.experimental_tensormap_create": _first_arg,
+    **_TMA_STORE_OPS,  # TMA stores are write ops
 }
 
-READ_OPS: dict[str, ReadWriteIndexes] = {
-    "tt.load": lambda op: [0],
-    "tt.load_tensor_descriptor": lambda op: [0],
-    "tt.descriptor_load": lambda op: [0],
+_READ_OPS: dict[str, ReadWriteIndexes] = {
+    "tt.load": _first_arg,
+    "tt.load_tensor_descriptor": _first_arg,
+    "tt.descriptor_load": _first_arg,
 }
-UNKNOWN_OPS: dict[str, IgnoreUnknownOp] = {
+_UNKNOWN_OPS: dict[str, IgnoreUnknownOp] = {
     "tt.elementwise_inline_asm": lambda op: op.is_pure
 }
 
@@ -973,14 +974,53 @@ def register_kernel_access_op(
     """
     index_fn = _read_write_indexes(indexes)
     if kind == "read":
-        READ_OPS[name] = index_fn
+        _READ_OPS[name] = index_fn
     elif kind == "write":
-        WRITE_OPS[name] = index_fn
+        _WRITE_OPS[name] = index_fn
     elif kind == "tma_store":
-        TMA_STORE_OPS[name] = index_fn
-        WRITE_OPS[name] = index_fn
+        _TMA_STORE_OPS[name] = index_fn
+        _WRITE_OPS[name] = index_fn
     else:
         assert_never(kind)
+    _reset_kernel_access_analysis_caches()
+
+
+def unregister_kernel_access_op(name: str, *, kind: KernelAccessKind) -> None:
+    """
+    Unregister a Triton op from kernel read/write analysis.
+
+    This is mainly useful for tests and temporary backend registrations. It
+    invalidates the memoized TTIR access analysis for the same reason as
+    registration.
+    """
+    if kind == "read":
+        _READ_OPS.pop(name, None)
+    elif kind == "write":
+        _WRITE_OPS.pop(name, None)
+    elif kind == "tma_store":
+        _TMA_STORE_OPS.pop(name, None)
+        _WRITE_OPS.pop(name, None)
+    else:
+        assert_never(kind)
+    _reset_kernel_access_analysis_caches()
+
+
+def register_kernel_access_unknown_op(name: str, ignore: IgnoreUnknownOp) -> None:
+    """
+    Register a Triton op with unknown effects for kernel access analysis.
+
+    The callback returns True when the op can be ignored, and False when
+    analysis should raise rather than risk missing a side effect.
+    """
+    _UNKNOWN_OPS[name] = ignore
+    _reset_kernel_access_analysis_caches()
+
+
+def unregister_kernel_access_unknown_op(name: str) -> None:
+    """
+    Unregister a Triton op with unknown effects from kernel access analysis.
+    """
+    _UNKNOWN_OPS.pop(name, None)
     _reset_kernel_access_analysis_caches()
 
 
@@ -1015,8 +1055,8 @@ def analyze_kernel_access(
         for op in op_list:
             # If we encounter an operation with effects that cannot be reliably analyzed
             # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
-            if op.name in UNKNOWN_OPS:
-                if UNKNOWN_OPS[op.name](op):
+            if op.name in _UNKNOWN_OPS:
+                if _UNKNOWN_OPS[op.name](op):
                     continue
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
@@ -1066,10 +1106,10 @@ def analyze_kernel_access(
                     if name in read_set:
                         read_stack.append(arg)
             else:
-                if op.name in WRITE_OPS:
-                    write_stack.extend(op.args[idx] for idx in WRITE_OPS[op.name](op))
-                if op.name in READ_OPS:
-                    read_stack.extend(op.args[idx] for idx in READ_OPS[op.name](op))
+                if op.name in _WRITE_OPS:
+                    write_stack.extend(op.args[idx] for idx in _WRITE_OPS[op.name](op))
+                if op.name in _READ_OPS:
+                    read_stack.extend(op.args[idx] for idx in _READ_OPS[op.name](op))
 
     # For these ops, only the first argument (base pointer) refers to actual
     # memory. The remaining arguments are shape/stride/offset metadata and

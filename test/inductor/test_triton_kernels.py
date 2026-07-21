@@ -4555,7 +4555,6 @@ class MutationTests(torch._inductor.test_case.TestCase):
             },
         }
 
-        old_write_ops = tkw.WRITE_OPS.copy()
         try:
             analyze_kernel_access.reset()
             tensor_accesses = analyze_kernel_access(
@@ -4578,9 +4577,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
             self.assertListEqual(write_names, ["out_ptr"])
         finally:
-            tkw.WRITE_OPS.clear()
-            tkw.WRITE_OPS.update(old_write_ops)
-            tkw.analyze_kernel_access.reset()
+            tkw.unregister_kernel_access_op(custom_store, kind="write")
 
     @unittest.skipIf(
         not has_triton_experimental_host_tma(),
@@ -4754,13 +4751,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
             }
         }
 
-        old_tma_store_ops = tkw.TMA_STORE_OPS.copy()
-        old_write_ops = tkw.WRITE_OPS.copy()
-        old_read_ops = tkw.READ_OPS.copy()
         try:
-            tkw.register_kernel_access_op(
-                custom_store, tkw._safe_at_least_one_arg, kind="tma_store"
-            )
+            tkw.register_kernel_access_op(custom_store, [0], kind="tma_store")
             tkw.register_kernel_access_op(custom_load, [0], kind="read")
             with (
                 mock.patch.object(
@@ -4808,14 +4800,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 else:
                     self.assertIn("mul2_kernel_0.run(", code)
         finally:
-            tkw.TMA_STORE_OPS.clear()
-            tkw.TMA_STORE_OPS.update(old_tma_store_ops)
-            tkw.WRITE_OPS.clear()
-            tkw.WRITE_OPS.update(old_write_ops)
-            tkw.READ_OPS.clear()
-            tkw.READ_OPS.update(old_read_ops)
-            tkw.get_tma_stores.reset()
-            tkw.analyze_kernel_access.reset()
+            tkw.unregister_kernel_access_op(custom_store, kind="tma_store")
+            tkw.unregister_kernel_access_op(custom_load, kind="read")
 
 
 if HAS_GPU:
