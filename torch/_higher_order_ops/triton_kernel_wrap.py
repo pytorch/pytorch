@@ -960,11 +960,6 @@ def _read_write_indexes(indexes: Sequence[int] | ReadWriteIndexes) -> ReadWriteI
     return lambda op: list(index_tuple)
 
 
-def _reset_kernel_access_analysis_caches() -> None:
-    get_tma_stores.reset()
-    analyze_kernel_access.reset()
-
-
 def register_kernel_access_op(
     name: str,
     *,
@@ -973,12 +968,7 @@ def register_kernel_access_op(
     is_tma_store: bool = False,
     ignore_if: IgnoreUnknownOp | None = None,
 ) -> None:
-    """
-    Register a Triton op for kernel read/write analysis.
-
-    Registration invalidates the memoized TTIR access analysis so callers can
-    register custom backend ops after earlier analyses have run.
-    """
+    """Register a Triton op for kernel read/write analysis."""
     if is_tma_store and write_indexes is None:
         raise AssertionError(
             f"{name} is marked as a TMA store but has no write indexes"
@@ -993,7 +983,6 @@ def register_kernel_access_op(
         is_tma_store=is_tma_store,
         ignore_if=ignore_if,
     )
-    _reset_kernel_access_analysis_caches()
 
 
 def unregister_kernel_access_op(name: str) -> None:
@@ -1001,11 +990,10 @@ def unregister_kernel_access_op(name: str) -> None:
     Unregister a Triton op from kernel read/write analysis.
 
     This is mainly useful for tests and temporary backend registrations. It
-    invalidates the memoized TTIR access analysis for the same reason as
-    registration.
+    does not reset memoized analysis, so direct analyze_kernel_access callers
+    must reset their own caches.
     """
     _KERNEL_ACCESS_OPS.pop(name, None)
-    _reset_kernel_access_analysis_caches()
 
 
 def register_kernel_access_unknown_op(name: str, ignore: IgnoreUnknownOp) -> None:

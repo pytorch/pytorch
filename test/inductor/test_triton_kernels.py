@@ -4537,7 +4537,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
         self.assertListEqual(write_names, ["workspace"])
 
-    def test_register_kernel_access_op_invalidates_analysis_cache(self):
+    def test_register_kernel_access_op_updates_direct_analysis_after_reset(self):
         from torch._higher_order_ops import triton_kernel_wrap as tkw
         from torch._higher_order_ops.triton_kernel_wrap import (
             analyze_kernel_access,
@@ -4567,6 +4567,9 @@ class MutationTests(torch._inductor.test_case.TestCase):
             self.assertEqual(len(tensor_accesses.read_writes.writes), 0)
 
             tkw.register_kernel_access_op(custom_store, write_indexes=[0])
+            # identify_accessed_tensors resets production caches per invocation.
+            # Direct analyze_kernel_access callers must reset before re-analysis.
+            analyze_kernel_access.reset()
             tensor_accesses = analyze_kernel_access(
                 functions,
                 "main",
