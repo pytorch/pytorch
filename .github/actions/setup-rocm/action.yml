@@ -40,7 +40,8 @@ runs:
       if: always()
       shell: bash
       run: |
-        amd-smi static
+        amd-smi monitor -ptumv
+        amd-smi list
 
     - name: Runner health check rocminfo
       if: always()
