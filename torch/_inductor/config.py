@@ -236,10 +236,10 @@ runtime_triton_nan_asserts = (
 )
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
 
-# Disable by default in fbcode
-alignment_asserts = (
-    os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS", "0" if is_fbcode() else "1")
-    == "1"
+alignment_asserts: bool = Config(
+    justknob="pytorch/inductor:alignment_asserts",
+    env_name_force="TORCHINDUCTOR_ALIGNMENT_ASSERTS",
+    default=True,
 )
 
 # enable loop reordering based on input orders
