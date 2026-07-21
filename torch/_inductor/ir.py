@@ -541,9 +541,7 @@ def try_match_insignificant_strides(
 
     storage, old_layout = as_storage_and_layout(tensor)
     new_stride = [*old_layout.stride]
-    is_empty = any(
-        V.graph.sizevars.statically_known_equals(s, 0) for s in tensor.get_size()
-    )
+    is_empty = tensor.is_zero_elements()
     for i, s in enumerate(tensor.get_size()):
         if is_empty or V.graph.sizevars.statically_known_leq(s, 1):
             new_stride[i] = strides[i]
