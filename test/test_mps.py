@@ -2836,6 +2836,34 @@ class TestMPS(TestCaseMPS):
         # Regression test for https://github.com/pytorch/pytorch/issues/96113
         torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/190491: small
+    # per-row variance with small eps used to collapse rstd to rsqrt(eps) on MPS.
+    @parametrize("axis_size", [8, 8192])
+    def test_layer_norm_small_variance(self, axis_size):
+        a, eps = 1e-4, 1e-9  # var = a^2 = 1e-8, far below the old 1e-6 clamp
+        row = torch.tensor([a, -a] * (axis_size // 2), dtype=torch.float32)
+        cpu_x = row.repeat(4, 1)
+        weight = torch.rand(axis_size)
+        bias = torch.rand(axis_size)
+        cpu_y = F.layer_norm(cpu_x, (axis_size,), weight, bias, eps)
+        mps_y = F.layer_norm(
+            cpu_x.to('mps'), (axis_size,), weight.to('mps'), bias.to('mps'), eps)
+        self.assertEqual(mps_y, cpu_y)
+
+    # The row base offset (tg_id * axis_size) overflows 32 bits for tensors with
+    # more than 2**32 elements; check a row past that boundary still normalizes.
+    @serialTest()
+    @largeTensorTest("18GB", device="mps")
+    @parametrize("axis_size", [4096, 8192])  # 4096 -> single_row, 8192 -> looped
+    def test_layer_norm_large_tensor_indexing(self, axis_size):
+        M = 2**32 // axis_size + 1  # last row starts at element offset >= 2**32
+        x = torch.randn(M, axis_size, dtype=torch.bfloat16, device="mps")
+        mps_y = F.layer_norm(x, (axis_size,))
+        # layer_norm is row-independent, so validate just the last row (whose
+        # offset overflows uint32) against CPU without a full-tensor CPU pass.
+        cpu_last = F.layer_norm(x[-1].float().cpu(), (axis_size,))
+        self.assertEqual(mps_y[-1].float().cpu(), cpu_last, atol=1e-2, rtol=1e-2)
+
     def test_ifft(self):
         # See: https://github.com/pytorch/pytorch/issues/124096
         device = torch.device("mps")
@@ -7889,6 +7917,33 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(output, input_cpu.to(torch.half))
         self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/189961
+    def test_copy_equal_strided_non_dense_mps_to_cpu(self):
+        parent = torch.zeros(20)
+        dst = parent[::2]
+        src = torch.arange(20., device="mps")[::2]
+        dst.copy_(src)
+        expected_parent = torch.zeros(20)
+        expected_parent[::2] = torch.arange(0., 20., 2.)
+        self.assertEqual(dst, torch.arange(0., 20., 2.))
+        # out-of-view slots of the destination's storage must stay untouched
+        self.assertEqual(parent, expected_parent)
+
+        # column view into a preallocated CPU matrix
+        mcpu = torch.zeros(4, 4)
+        mmps = torch.arange(16., device="mps").reshape(4, 4)
+        mcpu[:, 0].copy_(mmps[:, 0])
+        expected = torch.zeros(4, 4)
+        expected[:, 0] = torch.arange(0., 16., 4.)
+        self.assertEqual(mcpu, expected)
+
+        # dtype-converting variant exercises the castout path
+        half_parent = torch.zeros(20, dtype=torch.half)
+        half_dst = half_parent[::2]
+        half_dst.copy_(src)
+        self.assertEqual(half_dst, torch.arange(0., 20., 2., dtype=torch.half))
+        self.assertEqual(half_parent[1::2], torch.zeros(10, dtype=torch.half))
 
     def test_cast_mps_to_mps(self):
         def helper(src_dtype, dst_dtype):
@@ -15098,7 +15153,7 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertEqual(out, torch.zeros(2, device=device), atol=0, rtol=0)
 
     def test_nextafter(self, device="mps"):
-        for dtype in [torch.float16, torch.float32]:
+        for dtype in [torch.float16, torch.bfloat16, torch.float32]:
             x = torch.tensor([1, -1, 0, 0, 2, -2], device=device, dtype=dtype)
             y = torch.tensor([2, -2, -1, 1, -3, 3], device=device, dtype=dtype)
             na = torch.nextafter(x, y)
@@ -15107,6 +15162,7 @@ class TestAdvancedIndexing(TestCaseMPS):
             # greater is broken on MPS, see https://github.com/pytorch/pytorch/issues/125051
             na_ge_x_cpu = na_cpu > x.cpu()
             self.assertEqual(na_ge_x_mps, na_ge_x_cpu)
+            self.assertEqual(na, na_cpu)
 
 
 class TestRNNMPS(TestCaseMPS):
@@ -15209,6 +15265,57 @@ class TestRNNMPS(TestCaseMPS):
         for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/190057:
+    # dropout=1.0 produced 0 * inf = NaN between layers.
+    def test_lstm_dropout_one(self):
+        torch.manual_seed(0)
+        lstm_cpu = nn.LSTM(4, 4, num_layers=2, dropout=1.0)
+        x = torch.randn(3, 2, 4)
+        out_cpu, _ = lstm_cpu(x)
+        out_mps, _ = copy.deepcopy(lstm_cpu).to("mps")(x.to("mps"))
+        # dropout=1 zeroes the inter-layer input deterministically on both
+        self.assertEqual(out_mps.cpu(), out_cpu)
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/190056:
+    # backward ignored the inter-layer dropout mask. Resetting the device RNG
+    # before every forward pins the mask, making central differences valid.
+    def test_lstm_dropout_backward_matches_finite_differences(self):
+        torch.manual_seed(0)
+        lstm = nn.LSTM(4, 4, num_layers=2, dropout=0.5).to("mps")
+        lstm.train()
+
+        def loss(x):
+            torch.mps.manual_seed(42)
+            out, _ = lstm(x)
+            return out.sum()
+
+        x = torch.randn(3, 2, 4, device="mps", requires_grad=True)
+        loss(x).backward()
+        eps = 1e-2
+
+        for flat_idx in (0, 5, 17):
+            analytic = x.grad.flatten()[flat_idx].item()
+            with torch.no_grad():
+                xp = x.detach().clone()
+                xp.flatten()[flat_idx] += eps
+                xm = x.detach().clone()
+                xm.flatten()[flat_idx] -= eps
+                numeric = ((loss(xp) - loss(xm)) / (2 * eps)).item()
+            self.assertEqual(analytic, numeric, atol=2e-3, rtol=5e-2,
+                             msg=f"input grad mismatch at flat index {flat_idx}")
+
+        # layer-0 weight gradient only reaches the loss through the mask
+        w = lstm.weight_ih_l0
+        analytic_w = w.grad.flatten()[0].item()
+        with torch.no_grad():
+            orig = w.flatten()[0].item()
+            w.flatten()[0] += eps
+            lp = loss(x.detach()).item()
+            w.flatten()[0] = orig - eps
+            lm = loss(x.detach()).item()
+            w.flatten()[0] = orig
+        self.assertEqual(analytic_w, (lp - lm) / (2 * eps), atol=2e-3, rtol=5e-2)
 
     def test_lstm_eval_after_train_same_shape(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180744
