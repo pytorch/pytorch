@@ -35,7 +35,6 @@ PyObject* dynamo_frame_hook_default(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag);
 
-
 inline int use_frame_hook(void) {
   static int cached_result = -1;
   if (cached_result == -1) {
@@ -45,13 +44,32 @@ inline int use_frame_hook(void) {
   return cached_result;
 }
 
+inline int use_sys_monitoring(void) {
+  static int cached_result = -1;
+  if (cached_result == -1) {
+    const char* env_value = getenv("PYTORCH_USE_SYS_MONITORING");
+    cached_result = (env_value != NULL && env_value[0] == '1') ? 1 : 0;
+  }
+  return cached_result;
+}
+
+inline int dynamo_uses_code_replacement(void) {
+  return use_frame_hook() || use_sys_monitoring();
+}
+
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 static int64_t current_isolate_recompiles_id = -1;
 
 static PyObject* eval_frame_callback_get(void) {
-  void* result = (use_frame_hook() ? PyThread_tss_get(&hook_callback_key)
-                                   : PyThread_tss_get(&eval_frame_callback_key));
+  // hook_callback_key is shared between frame_hook and sys.monitoring modes
+  // since both have the same semantics (return a replacement code object).
+  void* result;
+  if (dynamo_uses_code_replacement()) {
+    result = PyThread_tss_get(&hook_callback_key);
+  } else {
+    result = PyThread_tss_get(&eval_frame_callback_key);
+  }
 
   if (unlikely(result == NULL)) {
     return (PyObject*)Py_None;
@@ -61,7 +79,7 @@ static PyObject* eval_frame_callback_get(void) {
 }
 
 void eval_frame_callback_set(PyObject* obj) {
-  if (use_frame_hook()) {
+  if (dynamo_uses_code_replacement()) {
     PyThread_tss_set(&hook_callback_key, obj);
   } else {
     PyThread_tss_set(&eval_frame_callback_key, obj);
@@ -250,6 +268,7 @@ static PyObject* dynamo_custom_eval_frame_shim(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
   FAIL_IF_FRAME_HOOK_ENABLED();
+  FAIL_IF_SYS_MONITORING_ENABLED();
   return dynamo__custom_eval_frame_shim(tstate, frame, throw_flag);
 }
 
@@ -258,6 +277,7 @@ PyObject* dynamo_eval_frame_default(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
   FAIL_IF_FRAME_HOOK_ENABLED();
+  FAIL_IF_SYS_MONITORING_ENABLED();
   if (tstate == NULL) {
     tstate = PyThreadState_GET();
   }
@@ -270,6 +290,7 @@ PyObject* dynamo_eval_frame_default(
 
 static void enable_eval_frame_shim(PyThreadState* tstate) {
   FAIL_IF_FRAME_HOOK_ENABLED();
+  FAIL_IF_SYS_MONITORING_ENABLED();
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       &dynamo_custom_eval_frame_shim) {
     DEBUG_CHECK(previous_eval_frame == NULL);
@@ -281,6 +302,7 @@ static void enable_eval_frame_shim(PyThreadState* tstate) {
 
 static void enable_eval_frame_default(PyThreadState* tstate) {
   FAIL_IF_FRAME_HOOK_ENABLED();
+  FAIL_IF_SYS_MONITORING_ENABLED();
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       previous_eval_frame) {
     DEBUG_CHECK(previous_eval_frame != NULL);
@@ -316,6 +338,7 @@ static PyObject* dynamo_eval_custom_code_impl(
   DEBUG_NULL_CHECK(code);
 
   FAIL_IF_FRAME_HOOK_ENABLED();
+  FAIL_IF_SYS_MONITORING_ENABLED();
 #if IS_PYTHON_3_11_PLUS
 
   // Generate Python function object and _PyInterpreterFrame in a way similar to
@@ -550,7 +573,7 @@ static PyObject* dynamo__custom_eval_frame_shim(
   PyObject* callback = eval_frame_callback_get();
 
   if (Py_IsNone(callback)) {
-    if (use_frame_hook()) {
+    if (dynamo_uses_code_replacement()) {
       return dynamo_frame_hook_default(tstate, frame, throw_flag);
     } else {
       return dynamo_eval_frame_default(tstate, frame, throw_flag);
@@ -618,6 +641,8 @@ static PyObject* increment_working_threads(
     if (state->active_dynamo_threads > 0) {
       if (use_frame_hook()) {
         enable_frame_hook_shim(tstate);
+      } else if (use_sys_monitoring()) {
+        enable_sys_monitoring_shim(tstate);
       } else {
         enable_eval_frame_shim(tstate);
       }
@@ -638,6 +663,8 @@ static PyObject* decrement_working_threads(
       if (state->active_dynamo_threads == 0) {
         if (use_frame_hook()) {
           clear_frame_hook_shim(tstate);
+        } else if (use_sys_monitoring()) {
+          clear_sys_monitoring_shim(tstate);
         } else {
           enable_eval_frame_default(tstate);
         }
@@ -798,6 +825,168 @@ void clear_frame_hook_shim(PyThreadState* tstate) {
 
 // end hook code
 
+// sys.monitoring code
+
+#if IS_PYTHON_3_12_PLUS
+
+static PyObject* py_monitoring_callback_obj = NULL;  // PyCFunction object
+
+// Track the code object we just installed via replace_frame_code so that
+// the next PY_START -- which CPython fires synchronously on the new code's
+// own RESUME -- can be passed through without re-entering Dynamo.
+static __thread PyObject* sys_monitoring_pending_replacement = NULL;
+
+static PyObject* py_sys_monitoring_callback(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  if (nargs != 2) {
+    PyErr_SetString(PyExc_TypeError, "PY_START callback expects 2 args");
+    return NULL;
+  }
+  PyObject* code_obj = args[0];
+
+  if (sys_monitoring_pending_replacement == code_obj) {
+    // CPython is re-firing PY_START on the code we just installed. Pass it
+    // through unchanged.
+    sys_monitoring_pending_replacement = NULL;
+    Py_INCREF(code_obj);
+    return code_obj;
+  }
+
+  PyThreadState* tstate = PyThreadState_GET();
+  PyObject* callback = eval_frame_callback_get();
+
+  if (callback == Py_None) {
+    // Dynamo not active on this thread; return original code (no replacement).
+    Py_INCREF(code_obj);
+    return code_obj;
+  }
+
+#if IS_PYTHON_3_13_PLUS
+  THP_EVAL_API_FRAME_OBJECT* frame = tstate->current_frame;
+#else
+  THP_EVAL_API_FRAME_OBJECT* frame = tstate->cframe->current_frame;
+#endif
+  if (frame == NULL) {
+    Py_INCREF(code_obj);
+    return code_obj;
+  }
+
+  // sys.monitoring increments tstate->tracing while invoking this callback.
+  // Dynamo's eval_frame_cpp.cpp short-circuits to eval_default when
+  // tstate->tracing > 0 (to avoid recursion when foreign tracers are active).
+  // Temporarily clear it so Dynamo can actually run.
+  int saved_tracing = tstate->tracing;
+  tstate->tracing = 0;
+  PyObject* result = dynamo__custom_eval_frame_shim(tstate, frame, 0);
+  tstate->tracing = saved_tracing;
+
+  if (result == NULL) {
+    return NULL;
+  }
+  if (!PyCode_Check(result)) {
+    Py_DECREF(result);
+    Py_INCREF(code_obj);
+    return code_obj;
+  }
+  if (result != code_obj) {
+    sys_monitoring_pending_replacement = result;
+  }
+  return result;
+}
+
+static PyMethodDef py_sys_monitoring_method_def = {
+    "torch_dynamo_py_start",
+    (PyCFunction)(void(*)(void))py_sys_monitoring_callback,
+    METH_FASTCALL,
+    "Torch Dynamo sys.monitoring PY_START callback"};
+
+void enable_sys_monitoring_shim(PyThreadState* tstate) {
+  DEBUG_TRACE0("enable_sys_monitoring_shim entered");
+
+  if (py_monitoring_callback_obj == NULL) {
+    py_monitoring_callback_obj =
+        PyCFunction_New(&py_sys_monitoring_method_def, NULL);
+    if (py_monitoring_callback_obj == NULL) {
+      return;
+    }
+  }
+
+  // Call into Python to handle sys.monitoring registration and setup
+  PyObject* sys_monitoring_module = PyImport_ImportModule("torch._dynamo.sys_monitoring");
+  if (sys_monitoring_module == NULL) {
+    DEBUG_TRACE0("Failed to import torch._dynamo.sys_monitoring");
+    PyErr_Clear();
+    return;
+  }
+
+  PyObject* enable_func = PyObject_GetAttrString(sys_monitoring_module, "enable_sys_monitoring");
+  Py_DECREF(sys_monitoring_module);
+
+  if (enable_func == NULL) {
+    DEBUG_TRACE0("Failed to get enable_sys_monitoring function");
+    PyErr_Clear();
+    return;
+  }
+
+  PyObject* result = PyObject_CallFunctionObjArgs(enable_func, py_monitoring_callback_obj, NULL);
+  Py_DECREF(enable_func);
+
+  if (result == NULL) {
+    DEBUG_TRACE0("enable_sys_monitoring call failed");
+    PyErr_Clear();
+  } else {
+    Py_DECREF(result);
+  }
+}
+
+void clear_sys_monitoring_shim(PyThreadState* tstate) {
+  DEBUG_TRACE0("clear_sys_monitoring_shim entered");
+
+  // Call into Python to handle sys.monitoring cleanup
+  PyObject* sys_monitoring_module = PyImport_ImportModule("torch._dynamo.sys_monitoring");
+  if (sys_monitoring_module == NULL) {
+    DEBUG_TRACE0("Failed to import torch._dynamo.sys_monitoring");
+    PyErr_Clear();
+    return;
+  }
+
+  PyObject* disable_func = PyObject_GetAttrString(sys_monitoring_module, "disable_sys_monitoring");
+  Py_DECREF(sys_monitoring_module);
+
+  if (disable_func == NULL) {
+    DEBUG_TRACE0("Failed to get disable_sys_monitoring function");
+    PyErr_Clear();
+    return;
+  }
+
+  PyObject* result = PyObject_CallFunctionObjArgs(disable_func, NULL);
+  Py_DECREF(disable_func);
+
+  if (result == NULL) {
+    DEBUG_TRACE0("disable_sys_monitoring call failed");
+    PyErr_Clear();
+  } else {
+    Py_DECREF(result);
+  }
+}
+
+#else
+
+void enable_sys_monitoring_shim(PyThreadState* tstate) {
+  PyErr_SetString(
+      PyExc_RuntimeError,
+      "PYTORCH_USE_SYS_MONITORING requires Python 3.12+");
+}
+
+void clear_sys_monitoring_shim(PyThreadState* tstate) {}
+
+#endif
+
+// end sys.monitoring code
+
+
 static PyObject* set_skip_guard_eval_unsafe(
     PyObject* dummy,
     PyObject* skip_guard_unsafe_flag) {
@@ -896,6 +1085,14 @@ static PyObject* is_frame_hook_enabled_py(PyObject* dummy, PyObject* obj) {
   }
 }
 
+static PyObject* is_sys_monitoring_enabled_py(PyObject* dummy, PyObject* obj) {
+  if (use_sys_monitoring()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 
 static int clear_state(PyObject* module) {
   ModuleState* state = PyModule_GetState(module);
@@ -974,10 +1171,10 @@ static PyMethodDef _methods[] = {
     {"set_eval_frame_isolate_recompiles_id", set_eval_frame_isolate_recompiles_id_py, METH_O, NULL},
     {"get_eval_frame_isolate_recompiles_id", get_eval_frame_isolate_recompiles_id_py, METH_NOARGS, NULL},
     {"is_frame_hook_enabled", is_frame_hook_enabled_py, METH_NOARGS, NULL},
+    {"is_sys_monitoring_enabled", is_sys_monitoring_enabled_py, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
-    PyModuleDef_HEAD_INIT,
     .m_name = "torch._C._dynamo.eval_frame",
     .m_doc = "Module containing hooks to override eval_frame",
     .m_size = sizeof(ModuleState),
@@ -996,8 +1193,9 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     return NULL;
   }
 
-  int result = (use_frame_hook() ? PyThread_tss_create(&hook_callback_key)
-                                 : PyThread_tss_create(&eval_frame_callback_key));
+  int result = (dynamo_uses_code_replacement()
+                    ? PyThread_tss_create(&hook_callback_key)
+                    : PyThread_tss_create(&eval_frame_callback_key));
   CHECK(result == 0);
 
   Py_INCREF(Py_None);

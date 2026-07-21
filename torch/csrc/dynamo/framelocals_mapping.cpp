@@ -56,6 +56,15 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
       CHECK(value != nullptr && PyCell_Check(value));
       value = PyCell_GET(value);
     }
+    else if (kind & CO_FAST_CELL && value != nullptr && PyCell_Check(value)) {
+      // A cell variable slot -- including an argument promoted to a cell by the
+      // MAKE_CELL prologue -- holds a PyCell only once the prologue has run.
+      // That is the case when the frame is inspected at RESUME (sys.monitoring's
+      // PY_START); before the prologue (PEP 523) the slot still holds the raw
+      // value (or NULL for a not-yet-created cell). Deref only when it is
+      // actually a cell, so PEP 523 is unaffected.
+      value = PyCell_GET(value);
+    }
 
     DEBUG_CHECK(0 <= i && i < _framelocals.size());
     _framelocals[i] = value;
