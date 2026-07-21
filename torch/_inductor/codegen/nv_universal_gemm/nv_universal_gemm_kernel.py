@@ -13,6 +13,7 @@ import hashlib
 import importlib
 import logging
 import re
+import threading
 from typing import Any, TYPE_CHECKING
 
 from torch._inductor.codegen.common import (
@@ -227,10 +228,14 @@ def _worker_nvgemm_autotuning_precompile(
     so CuTeDSL compilation is process-isolated (no thread-safety issues).
     Returns (None, elapsed_us) for compatibility with the precompile callback.
     """
-    import os
     import time
 
-    os.environ.update(extra_env)
+    # Share the persistent-worker env/cache handling used by PyCodeCache workers.
+    from torch._inductor.runtime.compile_tasks import (
+        _apply_subprocess_env_and_clear_caches,
+    )
+
+    _apply_subprocess_env_and_clear_caches(extra_env)
 
     start_ns = time.time_ns()
 
@@ -324,9 +329,17 @@ def _worker_nvgemm_autotuning_precompile(
         # reconstruct exactly that one operator (~us) instead of enumerating the
         # operator space. Done inside the patched region since construction may
         # query max_active_clusters, which the worker can't get from the driver.
-        base_kernel = (
-            metadata.operator_class(metadata) if metadata is not None else None
-        )
+        base_kernel = None
+        if metadata is not None:
+            try:
+                base_kernel = metadata.operator_class(metadata)
+            except Exception:
+                log.warning(
+                    "Failed to reconstruct NVGEMM operator %s from metadata; "
+                    "falling back to argument-based lookup",
+                    kernel_name,
+                    exc_info=True,
+                )
 
         artifact, _, _, was_compiled = _compile_nvgemm(
             variant_name,
@@ -692,21 +705,26 @@ def _nvgemm_run(
         # depends solely on shapes/layout -- fixed for a given mem_key.
         reuse = getattr(artifact, "_nvgemm_reuse", None)
         if reuse is not None:
-            args, kernel = reuse
-            if _update_reuse_args_tensors(
-                variant_name, args, input_tensors, out, epilogue_args
-            ):
-                try:
-                    kernel.run(
-                        args,
-                        artifact,
-                        stream=stream,
-                        workspace=workspace,
-                        assume_supported_args=True,
-                    )
-                finally:
-                    _clear_reuse_args_tensors(variant_name, args, epilogue_args)
-                return
+            args, kernel, reuse_lock = reuse
+            # The cached args are shared mutable state. Serialize the
+            # redirect->launch->clear so concurrent launches on the same cached
+            # artifact (e.g. two graph executions sharing this kernel) don't
+            # stomp each other's runtime tensor pointers.
+            with reuse_lock:
+                if _update_reuse_args_tensors(
+                    variant_name, args, input_tensors, out, epilogue_args
+                ):
+                    try:
+                        kernel.run(
+                            args,
+                            artifact,
+                            stream=stream,
+                            workspace=workspace,
+                            assume_supported_args=True,
+                        )
+                    finally:
+                        _clear_reuse_args_tensors(variant_name, args, epilogue_args)
+                    return
         # No reusable args (e.g. artifact loaded from disk by a subprocess
         # precompile): build them once, then attach below for future calls.
         args = _create_gemm_arguments(
@@ -771,9 +789,22 @@ def _nvgemm_run(
         variant_name, args, input_tensors, out, epilogue_args
     )
     if reuse_supported:
-        artifact._nvgemm_reuse = (args, kernel)
-
-    try:
+        # Publish and launch under the lock so a concurrent reuse-path caller
+        # that picks up these args blocks until this launch has cleared them.
+        reuse_lock = threading.Lock()
+        with reuse_lock:
+            artifact._nvgemm_reuse = (args, kernel, reuse_lock)
+            try:
+                kernel.run(
+                    args,
+                    artifact,
+                    stream=stream,
+                    workspace=workspace,
+                    assume_supported_args=True,
+                )
+            finally:
+                _clear_reuse_args_tensors(variant_name, args, epilogue_args)
+    else:
         kernel.run(
             args,
             artifact,
@@ -781,9 +812,6 @@ def _nvgemm_run(
             workspace=workspace,
             assume_supported_args=True,
         )
-    finally:
-        if reuse_supported:
-            _clear_reuse_args_tensors(variant_name, args, epilogue_args)
 
 
 # Patch both the canonical definition (integration_utils.mma) for callers that

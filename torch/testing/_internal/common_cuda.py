@@ -262,6 +262,8 @@ def evaluate_platform_supports_mx_gemm():
                 return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 14))
         else:
             return SM100OrLater
+    if torch.xpu.is_available():
+        return True
     return False
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
