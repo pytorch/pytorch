@@ -88,6 +88,7 @@ from .utils import (
     _unstable_customized_partition_wrapper,
     cache_on_self,
     cmp,
+    decompose_index,
     device_need_guard,
     get_current_backend,
     get_device_tflops,
@@ -7555,6 +7556,21 @@ class Scheduler:
 
         return str(reasons)
 
+    @staticmethod
+    def _generate_indexing_inverse(
+        read_expr: sympy.Expr,
+        index_var: sympy.Symbol,
+        index_range: sympy.Expr,
+    ) -> sympy.Expr | None:
+        simplified_read = sum(
+            V.graph.sizevars.combine_modular_indexing_pairs(term)
+            for term in sympy.Add.make_args(read_expr)
+        )
+
+        from torch._inductor.invert_expr_analysis import generate_inverse_formula
+
+        return generate_inverse_formula(simplified_read, index_var, index_range)
+
     def _reindex_consumer_for_index_inversion(
         self,
         producer_write: MemoryDep,
@@ -7563,12 +7579,7 @@ class Scheduler:
         consumer: SchedulerNode,
     ) -> _LoopStateSnapshot | None:
         """Flatten an equal-numel layout consumer before index inversion."""
-        if (
-            consumer.is_reduction()
-            or producer_write.index == consumer_write.index
-            or producer_write.size == consumer_write.size
-            or consumer_read.size != consumer_write.size
-        ):
+        if consumer.is_reduction() or consumer_read.size != consumer_write.size:
             return None
 
         flat_size = sympy_product(producer_write.size)
@@ -7579,6 +7590,32 @@ class Scheduler:
         ):
             return None
         if tuple(consumer._sizes[0]) == (flat_size,):
+            return None
+
+        body = consumer._body
+        if (
+            body is None
+            or body.subblocks
+            or len(body.indexing_exprs) != 2
+            or not consumer_write.normalize().is_contiguous()
+        ):
+            return None
+
+        read_exprs = OrderedSet(body.get_read_exprs())
+        iter_vars = body.vars[0]
+        iter_sizes = body.sizes[0]
+        if len(read_exprs) != 1 or len(iter_vars) != len(iter_sizes):
+            return None
+
+        flat_var = sympy.Dummy("reindex_flat", integer=True, nonnegative=True)
+        flattened_read = sympy_subs(
+            next(iter(read_exprs)),
+            dict(zip(iter_vars, decompose_index(flat_var, iter_sizes))),
+        )
+        flattened_read = V.graph.sizevars.simplify_with_ranges(
+            sympy.expand(flattened_read), {flat_var: flat_size}
+        )
+        if self._generate_indexing_inverse(flattened_read, flat_var, flat_size) is None:
             return None
 
         snapshot = _LoopStateSnapshot.create((consumer,))
@@ -7714,21 +7751,12 @@ class Scheduler:
             read_expr_index = "index1"
             write_expr_index = "index0"
 
-        from torch._inductor.invert_expr_analysis import generate_inverse_formula
-
         index_vars = body.vars[0]
         if len(index_vars) != 1:
             return -1
 
-        simplified_terms = []
-        for term in sympy.Add.make_args(read_expr):
-            simplified_terms.append(
-                V.graph.sizevars.combine_modular_indexing_pairs(term)
-            )
-        simplified_read_expr = sum(simplified_terms)
-
-        inverse_formula = generate_inverse_formula(
-            simplified_read_expr, index_vars[0], node2_read.size[0]
+        inverse_formula = self._generate_indexing_inverse(
+            read_expr, index_vars[0], node2_read.size[0]
         )
 
         # formula is not invertible
