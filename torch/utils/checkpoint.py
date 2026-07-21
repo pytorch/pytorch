@@ -1096,7 +1096,22 @@ def _current_user_saved_tensors_hooks():
     return hooks
 
 
-class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
+class _checkpoint_internal_hook(torch.autograd.graph.saved_tensors_hooks):
+    # _user_hooks must only exist while we are on the hooks TLS stack (the
+    # only time _current_user_saved_tensors_hooks can reach it): the graph
+    # retains pack_hook via SavedVariable in a way gc cannot traverse, so a
+    # persistent attribute would give the graph a strong ref to user hooks,
+    # leaking uncollectably whenever those hooks reach back to the graph.
+    def __enter__(self):
+        self.pack_hook._user_hooks = _current_user_saved_tensors_hooks()
+        return super().__enter__()
+
+    def __exit__(self, *args):
+        del self.pack_hook._user_hooks
+        return super().__exit__(*args)
+
+
+class _recomputation_hook(_checkpoint_internal_hook):
     def __init__(self, target_frame_ref: ReferenceType, gid: GraphExecGroup | int) -> None:
         # Dynamo guards on WeakKeyDictionary internals are unstable here
         # (dict length/keys change every call), causing recompilation storms.
@@ -1149,7 +1164,6 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             return x
 
         pack_hook._checkpoint_internal = True  # type: ignore[attr-defined]
-        pack_hook._user_hooks = _current_user_saved_tensors_hooks()  # type: ignore[attr-defined]
         super().__init__(pack_hook, unpack_hook)
 
 
@@ -1163,7 +1177,7 @@ def _run_fn_with_dynamo_disabled(fn, *args, **kwargs):
     return fn(*args, **kwargs)
 
 
-class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
+class _checkpoint_hook(_checkpoint_internal_hook):
     def __init__(self, frame) -> None:
         def pack_hook(x):
             # See Rule 4 above
@@ -1220,7 +1234,6 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             return ret
 
         pack_hook._checkpoint_internal = True  # type: ignore[attr-defined]
-        pack_hook._user_hooks = _current_user_saved_tensors_hooks()  # type: ignore[attr-defined]
         if frame.unpack_error_cb is not None:
             def unpack_hook_with_error_cb(holder):
                 try:

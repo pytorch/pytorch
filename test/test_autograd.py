@@ -16521,9 +16521,10 @@ class TestSelectiveActivationCheckpoint(TestCase):
         with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
             out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
         out.backward()
-        # mm output (MUST_SAVE, via SAC storage) and the two mm inputs
-        # (same tensor, saved by MmBackward during recompute) both fire hooks
-        self.assertTrue(len(packed) >= 1)
+        # Exactly two packs, both during forward: the checkpoint input x
+        # (save_inputs) and the mm output (MUST_SAVE, via SAC storage).
+        # Recompute saves are shadowed by _recomputation_hook and don't fire.
+        self.assertEqual(len(packed), 2)
         self.assertEqual(len(packed), len(unpacked))
 
         x_ref = x.detach().clone().requires_grad_()
@@ -16540,6 +16541,38 @@ class TestSelectiveActivationCheckpoint(TestCase):
             out.backward()
         self.assertEqual(len(packed), 0)
         self.assertEqual(x.grad, x_ref.grad)
+
+    @skipIfTorchDynamo("gc is unreliable under dynamo-wrapped frames")
+    def test_saved_tensors_hooks_no_refcycle_with_stateful_owner(self):
+        # The graph retains checkpoint's internal pack_hook via SavedVariable
+        # in a way gc cannot traverse, so if pack_hook kept a permanent ref to
+        # the user hooks, a hook owner reaching back to the output would leak
+        # uncollectably. _user_hooks must not outlive the hooks TLS scope.
+        class Hooks:
+            def pack(self, t):
+                return t.detach()
+
+            def unpack(self, t):
+                return t
+
+        def scenario():
+            x = torch.randn(4, 4, requires_grad=True)
+            hooks = Hooks()
+
+            # No tensor args: keeps save_inputs from packing x through the
+            # user hooks, which would reach hooks via a pre-existing path.
+            def fn():
+                return torch.mm(x, x).relu().sum()
+
+            with torch.autograd.graph.saved_tensors_hooks(hooks.pack, hooks.unpack):
+                out = checkpoint(fn, use_reentrant=False)
+            hooks.output = out  # owner -> graph back-reference
+            return weakref.ref(hooks), weakref.ref(out)
+
+        hooks_ref, out_ref = scenario()
+        gc.collect()
+        self.assertIsNone(hooks_ref())
+        self.assertIsNone(out_ref())
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_function_with_more_than_one_output(self):
