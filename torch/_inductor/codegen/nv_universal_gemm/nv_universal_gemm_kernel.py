@@ -13,6 +13,7 @@ import hashlib
 import importlib
 import logging
 import re
+import threading
 from typing import Any, TYPE_CHECKING
 
 from torch._inductor.codegen.common import (
@@ -86,6 +87,8 @@ def _compile_nvgemm(
     epilogue_args=None,
     epilogue_source="",
     fallback_fn=None,
+    cc: int | None = None,
+    base_kernel=None,
 ):
     """Compile an NVGEMM artifact, trying a fallback (disk cache) first.
 
@@ -95,6 +98,8 @@ def _compile_nvgemm(
 
     kernel_obj: pre-resolved kernel (skips _lookup_gemm_kernel).
     kernel_name: kernel name for _lookup_gemm_kernel.
+    base_kernel: pre-reconstructed operator (from metadata passed by the main
+        process); lets _lookup_gemm_kernel skip operator discovery entirely.
     args_kwargs: extra kwargs forwarded to _create_gemm_arguments.
     fallback_fn: callable(kernel) -> artifact | None, called before
         compiling (for disk cache lookup).
@@ -118,6 +123,9 @@ def _compile_nvgemm(
             kernel_name,  # pyrefly: ignore[bad-argument-type]
             epilogue_args=epilogue_args,
             epilogue_source=epilogue_source,
+            args=args if cc is not None else None,
+            cc=cc,
+            base_kernel=base_kernel,
         )
 
     artifact = None
@@ -211,6 +219,8 @@ def _worker_nvgemm_autotuning_precompile(
     swizzle_type_a=None,
     swizzle_type_b=None,
     has_bias_epilogue=False,
+    swap_ab=False,
+    metadata=None,
 ):
     """Subprocess worker: compile one NVGEMM kernel and save to disk cache.
 
@@ -247,6 +257,20 @@ def _worker_nvgemm_autotuning_precompile(
             device=output_tensor_meta.device,
             dtype=output_tensor_meta.dtype,
         )
+
+    # swap_ab: the kernel was selected for the transposed (N, M) problem, so the
+    # worker must swap operands here too -- both to resolve the kernel via the
+    # args-filtered fast lookup and to key the disk cache the same way the
+    # benchmark's make_run_fn does (it swaps before compiling). Mirrors the
+    # runtime swap in _nvgemm_run. swap_ab and a bias epilogue never co-occur.
+    if swap_ab and len(input_tensors) >= 2:
+        a, b = input_tensors[0], input_tensors[1]
+        if len(input_tensors) >= 4:
+            sa, sb = input_tensors[2], input_tensors[3]
+            input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
+        else:
+            input_tensors = (b.t(), a.t()) + input_tensors[2:]
+        out = out.t()
 
     helper_kwargs: dict[str, Any] = {}
     if variant_name == "SCALED_GEMM":
@@ -293,8 +317,30 @@ def _worker_nvgemm_autotuning_precompile(
     )
     disk_fn_cache: dict = {}
 
+    # cc for the args-filtered fast kernel lookup: workers can't query the CUDA
+    # driver, so use the bundled device capability instead of rebuilding the
+    # full ~294K-kernel manifest just to resolve one kernel by name.
+    major, minor = cuda_ctx.device_capability
+    worker_cc = major * 10 + minor
+
     patched = _patch_max_active_clusters(cuda_ctx.max_active_clusters)
     try:
+        # Best path: the main process passed the chosen operator's metadata, so
+        # reconstruct exactly that one operator (~us) instead of enumerating the
+        # operator space. Done inside the patched region since construction may
+        # query max_active_clusters, which the worker can't get from the driver.
+        base_kernel = None
+        if metadata is not None:
+            try:
+                base_kernel = metadata.operator_class(metadata)
+            except Exception:
+                log.warning(
+                    "Failed to reconstruct NVGEMM operator %s from metadata; "
+                    "falling back to argument-based lookup",
+                    kernel_name,
+                    exc_info=True,
+                )
+
         artifact, _, _, was_compiled = _compile_nvgemm(
             variant_name,
             input_tensors,
@@ -304,6 +350,8 @@ def _worker_nvgemm_autotuning_precompile(
             args_kwargs=helper_kwargs,
             epilogue_args=epilogue_args,
             epilogue_source=epilogue_source,
+            cc=worker_cc,
+            base_kernel=base_kernel,
         )
 
         if was_compiled:
@@ -402,20 +450,44 @@ def _lookup_gemm_kernel(
     *,
     epilogue_args: Any | None = None,
     epilogue_source: str = "",
+    args: Any | None = None,
+    cc: int | None = None,
+    base_kernel: Any | None = None,
 ):
     from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
         get_efc_kernel_with_epilogue,
         get_kernel_by_name,
+        get_kernel_by_name_via_args,
     )
 
+    # Best path (subprocess precompile): the caller reconstructed the exact
+    # operator from metadata passed by the main process (operator_class(metadata),
+    # ~us), so we skip operator discovery entirely -- no args-filtered query and
+    # no full manifest.
+    # Fast path (base_kernel absent): resolve the single named kernel via an
+    # args-filtered query (~0.05s) instead of building the full manifest (~14s).
+    fast = args is not None and cc is not None
+
     if epilogue_args is None:
-        kernel = get_kernel_by_name(kernel_name)
+        kernel = base_kernel
+        # Fast path can miss when the named kernel doesn't support these exact
+        # args (e.g. a swap_ab kernel selected for the transposed problem while
+        # the worker holds the original operands); fall back to the manifest.
+        if kernel is None and fast:
+            kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
+        if kernel is None:
+            kernel = get_kernel_by_name(kernel_name)
         if kernel is None:
             raise RuntimeError(f"Could not find kernel: {kernel_name}")
         return kernel
 
+    if base_kernel is None and fast:
+        base_kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
     kernel = get_efc_kernel_with_epilogue(
-        kernel_name, epilogue_args, epilogue_source=epilogue_source
+        kernel_name,
+        epilogue_args,
+        epilogue_source=epilogue_source,
+        base_kernel=base_kernel,
     )
     if kernel is None:
         raise RuntimeError(f"Could not find EFC kernel: {kernel_name}")
@@ -508,6 +580,79 @@ def _rewrap_efc_compiled_obj(compiled_fn, kernel, epilogue_args=None):
     return wrapped_launch
 
 
+def _update_reuse_args_tensors(
+    variant_name, args, input_tensors, out, epilogue_args
+) -> bool:
+    """Redirect the cached args at this call's runtime tensors.
+
+    A cache hit on ``mem_key`` guarantees identical shapes/strides/dtypes, so
+    only the data pointers change; mutating ``TensorWrapper._runtime_tensor`` in
+    place is sufficient and lets us skip the (expensive) _create_gemm_arguments
+    rebuild. Returns False for GROUPED_GEMM (unsupported), signalling the caller
+    to use the rebuild path.
+    """
+    if variant_name == "GROUPED_GEMM":
+        return False
+    if variant_name == "SCALED_GEMM":
+        a, b, scale_a, scale_b = input_tensors
+        args.A.quantized.tensor._runtime_tensor = a
+        args.A.scale.tensor._runtime_tensor = scale_a
+        args.B.quantized.tensor._runtime_tensor = b
+        args.B.scale.tensor._runtime_tensor = scale_b
+        args.out.tensor._runtime_tensor = out
+        return True
+    # GEMM: dense mm and the EFC bias/epilogue addmm path.
+    a, b = input_tensors
+    args.A.tensor._runtime_tensor = a
+    args.B.tensor._runtime_tensor = b
+    args.out.tensor._runtime_tensor = out
+    epilogue = getattr(args, "epilogue", None)
+    if epilogue is not None:
+        for name, wrapper in epilogue.tensors.items():
+            val = epilogue_args.tensors[name]
+            wrapper._runtime_tensor = getattr(val, "runtime_tensor", val)
+    return True
+
+
+def _clear_reuse_args_tensors(variant_name, args, epilogue_args):
+    """Drop the runtime tensors held by cached args after a launch.
+
+    kernel.run enqueues the launch synchronously and reads the pointers during
+    the call, and the caller keeps the tensors alive, so clearing our cached
+    references is safe. Required for cudagraph capture, which fails if a cached
+    object retains a tensor from the graph pool between iterations.
+    """
+    if variant_name == "SCALED_GEMM":
+        args.A.quantized.tensor._runtime_tensor = None
+        args.A.scale.tensor._runtime_tensor = None
+        args.B.quantized.tensor._runtime_tensor = None
+        args.B.scale.tensor._runtime_tensor = None
+        args.out.tensor._runtime_tensor = None
+        return
+    args.A.tensor._runtime_tensor = None
+    args.B.tensor._runtime_tensor = None
+    args.out.tensor._runtime_tensor = None
+    epilogue = getattr(args, "epilogue", None)
+    if epilogue is not None:
+        for wrapper in epilogue.tensors.values():
+            wrapper._runtime_tensor = None
+        # kernel.run traces the epilogue on first launch, and the trace retains
+        # the real output/aux tensors in example_inputs (used only for tracing,
+        # not the launch). Replace them with meta tensors so the cached args
+        # hold no real storage -- otherwise an intermediate output stays live
+        # and CUDA graph capture fails. Mirrors _fake_epilogue_metadata.
+        import torch
+
+        te = getattr(epilogue, "traced_epilogue", None)
+        example_inputs = getattr(te, "example_inputs", None) if te else None
+        if example_inputs:
+            for name, val in example_inputs.items():
+                if isinstance(val, torch.Tensor) and val.device.type != "meta":
+                    example_inputs[name] = torch.empty_strided(
+                        val.shape, val.stride(), dtype=val.dtype, device="meta"
+                    )
+
+
 def _nvgemm_run(
     variant_name: str,
     kernel_name: str,
@@ -528,9 +673,13 @@ def _nvgemm_run(
     aux_tensors: tuple = (),
     swap_ab: bool = False,
 ):
-    if swap_ab and len(input_tensors) >= 4:
-        a, b, sa, sb = input_tensors[:4]
-        input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
+    if swap_ab and len(input_tensors) >= 2:
+        a, b = input_tensors[0], input_tensors[1]
+        if len(input_tensors) >= 4:
+            sa, sb = input_tensors[2], input_tensors[3]
+            input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
+        else:
+            input_tensors = (b.t(), a.t()) + input_tensors[2:]
         # Swapped GEMM computes (N, M) = out.t(); write it zero-copy into a
         # transposed (column-major) view of the real (M, N) output -- no temp
         # buffer / copy (the kernel handles column-major C).
@@ -550,6 +699,34 @@ def _nvgemm_run(
 
     if mem_key in compiled_cache:
         artifact = compiled_cache[mem_key]
+        # Fast path: reuse the previously-built args, redirecting only the
+        # runtime tensor pointers. Skips _create_gemm_arguments, whose cost
+        # (get_type_hints + deepcopy + full epilogue/layout reprocessing)
+        # depends solely on shapes/layout -- fixed for a given mem_key.
+        reuse = getattr(artifact, "_nvgemm_reuse", None)
+        if reuse is not None:
+            args, kernel, reuse_lock = reuse
+            # The cached args are shared mutable state. Serialize the
+            # redirect->launch->clear so concurrent launches on the same cached
+            # artifact (e.g. two graph executions sharing this kernel) don't
+            # stomp each other's runtime tensor pointers.
+            with reuse_lock:
+                if _update_reuse_args_tensors(
+                    variant_name, args, input_tensors, out, epilogue_args
+                ):
+                    try:
+                        kernel.run(
+                            args,
+                            artifact,
+                            stream=stream,
+                            workspace=workspace,
+                            assume_supported_args=True,
+                        )
+                    finally:
+                        _clear_reuse_args_tensors(variant_name, args, epilogue_args)
+                    return
+        # No reusable args (e.g. artifact loaded from disk by a subprocess
+        # precompile): build them once, then attach below for future calls.
         args = _create_gemm_arguments(
             variant_name,
             input_tensors,
@@ -605,13 +782,36 @@ def _nvgemm_run(
 
         compiled_cache[mem_key] = artifact
 
-    kernel.run(
-        args,
-        artifact,
-        stream=stream,
-        workspace=workspace,
-        assume_supported_args=True,
+    # Attach the built args for reuse on subsequent calls (skipped for
+    # GROUPED_GEMM, where _update_reuse_args_tensors returns False). This runs
+    # for both the disk-loaded rebuild branch and the fresh-compile branch.
+    reuse_supported = _update_reuse_args_tensors(
+        variant_name, args, input_tensors, out, epilogue_args
     )
+    if reuse_supported:
+        # Publish and launch under the lock so a concurrent reuse-path caller
+        # that picks up these args blocks until this launch has cleared them.
+        reuse_lock = threading.Lock()
+        with reuse_lock:
+            artifact._nvgemm_reuse = (args, kernel, reuse_lock)
+            try:
+                kernel.run(
+                    args,
+                    artifact,
+                    stream=stream,
+                    workspace=workspace,
+                    assume_supported_args=True,
+                )
+            finally:
+                _clear_reuse_args_tensors(variant_name, args, epilogue_args)
+    else:
+        kernel.run(
+            args,
+            artifact,
+            stream=stream,
+            workspace=workspace,
+            assume_supported_args=True,
+        )
 
 
 # Patch both the canonical definition (integration_utils.mma) for callers that
