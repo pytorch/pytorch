@@ -2691,6 +2691,12 @@ def calc_conv_nd_return_shape(
     dims = input_tensor.shape[2:]
     if is_transposed:
         out_channels = groups * weight.shape[1]
+        torch._check(
+            input_tensor.shape[1] == weight.shape[0],
+            lambda: f"Given transposed=1, weight of size {list(weight.shape)}, "
+            f"expected input{list(input_tensor.shape)} to have {weight.shape[0]} "
+            f"channels, but got {input_tensor.shape[1]} channels instead",
+        )
     else:
         out_channels = weight.shape[0]
         torch._check(

@@ -2291,6 +2291,15 @@ class TestMetaKernelConv(TestCase):
                 torch.randn(4, 2, 3, device="meta"),
             )
 
+        # transposed conv validates input channels against weight[0]
+        with self.assertRaisesRegex(
+            RuntimeError, "expected input.* to have 6 channels, but got 8 channels"
+        ):
+            torch.nn.functional.conv_transpose1d(
+                torch.randn(2, 8, 10, device="meta"),
+                torch.randn(6, 4, 3, device="meta"),
+            )
+
 
 class TestMetaKernelRegistrations(TestCase):
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
