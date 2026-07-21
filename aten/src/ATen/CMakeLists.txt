@@ -573,10 +573,6 @@ else()
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
 endif()
 
-if(USE_CUDA AND USE_ROCM)
-  message(FATAL_ERROR "ATen doesn't not currently support simultaneously building with CUDA and ROCM")
-endif()
-
 if(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
   # Next two lines are needed because TunableOp uses third-party/fmt
