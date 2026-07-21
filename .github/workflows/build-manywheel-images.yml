@@ -30,6 +30,7 @@ concurrency:
 
 jobs:
   select-runner:
+    if: github.repository_owner == 'pytorch'
     uses: ./.github/workflows/_select-release-runner.yml
 
   build:
