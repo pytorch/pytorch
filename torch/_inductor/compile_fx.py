@@ -142,10 +142,11 @@ from .virtualized import V
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
-    from torch._inductor.output_code import _StrideExprStr
+    from torch._inductor.output_code import _StrideExprStr, CompiledFnRunner
     from torch._ops import OpOverload
     from torch.export.pt2_archive._package_weights import Weights
 
+    from .codecache import CacheInfo
     from .ir import ExternKernelNode
 
 
@@ -513,6 +514,47 @@ def _get_subgraph_names(
     yield from fx_subgraph_names
 
 
+def _get_nested_region_inductor_config_patches(
+    gm: GraphModule,
+) -> dict[str, Any] | None:
+    nested_config = getattr(gm, "meta", {}).get("nested_region_config")
+    patches = getattr(nested_config, "inductor_config_patches", None)
+    return patches or None
+
+
+def _patch_nested_region_inductor_config(
+    gm: GraphModule,
+) -> AbstractContextManager[None]:
+    patches = _get_nested_region_inductor_config_patches(gm)
+    if patches is None:
+        return contextlib.nullcontext()
+    return config.patch(patches)
+
+
+def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
+    # Seed each invoke_subgraph subgraph module's meta from the node meta, which
+    # (unlike a GraphModule's meta) survives FX transforms. Re-run at the start of
+    # every pass phase because each is an independent entry point that may see a
+    # freshly-created module (e.g. the partitioned backward graph); setdefault
+    # makes re-entry on an already-seeded module a no-op.
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        nested_config = node.meta.get("custom", {}).get("nested_region_config")
+        if nested_config is None:
+            continue
+        subgraph_node = node.args[0]
+        if (
+            not isinstance(subgraph_node, torch.fx.Node)
+            or subgraph_node.op != "get_attr"
+            or not isinstance(subgraph_node.target, str)
+        ):
+            continue
+        subgraph = getattr(gm, subgraph_node.target, None)
+        if isinstance(subgraph, GraphModule):
+            subgraph.meta.setdefault("nested_region_config", nested_config)
+
+
 def _recursive_pre_grad_passes(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -522,17 +564,19 @@ def _recursive_pre_grad_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
-        if not config.use_pre_grad_passes:
-            return gm
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_pre_grad_passes:
+                return gm
 
-        add_passes = config.add_pre_grad_passes
-        remove_passes = config.remove_pre_grad_passes
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            # as we don't have recursive example inputs, passing empty set here
-            new_subgraph = _recursive_pre_grad_passes(subgraph, ())
-            setattr(gm, subgraph_name, new_subgraph)
-        return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
+            add_passes = config.add_pre_grad_passes
+            remove_passes = config.remove_pre_grad_passes
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                # as we don't have recursive example inputs, passing empty set here
+                new_subgraph = _recursive_pre_grad_passes(subgraph, ())
+                setattr(gm, subgraph_name, new_subgraph)
+            return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
 def _recursive_joint_graph_passes(
@@ -552,29 +596,35 @@ def _recursive_joint_graph_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="joint_graph_pass_time_us",
     ):
-        if not config.use_joint_graph_passes:
-            return gm
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_joint_graph_passes:
+                return gm
 
-        # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
-        # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
-        # invoke_subgraph HOP before calling the partitioner on the outer graph.
-        # AOTAutograd has access to partition_fn, which internally calls the
-        # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
-        # skip_invoke_subgraph.
-        old_subgraph_names = OrderedSet(_get_subgraph_names(gm, skip_invoke_subgraph))
-        for subgraph_name in old_subgraph_names:
-            _run_on_sub_graph_module(subgraph_name)
-
-        out_gm = joint_graph_passes(gm, input_device)
-
-        # Some joint graph passes may create new sub graph module. Run one round
-        # for the newly created graph modules.
-        # We should not skip graphs for invoke_subgraph HOPs for newly
-        # generated subgraphs.
-        for subgraph_name in _get_subgraph_names(out_gm, skip_invoke_subgraph=False):
-            if subgraph_name not in old_subgraph_names:
+            # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
+            # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
+            # invoke_subgraph HOP before calling the partitioner on the outer graph.
+            # AOTAutograd has access to partition_fn, which internally calls the
+            # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
+            # skip_invoke_subgraph.
+            old_subgraph_names = OrderedSet(
+                _get_subgraph_names(gm, skip_invoke_subgraph)
+            )
+            for subgraph_name in old_subgraph_names:
                 _run_on_sub_graph_module(subgraph_name)
-        return out_gm
+
+            out_gm = joint_graph_passes(gm, input_device)
+
+            # Some joint graph passes may create new sub graph module. Run one round
+            # for the newly created graph modules.
+            # We should not skip graphs for invoke_subgraph HOPs for newly
+            # generated subgraphs.
+            for subgraph_name in _get_subgraph_names(
+                out_gm, skip_invoke_subgraph=False
+            ):
+                if subgraph_name not in old_subgraph_names:
+                    _run_on_sub_graph_module(subgraph_name)
+            return out_gm
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
@@ -583,13 +633,15 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         log_pt2_compile_event=True,
         dynamo_compile_column_us="post_grad_pass_time_us",
     ):
-        if not config.use_post_grad_passes:
-            return
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_post_grad_passes:
+                return
 
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            _recursive_post_grad_passes(subgraph, is_inference)
-        post_grad_passes(gm, is_inference)
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                _recursive_post_grad_passes(subgraph, is_inference)
+            post_grad_passes(gm, is_inference)
 
 
 def split_const_gm(
@@ -933,6 +985,8 @@ def _compile_fx_inner(
             f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
         )
 
+    _propagate_invoke_subgraph_nested_region_config(gm)
+
     if graph_kwargs.get("cudagraphs") is None:
         graph_kwargs["cudagraphs"] = BoxedBool(config.triton.cudagraphs)
     if config.save_args:
@@ -995,7 +1049,7 @@ def _compile_fx_inner(
 
         mb_compiled_graph: OutputCode | None = None
         key_info = None
-        cache_info = None
+        cache_info: CacheInfo | None = None
         remote_cache = None
         constants = CompiledFxGraphConstantsWithGm(gm)
         # TODO: this time will be slightly inconsistent with the one computed
@@ -1184,7 +1238,7 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
-        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
+        cache_event_metadata = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
             metadata=cache_event_metadata,
@@ -1611,7 +1665,7 @@ class _InProcessFxCompile(FxCompile):
                     # not going to touch it for now
 
                     compiled_fn: Any
-                    compiled_fn_runner = None
+                    compiled_fn_runner: CompiledFnRunner | None = None
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
@@ -3258,6 +3312,7 @@ def make_graph_return_tuple(
     with gm.graph.inserting_before(node):
         gm.graph.output(rv)
     gm.graph.erase_node(node)
+    gm.recompile()
     if not graph_returns_tuple(gm):
         raise AssertionError("Expected graph to return a tuple")
 

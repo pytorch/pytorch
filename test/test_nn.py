@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, with_ieee_matmul_precision
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -60,8 +60,6 @@ from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
-
-AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
 if TEST_WITH_ROCM:
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
@@ -2086,62 +2084,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inputs = torch.randn((), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_data_parallel_with_empty_parameter_shapes(self):
-        class MyModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param_2d = nn.Parameter(torch.zeros(0, 16))
-                self.param_3d = nn.Parameter(torch.zeros(3, 0, 8))
-                self.param_4d = nn.Parameter(torch.zeros(2, 0, 4, 5))
-                self.param_normal = nn.Parameter(torch.ones(2, 3))
-
-            def forward(self, x):
-                return x + self.param_normal.sum()
-
-        model = MyModule()
-        devices = [0, 1]
-        model_parallel = nn.DataParallel(model, device_ids=devices)
-        model_parallel.cuda(devices[0])
-        input_tensor = torch.ones(4, 2, device=f'cuda:{devices[0]}')
-        output = model_parallel(input_tensor)
-        self.assertEqual(model_parallel.module.param_2d.shape, torch.Size([0, 16]))
-        self.assertEqual(model_parallel.module.param_3d.shape, torch.Size([3, 0, 8]))
-        self.assertEqual(model_parallel.module.param_4d.shape, torch.Size([2, 0, 4, 5]))
-        self.assertEqual(model_parallel.module.param_normal.shape, torch.Size([2, 3]))
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_broadcast_double_backwards_gpu(self):
-        tensors = (torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
-                   torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
-                   torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double))
-        # TODO(#50743): the following segfaults with check_batched_grad=True
-        _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), tensors,
-                                     check_batched_grad=False)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_broadcast_not_requiring_grad(self):
-        variables = [
-            torch.randn(1, 2, device='cuda', requires_grad=True),
-            torch.randn(1, 2, device='cuda', requires_grad=False),
-            torch.randn(1, 2, device='cuda', requires_grad=False),
-            torch.randn(1, 2, device='cuda', requires_grad=True),
-            torch.randn(1, 2, device='cuda', requires_grad=True),
-        ]
-        broadcasted_variables = Broadcast.apply((0, 1), *variables)
-        for output_idx, broadcasted_var in enumerate(broadcasted_variables):
-            input_var = variables[output_idx % len(variables)]
-            self.assertEqual(input_var.requires_grad, broadcasted_var.requires_grad)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_broadcast_no_grad(self):
-        x = torch.randn(1, 2, dtype=torch.float32, requires_grad=True, device='cuda')
-        with torch.no_grad():
-            broadcasted = Broadcast.apply((0, 1), x)
-        self.assertTrue(x.requires_grad)
-        for output in broadcasted:
-            self.assertFalse(output.requires_grad)
-
     def test_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
@@ -2452,7 +2394,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
         loss = F.mse_loss(inputs, targets, weight=weight, reduction='mean')
         expected_loss = torch.tensor(0.25)
-        self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+        self.assertTrue(torch.isclose(loss, expected_loss), lambda msg: f"{msg}\nExpected {expected_loss}, but got {loss}")
 
     def test_weighted_l1_loss_with_weights(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
@@ -2460,7 +2402,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
         loss = F.l1_loss(inputs, targets, weight=weight, reduction='mean')
         expected_loss = torch.tensor(0.5)
-        self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+        self.assertTrue(torch.isclose(loss, expected_loss), lambda msg: f"{msg}\nExpected {expected_loss}, but got {loss}")
 
     def test_weighted_huber_loss(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
@@ -3499,91 +3441,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         hidden_h_shape = correct_hidden_h_shape
         hidden_c_shape = update_shape(correct_hidden_c_shape, 0, bad_size)
         test(input_shape, hidden_h_shape, hidden_c_shape)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_rnn_check_device(self):
-        import copy
-        input_size = 3
-        hidden_size = 5
-        num_layers = 2
-        batch_size = 4
-        seq_len = 6
-        num_directions = 1
-
-        correct_input_shape = (seq_len, batch_size, input_size)
-        correct_hidden_shape = (num_layers * num_directions, batch_size, hidden_size)
-        rnn_modes = ['RNN', 'GRU', 'LSTM']
-
-        for mode in rnn_modes:
-            model = getattr(nn, mode)(input_size, hidden_size, num_layers)
-            model_cuda = copy.deepcopy(model).to('cuda:0')
-            input = torch.randn(correct_input_shape)
-            hidden = torch.randn(correct_hidden_shape)
-
-            # input and weights are not at the same device
-            rnn_param_device_msg = (
-                r"(?:Input and parameter tensors are not at the same device|"
-                r"Expected all tensors to be on the same device)"
-            )
-            with self.assertRaisesRegex(RuntimeError, rnn_param_device_msg):
-                model(input.to('cuda:0'))
-            with self.assertRaisesRegex(RuntimeError, rnn_param_device_msg):
-                model_cuda(input)
-
-            # input and hiddens are not at the same device
-            rnn_hidden_device_msg = (
-                r"(?:Input and hidden tensors are not at the same device|"
-                r"Expected all tensors to be on the same device)"
-            )
-            with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
-                if mode == 'LSTM':
-                    model(input, (hidden.to('cuda:0'), hidden.to('cuda:0')))
-                else:
-                    model(input, (hidden.to('cuda:0')))
-            with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
-                if mode == 'LSTM':
-                    model_cuda(input.to('cuda:0'), (hidden, hidden))
-                else:
-                    model_cuda(input.to('cuda:0'), (hidden))
-
-            # hidden tensors are not at the same CUDA device
-            if mode == 'LSTM':
-                with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
-                    model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_projections_lstm_check_device(self):
-        input_size = 3
-        hidden_size = 5
-        proj_size = 2
-        num_layers = 2
-        batch_size = 4
-        seq_len = 6
-        num_directions = 1
-
-        correct_input_shape = (seq_len, batch_size, input_size)
-        correct_hidden_h_shape = (num_layers * num_directions, batch_size, proj_size)
-        correct_hidden_c_shape = (num_layers * num_directions, batch_size, hidden_size)
-
-        model = nn.LSTM(input_size, hidden_size, num_layers, proj_size=proj_size)
-        input = torch.randn(correct_input_shape)
-        hidden_h = torch.randn(correct_hidden_h_shape)
-        hidden_c = torch.randn(correct_hidden_c_shape)
-
-        # input and weights are not at the same device
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Input and parameter tensors are not at the same device"):
-            model(input.to('cuda:0'))
-
-        # input and hiddens are not at the same device
-        with self.assertRaisesRegex(RuntimeError,
-                                    r"Input and hidden tensors are not at the same device"):
-            model(input, (hidden_h.to('cuda:0'), hidden_c.to('cuda:0')))
-
-        # hidden tensors are not at the same CUDA device
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Input and hidden tensors are not at the same device"):
-            model(input.to('cuda:0'), (hidden_h.to('cuda:0'), hidden_c.to('cuda:1')))
 
     def test_rnn_initial_hidden_state(self):
         rnn_modes = ['RNN', 'GRU', 'LSTM']
@@ -5063,6 +4920,68 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         out = F.cosine_similarity(a, b)
         self.assertEqual(out, torch.ones(2, dtype=torch.float))
 
+        # Check keepdim=True preserves the reduced dimension
+        input_size = (1, 3, 2, 1)
+        input1 = torch.randn(input_size)
+        input2 = torch.randn(input_size)
+        out_squeeze = F.cosine_similarity(input1, input2, dim=1)
+        out_keepdim = F.cosine_similarity(input1, input2, dim=1, keepdim=True)
+        self.assertEqual(out_squeeze.size(), (1, 2, 1))
+        self.assertEqual(out_keepdim.size(), (1, 1, 2, 1))
+        self.assertEqual(out_keepdim.squeeze(1), out_squeeze)
+
+        # Check keepdim=False (default) matches original behavior
+        out_default = F.cosine_similarity(input1, input2, dim=1, keepdim=False)
+        self.assertEqual(out_default, out_squeeze)
+
+    def test_cosine_similarity_mixed_precision(self):
+        # test that CPU and CUDA behave consistently with various eps values
+
+        # test: Negative eps should raise error on both CPU and CUDA
+        x1 = torch.tensor(-1.6437e+10, dtype=torch.float64)
+        x2 = torch.full((3, 8, 2, 6), float('nan'), dtype=torch.float16)
+        eps_negative = -9.74982e+23
+
+        with self.assertRaisesRegex(RuntimeError, "eps must be non-negative"):
+            F.cosine_similarity(x1, x2, dim=0, eps=eps_negative)
+
+        if torch.cuda.is_available():
+            x1_cuda = x1.cuda()
+            x2_cuda = x2.cuda()
+            with self.assertRaisesRegex(RuntimeError, "eps must be non-negative"):
+                F.cosine_similarity(x1_cuda, x2_cuda, dim=0, eps=eps_negative)
+
+        # test: Large positive eps that overflows dtype - should produce consistent results
+        # CPU and CUDA should both handle overflow consistently (producing inf/nan)
+        eps_large_positive = 9.74982e+23  # Overflows float16
+        result_cpu = F.cosine_similarity(x1, x2, dim=0, eps=eps_large_positive)
+        self.assertTrue(torch.all(torch.isnan(result_cpu)) or torch.all(torch.isinf(result_cpu)))
+
+        if torch.cuda.is_available():
+            result_cuda = F.cosine_similarity(x1_cuda, x2_cuda, dim=0, eps=eps_large_positive)
+            # both should produce NaN or inf consistently
+            self.assertTrue(torch.all(torch.isnan(result_cuda)) or torch.all(torch.isinf(result_cuda)))
+
+        # test: Normal positive eps - should work correctly on both CPU and CUDA
+        x3 = torch.randn(10, 128, dtype=torch.float32)
+        x4 = torch.randn(10, 128, dtype=torch.float32)
+        result_cpu = F.cosine_similarity(x3, x4, dim=1, eps=1e-8)
+        self.assertEqual(result_cpu.shape, torch.Size([10]))
+        self.assertTrue(torch.all(result_cpu >= -1.0) and torch.all(result_cpu <= 1.0))
+
+        if torch.cuda.is_available():
+            x3_cuda = x3.cuda()
+            x4_cuda = x4.cuda()
+            result_cuda = F.cosine_similarity(x3_cuda, x4_cuda, dim=1, eps=1e-8)
+            self.assertTrue(torch.allclose(result_cpu, result_cuda.cpu(), rtol=1e-5, atol=1e-5))
+
+        # test: Float16 inputs with appropriate eps
+        x5 = torch.ones(2, 3, dtype=torch.float16)
+        x6 = torch.ones(2, 3, dtype=torch.float16)
+        result = F.cosine_similarity(x5, x6, dim=1, eps=1e-8)
+        self.assertEqual(result.dtype, torch.float16)
+        self.assertEqual(result.shape, torch.Size([2]))
+        self.assertTrue(torch.all(torch.isclose(result, torch.ones(2, dtype=torch.float16), rtol=1e-3)))
 
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
@@ -8280,13 +8199,6 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    # affine_grid does a K=3 matmul; grid_sample's bilinear interp then
-    # amplifies any matmul drift by the input's contrast (up to ~90× near
-    # step-edge corners in this test). The test's intent is algorithmic
-    # correctness vs scipy's CPU affine_transform reference, not matmul
-    # precision — disable reduced-precision matmul on both CPU and GPU.
-    # See https://github.com/jeffdaily/tf32_analysis.
-    @with_ieee_matmul_precision
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8544,10 +8456,6 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    # See test_affine_2d_rotate90: reduced-precision matmul noise in
-    # affine_grid (K=3) is amplified by grid_sample's bilinear interp.
-    # https://github.com/jeffdaily/tf32_analysis
-    @with_ieee_matmul_precision
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8598,10 +8506,6 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    # See test_affine_2d_rotate90: reduced-precision matmul noise in
-    # affine_grid (K=3) is amplified by grid_sample's trilinear interp.
-    # https://github.com/jeffdaily/tf32_analysis
-    @with_ieee_matmul_precision
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -9606,12 +9510,6 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypes(torch.float, torch.double)
-    # Test asserts GPU RNN slowpath (cudnn disabled) matches CPU. The
-    # gradient check uses a tight explicit atol=5e-5 designed for FP32;
-    # TF32 drift in the backward GEMMs (measured ~3e-3) exceeds that by
-    # ~50x but is unrelated to what the test verifies. See
-    # https://github.com/jeffdaily/tf32_analysis.
-    @with_ieee_matmul_precision
     def test_rnn_fused(self, device, dtype):
 
         def copy_rnn(rnn1, rnn2):
@@ -12215,7 +12113,7 @@ class TestNNDeviceType(NNTestCase):
         # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
         grad_fn_str = str(loss_cudnn.grad_fn)
         self.assertTrue("Miopen" in grad_fn_str or "Cudnn" in grad_fn_str,
-                        f"Expected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
+                        lambda msg: f"{msg}\nExpected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
@@ -12245,7 +12143,7 @@ class TestNNDeviceType(NNTestCase):
         # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
         grad_fn_str = str(loss_cudnn.grad_fn)
         self.assertTrue("Miopen" in grad_fn_str or "Cudnn" in grad_fn_str,
-                        f"Expected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
+                        lambda msg: f"{msg}\nExpected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
@@ -12561,6 +12459,43 @@ class TestNNDeviceType(NNTestCase):
         print(logits.numel(), labels.numel(), loss.numel())
         self.assertTrue(torch.allclose(loss_cpu, loss.cpu(), rtol=1e-4, atol=1e-4))
 
+    # Ref: https://github.com/pytorch/pytorch/issues/190139
+    @onlyCUDA
+    @largeTensorTest("5GB", "cuda")
+    def test_nll_loss2d_backward_large_sample_offset(self, device):
+        batch_size = 2**16 + 1
+        num_classes = 2**15
+        ignore_index = -100
+
+        # Reduced backward only uses input metadata. Expanding a scalar avoids
+        # materializing another four-GiB tensor.
+        input = torch.empty(
+            (),
+            device=device,
+            dtype=torch.float16,
+        ).expand(batch_size, num_classes, 1, 1)
+        target = torch.full(
+            (batch_size, 1, 1),
+            ignore_index,
+            dtype=torch.int64,
+            device=device,
+        )
+        target[-1] = 0
+        one = torch.ones((), dtype=torch.float16, device=device)
+
+        grad_input = torch.ops.aten.nll_loss2d_backward.default(
+            one,
+            input,
+            target,
+            None,
+            F._Reduction.get_enum("sum"),
+            ignore_index,
+            one,
+        )
+
+        torch.cuda.synchronize()
+        self.assertEqual(grad_input[-1, 0, 0, 0], -1)
+
     def _nll_loss_helper(self, input_size, reduction, expected, device, dtype):
         input = torch.rand(input_size, requires_grad=True, device=device, dtype=dtype)
         num_channels = input_size[1]
@@ -12698,7 +12633,7 @@ if __name__ == '__main__':
                           or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
                           or 'illegal memory access' in stderr)
         self.assertTrue(has_cuda_assert or has_hip_assert,
-                        f"Expected device assert error in stderr, got: {stderr}")
+                        lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}")
 
 
 
@@ -13941,6 +13876,24 @@ if __name__ == '__main__':
             self.assertEqual(out[0, 0, 0], 1 / numel)
 
     @onlyCUDA
+    @largeTensorTest("24GB", "cuda")
+    def test_avg_pool3d_backward_64bit_indexing(self, device):
+        # The overlapping-window avg_pool3d backward path scatters gradients
+        # through an atomicAdd kernel that computed the destination offset with
+        # 32-bit ints, so on inputs with more than INT_MAX elements the offset
+        # wrapped around and silently corrupted the gradient. Use the smallest
+        # overlapping config (kernel 2, stride 1) that pushes the per-element
+        # offset past INT_MAX.
+        x = torch.ones((1, 1, 240000000, 3, 3), device=device, dtype=torch.float16, requires_grad=True)
+        out = F.avg_pool3d(x, kernel_size=2, stride=1)
+        out.sum().backward()
+        # An interior voxel near the end of the buffer sits at an offset above
+        # INT_MAX and is covered by all 2**3 windows, so its gradient must be
+        # exactly 1.0; with the 32-bit offset it stays ~0 because the atomic
+        # adds land at wrapped-around locations instead.
+        self.assertEqual(x.grad[0, 0, -2, 1, 1], 1.0)
+
+    @onlyCUDA
     def test_softmax_backward_smem(self, device):
         torch.manual_seed(0)
         # We use smem for tensors that have > 1024 elements and size >= 4096 bytes.
@@ -14490,19 +14443,19 @@ if __name__ == '__main__':
                     worst_linear_bias_grad_err_kwargs = dict(module_kwargs)
 
         self.assertLessEqual(maximal_input_grad_err, feps,
-                             msg=f"worst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
         self.assertLessEqual(maximal_linear_weight_grad_err, feps,
-                             msg=f"worst linear_weight-grad err {maximal_linear_weight_grad_err} from kwargs={worst_linear_weight_grad_err_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst linear_weight-grad err {maximal_linear_weight_grad_err} from kwargs={worst_linear_weight_grad_err_kwargs}")
         self.assertLessEqual(maximal_linear_bias_grad_err, feps,
-                             msg=f"worst linear_bias-grad err {maximal_linear_bias_grad_err} from kwargs={worst_linear_bias_grad_err_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst linear_bias-grad err {maximal_linear_bias_grad_err} from kwargs={worst_linear_bias_grad_err_kwargs}")
         self.assertLessEqual(maximal_output_max_ulp_diff, expected_max_ulp_diff,
-                             msg=f"worst output ULP {maximal_output_max_ulp_diff} from kwargs={worst_output_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst output ULP {maximal_output_max_ulp_diff} from kwargs={worst_output_kwargs}")
         self.assertLessEqual(maximal_input_grad_max_ulp_diff, expected_input_grad_max_ulp_diff,
-                             msg=f"worst input-grad ULP {maximal_input_grad_max_ulp_diff} from kwargs={worst_input_grad_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst input-grad ULP {maximal_input_grad_max_ulp_diff} from kwargs={worst_input_grad_kwargs}")
         self.assertLessEqual(maximal_linear_weight_grad_max_ulp_diff, expected_weight_grad_max_ulp_diff,
-                             msg=f"worst linear_weight-grad ULP {maximal_linear_weight_grad_max_ulp_diff} from kwargs={worst_linear_weight_grad_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst linear_weight-grad ULP {maximal_linear_weight_grad_max_ulp_diff} from kwargs={worst_linear_weight_grad_kwargs}")
         self.assertLessEqual(maximal_linear_bias_grad_max_ulp_diff, expected_linear_bias_grad_max_ulp_diff,
-                             msg=f"worst linear_bias-grad ULP {maximal_linear_bias_grad_max_ulp_diff} from kwargs={worst_linear_bias_grad_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst linear_bias-grad ULP {maximal_linear_bias_grad_max_ulp_diff} from kwargs={worst_linear_bias_grad_kwargs}")
 
     @parametrize_test("bias", [False, True])
     @dtypes(torch.float32)
@@ -15935,6 +15888,149 @@ if __name__ == '__main__':
         m.eval()
         output = m(input)
         self.assertEqualTypeString(output, input)
+
+    @onlyAccelerator
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    def test_data_parallel_with_empty_parameter_shapes(self, device):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param_2d = nn.Parameter(torch.zeros(0, 16))
+                self.param_3d = nn.Parameter(torch.zeros(3, 0, 8))
+                self.param_4d = nn.Parameter(torch.zeros(2, 0, 4, 5))
+                self.param_normal = nn.Parameter(torch.ones(2, 3))
+
+            def forward(self, x):
+                return x + self.param_normal.sum()
+
+        model = MyModule()
+        model_parallel = nn.DataParallel(model, device_ids=[0, 1])
+        model_parallel.to(device)
+        input_tensor = torch.ones(4, 2, device=device)
+        model_parallel(input_tensor)
+        self.assertEqual(model_parallel.module.param_2d.shape, torch.Size([0, 16]))
+        self.assertEqual(model_parallel.module.param_3d.shape, torch.Size([3, 0, 8]))
+        self.assertEqual(model_parallel.module.param_4d.shape, torch.Size([2, 0, 4, 5]))
+        self.assertEqual(model_parallel.module.param_normal.shape, torch.Size([2, 3]))
+
+    @onlyAccelerator
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    def test_broadcast_double_backwards(self, device):
+        tensors = (torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
+                   torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
+                   torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double))
+        # TODO(#50743): the following segfaults with check_batched_grad=True
+        _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), tensors,
+                                     check_batched_grad=False)
+
+    @onlyAccelerator
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    def test_broadcast_not_requiring_grad(self, device):
+        variables = [
+            torch.randn(1, 2, device=device, requires_grad=True),
+            torch.randn(1, 2, device=device, requires_grad=False),
+            torch.randn(1, 2, device=device, requires_grad=False),
+            torch.randn(1, 2, device=device, requires_grad=True),
+            torch.randn(1, 2, device=device, requires_grad=True),
+        ]
+        broadcasted_variables = Broadcast.apply((0, 1), *variables)
+        for output_idx, broadcasted_var in enumerate(broadcasted_variables):
+            input_var = variables[output_idx % len(variables)]
+            self.assertEqual(input_var.requires_grad, broadcasted_var.requires_grad)
+
+    @onlyAccelerator
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    def test_broadcast_no_grad(self, device):
+        x = torch.randn(1, 2, dtype=torch.float32, requires_grad=True, device=device)
+        with torch.no_grad():
+            broadcasted = Broadcast.apply((0, 1), x)
+        self.assertTrue(x.requires_grad)
+        for output in broadcasted:
+            self.assertFalse(output.requires_grad)
+
+    @deviceCountAtLeast(2)
+    @parametrize_test('mode', ['RNN', 'GRU', 'LSTM'])
+    def test_rnn_check_device(self, devices, mode):
+        import copy
+        input_size = 3
+        hidden_size = 5
+        num_layers = 2
+        batch_size = 4
+        seq_len = 6
+        num_directions = 1
+
+        correct_input_shape = (seq_len, batch_size, input_size)
+        correct_hidden_shape = (num_layers * num_directions, batch_size, hidden_size)
+
+        model = getattr(nn, mode)(input_size, hidden_size, num_layers)
+        model_device = copy.deepcopy(model).to(devices[0])
+        input = torch.randn(correct_input_shape)
+        hidden = torch.randn(correct_hidden_shape)
+
+        # input and weights are not at the same device
+        rnn_param_device_msg = (
+            r"(?:Input and parameter tensors are not at the same device|"
+            r"Expected all tensors to be on the same device)"
+        )
+        with self.assertRaisesRegex(RuntimeError, rnn_param_device_msg):
+            model(input.to(devices[0]))
+        with self.assertRaisesRegex(RuntimeError, rnn_param_device_msg):
+            model_device(input)
+
+        # input and hiddens are not at the same device
+        rnn_hidden_device_msg = (
+            r"(?:Input and hidden tensors are not at the same device|"
+            r"Expected all tensors to be on the same device)"
+        )
+        with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
+            if mode == 'LSTM':
+                model(input, (hidden.to(devices[0]), hidden.to(devices[0])))
+            else:
+                model(input, (hidden.to(devices[0])))
+        with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
+            if mode == 'LSTM':
+                model_device(input.to(devices[0]), (hidden, hidden))
+            else:
+                model_device(input.to(devices[0]), (hidden))
+
+        # hidden tensors are not at the same accelerator device
+        if mode == 'LSTM':
+            with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
+                model(input.to(devices[0]), (hidden.to(devices[0]), hidden.to(devices[1])))
+
+    @deviceCountAtLeast(2)
+    def test_projections_lstm_check_device(self, devices):
+        input_size = 3
+        hidden_size = 5
+        proj_size = 2
+        num_layers = 2
+        batch_size = 4
+        seq_len = 6
+        num_directions = 1
+
+        correct_input_shape = (seq_len, batch_size, input_size)
+        correct_hidden_h_shape = (num_layers * num_directions, batch_size, proj_size)
+        correct_hidden_c_shape = (num_layers * num_directions, batch_size, hidden_size)
+
+        model = nn.LSTM(input_size, hidden_size, num_layers, proj_size=proj_size)
+        input = torch.randn(correct_input_shape)
+        hidden_h = torch.randn(correct_hidden_h_shape)
+        hidden_c = torch.randn(correct_hidden_c_shape)
+
+        # input and weights are not at the same device
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Input and parameter tensors are not at the same device"):
+            model(input.to(devices[0]))
+
+        # input and hiddens are not at the same device
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Input and hidden tensors are not at the same device"):
+            model(input, (hidden_h.to(devices[0]), hidden_c.to(devices[0])))
+
+        # hidden tensors are not at the same accelerator device
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Input and hidden tensors are not at the same device"):
+            model(input.to(devices[0]), (hidden_h.to(devices[0]), hidden_c.to(devices[1])))
 
 
 class TestFunctionalPickle(TestCase):

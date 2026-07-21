@@ -497,8 +497,11 @@ class TestControlDeps(InductorTestCase):
         )
         self.assertTrue(
             void_names & referenced,
-            "no record_event void op appears as an additional_buffer_dep; "
-            f"void_names={void_names}, referenced={referenced}",
+            lambda msg: f"{msg}\n"
+            + (
+                "no record_event void op appears as an additional_buffer_dep; "
+                f"void_names={void_names}, referenced={referenced}"
+            ),
         )
 
     def test_reinplace_not_blocked_by_control_deps_ordering_dep(self):

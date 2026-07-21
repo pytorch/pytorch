@@ -4,11 +4,10 @@ from __future__ import annotations
 import ctypes
 import json
 import logging
-import os
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 import numpy as np
 from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
@@ -16,15 +15,7 @@ from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 import torch
 
 from . import cupti_python
-from .records import (
-    Api,
-    Ctype,
-    FIELD_CTYPE,
-    FIELD_REGISTRY,
-    Kernel,
-    STRING_FIELDS,
-    Sync,
-)
+from .records import Ctype, FIELD_CTYPE, FIELD_REGISTRY, Kernel, STRING_FIELDS, Sync
 
 
 # A registration request: either a plain iterable of activity kinds (meaning "all
@@ -37,6 +28,9 @@ _PY_PROFILER = torch._C._profiler
 # The native CUPTI buffer-pool / layout-capture module (C++ side of the monitor).
 _cupti_monitor_native = _PY_PROFILER._cupti_monitor
 
+if TYPE_CHECKING:
+    from typing_extensions import Self
+
 logger = logging.getLogger(__name__)
 
 # Buffers are a recycling pool bounded by peak concurrent demand, so the count
@@ -44,9 +38,6 @@ logger = logging.getLogger(__name__)
 # CUPTI fills them. Warn once past this many outstanding buffers (1GB at the
 # default 4MB size) as a sign of that backpressure.
 _OUTSTANDING_WARN_THRESHOLD = 256
-
-_DEFAULT_BUFFER_SIZE = 4 * 1024 * 1024
-_DEFAULT_FLUSH_PERIOD_S = 1.0
 
 # flush(sync=True) fences at a SYNC point: it enables SYNCHRONIZATION, captures
 # CUPTI's clock, device-syncs (which produces a SYNCHRONIZATION record at a
@@ -249,13 +240,38 @@ class _SynchronizedClock:
 
 
 class CuptiMonitor:
-    def __init__(
-        self,
-        *,
-        buffer_size: int | None = None,
-        flush_period_s: float | None = None,
-        use_approx_timestamps: bool = False,
-    ) -> None:
+    """Process-wide CUPTI monitor / multiplexer singleton. Like PmSampler, ``CuptiMonitor()``
+    returns the one instance (constructed on first call); its settings are snapshotted from
+    the class config -- set via ``cupti_monitor.configure()`` before first use -- not from
+    constructor args."""
+
+    _instance: CuptiMonitor | None = None
+    _instance_lock = threading.Lock()
+    # Process-wide settings the singleton snapshots when first constructed; set via
+    # configure() (first-come-first-serve, no env var), defaults otherwise. Both cadences
+    # default to -1 (no background flush / drain -- the caller drives flush()).
+    #
+    # use_approx_timestamps defaults OFF; when on, the per-subscriber timestamp callback
+    # re-times HOST and DEVICE records onto the profiler's approx clock (kineto's timebase).
+    # Opt-in via configure(use_approx_timestamps=True).
+    _buffer_size: int = 4 * 1024 * 1024
+    _background_flush_period_s: float = -1.0
+    _background_drain_period_s: float = -1.0
+    _use_approx_timestamps: bool = False
+    _configured: bool = False
+
+    def __new__(cls) -> Self:
+        with cls._instance_lock:
+            if cls._instance is None:
+                inst = super().__new__(cls)
+                inst._init()
+                cls._instance = inst
+                # the live monitor snapshotted the config; lock it
+                cls._configured = True
+            return cls._instance
+
+    def _init(self) -> None:
+        cls = type(self)
         # The monitor is the engine and the multiplexer: it owns the single CUPTI
         # subscription + buffer pool + native decode worker, which demuxes each
         # completed buffer into columns; the monitor drains those columns at flush
@@ -266,37 +282,32 @@ class CuptiMonitor:
         # selection, decoded columnar against a record layout computed from the
         # field-size spec (no captured layout needed). This requires libcupti >= 13.2.
         #
-        # Per-buffer pool size (bytes). An explicit arg wins; otherwise it comes from
-        # TORCH_CUPTI_MONITOR_BUFFER_SIZE (default 4 MiB). Bigger buffers complete less
-        # often (fewer worker wakeups, lower overhead) at the cost of more pinned host
-        # memory and coarser delivery.
-        if buffer_size is None:
-            buffer_size = int(
-                os.environ.get("TORCH_CUPTI_MONITOR_BUFFER_SIZE", _DEFAULT_BUFFER_SIZE)
-            )
-        self.buffer_size = buffer_size
-        # Background-drain flush period (seconds). An explicit arg wins; otherwise it
-        # comes from TORCH_CUPTI_MONITOR_FLUSH_PERIOD_S (default 1.0). Sign-encoded:
-        #   > 0  -> background flush thread drains every flush_period_s.
-        #    0   -> background flush thread drains continuously (no wait between flushes).
-        #   < 0  -> NO background flush thread; the caller must drive flush() itself
-        #           (e.g. at end of step). flush() semantics are unchanged -- the caller
-        #           chooses sync=. This is the escape hatch for a libcupti/libnvperf HES
-        #           thread-safety bug: cuptiActivityFlushAll drives CUPTI's HW-trace
+        # Per-buffer pool size (bytes), default 4 MiB. Bigger buffers complete less often
+        # (fewer worker wakeups, lower overhead) at the cost of more pinned host memory and
+        # coarser delivery. Set process-wide via cupti_monitor.configure().
+        self.buffer_size = cls._buffer_size
+        # Two independent cadences (seconds); they control different things, so they are
+        # separate knobs.
+        #
+        # background_flush_period_s (default -1) -- how often the native decode thread
+        # self-drives cuptiActivityFlushAll, handing CUPTI's completed buffers to the
+        # decoder. Sign-encoded:
+        #   >= 0 -> the decode thread self-flushes on this cadence (0 = continuously).
+        #   <  0 -> NO self-flush; the caller must drive flush() itself (e.g. at end of
+        #           step). This is the default, and the escape hatch for a libcupti/libnvperf
+        #           HES thread-safety bug: cuptiActivityFlushAll drives CUPTI's HW-trace
         #           processing against live collection state and can wild-write the host
         #           heap when it overlaps concurrent host activity (e.g. NCCL collective
-        #           setup). The racy op is the flush, NOT the decode -- the native
-        #           decoder keeps decoding delivered buffers off-thread in this mode (it
-        #           only reads buffers CUPTI already handed over), and that this still
-        #           avoids the corruption is what confirms it. Driving flush() only from
-        #           the quiescent foreground avoids the race.
-        if flush_period_s is None:
-            flush_period_s = float(
-                os.environ.get(
-                    "TORCH_CUPTI_MONITOR_FLUSH_PERIOD_S", _DEFAULT_FLUSH_PERIOD_S
-                )
-            )
-        self.flush_period_s = flush_period_s
+        #           setup). The racy op is the flush, NOT the decode -- the decoder keeps
+        #           decoding delivered buffers off-thread regardless. Driving flush() only
+        #           from the quiescent foreground avoids the race.
+        #
+        # background_drain_period_s (default -1) -- how often the Python thread drains the
+        # decoded columns and dispatches them to observers (GIL work). Same sign-encoding:
+        #   >= 0 -> a background thread drains on this cadence (0 = continuously).
+        #   <  0 -> NO background drain thread; the caller drives drain via flush().
+        self.background_flush_period_s = cls._background_flush_period_s
+        self.background_drain_period_s = cls._background_drain_period_s
         self._cupti = cupti_python.pylibcupti()
         # The CUPTI subscriber handle.
         self._subscriber: int | None = None
@@ -311,8 +322,8 @@ class CuptiMonitor:
         self._lock = threading.Lock()
         self._started = False
         self._callbacks_registered = False
-        self._flush_stop = threading.Event()
-        self._flush_thread: threading.Thread | None = None
+        self._drain_stop = threading.Event()
+        self._drain_and_dispatch_thread: threading.Thread | None = None
         # Serializes _drain_and_dispatch: the native decoder accumulates columns
         # GIL-free; Python drains them here. Only ever one driver at a time (the
         # foreground caller OR the background flush loop, never both), but the lock
@@ -343,10 +354,10 @@ class CuptiMonitor:
         self._chains_gc_ready: list[int] = []
         # Record-timestamp -> unix conversion lives in the clock; the monitor delegates
         # convert_time / now_record_ns to it and calibrates it in start(). Records normally
-        # arrive on the native (realtime) clock; pass use_approx_timestamps=True to try to put
-        # them directly on the approx clock via CUPTI's timestamp callback (opt-in,
-        # sole-subscriber only, and current libcupti rejects it).
-        self._timestamp_callback_enabled = use_approx_timestamps
+        # arrive on the native (realtime) clock; configure(use_approx_timestamps=True) puts
+        # them directly on the approx clock via CUPTI's per-subscriber timestamp callback
+        # (opt-in, sole-subscriber only).
+        self._timestamp_callback_enabled = cls._use_approx_timestamps
         self._clock = _SynchronizedClock()
         self._timestamp_callback_active = False
 
@@ -430,57 +441,72 @@ class CuptiMonitor:
             callback_active=self._timestamp_callback_active,
             native_now=lambda: self._cupti.get_timestamp(cast(int, self._subscriber)),
         )
-        self._flush_stop.clear()
-        # Hand the native decode worker the subscriber + cuptiActivityGetNextRecord_v2
-        # address (so it iterates records without a libcupti link) plus the fence
-        # kind/field so it tracks the SYNCHRONIZATION-END clock for flush(sync). It
-        # then pulls completed buffers and decodes them GIL-free; Python drains the
-        # accumulated columns at flush time, so per-buffer decode never contends with
-        # the training thread.
+        self._drain_stop.clear()
+        # Hand the native decode worker the subscriber + the cuptiActivityGetNextRecord_v2
+        # (and, for self-flush, cuptiActivityFlushAll) addresses, so it iterates records and
+        # drives the periodic flush without a libcupti link, plus the fence kind/field so it
+        # tracks the SYNCHRONIZATION-END clock for flush(sync). It pulls completed buffers and
+        # decodes them GIL-free; Python drains the accumulated columns at flush time, so
+        # per-buffer decode never contends with the training thread. When
+        # background_flush_period_s >= 0 the decode thread also drives the periodic plain
+        # cuptiActivityFlushAll itself (GIL-free) on that cadence, so there is no separate
+        # flush thread; < 0 disables self-flush (the caller drives flush()).
         fn_addr = self._cupti.get_next_record_fn_address()
         if not fn_addr:
             raise RuntimeError(
                 "libcupti is missing cuptiActivityGetNextRecord_v2 (need >= 13.2); "
                 f"loaded {cupti_python.LIBCUPTI_SONAME}"
             )
+        if self.background_flush_period_s >= 0:
+            self_flush = True
+            flush_period_ns = int(self.background_flush_period_s * 1e9)
+            flush_fn = self._cupti.get_flush_fn_address()
+            if not flush_fn:
+                raise RuntimeError(
+                    "libcupti is missing cuptiActivityFlushAll; "
+                    f"loaded {cupti_python.LIBCUPTI_SONAME}"
+                )
+        else:
+            self_flush = False
+            flush_period_ns = 0
+            flush_fn = 0
         _cupti_monitor_native.configure_decoder(
-            cast(int, self._subscriber), fn_addr, int(_FENCE_KIND), _FENCE_END_FIELD
-        )
-        # Drop noisy runtime/driver records in the native decoder by cbid -- CUPTI's own
-        # per-cbid activity filter is NOT_COMPATIBLE under user-defined records
-        from .monitor_trace import driver_kept_cbids, runtime_dropped_cbids
-
-        _cupti_monitor_native.set_cbid_filter(
-            Api.CBID.id,
-            {
-                int(ActivityKind.RUNTIME): (False, list(runtime_dropped_cbids())),
-                int(ActivityKind.DRIVER): (True, list(driver_kept_cbids())),
-            },
+            cast(int, self._subscriber),
+            fn_addr,
+            int(_FENCE_KIND),
+            _FENCE_END_FIELD,
+            self_flush,
+            flush_period_ns,
+            flush_fn,
         )
         _cupti_monitor_native.start_decoder()
-        # Background drain when flush_period_s >= 0 (0 = drain continuously, no wait);
-        # < 0 means no background thread -- the caller drives flush() itself.
-        if self.flush_period_s >= 0:
-            self._flush_thread = threading.Thread(
-                target=self._flush_loop,
-                name="torch-cupti-monitor-flush",
+        # The decode thread self-flushes on background_flush_period_s (configured above); this
+        # Python loop only pulls the decoded columns and dispatches them to observers,
+        # which calls Python back and so must hold the GIL. No loop at background_drain_period_s < 0
+        # -- the caller drives drain via flush() itself.
+        if self.background_drain_period_s >= 0:
+            self._drain_and_dispatch_thread = threading.Thread(
+                target=self._drain_and_dispatch_loop,
+                name="torch-cupti-monitor-drain",
                 daemon=True,
             )
-            self._flush_thread.start()
+            self._drain_and_dispatch_thread.start()
         # Kinds/fields are enabled by _apply_selection as observers register.
         self._started = True
 
     def stop(self) -> None:
         if not self._started:
             return
-        # Stop the background flush loop first so nothing drives flush() (which
-        # touches the subscriber + drains) concurrently with teardown.
-        self._flush_stop.set()
-        if self._flush_thread is not None:
-            self._flush_thread.join(timeout=5.0)
-            if self._flush_thread.is_alive():
-                logger.warning("CUPTI monitor flush thread did not stop within 5s")
-            self._flush_thread = None
+        # Stop the Python drain loop. The decode thread keeps running (and self-flushing
+        # on its cadence) until stop_decoder() below, so it can still decode the fence's
+        # sync record; its plain cadence flush and the fence's foreground flush are both
+        # completed-buffers-only, so overlapping them is harmless.
+        self._drain_stop.set()
+        if self._drain_and_dispatch_thread is not None:
+            self._drain_and_dispatch_thread.join(timeout=5.0)
+            if self._drain_and_dispatch_thread.is_alive():
+                logger.warning("CUPTI monitor drain thread did not stop within 5s")
+            self._drain_and_dispatch_thread = None
         # Flush thread is down (no concurrent poll): final tail-drain + disable the PM sessions
         # while observers are still registered, so their last samples are delivered.
         self._stop_pm_sampler()
@@ -554,7 +580,6 @@ class CuptiMonitor:
             self._cupti.activity_flush_all()
             self._account_dropped_records(0, 0)
             self._drain_and_dispatch()
-            self._poll_pm_sampler()
             return
         added = self._begin_fence_kind()
         try:
@@ -583,7 +608,6 @@ class CuptiMonitor:
             # The fence guarantees everything up to the sync point is decoded; hand
             # the accumulated window to the observers now.
             self._drain_and_dispatch()
-            self._poll_pm_sampler()
 
     def _begin_fence_kind(self) -> bool:
         """Enable + make decodable the SYNCHRONIZATION sync-point kind for the
@@ -658,22 +682,21 @@ class CuptiMonitor:
 
     def _try_arm_approx_timestamp_callback(self, sub_handle: int) -> bool:
         """Best-effort: hand CUPTI the profiler's approx-clock timestamp callback so it
-        stamps activity records on kineto's exact timebase directly. Opt-in via the
-        use_approx_timestamps monitor arg (and only as the sole subscriber); returns False --
+        stamps activity records on kineto's exact timebase directly. Opt-in via
+        configure(use_approx_timestamps=True) (and only as the sole subscriber); returns False --
         leaving records on the CLOCK_REALTIME pass-through -- when disabled or when CUPTI
         rejects it. Set as a per-subscriber attribute (CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK),
         which coexists with the user-defined-record path -- unlike the global
         cuptiActivityRegisterTimestampCallback, which returns CUPTI_ERROR_NOT_COMPATIBLE."""
         if not self._timestamp_callback_enabled:
             return False
-        # cuptiSubscribe latches the device-record correlation base against a pre-existing CUDA
-        # context, so a callback armed now (post-subscribe) can't re-time device records if one
-        # exists -- they stay pinned to CLOCK_REALTIME. Refuse rather than silently drop them.
-        if _has_active_cuda_context():
+        # Older libcupti can't re-time device records when a context predates the subscriber, so
+        # refuse rather than silently drop them; libcupti >= 130303 re-times regardless.
+        if self._cupti.get_version() < 130303 and _has_active_cuda_context():
             logger.warning(
                 "CUPTI monitor: use_approx_timestamps requested but a CUDA context already "
-                "exists; device records were correlated on CLOCK_REALTIME at subscribe and "
-                "cannot be re-timed. Falling back to the CLOCK_REALTIME pass-through."
+                "exists and this libcupti cannot re-time device records; falling back to the "
+                "CLOCK_REALTIME pass-through."
             )
             return False
         addr = _cupti_monitor_native.approximate_time_callback_address()
@@ -792,8 +815,9 @@ class CuptiMonitor:
                 self._pm_sampler = None
 
     def _poll_pm_sampler(self) -> None:
-        """Poll every PM consumer on the monitor's flush cadence -- decode drains, so this pulls the
-        HW ring before it overflows. The final poll at release/stop catches the tail."""
+        """Poll every PM consumer on the monitor's drain cadence (folded into
+        _drain_and_dispatch) -- pulling the HW ring before it overflows. The final poll at
+        release/stop catches the tail."""
         with self._pm_lock:
             for sink, handle in self._pm_consumers.items():
                 self._deliver_pm(sink, handle.poll())
@@ -1072,17 +1096,25 @@ class CuptiMonitor:
             "session_start_unix_ns": self._clock.unix_anchor_ns,
             "session_start_approx_ns": self._clock.approx_anchor_ns,
             "buffer_size": self.buffer_size,
-            "flush_period_ns": int(self.flush_period_s * 1e9),
+            "flush_period_ns": int(self.background_flush_period_s * 1e9),
+            "drain_period_ns": int(self.background_drain_period_s * 1e9),
             "libcupti": cupti_python.LIBCUPTI_SONAME,
         }
 
-    def _flush_loop(self) -> None:
+    def _drain_and_dispatch_loop(self) -> None:
+        # cuptiActivityFlushAll is driven off-thread by the native flusher; this loop
+        # only drains the decoded columns + dispatches them (GIL work) -- the same work
+        # flush(sync=False) does after its flush, minus the flush itself.
+        # Floor the wait so a period of 0 ("continuously") doesn't busy-spin the GIL
+        # (Event.wait(0) returns immediately); 1ms is well below any useful cadence.
+        period = max(self.background_drain_period_s, 0.001)
         try:
-            while not self._flush_stop.wait(self.flush_period_s):
+            while not self._drain_stop.wait(period):
                 if self._started:
-                    self.flush()
+                    self._account_dropped_records(0, 0)
+                    self._drain_and_dispatch()
         except BaseException:
-            logger.exception("CUPTI monitor flush thread died")
+            logger.exception("CUPTI monitor drain thread died")
 
     def _drain_and_dispatch(self) -> None:
         """Drain the column groups the native decoder accumulated and fan them out
@@ -1121,6 +1153,10 @@ class CuptiMonitor:
             # drains that dispatch its trailing records (resolution reads it during
             # dispatch), so retire it a generation later, never before.
             self._gc_external_chains()
+        # PM sampling shares the drain cadence: polling the HW ring is GIL work, so it
+        # rides the drain path (foreground flush or the background drain loop) -- the
+        # native self-flush thread must not touch it.
+        self._poll_pm_sampler()
         self._maybe_warn_backpressure()
 
     def _columns_from_native(
@@ -1197,10 +1233,6 @@ class CuptiMonitor:
 
 _hes_enabled = False
 
-_instance_lock = threading.Lock()
-# At most one monitor per process.
-_instance: CuptiMonitor | None = None
-
 
 def enable_hes_early() -> None:
     global _hes_enabled
@@ -1228,17 +1260,57 @@ def is_hes_enabled() -> bool:
     return _hes_enabled
 
 
-def get_monitor() -> CuptiMonitor | None:
-    """The process-wide monitor singleton if it has been constructed, else None."""
-    return _instance
+def configure(
+    *,
+    buffer_size: int | None = None,
+    background_flush_period_s: float | None = None,
+    background_drain_period_s: float | None = None,
+    use_approx_timestamps: bool | None = None,
+) -> None:
+    """Set the process-wide CUPTI monitor settings the singleton snapshots when first
+    constructed (via CuptiMonitor()). First-come-first-serve (like
+    PmSampler.configure): locked once this lands OR the singleton is built, so a later call
+    is ignored with a warning -- pass all settings in one call, before first use. An unset
+    (None) arg keeps its current value. The two cadences default to -1 (caller-driven; a
+    non-negative value opts into background flush/drain at that period)."""
+    with CuptiMonitor._instance_lock:
+        if CuptiMonitor._configured:
+            logger.warning(
+                "cupti_monitor.configure() ignored: already configured "
+                "(first-come-first-serve). Call it once before the first CuptiMonitor()."
+            )
+            return
+        if buffer_size is not None:
+            CuptiMonitor._buffer_size = buffer_size
+        if background_flush_period_s is not None:
+            CuptiMonitor._background_flush_period_s = background_flush_period_s
+        if background_drain_period_s is not None:
+            CuptiMonitor._background_drain_period_s = background_drain_period_s
+        if use_approx_timestamps is not None:
+            CuptiMonitor._use_approx_timestamps = use_approx_timestamps
+        CuptiMonitor._configured = True
 
 
-def instance() -> CuptiMonitor:
-    """The process-wide CUPTI monitor / multiplexer singleton, constructed on first
-    use. It uses CUPTI's v2 user-defined-record API (requires libcupti >= 13.2).
-    Observers register with it via register()."""
-    global _instance
-    with _instance_lock:
-        if _instance is None:
-            _instance = CuptiMonitor()
-        return _instance
+def get_config() -> dict[str, Any]:
+    """The process-wide config the singleton will snapshot (or snapshotted): buffer_size,
+    the two cadences, the approx-clock flag, and whether configure()/construction has pinned
+    it (first-come-first-serve)."""
+    return {
+        "buffer_size": CuptiMonitor._buffer_size,
+        "background_flush_period_s": CuptiMonitor._background_flush_period_s,
+        "background_drain_period_s": CuptiMonitor._background_drain_period_s,
+        "use_approx_timestamps": CuptiMonitor._use_approx_timestamps,
+        "configured": CuptiMonitor._configured,
+    }
+
+
+def _reset_for_test() -> None:
+    """Test-only: drop the singleton and reset the config to defaults so a test can build a
+    freshly-configured monitor. Callers must have torn down any live session first."""
+    with CuptiMonitor._instance_lock:
+        CuptiMonitor._instance = None
+        CuptiMonitor._buffer_size = 4 * 1024 * 1024
+        CuptiMonitor._background_flush_period_s = -1.0
+        CuptiMonitor._background_drain_period_s = -1.0
+        CuptiMonitor._use_approx_timestamps = False
+        CuptiMonitor._configured = False
