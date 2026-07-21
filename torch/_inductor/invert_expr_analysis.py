@@ -5,6 +5,7 @@ import sympy
 from torch._inductor.utils import _IntLike, argsort_sym
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
+from .sizevars import join_dimensions
 from .virtualized import V
 
 
@@ -72,6 +73,8 @@ def generate_inverse_formula(
      References:
          Mixed-radix systems: https://en.wikipedia.org/wiki/Mixed_radix
     """
+    expr = expr.replace(lambda subexpr: isinstance(subexpr, sympy.Add), join_dimensions)
+
     # Step 1: Parse all terms
     terms = parse_terms(expr, var)
     if not terms:
