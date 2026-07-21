@@ -391,6 +391,10 @@ class TORCH_API Context {
   void setAllowTF32CuBLAS(bool /*b*/);
   Float32MatmulPrecision float32MatmulPrecision() const;
   Float32Precision float32Precision(Float32Backend backend, Float32Op op) const;
+  // Same as float32Precision, but a DEFAULT entry with no explicit parent
+  // override resolves to NONE instead of the legacy TF32 default. Used where
+  // TF32 must be strictly opt-in (e.g. MIOpen conv) rather than default-on.
+  Float32Precision float32PrecisionExplicit(Float32Backend backend, Float32Op op) const;
   CuBLASReductionOption allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(
       bool allow_reduced_precision,
@@ -473,6 +477,11 @@ class TORCH_API Context {
   }
 
  private:
+  Float32Precision float32PrecisionImpl(
+      Float32Backend backend,
+      Float32Op op,
+      bool legacy_default_tf32) const;
+
   std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES> init_;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
