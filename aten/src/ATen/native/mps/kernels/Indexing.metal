@@ -980,12 +980,15 @@ inline bool is_nonzero(T val) {
 // Count-side width: per-threadgroup block sums and the intra-block prefix
 // values are bounded by the threadgroup size (<= 1024), so they stay uint32.
 // The cumulative quantities (block_offsets, the total nonzero count, and the
-// scatter output position) can exceed 2^32 for a very large dense input, so
-// those are kept in 64-bit, matching CUDA's int64 aggregate in Nonzero.cu.
-// Metal's simd_shuffle_and_fill_up does not accept 64-bit integers on Metal
-// 3.x, so prefix_sum_blocks does its cumulative scan in threadgroup memory
-// rather than via simd shuffles. The input flat index is a separate concern,
-// widened via the index_t template parameter (see scatter_nonzero_indices).
+// scatter output position) can only exceed 2^32 when the tensor itself has
+// more than 2^32 elements, so there are two block-scan kernels: the default
+// prefix_sum_blocks keeps the fast parallel simd_shuffle scan (uint32 accum,
+// used whenever numel <= 2^32, i.e. the common case), and prefix_sum_blocks_i64
+// does the scan in 64-bit for tensors above 2^32 elements. Both write int64
+// block_offsets and total, so scatter stays uniform. (Metal 3.x cannot
+// simd_shuffle 64-bit integers, so the i64 path scans in threadgroup memory.)
+// The input flat index is a separate concern, widened via the index_t template
+// parameter (see scatter_nonzero_indices).
 template <typename T, typename index_t>
 [[max_total_threads_per_threadgroup(1024)]]
 kernel void count_nonzero_prefix_sum(
@@ -1059,14 +1062,93 @@ kernel void count_nonzero_prefix_sum(
   }
 }
 
-// Step 2: exclusive prefix sum of block_sums, block_offsets, and write
-// total nonzero count to a 1-element buffer.  Runs in a single threadgroup.
-// Each thread serially sums a contiguous chunk of block_sums; the per-thread
-// totals are then scanned in 64-bit through threadgroup memory. Per-block sums
-// are <= threadgroup size so a chunk total fits uint32, but the cumulative
-// offsets (and the grand total) can exceed 2^32, so those are kept in 64-bit.
+// Step 2: exclusive prefix sum of block_sums -> block_offsets, plus the grand
+// total. Runs in a single threadgroup. Fast path for numel <= 2^32: the
+// per-block sums and their running total both fit in uint32, so this keeps the
+// parallel simd_shuffle scan. block_offsets/total are still int64-typed so the
+// scatter kernel is identical across paths.
 [[max_total_threads_per_threadgroup(1024)]]
 kernel void prefix_sum_blocks(
+    const device uint* block_sums [[buffer(0)]],
+    device long* block_offsets [[buffer(1)]],
+    device long* total_nonzero [[buffer(2)]],
+    constant uint& num_blocks [[buffer(3)]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint tgsize [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
+  uint num_simds = (tgsize + simdgroup_size - 1) / simdgroup_size;
+
+  // Each thread handles a contiguous chunk of blocks
+  uint chunk_size = (num_blocks + tgsize - 1) / tgsize;
+  uint start = lid * chunk_size;
+  uint end = min(start + chunk_size, num_blocks);
+
+  // Serial sum over this thread's chunk
+  uint chunk_total = 0u;
+  for (uint i = start; i < end; i++) {
+    chunk_total += block_sums[i];
+  }
+
+  // Parallel inclusive prefix sum of chunk_totals across threads
+  uint val = chunk_total;
+  for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
+    uint other = simd_shuffle_and_fill_up(val, 0u, static_cast<ushort>(offset));
+    val += other;
+  }
+
+  threadgroup uint simdgroup_totals[32];
+  bool is_last_lane_in_simd;
+  if (simd_group_id < num_simds - 1) {
+    is_last_lane_in_simd = (simd_lane_id == simdgroup_size - 1);
+  } else {
+    uint lanes_in_last = tgsize - simd_group_id * simdgroup_size;
+    is_last_lane_in_simd = (simd_lane_id == lanes_in_last - 1);
+  }
+  if (is_last_lane_in_simd) {
+    simdgroup_totals[simd_group_id] = val;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  threadgroup uint simdgroup_offsets[32];
+  if (simd_group_id == 0) {
+    uint sg_val =
+        (simd_lane_id < num_simds) ? simdgroup_totals[simd_lane_id] : 0u;
+    for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
+      uint other =
+          simd_shuffle_and_fill_up(sg_val, 0u, static_cast<ushort>(offset));
+      sg_val += other;
+    }
+    uint exclusive =
+        simd_shuffle_and_fill_up(sg_val, 0u, static_cast<ushort>(1));
+    simdgroup_offsets[simd_lane_id] = exclusive;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // This thread's exclusive offset = inclusive_scan - chunk_total +
+  // simdgroup_offset
+  uint thread_offset = val - chunk_total + simdgroup_offsets[simd_group_id];
+
+  // Write block_offsets for this thread's chunk using a serial exclusive scan
+  uint running = thread_offset;
+  for (uint i = start; i < end; i++) {
+    block_offsets[i] = static_cast<long>(running);
+    running += block_sums[i];
+  }
+
+  if (lid == tgsize - 1) {
+    *total_nonzero = static_cast<long>(
+        simdgroup_offsets[num_simds - 1] + simdgroup_totals[num_simds - 1]);
+  }
+}
+
+// 64-bit variant for tensors with more than 2^32 elements, where the running
+// count can exceed uint32. Metal 3.x cannot simd_shuffle 64-bit integers, so
+// the cross-thread scan is done serially by thread 0 in threadgroup memory.
+// This path only runs for >2^32-element inputs (>34GB output regime), so its
+// serialized scan never affects normal tensors, which take prefix_sum_blocks.
+[[max_total_threads_per_threadgroup(1024)]]
+kernel void prefix_sum_blocks_i64(
     const device uint* block_sums [[buffer(0)]],
     device long* block_offsets [[buffer(1)]],
     device long* total_nonzero [[buffer(2)]],
