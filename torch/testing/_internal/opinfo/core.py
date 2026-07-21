@@ -3331,7 +3331,7 @@ def clone_sample(sample, **kwargs):
         else:
             return t
 
-    sample_kwargs = kwargs or sample.kwargs
+    sample_kwargs = kwargs if kwargs else sample.kwargs
 
     return SampleInput(
         clone_tensor(sample.input),

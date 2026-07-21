@@ -1385,6 +1385,9 @@ class TestInductorOpInfo(TestCase):
             overridden_kwargs.update({"rtol": 2e-2, "atol": 1e-3})
         func = op.get_op()
 
+        def fn(*args, **kwargs):
+            return func(*args, **kwargs)
+
         requires_grad = (
             op.supports_autograd
             and dtype in op.supported_backward_dtypes(device_type)
@@ -1413,7 +1416,7 @@ class TestInductorOpInfo(TestCase):
                 self.has_rng_op = False
 
             def __torch_dispatch__(self, func, types, args, kwargs=None):
-                kwargs = kwargs or {}
+                kwargs = kwargs if kwargs else {}
                 if torch.Tag.nondeterministic_seeded in func.tags:
                     self.has_rng_op = True
 
@@ -1489,7 +1492,7 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 rtol, atol = _get_tolerances(dtype)
-                no_python, has_rng_op = do_nopython_and_has_rng(func, args, kwargs)
+                no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
                 for context_fn, kwarg_overrides in get_contexts(
                     has_rng_op, args, kwargs
                 ):
@@ -1540,7 +1543,7 @@ class TestInductorOpInfo(TestCase):
                             exact_stride = op_name not in inductor_skip_exact_stride_xpu
                         if device_type == GPU_TYPE:
                             self.check_model_gpu(
-                                func,
+                                fn,
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
@@ -1548,7 +1551,7 @@ class TestInductorOpInfo(TestCase):
                             )
                         else:
                             self.check_model(
-                                func,
+                                fn,
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
