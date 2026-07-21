@@ -951,10 +951,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report(
                     "-- Not using Compute Library for the Arm architecture with MKLDNN"
                 )
-            if cmake_cache_vars["USE_MKLDNN_CBLAS"]:
-                report("-- Using CBLAS in MKLDNN")
-            else:
-                report("-- Not using CBLAS in MKLDNN")
         else:
             report("-- Not using MKLDNN")
         if cmake_cache_vars["USE_NCCL"] and cmake_cache_vars["USE_SYSTEM_NCCL"]:
@@ -1125,6 +1121,8 @@ def configure_extension_build() -> tuple[
         "mpi = torch.distributed.distributed_c10d:_register_builtin_mpi_backend",
         "gloo = torch.distributed.distributed_c10d:_register_builtin_gloo_backend",
         "nccl = torch.distributed.distributed_c10d:_register_builtin_nccl_backend",
+        "nccl2 = torch.distributed.distributed_c10d:_register_builtin_nccl2_backend",
+        "nccl-lazy = torch.distributed.distributed_c10d:_register_builtin_nccl_lazy_backend",
         "ucc = torch.distributed.distributed_c10d:_register_builtin_ucc_backend",
         "xccl = torch.distributed.distributed_c10d:_register_builtin_xccl_backend",
     ]

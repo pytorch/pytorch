@@ -57,6 +57,8 @@ from torch._subclasses.fake_tensor import (
     FakeTensorMode,
     get_plain_tensors,
     is_fake,
+    is_fake_tensor,
+    maybe_get_fake_mode,
     unset_fake_temporarily,
 )
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -695,8 +697,8 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # val.detach() will also eventually call fast_detach(),
     # but this saves us a full trip into __torch_dispatch__
     # (snapshot_fake is called a lot)
-    if isinstance(val, FakeTensor):
-        return fast_detach(val.fake_mode, val, include_real)
+    if is_fake_tensor(val):
+        return fast_detach(maybe_get_fake_mode(val), val, include_real)
     else:
         return val.detach()
 
@@ -1724,7 +1726,7 @@ class PythonKeyTracer(Tracer):
             val = v.meta["val"]
             # other subclasses like FunctionalTensor error on `extract_val`
             # "Attempting to use FunctionalTensor on its own." just store FakeTensors for now
-            if isinstance(val, torch.Tensor) and not isinstance(val, FakeTensor):
+            if isinstance(val, torch.Tensor) and not is_fake_tensor(val):
                 return None
             return extract_val(v.meta["val"])
 
@@ -2818,6 +2820,14 @@ class _MakefxTracer:
         self.decomposition_table.setdefault(
             torch.ops.aten.sym_numel.default, torch._decomp.decompositions.sym_numel
         )
+        # Only inject the default detach decomp when the caller passed no table
+        # at all. An explicit table, even empty, opts out and preserves exact
+        # detach semantics for pre-autograd export and compile paths.
+        if decomposition_table is None and not pre_dispatch:
+            self.decomposition_table.setdefault(
+                torch.ops.aten.detach.default,
+                torch._decomp.decompositions.nop_decomposition,
+            )
         self.tracing_mode: _TracingMode = tracing_mode
         self._allow_non_fake_inputs: bool = _allow_non_fake_inputs
         self.pre_dispatch: bool = pre_dispatch
@@ -3179,6 +3189,20 @@ class _MakefxTracer:
             stack.enter_context(disable_autocast_cache())
             stack.enter_context(_set_make_fx_tracer(self))
 
+            # Under compile-on-one-rank, redirect legacy in-place c10d
+            # collectives to functional collectives so the ProcessGroup flows
+            # into the graph as a (serializable) op argument instead of being
+            # baked in as a torchbind constant by the in-place op.
+            if (
+                torch.compiler.config.compile_on_one_rank
+                and torch.distributed.is_available()
+            ):
+                from torch.distributed._functional_collectives import (
+                    _LegacyToFunctionalCollectiveMode,
+                )
+
+                stack.enter_context(_LegacyToFunctionalCollectiveMode())
+
             if self.fx_tracer is None:
                 raise AssertionError("fx_tracer should not be None")
             try:
@@ -3306,6 +3330,11 @@ def make_fx(
     were executed during the course of execution.
 
     If record_stack_traces is True, the stack trace will be preserved on node.meta["stack_trace"]
+
+    By default, post-dispatch traces without an explicit decomposition_table
+    rewrite detach to alias. Re-differentiating the returned graph does not
+    preserve those detach calls as autograd gradient cuts; pass an explicit
+    decomposition_table or use pre_dispatch=True if exact detach nodes are needed.
 
     ``tracing_mode``:
         - ``"real"``: no fakification, traces with real tensors.

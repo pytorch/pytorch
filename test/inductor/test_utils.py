@@ -243,20 +243,24 @@ class TestUtils(TestCase):
             for t, t2, args, kwargs in trues:
                 fx_node_1, fx_node_2 = create_fx_node(t, t2, args, kwargs)
                 self.assertTrue(
-                    countable_fx(fx_node_1), f"Expected true {t}: {fx_node_1}"
+                    countable_fx(fx_node_1),
+                    lambda msg: f"{msg}\nExpected true {t}: {fx_node_1}",
                 )
                 self.assertTrue(
-                    countable_fx(fx_node_2), f"Expected true {t}: {fx_node_2}"
+                    countable_fx(fx_node_2),
+                    lambda msg: f"{msg}\nExpected true {t}: {fx_node_2}",
                 )
                 self.assertNotEqual(count_flops_fx(fx_node_1), None)
                 self.assertNotEqual(count_flops_fx(fx_node_2), None)
             for f, f2, args, kwargs in falses:
                 fx_node_1, fx_node_2 = create_fx_node(f, f2, args, kwargs)
                 self.assertFalse(
-                    countable_fx(fx_node_1), f"Expected false {f}: {fx_node_1}"
+                    countable_fx(fx_node_1),
+                    lambda msg: f"{msg}\nExpected false {f}: {fx_node_1}",
                 )
                 self.assertFalse(
-                    countable_fx(fx_node_2), f"Expected false {f}: {fx_node_2}"
+                    countable_fx(fx_node_2),
+                    lambda msg: f"{msg}\nExpected false {f}: {fx_node_2}",
                 )
 
     def test_flops_fx_higher_order_op(self):
