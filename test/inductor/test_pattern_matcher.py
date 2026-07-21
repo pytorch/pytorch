@@ -810,6 +810,19 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 0)
 
+    def test_replace_empty_tensor_ops(self):
+        def f(x, y):
+            return torch.add(x, y)
+
+        x = torch.randn(3, 0, dtype=torch.complex64)
+        y = torch.randn(3, 0, dtype=torch.complex64)
+        gm = make_fx(f)(x, y)
+        joint_graph.joint_graph_passes(gm)
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertNotIn(aten.add.Tensor, targets)
+        self.assertIn(aten.empty_strided.default, targets)
+        self.assertEqual(gm(x, y), f(x, y))
+
     def test_pointless_view_pair_dynamic_shapes(self):
         def f(x):
             s1, s2 = x.shape
