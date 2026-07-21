@@ -3958,7 +3958,7 @@ def _tensor_to_object(
 @_exception_logger
 def all_gather_object(
     object_list: list[_T],
-    obj: object,
+    obj: _T,
     group: ProcessGroup | None = None,
     weights_only: bool = False,
 ) -> None:
@@ -4066,7 +4066,7 @@ def all_gather_object(
 
 @_exception_logger
 def gather_object(
-    obj: object,
+    obj: _T,
     object_gather_list: list[_T] | None = None,
     dst: int | None = None,
     group: ProcessGroup | None = None,
@@ -6237,7 +6237,7 @@ def split_group(
     parent_pg: ProcessGroup | None = None,
     split_ranks: list[list[int]] | None = None,
     timeout: timedelta | None = None,
-    pg_options: object | None = None,
+    pg_options: C10DBackend.Options | None = None,
     group_desc: str | None = None,
     backend: str | Backend | None = None,
 ) -> ProcessGroup | None:
@@ -6417,7 +6417,7 @@ def split_group(
     split_pg = parent_pg.split_group(
         my_group,
         timeout=timeout,
-        opts=cast(C10DBackend.Options | None, pg_options),
+        opts=pg_options,
         group_name=group_name,
         group_desc=group_desc,
         device_types=device_types_filter,
@@ -6572,6 +6572,10 @@ def new_group(
             and str(backend).lower() != str(parent_backend).lower()
         )
         if not is_fake_subgroup:
+            if pg_options is not None and not isinstance(
+                pg_options, C10DBackend.Options
+            ):
+                raise TypeError("split_group requires C10DBackend.Options")
             return _new_group_via_split_group(
                 ranks=ranks,
                 timeout=timeout,
@@ -6600,7 +6604,7 @@ def _new_group_via_split_group(
     ranks: Sequence[int] | None,
     timeout: timedelta | None,
     backend: str | Backend | None,
-    pg_options: object | None,
+    pg_options: C10DBackend.Options | None,
     use_local_synchronization: bool,
     group_desc: str | None,
     device_id: torch.device | None,
