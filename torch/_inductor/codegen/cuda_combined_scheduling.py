@@ -248,6 +248,17 @@ class CUDACombinedScheduling(BaseScheduling):
                     lambda: call(clone_args(args)),
                     device=device,
                 )
+                # Subtract the per-iteration clone cost so we measure the kernel
+                # alone, matching TritonScheduling.benchmark_codegened_module.
+                # The GEMM operands must be cloned each iteration (the launch
+                # mutates `out`), but cloning the (often multi-MB) operands
+                # otherwise dominates the timing and makes fused NVGEMM epilogues
+                # look many-x slower than the clone-free unfused autotune timing,
+                # so epilogue fusion never wins the speedup_by_fusion benchmark.
+                ms = ms - benchmarker.benchmark(
+                    lambda: clone_args(args),
+                    device=device,
+                )
             except Exception as e:
                 log.debug(
                     "Exception (%s) while benchmarking NVGEMM fused kernel",
