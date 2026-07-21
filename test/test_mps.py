@@ -16393,24 +16393,14 @@ class TestErrorInputs(TestCase):
     # https://github.com/pytorch/pytorch/issues/190061 (scale_grad_by_freq
     # silently ignored).
     def test_embedding_bag_include_last_offset(self, device):
+        # Well-formed include_last_offset inputs are covered by the generic
+        # tests in test/nn/test_embedding.py. This test pins the MPS behavior
+        # for TRAILING indices (indices past the terminal offset), where CPU
+        # itself is inconsistent (#52851): MPS follows the CSR contract and
+        # excludes them everywhere.
         W = torch.arange(16.0).reshape(4, 4)
         idx = torch.tensor([0, 1, 2])
         offs = torch.tensor([0, 2])  # one bag: indices [0, 2); index 2 is trailing
-
-        # the well-defined case (terminal offset == len(indices)): CPU parity
-        offs_full = torch.tensor([0, 3])
-        for mode in ("sum", "mean", "max"):
-            with self.subTest(mode=mode, trailing=False):
-                w_cpu = W.clone().requires_grad_()
-                out_cpu = torch.nn.functional.embedding_bag(
-                    idx, w_cpu, offs_full, mode=mode, include_last_offset=True)
-                out_cpu.sum().backward()
-                w_mps = W.clone().to(device).requires_grad_()
-                out_mps = torch.nn.functional.embedding_bag(
-                    idx.to(device), w_mps, offs_full.to(device), mode=mode, include_last_offset=True)
-                out_mps.sum().backward()
-                self.assertEqual(out_mps.cpu(), out_cpu)
-                self.assertEqual(w_mps.grad.cpu(), w_cpu.grad)
 
         # trailing index, sum mode: CPU agrees the terminal offset ends the bag
         w_cpu = W.clone().requires_grad_()
@@ -16457,34 +16447,10 @@ class TestErrorInputs(TestCase):
         self.assertEqual(psw_mps.grad.cpu()[:2], psw_cpu.grad[:2])
         self.assertEqual(psw_mps.grad.cpu()[2].item(), 0.0)
 
-    def test_embedding_bag_scale_grad_by_freq(self, device):
-        # all-repeated indices: CPU parity
-        for mode in ("sum", "mean"):
-            with self.subTest(mode=mode):
-                w_cpu = torch.randn(4, 3, requires_grad=True)
-                idx = torch.tensor([1, 1, 2, 2])
-                offs = torch.tensor([0])
-                torch.nn.functional.embedding_bag(
-                    idx, w_cpu, offs, mode=mode, scale_grad_by_freq=True).sum().backward()
-                w_mps = w_cpu.detach().clone().to(device).requires_grad_()
-                torch.nn.functional.embedding_bag(
-                    idx.to(device), w_mps, offs.to(device), mode=mode,
-                    scale_grad_by_freq=True).sum().backward()
-                self.assertEqual(w_mps.grad.cpu(), w_cpu.grad)
-
-        # mixed frequencies: CPU divides index 3's gradient by index 1's count
-        # (counts[indices_data[i]] with the unique-group counter i at
-        # EmbeddingBag.cpp:1573), so compare against the documented semantics.
-        w_mps = torch.ones(4, 3, device=device).requires_grad_()
-        idx = torch.tensor([1, 1, 3], device=device)
-        offs = torch.tensor([0], device=device)
-        torch.nn.functional.embedding_bag(
-            idx, w_mps, offs, mode="sum", scale_grad_by_freq=True).sum().backward()
-        expected = torch.zeros(4, 3)
-        expected[1] = 1.0  # two occurrences, each scaled by 1/2
-        expected[3] = 1.0  # one occurrence, scaled by 1/1
-        self.assertEqual(w_mps.grad.cpu(), expected)
-
+    def test_embedding_bag_scale_grad_by_freq_bf16_counts(self, device):
+        # Generic scale_grad_by_freq semantics are covered by
+        # test_embedding_bag_scale_grad_by_freq_mixed_counts in
+        # test/nn/test_embedding.py.
         # pin the count divisor staying exact past bfloat16's integer range:
         # a naive bf16 accumulation of ones saturates at 256 (256 + 1 == 256)
         # and would divide index 5's gradient by 256 instead of 300. Only bag
