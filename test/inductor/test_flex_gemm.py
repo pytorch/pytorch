@@ -1904,6 +1904,72 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_fast_math_gelu_none_uses_tanh_decomposition(self):
+        def epilogue_fn(acc):
+            return torch.nn.functional.gelu(acc, approximate="none")
+
+        def compile_with_fast_math(a, b, fast_math):
+            def fn(a, b):
+                return flex_gemm(
+                    torch.mm,
+                    (a, b),
+                    epilogue_fn,
+                    kernel_options={"backend": "QUACK", "fast_math": fast_math},
+                )
+
+            torch._dynamo.reset()
+            return run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+
+        a = self.makeTensor(128, 64)
+        b = self.makeTensor(64, 128)
+        fast_result, (fast_code,) = compile_with_fast_math(a, b, True)
+        precise_result, (precise_code,) = compile_with_fast_math(a, b, False)
+        expected = epilogue_fn(a.double() @ b.double())
+
+        torch.testing.assert_close(
+            fast_result.double(), expected, atol=0.02, rtol=0.002
+        )
+        torch.testing.assert_close(
+            precise_result.double(), expected, atol=0.02, rtol=0.002
+        )
+        self.assertIn("cute.math.tanh", fast_code)
+        self.assertIn("fastmath=True", fast_code)
+        self.assertNotIn("cute.math.erf", fast_code)
+        self.assertIn("cute.math.erf", precise_code)
+        self.assertNotIn("cute.math.tanh", precise_code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_fast_math_gelu_tanh_preserves_requested_approximation(self):
+        def epilogue_fn(acc):
+            return torch.nn.functional.gelu(acc, approximate="tanh")
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "fast_math": True},
+            )
+
+        a = self.makeTensor(128, 64)
+        b = self.makeTensor(64, 128)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = epilogue_fn(a.double() @ b.double())
+
+        torch.testing.assert_close(actual.double(), expected, atol=0.02, rtol=0.002)
+        self.assertIn("cute.math.tanh", code)
+        self.assertIn("fastmath=True", code)
+        self.assertNotIn("cute.math.erf", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_dynamic_shapes_compiled_matches_reference(self):
         def epilogue_fn(acc):
             return (acc + 1).relu()
