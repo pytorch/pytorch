@@ -282,7 +282,9 @@ class TestDistributedFailure(ShardedTensorTestBase):
             e = cast(CheckpointException, cm.exception)
             for rank, wrapped_ex in e.failures.items():
                 ex = wrapped_ex[0]
-                self.assertTrue(rank in bad_ranks, msg=f"{rank} did not fail")
+                self.assertTrue(
+                    rank in bad_ranks, msg=lambda msg: f"{msg}\n{rank} did not fail"
+                )
                 if not kwargs.get("ignore_exception_type", False):
                     self.assertEqual(ValueError, type(ex), str(ex))
 
@@ -290,7 +292,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
             for rank in bad_ranks:
                 self.assertTrue(
                     rank in failed_ranks,
-                    msg=f"{rank} was supposed to fail was fine",
+                    msg=lambda msg: f"{msg}\n{rank} was supposed to fail was fine",
                 )
 
     def _test_save(self, state_dict, coordinator=0, **kwargs):
