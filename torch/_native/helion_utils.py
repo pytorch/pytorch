@@ -1,6 +1,5 @@
 import functools
 import logging
-import os as _os  # aliased to keep `os` out of the module public API
 import sys
 from typing import cast
 
@@ -40,12 +39,14 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
     if not _cuda.is_built():
         return (False, None)
 
+    import os
+
     import torch
 
     if torch.version.hip is not None:
         return (False, None)
 
-    backend = _os.getenv("HELION_BACKEND", _HELION_BACKENDS[0])
+    backend = os.getenv("HELION_BACKEND", _HELION_BACKENDS[0])
     if backend not in _HELION_BACKENDS:
         log.info(
             "Helion native DSL ops support backends %s; HELION_BACKEND=%s",
