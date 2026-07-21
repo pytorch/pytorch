@@ -7430,7 +7430,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
             dist.broadcast(tensor2, 7, group=ng2)
             self.assertEqual(tensor2, torch.full((1,), 7))
         else:
-            self.assertEqual(ng2, None)
+            self.assertIs(ng2, c10d.GroupMember.NON_GROUP_MEMBER)
         # a barrier and a cuda sync before destroying all pgs.
         dist.barrier(pg)
         torch.cuda.synchronize()
