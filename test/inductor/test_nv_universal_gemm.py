@@ -165,6 +165,30 @@ class TestNVUniversalGemm(TestCase):
             "exact-arch filter should reject kernels that min_cc alone accepts",
         )
 
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_matmul_swap_ab(self, dtype):
+        """swap_ab computes (B^T @ A^T)^T so the large N lands on the M-axis,
+        improving tile utilization for small-M shapes. Verify a small-M matmul
+        stays numerically correct with swap_ab enabled (the swapped operands and
+        transposed output view must round-trip to the original result).
+        """
+        m, n, k = 16, 512, 512
+
+        def matmul(a, b):
+            return a @ b
+
+        a = _create_tensor_with_layout("contiguous", m, k, dtype)
+        b = _create_tensor_with_layout("contiguous", k, n, dtype)
+        expected = matmul(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config(nvgemm_swap_ab=True)):
+            compiled_fn = torch.compile(matmul)
+            result = compiled_fn(a, b)
+
+        torch.testing.assert_close(result, expected)
+
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
 

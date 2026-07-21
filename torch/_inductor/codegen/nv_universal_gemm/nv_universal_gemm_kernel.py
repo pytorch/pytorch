@@ -211,6 +211,7 @@ def _worker_nvgemm_autotuning_precompile(
     swizzle_type_a=None,
     swizzle_type_b=None,
     has_bias_epilogue=False,
+    swap_ab=False,
 ):
     """Subprocess worker: compile one NVGEMM kernel and save to disk cache.
 
@@ -247,6 +248,20 @@ def _worker_nvgemm_autotuning_precompile(
             device=output_tensor_meta.device,
             dtype=output_tensor_meta.dtype,
         )
+
+    # swap_ab: the kernel was selected for the transposed (N, M) problem, so the
+    # worker must swap operands here too -- both to resolve the kernel via the
+    # args-filtered fast lookup and to key the disk cache the same way the
+    # benchmark's make_run_fn does (it swaps before compiling). Mirrors the
+    # runtime swap in _nvgemm_run. swap_ab and a bias epilogue never co-occur.
+    if swap_ab and len(input_tensors) >= 2:
+        a, b = input_tensors[0], input_tensors[1]
+        if len(input_tensors) >= 4:
+            sa, sb = input_tensors[2], input_tensors[3]
+            input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
+        else:
+            input_tensors = (b.t(), a.t()) + input_tensors[2:]
+        out = out.t()
 
     helper_kwargs: dict[str, Any] = {}
     if variant_name == "SCALED_GEMM":
@@ -528,9 +543,13 @@ def _nvgemm_run(
     aux_tensors: tuple = (),
     swap_ab: bool = False,
 ):
-    if swap_ab and len(input_tensors) >= 4:
-        a, b, sa, sb = input_tensors[:4]
-        input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
+    if swap_ab and len(input_tensors) >= 2:
+        a, b = input_tensors[0], input_tensors[1]
+        if len(input_tensors) >= 4:
+            sa, sb = input_tensors[2], input_tensors[3]
+            input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
+        else:
+            input_tensors = (b.t(), a.t()) + input_tensors[2:]
         # Swapped GEMM computes (N, M) = out.t(); write it zero-copy into a
         # transposed (column-major) view of the real (M, N) output -- no temp
         # buffer / copy (the kernel handles column-major C).
