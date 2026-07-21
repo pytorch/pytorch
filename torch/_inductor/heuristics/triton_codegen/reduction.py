@@ -14,7 +14,10 @@ from torch._inductor.heuristics.registry import (
     CodegenConfigHeuristics,
     register_codegen_heuristic,
 )
-from torch._inductor.runtime.hints import ReductionHint, TRITON_MAX_BLOCK
+from torch._inductor.runtime.hints import (
+    ReductionHint,
+    TRITON_MAX_BLOCK,
+)
 from torch._inductor.runtime.runtime_utils import next_power_of_2
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
@@ -210,7 +213,17 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         device_major = triton_meta["device"].major
         warp_size = triton_meta["device"].warp_size_or_default
-        MAX_R0_BLOCK = 1024 if device_major is not None and device_major >= 10 else 2048
+
+        has_scalar_online_softmax_reduction = inductor_meta.get(
+            "has_scalar_online_softmax_reduction", False
+        )
+        if has_scalar_online_softmax_reduction and 8192 <= rnumel:
+            MAX_R0_BLOCK = 4096
+        elif device_major is not None and device_major >= 10:
+            # Prefer smaller MAX_R0_BLOCK for Blackwell by default
+            MAX_R0_BLOCK = 1024
+        else:
+            MAX_R0_BLOCK = 2048
         if size_hints["x"] >= 1024 and loads_and_red >= 10:
             MAX_R0_BLOCK = 1024
             register_intensive = True
@@ -290,6 +303,19 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             register_intensive,
         )
 
+        # Scalar online-softmax accumulators make larger R0_BLOCK candidates
+        # viable without coordinate-descent tuning.
+        scalar_acc_configs: list[Config] = []
+        if (
+            has_scalar_online_softmax_reduction
+            and 8192 <= rnumel
+            and "y" not in size_hints
+        ):
+            scalar_acc_configs = [
+                make_config(1, min(rnumel, 8192), num_warps=4),
+                make_config(1, min(rnumel, 16384), num_warps=8),
+            ]
+
         configs: list[Config] = []
 
         if inductor_meta.get("add_persistent_rblock") and loads_and_red <= 8:
@@ -308,20 +334,24 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         elif max_autotune_enabled:
             pass
         elif reduction_hint == ReductionHint.INNER:
-            return configs + [contiguous_config]
+            return configs + [contiguous_config] + scalar_acc_configs
         elif reduction_hint == ReductionHint.OUTER:
             return configs + [outer_config]
         elif reduction_hint == ReductionHint.OUTER_TINY:
             return configs + [tiny_config]
 
-        result_configs = configs + [
-            contiguous_config,
-            outer_config,
-            tiny_config,
-            make_config(64, 64),
-            make_config(8, 512),
-            make_config(64, 4, num_warps=8),
-        ]
+        result_configs = (
+            configs
+            + [
+                contiguous_config,
+                outer_config,
+                tiny_config,
+                make_config(64, 64),
+                make_config(8, 512),
+                make_config(64, 4, num_warps=8),
+            ]
+            + scalar_acc_configs
+        )
 
         return self._finalize_configs(
             result_configs, make_config, size_hints, inductor_meta

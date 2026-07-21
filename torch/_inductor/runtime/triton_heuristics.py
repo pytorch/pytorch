@@ -4025,6 +4025,7 @@ def _subkernel_fingerprint(combo_meta: dict[str, Any], i: int) -> tuple[Any, ...
         tuple(sorted(sub_meta.get("autotune_hints") or [], key=str)),
         sub_meta.get("atomic_add_found"),
         sub_meta.get("no_x_dim"),
+        sub_meta.get("has_scalar_online_softmax_reduction", False),
         combo_meta.get(f"reduction_hint_{i}"),
         combo_meta.get(f"tile_hint_{i}"),
         sub_meta.get("add_persistent_rblock", False),
