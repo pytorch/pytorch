@@ -16,7 +16,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, highest_precision_float,
     integral_types, complex_types, floating_types_and,
-    integral_types_and, floating_and_complex_types_and, all_types_and, all_types, onlyNativeDeviceTypes,
+    integral_types_and, floating_and_complex_types_and, all_types_and, all_types,
 )
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    OpDTypes, onlyCPU, expectedFailureMeta, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
+    OpDTypes, onlyCPU, onlyNativeDeviceTypes, expectedFailureMeta, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
     dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyAccelerator, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
