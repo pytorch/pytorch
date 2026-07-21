@@ -165,7 +165,8 @@ jobs:
             nvidia-smi
           elif command -v amd-smi; then
             DEVICE_NAME=rocm
-            amd-smi static
+            amd-smi monitor -ptumv
+            amd-smi list
           elif command -v hl-smi; then
             DEVICE_NAME=hpu
             hl-smi
