@@ -5516,6 +5516,13 @@ class TestResizeStorageWithAddr(TestCase):
         self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
         self.assertNotEqual(other.untyped_storage().data_ptr(), original_ptr)
 
+    def test_resize_storage_negative_size_raises(self):
+        # A negative requested storage size must be rejected, not silently
+        # wrapped to a huge size_t (c10::overflows strict_unsigned path).
+        t = torch.empty(8, dtype=torch.uint8, device="cuda")
+        with self.assertRaisesRegex(RuntimeError, "cannot be represented as a size_t"):
+            t.untyped_storage().resize_(-1)
+
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC,
         "CUDAMallocAsync does not support exact-address allocation",
