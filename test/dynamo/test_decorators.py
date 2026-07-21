@@ -1433,6 +1433,25 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_compile_staticmethod_caching_precompile(self):
+        from torch._dynamo.package import DynamoCache
+
+        DynamoCache.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class Foo:
+            @torch.compile(backend=cnt)
+            @staticmethod
+            def bar(x):
+                return x.sin()
+
+        x = torch.randn(4)
+        expected = x.sin()
+        self.assertEqual(Foo.bar(x), expected)
+        self.assertEqual(Foo().bar(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_class_methods(self):
         class A:
             @classmethod
