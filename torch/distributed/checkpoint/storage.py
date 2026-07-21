@@ -3,7 +3,6 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-import torch
 from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex, StorageMeta
 from torch.distributed.checkpoint.planner import (
     LoadPlan,
@@ -23,9 +22,6 @@ class WriteResult:
 
     size_in_bytes: int
     storage_data: Any
-
-
-torch.serialization.add_safe_globals([WriteResult])
 
 
 class StorageWriter(abc.ABC):
