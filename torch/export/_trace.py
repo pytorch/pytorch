@@ -108,11 +108,6 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeInfo
-from torch.fx.passes.canonicalize import (
-    _canonical_node_key,
-    _is_safe_to_reorder,
-    canonicalize_graph,
-)
 from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
@@ -681,10 +676,13 @@ class _ExportSafeToReorder:
     """
 
     def __init__(self) -> None:
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        self._is_safe_to_reorder = _is_safe_to_reorder
         self._prev_stack: tuple[str, ...] | None = None
 
     def __call__(self, node: torch.fx.Node) -> bool:
-        if not _is_safe_to_reorder(node):
+        if not self._is_safe_to_reorder(node):
             self._prev_stack = tuple(node.meta.get("nn_module_stack", {}).keys())
             return False
         stack = tuple(node.meta.get("nn_module_stack", {}).keys())
@@ -704,6 +702,8 @@ def _canonicalize_export_graph(
     canonical names so that strict and non-strict export produce identical
     graphs.  Updates ``signature`` to reflect the new node names.
     """
+    from torch.fx.passes.canonicalize import _canonical_node_key, canonicalize_graph
+
     for mod in gm.modules():
         if isinstance(mod, torch.fx.GraphModule):
             placeholder_ord = itertools.count()
