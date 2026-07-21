@@ -165,6 +165,9 @@ def pytest_configure(config: Config) -> None:
             HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
             "hw_classification_plugin",
         )
+    min_gpu = int(os.environ.get("PYTORCH_TEST_MIN_GPU", "0"))
+    if min_gpu > 0:
+        config.pluginmanager.register(MinGpuFilterPlugin(min_gpu), "mingpufilterplugin")
 
 
 def pytest_unconfigure(config: Config) -> None:
@@ -453,3 +456,224 @@ class StepcurrentPlugin:
             self.cache.set(self.lastrun_location, self.initial_val)
         if exitstatus != 0:
             self.cache.set(self.made_failing_xml_location, True)
+
+
+def _get_decorator_attr(func: object | None, attr: str, default: int = 0) -> int:
+    """Read ``attr`` from ``func`` or any function in its ``__wrapped__`` chain."""
+    while func is not None:
+        val = getattr(func, attr, None)
+        if val is not None:
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                pass
+        func = getattr(func, "__wrapped__", None)
+    return default
+
+
+class MinGpuFilterPlugin:
+    """Deselect tests whose resolved accelerator requirement is below
+    ``PYTORCH_TEST_MIN_GPU`` so a CI job (e.g. a 4-GPU-only distributed job) can
+    run strictly the tests that need at least that many accelerators, with no
+    per-test list to maintain. Registered only when ``PYTORCH_TEST_MIN_GPU > 0``.
+
+    The requirement is resolved from existing signals (no new annotations):
+      - ``skip_if_lt_x_gpu(n)`` (stamps ``_min_gpus_required``) and
+        ``requires_world_size(n)`` (stamps ``_required_world_size``);
+      - the ``world_size`` of the multi-process base classes, gated by a
+        backend/device check so CPU/gloo ``world_size>=N`` tests are dropped;
+      - for thread-based tests, the accelerator-targeting test id plus
+        ``world_size``, since a thread count is not a physical GPU count.
+    An explicit decorator always overrides the backend/device gate. When the
+    requirement cannot be determined the test is kept (favor coverage).
+    """
+
+    def __init__(self, threshold: int) -> None:
+        import torch
+        from torch.distributed.distributed_c10d import Backend
+        from torch.testing._internal.common_distributed import (
+            ACCELERATOR_DIST_BACKENDS,
+            DEFAULT_WORLD_SIZE,
+            MultiProcContinuousTest,
+            MultiProcessTestCase,
+            MultiThreadedTestCase,
+        )
+        from torch.testing._internal.common_utils import TEST_CUDA, TEST_HPU, TEST_XPU
+
+        self.threshold = threshold
+        self._torch = torch
+        self._process_based = (MultiProcessTestCase, MultiProcContinuousTest)
+        self._thread_based = MultiThreadedTestCase
+        self._default_world_size = int(DEFAULT_WORLD_SIZE)
+        # Backend names whose test modules use a non-accelerator (CPU) backend,
+        # derived from the registered backend list so no hand-maintained list can
+        # drift. gloo/mpi/ucc can drive CUDA too, but their dedicated test
+        # modules (e.g. test_c10d_gloo) exercise the CPU path, so a module whose
+        # basename names one of these is treated as CPU-backed.
+        self._non_accel_backends = tuple(
+            b
+            for b in Backend.backend_list
+            if b not in ACCELERATOR_DIST_BACKENDS
+            and b not in (Backend.UNDEFINED, Backend.FAKE)
+        )
+        tokens = []
+        if TEST_CUDA:
+            tokens.append("cuda")
+        if TEST_XPU:
+            tokens.append("xpu")
+        if TEST_HPU:
+            tokens.append("hpu")
+        self._accel_tokens = tuple(tokens)
+        self._kept_count = 0
+        self._deselected_ids: list[str] = []
+
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        """Mutate ``items`` in-place to keep only tests meeting the GPU threshold."""
+        deselected = []
+        kept = []
+        for item in items:
+            if self._required_gpus(item) >= self.threshold:
+                kept.append(item)
+            else:
+                deselected.append(item)
+        self._kept_count = len(kept)
+        self._deselected_ids = [item.nodeid for item in deselected]
+        if deselected:
+            config.hook.pytest_deselected(items=deselected)
+            items[:] = kept
+
+    def pytest_report_collectionfinish(self, config: Config) -> list[str]:
+        total = self._kept_count + len(self._deselected_ids)
+        lines = [
+            f"MinGpuFilter (PYTORCH_TEST_MIN_GPU={self.threshold}): kept "
+            f"{self._kept_count}/{total}, deselected {len(self._deselected_ids)} "
+            f"test(s) needing <{self.threshold} accelerators"
+        ]
+        # The per-node-id dump is verbose; only emit it at non-negative
+        # verbosity, mirroring StepcurrentPlugin.pytest_report_collectionfinish.
+        if config.getoption("verbose") >= 0:
+            lines += [f"  deselected: {nodeid}" for nodeid in self._deselected_ids]
+        return lines
+
+    def _required_gpus(self, item: Any) -> int:
+        try:
+            return self._resolve(item)
+        except Exception:
+            # Introspection failed; fall back to a deterministic guess rather
+            # than blindly keeping the test.
+            return self._fallback(item)
+
+    def _resolve(self, item: Any) -> int:
+        func = getattr(item, "obj", None)
+        dec = max(
+            _get_decorator_attr(func, "_min_gpus_required"),
+            _get_decorator_attr(func, "_required_world_size"),
+        )
+        cls = getattr(item, "cls", None)
+        if cls is None:
+            # Not a class-based test; rely on an explicit decorator, else keep.
+            return dec if dec else self.threshold
+        if issubclass(cls, self._process_based):
+            required = max(dec, self._world_size(cls))
+            # A CPU-backed multi-process test uses ranks, not GPUs; drop it
+            # unless an explicit decorator asserts the GPU requirement.
+            if (
+                required >= self.threshold
+                and dec < self.threshold
+                and self._is_cpu_backed(item, cls)
+            ):
+                return 0
+            return required
+        if issubclass(cls, self._thread_based):
+            if dec:
+                return dec
+            # Thread count is not a GPU count: keep only accelerator-targeting
+            # variants that also spawn at least `threshold` ranks.
+            if (
+                self._id_targets_accelerator(item)
+                and self._world_size(cls) >= self.threshold
+            ):
+                return self.threshold
+            return 0
+        # Plain TestCase: needs an explicit decorator to qualify as multi-GPU.
+        return dec if dec else 1
+
+    def _fallback(self, item: Any) -> int:
+        cls = getattr(item, "cls", None)
+        if cls is not None and issubclass(cls, self._process_based):
+            return 0 if self._module_is_cpu(item) else self._default_world_size
+        return self.threshold
+
+    def _probe_attr(self, cls: Any, name: str) -> Any:
+        # Read a class attribute / constant-returning ``@property`` without
+        # running ``__init__`` (which spawns/initializes processes at runtime,
+        # not at collection). This is side-effect-free only insofar as the
+        # probed ``world_size`` / ``device`` / ``device_type`` properties are
+        # pure; the distributed base classes define them that way. Returns None
+        # when the value cannot be obtained.
+        try:
+            probe = cls.__new__(cls)
+        except Exception:
+            return None
+        try:
+            return getattr(probe, name)
+        except Exception:
+            return None
+
+    def _world_size(self, cls: Any) -> int:
+        val = self._probe_attr(cls, "world_size")
+        try:
+            resolved = int(val)
+        except (TypeError, ValueError):
+            return self._default_world_size
+        # A non-positive value means the world size is unresolved: e.g.
+        # MultiProcContinuousTest declares ``world_size: int = -2`` as an unset
+        # sentinel populated only at runtime. Treat it like the None case and
+        # fall back to the default so genuine multi-GPU tests are not dropped.
+        if resolved <= 0:
+            return self._default_world_size
+        return resolved
+
+    def _id_targets_accelerator(self, item: Any) -> bool:
+        if not self._accel_tokens:
+            return False
+        parts = item.name.lower().split("_")
+        return any(tok in parts for tok in self._accel_tokens)
+
+    def _is_cpu_backed(self, item: Any, cls: Any) -> bool:
+        verdict = self._device_is_cpu(self._probe_attr(cls, "device"))
+        if verdict is not None:
+            return verdict
+        dtype = self._coerce_str(self._probe_attr(cls, "device_type"))
+        if dtype is not None:
+            return dtype.lower().split(":")[0] == "cpu"
+        return self._module_is_cpu(item)
+
+    def _module_is_cpu(self, item: Any) -> bool:
+        module = getattr(item, "module", None)
+        base = (getattr(module, "__name__", "") or "").rsplit(".", 1)[-1].lower()
+        if any(b in base for b in self._non_accel_backends):
+            return True
+        return base.endswith("_cpu")
+
+    def _coerce_str(self, val: Any) -> "str | None":
+        if isinstance(val, str):
+            return val
+        if callable(val):
+            try:
+                result = val()
+            except Exception:
+                return None
+            return result if isinstance(result, str) else None
+        return None
+
+    def _device_is_cpu(self, dev: Any) -> "bool | None":
+        if dev is None:
+            return None
+        if isinstance(dev, self._torch.device):
+            return dev.type == "cpu"
+        if isinstance(dev, str):
+            return dev.lower().split(":")[0] == "cpu"
+        if isinstance(dev, int):
+            return False  # a device index implies an accelerator
+        return None

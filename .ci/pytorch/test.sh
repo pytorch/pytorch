@@ -204,10 +204,6 @@ if [[ "$TEST_CONFIG" == 'default' ]]; then
   fi
 fi
 
-if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export HIP_VISIBLE_DEVICES=0,1,2,3
-fi
-
 if [[ "$TEST_CONFIG" == 'slow' ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
   export PYTORCH_TEST_SKIP_FAST=1
@@ -1641,6 +1637,29 @@ test_distributed_single_gpu() {
   test_distributed not-multigpu
 }
 
+test_distributed_4gpu() {
+  # Run the distributed tests that need more GPUs than the standard 2-GPU
+  # runners provide, on runners with 4-GPU labels (e.g. ROCm gfx950.4). The
+  # threshold is 3 (not 4) so tests requiring exactly 3 GPUs -- which cannot run
+  # on the 2-GPU runners yet are still deselected by a strict >= 4 filter, so
+  # they would otherwise run nowhere -- are included alongside the 4-GPU tests.
+  # PYTORCH_TEST_MIN_GPU activates the collection-time filter in
+  # test/conftest.py (MinGpuFilterPlugin): it resolves each test's accelerator
+  # requirement from existing signals (skip_if_lt_x_gpu, requires_world_size,
+  # and the world_size of the multi-process base classes, gated by
+  # backend/device) and deselects anything below the threshold. This is
+  # independent of main's `multigpu` marker / --multigpu-filter path (which this
+  # job does not use), so there is no double filtering. run_test.py
+  # --distributed-tests discovers every distributed test file dynamically, so a
+  # new multi-GPU test added anywhere under test/distributed is picked up
+  # automatically with no list to maintain.
+  export PYTORCH_TEST_MIN_GPU=3
+  echo "Testing distributed python tests that require more than 2 GPUs"
+  # shellcheck disable=SC2086
+  time python test/run_test.py --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
+  assert_git_not_dirty
+}
+
 test_quantization() {
   echo "Testing quantization"
 
@@ -2232,6 +2251,10 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
+elif [[ "$TEST_CONFIG" == distributed_4gpu ]]; then
+  install_torchcomms
+  install_spmd_types
+  test_distributed_4gpu
 elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
   TEST_MODE="short"
 
