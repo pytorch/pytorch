@@ -5524,6 +5524,7 @@ class TestCudaAllocator(TestCase):
                         self.assertTrue("test_cuda.py" in f2.read())
             del unused
             del x
+            torch._C._cuda_clearCublasWorkspaces()
             torch.cuda.empty_cache()
             ss = torch.cuda.memory._snapshot()
             self.assertTrue(
