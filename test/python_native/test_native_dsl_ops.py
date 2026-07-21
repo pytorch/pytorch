@@ -117,7 +117,7 @@ class TestNativeDSLOps(TestCase):
 
                 self.assertTrue(
                     required_methods <= public,
-                    f"{module_name} missing: {required_methods - public}",
+                    lambda msg: f"{msg}\n{module_name} missing: {required_methods - public}",
                 )
 
                 for method_name in required_methods:

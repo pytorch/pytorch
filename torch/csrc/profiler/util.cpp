@@ -153,7 +153,7 @@ std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs) {
   return cs_str;
 }
 
-std::string stacksToStr(
+std::string joinStacks(
     const std::vector<std::string>& stacks,
     const char* delim) {
   std::ostringstream oss;
@@ -168,8 +168,13 @@ std::string stacksToStr(
 #endif
         return s;
       });
-  auto rc = std::move(oss).str();
-  return "\"" + rc + "\"";
+  return std::move(oss).str();
+}
+
+std::string stacksToStr(
+    const std::vector<std::string>& stacks,
+    const char* delim) {
+  return "\"" + joinStacks(stacks, delim) + "\"";
 }
 
 static std::vector<std::vector<int64_t>> flattenList(
@@ -261,6 +266,34 @@ std::string variantShapesToStr(const std::vector<shape>& shapes) {
   return str;
 }
 
+// Replicates variantShapesToStr's over-long-TensorList collapse: a TensorList
+// alternative longer than TENSOR_LIST_DISPLAY_LENGTH_LIMIT is replaced by an
+// empty TensorList so the typed serializer emits the byte-identical "[]".
+std::vector<shape> variantShapesTruncated(const std::vector<shape>& shapes) {
+  std::vector<shape> truncated;
+  truncated.reserve(shapes.size());
+  for (const auto& s : shapes) {
+    if (std::holds_alternative<std::vector<std::vector<int64_t>>>(s) &&
+        std::get<std::vector<std::vector<int64_t>>>(s).size() >
+            TENSOR_LIST_DISPLAY_LENGTH_LIMIT) {
+      truncated.emplace_back(std::vector<std::vector<int64_t>>{});
+    } else {
+      truncated.push_back(s);
+    }
+  }
+  return truncated;
+}
+
+std::vector<shape> shapesToInputShapes(
+    const std::vector<std::vector<int64_t>>& shapes) {
+  std::vector<shape> result;
+  result.reserve(shapes.size());
+  for (const auto& s : shapes) {
+    result.emplace_back(s);
+  }
+  return result;
+}
+
 std::string shapeToStr(const std::vector<int64_t>& shape) {
   std::string str("[");
   for (const auto s_idx : c10::irange(shape.size())) {
@@ -349,6 +382,25 @@ std::string ivalueListToStr(const std::vector<c10::IValue>& list) {
     }
   }
   return strListToStr(concrete_str_inputs);
+}
+
+// Like ivalueListToStr but returns the per-element strings (unquoted, None ->
+// "") instead of a single joined string, for the typed vector<string> field.
+std::vector<std::string> concreteInputsToStrList(
+    const std::vector<c10::IValue>& inputs) {
+  std::vector<std::string> concrete_str_inputs;
+  concrete_str_inputs.reserve(inputs.size());
+  std::stringstream ss;
+  for (const auto& val : inputs) {
+    if (val.isNone()) {
+      concrete_str_inputs.emplace_back("");
+    } else {
+      ss.str("");
+      ss << val;
+      concrete_str_inputs.emplace_back(std::move(ss).str());
+    }
+  }
+  return concrete_str_inputs;
 }
 
 std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
