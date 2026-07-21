@@ -203,6 +203,8 @@ _ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
     ]
 )
 
+# Reinplacing with an uninitialized factory base does not cost missed fusions
+# or writes to the base during materialization.
 _UNINITIALIZED_FACTORY_OPS = OrderedSet(
     [
         aten.empty.memory_format,
@@ -210,17 +212,6 @@ _UNINITIALIZED_FACTORY_OPS = OrderedSet(
         aten.empty_like.default,
         aten.new_empty.default,
         aten.new_empty_strided.default,
-    ]
-)
-
-_INITIALIZED_FACTORY_OPS = OrderedSet(
-    [
-        aten.zeros.default,
-        aten.zeros_like.default,
-        aten.ones.default,
-        aten.ones_like.default,
-        aten.full.default,
-        aten.full_like.default,
     ]
 )
 
@@ -258,14 +249,6 @@ def scatter_has_uninitialized_factory_base(node: torch.fx.Node) -> bool:
     )
 
 
-def scatter_has_initialized_factory_base(node: torch.fx.Node) -> bool:
-    return scatter_has_factory_base(
-        node,
-        _INITIALIZED_FACTORY_OPS,
-        (_generalized_scatter, _inplace_generalized_scatter),
-    )
-
-
 def scatter_base_has_no_functional_scatter(node: torch.fx.Node) -> bool:
     node = _get_view_base(node)
     while node.op == "call_function" and node.target in (
@@ -280,22 +263,6 @@ def scatter_base_has_no_functional_scatter(node: torch.fx.Node) -> bool:
         node = _get_view_base(inp)
 
     return True
-
-
-def scatter_base_has_inplace_scatter(node: torch.fx.Node) -> bool:
-    node = _get_view_base(node)
-    while node.op == "call_function" and node.target in (
-        _generalized_scatter,
-        _inplace_generalized_scatter,
-    ):
-        if node.target is _inplace_generalized_scatter:
-            return True
-        inp = node.args[0]
-        if not isinstance(inp, torch.fx.Node):
-            return False
-        node = _get_view_base(inp)
-
-    return False
 
 
 def scatter_has_smaller_src(inp: torch.fx.Node, src: torch.fx.Node) -> bool:
@@ -314,67 +281,6 @@ def scatter_has_smaller_realized_src(inp: torch.fx.Node, src: torch.fx.Node) -> 
     return is_node_realized(_get_view_base(src))
 
 
-def scatter_src_reads_base(inp: torch.fx.Node, src: torch.fx.Node) -> bool:
-    def scatter_base(node: torch.fx.Node) -> torch.fx.Node:
-        node = _get_view_base(node)
-        while node.target in (_generalized_scatter, _inplace_generalized_scatter):
-            arg = node.args[0]
-            if not isinstance(arg, torch.fx.Node):
-                return node
-            node = _get_view_base(arg)
-        return node
-
-    base = scatter_base(inp)
-    seen: OrderedSet[torch.fx.Node] = OrderedSet()
-
-    def visit(x: Any) -> bool:
-        if not isinstance(x, torch.fx.Node):
-            return False
-        if scatter_base(x) is base:
-            return True
-        if x in seen:
-            return False
-        seen.add(x)
-        args = x.args[1:2] if x.target is aten.copy.default else x.args
-        return any(visit(leaf) for leaf in pytree.tree_leaves((args, x.kwargs)))
-
-    return visit(src)
-
-
-def scatter_has_lowp_computed_base(inp: torch.fx.Node) -> bool:
-    inp = _get_view_base(inp)
-    inp_val = inp.meta.get("val", None)
-    return (
-        isinstance(inp_val, torch.Tensor)
-        and inp_val.dtype in (torch.float16, torch.bfloat16)
-        and inp.target
-        not in (
-            *_UNINITIALIZED_FACTORY_OPS,
-            *_INITIALIZED_FACTORY_OPS,
-            _generalized_scatter,
-            _inplace_generalized_scatter,
-        )
-    )
-
-
-def scatter_can_reinplace_smaller_src(inp: torch.fx.Node, src: torch.fx.Node) -> bool:
-    if scatter_has_smaller_realized_src(inp, src):
-        return True
-
-    if not scatter_has_smaller_src(inp, src):
-        return False
-
-    if scatter_src_reads_base(inp, src):
-        return False
-
-    if scatter_has_lowp_computed_base(inp):
-        return False
-
-    return scatter_base_has_inplace_scatter(
-        inp
-    ) or not scatter_has_initialized_factory_base(inp)
-
-
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -390,13 +296,15 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
         return True
 
     if isinstance(inp, torch.fx.Node) and scatter_has_uninitialized_factory_base(inp):
+        # When we have uninitialized base - we do not miss any fusion opportunities,
+        # by doing reinplacing of the scatter, the uninitialized factory does not cost any writes.
         return True
 
     if (
         isinstance(inp, torch.fx.Node)
         and isinstance(src, torch.fx.Node)
         and scatter_base_has_no_functional_scatter(inp)
-        and scatter_can_reinplace_smaller_src(inp, src)
+        and scatter_has_smaller_realized_src(inp, src)
     ):
         return True
 
