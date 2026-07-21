@@ -10,18 +10,17 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like_native.h>
-#include <ATen/ops/full_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/full.h>
 #include <ATen/ops/group_norm_native.h>
 #include <ATen/ops/native_group_norm.h>
 #include <ATen/ops/native_group_norm_backward_native.h>
 #include <ATen/ops/native_group_norm_native.h>
 #include <ATen/ops/var_mean.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/zeros_like_native.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
-#include <algorithm>
 #include <array>
 #include <tuple>
 #include <vector>
@@ -87,24 +86,24 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     check_mixed_data_type(X, gamma, beta);
   }
 
-  auto memory_format = X.device().is_cpu() ?
-      X.suggest_memory_format() : at::MemoryFormat::Contiguous;
+  auto memory_format{(X.device().is_cpu() || X.device().is_privateuseone()) ?
+      X.suggest_memory_format() : at::MemoryFormat::Contiguous};
+  auto stat_options{X.options().memory_format(at::MemoryFormat::Contiguous).dtype(param_scalar_type(X, mixed_type))};
 
   if (!X.numel()) {
     return std::make_tuple(
-      at::native::empty_like(X, {}, {}, {}, {}, memory_format),
-      at::zeros({N, group}, X.scalar_type(), {}, X.device(), {}),
-      at::native::full({N, group}, NAN, X.scalar_type(), {}, X.device()));
+      at::empty_like(X, memory_format),
+      at::zeros({N, group}, stat_options),
+      at::full({N, group}, NAN, stat_options));
   }
 
   Tensor X_ = X.contiguous(memory_format);
   Tensor gamma_ = gamma.defined() ? gamma.contiguous() : gamma;
   Tensor beta_ = beta.defined() ? beta.contiguous() : beta;
 
-  Tensor Y = at::native::empty_like(X_);
-  const auto dtype = param_scalar_type(X_, mixed_type);
-  Tensor mean = at::empty({N, group}, X_.options().dtype(dtype));
-  Tensor rstd = at::empty({N, group}, X_.options().dtype(dtype));
+  Tensor Y = at::empty_like(X_);
+  Tensor mean = at::empty({N, group}, stat_options);
+  Tensor rstd = at::empty({N, group}, stat_options);
 
   GroupNormKernel(
       X_.device().type(), X_, gamma_, beta_, N, C, HxW, group, eps, Y, mean, rstd);
@@ -134,14 +133,14 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     check_mixed_data_type(X, mean, rstd);
   }
 
-  auto memory_format = X.device().is_cpu() ?
+  auto memory_format = (X.device().is_cpu() || X.device().is_privateuseone()) ?
       X.suggest_memory_format() : at::MemoryFormat::Contiguous;
   auto dparam_options{(gamma.defined() ?
       gamma.options() : X.options()).memory_format(MemoryFormat::Contiguous)};
 
   if (!X.numel()) {
     return std::make_tuple(
-        grad_input_mask[0] ? at::native::zeros_like(X, {}, {}, {}, {}, memory_format) : Tensor{},
+        grad_input_mask[0] ? at::zeros_like(X, {}, memory_format) : Tensor{},
         grad_input_mask[1] ? at::zeros({C}, dparam_options) : Tensor{},
         grad_input_mask[2] ? at::zeros({C}, dparam_options) : Tensor{});
   }
@@ -154,7 +153,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
 
   Tensor dX{};
   if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X_);
+    dX = at::empty_like(X_);
   }
   Tensor dgamma{};
   if (grad_input_mask[1]) {
@@ -220,18 +219,33 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     int64_t HxW,
     int64_t group,
     double eps) {
-  auto input_shape = input.sizes();
-  if (std::ranges::any_of(input_shape, [](auto s) { return s == 0; })) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  const Tensor& bias = *bias_maybe_owned;
+
+  check_group_norm_inputs(input, weight, bias, C, group);
+
+  auto memory_format{(input.device().is_cpu() || input.device().is_privateuseone()) ?
+      input.suggest_memory_format() : at::MemoryFormat::Contiguous};
+  auto stat_options{input.options().memory_format(at::MemoryFormat::Contiguous)};
+
+  if (!input.numel()) {
     return std::make_tuple(
-        at::native::empty_like(input),
-        at::zeros({N, group}, input.scalar_type(), {}, input.device(), {}),
-        at::native::full({N, group}, NAN, input.scalar_type(), {}, input.device()));
+        at::empty_like(input, {}, memory_format),
+        // Return in the dtype of input, matching the operations below, unlike the
+        // optimized native_group_norm impl above.
+        at::zeros({N, group}, stat_options),
+        at::full({N, group}, NAN, stat_options));
   }
 
   auto input_reshaped = input.view({N, group, C / group * HxW});
   auto [var, mean] = at::var_mean(input_reshaped, {2}, c10::Scalar(0), true);
   auto rsqrt = var.add(eps).rsqrt();
-  auto out = input_reshaped.sub(mean).mul(rsqrt).reshape(input_shape);
+  auto out = input_reshaped.sub(mean).mul(rsqrt).reshape(input.sizes());
 
   std::vector<int64_t> weight_bias_shape(input.ndimension(), 1);
   weight_bias_shape[1] = C;
