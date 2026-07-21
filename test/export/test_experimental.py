@@ -118,10 +118,10 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     addmm = torch.ops.aten.addmm.default(p_linear_bias, view, permute);  p_linear_bias = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [3]);  addmm = None
     _softmax = torch.ops.aten._softmax.default(view_1, 0, False);  view_1 = None
-    alias = torch.ops.aten.alias.default(_softmax)
+    alias_1 = torch.ops.aten.alias.default(_softmax)
     clone = torch.ops.aten.clone.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
     _log_softmax = torch.ops.aten._log_softmax.default(_softmax, 0, False);  _softmax = None
-    alias_1 = torch.ops.aten.alias.default(_log_softmax)
+    alias_3 = torch.ops.aten.alias.default(_log_softmax)
     mul = torch.ops.aten.mul.Tensor(_log_softmax, clone);  _log_softmax = None
     sum_1 = torch.ops.aten.sum.dim_IntList(mul, []);  mul = None
     neg = torch.ops.aten.neg.default(sum_1);  sum_1 = None
@@ -131,15 +131,15 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     neg_1 = torch.ops.aten.neg.default(div_1);  div_1 = None
     expand = torch.ops.aten.expand.default(neg_1, [3]);  neg_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(expand, clone);  expand = clone = None
-    alias_2 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
-    exp = torch.ops.aten.exp.default(alias_2);  alias_2 = None
+    alias_4 = torch.ops.aten.alias.default(alias_3);  alias_3 = None
+    exp = torch.ops.aten.exp.default(alias_4);  alias_4 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(mul_1, [0], True)
     mul_2 = torch.ops.aten.mul.Tensor(exp, sum_2);  exp = sum_2 = None
     sub = torch.ops.aten.sub.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-    alias_3 = torch.ops.aten.alias.default(alias);  alias = None
-    mul_3 = torch.ops.aten.mul.Tensor(sub, alias_3);  sub = None
+    alias_6 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
+    mul_3 = torch.ops.aten.mul.Tensor(sub, alias_6);  sub = None
     sum_3 = torch.ops.aten.sum.dim_IntList(mul_3, [0], True)
-    mul_4 = torch.ops.aten.mul.Tensor(alias_3, sum_3);  alias_3 = sum_3 = None
+    mul_4 = torch.ops.aten.mul.Tensor(alias_6, sum_3);  alias_6 = sum_3 = None
     sub_1 = torch.ops.aten.sub.Tensor(mul_3, mul_4);  mul_3 = mul_4 = None
     view_2 = torch.ops.aten.view.default(sub_1, [1, 3]);  sub_1 = None
     permute_1 = torch.ops.aten.permute.default(view_2, [1, 0])
@@ -1418,8 +1418,10 @@ def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arange_3, 4);  arange_3 = None
     view = torch.ops.aten.view.default(arange_2, [64, 1]);  arange_2 = None
     ge = torch.ops.aten.ge.Tensor(view, add);  view = add = None
-    expand = torch.ops.aten.expand.default(ge, [1, 64, 64]);  ge = None
-    expand_1 = torch.ops.aten.expand.default(expand, [1, 1, 64, 64]);  expand = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(ge, 0);  ge = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, 64, 64]);  unsqueeze = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(expand, 0);  expand = None
+    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, 1, 64, 64]);  unsqueeze_1 = None
     constant_pad_nd = torch.ops.aten.constant_pad_nd.default(expand_1, [0, 64, 0, 64], 0.0);  expand_1 = None
     view_1 = torch.ops.aten.view.default(constant_pad_nd, [1, 1, 1, 128, 1, 128]);  constant_pad_nd = None
     permute = torch.ops.aten.permute.default(view_1, [0, 1, 2, 4, 3, 5]);  view_1 = None
@@ -1444,22 +1446,22 @@ def forward(self, arg0_1):
     _to_copy_7 = torch.ops.aten._to_copy.default(getitem_3, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_3 = None
     new_zeros = torch.ops.aten.new_zeros.default(_to_copy_4, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
     arange_4 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
-    unsqueeze = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
+    unsqueeze_2 = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
     arange_5 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
-    unsqueeze_1 = torch.ops.aten.unsqueeze.default(_to_copy_3, 3)
-    lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_1);  arange_5 = unsqueeze_1 = None
+    unsqueeze_3 = torch.ops.aten.unsqueeze.default(_to_copy_3, 3)
+    lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_3);  arange_5 = unsqueeze_3 = None
     scalar_tensor = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='cuda', index=0))
     where = torch.ops.aten.where.self(lt_1, _to_copy_4, scalar_tensor);  lt_1 = scalar_tensor = None
     new_ones = torch.ops.aten.new_ones.default(new_zeros, [1, 1], pin_memory = False)
     arange_6 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
-    unsqueeze_2 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
-    unsqueeze_3 = torch.ops.aten.unsqueeze.default(unsqueeze_2, -1);  unsqueeze_2 = None
+    unsqueeze_4 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
+    unsqueeze_5 = torch.ops.aten.unsqueeze.default(unsqueeze_4, -1);  unsqueeze_4 = None
     view_2 = torch.ops.aten.view.default(new_ones, [1, 1, 1, 1]);  new_ones = None
     arange_7 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
-    unsqueeze_4 = torch.ops.aten.unsqueeze.default(arange_7, -1);  arange_7 = None
-    unsqueeze_5 = torch.ops.aten.unsqueeze.default(unsqueeze_4, -1);  unsqueeze_4 = None
-    unsqueeze_6 = torch.ops.aten.unsqueeze.default(unsqueeze_5, -1);  unsqueeze_5 = None
-    index_put = torch.ops.aten.index_put.default(new_zeros, [unsqueeze_6, unsqueeze_3, unsqueeze, where], view_2);  new_zeros = unsqueeze_6 = unsqueeze_3 = unsqueeze = where = view_2 = None
+    unsqueeze_6 = torch.ops.aten.unsqueeze.default(arange_7, -1);  arange_7 = None
+    unsqueeze_7 = torch.ops.aten.unsqueeze.default(unsqueeze_6, -1);  unsqueeze_6 = None
+    unsqueeze_8 = torch.ops.aten.unsqueeze.default(unsqueeze_7, -1);  unsqueeze_7 = None
+    index_put = torch.ops.aten.index_put.default(new_zeros, [unsqueeze_8, unsqueeze_5, unsqueeze_2, where], view_2);  new_zeros = unsqueeze_8 = unsqueeze_5 = unsqueeze_2 = where = view_2 = None
     slice_3 = torch.ops.aten.slice.Tensor(index_put, 3, 0, 1);  index_put = None
     transpose_1 = torch.ops.aten.transpose.int(slice_3, -2, -1);  slice_3 = None
     sum_4 = torch.ops.aten.sum.dim_IntList(transpose_1, [-1])
@@ -1469,22 +1471,22 @@ def forward(self, arg0_1):
     _to_copy_9 = torch.ops.aten._to_copy.default(getitem_5, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_5 = None
     new_zeros_1 = torch.ops.aten.new_zeros.default(_to_copy_7, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
     arange_8 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
-    unsqueeze_7 = torch.ops.aten.unsqueeze.default(arange_8, -1);  arange_8 = None
+    unsqueeze_9 = torch.ops.aten.unsqueeze.default(arange_8, -1);  arange_8 = None
     arange_9 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
-    unsqueeze_8 = torch.ops.aten.unsqueeze.default(_to_copy_6, 3)
-    lt_2 = torch.ops.aten.lt.Tensor(arange_9, unsqueeze_8);  arange_9 = unsqueeze_8 = None
+    unsqueeze_10 = torch.ops.aten.unsqueeze.default(_to_copy_6, 3)
+    lt_2 = torch.ops.aten.lt.Tensor(arange_9, unsqueeze_10);  arange_9 = unsqueeze_10 = None
     scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='cuda', index=0))
     where_1 = torch.ops.aten.where.self(lt_2, _to_copy_7, scalar_tensor_1);  lt_2 = scalar_tensor_1 = None
     new_ones_1 = torch.ops.aten.new_ones.default(new_zeros_1, [1, 1], pin_memory = False)
     arange_10 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
-    unsqueeze_9 = torch.ops.aten.unsqueeze.default(arange_10, -1);  arange_10 = None
-    unsqueeze_10 = torch.ops.aten.unsqueeze.default(unsqueeze_9, -1);  unsqueeze_9 = None
+    unsqueeze_11 = torch.ops.aten.unsqueeze.default(arange_10, -1);  arange_10 = None
+    unsqueeze_12 = torch.ops.aten.unsqueeze.default(unsqueeze_11, -1);  unsqueeze_11 = None
     view_3 = torch.ops.aten.view.default(new_ones_1, [1, 1, 1, 1]);  new_ones_1 = None
     arange_11 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
-    unsqueeze_11 = torch.ops.aten.unsqueeze.default(arange_11, -1);  arange_11 = None
-    unsqueeze_12 = torch.ops.aten.unsqueeze.default(unsqueeze_11, -1);  unsqueeze_11 = None
-    unsqueeze_13 = torch.ops.aten.unsqueeze.default(unsqueeze_12, -1);  unsqueeze_12 = None
-    index_put_1 = torch.ops.aten.index_put.default(new_zeros_1, [unsqueeze_13, unsqueeze_10, unsqueeze_7, where_1], view_3);  new_zeros_1 = unsqueeze_13 = unsqueeze_10 = unsqueeze_7 = where_1 = view_3 = None
+    unsqueeze_13 = torch.ops.aten.unsqueeze.default(arange_11, -1);  arange_11 = None
+    unsqueeze_14 = torch.ops.aten.unsqueeze.default(unsqueeze_13, -1);  unsqueeze_13 = None
+    unsqueeze_15 = torch.ops.aten.unsqueeze.default(unsqueeze_14, -1);  unsqueeze_14 = None
+    index_put_1 = torch.ops.aten.index_put.default(new_zeros_1, [unsqueeze_15, unsqueeze_12, unsqueeze_9, where_1], view_3);  new_zeros_1 = unsqueeze_15 = unsqueeze_12 = unsqueeze_9 = where_1 = view_3 = None
     slice_6 = torch.ops.aten.slice.Tensor(index_put_1, 3, 0, 1);  index_put_1 = None
     transpose_3 = torch.ops.aten.transpose.int(slice_6, -2, -1);  slice_6 = None
     sum_5 = torch.ops.aten.sum.dim_IntList(transpose_3, [-1])
@@ -1871,9 +1873,15 @@ def forward(self, arg0_1):
         for label, joint_gm in [("public", joint_public), ("private", joint_private)]:
             buf_input = torch.zeros(())
             (exported_out,) = joint_gm(buf_input, x)
-            self.assertEqual(exported_out, eager_out, msg=f"{label}: output mismatch")
             self.assertEqual(
-                buf_input, eager_buf, msg=f"{label}: buffer mutation mismatch"
+                exported_out,
+                eager_out,
+                msg=lambda msg: f"{msg}\n{label}: output mismatch",
+            )
+            self.assertEqual(
+                buf_input,
+                eager_buf,
+                msg=lambda msg: f"{msg}\n{label}: buffer mutation mismatch",
             )
 
 

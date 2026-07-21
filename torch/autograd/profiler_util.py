@@ -378,6 +378,7 @@ class EventList(list):
         group_by_input_shapes=False,
         group_by_stack_n=0,
         group_by_overload_name=False,
+        include_python_functions=False,
     ):
         """Averages all function events over their keys.
 
@@ -392,6 +393,13 @@ class EventList(list):
 
             group_by_overload_name: Differentiate operators by their overload name e.g. aten::add.Tensor
             and aten::add.out will be aggregated separately
+
+            include_python_functions: include Python function events (e.g. individual
+                Python callsite entries captured with ``with_stack=True``) in the
+                averages. By default these are excluded because they tend to appear as
+                misleading hotspots (e.g. ``threading.py: wait``) that obscure the
+                real operator-level breakdown. Set to ``True`` to restore the raw
+                per-callsite view.
 
         Returns:
             An EventList containing FunctionEventAvg objects.
@@ -421,6 +429,8 @@ class EventList(list):
             return tuple(key)
 
         for evt in self:
+            if evt.is_python_function and not include_python_functions:
+                continue
             stats[
                 get_key(
                     evt, group_by_input_shapes, group_by_stack_n, group_by_overload_name
@@ -568,6 +578,8 @@ class EventMetadata(NamedTuple):
     graph_node_id: int | None
     stream: int | None
     context: int | None
+    channel: int | None
+    channel_type: int | None
     # Memory fields
     bytes: int | None
     bandwidth_gb_s: float | None
@@ -589,11 +601,6 @@ class EventMetadata(NamedTuple):
     dst_rank: int | None
     seq: int | None
     is_async: bool | None
-    # CUPTI channel and channel type for the activity, when surfaced by
-    # kineto's per-event metadata. Optional so events that don't carry
-    # them deserialize without error.
-    channel: int | None = None
-    channel_type: int | None = None
 
 
 def _to_str(v: str) -> str:
@@ -620,6 +627,8 @@ _EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
     "graph node id": ("graph_node_id", int),
     "stream": ("stream", int),
     "context": ("context", int),
+    "channel": ("channel", int),
+    "channel_type": ("channel_type", int),
     "bytes": ("bytes", int),
     "memory bandwidth (GB/s)": ("bandwidth_gb_s", float),
     "Collective name": ("collective_name", _to_str),
