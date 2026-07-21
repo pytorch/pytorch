@@ -210,21 +210,21 @@ template <typename Dtype, typename C_Dtype, typename std::enable_if<CUDABLAS_GEM
 void bgemm(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype));
 
 template <>
-void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double));
+TORCH_CUDA_CU_API void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double));
 template <>
-void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float));
+TORCH_CUDA_CU_API void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float));
 template <>
-void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>));
 template <>
-void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>));
 template <>
-void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
+TORCH_CUDA_CU_API void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
 template <>
-void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+TORCH_CUDA_CU_API void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
 template<>
-void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float));
+TORCH_CUDA_CU_API void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float));
 template<>
-void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float));
+TORCH_CUDA_CU_API void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float));
 
 template <typename Dtype, typename C_Dtype = Dtype>
 inline void bgemm_internal(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
