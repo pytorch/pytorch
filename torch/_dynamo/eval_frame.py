@@ -807,9 +807,7 @@ def guard_collectives_hook(guard_eval_result: bool) -> bool:
             log.debug("guard_collective %s", guard_eval_result)
             # TODO: a bit awkward to time, this isn't inside of the dynamo compile region
             all_results = [None] * pg.size()
-            dist.all_gather_object(
-                all_results, guard_eval_result, group=pg, weights_only=True
-            )
+            dist.all_gather_object(all_results, guard_eval_result, group=pg)
             # True = everyone hit, OK to run
             # False = someone missed, force recompile everywhere
             res = all(all_results)
