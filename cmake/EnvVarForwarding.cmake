@@ -109,6 +109,8 @@
 #                            to reconfigure from scratch instead.
 #   CMAKE_ONLY               configure without building; no equivalent (this was a
 #                            setup.py-only debugging aid).
+#   USE_NINJA                select the generator via CMAKE_GENERATOR=Ninja instead
+#                            (ninja is the default when available).
 
 # Additional env vars that are forwarded with a different CMake variable name.
 set(_ENV_ALIASES
