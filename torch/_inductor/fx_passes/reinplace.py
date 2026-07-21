@@ -307,28 +307,72 @@ def scatter_has_smaller_src(inp: torch.fx.Node, src: torch.fx.Node) -> bool:
     return statically_known_true(src_val.numel() < inp_val.numel())
 
 
-def scatter_has_smaller_realized_src(
-    inp: torch.fx.Node, src: torch.fx.Node
-) -> bool:
+def scatter_has_smaller_realized_src(inp: torch.fx.Node, src: torch.fx.Node) -> bool:
     if not scatter_has_smaller_src(inp, src):
         return False
 
     return is_node_realized(_get_view_base(src))
 
 
-def scatter_can_reinplace_smaller_src(
-    inp: torch.fx.Node, src: torch.fx.Node
-) -> bool:
+def scatter_src_reads_base(inp: torch.fx.Node, src: torch.fx.Node) -> bool:
+    def scatter_base(node: torch.fx.Node) -> torch.fx.Node:
+        node = _get_view_base(node)
+        while node.target in (_generalized_scatter, _inplace_generalized_scatter):
+            arg = node.args[0]
+            if not isinstance(arg, torch.fx.Node):
+                return node
+            node = _get_view_base(arg)
+        return node
+
+    base = scatter_base(inp)
+    seen: OrderedSet[torch.fx.Node] = OrderedSet()
+
+    def visit(x: Any) -> bool:
+        if not isinstance(x, torch.fx.Node):
+            return False
+        if scatter_base(x) is base:
+            return True
+        if x in seen:
+            return False
+        seen.add(x)
+        args = x.args[1:2] if x.target is aten.copy.default else x.args
+        return any(visit(leaf) for leaf in pytree.tree_leaves((args, x.kwargs)))
+
+    return visit(src)
+
+
+def scatter_has_lowp_computed_base(inp: torch.fx.Node) -> bool:
+    inp = _get_view_base(inp)
+    inp_val = inp.meta.get("val", None)
+    return (
+        isinstance(inp_val, torch.Tensor)
+        and inp_val.dtype in (torch.float16, torch.bfloat16)
+        and inp.target
+        not in (
+            *_UNINITIALIZED_FACTORY_OPS,
+            *_INITIALIZED_FACTORY_OPS,
+            _generalized_scatter,
+            _inplace_generalized_scatter,
+        )
+    )
+
+
+def scatter_can_reinplace_smaller_src(inp: torch.fx.Node, src: torch.fx.Node) -> bool:
     if scatter_has_smaller_realized_src(inp, src):
         return True
 
     if not scatter_has_smaller_src(inp, src):
         return False
 
-    return (
-        scatter_base_has_inplace_scatter(inp)
-        or not scatter_has_initialized_factory_base(inp)
-    )
+    if scatter_src_reads_base(inp, src):
+        return False
+
+    if scatter_has_lowp_computed_base(inp):
+        return False
+
+    return scatter_base_has_inplace_scatter(
+        inp
+    ) or not scatter_has_initialized_factory_base(inp)
 
 
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:

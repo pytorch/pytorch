@@ -5130,8 +5130,6 @@ class Scheduler:
                 ancestors.add(dep_node_name)
                 ancestors |= name_to_ancestors[dep_node_name]
             name_to_ancestors[node.get_name()] = ancestors
-            for op_name in node.get_operation_names():
-                name_to_ancestors[op_name] = ancestors
             node.ancestors = ancestors
 
         for order, node in enumerate(self.nodes):
@@ -5163,9 +5161,6 @@ class Scheduler:
                 max_dist = max(name_to_max_distance[op] + 1 for op in dep_ops)
             name_to_min_distance[node.get_name()] = min_dist
             name_to_max_distance[node.get_name()] = max_dist
-            for op_name in node.get_operation_names():
-                name_to_min_distance[op_name] = min_dist
-                name_to_max_distance[op_name] = max_dist
             node.min_input_distance = min_dist
             node.max_input_distance = max_dist
 
@@ -7011,122 +7006,75 @@ class Scheduler:
         peak_start = min(peak_steps) if peak_steps else None
         peak_end = max(peak_steps) if peak_steps else None
 
-        # Exact local rescheduling is too expensive for very wide spans.
-        max_exact_span = max(128, 2 * config.max_fusion_size)
-        if region_end - region_start > max_exact_span:
-            if peak_start is None or peak_end is None:
-                return False
-
-            moved_live_bytes = 0
-            for node in (node1, node2):
-                old_step = self._fusion_node_step(ctx, node)
-                if old_step is None or old_step <= peak_end:
-                    continue
-                for buf in node.get_outputs():
-                    if buf.get_name() in ctx.graph_outputs:
-                        continue
-                    succ_steps = [
-                        step
-                        for succ in buf.mpi_buffer.succ_nodes
-                        if (step := self._fusion_node_step(ctx, succ)) is not None
-                    ]
-                    if (
-                        succ_steps
-                        and region_start <= peak_end
-                        and max(succ_steps) >= peak_start
-                    ):
-                        moved_live_bytes += max(
-                            buf.mpi_buffer.size_alloc,
-                            buf.mpi_buffer.size_free,
-                        )
-
-            regresses_peak = moved_live_bytes > peak_allowed_increase
-            if regresses_peak:
-                fusion_log.debug(
-                    "memory-timeline fusion rejected %s with %s: moves %d bytes across peak",
-                    node1.get_name(),
-                    node2.get_name(),
-                    moved_live_bytes,
-                )
-                return True
-        else:
-            candidate = self.get_backend(node1.get_device()).fuse(node1, node2)
-            candidate_buffers = candidate.get_buffer_names()
-            pred_buffers = OrderedSet()
-            for node in (node1, node2):
-                pred_buffers.update(
-                    buf
-                    for buf in node.mpi_node.pred_buffers
-                    if buf.get_name() not in candidate_buffers
-                )
-            candidate.mpi_node = MemoryPlanningInfoForNode(
-                size=sum(buf.mpi_buffer.size_alloc for buf in candidate.get_outputs()),
-                pred_buffers=pred_buffers,
+        candidate = self.get_backend(node1.get_device()).fuse(node1, node2)
+        candidate_buffers = candidate.get_buffer_names()
+        pred_buffers = OrderedSet()
+        for node in (node1, node2):
+            pred_buffers.update(
+                buf
+                for buf in node.mpi_node.pred_buffers
+                if buf.get_name() not in candidate_buffers
             )
+        candidate.mpi_node = MemoryPlanningInfoForNode(
+            size=sum(buf.mpi_buffer.size_alloc for buf in candidate.get_outputs()),
+            pred_buffers=pred_buffers,
+        )
 
-            local_entries: list[_LocalEntry] = []
-            inserted_candidate = False
-            originals = OrderedSet((node1, node2))
-            for idx in range(region_start, region_end + 1):
-                node = ctx.nodes[idx]
-                if node in originals:
-                    if not inserted_candidate:
-                        local_entries.append(_LocalEntry(region_start, idx, candidate))
-                        inserted_candidate = True
-                    continue
-                local_entries.append(_LocalEntry(idx, idx, node))
+        local_entries: list[_LocalEntry] = []
+        inserted_candidate = False
+        originals = OrderedSet((node1, node2))
+        for idx in range(region_start, region_end + 1):
+            node = ctx.nodes[idx]
+            if node in originals:
+                if not inserted_candidate:
+                    local_entries.append(_LocalEntry(region_start, idx, candidate))
+                    inserted_candidate = True
+                continue
+            local_entries.append(_LocalEntry(idx, idx, node))
 
-            local_nodes = [
-                e.node
-                for e in sorted(local_entries, key=lambda e: (e.cur, e.baseline))
-            ]
-            local_nodes = self.topological_sort_schedule(local_nodes)
+        local_nodes = [
+            e.node for e in sorted(local_entries, key=lambda e: (e.cur, e.baseline))
+        ]
+        local_nodes = self.topological_sort_schedule(local_nodes)
 
-            new_step = {
-                node: region_start + idx for idx, node in enumerate(local_nodes)
-            }
-            candidate_step = new_step[candidate]
-            for node in (node1, node2):
-                new_step[node] = candidate_step
-                for snode in node.get_nodes():
-                    new_step[snode] = candidate_step
+        new_step = {node: region_start + idx for idx, node in enumerate(local_nodes)}
+        candidate_step = new_step[candidate]
+        for node in (node1, node2):
+            new_step[node] = candidate_step
+            for snode in node.get_nodes():
+                new_step[snode] = candidate_step
 
-            step_cache = {}
+        step_cache = {}
 
-            def step_of(node: BaseSchedulerNode) -> int:
-                if node not in step_cache:
-                    if node in new_step:
-                        step_cache[node] = new_step[node]
-                    elif node in ctx.node_to_idx:
-                        step_cache[node] = ctx.node_to_idx[node]
-                    else:
-                        steps = [
-                            new_step[n] for n in node.get_nodes() if n in new_step
-                        ]
-                        step_cache[node] = (
-                            min(steps) if steps else ctx.node_to_idx[node]
-                        )
-                return step_cache[node]
+        def step_of(node: BaseSchedulerNode) -> int:
+            if node not in step_cache:
+                if node in new_step:
+                    step_cache[node] = new_step[node]
+                elif node in ctx.node_to_idx:
+                    step_cache[node] = ctx.node_to_idx[node]
+                else:
+                    steps = [new_step[n] for n in node.get_nodes() if n in new_step]
+                    step_cache[node] = min(steps) if steps else ctx.node_to_idx[node]
+            return step_cache[node]
 
-            region_peak = estimate_region_peak_memory(
-                local_nodes,
-                region_start=region_start,
-                region_end=region_end,
-                step_of=step_of,
-                graph_outputs=ctx.graph_outputs,
-                cur_memory=ctx.baseline_live_before[region_start],
+        region_peak = estimate_region_peak_memory(
+            local_nodes,
+            region_start=region_start,
+            region_end=region_end,
+            step_of=step_of,
+            graph_outputs=ctx.graph_outputs,
+            cur_memory=ctx.baseline_live_before[region_start],
+        )
+
+        peak_delta = region_peak - ctx.baseline_peak
+        if peak_delta > peak_allowed_increase:
+            fusion_log.debug(
+                "memory-timeline fusion rejected %s with %s: estimated peak delta %d bytes",
+                node1.get_name(),
+                node2.get_name(),
+                peak_delta,
             )
-
-            peak_delta = region_peak - ctx.baseline_peak
-            regresses_peak = peak_delta > peak_allowed_increase
-            if regresses_peak:
-                fusion_log.debug(
-                    "memory-timeline fusion rejected %s with %s: estimated peak delta %d bytes",
-                    node1.get_name(),
-                    node2.get_name(),
-                    peak_delta,
-                )
-                return True
+            return True
 
         # A fusion can make one large output live through peak while another dies early.
         if (node1.get_operation_names() & node2.ancestors) or (
@@ -7154,8 +7102,7 @@ class Scheduler:
                 if end_step < peak_start:
                     has_pre_peak_output = True
                 if (
-                    max(buf.mpi_buffer.size_alloc, buf.mpi_buffer.size_free)
-                    > min_size
+                    max(buf.mpi_buffer.size_alloc, buf.mpi_buffer.size_free) > min_size
                     and region_start <= peak_end
                     and end_step >= peak_start
                 ):
@@ -7169,6 +7116,7 @@ class Scheduler:
                 node2.get_name(),
             )
             return True
+
         return False
 
     def fusion_prevent_too_many_reads_and_writes(
@@ -9063,7 +9011,9 @@ class Scheduler:
                 possible_fusions_group_by_priority[fusion_pair_priority].append(
                     (node1, node2)
                 )
-        peak_allowed_increase = self.fusion_memory_timeline_peak_allowed_increase_bytes()
+        peak_allowed_increase = (
+            self.fusion_memory_timeline_peak_allowed_increase_bytes()
+        )
         for _, possible_fusions_with_highest_priority in sorted(
             possible_fusions_group_by_priority.items(), key=operator.itemgetter(0)
         ):
