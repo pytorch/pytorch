@@ -198,7 +198,7 @@ def reference_reduction_numpy(f, supports_keepdims=True):
 
     The wrapper function will forward dim, keepdim, mask, and identity
     kwargs to the wrapped function as the NumPy equivalent axis,
-    keepdims, where, and initiak kwargs, respectively.
+    keepdims, where, and initial kwargs, respectively.
 
     Args:
         f: NumPy reduction operator to wrap
