@@ -31,16 +31,19 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
 #include <torch/csrc/profiler/standalone/privateuse1_profiler.h>
 
 #include <GenericTraceActivity.h>
 #include <IActivityProfiler.h>
+#include <MetadataFieldCatalog.h>
 #include <libkineto.h>
 #include <output_base.h>
 
@@ -205,6 +208,24 @@ class CapturingWarningHandler : public c10::WarningHandler {
   std::vector<std::string> messages_;
 };
 
+void registerCollectionMockProfiler() {
+  static const bool registered = [] {
+    libkineto::api().registerProfilerFactory(
+        []() { return std::make_unique<DuplicateFlowMockProfiler>(); });
+    return true;
+  }();
+  (void)registered;
+}
+
+void ensurePrivateUse1Profiler() {
+  torch::profiler::impl::PrivateUse1ProfilerRegistry& registry =
+      torch::profiler::impl::PrivateUse1ProfilerRegistry::instance();
+  if (!registry.hasFactory()) {
+    registry.registerFactory(
+        []() { return std::make_unique<NoopPrivateUse1Profiler>(); });
+  }
+}
+
 } // namespace
 
 // A backend producing duplicate async-CPU-GPU flow start IDs must be handled
@@ -220,17 +241,8 @@ TEST(ProfilerCollectionTest, DuplicateFlowIdHandledGracefully) {
   c10::WarningUtils::WarningHandlerGuard handler_guard(&handler);
   c10::WarningUtils::WarnAlways warn_always_guard(true);
 
-  // Register a child profiler directly with libkineto. The session it
-  // returns is what injects duplicate flow IDs into the trace.
-  libkineto::api().registerProfilerFactory(
-      []() { return std::make_unique<DuplicateFlowMockProfiler>(); });
-
-  // The PrivateUse1 registry needs a factory so prepareProfiler triggers
-  // libkineto init, which in turn materializes the factory registered above.
-  if (!PrivateUse1ProfilerRegistry::instance().hasFactory()) {
-    PrivateUse1ProfilerRegistry::instance().registerFactory(
-        []() { return std::make_unique<NoopPrivateUse1Profiler>(); });
-  }
+  registerCollectionMockProfiler();
+  ensurePrivateUse1Profiler();
 
   ProfilerConfig config(
       ProfilerState::KINETO_PRIVATEUSE1,
@@ -261,6 +273,52 @@ TEST(ProfilerCollectionTest, DuplicateFlowIdHandledGracefully) {
   }
   EXPECT_TRUE(saw_per_id_warning);
   EXPECT_TRUE(saw_summary_warning);
+}
+
+TEST(ProfilerCollectionTest, UsesTypedEventIndexMetadata) {
+  using namespace torch::autograd::profiler;
+  using namespace torch::profiler::impl;
+
+  registerCollectionMockProfiler();
+  ensurePrivateUse1Profiler();
+
+  ProfilerConfig config(
+      ProfilerState::KINETO_PRIVATEUSE1,
+      /*report_input_shapes=*/false,
+      /*profile_memory=*/false,
+      /*with_stack=*/false,
+      /*with_flops=*/false,
+      /*with_modules=*/false);
+  std::set<ActivityType> activities{ActivityType::CPU};
+
+  prepareProfiler(config, activities);
+  enableProfiler(config, activities, {at::RecordScope::FUNCTION});
+  {
+    RECORD_FUNCTION("typed_event_index", {});
+  }
+  std::unique_ptr<ProfilerResult> result = disableProfiler();
+  ASSERT_NE(result, nullptr);
+
+  const auto* trace_activities = result->traceActivities();
+  ASSERT_NE(trace_activities, nullptr);
+  const auto activity = std::find_if(
+      trace_activities->begin(),
+      trace_activities->end(),
+      [](const libkineto::ITraceActivity* a) {
+        return a->name() == "typed_event_index";
+      });
+  ASSERT_NE(activity, trace_activities->end());
+
+  const auto* generic_activity =
+      dynamic_cast<const libkineto::GenericTraceActivity*>(*activity);
+  ASSERT_NE(generic_activity, nullptr);
+  const auto event_index = generic_activity->getMetadataValue(
+      libkineto::GenericMetadataFields::kEvIdx);
+  ASSERT_TRUE(event_index.has_value());
+  EXPECT_GE(*event_index, 0);
+  const auto record_function_id = generic_activity->getMetadataValue(
+      libkineto::GenericMetadataFields::kRecordFunctionId);
+  EXPECT_TRUE(record_function_id.has_value());
 }
 
 #endif // USE_KINETO
