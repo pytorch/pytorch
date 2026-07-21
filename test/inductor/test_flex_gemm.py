@@ -108,6 +108,18 @@ if cute is not None:
         tmp4 = tmp3.broadcast_to(tmp1.shape)
         return tmp1 * (cute.full_like(tmp4, 1.0) / tmp4)
 
+    @cute.jit
+    def physical_group_sum_feed_epilogue(acc, local_reduce0):
+        return acc / local_reduce0
+
+    @cute.jit
+    def physical_group_sum_combine(lhs, rhs):
+        return lhs + rhs
+
+    @cute.jit
+    def physical_group_sum_finalize(value):
+        return value
+
 
 class TestFlexGemmRuntimeImport(TestCase):
     def test_import_does_not_load_external_quack(self):
@@ -972,6 +984,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         )
         from torch._inductor.kernel.flex_gemm.runtime import (
             FlexGemmRuntimeLocalReducePlan,
+            local_reduce_gemm_act_kwargs,
         )
         from torch._inductor.kernel.flex_gemm.template import (
             FlexGemmEpilogueLocalReduceConfig,
@@ -981,24 +994,22 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             lambda lhs, rhs: lhs, lambda value: value
         )
         geometry = FlexGemmLocalReduceGeometry(8, 0)
-        self.assertTrue(
-            FlexGemmRuntimeLocalReducePlan(
-                geometry, callbacks=callbacks, feeds_main=True
-            ).feeds_main
+        out = torch.empty(1)
+        feed_plan = FlexGemmRuntimeLocalReducePlan(
+            geometry, callbacks=callbacks, feeds_main=True
         )
-        self.assertTrue(
-            FlexGemmRuntimeLocalReducePlan(
-                geometry,
-                out=torch.empty(1),
-                callbacks=callbacks,
-                feeds_main=True,
-            ).feeds_main
+        shared_plan = FlexGemmRuntimeLocalReducePlan(
+            geometry,
+            out=out,
+            callbacks=callbacks,
+            feeds_main=True,
         )
-        self.assertFalse(
-            FlexGemmRuntimeLocalReducePlan(
-                geometry, out=torch.empty(1), callbacks=callbacks
-            ).feeds_main
+        store_plan = FlexGemmRuntimeLocalReducePlan(
+            geometry, out=out, callbacks=callbacks
         )
+        self.assertTrue(feed_plan.feeds_main)
+        self.assertTrue(shared_plan.feeds_main)
+        self.assertFalse(store_plan.feeds_main)
         self.assertTrue(
             FlexGemmEpilogueLocalReduceConfig(geometry, feeds_main=True).feeds_main
         )
@@ -1010,6 +1021,17 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         self.assertFalse(
             FlexGemmEpilogueLocalReduceConfig(geometry, out_index=0).feeds_main
         )
+
+        feed_kwargs = local_reduce_gemm_act_kwargs(
+            feed_plan, None, ("combine", "finalize")
+        )
+        self.assertTrue(feed_kwargs["local_reduce_feeds_main"])
+        self.assertFalse(feed_kwargs["tensor_epilogue_returns_local_reduce"])
+        shared_kwargs = local_reduce_gemm_act_kwargs(
+            shared_plan, out, ("combine", "finalize")
+        )
+        self.assertTrue(shared_kwargs["local_reduce_feeds_main"])
+        self.assertTrue(shared_kwargs["tensor_epilogue_returns_local_reduce"])
 
     def test_output_plan_rejects_invalid_state(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
@@ -1202,6 +1224,64 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             torch.testing.assert_close(out.double(), expected, atol=1e-4, rtol=1e-4)
             # A partial-fragment reduce would match the half-group reference.
             self.assertGreater((out.double() - wrong_expected).abs().max(), 1e-2)
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_physical_feed_main_forced_config_extremes_match_reference(self):
+        from torch._inductor.heuristics.template.flex_gemm import (
+            candidate_gemm_configs_for_device,
+            gemm_config_key,
+        )
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmLocalReduceCallbacks,
+            FlexGemmLocalReduceGeometry,
+            validate_flex_gemm_local_reduce_config,
+        )
+        from torch._inductor.kernel.flex_gemm.runtime import (
+            FlexGemmRuntimeLocalReducePlan,
+            gemm_epilogue,
+        )
+
+        m, n, k, group = 128, 128, 64, 32
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16) + 0.5
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16) + 0.5
+        gated = [
+            config
+            for config in candidate_gemm_configs_for_device(a.device)
+            if validate_flex_gemm_local_reduce_config(config, group, 0)
+        ]
+        self.assertTrue(gated)
+        extremes = (
+            min(gated, key=lambda config: (config.tile_m, config.tile_n)),
+            max(gated, key=lambda config: (config.tile_m, config.tile_n)),
+            min(gated, key=lambda config: (config.tile_n, config.tile_m)),
+            max(gated, key=lambda config: (config.tile_n, config.tile_m)),
+        )
+        selected = {gemm_config_key(config): config for config in extremes}.values()
+        accumulator = a.double() @ b.double()
+        grouped = accumulator.view(m // group, group, n)
+        expected = (grouped / grouped.sum(1, keepdim=True)).view(m, n)
+        callbacks = FlexGemmLocalReduceCallbacks(
+            physical_group_sum_combine, physical_group_sum_finalize
+        )
+        local_reduce = FlexGemmRuntimeLocalReducePlan(
+            FlexGemmLocalReduceGeometry(group, 0),
+            callbacks=callbacks,
+            feeds_main=True,
+        )
+        for config in selected:
+            out = gemm_epilogue(
+                a,
+                b,
+                physical_group_sum_feed_epilogue,
+                (
+                    "test_flex_gemm_physical_feed_main_"
+                    f"{config.tile_m}_{config.tile_n}_{config.cluster_m}_{config.cluster_n}"
+                ),
+                out_dtype=torch.float32,
+                local_reduce=local_reduce,
+                config_key=gemm_config_key(config),
+            )
+            torch.testing.assert_close(out.double(), expected, atol=1e-4, rtol=1e-4)
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("shape", ((128, 512, 256), (512, 128, 256), (256, 256, 256)))
