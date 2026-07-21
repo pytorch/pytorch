@@ -16,10 +16,12 @@ from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.license_files_audit import audit_repo_license_files
+
 
 sys.path.remove(str(REPO_ROOT))
 
