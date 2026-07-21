@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import dataclasses
 from collections.abc import Callable, Mapping
+from functools import partial
 from typing import Any, cast
 
 import torch
@@ -84,6 +85,18 @@ def flex_gemm_fast_math_silu(x: torch.Tensor) -> torch.Tensor:
     return half * torch.tanh(half) + half
 
 
+def flex_gemm_fast_math_gelu(
+    x: torch.Tensor,
+    approximate: str = "none",
+    *,
+    fallback: Callable[..., Any],
+) -> torch.Tensor:
+    """Approximate exact GELU with the standard tanh formulation."""
+    if approximate != "none":
+        return fallback(x, approximate)
+    return 0.5 * x * (1.0 + torch.tanh(0.7978845608028654 * (x + 0.044715 * x * x * x)))
+
+
 FLEX_GEMM_FAST_MATH_DECOMPOSITIONS: dict[torch._ops.OpOverload, Callable[..., Any]] = {
     torch.ops.aten.sigmoid.default: flex_gemm_fast_math_sigmoid,
     torch.ops.aten.silu.default: flex_gemm_fast_math_silu,
@@ -102,6 +115,11 @@ def flex_gemm_body_decomposition_table(
         return None
     merged_decompositions = dict(decomposition_table)
     merged_decompositions.update(FLEX_GEMM_FAST_MATH_DECOMPOSITIONS)
+    gelu = torch.ops.aten.gelu.default
+    if gelu in merged_decompositions:
+        merged_decompositions[gelu] = partial(
+            flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
+        )
     return merged_decompositions
 
 
