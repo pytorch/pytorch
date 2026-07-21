@@ -1,17 +1,21 @@
 # Owner(s): ["module: inductor"]
+import io
 import json
 import os
+import sys
 import tempfile
 from dataclasses import dataclass
 from unittest import mock
 
 from torch._inductor.remote_cache import (
     create_cache,
+    dump_cache_stats,
     RemoteCache,
     RemoteCacheBackend,
     RemoteCachePassthroughSerde,
 )
 from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.logging_utils import log_settings
 
 
 class FailingBackend(RemoteCacheBackend):
@@ -53,6 +57,25 @@ class TestRemoteCache(TestCase):
         c = RemoteCache(NoopBackend(), RemoteCachePassthroughSerde())
         c.put("test", "value")
         c.get("test")
+
+    def test_dump_cache_stats_after_stderr_capture_closed(
+        self,
+    ) -> None:
+        captured_stderr = io.StringIO()
+        live_stderr = io.StringIO()
+        old_stderr = sys.stderr
+
+        try:
+            sys.stderr = captured_stderr
+            with log_settings("inductor"):
+                captured_stderr.close()
+                sys.stderr = live_stderr
+                dump_cache_stats()
+        finally:
+            sys.stderr = old_stderr
+
+        self.assertIn("Cache Metrics", live_stderr.getvalue())
+        self.assertNotIn("Logging error", live_stderr.getvalue())
 
     def test_failure_no_sample(
         self,
