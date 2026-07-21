@@ -10,7 +10,7 @@ yolov3,export-aot-inductor,float32,static,default,1.571,0.988
 mobilenet_v2,export-aot-inductor,float32,static,default,3.11847
 resnext50_32x4d,export-aot-inductor,float32,dynamic,default,1.93167
 resnext50_32x4d,inductor,amp,static,default,3.87711
-vgg16,inductor,amp,static,default,1.2692454
+vgg16,inductor,amp,static,default,3.646566
 llama,inductor,amp,static,default,1.33157028
 mnasnet1_0,inductor,amp,static,cpp,2.1296814
 #mobilenet_v2,inductor,amp,dynamic,cpp,2.27774577 # https://github.com/pytorch/pytorch/issues/131693
