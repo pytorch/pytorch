@@ -641,7 +641,7 @@ multi_kernel_hints: list[int] = []
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
-# NVGEMM: NVIDIA Universal GEMM via cutlass_api (NVidia GPUs only).
+# NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.
@@ -669,6 +669,11 @@ nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default
 nvgemm_supplement_configs: bool = (
     os.environ.get("TORCHINDUCTOR_NVGEMM_SUPPLEMENT_CONFIGS", "0") == "1"
 )
+
+# When enabled, adds swap_ab NVGEMM choices that swap A/B operands so the
+# large N dimension goes on the M-axis. Improves tile utilization for
+# small-M decode shapes typical in LLM inference (M << N).
+nvgemm_swap_ab: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_SWAP_AB", "0") == "1"
 
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
@@ -878,6 +883,10 @@ cache_sdpa_constraint = (
 
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
+
+# Whether view outputs must match eager strides exactly instead of only matching
+# their stride order. Exact matching can introduce additional copy kernels.
+strict_output_strides = False
 
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging
