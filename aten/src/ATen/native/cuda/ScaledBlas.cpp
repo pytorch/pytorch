@@ -611,9 +611,13 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   if (scaling_choice_a == ScalingType::RowWise && scaling_choice_b == ScalingType::RowWise) {
 #ifndef USE_ROCM
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    if ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
+    // cuBLAS FP8 only accepts a BFloat16/Half bias, so a fused Float32 bias with
+    // Float32 output must go through CUTLASS, which supports it on every arch.
+    const bool bias_needs_cutlass = bias.has_value() && out.dtype() == kFloat;
+    if (bias_needs_cutlass ||
+        ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
         // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
-        ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty()))) {
+        ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty())))) {
       TORCH_CHECK_VALUE(
           out.dtype() == kBFloat16 || out.dtype() == kHalf ||
               out.dtype() == kFloat,
