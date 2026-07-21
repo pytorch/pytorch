@@ -4920,6 +4920,68 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         out = F.cosine_similarity(a, b)
         self.assertEqual(out, torch.ones(2, dtype=torch.float))
 
+        # Check keepdim=True preserves the reduced dimension
+        input_size = (1, 3, 2, 1)
+        input1 = torch.randn(input_size)
+        input2 = torch.randn(input_size)
+        out_squeeze = F.cosine_similarity(input1, input2, dim=1)
+        out_keepdim = F.cosine_similarity(input1, input2, dim=1, keepdim=True)
+        self.assertEqual(out_squeeze.size(), (1, 2, 1))
+        self.assertEqual(out_keepdim.size(), (1, 1, 2, 1))
+        self.assertEqual(out_keepdim.squeeze(1), out_squeeze)
+
+        # Check keepdim=False (default) matches original behavior
+        out_default = F.cosine_similarity(input1, input2, dim=1, keepdim=False)
+        self.assertEqual(out_default, out_squeeze)
+
+    def test_cosine_similarity_mixed_precision(self):
+        # test that CPU and CUDA behave consistently with various eps values
+
+        # test: Negative eps should raise error on both CPU and CUDA
+        x1 = torch.tensor(-1.6437e+10, dtype=torch.float64)
+        x2 = torch.full((3, 8, 2, 6), float('nan'), dtype=torch.float16)
+        eps_negative = -9.74982e+23
+
+        with self.assertRaisesRegex(RuntimeError, "eps must be non-negative"):
+            F.cosine_similarity(x1, x2, dim=0, eps=eps_negative)
+
+        if torch.cuda.is_available():
+            x1_cuda = x1.cuda()
+            x2_cuda = x2.cuda()
+            with self.assertRaisesRegex(RuntimeError, "eps must be non-negative"):
+                F.cosine_similarity(x1_cuda, x2_cuda, dim=0, eps=eps_negative)
+
+        # test: Large positive eps that overflows dtype - should produce consistent results
+        # CPU and CUDA should both handle overflow consistently (producing inf/nan)
+        eps_large_positive = 9.74982e+23  # Overflows float16
+        result_cpu = F.cosine_similarity(x1, x2, dim=0, eps=eps_large_positive)
+        self.assertTrue(torch.all(torch.isnan(result_cpu)) or torch.all(torch.isinf(result_cpu)))
+
+        if torch.cuda.is_available():
+            result_cuda = F.cosine_similarity(x1_cuda, x2_cuda, dim=0, eps=eps_large_positive)
+            # both should produce NaN or inf consistently
+            self.assertTrue(torch.all(torch.isnan(result_cuda)) or torch.all(torch.isinf(result_cuda)))
+
+        # test: Normal positive eps - should work correctly on both CPU and CUDA
+        x3 = torch.randn(10, 128, dtype=torch.float32)
+        x4 = torch.randn(10, 128, dtype=torch.float32)
+        result_cpu = F.cosine_similarity(x3, x4, dim=1, eps=1e-8)
+        self.assertEqual(result_cpu.shape, torch.Size([10]))
+        self.assertTrue(torch.all(result_cpu >= -1.0) and torch.all(result_cpu <= 1.0))
+
+        if torch.cuda.is_available():
+            x3_cuda = x3.cuda()
+            x4_cuda = x4.cuda()
+            result_cuda = F.cosine_similarity(x3_cuda, x4_cuda, dim=1, eps=1e-8)
+            self.assertTrue(torch.allclose(result_cpu, result_cuda.cpu(), rtol=1e-5, atol=1e-5))
+
+        # test: Float16 inputs with appropriate eps
+        x5 = torch.ones(2, 3, dtype=torch.float16)
+        x6 = torch.ones(2, 3, dtype=torch.float16)
+        result = F.cosine_similarity(x5, x6, dim=1, eps=1e-8)
+        self.assertEqual(result.dtype, torch.float16)
+        self.assertEqual(result.shape, torch.Size([2]))
+        self.assertTrue(torch.all(torch.isclose(result, torch.ones(2, dtype=torch.float16), rtol=1e-3)))
 
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
@@ -12418,6 +12480,43 @@ class TestNNDeviceType(NNTestCase):
         print(logits.numel(), labels.numel(), loss.numel())
         self.assertTrue(torch.allclose(loss_cpu, loss.cpu(), rtol=1e-4, atol=1e-4))
 
+    # Ref: https://github.com/pytorch/pytorch/issues/190139
+    @onlyCUDA
+    @largeTensorTest("5GB", "cuda")
+    def test_nll_loss2d_backward_large_sample_offset(self, device):
+        batch_size = 2**16 + 1
+        num_classes = 2**15
+        ignore_index = -100
+
+        # Reduced backward only uses input metadata. Expanding a scalar avoids
+        # materializing another four-GiB tensor.
+        input = torch.empty(
+            (),
+            device=device,
+            dtype=torch.float16,
+        ).expand(batch_size, num_classes, 1, 1)
+        target = torch.full(
+            (batch_size, 1, 1),
+            ignore_index,
+            dtype=torch.int64,
+            device=device,
+        )
+        target[-1] = 0
+        one = torch.ones((), dtype=torch.float16, device=device)
+
+        grad_input = torch.ops.aten.nll_loss2d_backward.default(
+            one,
+            input,
+            target,
+            None,
+            F._Reduction.get_enum("sum"),
+            ignore_index,
+            one,
+        )
+
+        torch.cuda.synchronize()
+        self.assertEqual(grad_input[-1, 0, 0, 0], -1)
+
     def _nll_loss_helper(self, input_size, reduction, expected, device, dtype):
         input = torch.rand(input_size, requires_grad=True, device=device, dtype=dtype)
         num_channels = input_size[1]
@@ -13796,6 +13895,24 @@ if __name__ == '__main__':
             x.fill_(1.0 / numel)
             out = torch._softmax_backward_data(x, x, 2, x.dtype)
             self.assertEqual(out[0, 0, 0], 1 / numel)
+
+    @onlyCUDA
+    @largeTensorTest("24GB", "cuda")
+    def test_avg_pool3d_backward_64bit_indexing(self, device):
+        # The overlapping-window avg_pool3d backward path scatters gradients
+        # through an atomicAdd kernel that computed the destination offset with
+        # 32-bit ints, so on inputs with more than INT_MAX elements the offset
+        # wrapped around and silently corrupted the gradient. Use the smallest
+        # overlapping config (kernel 2, stride 1) that pushes the per-element
+        # offset past INT_MAX.
+        x = torch.ones((1, 1, 240000000, 3, 3), device=device, dtype=torch.float16, requires_grad=True)
+        out = F.avg_pool3d(x, kernel_size=2, stride=1)
+        out.sum().backward()
+        # An interior voxel near the end of the buffer sits at an offset above
+        # INT_MAX and is covered by all 2**3 windows, so its gradient must be
+        # exactly 1.0; with the 32-bit offset it stays ~0 because the atomic
+        # adds land at wrapped-around locations instead.
+        self.assertEqual(x.grad[0, 0, -2, 1, 1], 1.0)
 
     @onlyCUDA
     def test_softmax_backward_smem(self, device):
