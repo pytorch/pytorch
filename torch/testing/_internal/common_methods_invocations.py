@@ -388,6 +388,15 @@ def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwa
     yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
     yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -2})
     yield SampleInput(make_arg((2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
+    # Test for keepdim
+    yield SampleInput(make_arg((S, S)), args=(make_arg((S, S)),), kwargs={'dim': 1, 'keepdim': True})
+    yield SampleInput(make_arg((S, S, M)), args=(make_arg((S, S, M)),), kwargs={'dim': 2, 'keepdim': True})
+    # keepdim with negative dim
+    yield SampleInput(make_arg((S, S)), args=(make_arg((S, S)),), kwargs={'dim': -1, 'keepdim': True})
+    yield SampleInput(make_arg((S, S, M)), args=(make_arg((S, S, M)),), kwargs={'dim': -2, 'keepdim': True})
+    # keepdim with broadcasting
+    yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1, 'keepdim': True})
+    yield SampleInput(make_arg((2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1, 'keepdim': True})
 
 
 def sample_inputs_item(op_info, device, dtype, requires_grad, **kwargs):
@@ -6666,7 +6675,7 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
     make_scalar_tensor = partial(make_tensor, (), device='cpu', dtype=dtype, requires_grad=requires_grad)
     supported_dtypes = op.supported_dtypes(device)
 
-    # broadcasting and oncontiguous cases
+    # broadcasting and noncontiguous cases
     cases = (
         ((4, 4), (4, 4), (4, 4)),
         ((4, 4), (1, 4, 4), (4, 4)),
@@ -17941,7 +17950,7 @@ op_db: list[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=True,
                     supports_one_python_scalar=True,
-                    # Integer types do not support negative exponentes
+                    # Integer types do not support negative exponents
                     rhs_make_tensor_kwargs=dict(low=0),
                     # Raising negative real numbers to fractional powers is not supported
                     lhs_make_tensor_kwargs=dict(low=0),
@@ -17995,7 +18004,7 @@ op_db: list[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
-                    # Integer types do not support negative exponentes
+                    # Integer types do not support negative exponents
                     rhs_make_tensor_kwargs=dict(low=0),
                     # Raising negative real numbers to fractional powers is not supported
                     lhs_make_tensor_kwargs=dict(low=0),
@@ -25759,8 +25768,6 @@ python_ref_db = [
                          device_type="cpu", dtypes=(torch.float32,)),
             DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_python_ref_torch_fallback",
                          device_type="cpu", dtypes=(torch.float32,)),
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.float32,)),
             # Exception: Dtypes torch.float32 and torch.float16 are not equal!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
