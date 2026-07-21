@@ -216,7 +216,20 @@ function install_fbgemm() {
     git clone --recursive https://github.com/pytorch/fbgemm
     pushd fbgemm/fbgemm_gpu
     git checkout "${fbgemm_commit}" --recurse-submodules
-    python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
+    # fbgemm emits six byte-identical, empty PT2 wrapper TUs for deprecated optimizers
+    # (has_cpu_support=False, has_gpu_support=False). Under CI's S3-backed sccache
+    # (classic/preprocessor-off mode, whose key ignores both the input path and -o)
+    # these collapse to one cached object that is copied to the other outputs, so every
+    # copy carries the same __hip_cuid symbol and the HIP link fails with
+    # "multiple definition of __hip_cuid_...". Force every compile in this build to
+    # recache so each identical source is compiled independently; clang folds -o into
+    # the CUID hash, giving each object a distinct __hip_cuid. Inline (not exported) and
+    # scoped to the ROCm build so it does not affect the PyTorch build (already built).
+    if [[ "${build_variant}" == "rocm" ]]; then
+      SCCACHE_RECACHE=1 python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
+    else
+      python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
+    fi
     popd
 
     # Save the wheel before cleaning up
