@@ -792,23 +792,24 @@ Tensor& _philox_distribution_shards_symint_cuda_(
     c10::SymIntArrayRef local_offsets,
     c10::SymIntArrayRef local_sizes,
     int64_t chunk_count,
-    int64_t kind,
+    int64_t distribution,
     ArrayRef<Scalar> params,
     std::optional<Generator> generator) {
   const auto global_shape_int = C10_AS_INTARRAYREF_SLOW_ALLOC(global_shape);
   const auto global_offsets_int = C10_AS_INTARRAYREF_SLOW_ALLOC(global_offsets);
   const auto local_offsets_int = C10_AS_INTARRAYREF_SLOW_ALLOC(local_offsets);
   const auto local_sizes_int = C10_AS_INTARRAYREF_SLOW_ALLOC(local_sizes);
-  const auto distribution_kind = static_cast<PhiloxDistributionKind>(kind);
+  const auto distribution_kind =
+      static_cast<PhiloxDistributionKind>(distribution);
   TORCH_CHECK(
       distribution_kind == PhiloxDistributionKind::Normal ||
           distribution_kind == PhiloxDistributionKind::Uniform,
       "_philox_distribution_shards_: unsupported distribution kind ",
-      kind);
+      distribution);
   TORCH_CHECK(
       params.size() == 2,
       "_philox_distribution_shards_: distribution kind ",
-      kind,
+      distribution,
       " expects 2 parameters, got ",
       params.size());
   TORCH_CHECK(

@@ -430,7 +430,7 @@ class TestPhiloxDistributionShardsOp(TestCase):
         local_offsets,
         local_sizes,
         chunk_count,
-        kind=_PHILOX_DISTRIBUTION_UNIFORM,
+        distribution=_PHILOX_DISTRIBUTION_UNIFORM,
         params=(0.0, 1.0),
         generator=None,
     ):
@@ -441,7 +441,7 @@ class TestPhiloxDistributionShardsOp(TestCase):
             local_offsets,
             local_sizes,
             chunk_count,
-            kind,
+            distribution,
             params,
             generator=generator,
         )
@@ -762,7 +762,7 @@ class TestPhiloxDistributionShardsOp(TestCase):
             ("parameters must be real", _PHILOX_DISTRIBUTION_NORMAL, [0j, 1.0]),
             ("unsupported distribution kind 2", 2, [0.0, 1.0]),
         )
-        for regex, kind, params in cases:
+        for regex, distribution, params in cases:
             with self.subTest(error=regex):
                 with self.assertRaisesRegex(RuntimeError, regex):
                     self._run(
@@ -772,7 +772,7 @@ class TestPhiloxDistributionShardsOp(TestCase):
                         [0],
                         [1],
                         1,
-                        kind,
+                        distribution,
                         params,
                     )
 

@@ -137,7 +137,7 @@ def _run_stateful_rng_op_rankwise(
     local_offsets: list[int | torch.SymInt],
     local_sizes: list[int | torch.SymInt],
     chunk_count: int,
-    kind: int,
+    distribution: int,
     generator: torch.Generator | None,
     generator_state: torch.Tensor | None,
     params: tuple[object, ...],
@@ -155,7 +155,7 @@ def _run_stateful_rng_op_rankwise(
         local_offsets,
         local_sizes,
         chunk_count,
-        kind,
+        distribution,
         params,
         generator=generator,
     )
@@ -202,7 +202,7 @@ def _run_stateful_rng_op(
         )
 
     # Validate before entering the rankwise helper or reserving generator state.
-    kind, validate = _STATEFUL_RNG_OP_SPECS[op_call]
+    distribution, validate = _STATEFUL_RNG_OP_SPECS[op_call]
     validate(tensor, op_args)
     params = tuple(op_args)
     chunk_count, flat_global_offsets, flat_local_offsets, flat_local_sizes = (
@@ -226,7 +226,7 @@ def _run_stateful_rng_op(
             flat_local_offsets,
             flat_local_sizes,
             chunk_count,
-            kind,
+            distribution,
             params,
             generator=generator,
         )
@@ -238,7 +238,7 @@ def _run_stateful_rng_op(
             flat_local_offsets,
             flat_local_sizes,
             chunk_count,
-            kind,
+            distribution,
             generator,
             generator_state,
             params,
