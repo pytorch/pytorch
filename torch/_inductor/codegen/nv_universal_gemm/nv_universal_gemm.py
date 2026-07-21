@@ -31,7 +31,14 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
     _unwrap_efc_compiled_obj,
 )
 from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heuristics
-from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, Layout, TensorBox
+from torch._inductor.ir import (
+    Buffer,
+    ChoiceCaller,
+    FixedLayout,
+    Layout,
+    PermuteView,
+    TensorBox,
+)
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
@@ -141,14 +148,15 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             # bias is the last input; the rest are the GEMM operands.
             return self._make_bias_run_fn(input_tensors, out)
 
-        # For swap_ab, transpose mat_a/mat_b and swap scales before creating
-        # GemmArguments. The swapped GEMM computes (N, M) = out.t(); write it
-        # zero-copy into a transposed (column-major) view of the real (M, N)
-        # output, so no temp buffer / copy is needed (the kernel handles a
-        # column-major C via its out-layout detection).
-        if self.swap_ab and len(input_tensors) >= 4:
-            a, b, sa, sb = input_tensors[:4]
-            input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
+        # swap_ab: transpose operands and write into a transposed view of `out`
+        # (zero-copy). See _nvgemm_run for the full explanation.
+        if self.swap_ab and len(input_tensors) >= 2:
+            a, b = input_tensors[0], input_tensors[1]
+            if len(input_tensors) >= 4:
+                sa, sb = input_tensors[2], input_tensors[3]
+                input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
+            else:
+                input_tensors = (b.t(), a.t()) + input_tensors[2:]
             out = out.t()
 
         helper_kwargs: dict[str, Any] = {}
@@ -675,14 +683,18 @@ def _add_nv_gemm_choices_impl(
         for node in input_nodes
     ]
 
-    if swap_ab and len(dummy_tensors) >= 4:
-        # swap_ab: transpose mat_a/mat_b dummies and swap scales.
-        # Original: dummy[0]=mat_a(M,K/2) row, dummy[1]=mat_b(K/2,N) col
-        # Swap: new_A=mat_b.t()=(N,K/2) row, new_B=mat_a.t()=(K/2,M) col
-        # Scales: new_scale_a=scale_b, new_scale_b=scale_a
-        d_a, d_b, d_sa, d_sb = dummy_tensors[:4]
+    if swap_ab and len(dummy_tensors) >= 2:
+        # swap_ab: transpose mat_a/mat_b dummies (and swap scales when scaled).
+        # Original: dummy[0]=mat_a(M,K) row, dummy[1]=mat_b(K,N) col
+        # Swap: new_A=mat_b.t()=(N,K) row, new_B=mat_a.t()=(K,M) col
+        d_a, d_b = dummy_tensors[0], dummy_tensors[1]
         if d_a is not None and d_b is not None:
-            dummy_tensors = [d_b.t(), d_a.t(), d_sb, d_sa] + dummy_tensors[4:]
+            if len(dummy_tensors) >= 4:
+                # scaled: new_scale_a=scale_b, new_scale_b=scale_a
+                d_sa, d_sb = dummy_tensors[2], dummy_tensors[3]
+                dummy_tensors = [d_b.t(), d_a.t(), d_sb, d_sa] + dummy_tensors[4:]
+            else:
+                dummy_tensors = [d_b.t(), d_a.t()] + dummy_tensors[2:]
 
     effective_layout = kernel_layout if kernel_layout is not None else layout
     out_tensor = _create_dummy_tensor_from_layout(effective_layout)
@@ -836,6 +848,36 @@ def add_nv_universal_gemm_choices(
         mm_inputs=inputs,
     )
 
+    # swap_ab: swap A/B so the large N goes on the M-axis, improving tile
+    # utilization for small-M / tall-skinny shapes (M << N). The kernel computes
+    # (N, M) and the runtime writes it into a transposed view of the (M, N)
+    # output. Mirrors the scaled path (see add_nv_universal_scaled_gemm_choices)
+    # but without scale operands. Only valid for 2D mm: this entry point also
+    # serves BMM (layout [B, M, N]), where the (M, N) / 2D-PermuteView swap logic
+    # would be wrong, so skip it there.
+    if not config.nvgemm_swap_ab or len(layout.size) != 2:
+        return
+    m, n = layout.size[0], layout.size[1]
+    swap_kernel_layout = FixedLayout(layout.device, layout.dtype, [n, m])
+    # Rank swap configs with the heuristic on the SWAPPED (N, M, K) problem:
+    # new mat1 = mat_b.t() (N, K) row, new mat2 = mat_a.t() (K, M) col. Without
+    # this, the swap variant would fall back to an unranked prefix and miss the
+    # small-tile configs that make swap_ab win.
+    mat_a, mat_b = inputs.mat1mat2()
+    swap_inputs = MMKernelInputs(
+        [PermuteView.create(mat_b, [1, 0]), PermuteView.create(mat_a, [1, 0])]
+    )
+    _add_nv_gemm_choices_impl(
+        choices=choices,
+        layout=layout,
+        input_nodes=inputs.nodes(),
+        variant=GemmVariant.GEMM,
+        accumulator_type=accumulator_type or torch.float32,
+        mm_inputs=swap_inputs,
+        swap_ab=True,
+        kernel_layout=swap_kernel_layout,
+    )
+
 
 def add_nv_universal_addmm_choices(
     choices: list[ChoiceCaller],
@@ -964,8 +1006,8 @@ def add_nv_universal_scaled_gemm_choices(
         swizzle_type_b=swizzle_type_b,
     )
 
-    # swap_ab: swap A/B operands so the large N goes on the M-axis.
-    # Improves tile utilization for small-M decode shapes (M << N).
+    # swap_ab: see add_nv_universal_gemm_choices for the rationale (swap A/B so
+    # the large N lands on the well-tiled M-axis for small-M shapes).
     if not config.nvgemm_swap_ab:
         return
 
