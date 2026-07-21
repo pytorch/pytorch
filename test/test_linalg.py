@@ -5783,6 +5783,9 @@ class TestLinalg(TestCase):
         # high batch regime shapes
         bsh = (300, 1100)
         nsh = (257,)
+        if dtype is torch.cdouble:
+            # To avoid OOMs in CIs
+            nsh = (100,)
 
         shapes = itertools.chain(itertools.product(bsl, nsl), itertools.product(bsh, nsh))
 
