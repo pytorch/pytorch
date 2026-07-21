@@ -16,9 +16,9 @@ import sys
 import time
 import traceback
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import timedelta
-from typing import Any, NamedTuple, NewType, TYPE_CHECKING
+from typing import Any, Final, Literal, NamedTuple, NewType, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -1224,7 +1224,7 @@ class group(metaclass=_WorldMeta):
 class GroupMember(metaclass=_WorldMeta):
     """Group member class."""
 
-    NON_GROUP_MEMBER = -100
+    NON_GROUP_MEMBER: Final[Literal[-100]] = -100
 
 
 def _get_default_timeout(backend: Backend) -> timedelta:
@@ -6359,15 +6359,15 @@ def split_group(
 
 @_time_logger
 def new_group(
-    ranks=None,
-    timeout=None,
-    backend=None,
-    pg_options=None,
+    ranks: Sequence[int] | None = None,
+    timeout: timedelta | None = None,
+    backend: str | Backend | None = None,
+    pg_options: Any | None = None,
     use_local_synchronization: bool = False,
-    group_desc=None,
+    group_desc: str | None = None,
     device_id: torch.device | None = None,
     sort_ranks: bool = True,
-):
+) -> ProcessGroup | Literal[-100]:
     """
     Create a new distributed group.
 
@@ -6463,16 +6463,16 @@ def new_group(
 
 
 def _new_group_with_tag(
-    ranks=None,
-    timeout=None,
-    backend=None,
-    backend_options=None,
-    pg_tag=None,
-    use_local_synchronization=False,
-    group_desc=None,
+    ranks: Sequence[int] | None = None,
+    timeout: timedelta | None = None,
+    backend: str | Backend | None = None,
+    backend_options: Any | None = None,
+    pg_tag: str | None = None,
+    use_local_synchronization: bool = False,
+    group_desc: str | None = None,
     device_id: torch.device | None = None,
     sort_ranks: bool = True,
-):
+) -> ProcessGroup | Literal[-100]:
     """
     Variant of ``new_group`` that exposes tag creation.
 
@@ -6512,7 +6512,7 @@ def _new_group_with_tag(
                 "MPI backend doesn't support use_local_synchronization=True"
             )
         if ranks is not None and get_rank() not in ranks:
-            return None
+            return GroupMember.NON_GROUP_MEMBER
 
     # checks the input ranks
     if ranks is not None:
@@ -6864,7 +6864,12 @@ def _find_or_create_pg_by_ranks_and_tag(
     if tag == "":
         raise ValueError("Cannot automatically create PG with empty tag")
     # TODO copy settings and timeout from default PG
-    return _new_group_with_tag(my_ranks, pg_tag=tag)
+    new_group = _new_group_with_tag(my_ranks, pg_tag=tag)
+    if new_group == GroupMember.NON_GROUP_MEMBER:
+        raise AssertionError(
+            f"Rank {my_rank} was not included in process group {my_ranks}"
+        )
+    return new_group
 
 
 def _get_group_tag(pg: ProcessGroup) -> str:
