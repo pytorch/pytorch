@@ -4,9 +4,19 @@ import contextlib
 import os
 import tempfile
 import unittest
-import unittest.mock
+from unittest import mock
 
 import tools.build_libtorch
+
+
+# Env vars that influence build_libtorch; run_build clears any not set by a case.
+CONTROLLED_ENV_VARS = (
+    "CMAKE_BUILD_TYPE",
+    "CMAKE_GENERATOR",
+    "DEBUG",
+    "REL_WITH_DEB_INFO",
+    "MAX_JOBS",
+)
 
 
 class TestBuildLibtorch(unittest.TestCase):
@@ -26,15 +36,15 @@ class TestBuildLibtorch(unittest.TestCase):
 
         with contextlib.ExitStack() as stack:
             tmpdir = stack.enter_context(tempfile.TemporaryDirectory())
-            stack.enter_context(unittest.mock.patch.dict(os.environ, env))
-            for key in ("CMAKE_BUILD_TYPE", "CMAKE_GENERATOR", "DEBUG", "REL_WITH_DEB_INFO", "MAX_JOBS"):  # noqa: B950
+            stack.enter_context(mock.patch.dict(os.environ, env))
+            for key in CONTROLLED_ENV_VARS:
                 if key not in env:
                     os.environ.pop(key, None)
             stack.enter_context(
-                unittest.mock.patch.object(tools.build_libtorch.shutil, "which", which)
+                mock.patch.object(tools.build_libtorch.shutil, "which", which)
             )
             check_call = stack.enter_context(
-                unittest.mock.patch.object(tools.build_libtorch.subprocess, "check_call")
+                mock.patch.object(tools.build_libtorch.subprocess, "check_call")
             )
             prev_cwd = os.getcwd()
             os.chdir(tmpdir)
@@ -84,7 +94,7 @@ class TestBuildLibtorch(unittest.TestCase):
         ]
         for env, have_ninja, want in cases:
             with self.subTest(env=env, have_ninja=have_ninja):
-                cpu_count = unittest.mock.patch.object(
+                cpu_count = mock.patch.object(
                     tools.build_libtorch.multiprocessing, "cpu_count", return_value=13
                 )
                 with cpu_count:
