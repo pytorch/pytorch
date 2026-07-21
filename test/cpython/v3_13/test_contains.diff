@@ -1,0 +1,41 @@
+diff --git a/test/cpython/v3_13/test_contains.py b/test/cpython/v3_13/test_contains.py
+index 471d04a76ca..dab22459a69 100644
+--- a/test/cpython/v3_13/test_contains.py
++++ b/test/cpython/v3_13/test_contains.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_contains.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ from collections import deque
+ import unittest
+ from test.support import NEVER_EQ
+@@ -15,7 +33,7 @@ class seq(base_set):
+     def __getitem__(self, n):
+         return [self.el][n]
+ 
+-class TestContains(unittest.TestCase):
++class TestContains(CPythonTestCase):
+     def test_common_tests(self):
+         a = base_set(1)
+         b = myset(1)
+@@ -106,4 +124,4 @@ class TestContains(unittest.TestCase):
+         self.assertRaises(TypeError, lambda: 0 in bc)
+ 
+ if __name__ == '__main__':
+-    unittest.main()
++    run_tests()

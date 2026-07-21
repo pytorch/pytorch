@@ -2299,6 +2299,60 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         expected = torch.mm(x, w) * self.world_size
         self.assertEqual(y, expected)
 
+    def _mempool_barrier_roundtrip(self, mempool, numel, dtype, group_name):
+        # Allocate a symmetric tensor from the pool, then run a bounded
+        # barrier / buffer round-trip. A polluted signal pad would deadlock the
+        # CAS barrier, so timeout_ms makes a regression fail cleanly.
+        with torch.cuda.use_mem_pool(mempool):
+            t = torch.empty(numel, dtype=dtype, device=self.device)
+        hdl = symm_mem.rendezvous(t, group=group_name)
+        t.fill_(self.rank)
+        hdl.barrier(timeout_ms=60000)
+        for peer in range(self.world_size):
+            buf = hdl.get_buffer(peer, (numel,), dtype)
+            self.assertTrue(buf.eq(peer).all())
+        hdl.barrier(timeout_ms=60000)
+        return t, hdl
+
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_recycled_alloc_signal_pad(self):
+        # Regression test for the signal-pad pollution bug: the symmetric
+        # allocator (ncclMemAlloc / cuMemCreate) does not zero memory, so a
+        # fresh allocation whose region is recycled from a previously-used block
+        # could start the CAS-based barrier() protocol from a non-zero signal
+        # pad and deadlock. alloc() zeros the pad up front. Allocate from the
+        # SymmMem MemPool and run a barrier round-trip, free, then allocate the
+        # same size again (recycling the freed block) and confirm the round-trip
+        # still works on the recycled region.
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        mempool = symm_mem.get_mem_pool(self.device)
+        numel, dtype = 1024, torch.float
+
+        t1, hdl1 = self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
+        del hdl1, t1
+        t2, hdl2 = self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
+        del hdl2, t2
+
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_large_alloc_barrier(self):
+        # alloc() only zeros the signal pad, not the whole (much larger) data
+        # buffer. Confirm the signaling protocol still initializes correctly on
+        # a large allocation: run a barrier / buffer round-trip and check data.
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        mempool = symm_mem.get_mem_pool(self.device)
+        numel, dtype = 4 * 1024 * 1024, torch.float
+        self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
+
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
