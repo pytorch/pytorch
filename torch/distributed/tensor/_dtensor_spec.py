@@ -85,6 +85,10 @@ def _has_symint(values: Any) -> bool:
     return any(isinstance(value, torch.SymInt) for value in values)
 
 
+def _tensor_meta_has_symint(tensor_meta: TensorMeta) -> bool:
+    return _has_symint(tensor_meta.shape) or _has_symint(tensor_meta.stride)
+
+
 def _normalize_sequence_for_key(values: Any, force: bool = False) -> Any:
     if force or _has_symint(values):
         return tuple(_normalize_int_for_key(value) for value in values)
@@ -495,6 +499,8 @@ class DTensorSpec:
         # use, where we make sure to update the hash when the `tensor_meta`
         # changes by overriding `__setattr__`. This must be lazy so that Dynamo
         # does not try to hash non-singleton `SymInt`s for the stride.
+        if self.tensor_meta is not None and _tensor_meta_has_symint(self.tensor_meta):
+            return self._hash_impl()
         if self._hash is None:
             self._hash = self._hash_impl()
         return self._hash

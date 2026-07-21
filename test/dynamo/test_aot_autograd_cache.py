@@ -366,9 +366,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
-    # This checks the existing duck-shaped cache-key contract explicitly; the
-    # default no-duck path is covered by Dynamo dynamic-shape tests.
-    @torch.fx.experimental._config.patch(use_duck_shape=True)
     def test_cache_hot_load(self, device, dtype, dynamic):
         """
         Verify that we can populate and hot load functions from the cache.
@@ -628,8 +625,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
-    # Multi-graph specialization asserts legacy duck-shaped cache reuse.
-    @torch.fx.experimental._config.patch(use_duck_shape=True)
     @functorch_config.patch({"enable_autograd_cache": True})
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_multi_graph_specialization(self):
@@ -658,9 +653,9 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         compiled_fn(a)
         compiled_fn(a8)
         compiled_fn(a16)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
         self._clear_dynamo_and_codecache()
 
@@ -668,9 +663,9 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         compiled_fn(a)
         compiled_fn(a8)
         compiled_fn(a16)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 3)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 4)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)

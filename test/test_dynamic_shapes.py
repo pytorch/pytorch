@@ -1696,6 +1696,48 @@ class f(torch.nn.Module):
             self.assertEqual(x.stride(), y.stride())
             self.assertEqual(x.storage_offset(), y.storage_offset())
 
+    def test_compound_tracked_input_sources_used_for_guards(self):
+        from torch._dynamo.source import ConstantSource, LocalSource
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(5, source=ConstantSource("s"))
+        symint = torch.SymInt(SymNode(symbol, shape_env, int, hint=5))
+        guard_expr = shape_env.produce_guards_expression([symint + 1])
+        self.assertIsNotNone(guard_expr)
+        self.assertTrue(shape_env.evaluate_guards_expression(guard_expr, [6]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guard_expr, [2]))
+        guard_expr = shape_env.produce_guards_expression([symint, symint + 1])
+        self.assertIsNotNone(guard_expr)
+        self.assertTrue(shape_env.evaluate_guards_expression(guard_expr, [5, 6]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guard_expr, [4, 6]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guard_expr, [4, 7]))
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(5, source=ConstantSource("s"))
+        symint = torch.SymInt(SymNode(symbol, shape_env, int, hint=5))
+        shape_env.guard_or_defer_runtime_assert(sympy.Eq(Mod(symbol, 3), 2), "test")
+
+        guards = shape_env.produce_guards([symint + 1], [LocalSource("x")])
+
+        self.assertTrue(any("Mod" in guard or "%" in guard for guard in guards))
+        guard_expr = shape_env.produce_guards_expression([symint + 1])
+        self.assertIsNotNone(guard_expr)
+        self.assertTrue(shape_env.evaluate_guards_expression(guard_expr, [6]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guard_expr, [7]))
+
+        guard_expr = shape_env.produce_guards_expression([symint, symint + 1])
+        self.assertIsNotNone(guard_expr)
+        self.assertTrue(shape_env.evaluate_guards_expression(guard_expr, [5, 6]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guard_expr, [5, 7]))
+
+        pruned_guards = shape_env.get_pruned_guards([symint + 1])
+        guard_expr = shape_env.produce_guards_expression(
+            [symint + 1], guards=pruned_guards
+        )
+        self.assertIsNotNone(guard_expr)
+        self.assertTrue(shape_env.evaluate_guards_expression(guard_expr, [6]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guard_expr, [7]))
+
     def test_tensor_factory_with_symint(self):
         args = list(range(3))
         expected = torch.tensor(args)

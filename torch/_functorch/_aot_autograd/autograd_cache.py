@@ -568,11 +568,15 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 class AOTAutogradCachePickler(FxGraphCachePickler):
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         super().__init__(gm)
+        self._canonical_symbol_names: dict[str, str] = {}
+        self._seed_symbols_from_placeholders(gm)
         # pyrefly: ignore[missing-attribute]
         self.dispatch_table.update(
             {
                 AOTConfig: functools.partial(self._reduce_aot_config),
                 torch.Tensor: functools.partial(self._reduce_tensor),
+                torch.SymInt: functools.partial(self._reduce_symint),
+                torch.SymBool: functools.partial(self._reduce_symbool),
                 FakeScriptObject: functools.partial(self._reduce_fake_script_object),
             }
         )
@@ -753,6 +757,54 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         metadata = extract_tensor_metadata_for_cache_key(t)
         return (_ident, (metadata,))
 
+    def _seed_symbols_from_placeholders(self, gm: torch.fx.GraphModule) -> None:
+        if not hasattr(gm, "graph"):
+            return
+        for node in gm.graph.find_nodes(op="placeholder", sort=True):
+            self._seed_symbols(node.meta.get("example_value"))
+            self._seed_symbols(node.meta.get("val"))
+
+    def _seed_symbols(self, value: Any) -> None:
+        if isinstance(value, torch.SymInt):
+            self._canonical_symbolic_expr(value.node.expr)
+        elif isinstance(value, torch.SymBool):
+            self._canonical_symbolic_expr(value.node.expr)
+        elif isinstance(value, torch.Tensor):
+            self._seed_symbols(tuple(value.shape))
+            self._seed_symbols(tuple(value.stride()))
+        elif isinstance(value, (tuple, list)):
+            for item in value:
+                self._seed_symbols(item)
+        elif isinstance(value, dict):
+            for key in sorted(value, key=str):
+                self._seed_symbols(key)
+                self._seed_symbols(value[key])
+
+    def _canonical_symbol_name(self, symbol: Any) -> str:
+        name = symbol.name
+        if name not in self._canonical_symbol_names:
+            self._canonical_symbol_names[name] = f"s{len(self._canonical_symbol_names)}"
+        return self._canonical_symbol_names[name]
+
+    def _canonical_symbolic_expr(self, expr: Any) -> str:
+        if not hasattr(expr, "free_symbols"):
+            return str(expr)
+        replacements = {
+            symbol: type(symbol)(self._canonical_symbol_name(symbol))
+            for symbol in sorted(expr.free_symbols, key=lambda symbol: symbol.name)
+        }
+        return str(expr.xreplace(replacements))
+
+    def _reduce_symint(
+        self, s: torch.SymInt
+    ) -> tuple[Callable[[Any], Any], tuple[str]]:
+        return (_ident, (self._canonical_symbolic_expr(s.node.expr),))
+
+    def _reduce_symbool(
+        self, s: torch.SymBool
+    ) -> tuple[Callable[[Any], Any], tuple[str]]:
+        return (_ident, (self._canonical_symbolic_expr(s.node.expr),))
+
 
 @contextlib.contextmanager
 def normalize_placeholder_names(
@@ -775,17 +827,14 @@ def normalize_placeholder_names(
     # Track all the old state of placeholders
     old_placeholder_names = []
     old_used_names = copy(gm.graph._graph_namespace._used_names)
-    i = 0
-    for n in gm.graph.find_nodes(op="placeholder", sort=True):
-        if n.type != torch.SymInt:
-            # _rename renames the node in the body of the function,
-            # but it doesn't change the raw name from node.target
-            # So we also set the raw_name of node.target to a new placeholder name
-            new_placeholder_name = f"p_{i}"
-            old_placeholder_names.append((n.name, n.target))
-            n.target = new_placeholder_name
-            n._rename(new_placeholder_name)
-            i += 1
+    for i, n in enumerate(gm.graph.find_nodes(op="placeholder", sort=True)):
+        # _rename renames the node in the body of the function,
+        # but it doesn't change the raw name from node.target.
+        # So we also set the raw_name of node.target to a new placeholder name.
+        new_placeholder_name = f"p_{i}"
+        old_placeholder_names.append((n.name, n.target))
+        n.target = new_placeholder_name
+        n._rename(new_placeholder_name)
     gm.recompile()
     try:
         yield
@@ -796,11 +845,10 @@ def normalize_placeholder_names(
         # Restore the placeholder names
         i = 0
         for n in gm.graph.find_nodes(op="placeholder", sort=True):
-            if n.type != torch.SymInt:
-                (name, target) = old_placeholder_names[i]
-                n.target = target
-                n._rename(name)
-                i += 1
+            (name, target) = old_placeholder_names[i]
+            n.target = target
+            n._rename(name)
+            i += 1
         if i != len(old_placeholder_names):
             raise AssertionError(
                 f"i={i} != len(old_placeholder_names)={len(old_placeholder_names)}"

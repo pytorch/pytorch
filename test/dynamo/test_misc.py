@@ -65,6 +65,7 @@ from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
+from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.recording import NotEqualError, replay_shape_env_events
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -9208,8 +9209,13 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(opt_fn(x, y2), fn(x, y2))
         self.assertEqual(opt_fn(x, y3), fn(x, y3))
-        # Resume function recompiled (y's shape changed), base frame did not.
-        self.assertTrue(recompiled_names)
+        # Static shapes, or dynamic duck sizing from the equal initial x/y size,
+        # force the resume function to recompile when y changes. Non-duck
+        # dynamic shapes keep y independently dynamic and avoid the recompile.
+        if torch._dynamo.config.assume_static_by_default or fx_config.use_duck_shape:
+            self.assertTrue(recompiled_names)
+        else:
+            self.assertEqual(recompiled_names, [])
         self.assertNotIn(fn.__code__.co_name, recompiled_names)
 
     def test_guard_sym_node_fstring_when_used(self):

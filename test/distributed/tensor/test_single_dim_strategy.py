@@ -851,7 +851,7 @@ class TestExpandPlaceholder(TestCase):
         self.assertIsInstance(result, OpStrategy)
         self.assertGreater(len(result.strategies), 0)
 
-    def test_symbolic_shapes_hash_for_sharding_prop_caches(self):
+    def test_symbolic_shapes_bypass_sharding_prop_caches(self):
         from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymNode
 
         mesh = DeviceMesh("cpu", mesh=torch.arange(2))
@@ -916,19 +916,24 @@ class TestExpandPlaceholder(TestCase):
         self.assertNotEqual(static_stride_spec, symbolic_stride_spec)
 
         op_schema = OpSchema(torch.ops.aten.sin.default, (spec,), {})
-        self.assertTrue(_op_schema_can_be_cached(op_schema))
+        self.assertFalse(_op_schema_can_be_cached(op_schema))
 
         propagator = ShardingPropagator()
 
         with (
             patch.object(
                 propagator,
-                "_propagate_tensor_meta_cached",
+                "_propagate_tensor_meta_non_cached",
                 return_value=symbolic_meta,
-            ) as cached_tensor_meta,
+            ) as uncached_tensor_meta,
+            patch.object(
+                propagator,
+                "_propagate_tensor_meta_cached",
+                side_effect=AssertionError("symbolic TensorMeta should not be cached"),
+            ),
         ):
             self.assertIs(propagator._propagate_tensor_meta(op_schema), symbolic_meta)
-            cached_tensor_meta.assert_called_once_with(op_schema)
+            uncached_tensor_meta.assert_called_once_with(op_schema)
 
         output_sharding = OutputSharding(spec)
         op_info = OpInfo(
@@ -941,13 +946,18 @@ class TestExpandPlaceholder(TestCase):
         with (
             patch.object(
                 propagator,
-                "propagate_op_sharding",
+                "propagate_op_sharding_non_cached",
                 return_value=output_sharding,
-            ) as cached_sharding,
+            ) as uncached_sharding,
+            patch.object(
+                propagator,
+                "propagate_op_sharding",
+                side_effect=AssertionError("symbolic TensorMeta should not be cached"),
+            ),
         ):
             propagator.propagate(op_info)
             self.assertIs(op_info.output_sharding, output_sharding)
-            cached_sharding.assert_called_once_with(op_schema)
+            uncached_sharding.assert_called_once_with(op_schema)
 
     def test_strategy_length_validation(self):
         """Test that _PreparedSingleDimStrategy validates strategy length against

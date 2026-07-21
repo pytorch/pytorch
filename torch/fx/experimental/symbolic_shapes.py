@@ -2833,10 +2833,16 @@ class _ShapeGuardPrinter(abc.ABC):
         symbol_to_source: Mapping[sympy.Symbol, list[Source]],
         source_ref: Callable[[Source], str],
         var_to_sources: Mapping[sympy.Symbol, list[Source]],
+        symbol_to_expr: Mapping[sympy.Symbol, sympy.Expr] | None = None,
+        fallback_source_symbols: set[sympy.Symbol] | None = None,
     ) -> None:
         self.symbol_to_source = symbol_to_source
         self.source_ref = source_ref
         self.var_to_sources = var_to_sources
+        self.symbol_to_expr = {} if symbol_to_expr is None else symbol_to_expr
+        self.fallback_source_symbols = (
+            set() if fallback_source_symbols is None else fallback_source_symbols
+        )
         super().__init__()
 
     def _print_Float(self, expr: sympy.Float) -> str:
@@ -2864,8 +2870,13 @@ class _ShapeGuardPrinter(abc.ABC):
         if not isinstance(expr, sympy.Symbol):
             raise AssertionError(f"Expected sympy.Symbol, got {type(expr)}")
 
-        # Try symbol_to_source first, fall back to var_to_sources if not found
-        if source := self.symbol_to_source.get(expr):
+        if (
+            source := self.symbol_to_source.get(expr)
+        ) and expr not in self.fallback_source_symbols:
+            return self.print_source(source[0])
+        elif expr in self.symbol_to_expr:
+            return f"({self.doprint(self.symbol_to_expr[expr])})"
+        elif source := self.symbol_to_source.get(expr):
             return self.print_source(source[0])
         elif source := self.var_to_sources.get(expr):
             return self.print_source(source[0])
@@ -6171,6 +6182,8 @@ class ShapeEnv:
         symbol_to_source: dict[sympy.Symbol, list[Source]] = collections.defaultdict(
             list
         )
+        symbol_to_expr: dict[sympy.Symbol, sympy.Expr] = {}
+        fallback_source_symbols: set[sympy.Symbol] = set()
         symbol_to_constraints: defaultdict[sympy.Symbol, set[Constraint]] = (
             collections.defaultdict(set)
         )
@@ -6178,7 +6191,11 @@ class ShapeEnv:
 
         printers: list[_ShapeGuardPrinter] = []
         py_printer = ShapeGuardPythonPrinter(
-            symbol_to_source, source_ref, self.var_to_sources
+            symbol_to_source,
+            source_ref,
+            self.var_to_sources,
+            symbol_to_expr,
+            fallback_source_symbols,
         )
         for lang in langs:
             if lang in ["python", "verbose_python"]:
@@ -6186,7 +6203,11 @@ class ShapeEnv:
             elif lang == "cpp":
                 printers.append(
                     _ShapeGuardCppPrinter(
-                        symbol_to_source, source_ref, self.var_to_sources
+                        symbol_to_source,
+                        source_ref,
+                        self.var_to_sources,
+                        symbol_to_expr,
+                        fallback_source_symbols,
                     )
                 )
             else:
@@ -6207,6 +6228,28 @@ class ShapeEnv:
                 isinstance(src, TensorPropertySource)
                 and src.prop is TensorProperty.SIZE
             )
+
+        def track_solvable_symbol_source(source: Source, expr: sympy.Expr) -> None:
+            if len(expr.free_symbols) != 1:
+                return
+            symbol = next(iter(expr.free_symbols))
+            if symbol in symbol_to_expr:
+                return
+            source_symbol = sympy.Symbol(f"__shape_source_{len(symbol_to_expr)}")
+            solution = try_solve(
+                sympy.Eq(source_symbol, expr), symbol, floordiv_inequality=False
+            )
+            if solution is None:
+                return
+            # Keep this to offset-only forms such as t0 = s + 1.  Wider
+            # affine forms like t0 = 2 * s require divisibility guards.
+            if sympy.simplify(solution[1] - source_symbol).free_symbols:
+                return
+            if not symbol_to_source.get(symbol):
+                symbol_to_source[symbol].extend(self.var_to_sources.get(symbol, []))
+                fallback_source_symbols.add(symbol)
+            symbol_to_source[source_symbol].append(source)
+            symbol_to_expr[symbol] = solution[1]
 
         if equalities_inputs:
             source_index = {}
@@ -6296,12 +6339,17 @@ class ShapeEnv:
             if isinstance(val, SymInt):
                 s = val.node.expr
                 if isinstance(s, sympy.Symbol):
-                    symbol_to_source[s].append(source)
+                    if s in fallback_source_symbols:
+                        symbol_to_source[s] = [source]
+                        fallback_source_symbols.remove(s)
+                    else:
+                        symbol_to_source[s].append(source)
                     if constraint is not None and not isinstance(
                         constraint, RelaxedUnspecConstraint
                     ):
                         symbol_to_constraints[s].add(constraint)
                 else:
+                    track_solvable_symbol_source(source, s)
                     constraint_violated = False
                     if isinstance(constraint, StrictMinMaxConstraint):
                         # try inferring the ranges of the expr s
@@ -6517,6 +6565,22 @@ class ShapeEnv:
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         all_exprs: list[list[str]] = [[] for _ in langs]
+
+        # Guards can mention a symbol that only appears through a compound
+        # placeholder expression, such as an input tracked as ``s + 1``.  Give
+        # those guard symbols a source early enough for DimConstraints, without
+        # adding unrelated ShapeEnv symbols to this guard expression.
+        guard_symbols: set[sympy.Symbol] = set()
+        active_guards = guards if guards is not None else self.guards
+        for guard in active_guards:
+            guard_symbols.update(guard.expr.free_symbols)
+        if guards is None:
+            for ra in self.deferred_runtime_asserts.get(None, []):
+                guard_symbols.update(ra.expr.free_symbols)
+        for symbol in guard_symbols:
+            if not symbol_to_source.get(symbol):
+                symbol_to_source[symbol].extend(self.var_to_sources.get(symbol, []))
+                fallback_source_symbols.add(symbol)
 
         self.dim_constraints = DimConstraints(
             symbol_to_source,
@@ -7032,11 +7096,15 @@ class ShapeEnv:
         reference symints from the passed in input
         """
         # pyrefly: ignore [bad-assignment]
-        symints = {
-            s.node.expr for s in symints if isinstance(s.node.expr, sympy.Symbol)
-        }
+        symint_symbols: set[sympy.Symbol] = set()
+        for s in symints:
+            expr = s.node.expr
+            if isinstance(expr, sympy.Basic):
+                symint_symbols.update(expr.free_symbols)
         guards = [
-            g for g in self.guards if all(s in symints for s in g.expr.free_symbols)
+            g
+            for g in self.guards
+            if all(s in symint_symbols for s in g.expr.free_symbols)
         ]
         return guards
 
