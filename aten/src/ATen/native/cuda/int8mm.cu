@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <c10/cuda/CUDAGuard.h>
 
 namespace at::native {
@@ -55,7 +56,7 @@ __global__ void weight_int8pack_mm_kernel(
 
 #pragma unroll
     for (int offset = kWarpSize / 2; offset > 0; offset >>= 1) {
-      acc += __shfl_down_sync(0xffffffff, acc, offset);
+      acc += WARP_SHFL_DOWN(acc, offset);
     }
 
     if (lane == 0) {
