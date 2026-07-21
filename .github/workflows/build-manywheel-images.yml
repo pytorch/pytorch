@@ -23,7 +23,11 @@ on:
 
 env:
   DOCKER_BUILDKIT: 1
-  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) }}
+  # Publish on protected-ref pushes (main / release / release-candidate tags ->
+  # Docker Hub) and on same-repo PRs (-> ECR pytorch/<image-name>, for
+  # ciflow/binaries test runs). Fork PRs have no push credentials, so they stay
+  # build-only. The registry + tag set is chosen per-event in binary-docker-build.
+  WITH_PUSH: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -50,6 +54,14 @@ jobs:
   build:
     if: github.repository_owner == 'pytorch'
     needs: select-runner
+    # id-token: write lets the same-repo PR path assume the ECR push role via
+    # OIDC and publish the content-addressed builder image to ECR (repo
+    # pytorch/<image-name>) -- the same PR-safe mechanism CI's docker-builds
+    # uses (PRs get no environment secrets, so DOCKER_TOKEN is unavailable, but
+    # OIDC works).
+    permissions:
+      id-token: write
+      contents: read
     environment: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) && 'docker-build') || '' }}
     runs-on: ${{ matrix.runner }}
     container:
@@ -73,8 +85,15 @@ jobs:
         ]
     name: ${{ matrix.name }}:${{ matrix.tag }}
     steps:
+      # TESTING ONLY -- REVERT TO @main BEFORE MERGE.
+      # Local (`./`) composite actions don't resolve on the OSDC/ARC
+      # container-hook runners: the runner resolves the action on the host
+      # (/home/runner/_work) while `container:` steps check out to /__w, so it
+      # errors with "Can't find action.yml". `uses:` can't take an expression,
+      # so to exercise this PR's binary-docker-build change we temporarily pin
+      # the action to this PR branch (a downloadable remote ref).
       - name: Build docker image
-        uses: pytorch/pytorch/.github/actions/binary-docker-build@main
+        uses: pytorch/pytorch/.github/actions/binary-docker-build@atalman/cd-docker-content-addressed
         with:
           docker-image-name: ${{ matrix.name }}
           custom-tag-prefix: ${{ matrix.tag }}

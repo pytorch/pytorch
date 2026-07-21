@@ -42,6 +42,16 @@ runs:
           --use \
           "${buildkit_addr}"
 
+    # Same-repo PRs publish the content-addressed image to ECR via OIDC -- the
+    # PR-safe path CI's docker-builds uses. PRs get no environment secrets (so
+    # DOCKER_TOKEN is unavailable), but id-token works on same-repo PRs. Skipped
+    # on fork PRs (no OIDC) and on push (Docker Hub path handles its own login).
+    - name: Login to ECR
+      if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+      uses: pytorch/pytorch/.github/actions/ecr-login@main
+      with:
+        aws-role-to-assume: arn:aws:iam::308535385114:role/arc
+
     - name: Build (and, on push, publish) via remote BuildKit
       env:
         REMOTE_BUILDKIT: "1"
@@ -63,27 +73,41 @@ runs:
         GIT_COMMIT_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
         CI_FOLDER_SHA=$(git rev-parse HEAD:.ci/docker)
 
-        # Same tag set the local-daemon path publishes: branch / commit /
-        # .ci/docker-hash tags are always produced; the floating ${prefix} tag is
-        # only published from main so a release-branch rebuild can't clobber the
-        # image main CI consumes.
-        PREFIX="docker.io/pytorch/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}"
-        TAGS=(
-          -t "${PREFIX}-${GIT_BRANCH_NAME}"
-          -t "${PREFIX}-${GIT_COMMIT_SHA}"
-          -t "${PREFIX}-${CI_FOLDER_SHA}"
-        )
-        if [[ "${GIT_BRANCH_NAME}" == "main" ]]; then
-          TAGS+=(-t "${PREFIX}")
-        fi
+        # Registry + tag set depend on the event:
+        #  - pull_request: publish ONLY the content-addressed image to ECR,
+        #    mirroring the Docker Hub repo layout -- pytorch/<image-name>:
+        #    <variant>-<.ci/docker hash> (e.g. pytorch/manylinux2_28-builder:
+        #    cuda13.0-<hash>, pytorch/almalinux-builder:<variant>-<hash>). The
+        #    image name IS the ECR repo. The ciflow/binaries test run consumes
+        #    it. Auth is via the ecr-login OIDC step above (no docker login
+        #    here). Keeps per-PR images off the public Docker Hub repo and off
+        #    the floating tag -- the same PR-safe path CI's docker-builds uses.
+        #  - push (main / release / rc tags): publish to Docker Hub as before --
+        #    branch / commit / .ci/docker-hash tags, plus the floating <prefix>
+        #    tag only from main so a release-branch rebuild can't clobber it.
+        if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+          PREFIX="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}"
+          TAGS=(-t "${PREFIX}-${CI_FOLDER_SHA}")
+        else
+          PREFIX="docker.io/pytorch/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}"
+          TAGS=(
+            -t "${PREFIX}-${GIT_BRANCH_NAME}"
+            -t "${PREFIX}-${GIT_COMMIT_SHA}"
+            -t "${PREFIX}-${CI_FOLDER_SHA}"
+          )
+          if [[ "${GIT_BRANCH_NAME}" == "main" ]]; then
+            TAGS+=(-t "${PREFIX}")
+          fi
 
-        # WITH_PUSH gates publishing (build.sh pushes when it is true; PRs just
-        # validate the build). Log in only when we are going to push.
-        set +x
-        if [[ "${WITH_PUSH:-false}" == "true" ]]; then
-          echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          # WITH_PUSH gates publishing (build.sh pushes when it is true; fork
+          # PRs have no credentials and stay build-only). The PR path logs in via
+          # the ecr-login step; log in to Docker Hub only on the push path.
+          set +x
+          if [[ "${WITH_PUSH:-false}" == "true" ]]; then
+            echo "${DOCKER_TOKEN}" | docker login docker.io -u "${DOCKER_ID}" --password-stdin
+          fi
+          set -x
         fi
-        set -x
 
         # build.sh reads REMOTE_BUILDKIT and buildx-pushes the passed -t tags.
         run_build() {
