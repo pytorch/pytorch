@@ -50,6 +50,7 @@ set(CMAKE_CXX_STANDARD
     20
     CACHE STRING
           "The C++ standard whose features are requested to build this target.")
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD
     17
     CACHE STRING
@@ -83,10 +84,6 @@ endif()
 # https://github.com/NVIDIA/cccl/blob/main/docs/libcudacxx/standard_api/numerics_library/complex.rst
 string(APPEND CMAKE_CUDA_FLAGS
        " -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
-
-if(LINUX)
-  set(CXX_STANDARD_REQUIRED ON)
-endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_LINK_WHAT_YOU_USE TRUE)
@@ -835,7 +832,7 @@ if("${TORCH_DEFAULT_VERSION} " STREQUAL " ")
   message(WARNING "Could not get version from base 'version.txt'")
   # If we can't get the version from the version file we should probably set it
   # to something non-sensical like 0.0.0
-  set(TORCH_DEFAULT_VERSION, "0.0.0")
+  set(TORCH_DEFAULT_VERSION "0.0.0")
 endif()
 set(TORCH_BUILD_VERSION
     "${TORCH_DEFAULT_VERSION}"
@@ -1183,7 +1180,7 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fstandalone-debug" CMAKE_CXX_FLAGS_DEBUG)
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     if(CMAKE_BUILD_TYPE MATCHES Debug)
-      message(Warning "Applying -Og optimization for aarch64 GCC debug build to workaround ICE")
+      message(WARNING "Applying -Og optimization for aarch64 GCC debug build to workaround ICE")
     endif()
     string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -Og")
     string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -Og")
@@ -1252,7 +1249,7 @@ if(USE_CPP_CODE_COVERAGE)
     string(APPEND CMAKE_OBJCXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
   else()
     message(
-      ERROR
+      FATAL_ERROR
       "Code coverage for compiler ${CMAKE_CXX_COMPILER_ID} is unsupported")
   endif()
 
@@ -1457,11 +1454,9 @@ endif()
 
 # Bundle PTXAS if needed
 if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
-  if(NOT EXISTS "${PROJECT_SOURCE_DIR}/build/bin/ptxas")
-    message(STATUS "Copying PTXAS into the bin folder")
-    file(COPY "${CUDAToolkit_BIN_DIR}/ptxas"
-         DESTINATION "${PROJECT_BINARY_DIR}")
-  endif()
+  message(STATUS "Copying PTXAS into the bin folder")
+  file(COPY "${CUDAToolkit_BIN_DIR}/ptxas"
+       DESTINATION "${PROJECT_BINARY_DIR}")
   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
