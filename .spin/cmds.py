@@ -154,6 +154,7 @@ VERY_FAST_LINTERS = {
     "HEADER_ONLY_LINTER",
     "IMPORT_LINTER",
     "INCLUDE",
+    "ISINSTANCE_FAKE_TENSOR",
     "LINTRUNNER_VERSION",
     "MERGE_CONFLICTLESS_CSV",
     "META_NO_CREATE_UNBACKED",
@@ -174,6 +175,7 @@ VERY_FAST_LINTERS = {
     "TESTOWNERS",
     "TYPEIGNORE",
     "TYPENOSKIP",
+    "UNSPECIFIED_BACKEND",
     "WORKFLOWSYNC",
 }
 
@@ -520,6 +522,44 @@ def docs(make_args):
         )
     cmd = ["make", *(make_args or ("html",))]
     spin.util.run(cmd, cwd="docs")
+
+
+def _pip_install_cmd(editable):
+    """Build the pip install command, preferring uv when available."""
+    if shutil.which("uv"):
+        cmd = ["uv", "pip", "install"]
+    else:
+        cmd = [sys.executable, "-m", "pip", "install"]
+    if editable:
+        cmd += ["-e"]
+    return cmd + [".", "-v", "--no-build-isolation"]
+
+
+@click.command()
+def develop():
+    """Build PyTorch (editable install).
+
+    Runs an editable pip install using uv when available, falling back to
+    regular pip.  Build configuration comes from the environment, e.g.
+    `BUILD_CONFIG spin develop`.
+    """
+    spin.util.run(_pip_install_cmd(editable=True))
+
+
+# Alias so `spin editable` also works.
+editable = click.command(name="editable")(develop.callback)
+editable.help = develop.help
+
+
+@click.command()
+def install():
+    """Install PyTorch (non-editable).
+
+    Runs a regular pip install using uv when available, falling back to
+    regular pip.  Build configuration comes from the environment, e.g.
+    `BUILD_CONFIG spin install`.
+    """
+    spin.util.run(_pip_install_cmd(editable=False))
 
 
 PYREFLY_LINTER_SCRIPT = CWD / "tools" / "linter" / "adapters" / "pyrefly_linter.py"

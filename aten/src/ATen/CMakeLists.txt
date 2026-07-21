@@ -662,11 +662,33 @@ if(USE_ROCM)
     ${native_quantized_hip_hip}
     ${native_transformers_hip_hip} ${native_transformers_src_hip_hip}
   )
+  file(GLOB native_hip_bgemm CONFIGURE_DEPENDS "native/hip/bgemm_kernels/*.hip")
+  file(GLOB native_hip_ck CONFIGURE_DEPENDS "native/hip/ck*.hip")
   if(NOT USE_ROCM_CK_GEMM)
-    file(GLOB native_hip_bgemm CONFIGURE_DEPENDS "native/hip/bgemm_kernels/*.hip")
-    file(GLOB native_hip_ck CONFIGURE_DEPENDS "native/hip/ck*.hip")
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
+  else()
+    # composable_kernel has no gfx1250 support yet, so its CK GEMM kernels fail to
+    # compile for that arch. Build CK GEMM as a separate library with gfx1250
+    # filtered out of HIP_ARCHITECTURES so every other requested arch still gets
+    # CK GEMM. Remove this filtering once the CK submodule supports gfx1250.
+    exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
+      ${native_hip_bgemm} ${native_hip_ck})
+    set(_ck_gemm_hip_arches ${PYTORCH_ROCM_ARCH})
+    list(REMOVE_ITEM _ck_gemm_hip_arches "gfx1250")
+    set_source_files_properties(${native_hip_bgemm} ${native_hip_ck} PROPERTIES LANGUAGE HIP)
+    add_library(ck_gemm STATIC ${native_hip_bgemm} ${native_hip_ck})
+    set_target_properties(ck_gemm PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      HIP_ARCHITECTURES "${_ck_gemm_hip_arches}")
+    target_compile_options(ck_gemm PRIVATE ${HIP_CXX_FLAGS})
+    target_include_directories(ck_gemm PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/hip
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include
+      ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
+    # Ensure torch_cpu (and its codegen) is built before ck_gemm to avoid race conditions
+    add_dependencies(ck_gemm torch_cpu)
   endif()
 
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)
@@ -772,10 +794,6 @@ endif(MKLDNN_FOUND)
 if(USE_MKLDNN_ACL)
     list(APPEND ATen_CPU_INCLUDE ${ACL_INCLUDE_DIRS})
     list(APPEND ATen_CPU_DEPENDENCY_LIBS ${ACL_LIBRARIES})
-endif()
-
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
 endif()
 
 if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
@@ -918,6 +936,7 @@ if(USE_MPS)
     include(../../../cmake/Metal.cmake)
 
     set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h} ${native_sparse_mps_mm})
+    set(METALLIB_DEPS)
 
     if(CAN_COMPILE_METAL)
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
@@ -927,7 +946,7 @@ if(USE_MPS)
             metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.1")
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
-        set(METALLIB_DEPS kernels_basic.metallib)
+        list(APPEND METALLIB_DEPS kernels_basic.metallib)
         if(CAN_COMPILE_METAL_40)
             foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
                 cmake_path(GET SHADER STEM TGT_STEM)
@@ -943,15 +962,15 @@ if(USE_MPS)
                           DEPENDS ${METALLIB_DEPS}
                           OUTPUT metallib_dummy.cpp
                           COMMENT "Updating metallibs timestamp")
-        add_custom_target(metallibs DEPENDS ${METALLIB_DEPS} metallib_dummy.cpp)
+        list(APPEND METALLIB_DEPS metallib_dummy.cpp)
     else()
-        file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native/mps")
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
-            cmake_path(GET SHADER STEM TGT_STEM)
-            string(CONCAT SHADER_HDR_NAME  "${CMAKE_CURRENT_BINARY_DIR}" /native/mps/ ${TGT_STEM} "_metallib.h")
-            metal_to_metallib_h(${SHADER} ${SHADER_HDR_NAME})
+            metal_to_metallib_h(${SHADER})
+            list(APPEND METALLIB_DEPS ${SHADER_HDR})
         endforeach()
     endif()
+
+    add_custom_target(metallibs DEPENDS ${METALLIB_DEPS})
 endif()
 
 if(USE_ROCM)
