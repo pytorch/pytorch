@@ -1819,6 +1819,23 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(vals.min().item(), 0)
         self.assertEqual(indices.max().item(), 0)
 
+    @onlyCUDA
+    @largeTensorTest('48GB')
+    def test_cummax_cummin_inner_dim_64bit_indexing(self, device):
+        # Exercises the innermost-dim _with_indices path when
+        # num_rows * row_size > UINT_MAX (scan along the last dimension).
+        # 262144 * 16384 = 2^32 = UINT_MAX + 1.
+        x = torch.zeros(262144, 16384, dtype=torch.int8, device=device)
+        tmp = torch.ones_like(x)
+        del tmp
+        vals, indices = torch.cummax(x, dim=-1)
+        self.assertEqual(vals.max().item(), 0)
+        self.assertEqual(indices.max().item(), 0)
+        del vals, indices
+        vals, indices = torch.cummin(x, dim=-1)
+        self.assertEqual(vals.min().item(), 0)
+        self.assertEqual(indices.max().item(), 0)
+
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):
