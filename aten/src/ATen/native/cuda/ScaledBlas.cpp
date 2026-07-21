@@ -663,7 +663,13 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #endif
   }
 
-  return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out, /*alpha=*/std::nullopt, scale_result);
+  // scale_result is only utilized when the output is a float8 type; for 16 and
+  // 32-bit outputs it is documented as not applied. Gate the forwarding: recent
+  // cuBLASLt versions reject CUBLASLT_MATMUL_DESC_D_SCALE_POINTER for non-fp8
+  // outputs instead of ignoring it.
+  const std::optional<Tensor> scale_result_fwd =
+      isFloat8Type(out.scalar_type()) ? scale_result : std::optional<Tensor>{};
+  return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out, /*alpha=*/std::nullopt, scale_result_fwd);
 }
 
 Tensor
