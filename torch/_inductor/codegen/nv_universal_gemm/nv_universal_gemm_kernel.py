@@ -86,6 +86,8 @@ def _compile_nvgemm(
     epilogue_args=None,
     epilogue_source="",
     fallback_fn=None,
+    cc: int | None = None,
+    base_kernel=None,
 ):
     """Compile an NVGEMM artifact, trying a fallback (disk cache) first.
 
@@ -95,6 +97,8 @@ def _compile_nvgemm(
 
     kernel_obj: pre-resolved kernel (skips _lookup_gemm_kernel).
     kernel_name: kernel name for _lookup_gemm_kernel.
+    base_kernel: pre-reconstructed operator (from metadata passed by the main
+        process); lets _lookup_gemm_kernel skip operator discovery entirely.
     args_kwargs: extra kwargs forwarded to _create_gemm_arguments.
     fallback_fn: callable(kernel) -> artifact | None, called before
         compiling (for disk cache lookup).
@@ -118,6 +122,9 @@ def _compile_nvgemm(
             kernel_name,  # pyrefly: ignore[bad-argument-type]
             epilogue_args=epilogue_args,
             epilogue_source=epilogue_source,
+            args=args if cc is not None else None,
+            cc=cc,
+            base_kernel=base_kernel,
         )
 
     artifact = None
@@ -212,6 +219,7 @@ def _worker_nvgemm_autotuning_precompile(
     swizzle_type_b=None,
     has_bias_epilogue=False,
     swap_ab=False,
+    metadata=None,
 ):
     """Subprocess worker: compile one NVGEMM kernel and save to disk cache.
 
@@ -308,8 +316,30 @@ def _worker_nvgemm_autotuning_precompile(
     )
     disk_fn_cache: dict = {}
 
+    # cc for the args-filtered fast kernel lookup: workers can't query the CUDA
+    # driver, so use the bundled device capability instead of rebuilding the
+    # full ~294K-kernel manifest just to resolve one kernel by name.
+    major, minor = cuda_ctx.device_capability
+    worker_cc = major * 10 + minor
+
     patched = _patch_max_active_clusters(cuda_ctx.max_active_clusters)
     try:
+        # Best path: the main process passed the chosen operator's metadata, so
+        # reconstruct exactly that one operator (~us) instead of enumerating the
+        # operator space. Done inside the patched region since construction may
+        # query max_active_clusters, which the worker can't get from the driver.
+        base_kernel = None
+        if metadata is not None:
+            try:
+                base_kernel = metadata.operator_class(metadata)
+            except Exception:
+                log.warning(
+                    "Failed to reconstruct NVGEMM operator %s from metadata; "
+                    "falling back to argument-based lookup",
+                    kernel_name,
+                    exc_info=True,
+                )
+
         artifact, _, _, was_compiled = _compile_nvgemm(
             variant_name,
             input_tensors,
@@ -319,6 +349,8 @@ def _worker_nvgemm_autotuning_precompile(
             args_kwargs=helper_kwargs,
             epilogue_args=epilogue_args,
             epilogue_source=epilogue_source,
+            cc=worker_cc,
+            base_kernel=base_kernel,
         )
 
         if was_compiled:
@@ -417,20 +449,44 @@ def _lookup_gemm_kernel(
     *,
     epilogue_args: Any | None = None,
     epilogue_source: str = "",
+    args: Any | None = None,
+    cc: int | None = None,
+    base_kernel: Any | None = None,
 ):
     from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
         get_efc_kernel_with_epilogue,
         get_kernel_by_name,
+        get_kernel_by_name_via_args,
     )
 
+    # Best path (subprocess precompile): the caller reconstructed the exact
+    # operator from metadata passed by the main process (operator_class(metadata),
+    # ~us), so we skip operator discovery entirely -- no args-filtered query and
+    # no full manifest.
+    # Fast path (base_kernel absent): resolve the single named kernel via an
+    # args-filtered query (~0.05s) instead of building the full manifest (~14s).
+    fast = args is not None and cc is not None
+
     if epilogue_args is None:
-        kernel = get_kernel_by_name(kernel_name)
+        kernel = base_kernel
+        # Fast path can miss when the named kernel doesn't support these exact
+        # args (e.g. a swap_ab kernel selected for the transposed problem while
+        # the worker holds the original operands); fall back to the manifest.
+        if kernel is None and fast:
+            kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
+        if kernel is None:
+            kernel = get_kernel_by_name(kernel_name)
         if kernel is None:
             raise RuntimeError(f"Could not find kernel: {kernel_name}")
         return kernel
 
+    if base_kernel is None and fast:
+        base_kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
     kernel = get_efc_kernel_with_epilogue(
-        kernel_name, epilogue_args, epilogue_source=epilogue_source
+        kernel_name,
+        epilogue_args,
+        epilogue_source=epilogue_source,
+        base_kernel=base_kernel,
     )
     if kernel is None:
         raise RuntimeError(f"Could not find EFC kernel: {kernel_name}")
