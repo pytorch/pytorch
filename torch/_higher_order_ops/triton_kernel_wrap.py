@@ -911,9 +911,9 @@ class IgnoreUnknownOp(Protocol):
 
 
 class ReadWriteIndexes(Protocol):
-    """Return the list of argument indexes read / written"""
+    """Return the argument indexes read / written."""
 
-    def __call__(self, op: Op) -> list[int]: ...
+    def __call__(self, op: Op) -> Sequence[int]: ...
 
 
 def first_arg(op: Op) -> list[int]:
@@ -957,7 +957,7 @@ def _read_write_indexes(indexes: Sequence[int] | ReadWriteIndexes) -> ReadWriteI
     if callable(indexes):
         return indexes
     index_tuple = tuple(indexes)
-    return lambda op: list(index_tuple)
+    return lambda op: index_tuple
 
 
 def register_kernel_access_op(
