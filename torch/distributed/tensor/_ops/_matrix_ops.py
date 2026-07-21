@@ -37,7 +37,7 @@ from torch.fx.experimental.symbolic_shapes import guard_or_false
 aten = torch.ops.aten
 
 
-@register_single_dim_strategy(aten.t.default)
+@register_single_dim_strategy(aten.t.default, allow_unbacked_sharding=False)
 def transpose_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:

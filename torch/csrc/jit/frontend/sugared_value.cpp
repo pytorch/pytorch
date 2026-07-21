@@ -81,7 +81,7 @@ bool SimpleValue::hasAttr(
       return false;
     } else {
       throw(
-          ErrorReport(loc) << "hasattr's first argument must be a object "
+          ErrorReport(loc) << "hasattr's first argument must be an object "
                            << "or NamedTuple, but got a normal Tuple "
                            << value_->type()->repr_str() << " instead");
     }
@@ -625,7 +625,7 @@ std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
 }
 
 Value* IterableTree::len(const SourceRange& loc, GraphFunction& m) {
-  // if it's a iterable tree, we get the base iterables that consists of
+  // if it's an iterable tree, we get the base iterables that consists of
   // SimpleValue or RangeValue, and then calculate the minimum length of all the
   // base iterables to be max_trip_count_val
   TORCH_INTERNAL_ASSERT(!unroll_length_);

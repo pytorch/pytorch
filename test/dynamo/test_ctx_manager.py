@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -518,31 +519,27 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "f32[s77, s77]", L_y_: "f32[s77, s77]"):
+    def forward(self, L_x_: "f32[s77, s77]", s77: "Sym(s77)", L_y_: "f32[s77, s77]"):
         l_x_ = L_x_
         l_y_ = L_y_
 
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        matmul: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled_1 = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled_1 = None
-
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
-
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
-        return (x,)
+        return (matmul,)
 """,
             )
         else:
@@ -557,24 +554,20 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        matmul: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled_1 = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled_1 = None
-
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
-
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
-        return (x,)
+        return (matmul,)
 """,
             )
 
@@ -606,21 +599,19 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "f32[s77, s77]", L_y_: "f32[s77, s77]"):
+    def forward(self, L_x_: "f32[s77, s77]", s77: "Sym(s77)", L_y_: "f32[s77, s77]"):
         l_x_ = L_x_
         l_y_ = L_y_
 
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
-        return (x,)
+        matmul: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        return (matmul,)
 """,
             )
         else:
@@ -635,14 +626,12 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
-        return (x,)
+        matmul: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        return (matmul,)
 """,
             )
 
@@ -655,22 +644,20 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "bf16[s77, s77]", L_z_: "f32[s77, s77]"):
+    def forward(self, L_x_: "bf16[s77, s77]", s77: "Sym(s77)", L_z_: "f32[s77, s77]"):
         l_x_ = L_x_
         l_z_ = L_z_
 
-        x: "bf16[s77, s77]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
+        matmul: "bf16[s77, s77]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
-        return (x,)
+        return (matmul,)
 """,
             )
         else:
@@ -682,20 +669,53 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_z_ = L_z_
 
-        x: "bf16[3, 3]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
+        matmul: "bf16[3, 3]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
-        return (x,)
+        return (matmul,)
 """,
             )
+
+    def test__enter__exit_autocast_graph_break_explicit_dtype(self):
+        def f(x):
+            m = torch.amp.autocast_mode._enter_autocast(
+                "cpu", torch.float16, True, True
+            )
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 2
+            torch.amp.autocast_mode._exit_autocast(m)
+            return x
+
+        prev_enabled = torch.is_autocast_enabled("cpu")
+        prev_dtype = torch.get_autocast_dtype("cpu")
+        prev_cache = torch.is_autocast_cache_enabled()
+        try:
+            torch.set_autocast_enabled("cpu", False)
+            torch.set_autocast_dtype("cpu", torch.bfloat16)
+            torch.set_autocast_cache_enabled(True)
+
+            opt_f = torch.compile(f, backend="eager", fullgraph=False)
+            x = torch.randn(3, 3, dtype=torch.float32)
+            out = f(x)
+            self.assertFalse(torch.is_autocast_enabled("cpu"))
+            self.assertEqual(torch.get_autocast_dtype("cpu"), torch.bfloat16)
+
+            opt_out = opt_f(x)
+            self.assertEqual(out, opt_out)
+            self.assertFalse(torch.is_autocast_enabled("cpu"))
+            self.assertEqual(torch.get_autocast_dtype("cpu"), torch.bfloat16)
+            self.assertTrue(torch.is_autocast_cache_enabled())
+        finally:
+            torch.set_autocast_enabled("cpu", prev_enabled)
+            torch.set_autocast_dtype("cpu", prev_dtype)
+            torch.set_autocast_cache_enabled(prev_cache)
 
     def test_autocast_low_level_api(self):
         def f(x, y):
@@ -787,10 +807,10 @@ class GraphModule(torch.nn.Module):
 
         _enter_autocast = torch.amp.autocast_mode._enter_autocast('cpu', None, True, None)
 
-        x: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        matmul: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
 
         _exit_autocast = torch.amp.autocast_mode._exit_autocast(_enter_autocast);  _enter_autocast = _exit_autocast = None
-        return (x,)
+        return (matmul,)
 """,
         )
 
@@ -817,22 +837,18 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
-        x: "bf16[3, 3]" = l_l_x_ @ l_l_y_;  l_l_x_ = l_l_y_ = None
+        matmul: "bf16[3, 3]" = l_l_x_ @ l_l_y_;  l_l_x_ = l_l_y_ = None
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled_1 = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled_1 = None
-
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
-
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
-        return (x,)
+        return (matmul,)
 """,
         )
 
@@ -1148,11 +1164,11 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x: "f32[1]" = torch.ones(1)
+        ones: "f32[1]" = torch.ones(1)
 
-        y: "f32[1]" = torch.zeros(1)
+        zeros: "f32[1]" = torch.zeros(1)
 
-        add: "f32[1]" = x + y;  x = y = None
+        add: "f32[1]" = ones + zeros;  ones = zeros = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (add,)
@@ -1191,11 +1207,11 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x: "f32[1]" = torch.ones(1)
+        ones: "f32[1]" = torch.ones(1)
 
-        y: "f32[1]" = torch.zeros(1)
+        zeros: "f32[1]" = torch.zeros(1)
 
-        add: "f32[1]" = x + y;  x = y = None
+        add: "f32[1]" = ones + zeros;  ones = zeros = None
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_1 = None
         return (add,)
@@ -1240,17 +1256,17 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x: "f32[1]" = torch.ones(1)
+        ones: "f32[1]" = torch.ones(1)
 
-        y: "f32[1]" = torch.zeros(1)
+        zeros: "f32[1]" = torch.zeros(1)
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner');  _saved_tensors_hooks_disable_1 = None
 
-        add: "f32[1]" = x + y;  y = None
+        add: "f32[1]" = ones + zeros;  zeros = None
 
         _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable_2 = None
 
-        add_1: "f32[1]" = add + x;  add = x = None
+        add_1: "f32[1]" = add + ones;  add = ones = None
 
         _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_3 = None
         return (add_1,)
@@ -1283,10 +1299,10 @@ class GraphModule(torch.nn.Module):
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        y: "f32[]" = l_x_ + 1;  l_x_ = None
+        add: "f32[]" = l_x_ + 1;  l_x_ = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
-        return (y,)
+        return (add,)
 """,
         )
 
@@ -1327,14 +1343,14 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[]"):
         l_x_ = L_x_
 
-        y: "f32[]" = l_x_ + 1;  l_x_ = None
+        add: "f32[]" = l_x_ + 1;  l_x_ = None
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        y *= 2;  y_1: "f32[]" = y;  y = None
+        add *= 2;  imul: "f32[]" = add;  add = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
-        return (y_1,)
+        return (imul,)
 """,
         )
 
@@ -2054,6 +2070,335 @@ class GraphModule(torch.nn.Module):
 
 
 class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
+    def test_cuda_use_mem_pool_fx_cse_preserves_distinct_contexts(self):
+        from torch._functorch.compile_utils import fx_graph_cse
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        add_a = graph.call_function(torch.ops.aten.add.Tensor, (x, 1))
+        add_a.meta["custom"] = {"mempool": 0, "mempool_device": 0}
+        add_b = graph.call_function(torch.ops.aten.add.Tensor, (x, 1))
+        add_b.meta["custom"] = {"mempool": 1, "mempool_device": 0}
+        graph.output((add_a, add_b))
+
+        cse_graph = fx_graph_cse(graph)
+        add_nodes = [
+            node
+            for node in cse_graph.nodes
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor
+        ]
+        self.assertEqual(len(add_nodes), 2)
+
+    def _check_cuda_use_mem_pool(self, backend=None):
+        torch.cuda.empty_cache()
+
+        def fn(pool):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.ones(16, device="cuda") + 1
+
+        pool = torch.cuda.MemPool()
+        opt_fn = (
+            torch.compile(fn, backend=backend, fullgraph=True)
+            if backend is not None
+            else torch.compile(fn, backend="inductor", fullgraph=True)
+        )
+        res = opt_fn(pool)
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((16,), 2.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_use_mem_pool_context_manager(self):
+        self._check_cuda_use_mem_pool(backend="eager")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_mem_pool_id(self):
+        def fn(pool):
+            return pool.id
+
+        pool = torch.cuda.MemPool()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(pool), pool.id)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_context_manager_inductor(self):
+        self._check_cuda_use_mem_pool()
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_cpp_wrapper_unsupported(self):
+        def fn(pool):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.ones(16, device="cuda")
+
+        pool = torch.cuda.MemPool()
+        with (
+            torch._inductor.config.patch(
+                {
+                    "cpp_wrapper": True,
+                    "triton.autotune_at_compile_time": True,
+                    "triton.autotune_with_sample_inputs": True,
+                }
+            ),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "torch.cuda.use_mem_pool is not supported with C\\+\\+ wrapper codegen",
+            ),
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(pool)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_realize_at_boundary_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, inp):
+            with torch.cuda.use_mem_pool(pool):
+                x = inp + 1
+            return x + 1
+
+        pool = torch.cuda.MemPool()
+        inp = torch.ones(16, device="cuda")
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(pool, inp)
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((16,), 3.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_fallback_alloc_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, inp):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.histc(inp, bins=4, min=0, max=4)
+
+        pool = torch.cuda.MemPool()
+        inp = torch.arange(16, device="cuda", dtype=torch.float32) % 4
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(pool, inp)
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((4,), 4.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_foreach_alloc_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, xs):
+            with torch.cuda.use_mem_pool(pool):
+                return torch._foreach_add(xs, 1.0)
+
+        pool = torch.cuda.MemPool()
+        xs = [
+            torch.ones(64, device="cuda"),
+            torch.full((64,), 2.0, device="cuda"),
+        ]
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(pool, xs)
+        torch.cuda.synchronize()
+        self.assertEqual(res[0], torch.full((64,), 2.0, device="cuda"))
+        self.assertEqual(res[1], torch.full((64,), 3.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_forced_extern_multi_template_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, x, y):
+            with torch.cuda.use_mem_pool(pool):
+                return x @ y
+
+        pool = torch.cuda.MemPool()
+        x = torch.randn(32, 32, device="cuda")
+        y = torch.randn(32, 32, device="cuda")
+        with torch._inductor.config.patch(
+            {
+                "test_configs.force_extern_kernel_in_multi_template": True,
+                "triton.native_matmul": False,
+            }
+        ):
+            res = torch.compile(
+                fn,
+                backend="inductor",
+                mode="max-autotune-no-cudagraphs",
+                fullgraph=True,
+            )(pool, x, y)
+        torch.cuda.synchronize()
+        self.assertEqual(res, x @ y, atol=1e-4, rtol=1e-4)
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_nested_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(outer_pool, inner_pool, inp):
+            with torch.cuda.use_mem_pool(outer_pool):
+                outer = inp + 1
+                with torch.cuda.use_mem_pool(inner_pool):
+                    inner = inp + 2
+                outer = outer + 3
+            return outer, inner
+
+        outer_pool = torch.cuda.MemPool()
+        inner_pool = torch.cuda.MemPool()
+        inp = torch.ones(16, device="cuda")
+        outer, inner = torch.compile(fn, backend="inductor", fullgraph=True)(
+            outer_pool, inner_pool, inp
+        )
+        torch.cuda.synchronize()
+        self.assertEqual(outer, torch.full((16,), 5.0, device="cuda"))
+        self.assertEqual(inner, torch.full((16,), 3.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(outer_pool.id)), 0)
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(inner_pool.id)), 0)
+        self.assertEqual(outer_pool.use_count(), 1)
+        self.assertEqual(inner_pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_distinct_pools_not_cse_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool_a, pool_b, inp):
+            with torch.cuda.use_mem_pool(pool_a):
+                a = inp + 1
+            with torch.cuda.use_mem_pool(pool_b):
+                b = inp + 1
+            return a + b
+
+        pool_a = torch.cuda.MemPool()
+        pool_b = torch.cuda.MemPool()
+        inp = torch.ones(16, device="cuda")
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(pool_a, pool_b, inp)
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((16,), 4.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool_a.id)), 0)
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool_b.id)), 0)
+        self.assertEqual(pool_a.use_count(), 1)
+        self.assertEqual(pool_b.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_reduce_overhead_cudagraph_asserts_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, x, w):
+            with torch.cuda.use_mem_pool(pool):
+                return (x @ w).relu()
+
+        pool = torch.cuda.MemPool()
+        x = torch.randn(64, 64, device="cuda")
+        w = torch.randn(64, 64, device="cuda")
+        with torch._inductor.config.patch({"triton.slow_path_cudagraph_asserts": True}):
+            opt_fn = torch.compile(
+                fn, backend="inductor", mode="reduce-overhead", fullgraph=True
+            )
+            res = opt_fn(pool, x, w)
+            res_second = opt_fn(pool, x, w)
+        torch.cuda.synchronize()
+        self.assertEqual(res, (x @ w).relu(), atol=1e-4, rtol=1e-4)
+        self.assertEqual(res_second, res)
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_stream_order_inductor(self):
+        from torch._inductor.utils import run_and_get_code
+
+        torch.cuda.empty_cache()
+
+        def pool_outer(pool, stream, inp):
+            with torch.cuda.use_mem_pool(pool):
+                with torch.cuda.stream(stream):
+                    return inp + 1
+
+        def stream_outer(pool, stream, inp):
+            with torch.cuda.stream(stream):
+                with torch.cuda.use_mem_pool(pool):
+                    return inp + 2
+
+        inp = torch.ones(16, device="cuda")
+        stream = torch.cuda.Stream()
+        for fn in (pool_outer, stream_outer):
+            with self.subTest(fn=fn.__name__):
+                pool = torch.cuda.MemPool()
+                expected = fn(pool, stream, inp)
+                actual, source_codes = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True),
+                    pool,
+                    stream,
+                    inp,
+                )
+                torch.cuda.synchronize()
+                self.assertEqual(actual, expected)
+                self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+                self.assertEqual(pool.use_count(), 1)
+
+                source = "\n".join(source_codes)
+                # The compiled wrapper deliberately normalizes to pool-outer,
+                # stream-inner ordering so allocators with set_context/pop_context
+                # side effects see a consistent pool lifetime.
+                mempool_enter = source.index("with torch.cuda.use_mem_pool(")
+                stream_enter = source.index("with stream")
+                self.assertLess(mempool_enter, stream_enter)
+
+    @requires_cuda_and_triton
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires multiple cuda devices")
+    def test_cuda_use_mem_pool_device_none_resolves_at_entry_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.ones(16, device="cuda:0")
+
+        with torch.cuda.device(1):
+            pool = torch.cuda.MemPool()
+            res = torch.compile(fn, backend="inductor", fullgraph=True)(pool)
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        self.assertEqual(res, torch.ones(16, device="cuda:0"))
+        self.assertEqual(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_use_mem_pool_invalid_signatures(self):
+        pool = torch.cuda.MemPool()
+
+        def missing(_pool):
+            with torch.cuda.use_mem_pool():
+                return torch.ones(1, device="cuda")
+
+        def too_many(pool):
+            with torch.cuda.use_mem_pool(pool, None, None):
+                return torch.ones(1, device="cuda")
+
+        def unexpected_kwarg(pool):
+            with torch.cuda.use_mem_pool(pool, foo=None):
+                return torch.ones(1, device="cuda")
+
+        def duplicate_pool(pool):
+            with torch.cuda.use_mem_pool(pool, pool=pool):
+                return torch.ones(1, device="cuda")
+
+        def duplicate_device(pool):
+            with torch.cuda.use_mem_pool(pool, None, device=None):
+                return torch.ones(1, device="cuda")
+
+        cases = [
+            (missing, "missing 1 required positional argument: 'pool'"),
+            (
+                too_many,
+                "takes from 1 to 2 positional arguments but 3 were given",
+            ),
+            (unexpected_kwarg, "unexpected keyword argument 'foo'"),
+            (duplicate_pool, "multiple values for argument 'pool'"),
+            (duplicate_device, "multiple values for argument 'device'"),
+        ]
+        for fn, msg in cases:
+            with (
+                self.subTest(msg=msg),
+                self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg),
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(pool)
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):
         def fn(x):
@@ -3193,10 +3538,10 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         set_default_dtype = torch.set_default_dtype(torch.float64);  set_default_dtype = None
 
-        x: "c128[2]" = torch.tensor([3.0, (3+5j)])
+        tensor: "c128[2]" = torch.tensor([3.0, (3+5j)])
 
         set_default_dtype_1 = torch.set_default_dtype(torch.float32);  set_default_dtype_1 = None
-        return (x,)
+        return (tensor,)
 """,
         )
 

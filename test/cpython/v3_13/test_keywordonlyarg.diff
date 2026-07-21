@@ -1,0 +1,41 @@
+diff --git a/test/cpython/v3_13/test_keywordonlyarg.py b/test/cpython/v3_13/test_keywordonlyarg.py
+index 918f953cae5..1511e69caa2 100644
+--- a/test/cpython/v3_13/test_keywordonlyarg.py
++++ b/test/cpython/v3_13/test_keywordonlyarg.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_keywordonlyarg.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ """Unit tests for the keyword only argument specified in PEP 3102."""
+ 
+ __author__ = "Jiwon Seo"
+@@ -34,7 +52,7 @@ class Foo:
+     def sum(self):
+         return self.k1 + self.k2
+ 
+-class KeywordOnlyArgTestCase(unittest.TestCase):
++class KeywordOnlyArgTestCase(CPythonTestCase):
+     def assertRaisesSyntaxError(self, codestr):
+         def shouldRaiseSyntaxError(s):
+             compile(s, "<test>", "single")
+@@ -175,4 +193,4 @@ class KeywordOnlyArgTestCase(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
