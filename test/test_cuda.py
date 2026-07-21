@@ -5879,8 +5879,8 @@ class TestCudaAllocator(TestCase):
             x = torch.rand(3, 4, device="cuda")
             torch.cuda.memory._set_memory_metadata("")
             ptr = x.untyped_storage().data_ptr()
-            torch.cuda.memory._annotate_memory(ptr, "retained by autograd")
-            torch.cuda.memory._annotate_memory(ptr, "second annotation")
+            torch.cuda.memory._annotate_tensor(x, "retained by autograd")
+            torch.cuda.memory._annotate_tensor(x, "second annotation")
 
             ss = torch.cuda.memory._snapshot()
             notes = [e for e in ss["device_traces"][0] if e["action"] == "annotate"]
@@ -5889,7 +5889,7 @@ class TestCudaAllocator(TestCase):
                 self.assertEqual(e["addr"], ptr)
             self.assertEqual(notes[0]["user_metadata"], "retained by autograd")
             self.assertEqual(notes[1]["user_metadata"], "second annotation")
-            # tensor-level wrapper resolves views to the storage base address
+            # views resolve to the storage base address
             view = x[1:]
             self.assertNotEqual(view.data_ptr(), ptr)
             torch.cuda.memory._annotate_tensor(view, "via view")
@@ -5909,7 +5909,7 @@ class TestCudaAllocator(TestCase):
             del x, view
             torch.cuda.synchronize()
             with self.assertRaisesRegex(RuntimeError, "no live allocation"):
-                torch.cuda.memory._annotate_memory(ptr, "should fail")
+                torch._C._cuda_annotateMemory(ptr, "should fail")
         finally:
             torch.cuda.memory._record_memory_history(None)
 

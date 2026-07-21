@@ -1128,7 +1128,7 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
                 # useful to correlate a previously taken
                 # snapshot with this trace
                 "annotate",  # metadata was attached to a live allocation
-                # via _annotate_memory. 'addr' is the allocation's base
+                # via _annotate_tensor. 'addr' is the allocation's base
                 # address and 'user_metadata' holds the annotation
             ]
             addr: int  # not present for OOM
@@ -1236,9 +1236,9 @@ def _get_memory_metadata() -> str:
     return torch._C._cuda_getMemoryMetadata()
 
 
-def _annotate_memory(data_ptr: int, metadata: str):
+def _annotate_tensor(tensor: torch.Tensor, metadata: str):
     """
-    Attach metadata to an existing (live) allocation, post facto.
+    Attach metadata to the allocation backing ``tensor``, post facto.
 
     Unlike :func:`_set_memory_metadata`, which stamps metadata onto trace
     events as they are generated, this records a dedicated ``annotate`` trace
@@ -1252,33 +1252,14 @@ def _annotate_memory(data_ptr: int, metadata: str):
     :func:`_record_memory_history`). The pytorch.org/memory_viz visualizer
     shows annotations alongside the allocation's own metadata.
 
-    ``data_ptr`` must be the base address of a live allocation, e.g. the
-    result of ``tensor.untyped_storage().data_ptr()``. Passing the result of
-    ``tensor.data_ptr()`` for a view with a nonzero ``storage_offset`` will
-    raise, as will passing a pointer that is not a live allocation of the
-    caching allocator.
+    The annotation is keyed to the base address of the tensor's untyped
+    storage, so it works for views and tensors with a nonzero
+    ``storage_offset``.
 
     If memory history recording is not enabled (see
     :func:`_record_memory_history`), this has no observable effect. It is only
     supported by the native caching allocator; with other backends (e.g.
     ``cudaMallocAsync`` or a pluggable allocator) it is silently ignored.
-
-    Args:
-        data_ptr (int): Base device pointer of the live allocation to annotate.
-        metadata (str): Annotation string to record.
-    """
-    # pyrefly: ignore [missing-attribute]
-    torch._C._cuda_annotateMemory(data_ptr, metadata)
-
-
-def _annotate_tensor(tensor: torch.Tensor, metadata: str):
-    """
-    Attach metadata to the allocation backing ``tensor``, post facto.
-
-    Convenience wrapper around :func:`_annotate_memory` that annotates the
-    base address of the tensor's untyped storage, so it works for views and
-    tensors with a nonzero ``storage_offset``. See :func:`_annotate_memory`
-    for semantics.
 
     Args:
         tensor (torch.Tensor): CUDA tensor whose backing allocation to
@@ -1287,7 +1268,8 @@ def _annotate_tensor(tensor: torch.Tensor, metadata: str):
     """
     if not tensor.is_cuda:
         raise ValueError(f"expected a CUDA tensor, got device {tensor.device}")
-    _annotate_memory(tensor.untyped_storage().data_ptr(), metadata)
+    # pyrefly: ignore [missing-attribute]
+    torch._C._cuda_annotateMemory(tensor.untyped_storage().data_ptr(), metadata)
 
 
 def _save_segment_usage(filename="output.svg", snapshot=None):
