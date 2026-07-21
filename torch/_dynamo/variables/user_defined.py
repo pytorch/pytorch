@@ -2069,8 +2069,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
         type_attr = self.lookup_class_mro_attr(name)
-        if type_attr is None or type_attr is NO_SUCH_SUBOBJ:
+        if type_attr is NO_SUCH_SUBOBJ:
+            # The method doesn't exist
             return None
+        if type_attr is None:
+            # Method exists but it is set to None
+            return variables.ConstantVariable.create(None)
         source = self.get_source_by_walking_mro(tx, name) if self.source else None
 
         if isinstance(
