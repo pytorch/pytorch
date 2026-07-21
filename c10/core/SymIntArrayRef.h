@@ -7,10 +7,37 @@
 #include <c10/util/irange.h>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 
 namespace c10 {
 using SymIntArrayRef = ArrayRef<SymInt>;
+
+inline bool symIntArrayRefElementIsHeapAllocated(
+    c10::SymIntArrayRef ar,
+    size_t index) {
+#ifdef C10_MOBILE
+  return false;
+#else
+  // SymIntArrayRef can be a view over IntArrayRef storage through
+  // fromIntArrayRefSlow. In that case the bytes use SymInt's inline
+  // representation, but no SymInt objects are alive, so validation must inspect
+  // the shared one-word representation instead of calling SymInt methods.
+  static_assert(sizeof(SymInt) == sizeof(int64_t));
+  int64_t raw_data = 0;
+  std::memcpy(
+      &raw_data,
+      reinterpret_cast<const char*>(ar.data()) + index * sizeof(raw_data),
+      sizeof(raw_data));
+  // The top-two-bit tag is 2 for the 10... range reserved for heap-allocated
+  // SymInt data. Keep the branch on that shifted tag rather than a signed range
+  // comparison so Valgrind does not see unrelated payload bits as branch
+  // inputs.
+  const auto raw_bits = static_cast<uint64_t>(raw_data);
+  constexpr uint64_t heap_allocated_tag = 2;
+  return (raw_bits >> 62) == heap_allocated_tag;
+#endif
+}
 
 [[noreturn]] C10_NOINLINE inline void reportSymIntArrayRefToIntArrayRefError(
     c10::SymIntArrayRef ar,
@@ -60,8 +87,8 @@ inline at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
 
 inline std::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
     c10::SymIntArrayRef ar) {
-  for (const c10::SymInt& sci : ar) {
-    if (sci.is_heap_allocated()) {
+  for (const auto i : c10::irange(ar.size())) {
+    if (symIntArrayRefElementIsHeapAllocated(ar, i)) {
       return std::nullopt;
     }
   }
@@ -74,7 +101,7 @@ inline at::IntArrayRef asIntArrayRefSlow(
     const char* file,
     int64_t line) {
   for (const auto i : c10::irange(ar.size())) {
-    if (C10_UNLIKELY(ar[i].is_heap_allocated())) {
+    if (C10_UNLIKELY(symIntArrayRefElementIsHeapAllocated(ar, i))) {
       reportSymIntArrayRefToIntArrayRefError(ar, i, file, line);
     }
   }
