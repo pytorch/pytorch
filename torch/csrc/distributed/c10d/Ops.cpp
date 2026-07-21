@@ -588,24 +588,24 @@ IMPL_ALLTOALL_BASE(CUDA)
 IMPL_ALLTOALL_BASE(PrivateUse1)
 
 // NOLINTBEGIN(performance-unnecessary-value-param)
-#define IMPL_BARRIER(DEV)                                               \
-  c10::intrusive_ptr<Work> barrier##DEV(                                \
-      at::Tensor /* unused */,                                          \
-      const c10::intrusive_ptr<ProcessGroup>& process_group,            \
-      const std::vector<int64_t>& device_ids,                           \
-      bool asyncOp,                                                     \
-      int64_t timeout) {                                                \
-    auto opts = BarrierOptions{};                                       \
-    opts.device_ids = device_ids;                                       \
-    opts.timeout = std::chrono::milliseconds(timeout);                  \
-    opts.asyncOp = asyncOp;                                             \
-    auto hook_op_id =                                                   \
-        process_group->firePreHook(HookOpName::BARRIER, asyncOp, -1);   \
-    auto work =                                                         \
-        process_group->getBackend(c10::DeviceType::DEV)->barrier(opts); \
-    process_group->firePostHook(                                        \
-        HookOpName::BARRIER, asyncOp, hook_op_id, work);                \
-    return work;                                                        \
+#define IMPL_BARRIER(DEV)                                                   \
+  c10::intrusive_ptr<Work> barrier##DEV(                                    \
+      at::Tensor tensor,                                                    \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,                \
+      const std::vector<int64_t>& device_ids,                               \
+      bool asyncOp,                                                         \
+      int64_t timeout) {                                                    \
+    auto opts = BarrierOptions{};                                           \
+    opts.device_ids = device_ids;                                           \
+    opts.timeout = std::chrono::milliseconds(timeout);                      \
+    opts.asyncOp = asyncOp;                                                 \
+    auto hook_op_id = process_group->firePreHook(                           \
+        HookOpName::BARRIER, asyncOp, -1, std::vector<at::Tensor>{tensor}); \
+    auto work =                                                             \
+        process_group->getBackend(c10::DeviceType::DEV)->barrier(opts);     \
+    process_group->firePostHook(                                            \
+        HookOpName::BARRIER, asyncOp, hook_op_id, work);                    \
+    return work;                                                            \
   }
 
 IMPL_BARRIER(CPU)

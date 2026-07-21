@@ -313,7 +313,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
                 "entries"
             ]
             ag_entries = [
-                e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
+                e for e in entries if e["profiling_name"] == "nccl:all_gather"
             ]
             # On NVLink-fabric hardware both the RendezvousRequest and handle
             # exchange go through pg_all_gather → 2 allgathers. On hardware
@@ -322,7 +322,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             self.assertIn(
                 len(ag_entries),
                 [1, 2],
-                lambda msg: f"{msg}\nexpected 1 or 2 NCCL _all_gather_base from rendezvous, "
+                lambda msg: f"{msg}\nexpected 1 or 2 NCCL all_gather operations "
+                "from rendezvous, "
                 f"got {len(ag_entries)}: {[e['profiling_name'] for e in entries]}",
             )
 
@@ -383,12 +384,12 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 
         entries = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())["entries"]
         ag_entries = [
-            e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
+            e for e in entries if e["profiling_name"] == "ncclx_stub:all_gather"
         ]
         self.assertGreaterEqual(
             len(ag_entries),
             1,
-            lambda msg: f"{msg}\nexpected NCCL _all_gather_base from PG rendezvous, "
+            lambda msg: f"{msg}\nexpected ncclx_stub all_gather from PG rendezvous, "
             f"got: {[e['profiling_name'] for e in entries]}",
         )
 

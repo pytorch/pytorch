@@ -48,7 +48,7 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._C._distributed_c10d import ErrorType, OpType, WorkResult
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_cuda import _get_torch_rocm_version, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     get_required_world_size,
     get_timeout,
@@ -5625,9 +5625,7 @@ class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
 class NCCLTraceTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
-        os.environ["TORCH_NCCL_ENABLE_TIMING"] = (
-            "0"  # see 'timing_enabled' parametrized tests
-        )
+        os.environ["TORCH_NCCL_ENABLE_TIMING"] = "0"
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "1000"
         os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "1"
         self.tempdir = tempfile.TemporaryDirectory()
@@ -5708,12 +5706,9 @@ class NCCLTraceTestBase(MultiProcessTestCase):
     def _trace_name(self, rank):
         return self._trace_basename() + str(rank)
 
-    def started_or_scheduled(self, timing_enabled):
-        return "started" if timing_enabled else "scheduled"
-
 
 class NCCLTraceTest(NCCLTraceTestBase):
-    def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
+    def _verify_trace(self, t, include_collectives, is_json):
         ver = t["version"]
         self.assertEqual(ver, "2.10")
         comm_lib_version = t["comm_lib_version"]
@@ -5733,7 +5728,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(str(pg_status["0"]["last_completed_collective"]), "2")
         self.assertEqual(
             str(pg_status["0"]["last_started_collective"]),
-            "2" if timing_enabled else "-1",
+            "-1",
         )
         global_ranks = pg_config["0"]["ranks"]
         self.assertEqual(len(json.loads(global_ranks)), self.world_size)
@@ -5745,13 +5740,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(last["thread_name"], "fr_test_thread")
             self.assertEqual(last["process_group"], ("0", "default_pg"))
             self.assertEqual(last["state"], "completed")
-            s = last["time_discovered_started_ns"]
             f = last["time_discovered_completed_ns"]
             self.assertEqual(last["record_id"], 1)
             self.assertIsNotNone(f)
-            if timing_enabled:
-                self.assertIsNotNone(s)
-                self.assertTrue(s <= f)
             # we don't collect stack traces in JSON at the moment
             if not is_json:
                 self.assertIn("test_c10d_nccl.py", str(last["frames"]))
@@ -5767,11 +5758,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             )
             before_test = now - timedelta(minutes=1)
             self.assertTrue(before_test < event_created_time < now)
-            if timing_enabled:
-                # very loose bounds, measured 0.036 ms on devgpu
-                self.assertTrue(0 < last["duration_ms"] < 100)
-            else:
-                self.assertTrue("duration_ms" not in last)
+            self.assertNotIn("duration_ms", last)
         else:
             self.assertTrue("entries" not in t)
 
@@ -5806,14 +5793,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("timing_enabled", [True, False])
     @parametrize("include_collectives", [True, False])
-    def test_short_json(self, timing_enabled, include_collectives):
+    def test_short_json(self, include_collectives):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
         device = self.local_device
         self.set_thread_name("fr_test_thread")
         a = torch.full((3, 4), float(self.rank), device=device)
@@ -5821,26 +5805,22 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
-        time.sleep(1)
+        pg._wait_for_pending_works()
         t = json.loads(
             torch._C._distributed_c10d._dump_nccl_trace_json(
                 includeCollectives=include_collectives
             )
         )
-        self._verify_trace(t, include_collectives, timing_enabled, True)
+        self._verify_trace(t, include_collectives, True)
         dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("timing_enabled", [True, False])
     @parametrize("include_collectives", [True, False])
-    def test_short_pickle(self, timing_enabled, include_collectives):
+    def test_short_pickle(self, include_collectives):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
         device = self.local_device
         self.set_thread_name("fr_test_thread")
         a = torch.full((3, 4), float(self.rank), device=device)
@@ -5848,8 +5828,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
-        time.sleep(1)
+        pg._wait_for_pending_works()
         t = pickle.loads(
             torch._C._distributed_c10d._dump_nccl_trace(
                 includeCollectives=include_collectives
@@ -5858,20 +5837,16 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self._verify_trace(
             t,
             include_collectives=include_collectives,
-            timing_enabled=timing_enabled,
-            is_json=True,
+            is_json=False,
         )
         dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("timing_enabled", [True, False])
-    def test_fr_record_reset(self, timing_enabled):
+    def test_fr_record_reset(self):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
         device = self.local_device
         self.set_thread_name("fr_test_thread")
         a = torch.full((3, 4), float(self.rank), device=device)
@@ -5879,14 +5854,13 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
-        time.sleep(1)
+        pg._wait_for_pending_works()
         torch._C._distributed_c10d._reset_fr_recording_nccl()
         for _ in range(4):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), 4)
         dist.destroy_process_group()
@@ -5949,6 +5923,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
+        pg._wait_for_pending_works()
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         t = t["entries"]
         self.assertEqual(len(t), 10)
@@ -5983,7 +5958,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(len(t), 2)
         first = t[0]
         last = t[-1]
-        self.assertEqual(first["profiling_name"], "nccl:all_reduce_barrier")
+        self.assertEqual(first["profiling_name"], "nccl:barrier")
         self.assertEqual(last["profiling_name"], "nccl:all_reduce")
         dist.destroy_process_group()
 
@@ -6012,9 +5987,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("timing_enabled", [True, False])
     @parametrize("only_active", [True, False])
-    def test_trace_while_active(self, timing_enabled, only_active):
+    def test_trace_while_active(self, only_active):
         if self.rank == self.MAIN_PROCESS_RANK:
             for c in self.children_pipes:
                 self.assertEqual(c.recv(), "next")
@@ -6023,8 +5997,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
             return
 
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
         device = self.local_device
         with torch.cuda.device(device):
             a = torch.full((3, 4), float(self.rank), device=device)
@@ -6035,10 +6007,22 @@ class NCCLTraceTest(NCCLTraceTestBase):
             if self.rank != 0:
                 pg.allreduce(a).wait()
             e.synchronize()
-            t = pickle.loads(
-                torch._C._distributed_c10d._dump_nccl_trace(onlyActive=only_active)
-            )
-            t = t["entries"]
+            deadline = time.monotonic() + 5
+            while True:
+                all_entries = pickle.loads(
+                    torch._C._distributed_c10d._dump_nccl_trace()
+                )["entries"]
+                if all_entries and all_entries[0]["state"] == "completed":
+                    break
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.05)
+            if only_active:
+                t = pickle.loads(
+                    torch._C._distributed_c10d._dump_nccl_trace(onlyActive=True)
+                )["entries"]
+            else:
+                t = all_entries
             if only_active:
                 if self.rank == 0:
                     self.assertEqual(len(t), 0)
@@ -6052,23 +6036,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 else:
                     self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
                     self.assertEqual(t[-1]["collective_seq_id"], 2)
-
-                    # ROCm runtime used to call uSleep(20 µs)inside the default‑signal busy-wait loop.
-                    # Now, this sleep is removed which lets the host thread spin continuously
-                    # Therefore, the state can either be scheduled or started before test dumps the trace.
-                    if (
-                        torch.version.hip
-                        and _get_torch_rocm_version() >= (6, 4)
-                        and timing_enabled
-                    ):
-                        if t[-1]["state"] not in ("scheduled", "started"):
-                            raise AssertionError(
-                                f"Expected state in ('scheduled', 'started'), got {t[-1]['state']}"
-                            )
-                    else:
-                        self.assertEqual(
-                            t[-1]["state"], self.started_or_scheduled(timing_enabled)
-                        )
+                    self.assertEqual(t[-1]["state"], "scheduled")
 
             self.parent.send("next")
             self.assertEqual("next", self.parent.recv())
@@ -6078,8 +6046,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("timing_enabled", [True, False])
-    def test_trace_while_stuck(self, timing_enabled):
+    def test_trace_while_stuck(self):
         if self.rank == self.MAIN_PROCESS_RANK:
             for c in self.children_pipes:
                 self.assertEqual(c.recv(), "next")
@@ -6088,8 +6055,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
             return
 
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
 
         device = self.local_device
         with torch.cuda.device(device):
@@ -6111,9 +6076,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     self.assertEqual(t[-1]["state"], "completed")
                 else:
                     self.assertEqual(t[-1]["collective_seq_id"], 2)
-                    self.assertEqual(
-                        t[-1]["state"], self.started_or_scheduled(timing_enabled)
-                    )
+                    self.assertEqual(t[-1]["state"], "scheduled")
                     self.assertIsNone(t[-1]["time_discovered_completed_ns"])
                 # this will eventually cause the missing rank 0
                 # to continue which will unblock the non-zero ranks
@@ -6145,18 +6108,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
             [(2, 3), (5, 5), (1,)],
         ],
     )
-    @parametrize("timing_enabled", [True, False])
-    def test_batched_send_recv(self, op_sizes_per_coalesce, timing_enabled):
-        """
-        'WorkEnqueue' was skipped for isendirecv, leading to segfault on dump_entries when update_state tried to use
-        a destructed Work obj's cuda events
-        """
-
+    def test_batched_send_recv(self, op_sizes_per_coalesce):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
+        self._create_process_group_nccl()
 
         num_coalesced_ops = 20
         ops_per_coalesce = len(op_sizes_per_coalesce)
@@ -6174,67 +6129,32 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         torch.cuda.synchronize(device=self.local_device)
 
-        if timing_enabled:
-            # wait for watchdog thread to process the queue of works
-            time.sleep(1)
-
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        self.assertEqual(len(t["entries"]), num_coalesced_ops * (ops_per_coalesce + 1))
+        self.assertEqual(len(t["entries"]), num_coalesced_ops * ops_per_coalesce)
 
         expected_record_id = 0
         expected_seq = 1
-        expected_op_id = 1
-        for seq in range(num_coalesced_ops):
-            first_op = seq * (ops_per_coalesce + 1)
-            coalesced_op = first_op + ops_per_coalesce
-            for p2p_op_idx, input_sizes in zip(
-                range(first_op, coalesced_op, 1), op_sizes_per_coalesce
-            ):
-                # the individual ops inside the coalescing group the individual op metadata,
-                # but not the timing info coming from the actual coalesced kernel
-                profiling_name = (
-                    "nccl:recv 0<-1" if self.rank == 0 else "nccl:send 1->0"
-                )
+        expected_op_id = 0
+        for _ in range(num_coalesced_ops):
+            for input_sizes in op_sizes_per_coalesce:
+                entry = t["entries"][expected_record_id]
+                profiling_name = "nccl:recv" if self.rank == 0 else "nccl:send"
                 self.assertEqual(
-                    t["entries"][p2p_op_idx]["record_id"], expected_record_id
+                    entry["record_id"],
+                    expected_record_id,
                 )
                 expected_record_id += 1
-                self.assertEqual(
-                    t["entries"][p2p_op_idx]["profiling_name"], profiling_name
-                )
-                # we don't increment collective_seq_id for p2p ops.
-                self.assertEqual(t["entries"][p2p_op_idx]["collective_seq_id"], 0)
-                self.assertEqual(t["entries"][p2p_op_idx]["p2p_seq_id"], expected_seq)
-                self.assertEqual(t["entries"][p2p_op_idx]["op_id"], expected_op_id)
+                self.assertEqual(entry["profiling_name"], profiling_name)
+                self.assertEqual(entry["collective_seq_id"], 0)
+                self.assertEqual(entry["p2p_seq_id"], expected_seq)
+                expected_seq += 1
+                self.assertEqual(entry["op_id"], expected_op_id)
                 expected_op_id += 1
-                self.assertEqual(t["entries"][p2p_op_idx]["input_sizes"], [input_sizes])
-                self.assertEqual(
-                    t["entries"][p2p_op_idx]["output_sizes"], [input_sizes]
-                )
-                # duration doesn't get tagged onto individual ops yet, nor is their state updated
-                self.assertEqual(t["entries"][p2p_op_idx]["state"], "scheduled")
-                self.assertTrue("duration_ms" not in t["entries"][p2p_op_idx])
-
-            # the coalesced op has no metadata but indicates that coalescing was used,
-            # and accurately reflects the timing and state info for the whole group
-            self.assertEqual(
-                t["entries"][coalesced_op]["record_id"], expected_record_id
-            )
-            expected_record_id += 1
-            self.assertEqual(
-                t["entries"][coalesced_op]["profiling_name"], "nccl:coalesced"
-            )
-            self.assertEqual(t["entries"][coalesced_op]["p2p_seq_id"], expected_seq)
-            expected_seq += 1
-            self.assertEqual(t["entries"][coalesced_op]["state"], "completed")
-            self.assertEqual(t["entries"][coalesced_op]["input_sizes"], [])
-            self.assertEqual(t["entries"][coalesced_op]["output_sizes"], [])
-            if timing_enabled:
-                duration = t["entries"][coalesced_op]["duration_ms"]
-                self.assertTrue(0.001 < duration < 10000, duration)
-            else:
-                self.assertTrue("duration_ms" not in t["entries"][coalesced_op])
-            self.assertEqual(t["entries"][coalesced_op]["timeout_ms"], 600000)
+                self.assertEqual(entry["input_sizes"], [input_sizes])
+                self.assertEqual(entry["output_sizes"], [input_sizes])
+                self.assertEqual(entry["state"], "completed")
+                self.assertNotIn("duration_ms", entry)
+                self.assertEqual(entry["timeout_ms"], 600000)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -6246,8 +6166,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             [(2, 3), (5, 5), (1,)],
         ],
     )
-    @parametrize("timing_enabled", [True, False])
-    def test_batched_send_recv_compiled(self, op_sizes_per_coalesce, timing_enabled):
+    def test_batched_send_recv_compiled(self, op_sizes_per_coalesce):
         def _pattern(tensors):
             ops = list()
             for tensor in tensors:
@@ -6262,9 +6181,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
+        self._create_process_group_nccl()
 
         compiled_fn = torch.compile(_pattern)
 
@@ -6295,24 +6212,14 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         torch.cuda.synchronize()
 
-        if timing_enabled:
-            time.sleep(1)
-
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertTrue(len(t["entries"]) > 0)
-        expected_total_entries = num_coalesced_ops * (ops_per_coalesce + 1)
+        expected_total_entries = num_coalesced_ops * ops_per_coalesce
         self.assertEqual(len(t["entries"]), expected_total_entries)
-
-        for seq in range(num_coalesced_ops):
-            coalesced_op_idx = seq * (ops_per_coalesce + 1) + ops_per_coalesce
-
-            self.assertEqual(
-                t["entries"][coalesced_op_idx]["profiling_name"], "nccl:coalesced"
-            )
-            try:
-                self.assertEqual(t["entries"][coalesced_op_idx]["state"], "completed")
-            except Exception:
-                self.assertEqual(t["entries"][coalesced_op_idx]["state"], "scheduled")
+        expected_name = "nccl:recv" if self.rank == 0 else "nccl:send"
+        for entry in t["entries"]:
+            self.assertEqual(entry["profiling_name"], expected_name)
+            self.assertEqual(entry["state"], "completed")
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -6688,18 +6595,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
             [(2, 3), (5, 5), (1,)],
         ],
     )
-    @parametrize("timing_enabled", [True, False])
-    def test_individual_send_recv(self, op_sizes, timing_enabled):
-        """
-        'WorkEnqueue' was skipped for isendirecv, leading to segfault on dump_entries when update_state tried to use
-        a destructed Work obj's cuda events
-        """
-
+    def test_individual_send_recv(self, op_sizes):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
         num_repeats = 10
         ops_per_repeat = len(op_sizes)
         for _ in range(num_repeats):
@@ -6712,43 +6611,31 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     dist.send(tensor, 0)
 
         torch.cuda.synchronize(device=self.local_device)
-        if timing_enabled:
-            # wait for watchdog thread to process the queue of works
-            time.sleep(1)
+        pg._wait_for_pending_works()
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), num_repeats * (ops_per_repeat))
         expected_seq = 1
-        expected_op_id = 1
         for seq in range(num_repeats * ops_per_repeat):
             input_sizes = op_sizes[seq % ops_per_repeat]
-            profiling_name = "nccl:recv 0<-1" if self.rank == 0 else "nccl:send 1->0"
+            profiling_name = "nccl:recv" if self.rank == 0 else "nccl:send"
             self.assertEqual(t["entries"][seq]["profiling_name"], profiling_name)
             # we don't increment collective_seq_id for p2p ops.
             self.assertEqual(t["entries"][seq]["collective_seq_id"], 0)
             self.assertEqual(t["entries"][seq]["p2p_seq_id"], expected_seq)
             expected_seq += 1
-            self.assertEqual(t["entries"][seq]["op_id"], expected_op_id)
-            expected_op_id += 1
+            self.assertEqual(t["entries"][seq]["op_id"], seq)
             self.assertEqual(t["entries"][seq]["input_sizes"], [input_sizes])
             self.assertEqual(t["entries"][seq]["output_sizes"], [input_sizes])
             self.assertEqual(t["entries"][seq]["state"], "completed")
-
-            if timing_enabled:
-                duration = t["entries"][seq]["duration_ms"]
-                self.assertTrue(0.001 < duration < 10000, duration)
-            else:
-                self.assertTrue("duration_ms" not in t["entries"][seq])
+            self.assertNotIn("duration_ms", t["entries"][seq])
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @parametrize("timing_enabled", [True, False])
-    def test_allgather_uneven(self, timing_enabled):
+    def test_allgather_uneven(self):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
 
         output_split_sizes = [i + 1 for i in range(self.world_size)]
         sum_len = sum(output_split_sizes)
@@ -6761,45 +6648,26 @@ class NCCLTraceTest(NCCLTraceTestBase):
         )
         torch.cuda.synchronize(device=self.rank)
         self.assertEqual(output_tensor, expected_tensor)
-        if timing_enabled:
-            # wait for watchdog thread to process the queue of works
-            time.sleep(1)
+        pg._wait_for_pending_works()
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        self.assertEqual(len(t["entries"]), self.world_size + 1)
-        for i in range(self.world_size):
-            self.assertEqual(t["entries"][i]["profiling_name"], "nccl:_broadcast_oop")
-            # collective_seq_id should be incremented once.
-            self.assertEqual(t["entries"][i]["collective_seq_id"], 1)
-            self.assertEqual(t["entries"][i]["input_sizes"], [[i + 1, 2]])
-            self.assertEqual(
-                t["entries"][i]["output_sizes"],
-                [[i + 1, 2]],
-            )
-            self.assertEqual(t["entries"][i]["state"], "scheduled")
-            # No event is recorded for individual ops
-            self.assertTrue("time_discovered_completed_ns" in t["entries"][i])
+        self.assertEqual(len(t["entries"]), 1)
+        entry = t["entries"][0]
+        self.assertEqual(entry["profiling_name"], "nccl:all_gather")
+        self.assertEqual(entry["collective_seq_id"], 1)
+        self.assertEqual(entry["input_sizes"], [[self.rank + 1, 2]])
         self.assertEqual(
-            t["entries"][self.world_size]["profiling_name"], "nccl:ALLGATHER_coalesced"
+            entry["output_sizes"],
+            [[i + 1, 2] for i in range(self.world_size)],
         )
+        self.assertEqual(entry["state"], "completed")
 
-    # TODO(whc) test out other ops (And combinations of ops, if that's valid?)
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @parametrize("timing_enabled", [True, False])
-    def test_coalescing_manager_collective(self, timing_enabled):
-        """
-        The coalescing manager api works by accumulating operations in python via a contextmanager, and then making
-        one call into c++ to an <op>_coalesced API.  It has limited support for ops and has been added recently to
-        avoid overheads of making individual py-cpp calls.  This complicates flight recording..
-
-        For now, flight recording of coalescing_manager collectives is less detailed than cpp coalesced collectives.
-        """
+    def test_coalescing_manager_collective(self):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
 
         output_tensors = torch.zeros(2, 2).to(self.rank)
         input_tensors = [torch.ones(2, 2).to(self.rank) for _ in range(self.world_size)]
@@ -6813,20 +6681,12 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
 
         torch.cuda.synchronize(device=self.rank)
-
-        if timing_enabled:
-            # wait for watchdog thread to process the queue of works
-            time.sleep(1)
+        pg._wait_for_pending_works()
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
 
-        self.assertEqual(
-            len(t["entries"]), 1
-        )  # one for the reduce_scatter_tensor_coalesced
-        self.assertEqual(
-            t["entries"][0]["profiling_name"], "nccl:reduce_scatter_tensor_coalesced"
-        )
-        # collective_seq_id should be incremented once.
+        self.assertEqual(len(t["entries"]), 1)
+        self.assertEqual(t["entries"][0]["profiling_name"], "nccl:reduce_scatter")
         self.assertEqual(t["entries"][0]["collective_seq_id"], 1)
         self.assertEqual(t["entries"][0]["input_sizes"], [[2, 2], [2, 2]])
         self.assertEqual(
@@ -6841,16 +6701,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
             ],
         )
         self.assertEqual(t["entries"][0]["state"], "completed")
-        if timing_enabled:
-            duration = t["entries"][0]["duration_ms"]
-            self.assertTrue(0.001 < duration < 10000, duration)
-        else:
-            self.assertTrue("duration_ms" not in t["entries"][0])
+        self.assertNotIn("duration_ms", t["entries"][0])
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("timing_enabled", [True, False])
-    def test_fr_record_reset_circular_buffer_full(self, timing_enabled):
+    def test_fr_record_reset_circular_buffer_full(self):
         """
         Test that when the circular buffer in entries_ is full and we call reset,
         then fill the buffer with new entries, dump_entries returns only the new
@@ -6863,8 +6718,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
 
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
         device = self.local_device
         self.set_thread_name("fr_test_thread")
         a = torch.full((3, 4), float(self.rank), device=device)
@@ -6874,7 +6727,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Verify buffer is full with 10 entries
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -6888,7 +6741,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Verify we get exactly 10 new entries, not 20
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -6907,8 +6760,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("timing_enabled", [True, False])
-    def test_fr_record_reset_partial_overwrite(self, timing_enabled):
+    def test_fr_record_reset_partial_overwrite(self):
         """
         Test that when the circular buffer is full, we reset, and then add fewer
         entries than the buffer size, we only get the new entries.
@@ -6922,8 +6774,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
 
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
         device = self.local_device
         self.set_thread_name("fr_test_thread")
         a = torch.full((3, 4), float(self.rank), device=device)
@@ -6933,7 +6783,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Reset the flight recorder
         torch._C._distributed_c10d._reset_fr_recording_nccl()
@@ -6943,7 +6793,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Verify we only get the 3 new entries, not 10
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -6958,8 +6808,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("timing_enabled", [True, False])
-    def test_fr_record_reset_wraparound(self, timing_enabled):
+    def test_fr_record_reset_wraparound(self):
         """
         Test that when we reset in the middle of the circular buffer and then
         wrap around, dump_entries correctly returns only entries from the current
@@ -6972,8 +6821,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
 
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
         device = self.local_device
         self.set_thread_name("fr_test_thread")
         a = torch.full((3, 4), float(self.rank), device=device)
@@ -6983,7 +6830,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Reset at this point (reset happens at index 5)
         torch._C._distributed_c10d._reset_fr_recording_nccl()
@@ -6994,7 +6841,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Should get exactly 8 entries, properly ordered
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -7013,8 +6860,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("timing_enabled", [True, False])
-    def test_fr_record_multiple_resets(self, timing_enabled):
+    def test_fr_record_multiple_resets(self):
         """
         Test multiple consecutive resets to ensure each reset properly increments
         the epoch and filters out entries from previous epochs.
@@ -7026,8 +6872,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
 
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
         device = self.local_device
         self.set_thread_name("fr_test_thread")
         a = torch.full((3, 4), float(self.rank), device=device)
@@ -7037,7 +6881,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # First reset
         torch._C._distributed_c10d._reset_fr_recording_nccl()
@@ -7047,7 +6891,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Second reset
         torch._C._distributed_c10d._reset_fr_recording_nccl()
@@ -7057,7 +6901,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Should only see the last 4 entries
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -7115,8 +6959,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
 class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @parametrize("timing_enabled", [True, False])
-    def test_timeout_dumps(self, timing_enabled):
+    def test_timeout_dumps(self):
         # dump on heartbeatmonitor thread
         os.environ["TORCH_NCCL_COORD_CHECK_MILSEC"] = "1000"
         # need rank0 to crash before looking for its output file
@@ -7133,18 +6976,13 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
                 self.assertEqual(t[0]["collective_seq_id"], 1)
                 self.assertEqual(t[0]["state"], "completed")
                 self.assertEqual(t[1]["collective_seq_id"], 2)
-                self.assertEqual(
-                    t[1]["state"], self.started_or_scheduled(timing_enabled)
-                )
+                self.assertEqual(t[1]["state"], "scheduled")
 
             self.assertFalse(os.path.exists(self._trace_name(rank=1)))
 
             return
 
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            # we force disabled timing in setup, since there is no 'disable' function
-            pg._enable_collectives_timing()
 
         device = self.local_device
         with torch.cuda.device(device):

@@ -69,7 +69,7 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
 
 // Control whether dumping debug info on watchdog
 // timeout is enabled. This variable must be set together with
-// TORCH_NCCL_ENABLE_MONITORING=1 and TORCH_NCCL_TRACE_BUFFER_SIZE > 0.
+// TORCH_NCCL_ENABLE_MONITORING=1 and TORCH_FR_BUFFER_SIZE > 0.
 static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
     "TORCH_NCCL_DUMP_ON_TIMEOUT"};
 
@@ -112,6 +112,7 @@ static std::vector<std::string> TORCH_NCCL_RETHROW_CUDA_ERRORS = {
 // The maximum number of events we store in the flight recorder's ring buffer.
 // (One event could be the start or end of a collective, for example).
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
+    "TORCH_FR_BUFFER_SIZE",
     "TORCH_NCCL_TRACE_BUFFER_SIZE"};
 
 // Control how much extra time we will wait for dumping the debugging info
@@ -500,10 +501,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     c10::intrusive_ptr<at::ivalue::Future> futureWorkResult_;
 
     bool timingEnabled_;
-    // unique id used to tell the trace buffer that this
-    // work has completed
-    std::optional<uint64_t> trace_id_;
-    std::optional<uint64_t> trace_reset_epoch_;
     DebugLevel distDebugLevel_;
     friend class ProcessGroupNCCL;
   };
@@ -1088,8 +1085,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<NCCLComm>& ncclComm);
 
-  // Ensure that if record is True, the work obj will be enqueued via
-  // workEnqueue
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
       int rank,

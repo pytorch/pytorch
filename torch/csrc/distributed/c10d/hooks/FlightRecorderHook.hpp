@@ -5,12 +5,11 @@
 // hooks/fr FlightRecorderHook onto c10d.
 //
 // The pre-hook records an entry into the generic FlightRecorder<c10::Event>
-// ring buffer (null start/end events, like ProcessGroupGloo's built-in
-// recording -- no GPU duration, but full op/tensor/sequencing metadata); the
-// post-hook retires it. Because the hooks fire from the dispatcher kernels in
-// Ops.cpp, this works for any backend routed through c10d ops -- including
-// backends with no native FlightRecorder support (nccl2, custom backends) --
-// and the traces are dumped with the existing _dump_fr_trace{,_json} APIs.
+// ring buffer (null start/end events, but full op/tensor/sequencing metadata).
+// The post-hook associates the entry with the returned Work so it can be
+// retired when the operation completes. Because the hooks fire from the
+// dispatcher kernels in Ops.cpp, this works for any backend routed through
+// c10d ops.
 
 #pragma once
 
@@ -26,10 +25,12 @@ namespace c10d {
 class TORCH_API FlightRecorderHook
     : public std::enable_shared_from_this<FlightRecorderHook> {
  public:
-  // Attaches a hook to the process group and returns it. The hook stays
-  // attached until remove() is called or the returned handle is destroyed.
+  // Returns the process group's automatically installed hook, or attaches a
+  // caller-owned hook when automatic recording is disabled.
   static std::shared_ptr<FlightRecorderHook> attach(
       c10::intrusive_ptr<ProcessGroup> pg);
+
+  static bool isEnabled();
 
   ~FlightRecorderHook();
 
@@ -42,11 +43,19 @@ class TORCH_API FlightRecorderHook
   void remove();
 
  private:
-  explicit FlightRecorderHook(c10::intrusive_ptr<ProcessGroup> pg);
+  friend class ProcessGroup;
+
+  explicit FlightRecorderHook(
+      ProcessGroup* pg,
+      c10::intrusive_ptr<ProcessGroup> pg_keepalive = nullptr);
+  static std::shared_ptr<FlightRecorderHook> attachOwned(ProcessGroup* pg);
+
   void onPre(const PreHookArgs& args);
   void onPost(const PostHookArgs& args);
+  std::string backendName(const PreHookArgs& args) const;
 
-  c10::intrusive_ptr<ProcessGroup> pg_;
+  ProcessGroup* pg_;
+  c10::intrusive_ptr<ProcessGroup> pg_keepalive_;
   int64_t hook_id_;
   size_t pg_id_;
   std::shared_ptr<ProcessGroupStatus> pg_status_;
@@ -58,8 +67,13 @@ class TORCH_API FlightRecorderHook
   std::mutex mutex_;
   size_t collective_seq_{0};
   size_t p2p_seq_{0};
-  std::unordered_map<int64_t, FlightRecorder<c10::Event>::TraceIdentifier>
-      inflight_;
+  struct InflightTrace {
+    FlightRecorder<c10::Event>::TraceIdentifier id;
+    int64_t sequence;
+    std::string name;
+    bool track_completion;
+  };
+  std::unordered_map<int64_t, InflightTrace> inflight_;
 };
 
 } // namespace c10d

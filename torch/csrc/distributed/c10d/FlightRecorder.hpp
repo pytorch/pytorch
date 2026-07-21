@@ -328,4 +328,23 @@ TORCH_API std::string dump_fr_trace(
 TORCH_API std::string dump_fr_trace_json(
     bool includeCollectives,
     bool onlyActive);
+
+using FlightRecorderDumpMap = std::
+    unordered_map<std::string, std::unordered_map<std::string, std::string>>;
+
+TORCH_API void reset_fr_trace();
+
+TORCH_API void record_fr_accelerator_version(
+    const std::string& comm_lib_version);
+
+TORCH_API std::string dump_fr_trace(
+    const FlightRecorderDumpMap& extraDumpMap,
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive);
+
+TORCH_API std::string dump_fr_trace_json(
+    const FlightRecorderDumpMap& extraDumpMap,
+    bool includeCollectives,
+    bool onlyActive);
 } // namespace c10d

@@ -41,8 +41,6 @@
 namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
-using FlightRecorderCUDA = FlightRecorder<at::cuda::CUDAEvent>;
-
 namespace {
 
 // NCCL op mapping
@@ -428,7 +426,7 @@ static std::
 }
 
 void reset_nccl_trace() {
-  FlightRecorderCUDA::get()->reset_all();
+  reset_fr_trace();
 }
 
 std::string dump_nccl_trace(
@@ -441,14 +439,13 @@ std::string dump_nccl_trace(
     printNcclCommProxyTrace("Received dump signal " + ncclUniqueIDStr, dump);
   }
 #endif // defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
-  return FlightRecorderCUDA::get()->dump(
+  return dump_fr_trace(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
 
 std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
   auto ncclDumpMap = getNCCLCommDumpMap();
-  return FlightRecorderCUDA::get()->dump_json(
-      ncclDumpMap, includeCollectives, onlyActive);
+  return dump_fr_trace_json(ncclDumpMap, includeCollectives, onlyActive);
 }
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
@@ -608,10 +605,9 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       stashed_for_allocator_safety_(w.stashed_for_allocator_safety_),
       futureWorkResult_(w.futureWorkResult_),
       timingEnabled_(w.timingEnabled_),
-      trace_id_(w.trace_id_),
-      trace_reset_epoch_(w.trace_reset_epoch_),
       distDebugLevel_(w.distDebugLevel_) {
   exception_ = w.exception_;
+  flightRecorderTraceInfo_ = w.flightRecorderTraceInfo_;
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
@@ -746,23 +742,11 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 
 // Print the traceback of the collective at call time
 std::string ProcessGroupNCCL::WorkNCCL::getTraceback() const {
-  // First step we get the corresponding record entry from FR, based on work's
-  // trace_id_ and trace_reset_epoch_
-  std::optional<FlightRecorderCUDA::Entry> entry =
-      FlightRecorderCUDA::get()->getEntry(trace_id_, trace_reset_epoch_);
-  if (entry.has_value()) {
-    auto entryVal = entry.value();
-    // Get stack trace from FR entry, in string format
-    // Note: `getTraceback` call below invokes `torch::symbolize`, which may
-    // need to acquire the GIL. In order for watchdog to be block-free, we make
-    // the call with std::async.
-    auto future = std::async(
-        std::launch::async, [&entryVal]() { return entryVal.getTraceback(); });
-    // Wait for the future to complete or timeout
-    auto status = future.wait_for(std::chrono::seconds(8));
-    if (status == std::future_status::ready) {
-      return future.get();
-    }
+  auto future = std::async(
+      std::launch::async, [this]() { return getFlightRecorderTraceback(); });
+  auto status = future.wait_for(std::chrono::seconds(8));
+  if (status == std::future_status::ready) {
+    return future.get();
   }
   return "";
 }
@@ -774,10 +758,10 @@ void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
     LOG(ERROR) << "Stack trace of the failed collective: \n" << tracebackStr;
   } // else, symbolizer probably timed out, we skip logging the stack trace.
   else {
-    LOG(ERROR)
-        << "Stack trace of the failed collective not found, "
-        << "potentially because FlightRecorder is disabled. "
-        << "You can enable it by setting TORCH_NCCL_TRACE_BUFFER_SIZE to a non-zero value.";
+    LOG(ERROR) << "Stack trace of the failed collective not found, "
+               << "potentially because FlightRecorder is disabled. "
+               << "Set TORCH_FR_BUFFER_SIZE or TORCH_NCCL_TRACE_BUFFER_SIZE "
+                  "to a non-zero value to enable it.";
   }
 }
 
@@ -948,6 +932,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // environment variables from config file, which can race with getenv from
   // other threads and cause segfaults.
   const auto ncclVersion = getNcclVersion();
+  record_fr_accelerator_version(ncclVersion);
   this->setGroupUid(options_->group_name);
   this->setUsePgForSymmMemRendezvous(options_->use_pg_for_symm_mem_rendezvous);
   this->localDeviceCount_ = static_cast<int>(at::cuda::getNumGPUs());
@@ -2498,8 +2483,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
         pg_->pgStatus_->lastCompletedWorkName = opTypeToString(work.opType_);
         pg_->pgStatus_->lastCompletedNumelIn = work.numelIn_;
         pg_->pgStatus_->lastCompletedNumelOut = work.numelOut_;
-        FlightRecorderCUDA::get()->retire_id(
-            work.trace_id_, work.trace_reset_epoch_, true);
+        work.retireFlightRecorderTrace();
         if (pg_->onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
@@ -3220,10 +3204,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     inInitializationCommMap_.emplace(deviceKey, ncclComm);
   }
 
-  FlightRecorderCUDA::get()->record_pg_ranks(
-      std::make_tuple(pg_uid_, pg_desc_), groupRanks());
-  FlightRecorderCUDA::get()->record_accelerator_version(getNcclVersion());
-
   VLOG(2) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
           << ncclComm->repr()
           << " on CUDA device: " << static_cast<int>(deviceIndex);
@@ -3445,8 +3425,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     bool isP2P,
     const char* profilingTitle,
     const std::vector<at::Tensor>& inputs,
-    const std::vector<at::Tensor>& outputs, // TODO(kwen2501): necessary?
-    bool record) {
+    const std::vector<at::Tensor>& /* outputs */,
+    bool /* record */) {
   auto r = c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(
       pg_uid_,
       pg_desc_,
@@ -3462,38 +3442,6 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       cudaEventCacheEnabled_.load(),
       dist_debug_level_);
 
-  if (record) {
-    bool isP2P = isP2POp(opType);
-    // Ideally record every work that we enqueue, rather than every work we
-    // create.
-    // - at the time of this PR we do not currently enqueue every created work
-    // - but it is unsafe to steal refs to start/end cuda events from Works that
-    //   may go out of scope before flight recorder has retired them,
-    //   so we must ensure that any work that is initialized via initWork will
-    //   be enqueued
-    // - initially, moved record() into workEnqueue(), but found that makes it
-    //   hard to get access to profilingTitle,
-    //   inputs, and outputs for metadata recording, and we don't want to attach
-    //   these objects to the Work because it has implications for keeping those
-    //   tensors alive longer and adds overhead when copying Work objects
-    //   between threads
-    auto traceId = FlightRecorderCUDA::get()->recordWithResetEnabled(
-        local_id_,
-        std::make_tuple(pg_uid_, pg_desc_),
-        seqCollective_,
-        seqP2P_,
-        op_id_,
-        profilingTitle ? profilingTitle : "",
-        inputs,
-        outputs,
-        r->ncclStartEvent_.get(),
-        r->ncclEndEvent_.get(),
-        options_->timeout,
-        pgStatus_,
-        isP2P);
-    r->trace_id_ = traceId.id;
-    r->trace_reset_epoch_ = traceId.reset_epoch;
-  }
   return r;
 }
 
@@ -3790,27 +3738,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       !coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None;
   auto work = initWork(
       device, rank_, opType, false, profilingTitle, inputs, outputs, enqueue);
-  if (coalescing_state_) {
-    // When coalescing, we record events per op that lack timing/state
-    // information because there is no 'work' associated with them, and then
-    // later in endCoalescing we record a 'coalesced' Work which has
-    // timing/state updates via watchdog thread, but lacks op metadata such as
-    // input/output sizes and profilingTitle per-op in the group.
-    FlightRecorderCUDA::get()->recordWithResetEnabled(
-        local_id_,
-        std::make_tuple(pg_uid_, pg_desc_),
-        seqCollective_,
-        seqP2P_,
-        op_id_,
-        profilingTitle,
-        inputs,
-        outputs,
-        nullptr,
-        nullptr,
-        options_->timeout,
-        pgStatus_,
-        /*isP2P=*/false);
-  }
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -3984,20 +3911,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     syncStream(device, ncclEvents_[key], ncclStream);
   }
 
-  // When nested in a coalescing manager, this per-call Work is discarded:
-  // endCoalescing returns the single Work the user tracks/waits and that owns
-  // the stash, so neither record nor enqueue this one. Mirrors collective().
   bool enqueue =
       !coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None;
   auto work = initWork(
-      device,
-      rank_,
-      opType,
-      false,
-      profilingTitle,
-      inputs,
-      outputs,
-      /*record=*/enqueue);
+      device, rank_, opType, false, profilingTitle, inputs, outputs, enqueue);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -4242,32 +4159,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
   // Work itself will create the CUDA events on all GPUs of tensors
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work;
-  if (coalescing_state_) {
-    // When coalescing, we record events per op that lack timing/state
-    // information because there is no 'work' associated with them, and then
-    // later in endCoalescing we record a 'coalesced' Work which has
-    // timing/state updates via watchdog thread, but lacks op metadata such as
-    // input/output sizes and profilingTitle per-op in the group.
-    FlightRecorderCUDA::get()->record(
-        local_id_,
-        std::make_tuple(pg_uid_, pg_desc_),
-        seqCollective_,
-        seqP2P_,
-        op_id_,
-        profilingTitle,
-        {tensor},
-        {tensor},
-        nullptr,
-        nullptr,
-        options_->timeout,
-        pgStatus_,
-        /*isP2P=*/true);
-    // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
-    // their timings/states updated by proxy when the Work obj representing the
-    // coalesce group gets its update, we could accumulate these trace_ids
-    // together and ask FlightRecorder to take the update from one Work and
-    // apply it to multiple entries
-  } else {
+  if (!coalescing_state_) {
     // Store references to outputs to be used by WorkNCCL::result and
     // operator<<. Note that these outputs are only valid for recv(), as send()
     // does not modify the inputs but we still create these outputs for use
@@ -4286,25 +4178,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // output, not sure what
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>();
     work->outputs_->push_back(tensor);
-    // TODO(whc) because we don't pass output {tensor} to initWork, we tell
-    // initWork to not record, and then we manually call record passing all the
-    // information it wants.
-    auto traceId = FlightRecorderCUDA::get()->recordWithResetEnabled(
-        local_id_,
-        std::make_tuple(pg_uid_, pg_desc_),
-        seqCollective_,
-        seqP2P_,
-        op_id_,
-        profilingTitle,
-        {tensor},
-        {tensor},
-        work->ncclStartEvent_.get(),
-        work->ncclEndEvent_.get(),
-        options_->timeout,
-        pgStatus_,
-        /*isP2P=*/true);
-    work->trace_id_ = traceId.id;
-    work->trace_reset_epoch_ = traceId.reset_epoch;
   }
 
   // Only check for NaN for send ops, for recv ops `tensor` can be a random

@@ -120,6 +120,7 @@ WorkNCCL::WorkStatus WorkNCCL::checkStatus() {
 
   if (end_completed) {
     setStatus(WorkStatus::COMPLETED);
+    retireFlightRecorderTrace();
     inputTensors_.clear();
     inputTensor_.reset();
   } else {

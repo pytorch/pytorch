@@ -4680,11 +4680,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           &::c10d::FlightRecorderHook::attach,
           py::arg("pg"),
           R"(
-Attach a FlightRecorder hook to a process group. Collectives issued through
-the group are recorded into the generic flight recorder ring buffer (dump
-with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
-backend has native FlightRecorder support. The hook detaches when remove()
-is called or the returned handle is garbage collected.)")
+Return the FlightRecorder hook installed on a process group, or attach one if
+automatic recording is disabled. Collectives issued through the group are
+recorded into the generic flight recorder ring buffer and can be dumped with
+_dump_fr_trace or _dump_fr_trace_json. Call remove() to detach the hook.)")
       .def("remove", &::c10d::FlightRecorderHook::remove);
 
   module.def(
