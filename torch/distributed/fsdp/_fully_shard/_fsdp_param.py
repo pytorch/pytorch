@@ -1149,6 +1149,8 @@ class FSDPParam:
         return self._get_grad_inner_tensor(torch.zeros_like(self.unsharded_param))
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
+        if isinstance(grad, AsyncCollectiveTensor):
+            grad = grad.wait()
         if self.reduce_dtype is not None and grad.dtype != self.reduce_dtype:
             # This method may issue a Partial -> Replicate all-reduce over
             # non-DP mesh dims (e.g. for a TP-replicated norm weight), and
@@ -1176,8 +1178,6 @@ class FSDPParam:
                 )
 
         if self.is_dtensor:
-            if isinstance(grad, AsyncCollectiveTensor):
-                grad = grad.wait()
             if not isinstance(grad, DTensor):
                 raise AssertionError(f"Expected DTensor, got {type(grad)}")
             if self._unsharded_dtensor_spec is None:
