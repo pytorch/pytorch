@@ -358,7 +358,6 @@ function(torch_compile_options libname)
 
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
-        ${MSVC_RUNTIME_LIBRARY_OPTION}
         $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
         /EHsc
         /bigobj>
@@ -434,9 +433,6 @@ function(torch_compile_options libname)
     foreach(option IN LISTS private_compile_options)
       if(CMAKE_CUDA_HOST_COMPILER_ID STREQUAL "GNU")
         if("${option}" STREQUAL "-Wextra-semi")
-          continue()
-        endif()
-        if("${option}" STREQUAL "-Wunused-private-field")
           continue()
         endif()
       endif()
