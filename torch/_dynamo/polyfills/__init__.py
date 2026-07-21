@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         _collections as _collections,
         builtins as builtins,
         functools as functools,
+        io as io,
         itertools as itertools,
         operator as operator,
         os as os,
