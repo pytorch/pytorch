@@ -74,6 +74,7 @@ from torch._guards import detect_fake_mode, tracing, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import is_custom_class
 from torch._logging import dtrace_structured
+from torch._prims_common import compute_required_storage_length
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import compile_time_strobelight_meta, log_export_usage
 from torch.export._leakage_detection_utils import find_legit_leaks_from_referrers
@@ -1463,10 +1464,18 @@ def _process_jit_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
     return example_inputs, example_kwarg_inputs
 
 
-def _validate_param_buffer_storage(state_dict: dict[str, Any]) -> None:
-    from torch._prims_common import compute_required_storage_length
+def _get_original_state_dict(mod: torch.nn.Module) -> dict[str, Any]:
+    # Explicitly not calling mode.state_dict() as we do not want the module state for serialization
+    # but the running module state so we can always match by id() the entries here with the graph inputs
+    named_parameters = dict(mod.named_parameters(remove_duplicate=False))
+    named_buffers = dict(mod.named_buffers(remove_duplicate=False))
+    original_state_dict = named_parameters | named_buffers
 
-    for name, tensor in state_dict.items():
+    non_persistent_buffers = _get_non_persistent_buffers(mod)
+    for k in non_persistent_buffers:
+        original_state_dict.pop(k, None)
+
+    for name, tensor in original_state_dict.items():
         if not isinstance(tensor, torch.Tensor):
             continue
         storage_size = tensor.untyped_storage().nbytes() // tensor.element_size()
@@ -1484,19 +1493,6 @@ def _validate_param_buffer_storage(state_dict: dict[str, Any]) -> None:
                 f"for storage of size {tensor.untyped_storage().nbytes()}",
             )
 
-
-def _get_original_state_dict(mod: torch.nn.Module) -> dict[str, Any]:
-    # Explicitly not calling mode.state_dict() as we do not want the module state for serialization
-    # but the running module state so we can always match by id() the entries here with the graph inputs
-    named_parameters = dict(mod.named_parameters(remove_duplicate=False))
-    named_buffers = dict(mod.named_buffers(remove_duplicate=False))
-    original_state_dict = named_parameters | named_buffers
-
-    non_persistent_buffers = _get_non_persistent_buffers(mod)
-    for k in non_persistent_buffers:
-        original_state_dict.pop(k, None)
-
-    _validate_param_buffer_storage(original_state_dict)
     return original_state_dict
 
 
