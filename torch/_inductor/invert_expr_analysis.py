@@ -73,6 +73,13 @@ def generate_inverse_formula(
      References:
          Mixed-radix systems: https://en.wikipedia.org/wiki/Mixed_radix
     """
+    # Collapse modular fragments introduced by view decomposition before parsing.
+    expr = sympy.Add(
+        *(
+            V.graph.sizevars.combine_modular_indexing_pairs(term)
+            for term in sympy.Add.make_args(expr)
+        )
+    )
     expr = expr.replace(lambda subexpr: isinstance(subexpr, sympy.Add), join_dimensions)
 
     # Step 1: Parse all terms
