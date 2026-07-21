@@ -5,7 +5,6 @@
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -193,12 +192,9 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
 }
 
 void TensorImpl::set_fake_device(c10::Device fake_device) {
-  if (fake_device.type() == c10::DeviceType::Meta) {
-    auto mode = c10::impl::FakeTensorModeTLS::get_state();
-    TORCH_CHECK(
-        mode == nullptr || mode->allow_meta_,
-        "device.type must not be 'meta' when allow_meta is False");
-  }
+  // NB: the allow_meta validation lives in set_fake_tensor_mode(), which every
+  // caller invokes right after this with the mode in hand -- avoids a TLS
+  // lookup on this hot (per-op-output) path.
 
   // in python FakeTensor, it checks whether or not
   // we are in in_kernel_invocation manager to determine
@@ -625,6 +621,7 @@ void TensorImpl::copy_generic_tensor_metadata(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
+  dest_impl->custom_device_ = src_impl->custom_device_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->is_channels_last_contiguous_ =
       src_impl->is_channels_last_contiguous_;
@@ -650,8 +647,6 @@ void TensorImpl::copy_generic_tensor_metadata(
   // policy is NOT (you have no Python object to dispatch to!)
   // NB: subclass relevant policy doesn't have to be copied; the
   // constructor sets this up
-  dest_impl->custom_device_ = src_impl->custom_device_;
-
   dest_impl->refresh_sizes_strides_policy();
   dest_impl->refresh_layout_policy();
   dest_impl->refresh_device_policy();
@@ -1069,19 +1064,26 @@ AutogradMetaFactory* GetAutogradMetaFactory() {
 
 void FakeTensorMode::set_constant(
     const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
-    std::shared_ptr<at::Tensor> constant,
+    c10::intrusive_ptr<c10::TensorImpl> constant,
     c10::StorageImpl* constant_storage) {
   std::lock_guard<std::mutex> lock(constant_mutex_);
   if (constant_storage) {
     constant_storage_mapping_[constant_storage].emplace_back(fake_impl);
   }
-  tensor_to_constant_[fake_impl.get()] = std::move(constant);
+  // a registered fake tensor always has ExtraMeta (set by set_fake_device)
+  auto* extra_meta = fake_impl->maybe_get_extra_meta();
+  TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
+  extra_meta->is_fake_constant_ = true;
+  tensor_to_constant_[extra_meta] = std::move(constant);
 }
 
-std::shared_ptr<at::Tensor> FakeTensorMode::get_constant(
+c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(
     c10::TensorImpl* fake_impl) const {
   std::lock_guard<std::mutex> lock(constant_mutex_);
-  auto it = tensor_to_constant_.find(fake_impl);
+  auto* extra_meta = fake_impl->maybe_get_extra_meta();
+  if (extra_meta == nullptr)
+    return nullptr;
+  auto it = tensor_to_constant_.find(extra_meta);
   if (it == tensor_to_constant_.end())
     return nullptr;
   return it->second;
@@ -1096,10 +1098,26 @@ void FakeTensorMode::invalidate_constant_aliases(
   for (auto& weak_ref : it->second) {
     auto impl = weak_ref.lock();
     if (impl) {
-      tensor_to_constant_.erase(impl.get());
+      if (auto* extra_meta = impl->maybe_get_extra_meta()) {
+        // clear the flag so the tensor's later ~ExtraMeta skips the redundant
+        // remove_constant (the entry is gone); safe since impl is alive here.
+        extra_meta->is_fake_constant_ = false;
+        tensor_to_constant_.erase(extra_meta);
+      }
     }
   }
   constant_storage_mapping_.erase(it);
+}
+
+void FakeTensorMode::remove_constant(c10::ExtraMeta* extra_meta) {
+  std::lock_guard<std::mutex> lock(constant_mutex_);
+  tensor_to_constant_.erase(extra_meta);
+}
+
+ExtraMeta::~ExtraMeta() {
+  if (is_fake_constant_ && fake_tensor_mode_) {
+    fake_tensor_mode_->remove_constant(this);
+  }
 }
 
 } // namespace c10
