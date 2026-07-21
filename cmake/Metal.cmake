@@ -39,7 +39,7 @@ function(metal_to_metallib_h SHADER)
     cmake_path(APPEND_STRING SHADER_HDR "_metallib.h")
 
     add_custom_command(COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/write_metallib_headers.py ${SHADER_ABSOLUTE} ${SHADER_HDR}
-                       DEPENDS ${SHADER_ABSOLUTE}
+                       DEPENDS ${SHADER_ABSOLUTE} ${CMAKE_SOURCE_DIR}/scripts/write_metallib_headers.py
                        OUTPUT ${SHADER_HDR}
                        COMMENT "Generating metallib wrapper header for ${SHADER}"
                        VERBATIM)

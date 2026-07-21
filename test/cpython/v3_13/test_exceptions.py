@@ -407,8 +407,8 @@ class ExceptionTests(__TestCase):
             def __init__(self_):
                 raise RuntimeError("can't instantiate BadException")
 
-            class InvalidException:
-                pass
+        class InvalidException:
+            pass
 
         @unittest.skipIf(_testcapi is None, "requires _testcapi")
         def test_capi1():

@@ -24,7 +24,7 @@ from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
-from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
+from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_constant_type
 from torch.types import py_sym_types
 from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -69,7 +69,7 @@ _legal_ops = dict.fromkeys(
 )
 
 
-# Signature for functions thattransforms the body (`list[str]`) of the
+# Signature for functions that transform the body (`list[str]`) of the
 # generated code
 TransformCodeFunc = Callable[[list[str]], list[str]]
 
@@ -624,9 +624,16 @@ class CodeGen:
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
             elif isinstance(arg, complex):
-                if arg.real == 0.0 or arg.imag == 0.0:
+                if (
+                    arg.real == 0.0
+                    or arg.imag == 0.0
+                    or not math.isfinite(arg.real)
+                    or not math.isfinite(arg.imag)
+                ):
                     # complex.__repr__ is not a safe source representation for
                     # signed zero components, e.g. eval("(-0-1j)") loses the sign.
+                    # It's also unsafe for nan/inf imaginary parts: repr produces
+                    # "nanj"/"infj" which Python parses as a single identifier.
                     return f"complex({_get_repr(arg.real)}, {_get_repr(arg.imag)})"
                 return blue(repr(arg))
             elif isinstance(arg, torch.Tensor):
@@ -642,7 +649,7 @@ class CodeGen:
                 return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
-            elif is_opaque_value_type(type(arg)):
+            elif is_opaque_constant_type(type(arg)):
                 obj_repr, opaque_types = get_opaque_obj_repr(arg)
                 for n, t in opaque_types.items():
                     add_global(n, t)
@@ -735,6 +742,10 @@ class CodeGen:
                 if stack_trace := node.stack_trace:
                     if parsed_stack_trace := _parse_stack_trace(stack_trace):
                         stack_trace_str = parsed_stack_trace.get_summary_str()
+                        if node.meta.get("autograd_backward", False):
+                            stack_trace_str = (
+                                f"Backward of forward node: {stack_trace_str}"
+                            )
 
                 maybe_recompute_info = ""
                 if hasattr(node, "meta") and node.meta:
