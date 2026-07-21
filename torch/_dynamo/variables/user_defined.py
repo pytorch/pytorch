@@ -29,6 +29,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import operator
 import random
 import sys
 import threading
@@ -1990,6 +1991,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 skip_frame=True,
             )
 
+    def _call_method_var_or_const_fold(
+        self,
+        tx: "InstructionTranslatorBase",
+        method_var: VariableTracker,
+        direct_fn: Any,
+    ) -> VariableTracker:
+        if (
+            isinstance(method_var, variables.GetAttrVariable)
+            and self.is_python_constant()
+        ):
+            return variables.ConstantVariable.create(
+                direct_fn(self.as_python_constant())
+            )
+        return method_var.call_function(tx, [], {})
+
     def nb_index_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1999,7 +2015,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if type_attr is NO_SUCH_SUBOBJ:
             return super().nb_index_impl(tx)
         method_var = self.resolve_type_attr(tx, "__index__", type_attr, source)
-        result = method_var.call_function(tx, [], {})
+        result = self._call_method_var_or_const_fold(tx, method_var, operator.index)
         # CPython validates that __index__ returns an int.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/abstract.c#L1433-L1438
         if result.is_python_constant() and not isinstance(
@@ -2024,7 +2040,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if type_attr is NO_SUCH_SUBOBJ:
             return super().nb_int_impl(tx)
         method_var = self.resolve_type_attr(tx, "__int__", type_attr, source)
-        result = method_var.call_function(tx, [], {})
+        result = self._call_method_var_or_const_fold(tx, method_var, int)
         if not issubclass(result.python_type(), int):
             raise_observed_exception(
                 TypeError,
@@ -2045,7 +2061,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if type_attr is NO_SUCH_SUBOBJ:
             return super().nb_float_impl(tx)
         method_var = self.resolve_type_attr(tx, "__float__", type_attr, source)
-        result = method_var.call_function(tx, [], {})
+        result = self._call_method_var_or_const_fold(tx, method_var, float)
         if not issubclass(result.python_type(), float):
             raise_observed_exception(
                 TypeError,
@@ -2483,6 +2499,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             nb_slot=PyNumberSlots.NB_MULTIPLY,
             reverse=reverse,
         )
+
+    def nb_matrix_multiply_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__matmul__",
+            "__rmatmul__",
+            nb_slot=PyNumberSlots.NB_MATRIX_MULTIPLY,
+            reverse=reverse,
+        )
+
+    def nb_inplace_matrix_multiply_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__imatmul__", [other], {})
 
     def nb_lshift_impl(
         self,
@@ -4938,7 +4976,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
             raise AssertionError("_base_vt must not be None for defaultdict repr")
         return VariableTracker.build(
             tx,
-            f"defaultdict({tracked_repr(tx, self.default_factory)}, "
+            f"{self.python_type_name()}({tracked_repr(tx, self.default_factory)}, "
             f"{tracked_repr(tx, self._base_vt)})",
         )
 

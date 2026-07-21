@@ -118,6 +118,24 @@ if(WIN32)
   set(CMAKE_HIP_COMPILER_FRONTEND_VARIANT "GNU")
 endif()
 
+# CMake populates CMAKE_<LANG>_USING_LINKER_<TYPE> for C/CXX (Clang) but not for
+# HIP, so a global CMAKE_LINKER_TYPE (e.g. LLD) leaks into enable_language(HIP)'s
+# ABI probe and aborts with "LINKER_TYPE '<TYPE>' is unknown or not supported by
+# this toolchain". HIP here is the same clang++ driver as CXX, so reuse the CXX
+# linker-type mapping; fall back to the standard -fuse-ld flag if CXX has none.
+if(CMAKE_LINKER_TYPE AND NOT DEFINED CMAKE_HIP_USING_LINKER_${CMAKE_LINKER_TYPE})
+  if(DEFINED CMAKE_CXX_USING_LINKER_${CMAKE_LINKER_TYPE})
+    set(CMAKE_HIP_USING_LINKER_${CMAKE_LINKER_TYPE}
+        "${CMAKE_CXX_USING_LINKER_${CMAKE_LINKER_TYPE}}")
+    if(DEFINED CMAKE_CXX_USING_LINKER_MODE)
+      set(CMAKE_HIP_USING_LINKER_MODE "${CMAKE_CXX_USING_LINKER_MODE}")
+    endif()
+  else()
+    string(TOLOWER "${CMAKE_LINKER_TYPE}" _hip_linker_lc)
+    set(CMAKE_HIP_USING_LINKER_${CMAKE_LINKER_TYPE} "-fuse-ld=${_hip_linker_lc}")
+  endif()
+endif()
+
 enable_language(HIP)
 message(STATUS "HIP language enabled with compiler: ${CMAKE_HIP_COMPILER}")
 message(STATUS "HIP architectures: ${CMAKE_HIP_ARCHITECTURES}")
