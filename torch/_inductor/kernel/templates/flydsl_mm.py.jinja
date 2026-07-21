@@ -12,73 +12,14 @@ from torch._inductor.runtime.flydsl_cache import ensure_flydsl_cache_dir
 {{gen_defines()}}
 
 
-_gemm_call_entry = None
+_gemm_param = None
+_gemm_executor = None
 
 
 def _dynamic_tensor_arg(tensor):
     # Keep concrete tensor shapes out of FlyDSL's JIT cache key so the same tile
     # config can be reused across GEMM shapes.
     return flydsl_jit_argument.TorchTensorJitArg(tensor)
-
-
-def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, stream):
-    """First call compiles and executes; subsequent calls dispatch the cached executor."""
-    global _gemm_call_entry
-    entry = _gemm_call_entry
-    if entry is None:
-        has_k_tail = infer_has_k_tail(k, TILE_K, STAGES)
-        if USE_HALF_TILE_INTERLEAVED:
-            has_k_tail = has_k_tail or (((k + TILE_K - 1) // TILE_K) % 2 != 0)
-        param = make_gemm_param_and_validate(
-            m,
-            n,
-            k,
-            {
-                "dtype_id": GEMM_DTYPE_ID,
-                "block_m": TILE_M,
-                "block_n": TILE_N,
-                "block_k": TILE_K,
-                "stages": STAGES,
-                "m_waves": BLOCK_M_WARPS,
-                "n_waves": BLOCK_N_WARPS,
-                "group_m": GROUP_M,
-                "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
-                "has_bias": False,
-                "has_k_tail": has_k_tail,
-            },
-        )
-        assert param is not None, "unsupported FlyDSL GEMM shape/config"
-        entry = [param, None]
-        _gemm_call_entry = entry
-    else:
-        param = entry[0]
-    executor = entry[1]
-    if executor is None:
-        ensure_flydsl_cache_dir()
-        executor = flyc.compile(
-            launch_gemm_gfx950,
-            _dynamic_tensor_arg(output_mn),
-            _dynamic_tensor_arg(mat1_mk),
-            _dynamic_tensor_arg(mat2_nk),
-            m,
-            n,
-            k,
-            param,
-            stream,
-        )
-        if not os.environ.get("COMPILE_ONLY"):
-            entry[1] = executor
-    else:
-        executor(
-            output_mn,
-            mat1_mk,
-            mat2_nk,
-            m,
-            n,
-            k,
-            param,
-            stream,
-        )
 
 
 @contextlib.contextmanager
@@ -97,26 +38,70 @@ def _temporary_env(updates):
                 os.environ[key] = old_value
 
 
-def _flydsl_mm(output, mat1, mat2, stream):
-    m = GEMM_M
-    n = GEMM_N
-    k = GEMM_K
-    if MAT2_IS_NK:
-        # The lowering passes the original contiguous B buffer for A @ B.T.
-        mat2_nk = mat2
-    else:
-        mat2_nk = mat2.transpose(0, 1)
-
-    mat1_mk = mat1
-    output_mn = output
-
-    _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, stream)
-    return output
-
-
 {{def_kernel("mat1", "mat2")}}
     output = {{get_output()}}
-    return _flydsl_mm(output, mat1, mat2, stream)
+    global _gemm_executor, _gemm_param
+{% if MAT2_IS_NK %}
+    # The lowering passes the original contiguous B buffer for A @ B.T.
+    mat2_nk = mat2
+{% else %}
+    mat2_nk = mat2.transpose(0, 1)
+{% endif %}
+    executor = _gemm_executor
+    if executor is not None:
+        executor(
+            output,
+            mat1,
+            mat2_nk,
+            GEMM_M,
+            GEMM_N,
+            GEMM_K,
+            _gemm_param,
+            stream,
+        )
+        return output
+
+    param = _gemm_param
+    if param is None:
+        has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
+        if USE_HALF_TILE_INTERLEAVED:
+            has_k_tail = has_k_tail or (((GEMM_K + TILE_K - 1) // TILE_K) % 2 != 0)
+        param = make_gemm_param_and_validate(
+            GEMM_M,
+            GEMM_N,
+            GEMM_K,
+            {
+                "dtype_id": GEMM_DTYPE_ID,
+                "block_m": TILE_M,
+                "block_n": TILE_N,
+                "block_k": TILE_K,
+                "stages": STAGES,
+                "m_waves": BLOCK_M_WARPS,
+                "n_waves": BLOCK_N_WARPS,
+                "group_m": GROUP_M,
+                "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
+                "has_bias": False,
+                "has_k_tail": has_k_tail,
+            },
+        )
+        assert param is not None, "unsupported FlyDSL GEMM shape/config"
+        _gemm_param = param
+
+    ensure_flydsl_cache_dir()
+    executor = flyc.compile(
+        launch_gemm_gfx950,
+        _dynamic_tensor_arg(output),
+        _dynamic_tensor_arg(mat1),
+        _dynamic_tensor_arg(mat2_nk),
+        GEMM_M,
+        GEMM_N,
+        GEMM_K,
+        param,
+        stream,
+    )
+    if not os.environ.get("COMPILE_ONLY"):
+        _gemm_executor = executor
+    return output
 
 
 def {{kernel_name}}_precompile(
@@ -159,7 +144,8 @@ def {{kernel_name}}_precompile(
             output = _fake_proxy(shape_output, stride_output, dtype_output)
 
             try:
-                _flydsl_mm(output, mat1, mat2, stream=0)
+                {{kernel_name}}_main(mat1, mat2, output, stream=0)
             finally:
-                global _gemm_call_entry
-                _gemm_call_entry = None
+                global _gemm_executor, _gemm_param
+                _gemm_executor = None
+                _gemm_param = None
