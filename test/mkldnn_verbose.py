@@ -20,7 +20,7 @@ def run_model(level):
         m(d)
 
 
-def run_acl_bf16_linear(level):
+def run_bf16_linear(level):
     # Keep Inductor import out of the default verbose helper subprocess.
     from torch._inductor import config as inductor_config
 
@@ -37,12 +37,14 @@ def run_acl_bf16_linear(level):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--verbose-level", default=0, type=int)
-    parser.add_argument("--model", choices=["conv", "acl-bf16-linear"], default="conv")
+    parser.add_argument("--model", choices=["conv", "bf16-linear"], default="conv")
     args = parser.parse_args()
     try:
-        if args.model == "acl-bf16-linear":
-            run_acl_bf16_linear(args.verbose_level)
+        if args.model == "bf16-linear":
+            run_bf16_linear(args.verbose_level)
         else:
             run_model(args.verbose_level)
     except Exception as e:
+        if args.model == "bf16-linear":
+            raise
         print(e)
