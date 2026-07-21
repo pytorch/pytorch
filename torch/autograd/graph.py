@@ -468,17 +468,10 @@ class node_creation_hook:
     :meth:`~torch.autograd.graph.Node.register_hook` and
     :meth:`~torch.autograd.graph.Node.register_prehook`.
 
-    .. warning::
-
-        The node is passed to the hook as soon as it is attached to its first
-        output, which is convenient but means the node is not yet fully
-        constructed. Its ``next_functions`` are wired, but other state may
-        not be: for ops that save an output (e.g. :func:`torch.exp`) the
-        ``_saved_*`` tensors are populated after the hook runs, and for
-        multi-output ops ``_input_metadata`` only reflects the outputs bound
-        so far. Do not rely on this state from within the hook; registering
-        (pre)hooks is always safe, as they observe the node at backward time
-        when it is complete.
+    The node is passed to the hook only once it is fully populated: its
+    ``next_functions`` are wired, all outputs' metadata are bound, and the
+    tensors saved for backward (``_saved_*``) have been stored, so a hook
+    that inspects the node sees its complete state.
 
     The hook should have the following signature::
 

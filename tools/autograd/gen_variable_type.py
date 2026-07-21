@@ -1837,7 +1837,7 @@ def emit_body(
             decl = ""
             capture = ""
             if fn == "rebase":
-                decl = "std::vector<c10::intrusive_ptr<Node>> _rebased_fns(grad_fns.size());\n"
+                decl = "c10::SmallVector<c10::intrusive_ptr<Node>, 8> _rebased_fns(grad_fns.size());\n"
                 capture = "_rebased_fns[i] = "
             return decl + LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(
                 preamble=(
