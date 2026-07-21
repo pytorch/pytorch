@@ -835,9 +835,11 @@ class TritonTemplateKernel(TritonKernel):
         xindex_entry = self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths))
         old_symbol = xindex_entry.symbol()
         xindex_entry.set_name(xindex_name)
-        # Keep the kernel's range-symbol registry in sync with the renamed entry so
-        # downstream Triton block-shape inference can resolve the (possibly epilogue-
-        # scoped) index symbol; mirrors the TMA block-indexing re-key elsewhere here.
+        # Re-key only range_tree_nodes: get_block_shape resolves the renamed symbol
+        # via this dict. Unlike the TMA re-key, var_list/var_ranges are left alone --
+        # in the single-dim case old_symbol is the construct_entries-renamed name,
+        # not the auto symbol var_list holds, so a var_list.index() re-key would raise;
+        # the stale entries only cost codegen quality, not correctness.
         if self.range_tree_nodes.get(old_symbol) is xindex_entry:
             del self.range_tree_nodes[old_symbol]
         self.range_tree_nodes[xindex_entry.symbol()] = xindex_entry
