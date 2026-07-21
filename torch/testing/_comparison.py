@@ -729,10 +729,14 @@ class TensorLikePair(Pair):
         self, actual: Any, expected: Any, *, id: tuple[Any, ...], allow_subclasses: bool
     ) -> tuple[torch.Tensor, torch.Tensor]:
         is_actual_scalar = isinstance(actual, (bool, int, float, complex)) or (
-            np is not None and isinstance(actual, np.generic)
+            np is not None and (
+                isinstance(actual, np.generic) or (isinstance(actual, np.ndarray) and actual.ndim == 0)
+            )
         )
         is_expected_scalar = isinstance(expected, (bool, int, float, complex)) or (
-            np is not None and isinstance(expected, np.generic)
+            np is not None and (
+                isinstance(expected, np.generic) or (isinstance(expected, np.ndarray) and expected.ndim == 0)
+            )
         )
 
         if not (is_actual_scalar or is_expected_scalar):

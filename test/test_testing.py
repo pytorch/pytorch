@@ -981,6 +981,22 @@ class TestAssertClose(TestCase):
             torch.testing.assert_close(torch.ones(()), np.float64(1.0), check_dtype=False)
             torch.testing.assert_close(torch.tensor(1.0, dtype=torch.float64), np.float64(1.0))
 
+            # 0-d numpy.ndarray vs Tensor (eager and compiled)
+            torch.testing.assert_close(torch.ones(()), np.array(1.0), check_dtype=False)
+            torch.testing.assert_close(torch.tensor(1.0, dtype=torch.float64), np.array(1.0))
+
+            @torch.compile(backend="aot_eager")
+            def compiled_assert_close(x, y):
+                torch.testing.assert_close(x, y, check_dtype=False)
+
+            compiled_assert_close(torch.ones(()), np.array(1.0))
+
+            # Non-scalar numpy.ndarray (1-d or 2-d) still raises TypeError
+            with self.assertRaises(TypeError):
+                torch.testing.assert_close(torch.ones(2), np.array([1.0, 1.0]))
+            with self.assertRaises(TypeError):
+                torch.testing.assert_close(torch.ones((2, 2)), np.array([[1.0, 1.0], [1.0, 1.0]]))
+
         # CUDA tensor vs Python scalar (if CUDA is available)
         if torch.cuda.is_available():
             torch.testing.assert_close(torch.ones((), device="cuda"), 1, check_dtype=False)
