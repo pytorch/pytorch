@@ -6350,22 +6350,15 @@ class Scheduler:
             tuple[BaseSchedulerNode, BaseSchedulerNode]
         ] = []
 
+        fusion_memory_context = None
+        if self.fusion_memory_timeline_peak_allowed_increase_bytes() is not None:
+            fusion_memory_context = self._init_fusion_memory_context(nodes)
+
         possible_fusions = self.get_possible_fusions(
             nodes,
             is_reorder_round,
+            fusion_memory_context,
         )
-
-        fusion_memory_context = None
-        if possible_fusions:
-            peak_allowed_increase = (
-                self.fusion_memory_timeline_peak_allowed_increase_bytes()
-            )
-            if peak_allowed_increase is not None:
-                fusion_memory_context = self._init_fusion_memory_context(nodes)
-            possible_fusions = self.get_possible_fusions_with_highest_priority(
-                possible_fusions, fusion_memory_context
-            )
-            possible_fusions.sort(key=self.score_fusion_key, reverse=True)
 
         if config.max_autotune_gemm or config.max_autotune:
             possible_fusions = self._handle_template_overlap(
@@ -6761,9 +6754,10 @@ class Scheduler:
         self,
         nodes: list[BaseSchedulerNode],
         is_reorder_round: bool,
+        fusion_memory_context: FusionMemoryContext | None = None,
     ) -> list[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
         """
-        Helper to find all legal fusion opportunities.
+        Helper to find all legal fusion opportunities, sorted by self.score_fusion()
         """
         possible_fusions = []
         seen = OrderedSet[tuple[BaseSchedulerNode, BaseSchedulerNode]]()
@@ -6806,6 +6800,10 @@ class Scheduler:
             for node_grouping in group_grouping.values():
                 check_all_pairs(node_grouping)
 
+        possible_fusions = self.get_possible_fusions_with_highest_priority(
+            possible_fusions, fusion_memory_context
+        )
+        possible_fusions.sort(key=self.score_fusion_key, reverse=True)
         fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
 
@@ -8984,7 +8982,7 @@ class Scheduler:
     def get_possible_fusions_with_highest_priority(
         self,
         possible_fusions: list[tuple[BaseSchedulerNode, BaseSchedulerNode]],
-        fusion_memory_context: FusionMemoryContext | None,
+        fusion_memory_context: FusionMemoryContext | None = None,
     ) -> list[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
         # Group the possible fusions based on their priority from the backend.
         # Only return the group of possible fusions with highest priority.
