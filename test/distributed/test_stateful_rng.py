@@ -55,7 +55,12 @@ class _StatefulRNGMode(TorchDispatchMode):
         block_sizes: list[int | torch.SymInt] = []
         block_strides: list[int | torch.SymInt] = []
         block_counts: list[int | torch.SymInt] = []
-        for start_index, block_size, block_stride, num_blocks in rng_layout.index_blocks:
+        for (
+            start_index,
+            block_size,
+            block_stride,
+            num_blocks,
+        ) in rng_layout.index_blocks:
             start_indices.append(start_index)
             block_sizes.append(block_size)
             block_strides.append(block_stride)
@@ -89,6 +94,61 @@ class TestCheckpointableTensorRNG(TestCase):
         setattr(tensor, "local_offsets", local_offsets)  # noqa: B010
         setattr(tensor, "local_sizes", local_sizes)  # noqa: B010
 
+    @staticmethod
+    def _flex_shard_layout_cases():
+        return (
+            (
+                "ragged_shard",
+                (4, 4),
+                (3, 4),
+                ((1, 0),),
+                ((0, 0),),
+                ((3, 4),),
+            ),
+            (
+                "ragged_shard_zero_owner",
+                (4, 4),
+                (0, 4),
+                (),
+                (),
+                (),
+            ),
+            (
+                "grouped_ragged_shard",
+                (4, 2),
+                (2, 2),
+                ((2, 0),),
+                ((0, 0),),
+                ((2, 2),),
+            ),
+            (
+                "grouped_owned_expert_block",
+                (4, 2, 3),
+                (2, 2, 3),
+                ((2, 0, 0),),
+                ((0, 0, 0),),
+                ((2, 2, 3),),
+            ),
+            (
+                "grouped_owned_nonowner",
+                (2, 2),
+                (0, 0),
+                (),
+                (),
+                (),
+            ),
+            # A flat interval crossing row boundaries is representable when the
+            # placement exposes a rank-preserving local view.
+            (
+                "flat_shard_rank_preserving",
+                (3, 4),
+                (1, 6),
+                ((0, 3), (1, 0), (2, 0)),
+                ((0, 0), (0, 1), (0, 5)),
+                ((1, 1), (1, 4), (1, 1)),
+            ),
+        )
+
     def test_plain_tensor_metadata_satisfies_protocol(self):
         tensor = torch.empty(1)
         self.assertNotIsInstance(tensor, CheckpointableTensor)
@@ -121,6 +181,25 @@ class TestCheckpointableTensorRNG(TestCase):
                 self.assertEqual(layout.index_blocks, expected_blocks)
                 self.assertTrue(layout.is_direct)
 
+    def test_flattened_flex_shard_layouts_require_matching_rank(self):
+        cases = (
+            ("grouped_ragged_shard_prefix_dims", (2, 3, 4), (3, 4)),
+            ("grouped_owned_flat_segments", (4, 2, 3), (12,)),
+            ("flat_shard", (3, 4), (6,)),
+        )
+        for name, global_shape, local_shape in cases:
+            with self.subTest(layout=name):
+                tensor = torch.empty(local_shape)
+                self._set_shard_metadata(tensor, global_shape, (), (), ())
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "global_shape and the local tensor must have the same number",
+                ):
+                    _derive_checkpointable_rng_layout(
+                        cast(CheckpointableTensor, tensor)
+                    )
+
     def test_strided_shard_lowers_to_multiple_index_blocks(self):
         # _StridedShard(dim=1, split_factor=2) on two ranks gives rank 0
         # columns [0:2, 4:6], concatenated in that order in the local tensor.
@@ -133,9 +212,7 @@ class TestCheckpointableTensorRNG(TestCase):
             ((3, 2), (3, 2)),
         )
 
-        layout = _derive_checkpointable_rng_layout(
-            cast(CheckpointableTensor, tensor)
-        )
+        layout = _derive_checkpointable_rng_layout(cast(CheckpointableTensor, tensor))
 
         self.assertEqual(layout.index_blocks, ((0, 2, 8, 3), (4, 2, 8, 3)))
         self.assertFalse(layout.is_direct)
@@ -223,6 +300,55 @@ class TestCheckpointableTensorRNG(TestCase):
 
                 self.assertEqual(actual, expected_shards[rank], rtol=0, atol=0)
                 self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_flex_shard_layouts_match_dense(self):
+        device = torch.device("cuda")
+        for (
+            name,
+            global_shape,
+            local_shape,
+            global_offsets,
+            local_offsets,
+            local_sizes,
+        ) in self._flex_shard_layout_cases():
+            with self.subTest(layout=name):
+                expected_generator = torch.Generator(device=device).manual_seed(123)
+                dense = torch.empty(global_shape, device=device).normal_(
+                    0.1, 0.02, generator=expected_generator
+                )
+                expected_state = expected_generator.get_state()
+                expected = torch.empty(local_shape, device=device)
+                for global_offset, local_offset, local_size in zip(
+                    global_offsets,
+                    local_offsets,
+                    local_sizes,
+                    strict=True,
+                ):
+                    global_slices = tuple(
+                        slice(offset, offset + size)
+                        for offset, size in zip(global_offset, local_size, strict=True)
+                    )
+                    local_slices = tuple(
+                        slice(offset, offset + size)
+                        for offset, size in zip(local_offset, local_size, strict=True)
+                    )
+                    expected[local_slices].copy_(dense[global_slices])
+
+                actual_generator = torch.Generator(device=device).manual_seed(123)
+                actual = torch.empty(local_shape, device=device)
+                self._set_shard_metadata(
+                    actual,
+                    global_shape,
+                    global_offsets,
+                    local_offsets,
+                    local_sizes,
+                )
+                with _StatefulRNGMode():
+                    actual.normal_(0.1, 0.02, generator=actual_generator)
+
+                self.assertEqual(actual, expected, rtol=0, atol=0)
+                self.assertEqual(actual_generator.get_state(), expected_state)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_multiblock_replay_from_nonzero_generator_offset(self):
