@@ -9583,6 +9583,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         out = foo_opt(inp)
         self.assertEqual(inp.storage(), out.storage())
 
+    def test_empty_output_strides(self):
+        def fn(x):
+            return x.new_empty((2, 0, 0))
+
+        inp = torch.randn(1, device=self.device)
+        eager = fn(inp)
+        compiled = torch.compile(fn, backend="inductor")(inp)
+        self.assertEqual(compiled.stride(), eager.stride())
+
     def test_index_select(self):
         def fn(a, b):
             return (
