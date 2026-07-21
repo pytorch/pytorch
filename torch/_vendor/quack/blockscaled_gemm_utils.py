@@ -10,8 +10,7 @@ import cutlass
 import cutlass.cute as cute
 
 from .compile_utils import make_fake_tensor as fake_tensor
-from .cute_dsl_utils import get_device_capacity, get_max_active_clusters, torch2cute_dtype_map
-from .gemm_act import GemmActSm100
+from .cute_dsl_utils import get_device_capacity, get_max_active_clusters
 from .gemm_default_epi import GemmDefaultSm100
 from .gemm_tvm_ffi_utils import div_for_dtype, make_scheduler_args
 from .mx_utils import (
@@ -442,14 +441,7 @@ def create_blockscaled_varlen_m_operands(
 
     # Quantize A: (total_m, k) bf16 -> (total_m, k) fp8 K-major.
     # A data itself is stored packed (no per-expert padding); only SFA is padded.
-    a_hp = torch.testing.make_tensor(
-        total_m,
-        k,
-        dtype=torch.bfloat16,
-        device="cuda",
-        low=-std,
-        high=std,
-    ).contiguous()
+    a_hp = (torch.randn(total_m, k, dtype=torch.bfloat16, device="cuda") * std).contiguous()
     qa, sa_2d = to_fn(a_hp, sf_vec_size)  # (total_m, k), (total_m, sf_k)
     a_ref = qa.float() * sa_2d.float().repeat_interleave(sf_vec_size, dim=-1)
 
@@ -473,15 +465,7 @@ def create_blockscaled_varlen_m_operands(
     # Quantize B: (num_experts, n, k) bf16 -> (n, k, num_experts). b_major selects
     # k-major (stride (k, 1, n*k)) or n-major (stride (1, n, n*k)).
     assert b_major in ("k", "n"), f"b_major must be 'k' or 'n', got {b_major!r}"
-    b_hp = torch.testing.make_tensor(
-        num_experts,
-        n,
-        k,
-        dtype=torch.bfloat16,
-        device="cuda",
-        low=-std,
-        high=std,
-    ).contiguous()
+    b_hp = (torch.randn(num_experts, n, k, dtype=torch.bfloat16, device="cuda") * std).contiguous()
     qb_flat, sb_2d = to_fn(b_hp.view(num_experts * n, k), sf_vec_size)
     if b_major == "k":
         qb = (
@@ -559,27 +543,13 @@ def create_blockscaled_varlen_k_operands(
     b_q_list, b_sc_list, b_ref_list = [], [], []
     for k_i in seqlens_k:
         # A slice: (m, k_i) bf16 -> fp8, scales (m, k_i // sf_vec_size).
-        a_hp = torch.testing.make_tensor(
-            m,
-            k_i,
-            dtype=torch.bfloat16,
-            device="cuda",
-            low=-std,
-            high=std,
-        ).contiguous()
+        a_hp = (torch.randn(m, k_i, dtype=torch.bfloat16, device="cuda") * std).contiguous()
         a_q, a_sc = to_mx_compiled(a_hp, sf_vec_size)
         a_q_list.append(a_q)
         a_sc_list.append(a_sc)
         a_ref_list.append(a_q.float() * a_sc.float().repeat_interleave(sf_vec_size, dim=-1))
 
-        b_hp = torch.testing.make_tensor(
-            n,
-            k_i,
-            dtype=torch.bfloat16,
-            device="cuda",
-            low=-std,
-            high=std,
-        ).contiguous()
+        b_hp = (torch.randn(n, k_i, dtype=torch.bfloat16, device="cuda") * std).contiguous()
         b_q, b_sc = to_mx_compiled(b_hp, sf_vec_size)
         b_q_list.append(b_q)
         b_sc_list.append(b_sc)
@@ -638,13 +608,6 @@ def compile_blockscaled_gemm_tvm_ffi(
     use_clc_persistence: bool = True,
     varlen_m: bool = False,
     varlen_k: bool = False,
-    tensor_epilogue_fn: Callable | None = None,
-    tensor_epilogue_key: str | None = None,
-    tensor_epilogue_uses_c: bool = False,
-    tensor_epilogue_arg_kinds: tuple[int, ...] = (),
-    tensor_epilogue_rowvec_biases: tuple[torch.Tensor, ...] = (),
-    tensor_epilogue_colvec_biases: tuple[torch.Tensor, ...] = (),
-    tensor_epilogue_tile_biases: tuple[torch.Tensor, ...] = (),
 ) -> Callable:
     """Compile the SM100 blockscaled GEMM.
 
@@ -658,38 +621,12 @@ def compile_blockscaled_gemm_tvm_ffi(
         raise RuntimeError("Blockscaled SM100 GEMM requires SM100/SM110")
     assert not (varlen_m and varlen_k), "Only one of varlen_m / varlen_k"
 
-    tensor_epilogue_rowvec_biases = tuple(
-        _make_compile_tensor_like(tensor, torch2cute_dtype_map[tensor.dtype])
-        for tensor in tensor_epilogue_rowvec_biases
-    )
-    tensor_epilogue_colvec_biases = tuple(
-        _make_compile_tensor_like(tensor, torch2cute_dtype_map[tensor.dtype])
-        for tensor in tensor_epilogue_colvec_biases
-    )
-    tensor_epilogue_tile_biases = tuple(
-        _make_compile_tensor_like(tensor, torch2cute_dtype_map[tensor.dtype])
-        for tensor in tensor_epilogue_tile_biases
-    )
-    GemmCls = GemmActSm100 if tensor_epilogue_fn is not None else GemmDefaultSm100
     gemm = partial(
-        GemmCls,
+        GemmDefaultSm100,
         sf_vec_size=sf_vec_size,
         use_clc_persistence=use_clc_persistence,
     )(cutlass.Float32, ab_dtype, mma_tiler_mn, (*cluster_shape_mn, 1))
-    compile_epi_args = (
-        gemm.EpilogueArguments(
-            mD,
-            None,
-            tensor_epilogue_fn,
-            tensor_epilogue_uses_c=tensor_epilogue_uses_c,
-            tensor_epilogue_arg_kinds=tensor_epilogue_arg_kinds,
-            mTensorEpilogueRowVecBroadcasts=tensor_epilogue_rowvec_biases or None,
-            mTensorEpilogueColVecBroadcasts=tensor_epilogue_colvec_biases or None,
-            mTensorEpilogueTiles=tensor_epilogue_tile_biases or None,
-        )
-        if tensor_epilogue_fn is not None
-        else gemm.EpilogueArguments()
-    )
+    compile_epi_args = gemm.EpilogueArguments()
     scheduler_args = make_scheduler_args(
         get_max_active_clusters(cluster_shape_mn[0] * cluster_shape_mn[1]),
         max_swizzle_size=8,
@@ -762,59 +699,6 @@ def compile_blockscaled_gemm_tvm_ffi(
             mD.shape, d_dtype, leading_dim=_leading_dim_from_stride(mD)
         )
 
-    if tensor_epilogue_fn is None:
-
-        @cute.jit
-        def runner(
-            a: cute.Tensor,
-            b: cute.Tensor,
-            d: cute.Tensor,
-            sfa: cute.Tensor,
-            sfb: cute.Tensor,
-            varlen_args,
-            stream,
-        ):
-            gemm(a, b, d, None, compile_epi_args, scheduler_args, varlen_args, stream, sfa, sfb, None)
-
-        compiled = cute.compile(
-            runner,
-            fake_mA,
-            fake_mB,
-            fake_mD,
-            _make_compile_tensor_like(mSFA, sf_dtype, dynamic_layout=True),
-            _make_compile_tensor_like(mSFB, sf_dtype, dynamic_layout=True),
-            varlen_args_fake,
-            stream,
-            options="--enable-tvm-ffi",
-        )
-
-        if varlen_m or varlen_k:
-
-            def run(a, b, d, sfa, sfb, cu_seqlens):
-                varlen_args = VarlenArguments(
-                    mCuSeqlensM=cu_seqlens if varlen_m else None,
-                    mCuSeqlensK=cu_seqlens if varlen_k else None,
-                )
-                compiled(a, b, d, sfa, sfb, varlen_args)
-        else:
-
-            def run(a, b, d, sfa, sfb):
-                compiled(a, b, d, sfa, sfb, VarlenArguments())
-
-        return run
-
-    def make_epi_args(d, row_auxes, col_auxes, tile_auxes):
-        return gemm.EpilogueArguments(
-            d,
-            None,
-            tensor_epilogue_fn,
-            tensor_epilogue_uses_c=tensor_epilogue_uses_c,
-            tensor_epilogue_arg_kinds=tensor_epilogue_arg_kinds,
-            mTensorEpilogueRowVecBroadcasts=row_auxes or None,
-            mTensorEpilogueColVecBroadcasts=col_auxes or None,
-            mTensorEpilogueTiles=tile_auxes or None,
-        )
-
     @cute.jit
     def runner(
         a: cute.Tensor,
@@ -822,13 +706,10 @@ def compile_blockscaled_gemm_tvm_ffi(
         d: cute.Tensor,
         sfa: cute.Tensor,
         sfb: cute.Tensor,
-        row_auxes,
-        col_auxes,
-        tile_auxes,
         varlen_args,
         stream,
     ):
-        gemm(a, b, None, None, make_epi_args(d, row_auxes, col_auxes, tile_auxes), scheduler_args, varlen_args, stream, sfa, sfb, None)
+        gemm(a, b, d, None, compile_epi_args, scheduler_args, varlen_args, stream, sfa, sfb, None)
 
     compiled = cute.compile(
         runner,
@@ -837,9 +718,6 @@ def compile_blockscaled_gemm_tvm_ffi(
         fake_mD,
         _make_compile_tensor_like(mSFA, sf_dtype, dynamic_layout=True),
         _make_compile_tensor_like(mSFB, sf_dtype, dynamic_layout=True),
-        tensor_epilogue_rowvec_biases,
-        tensor_epilogue_colvec_biases,
-        tensor_epilogue_tile_biases,
         varlen_args_fake,
         stream,
         options="--enable-tvm-ffi",
@@ -847,16 +725,16 @@ def compile_blockscaled_gemm_tvm_ffi(
 
     if varlen_m or varlen_k:
 
-        def run(a, b, d, sfa, sfb, row_auxes=(), col_auxes=(), tile_auxes=(), cu_seqlens=None):
+        def run(a, b, d, sfa, sfb, cu_seqlens):
             varlen_args = VarlenArguments(
                 mCuSeqlensM=cu_seqlens if varlen_m else None,
                 mCuSeqlensK=cu_seqlens if varlen_k else None,
             )
-            compiled(a, b, d, sfa, sfb, row_auxes, col_auxes, tile_auxes, varlen_args)
+            compiled(a, b, d, sfa, sfb, varlen_args)
     else:
 
-        def run(a, b, d, sfa, sfb, row_auxes=(), col_auxes=(), tile_auxes=()):
-            compiled(a, b, d, sfa, sfb, row_auxes, col_auxes, tile_auxes, VarlenArguments())
+        def run(a, b, d, sfa, sfb):
+            compiled(a, b, d, sfa, sfb, VarlenArguments())
 
     return run
 

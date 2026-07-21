@@ -80,12 +80,17 @@ class SubgraphLoweringException(RuntimeError):
 
 
 class InvalidCxxCompiler(RuntimeError):
-    def __init__(self) -> None:
+    def __init__(self, compiler: str | None = None) -> None:
         from . import config
 
-        super().__init__(
-            f"No working C++ compiler found in {config.__name__}.cpp.cxx: {config.cpp.cxx}"
-        )
+        if compiler is None:
+            msg = (
+                f"No working C++ compiler found in {config.__name__}.cpp.cxx: "
+                f"{config.cpp.cxx}"
+            )
+        else:
+            msg = f"Compiler: {compiler} is not found."
+        super().__init__(msg)
 
 
 class CppWrapperCodegenError(RuntimeError):

@@ -203,7 +203,7 @@ bool maybeThrowBackCompatKeepdimWarn(char* func) {
     std::ostringstream ss;
     ss << "backwards compatibility: call to \"" << func
        << "\" uses default value for keepdim which has changed default to False.  Consider passing as kwarg.",
-        PyErr_WarnEx(PyExc_UserWarning, ss.str().c_str(), 1);
+        PyErr_WarnEx(PyExc_UserWarning, std::move(ss).str().c_str(), 1);
   }
   return true;
 }
@@ -340,13 +340,13 @@ error:
 std::string int_array_ref_string(at::IntArrayRef sizes) {
   std::stringstream ss;
   ss << sizes;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string dispatch_keyset_string(c10::DispatchKeySet keyset) {
   std::stringstream ss;
   ss << keyset;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 } // namespace torch::gdb

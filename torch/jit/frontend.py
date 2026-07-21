@@ -204,7 +204,7 @@ def get_class_properties(cls, self_name):
         here refers to the subclass of TreeView.
     """
     props = inspect.getmembers(cls, predicate=lambda m: isinstance(m, property))
-    # Any property that should not compiled must be in this list on the Module.
+    # Any property that should not be compiled must be in this list on the Module.
     unused_properties = getattr(cls, "__jit_unused_properties__", [])
 
     # Create Property TreeView objects from inspected property objects.

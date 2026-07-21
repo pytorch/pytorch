@@ -111,7 +111,9 @@ class MixOrderReductionTest(TestBase):
         ref = f(x)
         act = opt_f(x)
         tol = 1e-3 if dtype == torch.float else 1e-2
-        self.assertTrue(same(ref, act, tol=tol), f"ref:\n{ref}\nact:\n{act}")
+        self.assertTrue(
+            same(ref, act, tol=tol), lambda msg: f"{msg}\nref:\n{ref}\nact:\n{act}"
+        )
         self.assertEqual(
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
@@ -144,7 +146,9 @@ class MixOrderReductionTest(TestBase):
         ref = f(x)
         act = opt_f(x)
 
-        self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
+        self.assertTrue(
+            same(ref, act, tol=1e-3), lambda msg: f"{msg}\nref:\n{ref}\nact:\n{act}"
+        )
         self.assertEqual(
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
@@ -378,7 +382,9 @@ class MixOrderReductionTest(TestBase):
         ref = fwd_bwd(f)
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
-        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertTrue(
+            same(ref, act, tol=1e-2), lambda msg: f"{msg}\nref:\n{ref}\nact:\n{act}"
+        )
         self.assertEqual(
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
@@ -424,7 +430,9 @@ class MixOrderReductionTest(TestBase):
         ref = fwd_bwd(f)
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
-        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertTrue(
+            same(ref, act, tol=1e-2), lambda msg: f"{msg}\nref:\n{ref}\nact:\n{act}"
+        )
         self.assertEqual(
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
@@ -464,7 +472,9 @@ class MixOrderReductionTest(TestBase):
         ref = fwd_bwd(f)
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
-        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertTrue(
+            same(ref, act, tol=1e-2), lambda msg: f"{msg}\nref:\n{ref}\nact:\n{act}"
+        )
         self.assertEqual(
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
@@ -499,7 +509,9 @@ class MixOrderReductionTest(TestBase):
         ref = fwd_bwd(f)
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
-        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertTrue(
+            same(ref, act, tol=1e-2), lambda msg: f"{msg}\nref:\n{ref}\nact:\n{act}"
+        )
         self.assertEqual(
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
@@ -537,7 +549,9 @@ class MixOrderReductionTest(TestBase):
         ref = fwd_bwd(f)
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
-        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertTrue(
+            same(ref, act, tol=1e-2), lambda msg: f"{msg}\nref:\n{ref}\nact:\n{act}"
+        )
         self.assertEqual(
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
@@ -1121,7 +1135,9 @@ class MixOrderReductionTest(TestBase):
         act = fwd_bwd(compiled_model, x, dy)
 
         # Verify numerical correctness
-        self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
+        self.assertTrue(
+            same(ref, act, tol=1e-3), lambda msg: f"{msg}\nref:\n{ref}\nact:\n{act}"
+        )
 
         # Verify mix order reduction was used
         self.assertGreater(
@@ -1161,11 +1177,18 @@ class OverFusionTest(TestBase):
     regression. See #179423.
     """
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181699")
+    @skipIfXpu(
+        msg="XPU selects Flash Attention for SDPA backward; the current SYCL TLA"
+        "implementation does not guarantee precision on PVC. Re-enable once oneDNN"
+        "adds SDPA backward support. See https://github.com/intel/torch-xpu-ops/issues/4094"
+    )
     @inductor_config.patch(
         {
             "triton.mix_order_reduction": True,
             "triton.mix_order_reduction_max_reads": 10,
+            # These assertions inspect scheduler/codegen metrics populated only
+            # during fresh compilation; a warm FX graph cache bypasses that path.
+            "force_disable_caches": True,
         }
     )
     def test_max_reads_limits_fusion(self):
