@@ -184,8 +184,9 @@ def associative_scan(
             Note: ``combine_mode=pointwise`` is more efficient than ``combine_mode=generic``.
 
     Returns:
-        A pytree of the same structure and shape as ``xs``; if the scan dimension
-        has size 0, the output mirrors the (empty) input unchanged and all input gradients are zero.
+        A pytree of the same structure and shape as ``xs``. If the scan dimension has size 0,
+        the output mirrors the (empty) input unchanged. The gradient with respect to ``xs``
+        is also empty (size 0 along ``dim``), since there are no elements to differentiate through.
 
     Example::
 

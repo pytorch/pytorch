@@ -123,7 +123,9 @@ def scan(
             the final carry of the scan operation with same pytree structure as init.
         out (torch.Tensor or pytree with tensor leaves),
             each tensor leaf is a stacked output along first dim, where each slice is the output of a scan iteration.
-            If the scan dimension has size 0, ``final_carry`` equals ``init``, each output leaf has size 0 along ``dim``, and all input gradients are zero.
+            If the scan dimension has size 0, ``final_carry`` equals ``init`` unchanged and each output leaf has
+            size 0 along ``dim``. The gradient of ``final_carry`` with respect to ``init`` is the identity
+            (not zero), since the body is never called and the carry passes through untouched.
 
     Restrictions:
         - The combine_fn shouldn't have any aliasing between input-input, input-output, and output-output. E.g. return a view
