@@ -66,6 +66,77 @@ TensorMetadata::TensorMetadata(
   SOFT_ASSERT(r.weak_self_.has_value());
 }
 
+OpArgData parseArgData(
+    const std::vector<op_input_t>& input_shapes,
+    const std::vector<op_input_t>& concreteInputs) {
+  if (input_shapes.empty()) {
+    return OpArgData{.hasData = false};
+  }
+
+  std::vector<shape> shapes(input_shapes.size());
+  std::vector<shape> strides(input_shapes.size());
+  std::vector<std::vector<int64_t>> shapesForKinetoEvent(input_shapes.size());
+
+  std::vector<std::string> dtypes(input_shapes.size());
+  std::vector<c10::IValue> concrete_inputs_list;
+
+  for (const auto& i : c10::irange(input_shapes.size())) {
+    std::visit(
+        c10::overloaded(
+            [&](const TensorMetadata& t) {
+              shapes[i] = t.sizes_;
+              shapesForKinetoEvent[i] = t.sizes_;
+              dtypes[i] = std::string(scalarTypeToTypeMeta(t.dtype_).name());
+              strides[i] = t.strides_;
+            },
+            [&](const std::vector<TensorMetadata>& l) {
+              std::vector<std::vector<int64_t>> shape;
+              shape.reserve(l.size());
+              std::vector<std::vector<int64_t>> stride;
+              stride.reserve(l.size());
+              for (const auto& t : l) {
+                shape.emplace_back(t.sizes_);
+                stride.emplace_back(t.strides_);
+              }
+              shapes[i] = shape;
+              strides[i] = stride;
+              dtypes[i] = "TensorList";
+            },
+            [&](const c10::IValue&) { dtypes[i] = "Scalar"; },
+            [&](const auto&) {}),
+        input_shapes[i]);
+  }
+
+  // If we recorded concrete inputs, then parse them
+  if (input_shapes.size() == concreteInputs.size() && !concreteInputs.empty()) {
+    concrete_inputs_list.resize(input_shapes.size());
+
+    for (const auto& i : c10::irange(input_shapes.size())) {
+      std::visit(
+          c10::overloaded(
+              [&](const c10::IValue& val) { concrete_inputs_list[i] = val; },
+              [&](const auto&) {}),
+          input_shapes[i]);
+      std::visit(
+          c10::overloaded(
+              [&](const c10::IValue& val) {
+                concrete_inputs_list[i] = val;
+                dtypes[i] = "ScalarList";
+              },
+              [&](const auto&) {}),
+          concreteInputs[i]);
+    }
+  }
+
+  return OpArgData{
+      .hasData = true,
+      .shapes = shapes,
+      .dtypes = dtypes,
+      .concreteInputs = concrete_inputs_list,
+      .shapesForKinetoEvent = shapesForKinetoEvent,
+      .strides = strides};
+}
+
 // ============================================================================
 // == PyTorch Ops =============================================================
 // ============================================================================
@@ -344,12 +415,14 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     torch_ops_.inputs_outputs_.push(fn.inputs());
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
   }
+  bool pushed_correlation_id = false;
   if (!config_.experimental_config.disable_external_correlation) {
     if (fn.scope() == at::RecordScope::USER_SCOPE) {
       torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
     } else {
       torch::profiler::impl::kineto::pushCorrelationId(corr_id);
     }
+    pushed_correlation_id = true;
   }
 
 #if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
@@ -370,6 +443,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   auto out = std::make_unique<KinetoObserverContext>(event);
+  out->pushed_correlation_id_ = pushed_correlation_id;
   if (fn.isNcclMeta()) {
     // Record NCCL metadata for specific CPU ops, switch off output
     // introspection in this begin_op callback, we will do that in exit callback
@@ -877,6 +951,12 @@ void generateForwardBackwardLinks(
 
 static constexpr const char* indexKey = "Ev Idx";
 
+static std::string sanitizeNameForKinetoJSON(std::string name) {
+  // Kineto's Chrome trace writer quotes names itself but does not escape '"'.
+  std::replace(name.begin(), name.end(), '"', '\'');
+  return name;
+}
+
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
     uint64_t start_time_ns,
@@ -898,6 +978,7 @@ void passEventsToKineto(
     if (!e->overload_name().empty()) {
       name = fmt::format("{}.{}", e->name(), e->overload_name());
     }
+    name = sanitizeNameForKinetoJSON(std::move(name));
     auto* activity = cpu_trace.addCPUActivity(
         name,
         e->kinetoType(),
@@ -1105,7 +1186,7 @@ class TransferEvents {
                   /*start=*/activity->flowStart()};
             },
             [](auto&) {}));
-        if (config_.experimental_config.expose_kineto_event_metadata) {
+        if (config_.get().experimental_config.expose_kineto_event_metadata) {
           e->visit(c10::overloaded(
               [&](ExtraFields<EventType::TorchOp>& i) {
                 i.metadata_json_ = activity->metadataJson();
@@ -1240,7 +1321,7 @@ class TransferEvents {
   static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
-  const ProfilerConfig& config_;
+  std::reference_wrapper<const ProfilerConfig> config_;
   std::vector<const itrace_t*> trace_activities_;
   ska::flat_hash_map<const itrace_t*, std::shared_ptr<Result>> kineto_events_;
 };
@@ -1365,7 +1446,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
     stacks.erase(start_tid);
     auto new_frame = event->parent_.lock();
     if (new_frame != nullptr) {
-      stacks[start_tid] = new_frame;
+      stacks[start_tid] = std::move(new_frame);
     }
   };
 

@@ -43,7 +43,7 @@ jobs:
   reproduce:
     if: github.repository_owner == 'pytorch'
     name: re-vendor and diff
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout pytorch
         uses: actions/checkout@v4
