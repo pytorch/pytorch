@@ -134,6 +134,18 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // Set to true in capture_end if cudaGraphInstantiate succeeded
   bool has_graph_exec_ = false;
 
+  // Set to true in capture_begin once a private pool has been acquired
+  // (beginAllocateToPool). Tells reset() it must release the pool, even if the
+  // capture failed before capture_end() completed. Otherwise a failed capture
+  // leaks the pool: its use_count never returns to zero, so empty_cache can
+  // never reclaim its segments for the rest of the process.
+  bool allocated_pool_ = false;
+  // Set to true in capture_begin after beginAllocateToPool and cleared in
+  // capture_end after endAllocateToPool. Tells reset() whether the allocator is
+  // still routing allocations to the pool (capture abandoned before capture_end
+  // ran) and must be ended before the pool can be released.
+  bool capturing_to_pool_ = false;
+
   // the ID assigned by cuda during graph capture,
   // used to identify when a stream is participating in capture
   CaptureId_t capture_id_ = 0;

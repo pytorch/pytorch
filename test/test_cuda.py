@@ -2953,6 +2953,43 @@ torch.cuda.synchronize()
             after, baseline, "Leaked CUDA/RNG allocations after failed capture test"
         )
 
+    @skipIfRocmVersionLessThan((7, 14))
+    @xfailCUDAIfSM89OrLaterOnWindows
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_error_releases_reserved_segments(self):
+        # A failed capture (capture_end raises) must still release the graph's
+        # private mempool on reset(); otherwise its reserved segments leak for
+        # the rest of the process. Unlike test_graph_rng_after_failed_capture,
+        # which asserts on active.all.current (no leaked live allocations), this
+        # checks memory_reserved(): a leaked pool can show zero active bytes yet
+        # still hold reserved segments, so only this assertion catches the leak.
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        reserved_before = torch.cuda.memory_reserved()
+
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.stream(s):
+            g.capture_begin()
+            x = torch.empty(8 * 1024 * 1024, device="cuda")
+            # A synchronizing op during capture invalidates it, but we must
+            # still call capture_end() so the stream's capture is ended (with an
+            # error); otherwise the stream is left mid-capture and teardown fails.
+            with self.assertRaises(RuntimeError):
+                torch.cuda.synchronize()
+            with self.assertRaises(RuntimeError):
+                g.capture_end()
+
+        del x
+        g.reset()
+        del g
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        self.assertEqual(torch.cuda.memory_reserved(), reserved_before)
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -5487,6 +5524,7 @@ class TestCudaAllocator(TestCase):
                         self.assertTrue("test_cuda.py" in f2.read())
             del unused
             del x
+            torch._C._cuda_clearCublasWorkspaces()
             torch.cuda.empty_cache()
             ss = torch.cuda.memory._snapshot()
             self.assertTrue(
@@ -5756,6 +5794,10 @@ class TestCudaAllocator(TestCase):
 
         try:
             torch.cuda.memory.empty_cache()
+            # Region ids come from Dynamo's process-global frame counter, which
+            # reset() zeroes; do it before compiling so the region strings are
+            # deterministic.
+            torch._dynamo.reset()
             input_tensor = torch.randn(1, 10, device="cuda")
             # Create an instance of the model
             model = MyModel()
@@ -5779,14 +5821,19 @@ class TestCudaAllocator(TestCase):
                 if len(allocation_sequence) > 0 and allocation_sequence[-1] == context:
                     continue
                 allocation_sequence.append(context)
-            self.assertTrue(allocation_sequence == expected_allocation_sequence)
+            self.assertEqual(allocation_sequence, expected_allocation_sequence)
         except RuntimeError as e:
             pass
         finally:
             torch.cuda.memory._record_memory_history(None)
+            # Clean up the model and input tensor to fix memory leaks in other tests
+            del compiled_model, model, input_tensor
+            ss = None
+            torch._dynamo.reset()
             # This test requires to run gc.collec() to fix other memory tests
-            torch.cuda.synchronize()
             gc.collect()
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
