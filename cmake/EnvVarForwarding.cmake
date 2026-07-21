@@ -41,7 +41,6 @@ set(_ENV_PASSTHROUGH
   TORCH_CUDA_ARCH_LIST
   TORCH_XPU_ARCH_LIST
   TRACING_BASED
-  PYTHON_LIB_REL_PATH
 )
 
 # Low-priority aliases: if the canonical var is not set, use the alias.
