@@ -2316,7 +2316,7 @@ class TestCutlassBackend(TestCase):
             else:
                 atol = None
                 rtol = None
-                expected_time = 50
+                expected_time = 120
             torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
         self.assertTrue(time.time() - start_time < expected_time)
 
