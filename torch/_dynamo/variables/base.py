@@ -2933,7 +2933,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     @property
     def tp_dict(self):
-        return _tp_dict(self.python_type())
+        return _tp_dict(maybe_get_python_type(self))
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """
