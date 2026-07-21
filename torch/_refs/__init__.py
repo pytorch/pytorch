@@ -3386,7 +3386,7 @@ def native_group_norm(
     # Match contiguous behavior of eager implementation.  Only necessary for ref tests.
     mem_fmt = (
         torch.contiguous_format
-        if input.device.type != "cpu"
+        if input.device.type not in ("cpu", torch._C._get_privateuse1_backend_name())
         else utils.suggest_memory_format(input)
     )
     input = input.contiguous(memory_format=mem_fmt)
