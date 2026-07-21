@@ -5013,11 +5013,74 @@ def _raise_if_copy_has_partial_overlap(self: IRNode, src: IRNode) -> bool:
     _raise_copy_overlap_error()
 
 
+def _copy_pointwise(self, src, non_blocking=False):
+    if not isinstance(src, ir.IRNode):
+        src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
+    x = src
+    if self.get_device() != src.get_device():
+        x = to_device(x, self.get_device())
+    if self.get_dtype() != src.get_dtype():
+        x = to_dtype(x, self.get_dtype())
+
+    if self.get_size() != src.get_size():
+        out = expand(x, self.get_size())
+        result = clone(out)
+    else:
+        result = clone(x)
+
+    self_layout = self.maybe_get_layout()
+    if self_layout is not None and self_layout.is_pinned:
+        _realize_as_pinned(result)
+    return result
+
+
+_COPY_STORAGE_OBSERVING_TARGETS = (
+    aten.as_strided.default,
+    aten.as_strided_scatter.default,
+    aten.view.dtype,
+    prims.as_strided_scatter.default,
+)
+
+
+def _copy_user_observes_storage(user: torch.fx.Node, copy_node: torch.fx.Node) -> bool:
+    if user.op == "output":
+        return True
+    if (
+        user.op == "call_function"
+        and user.target is aten.copy_.default
+        and len(user.args) >= 2
+        and user.args[1] is copy_node
+    ):
+        return False
+    if user.op != "call_function":
+        return True
+    if user.target in _COPY_STORAGE_OBSERVING_TARGETS:
+        return True
+    return not is_pointwise_use(user)
+
+
+def _copy_result_must_preserve_self_storage() -> bool:
+    current_node = V.graph.current_node
+    if current_node is None or current_node.target is not aten.copy.default:
+        return False
+
+    return any(
+        _copy_user_observes_storage(user, current_node) for user in current_node.users
+    )
+
+
 @register_lowering(aten.copy, type_promotion_kind=None)
 def copy(self, src, non_blocking=False):
     if not isinstance(src, ir.IRNode):
         src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
-    return fallback_handler(aten.copy.default)(self, src, non_blocking)
+    if (
+        _copy_inplace_needs_native_graph_input_overlap_check(self, src)
+        or _has_fallback_storage(self)
+        or _copy_result_must_preserve_self_storage()
+    ):
+        return fallback_handler(aten.copy.default)(self, src, non_blocking)
+    _raise_if_copy_has_partial_overlap(self, src)
+    return _copy_pointwise(self, src, non_blocking)
 
 
 @register_lowering(aten.clone)
@@ -9894,7 +9957,7 @@ register_foreach_pointwise(aten._foreach_clamp_max.Scalar, minimum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
 register_foreach_pointwise(aten._foreach_clone, clone)
-foreach_copy = register_foreach_pointwise(aten._foreach_copy, copy)
+foreach_copy = register_foreach_pointwise(aten._foreach_copy, _copy_pointwise)
 
 
 # these are only encountered as outputs of the graph

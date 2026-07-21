@@ -456,7 +456,7 @@ class CppTemplateKernel(CppKernel):
         else:
             if dst.get_name() != src.get_name():
                 # src is local
-                copy = L.copy(dst, src).data.data
+                copy = L._copy_pointwise(dst, src).data.data
                 with LocalBufferContext(self.args) as scope:
                     scope.add_local_buffer(src)
 
@@ -515,7 +515,7 @@ class CppTemplateKernel(CppKernel):
                                 in all_read_names
                                 and orig_src[gemm_idx].get_name() not in all_read_names
                             ):
-                                # Epilogue might directly read the MultiOutput, Locallize MultiOutput to the local Buffer
+                                # Epilogue might directly read the MultiOutput, Localize MultiOutput to the local Buffer
                                 # if this MultiOutput has not been stored by in-template epilogue
                                 # otherwise, use the cse store cache if it will be stored before used
                                 global_buffers.append(multi_output_buffers[gemm_idx])
@@ -526,7 +526,11 @@ class CppTemplateKernel(CppKernel):
                         else:
                             scope.add_local_buffer(src[gemm_idx])
                             localize_epilogue_nodes.extend(
-                                [L.copy(dst[gemm_idx], src[gemm_idx]).data.data]
+                                [
+                                    L._copy_pointwise(
+                                        dst[gemm_idx], src[gemm_idx]
+                                    ).data.data
+                                ]
                             )
                             reindexers.append(None)
                             output_names.append(dst[gemm_idx].get_name())
@@ -559,7 +563,7 @@ class CppTemplateKernel(CppKernel):
                 copy_list = []
                 with LocalBufferContext(self.args) as scope:
                     for _src, _dst in zip(src, dst):
-                        copy_list.extend([L.copy(_dst, _src).data.data])
+                        copy_list.extend([L._copy_pointwise(_dst, _src).data.data])
                         scope.add_local_buffer(_src)
                         output_names.append(_dst.get_name())
                         final_offsets.append([sympy.S.Zero] * len(_dst.get_size()))

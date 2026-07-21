@@ -3,7 +3,6 @@
 import functools
 import itertools
 import logging
-import math
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
@@ -70,6 +69,7 @@ from ..utils import (
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
 from ..virtualized import V
+from . import copy_overlap
 from .b2b_gemm import B2B_GEMM_PASS
 from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
@@ -80,6 +80,13 @@ from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
 
+
+_static_int = copy_overlap.static_int
+_tensors_have_disjoint_byte_bands = copy_overlap.tensors_have_disjoint_byte_bands
+_tensors_have_disjoint_byte_residue = copy_overlap.tensors_have_disjoint_byte_residue
+_tensors_have_exact_disjoint_byte_intervals = (
+    copy_overlap.tensors_have_exact_disjoint_byte_intervals
+)
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
@@ -1034,16 +1041,26 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
     """Based on a pattern in OPTForCausalLM"""
 
     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
+        # match full()'s fill_value cast
+        fill_value = int(bool(fill_value) if is_boolean_dtype(dtype) else fill_value)
         # cumsum promotes all integral types to int64
         dtype = torch.int64
 
+    out_dtype = match.output_node().kwargs.get("dtype") or dtype
+    bool_out = is_boolean_dtype(out_dtype)  # pyrefly: ignore[bad-argument-type]
+    # pyrefly: ignore[bad-argument-type]
+    integral_out = bool_out or is_integer_dtype(out_dtype)
+    if integral_out:
+        fill_value = int(bool(fill_value) if bool_out else fill_value)
+    acc_dtype = torch.int64 if integral_out else torch.float64
+
     def repl(*shape):
         dim_size = shape[dim]
-        idx = torch.arange(1, dim_size + 1, device=device, dtype=dtype)
+        idx = torch.arange(1, dim_size + 1, device=device, dtype=acc_dtype)
 
         inter_shape = [1] * len(shape)
         inter_shape[dim] = dim_size
-        return (idx * fill_value).view(inter_shape).expand(shape)
+        return (idx * fill_value).view(inter_shape).expand(shape).to(out_dtype)
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
@@ -1682,173 +1699,6 @@ def fix_auto_functionalized_dtype_views(graph: torch.fx.Graph) -> None:
             node.meta["only_clone_these_tensors"] = keep
 
 
-_COPY_OVERLAP_EXACT_MAX_ELEMENTS = 65536
-
-
-def _static_int(x: object) -> int | None:
-    try:
-        return int(x)  # type: ignore[arg-type]
-    except (GuardOnDataDependentSymNode, TypeError, ValueError):
-        return None
-
-
-def _byte_intervals_for_tensor(
-    val: torch.Tensor,
-) -> list[tuple[int, int]] | None:
-    sizes = [_static_int(size) for size in val.size()]
-    strides = [_static_int(stride) for stride in val.stride()]
-    storage_offset = _static_int(val.storage_offset())
-    if (
-        storage_offset is None
-        or any(size is None for size in sizes)
-        or any(stride is None for stride in strides)
-    ):
-        return None
-
-    concrete_sizes = [size for size in sizes if size is not None]
-    concrete_strides = [stride for stride in strides if stride is not None]
-    numel = 1
-    for size in concrete_sizes:
-        numel *= size
-        if numel > _COPY_OVERLAP_EXACT_MAX_ELEMENTS:
-            return None
-
-    itemsize = val.element_size()
-    intervals = []
-    for point in itertools.product(*(range(size) for size in concrete_sizes)):
-        storage_index = storage_offset + sum(
-            index * stride for index, stride in zip(point, concrete_strides)
-        )
-        start = storage_index * itemsize
-        intervals.append((start, start + itemsize))
-    return intervals
-
-
-def _byte_interval_sets_are_disjoint(
-    lhs: list[tuple[int, int]], rhs: list[tuple[int, int]]
-) -> bool:
-    lhs = sorted(lhs)
-    rhs = sorted(rhs)
-    lhs_idx = rhs_idx = 0
-    while lhs_idx < len(lhs) and rhs_idx < len(rhs):
-        lhs_start, lhs_end = lhs[lhs_idx]
-        rhs_start, rhs_end = rhs[rhs_idx]
-        if lhs_end <= rhs_start:
-            lhs_idx += 1
-        elif rhs_end <= lhs_start:
-            rhs_idx += 1
-        else:
-            return False
-    return True
-
-
-def _tensors_have_exact_disjoint_byte_intervals(
-    lhs: torch.Tensor, rhs: torch.Tensor
-) -> bool:
-    lhs_intervals = _byte_intervals_for_tensor(lhs)
-    rhs_intervals = _byte_intervals_for_tensor(rhs)
-    if lhs_intervals is None or rhs_intervals is None:
-        return False
-    return _byte_interval_sets_are_disjoint(lhs_intervals, rhs_intervals)
-
-
-def _byte_stride_gcd(val: torch.Tensor) -> int | None:
-    sizes = [_static_int(size) for size in val.size()]
-    strides = [_static_int(stride) for stride in val.stride()]
-    if any(size is None for size in sizes) or any(stride is None for stride in strides):
-        return None
-
-    result = 0
-    for size, stride in zip(sizes, strides):
-        if size is None or stride is None or size <= 1 or stride == 0:
-            continue
-        result = math.gcd(result, abs(stride * val.element_size()))
-    return result
-
-
-def _tensors_have_disjoint_byte_residue(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
-    lhs_offset = _static_int(lhs.storage_offset())
-    rhs_offset = _static_int(rhs.storage_offset())
-    lhs_gcd = _byte_stride_gcd(lhs)
-    rhs_gcd = _byte_stride_gcd(rhs)
-    if lhs_offset is None or rhs_offset is None or lhs_gcd is None or rhs_gcd is None:
-        return False
-    combined_gcd = math.gcd(lhs_gcd, rhs_gcd)
-    if combined_gcd == 0:
-        return False
-
-    lhs_start = lhs_offset * lhs.element_size()
-    rhs_start = rhs_offset * rhs.element_size()
-    residue = (lhs_start - rhs_start) % combined_gcd
-    distance = min(residue, combined_gcd - residue)
-    return distance >= max(lhs.element_size(), rhs.element_size())
-
-
-def _tensor_residual_byte_range(
-    val: torch.Tensor, excluded_dim: int
-) -> tuple[int, int] | None:
-    sizes = [_static_int(size) for size in val.size()]
-    strides = [_static_int(stride) for stride in val.stride()]
-    storage_offset = _static_int(val.storage_offset())
-    if (
-        storage_offset is None
-        or any(size is None for size in sizes)
-        or any(stride is None for stride in strides)
-    ):
-        return None
-
-    itemsize = val.element_size()
-    start = storage_offset * itemsize
-    min_offset = start
-    max_offset = start
-    for dim, (size, stride) in enumerate(zip(sizes, strides)):
-        if dim == excluded_dim or size is None or stride is None or size <= 1:
-            continue
-        delta = (size - 1) * stride * itemsize
-        min_offset += min(delta, 0)
-        max_offset += max(delta, 0)
-    return min_offset, max_offset + itemsize
-
-
-def _tensors_have_disjoint_byte_bands(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
-    lhs_sizes = [_static_int(size) for size in lhs.size()]
-    rhs_sizes = [_static_int(size) for size in rhs.size()]
-    lhs_strides = [_static_int(stride) for stride in lhs.stride()]
-    rhs_strides = [_static_int(stride) for stride in rhs.stride()]
-    if (
-        any(size is None for size in lhs_sizes)
-        or any(size is None for size in rhs_sizes)
-        or any(stride is None for stride in lhs_strides)
-        or any(stride is None for stride in rhs_strides)
-    ):
-        return False
-
-    lhs_itemsize = lhs.element_size()
-    rhs_itemsize = rhs.element_size()
-    for lhs_dim, (lhs_size, lhs_stride) in enumerate(zip(lhs_sizes, lhs_strides)):
-        if lhs_size is None or lhs_stride is None or lhs_size <= 1:
-            continue
-        lhs_byte_stride = lhs_stride * lhs_itemsize
-        if lhs_byte_stride <= 0:
-            continue
-        for rhs_dim, (rhs_size, rhs_stride) in enumerate(zip(rhs_sizes, rhs_strides)):
-            if rhs_size is None or rhs_stride is None or rhs_size <= 1:
-                continue
-            rhs_byte_stride = rhs_stride * rhs_itemsize
-            if rhs_byte_stride != lhs_byte_stride:
-                continue
-            lhs_range = _tensor_residual_byte_range(lhs, lhs_dim)
-            rhs_range = _tensor_residual_byte_range(rhs, rhs_dim)
-            if lhs_range is None or rhs_range is None:
-                continue
-            if lhs_range[1] <= rhs_range[0] or rhs_range[1] <= lhs_range[0]:
-                union_start = min(lhs_range[0], rhs_range[0])
-                union_end = max(lhs_range[1], rhs_range[1])
-                if union_end - union_start <= lhs_byte_stride:
-                    return True
-    return False
-
-
 def reject_dtype_view_copy_aliases(graph: torch.fx.Graph) -> None:
     for node in graph.nodes:
         if (
@@ -1867,8 +1717,12 @@ def reject_dtype_view_copy_aliases(graph: torch.fx.Graph) -> None:
         self, src = node.args[:2]
         self_storage = get_node_storage(self)
         src_storage = get_node_storage(src)
-        self_val = self.meta["val"]
-        src_val = src.meta["val"]
+        self_val = self.meta.get("val")
+        src_val = src.meta.get("val")
+        if not isinstance(self_val, torch.Tensor) or not isinstance(
+            src_val, torch.Tensor
+        ):
+            continue
         if self_val.element_size() == src_val.element_size():
             continue
         if self_storage is None or src_storage is None or self_storage != src_storage:
@@ -1877,24 +1731,27 @@ def reject_dtype_view_copy_aliases(graph: torch.fx.Graph) -> None:
             sym_eq(src_val.numel(), 0)
         ):
             continue
-        self_start = self_val.storage_offset() * self_val.element_size()
-        self_end = (
-            compute_required_storage_length(
-                self_val.size(), self_val.stride(), self_val.storage_offset()
+        self_storage_offset = _static_int(self_val.storage_offset())
+        src_storage_offset = _static_int(src_val.storage_offset())
+        if self_storage_offset is not None and src_storage_offset is not None:
+            self_start = self_storage_offset * self_val.element_size()
+            self_end = (
+                compute_required_storage_length(
+                    self_val.size(), self_val.stride(), self_storage_offset
+                )
+                * self_val.element_size()
             )
-            * self_val.element_size()
-        )
-        src_start = src_val.storage_offset() * src_val.element_size()
-        src_end = (
-            compute_required_storage_length(
-                src_val.size(), src_val.stride(), src_val.storage_offset()
+            src_start = src_storage_offset * src_val.element_size()
+            src_end = (
+                compute_required_storage_length(
+                    src_val.size(), src_val.stride(), src_storage_offset
+                )
+                * src_val.element_size()
             )
-            * src_val.element_size()
-        )
-        if statically_known_true(self_end <= src_start) or statically_known_true(
-            src_end <= self_start
-        ):
-            continue
+            if statically_known_true(self_end <= src_start) or statically_known_true(
+                src_end <= self_start
+            ):
+                continue
         if _tensors_have_disjoint_byte_residue(self_val, src_val):
             continue
         if _tensors_have_disjoint_byte_bands(self_val, src_val):

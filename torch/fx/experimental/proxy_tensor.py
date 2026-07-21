@@ -3189,6 +3189,20 @@ class _MakefxTracer:
             stack.enter_context(disable_autocast_cache())
             stack.enter_context(_set_make_fx_tracer(self))
 
+            # Under compile-on-one-rank, redirect legacy in-place c10d
+            # collectives to functional collectives so the ProcessGroup flows
+            # into the graph as a (serializable) op argument instead of being
+            # baked in as a torchbind constant by the in-place op.
+            if (
+                torch.compiler.config.compile_on_one_rank
+                and torch.distributed.is_available()
+            ):
+                from torch.distributed._functional_collectives import (
+                    _LegacyToFunctionalCollectiveMode,
+                )
+
+                stack.enter_context(_LegacyToFunctionalCollectiveMode())
+
             if self.fx_tracer is None:
                 raise AssertionError("fx_tracer should not be None")
             try:
