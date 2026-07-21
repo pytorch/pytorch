@@ -1,5 +1,6 @@
 #include <torch/csrc/utils/pybind.h>
 
+#if defined(USE_CUSPARSELT) || defined(USE_HIPSPARSELT)
 #include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
 #ifdef USE_HIPSPARSELT
 #include <hipsparselt/hipsparselt-version.h>
@@ -58,3 +59,4 @@ void initCusparseltBindings(PyObject* module) {
 }
 
 } // namespace torch::cuda::shared
+#endif
