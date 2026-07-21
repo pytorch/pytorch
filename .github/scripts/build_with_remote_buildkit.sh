@@ -13,16 +13,17 @@ esac
 docker buildx create --name remote-buildkit --driver remote --use "${buildkit_addr}" >/dev/null 2>&1 \
   || docker buildx use remote-buildkit
 
+log="$(mktemp)"
+trap 'rm -f "${log}"' EXIT
+
 attempts="${REMOTE_BUILDKIT_CONNECT_ATTEMPTS:-40}"
 delay="${REMOTE_BUILDKIT_CONNECT_DELAY:-15}"
 for attempt in $(seq 1 "${attempts}"); do
-  log="$(mktemp)"
   set +e
   "$@" 2>&1 | tee "${log}"
   rc="${PIPESTATUS[0]}"
   set -e
   if [[ "${rc}" -eq 0 ]]; then
-    rm -f "${log}"
     exit 0
   fi
   # Retry only while buildx never reached a worker (cold pool). Once BuildKit has
@@ -32,10 +33,8 @@ for attempt in $(seq 1 "${attempts}"); do
      && ! grep -qE "load build definition|transferring context|\[[0-9 ]+/[0-9 ]+\]" "${log}" \
      && grep -qiE "waiting for connection|failed to (dial|list workers)|connection (refused|reset)|no such host|context deadline exceeded|server preface" "${log}"; then
     echo "Remote BuildKit not ready yet (attempt ${attempt}/${attempts}); retrying in ${delay}s..." >&2
-    rm -f "${log}"
     sleep "${delay}"
     continue
   fi
-  rm -f "${log}"
   exit "${rc}"
 done
