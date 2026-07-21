@@ -5500,7 +5500,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_dispatcher(
     std::tie(dX, dgamma, dbeta) =
         infinitely_differentiable_native_group_norm_backward(
             dY, X, mean, rstd, gamma, N, C, HxW, group, grad_input_mask);
-  } else {
+  } else if (dY.defined()) {
     std::tie(dX, dgamma, dbeta) = at::native_group_norm_backward_symint(
         dY, X, mean, rstd, gamma, N, C, HxW, group, grad_input_mask);
   }
