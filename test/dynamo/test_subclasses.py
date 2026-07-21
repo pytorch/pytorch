@@ -1268,9 +1268,13 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         self.assertEqual(cnt.frame_count, 1)
 
     def test_async_collective_tensor_inner_access(self):
-        # Reading the ACT inner tensor must trace and reconstruct through the
-        # unwrap accessor. At runtime a plain Tensor reuses the graph (the unwrap
-        # accessor yields it unchanged), so alternate ACT and plain Tensor.
+        # Reading the ACT inner tensor (w.elem) under fullgraph must trace and
+        # reconstruct it correctly -- for an ACT input the inner tensor is guarded
+        # through UnwrapCollectiveTensorSource, so this exercises that source's
+        # reconstruct() (whose absence previously hard-errored). The isinstance
+        # check discriminates ACT from Tensor, so the two classes compile separate
+        # graphs (no reuse here); the plain-Tensor reuse path is covered by
+        # test_async_collective_tensor_input_polymorphism.
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -1310,6 +1314,13 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
     def test_async_collective_tensor_type_introspection_recompiles(self, channel):
         # A region that observes the ACT class must recompile on the class change
         # and stay correct: the relaxed class guard is reinstalled on observation.
+        # The non-observing control below (same matmul, no class check) reuses one
+        # graph across the ACT/Tensor alternation, so the extra compile is caused
+        # by the observation, not by the input class per se. This is what pins the
+        # reinstall-on-observation behavior: without the relaxation the control
+        # would recompile too (ACT vs Tensor guards differ regardless), so a plain
+        # "observing recompiles" assertion would pass even if the relaxation
+        # regressed.
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
         def make_fn(channel):
@@ -1345,15 +1356,24 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
 
             return fn
 
-        cnt = torch._dynamo.testing.CompileCounter()
-        fn = make_fn(channel)
-        step = torch.compile(fn, backend=cnt, fullgraph=True)
-        x = torch.randn(4, 4)
-        base = torch.randn(4, 4)
-        for i in range(4):
-            w = AsyncCollectiveTensor(base) if i % 2 == 0 else base
-            self.assertEqual(step(x, w), fn(x, w))
-        self.assertEqual(cnt.frame_count, 2)
+        def control(x, w):
+            return (x @ w).sum()
+
+        def run(f):
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounter()
+            step = torch.compile(f, backend=cnt, fullgraph=True)
+            x = torch.randn(4, 4)
+            base = torch.randn(4, 4)
+            for i in range(4):
+                w = AsyncCollectiveTensor(base) if i % 2 == 0 else base
+                self.assertEqual(step(x, w), f(x, w))
+            return cnt.frame_count
+
+        # Observing the class recompiles across the ACT<->Tensor change...
+        self.assertEqual(run(make_fn(channel)), 2)
+        # ...while the same computation without the class check reuses one graph.
+        self.assertEqual(run(control), 1)
 
     @parametrize("channel", ["isinstance", "isinstance_tuple", "match"])
     def test_async_collective_tensor_nondiscriminating_checks_reuse(self, channel):
