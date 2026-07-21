@@ -93,13 +93,13 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
-    build,
     GetSet,
+    getset_build,
+    getset_read,
     Member,
     Method,
     MethodFlags,
     NO_SUCH_SUBOBJ,
-    read,
     ValueMutationNew,
     VariableTracker,
 )
@@ -1206,6 +1206,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
         self.remaining_items: list[VariableTracker] = []
+        inline_tracer.output.track_generator(self)
 
     def get_code(self) -> types.CodeType:
         return self.code
@@ -1262,6 +1263,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
+    def pygen_yf(self) -> VariableTracker | None:
+        if self.inline_tracer.frame_state == FrameState.FRAME_SUSPENDED_YIELD_FROM:
+            return self.inline_tracer.stack[-1]
+        return None
+
     def gen_send_ex2(
         self,
         tx: "InstructionTranslatorBase",
@@ -1297,6 +1303,37 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 if exc:
                     self.throw_pending()
                 return tracer.inline_call_()
+        except ObservedUserStopIteration:
+            # PEP 479: pre-3.12 has no STOPITERATION_ERROR opcode, so convert a
+            # StopIteration that escapes the generator body to RuntimeError here
+            # at the frame boundary. https://github.com/python/cpython/pull/99006
+            # A normal return sets FRAME_CLEARED and raises a synthetic
+            # StopIteration to signal exhaustion; that one must stay a
+            # StopIteration, so only convert when the body was still executing.
+            was_executing = tracer.frame_state == FrameState.FRAME_EXECUTING
+            tracer.frame_state = FrameState.FRAME_COMPLETED
+            if sys.version_info < (3, 12) and was_executing:
+                # Match CPython's _PyErr_FormatFromCause: set __context__ and
+                # __cause__ directly rather than pushing onto the exception
+                # stack (which must stay balanced -- genobject.c pops the
+                # generator's gi_exc_state before the conversion runs, so the
+                # caller's stack is left unchanged). do_raise sets __cause__;
+                # set __context__ first so set_exception_obj's implicit chaining
+                # leaves it untouched.
+                prev = tracer.exn_vt_stack.get_raised_exception()
+                rt = VariableTracker.build(tx, RuntimeError).call_function(
+                    tx,
+                    [VariableTracker.build(tx, "generator raised StopIteration")],
+                    {},
+                )
+                rt.call_method(
+                    tx,
+                    "__setattr__",
+                    [ConstantVariable.create("__context__"), prev],
+                    {},
+                )
+                tx.do_raise(rt, prev)
+            raise
         except ObservedException:
             # An exception propagating out of the generator frame finishes it,
             # mirroring CPython setting gi_frame_state = FRAME_CLEARED.
@@ -1366,14 +1403,17 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", exc: VariableTracker
     ) -> None:
         # Set up the exception to be raised in the generator frame
-        from torch._dynamo.symbolic_convert import ExceptionVals
+        from torch._dynamo.symbolic_convert import ExceptionTypes, ExceptionVals
 
-        val = exc
-        if isinstance(exc, variables.BuiltinVariable):
-            val = exc.call_function(tx, [], {})
+        # Instantiate if an exception type was passed (builtin or user-defined).
+        if not isinstance(exc, (ExceptionTypes, ExceptionVals)):
+            raise TypeError(
+                f"Expected an exception type or instance, got {exc.python_type_name()}"
+            )
+        val = tx._create_exception_instance(exc)
         if not isinstance(val, ExceptionVals):
             raise AssertionError(f"Expected an exception variable, got {val}")
-        self.inline_tracer.exn_vt_stack.set_current_exception(val, set_context=False)
+        self.inline_tracer.exn_vt_stack.set_raised_exception(val)
 
     def _frame_state_created(self) -> bool:
         return self.inline_tracer.frame_state == FrameState.FRAME_CREATED
@@ -1428,16 +1468,31 @@ class LocalGeneratorObjectVariable(VariableTracker):
         if self._frame_state_finished():
             return ConstantVariable.create(None)
 
-        self._setup_exception(tx, VariableTracker.build(tx, GeneratorExit))
+        err = False
+        yf = self.pygen_yf()
+        if yf:
+            with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
+                try:
+                    yf.call_method(tx, "close", [], {})
+                except ObservedException:
+                    err = True
+
+        if err is False:
+            self._setup_exception(tx, VariableTracker.build(tx, GeneratorExit))
 
         try:
             self.gen_send_ex(tx, ConstantVariable.create(None), True)
-        except ObservedGeneratorExit:
+        except ObservedGeneratorExit as e:
+            # Drop the traceback to break the exception -> traceback -> frame ->
+            # (raised_exception, self) reference cycle. Otherwise the generator's
+            # inline_tracer (and the OutputGraph it points at) survives until
+            # cyclic GC instead of being freed by refcount at frame exit.
+            e.__traceback__ = None
             return ConstantVariable.create(None)
         except ObservedUserStopIteration:
             # generator returned a value while closing. gen_send_ex() raises
             # StopIteration with the value returned
-            curr_exc = tracer.exn_vt_stack.get_current_exception()
+            curr_exc = tracer.exn_vt_stack.get_raised_exception()
             if not isinstance(curr_exc, variables.ExceptionVariable):
                 # make pyrefly happy
                 raise AssertionError(
@@ -1456,10 +1511,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def throw_pending(self) -> None:
         tracer = self.inline_tracer
-        curr_exc = tracer.exn_vt_stack.get_current_exception()
+        curr_exc = tracer.exn_vt_stack.get_raised_exception()
         observed = get_dynamo_observed_exception(curr_exc.python_type())()
-        # TODO: This is a temporary workaround
-        tracer.exn_vt_stack.set_current_exception(curr_exc)
+        curr_type = VariableTracker.build(tracer, curr_exc.exc_type)
+        tracer.set_exception_obj(curr_type, curr_exc)
         tracer.exception_handler(observed)
 
     def gen_throw(
@@ -1473,10 +1528,34 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # * If the generator exits without yielding, raise StopIteration
         # * If the generator function does not catch the passed-in exception,
         # or raises a different exception, then that exception propagates to the caller.
+        def throw_here():
+            self._setup_exception(tx, arg)
+            return self.gen_send_ex(tx, ConstantVariable.create(None), True)
+
+        from torch._dynamo.symbolic_convert import pyerr_given_exception_match
 
         arg = args[1] if len(args) > 1 else args[0]
-        self._setup_exception(tx, arg)
-        return self.gen_send_ex(tx, ConstantVariable.create(None), True)
+        yf = self.pygen_yf()
+        tracer = self.inline_tracer
+
+        if yf:
+            # CPython has an extra flag for handling async generators
+            if pyerr_given_exception_match(arg, GeneratorExit):
+                try:
+                    # CPython uses gen_close_iter here
+                    with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
+                        yf.call_method(tx, "close", [], {})
+                except ObservedException:
+                    pass
+                return throw_here()
+
+            try:
+                with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
+                    return yf.call_method(tx, "throw", [arg], {})
+            except ObservedException:
+                return self.gen_send_ex(tx, ConstantVariable.create(None), True)
+
+        return throw_here()
 
     tp_methods = {
         "send": Method(gen_send, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
@@ -1609,27 +1688,6 @@ class FunctionDecoratedByContextlibContextManagerVariable(
             generator_cls=ContextlibContextManagerLocalGeneratorObjectVariable,
             **kwargs,
         )
-
-    def _build_inline_tracer(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> "InliningGeneratorInstructionTranslator":
-        # NOTE: This only exists to not break support for context manager when
-        # config.enable_faithful_generator_behavior = False and
-        # config.enable_trace_contextlib = True. In case the former is false,
-        # Dynamo should still be able to trace through @contextmanager functions
-        tracer = super()._build_inline_tracer(tx, args, kwargs)
-        if not isinstance(
-            tracer,
-            torch._dynamo.symbolic_convert.InliningGeneratorInstructionTranslator,
-        ):
-            raise AssertionError(
-                f"expected InliningGeneratorInstructionTranslator, got {type(tracer)}"
-            )
-        tracer.is_generator_from_ctx_manager = True
-        return tracer
 
 
 class UserMethodVariable(UserFunctionVariable):
@@ -1765,7 +1823,7 @@ class UserMethodVariable(UserFunctionVariable):
     # __self__ / __func__ are read-only members on method objects.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L20-L24
     tp_members = {
-        "__self__": Member(read(lambda s: s.obj)),
+        "__self__": Member(getset_read(lambda s: s.obj)),
         "__func__": Member(_get_func, None),
     }
 
@@ -2342,7 +2400,29 @@ class SkipFunctionVariable(VariableTracker):
             )
             return VariableTracker.build(tx, result)
 
-        if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+        def unimplemented_direct_disable_call(api_name: str) -> Never:
+            # The registry linter keys off this helper name and records concrete
+            # entries from the call sites below. Use an alias here so the
+            # parameterized helper body is not recorded as a generic
+            # `{api_name}` entry.
+            _unimplemented = unimplemented
+            _unimplemented(
+                gb_type=f"Call to `{api_name}()`",
+                context=f"Called `{api_name}()` with args `{args}`, kwargs `{kwargs}`",
+                explanation=f"`{api_name}()` was called inside a compiled region. "
+                "This API disables compilation when used as a decorator or wrapper "
+                "outside the compiled region.",
+                hints=[
+                    f"Move the `{api_name}()` call outside the compiled function and apply it to the function that should run eagerly.",
+                    "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.",
+                ],
+            )
+
+        if self.value is torch._dynamo.disable:
+            unimplemented_direct_disable_call("torch._dynamo.disable")
+        elif self.value is torch.compiler.disable:
+            unimplemented_direct_disable_call("torch.compiler.disable")
+        elif inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented(
                 gb_type="Skip calling `torch.compiler.disable()`d function",
@@ -2675,7 +2755,10 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         )
 
     def get_real_python_backed_value(self) -> object:
-        return getattr(self.wrapper_obj, self.attr_to_trace)
+        # This VT stands for the wrapper, which is also what self.source
+        # denotes. The inline target is reached via attr_to_trace and is a
+        # different object.
+        return self.wrapper_obj
 
 
 class WrapperUserMethodVariable(WrapperUserFunctionVariable):
@@ -3959,8 +4042,8 @@ class WrapperDescriptorVariable(VariableTracker):
         return self.descriptor
 
     tp_members = {
-        "__objclass__": Member(build(lambda s: s.descriptor.__objclass__)),
-        "__name__": Member(build(lambda s: s.descriptor.__name__)),
+        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__)),
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__)),
     }
 
     def call_function(
@@ -4139,8 +4222,8 @@ class MethodDescriptorVariable(VariableTracker):
         return self.descriptor
 
     tp_members = {
-        "__objclass__": Member(build(lambda s: s.descriptor.__objclass__)),
-        "__name__": Member(build(lambda s: s.descriptor.__name__)),
+        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__)),
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__)),
     }
 
     def call_function(
@@ -4299,8 +4382,8 @@ class ClassMethodDescriptorVariable(VariableTracker):
         return self.descriptor
 
     tp_members = {
-        "__objclass__": Member(build(lambda s: s.descriptor.__objclass__)),
-        "__name__": Member(build(lambda s: s.descriptor.__name__)),
+        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__)),
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__)),
     }
 
     def tp_descr_get_impl(
@@ -4452,8 +4535,8 @@ class MemberDescriptorVariable(VariableTracker):
         return self.descriptor
 
     tp_members = {
-        "__objclass__": Member(build(lambda s: s.descriptor.__objclass__)),
-        "__name__": Member(build(lambda s: s.descriptor.__name__)),
+        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__)),
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__)),
     }
 
     def tp_descr_get_impl(
@@ -4528,8 +4611,8 @@ class GetSetDescriptorVariable(VariableTracker):
     }
 
     tp_members = {
-        "__objclass__": Member(build(lambda s: s.descriptor.__objclass__)),
-        "__name__": Member(build(lambda s: s.descriptor.__name__)),
+        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__)),
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__)),
     }
 
     def is_python_constant(self) -> bool:
@@ -4677,7 +4760,7 @@ class TupleGetterVariable(VariableTracker):
 
     # _tuplegetter exposes __doc__ as a T_OBJECT member.
     # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L2717-L2721
-    tp_members = {"__doc__": Member(build(lambda s: s.descriptor.__doc__))}
+    tp_members = {"__doc__": Member(getset_build(lambda s: s.descriptor.__doc__))}
 
     def tp_descr_get_impl(
         self,
