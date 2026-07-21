@@ -23,8 +23,8 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_philox_distribution_shards_native.h>
 #include <ATen/ops/_philox_normal_native.h>
-#include <ATen/ops/_philox_normal_shards_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #endif
 
@@ -33,6 +33,10 @@ namespace at::native {
 namespace {
 
 using at::cuda::philox_4x32;
+
+enum class PhiloxDistributionKind : int64_t {
+  Normal = 0,
+};
 
 // Elements produced per Philox 4x32 call: 4 for float/half/bfloat16, 2 for double.
 // Note that we use a full float for each generated half/bfloat16 for better numerics.
@@ -173,7 +177,7 @@ void append_shard_dimension(
 
   TORCH_CHECK(
       calculator.dims < kMaxDistributionShardDims,
-      "_philox_normal_shards_: too many non-trivial shard dimensions");
+      "_philox_distribution_shards_: too many non-trivial shard dimensions");
   const int index = calculator.dims++;
   calculator.sizes[index] =
       at::cuda::detail::IntDivider<uint32_t>(static_cast<uint32_t>(size));
@@ -189,7 +193,7 @@ std::vector<DistributionShardLaunch> validate_and_build_shard_launches(
     IntArrayRef local_sizes,
     int64_t chunk_count,
     int64_t& global_numel) {
-  constexpr const char* op_name = "_philox_normal_shards_";
+  constexpr const char* op_name = "_philox_distribution_shards_";
   TORCH_CHECK(
       self.layout() == kStrided,
       op_name,
@@ -736,37 +740,67 @@ Tensor& _philox_normal_cuda_(
   return self;
 }
 
-Tensor& _philox_normal_shards_cuda_(
+Tensor& _philox_distribution_shards_symint_cuda_(
     Tensor& self,
-    IntArrayRef global_shape,
-    IntArrayRef global_offsets,
-    IntArrayRef local_offsets,
-    IntArrayRef local_sizes,
+    c10::SymIntArrayRef global_shape,
+    c10::SymIntArrayRef global_offsets,
+    c10::SymIntArrayRef local_offsets,
+    c10::SymIntArrayRef local_sizes,
     int64_t chunk_count,
-    double mean,
-    double stddev,
+    int64_t distribution,
+    ArrayRef<Scalar> params,
     std::optional<Generator> generator) {
-  validate_normal_std(stddev);
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kHalf, kBFloat16, self.scalar_type(), "_philox_normal_shards_", [&] {
-        using accscalar_t = at::acc_type<scalar_t, true>;
-        auto mu = static_cast<accscalar_t>(mean);
-        auto sigma = static_cast<accscalar_t>(stddev);
-        auto param_func = [mu, sigma] __device__(accscalar_t rand) {
-          return static_cast<scalar_t>(
-              at::transformation::normal<accscalar_t>(rand, mu, sigma));
-        };
-        distribution_shards<scalar_t>(
-            self,
-            global_shape,
-            global_offsets,
-            local_offsets,
-            local_sizes,
-            chunk_count,
-            generator,
-            CurandNormalSampler<scalar_t>{},
-            param_func);
-      });
+  const auto global_shape_int = C10_AS_INTARRAYREF_SLOW_ALLOC(global_shape);
+  const auto global_offsets_int = C10_AS_INTARRAYREF_SLOW_ALLOC(global_offsets);
+  const auto local_offsets_int = C10_AS_INTARRAYREF_SLOW_ALLOC(local_offsets);
+  const auto local_sizes_int = C10_AS_INTARRAYREF_SLOW_ALLOC(local_sizes);
+  const auto distribution_kind =
+      static_cast<PhiloxDistributionKind>(distribution);
+  TORCH_CHECK(
+      distribution_kind == PhiloxDistributionKind::Normal,
+      "_philox_distribution_shards_: unsupported distribution kind ",
+      distribution);
+  TORCH_CHECK(
+      params.size() == 2,
+      "_philox_distribution_shards_: distribution kind ",
+      distribution,
+      " expects 2 parameters, got ",
+      params.size());
+  TORCH_CHECK(
+      !params[0].isComplex() && !params[1].isComplex(),
+      "_philox_distribution_shards_: parameters must be real");
+
+  const double param0 = params[0].toDouble();
+  const double param1 = params[1].toDouble();
+  switch (distribution_kind) {
+    case PhiloxDistributionKind::Normal:
+      validate_normal_std(param1);
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          kHalf,
+          kBFloat16,
+          self.scalar_type(),
+          "_philox_distribution_shards_",
+          [&] {
+            using accscalar_t = at::acc_type<scalar_t, true>;
+            auto mu = static_cast<accscalar_t>(param0);
+            auto sigma = static_cast<accscalar_t>(param1);
+            auto param_func = [mu, sigma] __device__(accscalar_t rand) {
+              return static_cast<scalar_t>(
+                  at::transformation::normal<accscalar_t>(rand, mu, sigma));
+            };
+            distribution_shards<scalar_t>(
+                self,
+                global_shape_int,
+                global_offsets_int,
+                local_offsets_int,
+                local_sizes_int,
+                chunk_count,
+                generator,
+                CurandNormalSampler<scalar_t>{},
+                param_func);
+          });
+      break;
+  }
   return self;
 }
 

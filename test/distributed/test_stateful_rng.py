@@ -13,6 +13,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 aten = torch.ops.aten
 
+_PHILOX_DISTRIBUTION_NORMAL = 0
+
 
 def _flatten_chunks(chunks: tuple[tuple[int, ...], ...]) -> list[int]:
     return [value for chunk in chunks for value in chunk]
@@ -42,15 +44,15 @@ class _StatefulRNGMode(TorchDispatchMode):
         rng_metadata = cast(CheckpointableTensor, tensor_arg)
 
         _, mean, std = filled_args
-        aten._philox_normal_shards_.default(
+        aten._philox_distribution_shards_.default(
             tensor_arg,
             rng_metadata.global_shape,
             _flatten_chunks(rng_metadata.global_offsets),
             _flatten_chunks(rng_metadata.local_offsets),
             _flatten_chunks(rng_metadata.local_sizes),
             len(rng_metadata.global_offsets),
-            mean,
-            std,
+            _PHILOX_DISTRIBUTION_NORMAL,
+            (mean, std),
             generator=filled_kwargs["generator"],
         )
         return tensor_arg
@@ -271,7 +273,7 @@ class TestCheckpointableTensorRNG(TestCase):
         self.assertEqual(generator.get_state(), state)
 
 
-class TestPhiloxNormalShardsOp(TestCase):
+class TestPhiloxDistributionShardsOp(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_invalid_calls_do_not_advance_generator(self):
         device = torch.device("cuda")
@@ -285,27 +287,29 @@ class TestPhiloxNormalShardsOp(TestCase):
 
         assert_invalid_without_advancing(
             "local shards 0 and 1 must not overlap",
-            lambda: torch.ops.aten._philox_normal_shards_(
+            lambda: torch.ops.aten._philox_distribution_shards_(
                 torch.empty(2, device=device),
                 [4],
                 [0, 2],
                 [0, 0],
                 [1, 1],
                 2,
+                _PHILOX_DISTRIBUTION_NORMAL,
+                [0.0, 1.0],
                 generator=generator,
             ),
         )
         assert_invalid_without_advancing(
             "normal expects std >= 0.0",
-            lambda: torch.ops.aten._philox_normal_shards_(
+            lambda: torch.ops.aten._philox_distribution_shards_(
                 torch.empty(1, device=device),
                 [1],
                 [0],
                 [0],
                 [1],
                 1,
-                0,
-                -1,
+                _PHILOX_DISTRIBUTION_NORMAL,
+                [0.0, -1.0],
                 generator=generator,
             ),
         )
