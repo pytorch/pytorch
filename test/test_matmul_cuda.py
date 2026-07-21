@@ -1005,10 +1005,8 @@ class TestMatmulCuda(InductorTestCase):
         raise AssertionError(f"Invalid op: {op}")
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
-    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 2), "cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 3), "cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
     @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
-    @unittest.skipIf(SM90OrLater and not SM100OrLater and _get_torch_cuda_version() < (13, 3),
-                     "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("jagged_size", [31, 32])
     @parametrize("a_row_major", [False, True])
@@ -1035,10 +1033,8 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(C, C_ref)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
-    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 2), "cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 3), "cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
     @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
-    @unittest.skipIf(SM90OrLater and not SM100OrLater and _get_torch_cuda_version() < (13, 3),
-                     "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("jagged_size", [31, 32])
     @parametrize("a_row_major", [False, True])
@@ -1081,10 +1077,8 @@ class TestMatmulCuda(InductorTestCase):
             torch._grouped_mm(A, B, offs=offs)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
-    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 2), "cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 3), "cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
     @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
-    @unittest.skipIf(SM90OrLater and not SM100OrLater and _get_torch_cuda_version() < (13, 3),
-                     "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/3d"])
     def test_grouped_gemm_cublaslt_int64_indexing(self, op):
         # Verify that the int64 indexing path works correctly when a
