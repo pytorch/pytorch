@@ -372,8 +372,13 @@ class TestNativeDSLOps(TestCase):
             # Verify the function returns True
             self.assertTrue(check_native_jit_disabled())
 
-            # Mock the registry calls to count how many times they would be called
-            with patch("torch._native.registry.register_op_override") as registry_mock:
+            with (
+                patch.object(triton_utils, "_register_op_override_impl") as triton_mock,
+                patch.object(
+                    cutedsl_utils, "_register_op_override_impl"
+                ) as cutedsl_mock,
+                patch.object(helion_utils, "_register_op_override_impl") as helion_mock,
+            ):
                 # Use a unique operation name
                 unique_op = f"test_jit_disabled_{uuid.uuid4().hex[:8]}.Tensor"
                 triton_utils.register_op_override(
@@ -385,8 +390,30 @@ class TestNativeDSLOps(TestCase):
                 helion_utils.register_op_override(
                     "aten", unique_op, "CPU", lambda *a, **k: True, lambda: None
                 )
-                # Should not call the registry function at all since JIT is disabled
-                self.assertEqual(registry_mock.call_count, 0)
+                self.assertEqual(triton_mock.call_count, 0)
+                self.assertEqual(cutedsl_mock.call_count, 0)
+                self.assertEqual(helion_mock.call_count, 0)
+
+    def test_helion_availability_requires_supported_backend_and_version(self):
+        from torch._native import helion_utils
+        from torch._vendor.packaging.version import Version
+
+        with patch.dict(os.environ, {"HELION_BACKEND": "metal"}):
+            helion_utils._check_runtime_available.cache_clear()
+            helion_utils._version_is_sufficient.cache_clear()
+            self.assertFalse(helion_utils.runtime_available())
+
+        helion_utils._check_runtime_available.cache_clear()
+        helion_utils._version_is_sufficient.cache_clear()
+        with patch.object(
+            helion_utils,
+            "_check_runtime_available",
+            return_value=(True, Version("1.0.0")),
+        ):
+            self.assertFalse(helion_utils.runtime_available())
+
+        helion_utils._check_runtime_available.cache_clear()
+        helion_utils._version_is_sufficient.cache_clear()
 
     def test_version_skip_env_var_overrides(self):
         """TORCH_NATIVE_SKIP_VERSION_CHECK=1 allows non-blessed versions."""

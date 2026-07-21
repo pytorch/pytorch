@@ -1,6 +1,5 @@
 # Owner(s): ["module: dsl-native-ops"]
 
-import os
 import subprocess
 import sys
 import textwrap
@@ -16,6 +15,7 @@ from torch._native.ops.cross_entropy.helion_impl import (
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfNoHelionDSL,
@@ -47,8 +47,19 @@ _SHAPE_CONFIG_INDEX = {
     (2048, 256000): 5,
 }
 
+_CONFIG_SIGNATURES = (
+    ([256], 4, "persistent_interleaved"),
+    ([8192], 8, "flat"),
+    ([None], 16, "flat"),
+    ([512], 8, "persistent_blocked"),
+    ([256], 4, "persistent_interleaved"),
+    ([1024], 16, "persistent_interleaved"),
+    ([2048], 32, "persistent_interleaved"),
+)
+
 _AOT_RUNTIME_SHAPES = (
     (4096, 129280),
+    (32768, 128000),
     (2048, 128256),
     (4096, 32000),
     (2048, 152064),
@@ -56,6 +67,26 @@ _AOT_RUNTIME_SHAPES = (
     (2048, 256000),
     (1024, 256000),
 )
+
+
+class TestHelionCrossEntropyAOTConfig(TestCase):
+    def test_shapes_match_pretuned_set(self):
+        self.assertEqual(_B200_PRETUNED_SHAPES, frozenset(_SHAPE_CONFIG_INDEX))
+
+    @parametrize("shape, expected", tuple(_SHAPE_CONFIG_INDEX.items()))
+    def test_aot_config(self, shape, expected):
+        from torch._native.ops.cross_entropy._helion_aot_helion_kernel_cuda_sm100 import (
+            autotune_cross_entropy,
+        )
+
+        logits = torch.empty(shape, device="meta", dtype=torch.bfloat16)
+        config = autotune_cross_entropy(logits)
+        signature = (
+            config["reduction_loops"],
+            config["num_warps"],
+            config["pid_type"],
+        )
+        self.assertEqual(signature, _CONFIG_SIGNATURES[expected])
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
@@ -75,37 +106,8 @@ class TestHelionCrossEntropy(TestCase):
             dtype=torch.bfloat16,
             requires_grad=requires_grad,
         )
-        labels = torch.randint(32000, (4096,), device="cuda", dtype=torch.int64)
+        labels = torch.randint(32000, (4096,), device=device, dtype=torch.int64)
         return logits, labels
-
-    def _autograd_cuda_registration(self):
-        return next(
-            line
-            for line in torch._C._dispatch_dump_table(
-                "aten::cross_entropy_loss"
-            ).splitlines()
-            if line.startswith("AutogradCUDA:")
-        )
-
-    def _autocast_cuda_registration(self):
-        return next(
-            line
-            for line in torch._C._dispatch_dump_table(
-                "aten::cross_entropy_loss"
-            ).splitlines()
-            if line.startswith("AutocastCUDA:")
-        )
-
-    def test_aot_config_for_all_shapes(self, device):
-        from torch._native.ops.cross_entropy._helion_aot_helion_kernel_cuda_sm100 import (
-            key_cross_entropy,
-        )
-
-        self.assertEqual(_B200_PRETUNED_SHAPES, frozenset(_SHAPE_CONFIG_INDEX))
-        for shape, expected in _SHAPE_CONFIG_INDEX.items():
-            with self.subTest(shape=shape):
-                logits = torch.empty(shape, device="meta", dtype=torch.bfloat16)
-                self.assertEqual(key_cross_entropy(logits), expected)
 
     def test_condition_accepts_pretuned_contract(self, device):
         logits, labels = self._inputs(device)
@@ -127,6 +129,33 @@ class TestHelionCrossEntropy(TestCase):
         self.assertEqual(actual, expected, rtol=1e-2, atol=1e-2)
         bound = cross_entropy.helion_kernel.bind((logits, labels))
         self.assertEqual(bound._config.config, autotune_cross_entropy(logits))
+
+    def test_target_gather(self, device):
+        n, v = 4096, 32000
+        labels = torch.arange(n, device=device, dtype=torch.int64) % v
+        logits = torch.zeros((n, v), device=device, dtype=torch.bfloat16)
+        logits[torch.arange(n, device=device), labels] = 5
+        actual = F.cross_entropy(logits, labels)
+        with torch.backends.python_native.helion.disabled():
+            expected = F.cross_entropy(logits, labels)
+        self.assertEqual(actual, expected, rtol=1e-2, atol=1e-2)
+
+    def test_instrumentation_reports_compile_and_cache_hit(self, device):
+        from torch._native.ops.cross_entropy.helion_kernel import cross_entropy
+
+        logits, labels = self._inputs(device)
+        kernel = cross_entropy.helion_kernel
+        kernel.reset()
+        try:
+            with self.assertLogs("torch._native.instrumentation", level="INFO") as logs:
+                cross_entropy(logits, labels)
+                cross_entropy(logits, labels)
+        finally:
+            kernel.reset()
+        self.assertEqual(len(logs.output), 2)
+        self.assertIn("compiled", logs.output[0])
+        self.assertIn("misses=1", logs.output[0])
+        self.assertIn("cache_hit", logs.output[1])
 
     @unittest.skipIf(
         torch.cuda.device_count() < 2,
@@ -240,100 +269,25 @@ class TestHelionCrossEntropy(TestCase):
                 expected = F.cross_entropy(logits, target, label_smoothing=0.1)
         self.assertEqual(actual, expected)
 
-    def test_disable_restores_autograd_registration(self, device):
-        self.assertIn("fallthrough", self._autograd_cuda_registration())
-        self.assertIn("helion_impl.py", self._autocast_cuda_registration())
-        with torch.backends.python_native.helion.disabled():
-            self.assertNotIn("fallthrough", self._autograd_cuda_registration())
-            self.assertNotIn("helion_impl.py", self._autocast_cuda_registration())
-        self.assertIn("fallthrough", self._autograd_cuda_registration())
-        self.assertIn("helion_impl.py", self._autocast_cuda_registration())
-
-    def test_operation_filter_restores_autograd_registration(self, device):
-        pn = torch.backends.python_native
-        with pn.operations_disabled("cross_entropy_loss"):
-            self.assertNotIn("fallthrough", self._autograd_cuda_registration())
-            self.assertNotIn("helion_impl.py", self._autocast_cuda_registration())
-        self.assertIn("fallthrough", self._autograd_cuda_registration())
-        self.assertIn("helion_impl.py", self._autocast_cuda_registration())
-
-    def test_dispatch_filter_restores_autograd_registration(self, device):
-        pn = torch.backends.python_native
-        pn.disable_dispatch_keys("CUDA")
-        try:
-            self.assertNotIn("fallthrough", self._autograd_cuda_registration())
-            self.assertNotIn("helion_impl.py", self._autocast_cuda_registration())
-        finally:
-            pn.enable_dispatch_keys("CUDA")
-        self.assertIn("fallthrough", self._autograd_cuda_registration())
-        self.assertIn("helion_impl.py", self._autocast_cuda_registration())
-
-    def test_jit_disabled_enable_does_not_install_fallthrough(self, device):
+    def test_preserves_existing_autograd_registration(self, device):
         script = textwrap.dedent(
             """\
             import torch
+            import torch.nn.functional as F
 
+            torch.backends.python_native.helion.disable()
+            lib = torch.library.Library("aten", "IMPL", "AutogradCUDA")
+            lib.impl(
+                "cross_entropy_loss",
+                lambda self, target, weight=None, reduction=1,
+                       ignore_index=-100, label_smoothing=0.0:
+                    torch.full((), 456.0, device=self.device),
+                allow_override=True,
+            )
             torch.backends.python_native.helion.enable()
-            line = next(
-                line
-                for line in torch._C._dispatch_dump_table(
-                    "aten::cross_entropy_loss"
-                ).splitlines()
-                if line.startswith("AutogradCUDA:")
-            )
-            print(line)
-            line = next(
-                line
-                for line in torch._C._dispatch_dump_table(
-                    "aten::cross_entropy_loss"
-                ).splitlines()
-                if line.startswith("AutocastCUDA:")
-            )
-            print(line)
-            """
-        )
-        env = dict(os.environ)
-        env["TORCH_DISABLE_NATIVE_JIT"] = "1"
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            env=env,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        self.assertNotIn("AutogradCUDA: fallthrough", result.stdout)
-        self.assertNotIn("helion_impl.py", result.stdout)
-
-    def test_destructive_reorder_uninstalls_fallthrough(self, device):
-        script = textwrap.dedent(
-            """\
-            import torch
-            import torch._native.registry as registry
-
-            def remove_cross_entropy(op_symbol, dispatch_key, graph):
-                if (op_symbol, dispatch_key) == ("cross_entropy_loss", "CUDA"):
-                    return []
-                return graph
-
-            registry.reorder_graphs_from_user_function(
-                remove_cross_entropy, reregister_overrides=True
-            )
-            line = next(
-                line
-                for line in torch._C._dispatch_dump_table(
-                    "aten::cross_entropy_loss"
-                ).splitlines()
-                if line.startswith("AutogradCUDA:")
-            )
-            print(line)
-            line = next(
-                line
-                for line in torch._C._dispatch_dump_table(
-                    "aten::cross_entropy_loss"
-                ).splitlines()
-                if line.startswith("AutocastCUDA:")
-            )
-            print(line)
+            logits = torch.randn(2, 3, device="cuda")
+            labels = torch.tensor([0, 1], device="cuda")
+            print(F.cross_entropy(logits, labels).item())
             """
         )
         result = subprocess.run(
@@ -342,8 +296,7 @@ class TestHelionCrossEntropy(TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertNotIn("AutogradCUDA: fallthrough", result.stdout)
-        self.assertNotIn("helion_impl.py", result.stdout)
+        self.assertEqual(float(result.stdout), 456.0)
 
     def test_condition_rejects_unsupported_contracts(self, device):
         logits, labels = self._inputs(device)
@@ -369,8 +322,6 @@ class TestHelionCrossEntropy(TestCase):
         with self.subTest("target_layout"):
             labels_storage = torch.empty(8192, device=device, dtype=torch.int64)
             self.assertFalse(_cross_entropy_cond(logits, labels_storage[::2]))
-        with self.subTest("cow"):
-            self.assertFalse(_cross_entropy_cond(logits._lazy_clone(), labels))
         with self.subTest("shape"):
             small_logits = torch.randn(32, 128, device=device, dtype=torch.bfloat16)
             small_labels = torch.randint(128, (32,), device=device)
@@ -398,6 +349,18 @@ class TestHelionCrossEntropy(TestCase):
         misaligned_labels = labels_storage[1:]
         self.assertTrue(misaligned_labels.is_contiguous())
         self.assertFalse(_cross_entropy_cond(logits, misaligned_labels))
+
+    def test_cow_inputs_do_not_materialize(self, device):
+        logits, labels = self._inputs(device)
+        cow_logits = logits._lazy_clone()
+        cow_labels = labels._lazy_clone()
+        self.assertTrue(_cross_entropy_cond(cow_logits, cow_labels))
+        actual = F.cross_entropy(cow_logits, cow_labels)
+        self.assertTrue(torch._C._is_cow_tensor(cow_logits))
+        self.assertTrue(torch._C._is_cow_tensor(cow_labels))
+        with torch.backends.python_native.helion.disabled():
+            expected = F.cross_entropy(logits, labels)
+        self.assertEqual(actual, expected, rtol=1e-2, atol=1e-2)
 
     @parametrize("case", ("weight", "reduction", "ignore_index", "label_smoothing"))
     def test_unsupported_arguments_fall_through(self, device, case):
@@ -447,21 +410,22 @@ class TestHelionCrossEntropy(TestCase):
 
         script = textwrap.dedent(
             """\
+            import sys
+
             import torch
             import torch.nn.functional as F
 
-            logits = torch.randn(4096, 32000, device="cuda", dtype=torch.bfloat16)
-            labels = torch.zeros(4096, device="cuda", dtype=torch.int64)
+            device = torch.device("cuda", int(sys.argv[1]))
+            torch.cuda.set_device(device)
+            logits = torch.randn(4096, 32000, device=device, dtype=torch.bfloat16)
+            labels = torch.zeros(4096, device=device, dtype=torch.int64)
             labels[0] = 32000
             F.cross_entropy(logits, labels)
             torch.cuda.synchronize()
             """
         )
-        env = dict(os.environ)
-        env["CUDA_VISIBLE_DEVICES"] = str(torch.cuda.current_device())
         result = subprocess.run(
-            [sys.executable, "-c", script],
-            env=env,
+            [sys.executable, "-c", script, str(torch.cuda.current_device())],
             capture_output=True,
             text=True,
         )
@@ -487,6 +451,7 @@ class TestHelionCrossEntropy(TestCase):
             self.assertIsNotNone(output_tangent)
 
 
+instantiate_parametrized_tests(TestHelionCrossEntropyAOTConfig)
 instantiate_device_type_tests(TestHelionCrossEntropy, globals(), only_for="cuda")
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from typing import Any
 
 import torch
@@ -39,10 +40,28 @@ _B200_PRETUNED_SHAPES: frozenset[tuple[int, int]] = frozenset(
 # At this smallest shape, that fixed cost makes the integrated override slower
 # than ATen on B200; every other pretuned shape wins in end-to-end measurement.
 _B200_SHAPES = _B200_PRETUNED_SHAPES - {(2048, 32000)}
+_REQUIRED_ALIGNMENT = 16
 
 _autograd_lib: torch.library.Library | None = None
 _autocast_lib: torch.library.Library | None = None
-_autocast_fallback_kernel: Any | None = None
+
+
+def _call_helion_read_only(kernel: Any, *args: object) -> torch.Tensor:
+    from ...triton import ConstTensorWrapper
+
+    # Wrap read-only launch args in ConstTensorWrapper so a copy-on-write input
+    # is not materialized just to read it. Not ReadOnlyTensorWrapper: it is
+    # DLPack-export-only, but a Triton launch duck-types data_ptr() off the arg.
+    # Helion's host wrapper needs tensor metadata before the Triton launch, so
+    # bind real tensors and use const-pointer wrappers only for the launch.
+    raw_kernel = kernel.helion_kernel
+    bound = raw_kernel.bind(args)
+    bound.ensure_config_exists(args)
+    launch_args = tuple(
+        ConstTensorWrapper(arg) if isinstance(arg, torch.Tensor) else arg
+        for arg in args
+    )
+    return bound(*launch_args)
 
 
 def _cross_entropy_cond(
@@ -80,10 +99,9 @@ def _cross_entropy_cond(
     # Target validation is data-dependent, so this override is eager-only.
     if type(self) is not torch.Tensor or type(target) is not torch.Tensor:
         return False
-    is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
-    if is_cow(self) or is_cow(target):
-        return False
-    if self.data_ptr() % 16 != 0 or target.data_ptr() % 16 != 0:
+    self_ptr = self.const_data_ptr()  # pyrefly: ignore[missing-attribute]
+    target_ptr = target.const_data_ptr()  # pyrefly: ignore[missing-attribute]
+    if self_ptr % _REQUIRED_ALIGNMENT != 0 or target_ptr % _REQUIRED_ALIGNMENT != 0:
         return False
 
     from .helion_kernel import validate_labels
@@ -91,7 +109,11 @@ def _cross_entropy_cond(
     with torch.accelerator.device_index(self.get_device()):
         if torch.cuda.is_current_stream_capturing():
             return False
-        return bool(validate_labels(target, self.shape[1]).item())
+        if torch._C._is_cow_tensor(target):  # pyrefly: ignore[missing-attribute]
+            valid = _call_helion_read_only(validate_labels, target, self.shape[1])
+        else:
+            valid = validate_labels(target, self.shape[1])
+        return bool(valid.item())
 
 
 def _cross_entropy_impl(
@@ -105,10 +127,14 @@ def _cross_entropy_impl(
     from .helion_kernel import cross_entropy
 
     with torch.accelerator.device_index(self.get_device()):
+        is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
+        if is_cow(self) or is_cow(target):
+            return _call_helion_read_only(cross_entropy, self, target)
         return cross_entropy(self, target)
 
 
 def _autocast_cross_entropy(
+    fallback_kernel: Any,
     keyset: torch._C.DispatchKeySet,
     self: torch.Tensor,
     target: torch.Tensor,
@@ -117,54 +143,58 @@ def _autocast_cross_entropy(
     ignore_index: int = -100,
     label_smoothing: float = 0.0,
 ) -> torch.Tensor:
-    fallback_kernel = _autocast_fallback_kernel
-    if fallback_kernel is None:
-        raise RuntimeError("native cross entropy fallback is not installed")
     keyset = keyset.remove(torch._C.DispatchKey.AutocastCUDA)
     return fallback_kernel.call_boxed(
         keyset, self, target, weight, reduction, ignore_index, label_smoothing
     )
 
 
-def _install_autograd_fallthrough() -> None:
-    global _autocast_fallback_kernel, _autocast_lib, _autograd_lib
+def _install_autograd_fallthrough(fallback_kernel: Any) -> None:
+    # cross_entropy_loss is CompositeImplicitAutograd, so our CUDA router shadows
+    # the composite kernel that otherwise gives it autograd and autocast (a plain
+    # backend op needs neither -- see registry.py). Restore both: the AutogradCUDA
+    # fallthrough lets backward decompose through aten (else PyTorch warns the op
+    # has no autograd kernel), and the AutocastCUDA redispatch keeps
+    # torch.compile + autocast in fp32 like aten.
+    global _autocast_lib, _autograd_lib
     if _autograd_lib is not None:
         return
-    from ...registry import _fallback_kernels
+    op = "aten::cross_entropy_loss"
+    has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
+    if has_kernel(op, "AutogradCUDA") or has_kernel(op, "AutocastCUDA"):
+        return
 
-    _autocast_fallback_kernel = _fallback_kernels[("cross_entropy_loss", "CUDA")]
-    _autograd_lib = torch.library.Library("aten", "IMPL", "AutogradCUDA")
-    _autograd_lib.impl(
-        "cross_entropy_loss", torch.library.fallthrough_kernel, allow_override=True
-    )
-    _autocast_lib = torch.library.Library("aten", "IMPL", "AutocastCUDA")
-    _autocast_lib.impl(
+    autocast_lib = torch.library.Library("aten", "IMPL", "AutocastCUDA")
+    autocast_lib.impl(
         "cross_entropy_loss",
-        _autocast_cross_entropy,
+        functools.partial(_autocast_cross_entropy, fallback_kernel),
         with_keyset=True,
         allow_override=True,
     )
+    try:
+        autograd_lib = torch.library.Library("aten", "IMPL", "AutogradCUDA")
+        autograd_lib.impl(
+            "cross_entropy_loss", torch.library.fallthrough_kernel, allow_override=True
+        )
+    except Exception:
+        autocast_lib._destroy()
+        raise
+    _autocast_lib = autocast_lib
+    _autograd_lib = autograd_lib
 
 
 def _uninstall_autograd_fallthrough() -> None:
-    global _autocast_fallback_kernel, _autocast_lib, _autograd_lib
+    global _autocast_lib, _autograd_lib
     if _autograd_lib is None:
         return
+    _autograd_lib._destroy()
+    _autograd_lib = None
     if _autocast_lib is not None:
         _autocast_lib._destroy()
         _autocast_lib = None
-    _autograd_lib._destroy()
-    _autograd_lib = None
-    _autocast_fallback_kernel = None
 
 
 def register_to_dispatch() -> None:
-    if (
-        not hu.runtime_available()
-        or not hu._version_is_sufficient()
-        or hu.check_native_jit_disabled()
-    ):
-        return
     hu.register_op_override(
         "aten",
         "cross_entropy_loss",

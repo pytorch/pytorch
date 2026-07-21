@@ -6,48 +6,48 @@ Backend: decision_tree
 import torch
 
 
-def key_cross_entropy(*args) -> int:
+def select_cross_entropy_config(configs: list[dict], *args) -> dict:
     is_tensor = len(args) > 0 and isinstance(args[0], torch.Tensor)
     _arg0_dim0 = int(args[0].shape[0]) if is_tensor and args[0].ndim > 0 else 0
     _arg0_dim1 = int(args[0].shape[1]) if is_tensor and args[0].ndim > 1 else 0
     _arg0_numel = int(args[0].numel()) if is_tensor else 0
     if _arg0_numel <= 262144000.0:
         if _arg0_dim0 <= 1024.0:
-            return 6
+            return configs[6]
         else:
-            return 2
+            return configs[2]
     else:
         if _arg0_dim1 <= 151936.0:
             if _arg0_dim1 <= 128256.0:
                 if _arg0_dim0 <= 2048.0:
-                    return 1
+                    return configs[1]
                 else:
                     if _arg0_numel <= 2097152000.0:
                         if _arg0_dim1 <= 128000.0:
-                            return 0
+                            return configs[0]
                         else:
-                            return 4
+                            return configs[4]
                     else:
-                        return 0
+                        return configs[0]
             else:
                 if _arg0_dim1 <= 129280.0:
                     if _arg0_dim0 <= 2048.0:
-                        return 1
+                        return configs[1]
                     else:
                         if _arg0_dim0 <= 4096.0:
-                            return 0
+                            return configs[0]
                         else:
-                            return 1
+                            return configs[1]
                 else:
-                    return 1
+                    return configs[1]
         else:
             if _arg0_dim0 <= 4096.0:
                 if _arg0_dim1 <= 152064.0:
-                    return 3
+                    return configs[3]
                 else:
-                    return 5
+                    return configs[5]
             else:
-                return 0
+                return configs[0]
 
 
 def autotune_cross_entropy(*args) -> dict:
@@ -215,4 +215,4 @@ def autotune_cross_entropy(*args) -> dict:
             "num_sm_multiplier": 32,
         },
     ]
-    return _C[key_cross_entropy(*args)]
+    return select_cross_entropy_config(_C, *args)

@@ -360,7 +360,7 @@ class TestTritonKernelInstrumentation(_LoggerCaptureTest):
 
 
 class TestHelionKernelInstrumentation(_LoggerCaptureTest):
-    def _kernel(self, op="aten::cross_entropy_loss", key_fn=None):
+    def _kernel(self, op="aten::add", key_fn=None):
         return instrument_helion_kernel(op, key_fn=key_fn)(_FakeHelionKernel())
 
     def test_first_call_reports_compiled(self):
@@ -387,14 +387,14 @@ class TestHelionKernelInstrumentation(_LoggerCaptureTest):
     def test_error_is_reported_and_reraised(self):
         fake = _FakeHelionKernel()
         fake.raise_on_call = True
-        kernel = instrument_helion_kernel("aten::cross_entropy_loss")(fake)
+        kernel = instrument_helion_kernel("aten::add")(fake)
         with self.assertRaisesRegex(RuntimeError, "helion boom"):
             kernel()
         self.assertIn("error", self.messages[0])
 
     def test_raw_kernel_and_attributes_are_exposed(self):
         fake = _FakeHelionKernel()
-        kernel = instrument_helion_kernel("aten::cross_entropy_loss")(fake)
+        kernel = instrument_helion_kernel("aten::add")(fake)
         self.assertIs(kernel.helion_kernel, fake)
         self.assertEqual(kernel.cache_key, "helion-cache")
 
@@ -567,7 +567,7 @@ _DSL_INSTRUMENTATION_RULES = (
     ),
     (
         "helion",
-        ("helion.kernel", "helion.experimental.aot_kernel"),
+        ("helion.kernel", "helion.jit", "helion.experimental.aot_kernel"),
         "instrument_helion_kernel",
         "instrumented_helion_kernel",
     ),
@@ -767,6 +767,12 @@ class TestInstrumentationCoverage(TestCase):
         )
         self.assertEqual(aot_n, 1)
         self.assertEqual(len(aot_v), 1)
+
+        jit_v, jit_n = _scan_for_missing_instrumentation(
+            "@helion.jit\ndef h(): ...\n", "<helion-jit-bad>"
+        )
+        self.assertEqual(jit_n, 1)
+        self.assertEqual(len(jit_v), 1)
 
     def test_no_raw_cute_compile_calls(self):
         # Caching is compulsory for cutedsl compiles: every cute.compile() must

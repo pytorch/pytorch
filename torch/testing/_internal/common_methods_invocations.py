@@ -6993,15 +6993,10 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 def sample_inputs_helion_cross_entropy(
     op_info, device, dtype, requires_grad, **kwargs
 ):
-    logits = make_tensor(
-        (4096, 32000),
-        device=device,
-        dtype=dtype,
-        low=-3,
-        high=3,
-        requires_grad=False,
-    )
-    target = torch.randint(32000, (4096,), device=device, dtype=torch.int64)
+    n, v = 4096, 32000
+    target = torch.arange(n, device=device, dtype=torch.int64) % v
+    logits = torch.zeros((n, v), device=device, dtype=dtype)
+    logits[torch.arange(n, device=device), target] = 5
     yield SampleInput(logits, args=(target,))
 
 def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *, chunked=False, chunked_none=False, **kwargs_unused):
@@ -23968,7 +23963,7 @@ if "helion" in dsl_ops_by_dsl:
             supports_forward_ad=False,
             supports_fwgrad_bwgrad=False,
             supports_out=False,
-            supports_cow_input_no_materialize_forward=False,
+            supports_cow_input_no_materialize_forward=True,
             decorators=[
                 onlyCUDA,
                 skipCUDAIf(not IS_SM100, "Helion cross entropy requires SM100"),
