@@ -1453,11 +1453,8 @@ class ComboKernel(Kernel):
         argdefs: list[ArgName],
     ) -> list[str] | None:
         """Emit each sub-kernel body as a @triton.jit(noinline=True) device
-        function and return the per-branch call lines. The call boundary makes
-        ptxas allocate registers per body instead of jointly over the merged
-        control-flow graph, so one register-fat member cannot inflate the
-        whole combo binary's allocation (and with it every member's
-        residency). Returns None when any body cannot be emitted this way
+        function and return the per-branch call lines.
+        Returns None when any body cannot be emitted this way
         (caller falls back to inline splicing)."""
         call_lines: list[str] = []
         defs = IndentedBuffer()
@@ -1553,9 +1550,6 @@ class ComboKernel(Kernel):
         kernel_name = name or str(Placeholder.KERNEL_NAME)
 
         sub_kernel_codes = self._codegen_sub_kernel_bodies()
-        shared_body = self._try_get_shared_body(
-            sub_kernel_codes, signature, heuristics_list
-        )
         # Sub-functions must be emitted before the main kernel's heuristics
         # decorator line (triton reads the decorated function's source by
         # inspection). PDL intrinsics move with each body and proton scopes
@@ -1589,6 +1583,9 @@ class ComboKernel(Kernel):
             if self.bake_blocks:
                 self.codegen_blocks(code)
 
+            shared_body = self._try_get_shared_body(
+                sub_kernel_codes, signature, heuristics_list
+            )
             if shared_body is not None:
                 self._codegen_shared_branches(code, sub_kernel_codes, shared_body)
             elif noinline_calls is not None:
