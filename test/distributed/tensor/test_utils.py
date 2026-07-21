@@ -1377,7 +1377,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
             self.assertIsInstance(
                 fsdp_placement,
                 (_StridedShard, Shard),
-                f"Parameter {name} has unexpected FSDP placement: {fsdp_placement}",
+                lambda msg: f"{msg}\nParameter {name} has unexpected FSDP placement: {fsdp_placement}",
             )
 
         # Run training loop
