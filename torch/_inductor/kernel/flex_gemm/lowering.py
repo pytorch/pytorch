@@ -236,11 +236,36 @@ def flex_gemm_config_keys_for_local_reduce(
     return (gemm_config_key(configs[0]),)
 
 
-@register_lowering(flex_gemm_hop, type_promotion_kind=None)
-def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
-    """Lower FlexGEMM to the regular subgraph path or the QUACK template."""
-    if kernel_options.get("backend", "TRITON") != "QUACK":
-        return process_subgraph_nodes(subgraph.graph_module, list(args))
+def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
+    """Lower FlexGEMM through the generated QUACK CuTeDSL template.
+
+    The current pipeline is:
+
+    ::
+
+        FlexGEMM HOP body (FX GraphModule)
+                         |
+                         v
+          find GEMM operands and captured epilogue args
+                         |
+                         v
+             analyze_flex_gemm_epilogue()
+                         |
+                         +--> output plan + buffer ABI
+                         |        `--> derive layout + allocate aux
+                         |
+                         +--> grouped/reduction geometry
+                         |        `--> filter QuACK configurations
+                         |
+                         `--> materialize_flex_gemm_epilogue()
+                                  `--> CuTeDSL epilogue + callbacks
+                         |
+                         v
+             combine into template choices -> autotune
+                         |
+                         v
+              restore captured output order
+    """
     if gemm_op not in FLEX_GEMM_OP_SPECS:
         raise NotImplementedError(
             f"FlexGEMM QUACK backend currently supports only aten.{_SUPPORTED_FLEX_GEMM_OP_NAMES}"
@@ -297,6 +322,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     beta = gemm_fx_node.kwargs.get("beta", gemm_kwargs.get("beta", 1.0))
     if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
         raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
+    # This is where we figure out what the fx-graph body is doing
     epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module)
     if (
         epilogue_analysis.required_geometries
@@ -387,7 +413,6 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 gemm_op=op_spec,
                 alpha=float(alpha),
                 beta=float(beta),
-                out_dtype=output_meta.dtype,
                 quack_config_key=quack_config_key,
                 epilogue_arg_indices=epilogue_arg_indices,
                 epilogue_arg_kinds=epilogue_arg_kinds,
@@ -415,3 +440,13 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         local_reduce_outs,
         None if local_reduce_store is None else local_reduce_store.aux_index,
     )
+
+
+@register_lowering(flex_gemm_hop, type_promotion_kind=None)
+def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
+    """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
+    if kernel_options.get("backend", "TRITON") == "QUACK":
+        return lower_quack_flex_gemm(
+            gemm_op, subgraph, args, gemm_kwargs, kernel_options
+        )
+    return process_subgraph_nodes(subgraph.graph_module, list(args))

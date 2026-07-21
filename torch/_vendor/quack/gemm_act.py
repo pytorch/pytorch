@@ -28,7 +28,9 @@ from .epi_ops import (
     ColVecTupleLoad,
     EpiSmemBytes,
     GroupedLocalReduce,
+    LOCAL_REDUCE_FRAGMENT_WIDTH,
     Scalar,
+    grouped_local_reduce_uses_smem,
     grouped_rowvec_reduce_value,
     TileTupleLoad,
     TileStore,
@@ -60,8 +62,6 @@ from .rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_out_sr_
 _tensor_epilogue_fns: dict[str, Callable] = {}
 _local_reduce_combine_fns: dict[str, Callable] = {}
 _local_reduce_finalize_fns: dict[str, Callable] = {}
-# Feed-main must fit within grouped_rowvec_reduce_value's lane-layout M extent.
-LOCAL_REDUCE_FRAGMENT_WIDTH = 32
 
 
 def power_of_2_divisibility(value: int, max_divisibility: int) -> int:
@@ -207,12 +207,12 @@ class GemmActMixin(ComposableEpiMixin):
     @classmethod
     def epi_smem_bytes(cls, args, cta_tile_shape_mnk, epi_tile, warp_shape_mnk=None):
         result = super().epi_smem_bytes(args, cta_tile_shape_mnk, epi_tile, warp_shape_mnk)
-        if (
-            args.mLocalReduce is not None
-            and args.local_reduce_axis == 0
-            and args.local_reduce_group > LOCAL_REDUCE_FRAGMENT_WIDTH
+        if args.mLocalReduce is not None and grouped_local_reduce_uses_smem(
+            args.local_reduce_axis, args.local_reduce_group
         ):
-            smem_warps = max((warp_shape_mnk[0] if warp_shape_mnk is not None else 1) - 1, 0)
+            smem_warps = max(
+                (warp_shape_mnk[0] if warp_shape_mnk is not None else 1) - 1, 0
+            )
             result += EpiSmemBytes(
                 unstaged=cta_tile_shape_mnk[1] * smem_warps * (Float32.width // 8)
             )
