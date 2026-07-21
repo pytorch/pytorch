@@ -37,6 +37,7 @@ from torch._prims_common import (
     ShapeType,
 )
 from torch._subclasses.fake_tensor import (
+    _common_extra_dispatch_keys,
     DataDependentOutputException,
     DynamicOutputShapeException,
     FakeTensor,
@@ -293,13 +294,16 @@ def constructors(
     out_device = out_device if out_device is not None else default_device
     if has_device_arg:
         new_kwargs["device"] = torch.device("meta")
+    extra_dispatch_keys = _common_extra_dispatch_keys(
+        out_device, pytree.tree_leaves((args, new_kwargs))
+    )
     # _like constructors have fake tensor inputs (maybe this causes the non-like
     # to fail? hmmm)
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
     if r.device.type == "meta":
         return fake_mode.fake_tensor_converter.from_meta_and_device(
-            fake_mode, r, out_device
+            fake_mode, r, out_device, extra_dispatch_keys=extra_dispatch_keys
         )
     return fake_mode.fake_tensor_converter.from_real_tensor(fake_mode, r)
 
@@ -369,7 +373,10 @@ def non_kwarg_to(
         r = func(inp, **new_kwargs)
     # TODO: I think this does the wrong thing if r is inp
     return fake_mode.fake_tensor_converter.from_meta_and_device(
-        fake_mode, r, out_device
+        fake_mode,
+        r,
+        out_device,
+        extra_dispatch_keys=_common_extra_dispatch_keys(out_device, [inp]),
     )
 
 
@@ -587,7 +594,10 @@ def _spdiags(
                 )
 
     return fake_mode.fake_tensor_converter.from_meta_and_device(
-        fake_mode, out, diagonals.device
+        fake_mode,
+        out,
+        diagonals.device,
+        extra_dispatch_keys=_common_extra_dispatch_keys(diagonals.device, [diagonals]),
     )
 
 
@@ -612,12 +622,20 @@ def _to_dense(
                 dtype=self.dtype,
                 device="meta",
             )
-        return FakeTensor(fake_mode, out, self.fake_device)
+        return FakeTensor(
+            fake_mode,
+            out,
+            self.fake_device,
+            extra_dispatch_keys=_common_extra_dispatch_keys(self.fake_device, [self]),
+        )
 
     with in_kernel_invocation_manager(fake_mode):
         out = func(self, dtype=dtype, masked_grad=masked_grad)
     return fake_mode.fake_tensor_converter.from_meta_and_device(
-        fake_mode, out, self.fake_device
+        fake_mode,
+        out,
+        self.fake_device,
+        extra_dispatch_keys=_common_extra_dispatch_keys(self.fake_device, [self]),
     )
 
 
@@ -1627,7 +1645,14 @@ def run_and_return_new_tensor_of_input_device(
 
     if out is new_kwargs["input"]:
         return out  # copy_
-    return FakeTensor(fake_mode, out, out_device)
+    return FakeTensor(
+        fake_mode,
+        out,
+        out_device,
+        extra_dispatch_keys=_common_extra_dispatch_keys(
+            out_device, pytree.tree_leaves(new_kwargs)
+        ),
+    )
 
 
 _is_builtin_namespaces = ordered_set("aten", "prims", "prim")
@@ -1679,7 +1704,12 @@ def maybe_to_dense_mkldnn(
             dtype=out_dtype,
             device="meta",
         )
-    return FakeTensor(fake_mode, out, a.fake_device)
+    return FakeTensor(
+        fake_mode,
+        out,
+        a.fake_device,
+        extra_dispatch_keys=_common_extra_dispatch_keys(a.fake_device, [a]),
+    )
 
 
 class _ToDenseMkldnn(torch.autograd.Function):
@@ -1870,7 +1900,11 @@ def to_mkldnn(
             device="meta",
         )
     return FakeTensor(
-        fake_mode, out, a.fake_device, dispatch_keys=_MKLDNN_DISPATCH_KEYS
+        fake_mode,
+        out,
+        a.fake_device,
+        dispatch_keys=_MKLDNN_DISPATCH_KEYS,
+        extra_dispatch_keys=_common_extra_dispatch_keys(a.fake_device, [a]),
     )
 
 
@@ -1905,10 +1939,14 @@ def foreach_run_and_map_input_device(
     out_fake = []
 
     for i, meta_t in enumerate(out_meta):
-        device, _ = FakeTensor._find_common_device(func, [tl[i] for tl in tensor_lists])
+        inputs = [tl[i] for tl in tensor_lists]
+        device, _ = FakeTensor._find_common_device(func, inputs)
         out_fake.append(
             fake_mode.fake_tensor_converter.from_meta_and_device(
-                fake_mode, meta_t, device
+                fake_mode,
+                meta_t,
+                device,
+                extra_dispatch_keys=_common_extra_dispatch_keys(device, inputs),
             )
         )
 
@@ -2167,6 +2205,10 @@ def conv(
                 input_, weight, conv_backend
             )
 
+    extra_dispatch_keys = _common_extra_dispatch_keys(
+        device, pytree.tree_leaves(new_kwargs)
+    )
+
     def convert(
         t: torch.Tensor | None, mem_fmt: torch.memory_format | None
     ) -> FakeTensor | None:
@@ -2178,7 +2220,12 @@ def conv(
                 t = t.unsqueeze(2).to(memory_format=mem_fmt).squeeze(2)
             else:
                 t = t.to(memory_format=mem_fmt)
-        return FakeTensor(fake_mode, t, device)
+        return FakeTensor(
+            fake_mode,
+            t,
+            device,
+            extra_dispatch_keys=extra_dispatch_keys,
+        )
 
     with in_kernel_invocation_manager(fake_mode):
         out = func(**new_kwargs)
@@ -2263,7 +2310,13 @@ def _fake_alias(fake_mode: FakeTensorMode, x: FakeTensor) -> FakeTensor:
         out = aten.alias.default(x)
     # Real MKLDNN alias is not public API, but compiler-generated alias nodes
     # must preserve fake MKLDNN layout state through tracing.
-    return FakeTensor(fake_mode, out, x.device, dispatch_keys=x.dispatch_keys)
+    return FakeTensor(
+        fake_mode,
+        out,
+        x.device,
+        dispatch_keys=x.dispatch_keys,
+        extra_dispatch_keys=x.extra_dispatch_keys,
+    )
 
 
 @register_op_impl(aten.alias.default)
@@ -2422,6 +2475,10 @@ def make_fast_binary_impl(
             elif op.device != common_device:
                 return slow("error")
 
+        common_extra_dispatch_keys = _common_extra_dispatch_keys(
+            common_device, operands
+        )
+
         # compute_fast_setup_type
         definitely_contiguous = True
         definitely_channels_last = True
@@ -2457,6 +2514,7 @@ def make_fast_binary_impl(
                     memory_format=torch.contiguous_format,
                 ),
                 device=common_device,
+                extra_dispatch_keys=common_extra_dispatch_keys,
             )
         if definitely_channels_last:
             count_label("fast channels_last")
@@ -2470,6 +2528,7 @@ def make_fast_binary_impl(
                     memory_format=torch.channels_last,
                 ),
                 device=common_device,
+                extra_dispatch_keys=common_extra_dispatch_keys,
             )
 
         return slow("no contiguity match")
@@ -2494,6 +2553,7 @@ def fast_detach(
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
     dispatch_keys = x.dispatch_keys
+    extra_dispatch_keys = x.extra_dispatch_keys
     if include_real:
         return FakeTensor(
             fake_mode,
@@ -2501,8 +2561,15 @@ def fast_detach(
             x.device,
             real_tensor=x.real_tensor,
             dispatch_keys=dispatch_keys,
+            extra_dispatch_keys=extra_dispatch_keys,
         )
-    return FakeTensor(fake_mode, out, x.device, dispatch_keys=dispatch_keys)
+    return FakeTensor(
+        fake_mode,
+        out,
+        x.device,
+        dispatch_keys=dispatch_keys,
+        extra_dispatch_keys=extra_dispatch_keys,
+    )
 
 
 def fast_alias(fake_mode: FakeTensorMode, x: FakeTensor) -> FakeTensor:

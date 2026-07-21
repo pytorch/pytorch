@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import inspect
 import threading
 import typing
 import weakref
@@ -422,12 +423,36 @@ class MetaTensorDescriber:
 
         view_func = ViewFunc.from_tensor(t)
 
+        dispatch_keys = None
+        extra_dispatch_keys = None
+        from torch._subclasses.fake_tensor import (
+            _extra_dispatch_keys_for_tensor,
+            is_fake_tensor,
+        )
+
+        if is_fake_tensor(t):
+            fake_t = typing.cast("FakeTensor", t)
+            dispatch_keys = (
+                fake_t.dispatch_keys.raw_repr()
+                if fake_t.dispatch_keys is not None
+                else None
+            )
+        elif t.device.type == "xla":
+            # Real XLA wrapper tensors can carry non-XLA physical keys such as
+            # AutocastCUDA. Avoid probing arbitrary real tensors here; fake
+            # tensors already carry the represented key set explicitly.
+            dispatch_keys = torch._C._dispatch_keys(t).raw_repr()
+        extra_keys = _extra_dispatch_keys_for_tensor(t.device, t)
+        extra_dispatch_keys = extra_keys.raw_repr() if extra_keys is not None else None
+
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
         is_inference_mode_disabled = getattr(tls, "disable_inference_mode", False)
         r: MetaTensorDesc[Any] = MetaTensorDesc(
             id=self.get_tensor_id(t),
             storage=storage,
+            dispatch_keys=dispatch_keys,
+            extra_dispatch_keys=extra_dispatch_keys,
             is_inference=False if is_inference_mode_disabled else t.is_inference(),
             is_leaf=is_leaf,
             requires_grad=t.requires_grad,
@@ -631,19 +656,46 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
         return self.func(new_base, symint_visitor_fn, tensor_visitor_fn)
 
 
-# A callback where the device is either optional or required.
+# A callback where the device is either optional or required. MetaConverter can
+# also pass the optional source_desc kwarg when a callback accepts it.
 # All of these satisfy this protocol:
-#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str])
-#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str] = "meta")
-#   def mk(arg: Callable[[], torch.Tensor], device: Optional[Union[torch.device, str]] = None)
+#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str],
+#          source_desc: MetaTensorDesc[Any] | None = None)
+#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str] = "meta",
+#          source_desc: MetaTensorDesc[Any] | None = None)
 class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
     def __call__(
-        self, arg: Callable[[], torch.Tensor], /, *, device: torch.device | str
+        self,
+        arg: Callable[[], torch.Tensor],
+        /,
+        *,
+        device: torch.device | str,
+        source_desc: MetaTensorDesc[Any] | None = None,
     ) -> _TensorT_cov: ...
 
 
 class _MetaTensorCallbackKwargs(TypedDict, total=False):
     device: torch.device | str
+    source_desc: MetaTensorDesc[Any] | None
+
+
+def _callback_accepts_source_desc(callback: Callable[..., Any]) -> bool:
+    try:
+        parameters = inspect.signature(callback).parameters.values()
+    except (TypeError, ValueError):
+        return False
+
+    for parameter in parameters:
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            return True
+        # External callbacks opt in by accepting this kwarg. Keep the name
+        # stable: FakeTensor uses it to preserve source tensor metadata.
+        if parameter.name == "source_desc" and parameter.kind in (
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            return True
+    return False
 
 
 # A callback where the device may not be provided (is optional).
@@ -682,6 +734,8 @@ class MetaTensorDesc(Generic[_TensorT]):
     dynamo_dynamic_indices: list[int]
     dynamo_hint_overrides: dict[int, int]
 
+    dispatch_keys: int | None = None
+    extra_dispatch_keys: int | None = None
     layout: torch.layout = torch.strided
     is_inference: bool = False
     is_leaf: bool = False
@@ -992,6 +1046,7 @@ class MetaConverter(Generic[_TensorT]):
         cls,
         t: Callable[[], torch.Tensor],
         device: torch.device | str | None = None,
+        source_desc: MetaTensorDesc[Any] | None = None,
     ) -> _TensorT:
         return cls._checked_cast_tensor_t(t())
 
@@ -1013,6 +1068,7 @@ class MetaConverter(Generic[_TensorT]):
         symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext | None,
         callback: _MetaTensorCallbackOptDevice[_TensorT],
         source: torch._guards.Source,
+        callback_accepts_source_desc: bool | None = None,
     ) -> _TensorT:
         from torch._dynamo.source import AttrSource
         from torch.fx.experimental.symbolic_shapes import SubclassSymbolicContext
@@ -1026,6 +1082,7 @@ class MetaConverter(Generic[_TensorT]):
                 callback,
                 source,
                 symbolic_context,
+                callback_accepts_source_desc=callback_accepts_source_desc,
             )
 
         inner_tensors: dict[str, torch.Tensor | CustomClassBase] = {}
@@ -1058,6 +1115,7 @@ class MetaConverter(Generic[_TensorT]):
                 current_context,
                 inner_callback,
                 current_source,
+                callback_accepts_source_desc=True,
             )
             inner_tensors[attr] = new_empty_tensor
 
@@ -1084,12 +1142,28 @@ class MetaConverter(Generic[_TensorT]):
         callback_: _MetaTensorCallback[_TensorT],
         source: Source | None,
         symbolic_context: SymbolicContext | None,
+        *,
+        callback_accepts_source_desc: bool | None = None,
     ) -> _TensorT:
         from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_real_tensor
 
-        callback: _MetaTensorCallbackOptDevice[_TensorT] = functools.partial(
+        base_callback: _MetaTensorCallbackOptDevice[_TensorT] = functools.partial(
             callback_, device=t.device
         )
+        if callback_accepts_source_desc is None:
+            callback_accepts_source_desc = _callback_accepts_source_desc(callback_)
+
+        def callback(
+            make_meta_t: Callable[[], torch.Tensor],
+            **kwargs: Unpack[_MetaTensorCallbackKwargs],
+        ) -> _TensorT:
+            if callback_accepts_source_desc:
+                if "source_desc" not in kwargs:
+                    kwargs["source_desc"] = t
+            else:
+                kwargs.pop("source_desc", None)
+            return base_callback(make_meta_t, **kwargs)
+
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -1293,6 +1367,7 @@ class MetaConverter(Generic[_TensorT]):
                 symbolic_context,
                 callback,
                 source,
+                callback_accepts_source_desc=True,
             )
 
             # NB: Purposefully guard here to simplify the inner / outer symbols.
@@ -1526,6 +1601,7 @@ class MetaConverter(Generic[_TensorT]):
                         all_dynamic_symbolic_context(
                             visited_desc, temp_source, shape_env, callback
                         ),
+                        callback_accepts_source_desc=True,
                     )
 
                 # Replay the view, swapping out any non-symbolic SymInts or real tensors
@@ -1829,6 +1905,7 @@ class MetaConverter(Generic[_TensorT]):
                                 # work, take a closer look.
                                 source,
                                 symbolic_context,
+                                callback_accepts_source_desc=True,
                             )
                             r = self._checked_cast_tensor_t(
                                 _wrap_functional_tensor(ft, t.current_level),
@@ -1882,6 +1959,7 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         source,
                         symbolic_context,
+                        callback_accepts_source_desc=True,
                     )
                     r = self._checked_cast_tensor_t(
                         torch._to_functional_tensor(unwrapped)
@@ -1927,6 +2005,7 @@ class MetaConverter(Generic[_TensorT]):
                             callback,
                             torch._dynamo.source.AttrSource(source, "_base"),
                             base_symbolic_context,
+                            callback_accepts_source_desc=True,
                         )
 
                     def is_c_of_r(
@@ -2282,11 +2361,30 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         grad_source,
                         grad_symbolic_context,
+                        callback_accepts_source_desc=True,
                     )
                 # pyrefly: ignore [unbound-name]
                 torch._C._set_conj(r, t.is_conj)
                 # pyrefly: ignore [unbound-name]
                 torch._C._set_neg(r, t.is_neg)
+                # pyrefly: ignore [unbound-name]
+                if is_fake_tensor(r):
+                    r.dispatch_keys = (  # type: ignore[attr-defined]
+                        torch._C.DispatchKeySet.from_raw_repr(t.dispatch_keys)
+                        if t.dispatch_keys is not None
+                        else None
+                    )
+                    if t.extra_dispatch_keys is not None:
+                        extra_dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(
+                            t.extra_dispatch_keys
+                        )
+                    elif t.dispatch_keys is not None:
+                        # FakeTensor.__new__ already derived the physical subset
+                        # from the full logical dispatch key set.
+                        extra_dispatch_keys = r.extra_dispatch_keys  # type: ignore[attr-defined]
+                    else:
+                        extra_dispatch_keys = None
+                    r.extra_dispatch_keys = extra_dispatch_keys  # type: ignore[attr-defined]
             # This can be skipped if necessary for performance reasons
             skip_leaf = (
                 t.is_gradtrackingtensor and t.level == GRAD_TENSOR_SENTINEL_VALUE
@@ -2329,6 +2427,7 @@ class MetaConverter(Generic[_TensorT]):
         callback: _MetaTensorCallback[_TensorT] | None = None,
         source: Source | None = None,
         symbolic_context: SymbolicContext | None = None,
+        callback_accepts_source_desc: bool | None = None,
         # Controls whether or not we should dump the tensor metadata to structured logs
         # when source is not None.  Because we refakify after Dynamo is done,
         # we don't want to dump info again from AOTAutograd, it is redundant.
@@ -2337,6 +2436,8 @@ class MetaConverter(Generic[_TensorT]):
         callback_: _MetaTensorCallback[_TensorT]
         if callback is None:
             callback_ = self._identity_callable
+            if callback_accepts_source_desc is None:
+                callback_accepts_source_desc = True
         else:
             callback_ = callback
         # TODO: zero tensors?  We appear to have eliminated them by
@@ -2408,6 +2509,7 @@ class MetaConverter(Generic[_TensorT]):
                 callback_,
                 source,
                 symbolic_context,
+                callback_accepts_source_desc=callback_accepts_source_desc,
             )
 
         if type(t) is torch.nn.Parameter:

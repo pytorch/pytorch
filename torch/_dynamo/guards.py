@@ -4228,6 +4228,14 @@ class GuardsStatePickler(pickle.Pickler):
                 return _Missing, ("tensor guard tree",)
 
             if is_traceable_wrapper_subclass(obj):
+                dispatch_keys = torch._C._dispatch_keys(obj)
+                if (
+                    isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                        obj, torch._subclasses.FakeTensor
+                    )
+                    and obj.dispatch_keys is not None
+                ):
+                    dispatch_keys = obj.dispatch_keys
                 # inner_data is a list of tuples of:
                 #   (inner attr name, unpickle func, tuple of func inputs)
                 # This supports traceable wrapper subclass inner tensors.
@@ -4244,7 +4252,7 @@ class GuardsStatePickler(pickle.Pickler):
                     torch.empty_like(obj, device="meta"),
                     obj.device,
                     type(obj),
-                    torch._C._dispatch_keys(obj).raw_repr(),
+                    dispatch_keys.raw_repr(),
                     ctx,
                     inner_data,
                 )
@@ -4253,16 +4261,19 @@ class GuardsStatePickler(pickle.Pickler):
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
+            dispatch_keys = torch._C._dispatch_keys(obj)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+                if obj.dispatch_keys is not None:
+                    dispatch_keys = obj.dispatch_keys
 
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,
                 pytype,
-                torch._C._dispatch_keys(obj).raw_repr(),
+                dispatch_keys.raw_repr(),
                 obj.grad,
             )
 
