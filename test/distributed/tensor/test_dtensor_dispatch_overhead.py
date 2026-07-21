@@ -5,6 +5,7 @@ import functools
 import logging
 import statistics
 import time
+import unittest
 from collections import namedtuple
 
 import torch
@@ -12,7 +13,6 @@ from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    skip_unless_torch_gpu,
     with_comms,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -65,7 +65,10 @@ class DistOpDispatchOverHead(DTensorTestBase):
     def world_size(self) -> int:
         return 4
 
-    @skip_unless_torch_gpu
+    @unittest.skipIf(
+        torch.accelerator.device_count() < 4,
+        "requires at least 4 accelerator devices",
+    )
     @with_comms
     def test_dtensor_add_op_dispatch_overhead(self):
         device_module = torch.get_device_module(self.device_type)
