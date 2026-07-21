@@ -1563,6 +1563,19 @@ class DeviceCachingAllocator {
     return user_metadata;
   }
 
+  void annotateMemory(Block* block, const std::string& metadata) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    record_trace(
+        TraceEntry::ANNOTATE,
+        int64_t(block->ptr),
+        block->requested_size,
+        block->stream,
+        block->device,
+        block->pool->owner_MempoolId(),
+        maybeGatherContext(RecordContext::ALLOC),
+        metadata);
+  }
+
   bool checkPoolLiveAllocations(
       MempoolId_t mempool_id,
       const std::unordered_set<void*>& expected_live_allocations) const {
@@ -4390,7 +4403,8 @@ class DeviceCachingAllocator {
       cudaStream_t stream,
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::shared_ptr<GatheredContext> context) {
+      std::shared_ptr<GatheredContext> context,
+      std::optional<std::string> metadata_override = std::nullopt) {
     if (!record_history && trace_trackers_.empty())
       return;
     std::string compile_string = "N/A";
@@ -4407,7 +4421,7 @@ class DeviceCachingAllocator {
         getApproximateTime(),
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
         compile_string,
-        user_metadata);
+        metadata_override ? std::move(*metadata_override) : user_metadata);
 
     // Callbacks should not include any Pytorch call
     for (const auto& cb : trace_trackers_) {
@@ -4716,6 +4730,13 @@ class NativeCachingAllocator : public CUDAAllocator {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     return device_allocator[device]->getUserMetadata();
+  }
+
+  void annotateMemory(const void* ptr, const std::string& metadata) override {
+    Block* block = get_allocated_block(ptr);
+    TORCH_CHECK(
+        block, "annotateMemory: no live allocation found at pointer ", ptr);
+    device_allocator[block->device]->annotateMemory(block, metadata);
   }
 
   bool isHistoryEnabled() override {

@@ -867,6 +867,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
 
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
+  py::str annotate_s = "annotate";
   py::str device_free_s = "device_free";
 
   using c10::CachingDeviceAllocator::TraceEntry;
@@ -891,6 +892,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
+      case TraceEntry::ANNOTATE:
+        return annotate_s;
     }
     TORCH_CHECK(false, "unreachable");
   };
@@ -1259,6 +1262,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def("_cuda_getMemoryMetadata", []() {
     return c10::cuda::CUDACachingAllocator::getUserMetadata();
+  });
+
+  m.def("_cuda_annotateMemory", [](size_t ptr, const std::string& metadata) {
+    c10::cuda::CUDACachingAllocator::annotateMemory(
+        reinterpret_cast<void*>(ptr), metadata);
   });
 
   m.def("_cuda_get_conv_benchmark_empty_cache", []() {
