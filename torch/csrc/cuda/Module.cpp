@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/RNN.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
@@ -1458,21 +1459,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
       });
 
-  m.def(
-      "_set_storage_data_ptr_access_error_msg",
-      [](size_t storage_impl_ptr, std::string s) {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-        storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
-      });
-
-  m.def(
-      "_clear_storage_data_ptr_access_error_msg", [](size_t storage_impl_ptr) {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-        storage_impl->clear_data_ptr_access_error_msg_();
-      });
-
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
@@ -1764,6 +1750,20 @@ static PyObject* THCPModule_resetCublasLtWorkspaceSize(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
   at::cuda::resetCUDABlasLtWorkspaceSize();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPModule_cudnnClearDropoutState_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+#if defined(USE_ROCM)
+  // On ROCm, RNNs dispatch to MIOpen, which caches its dropout state buffer in
+  // thread-local storage separate from the cuDNN path.
+  at::native::_miopen_clear_dropout_state();
+#endif
+  at::native::_cudnn_clear_dropout_state();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -2260,6 +2260,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_resetCublasLtWorkspaceSize",
      THCPModule_resetCublasLtWorkspaceSize,
+     METH_NOARGS,
+     nullptr},
+    {"_cudnn_clear_dropout_state",
+     THCPModule_cudnnClearDropoutState_wrap,
      METH_NOARGS,
      nullptr},
     {"_cuda_isCurrentStreamCapturing",
