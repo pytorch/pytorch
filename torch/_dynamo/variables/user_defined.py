@@ -2335,7 +2335,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
-        return self.call_method(tx, "__imatmul__", [other], {})
+        return self.SLOT1(tx, "__imatmul__", other)
 
     def nb_lshift_impl(
         self,
