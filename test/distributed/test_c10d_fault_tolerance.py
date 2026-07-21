@@ -2,6 +2,7 @@
 
 import os
 import sys
+import threading
 import unittest
 from datetime import timedelta
 
@@ -236,6 +237,38 @@ class AbstractFaultToleranceTest:
 
         handles = self._collect_handles("ft_abort_recover")
         self._reconfigure(1201, handles)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
+    def test_reconfigure_after_timeout(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("timeout-triggered revoke is specific to nccl2")
+
+        from torch._C._distributed_c10d import ErrorType
+
+        self._create_reconfigured_pg("ft_timeout", 1300)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+        self.backend.set_timeout(timedelta(seconds=2))
+        revoke_event = threading.Event()
+        self.backend.register_abort_hook(0, revoke_event.set)
+
+        if self.rank != 0:
+            tensor = torch.ones(4, device=self.device)
+            work = dist.all_reduce(tensor, async_op=True)
+            self.assertTrue(
+                revoke_event.wait(10),
+                "NCCL2 communicator was not revoked after operation timeout",
+            )
+            self.assertEqual(self.backend.get_error(), ErrorType.TIMEOUT)
+            with self.assertRaisesRegex(RuntimeError, "timed out"):
+                dist.all_reduce(tensor, async_op=True)
+            del work
+
+        self.backend.unregister_abort_hook(0)
+        self.backend.set_timeout(timedelta(seconds=30))
+        self._store_barrier("ft_timeout_observed")
+
+        handles = self._collect_handles("ft_timeout_recover")
+        self._reconfigure(1301, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
     def test_reconfigure_rejects_reused_uuid(self):
