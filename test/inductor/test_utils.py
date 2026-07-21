@@ -13,6 +13,7 @@ from unittest import mock
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
+from torch._dynamo.device_interface import DeviceInterface
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.compile_fx import _get_subgraph_names
@@ -42,6 +43,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
+from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
 
 
@@ -1144,6 +1146,100 @@ class TestFakeTensorUpdater(TestCase):
 
         self.assertEqual(tuple(neg_replacement.meta["val"].shape), (4, 5))
         self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+
+# A non-RuntimeError exception mirroring CUDA's GPUTooOldForTriton. The
+# has_triton() loop must never let this escape for a sub-capable device.
+class _GPUTooOldForTriton(Exception):
+    pass
+
+
+def _make_triton_interface(*, available=True, capable=True, raise_exc=None):
+    class _FakeInterface(DeviceInterface):
+        @staticmethod
+        def is_available() -> bool:
+            return available
+
+        @staticmethod
+        def is_triton_capable(device=None) -> bool:
+            return capable
+
+        @classmethod
+        def raise_if_triton_unavailable(cls, device=None) -> None:
+            if raise_exc is not None:
+                raise raise_exc
+
+    return _FakeInterface
+
+
+class TestHasTriton(TestCase):
+    def setUp(self):
+        super().setUp()
+        triton_utils.has_triton.cache_clear()
+
+    def tearDown(self):
+        triton_utils.has_triton.cache_clear()
+        super().tearDown()
+
+    def _run(self, registered, *, has_package=True, detection_disabled=False):
+        with (
+            mock.patch.object(
+                triton_utils, "has_triton_package", return_value=has_package
+            ),
+            mock.patch(
+                "torch._inductor.config.triton_disable_device_detection",
+                detection_disabled,
+            ),
+            mock.patch(
+                "torch._dynamo.device_interface.get_registered_device_interfaces",
+                return_value=registered,
+            ),
+        ):
+            triton_utils.has_triton.cache_clear()
+            return triton_utils.has_triton()
+
+    def test_no_triton_package(self):
+        result = self._run([("fake", _make_triton_interface())], has_package=False)
+        self.assertFalse(result)
+
+    def test_detection_disabled(self):
+        result = self._run(
+            [("fake", _make_triton_interface())], detection_disabled=True
+        )
+        self.assertFalse(result)
+
+    def test_capable_available_backend_built(self):
+        self.assertTrue(self._run([("fake", _make_triton_interface())]))
+
+    def test_device_not_available(self):
+        self.assertFalse(
+            self._run([("fake", _make_triton_interface(available=False))])
+        )
+
+    def test_device_not_triton_capable(self):
+        self.assertFalse(self._run([("fake", _make_triton_interface(capable=False))]))
+
+    def test_backend_missing_raises_runtime_error(self):
+        iface = _make_triton_interface(raise_exc=RuntimeError("backend not built"))
+        self.assertFalse(self._run([("fake", iface)]))
+
+    def test_indexed_device_name_skipped(self):
+        # "fake:0" is available+capable but must be skipped as an indexed alias.
+        self.assertFalse(self._run([("fake:0", _make_triton_interface())]))
+
+    def test_first_working_device_wins(self):
+        registered = [
+            ("bad", _make_triton_interface(capable=False)),
+            ("good", _make_triton_interface()),
+        ]
+        self.assertTrue(self._run(registered))
+
+    def test_capability_gate_precedes_backend_probe(self):
+        # A sub-capable device whose backend probe would throw a NON-RuntimeError.
+        # The capability gate must short-circuit before the probe is ever called;
+        # if the ordering regresses, _GPUTooOldForTriton escapes instead of False.
+        iface = _make_triton_interface(capable=False, raise_exc=_GPUTooOldForTriton())
+        self.assertFalse(self._run([("fake", iface)]))
 
 
 if __name__ == "__main__":
