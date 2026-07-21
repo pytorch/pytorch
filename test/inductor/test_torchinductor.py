@@ -118,6 +118,7 @@ from torch.testing._internal.common_utils import (
     MI350_ARCH,
     NAVI_ARCH,
     parametrize,
+    recover_orig_fp32_precision,
     serialTest,
     skipIfNoLapack,
     skipIfRocm,
@@ -5872,6 +5873,7 @@ for dtype in (torch.int32, torch.int64):
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
     @requires_multigpu()
+    @recover_orig_fp32_precision
     def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
 
@@ -18798,6 +18800,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager_result5, compiled_result5)
 
     @requires_cuda_and_triton
+    @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch({"triton.enable_pdl": True})
     def test_pdl_mutation(self):
@@ -18829,6 +18832,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ).run(code)
 
     @requires_cuda_and_triton
+    @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch(
         {
