@@ -251,14 +251,9 @@ class CuptiMonitor:
     # configure() (first-come-first-serve, no env var), defaults otherwise. Both cadences
     # default to -1 (no background flush / drain -- the caller drives flush()).
     #
-    # use_approx_timestamps defaults OFF. The per-subscriber timestamp callback re-times HOST
-    # records but cannot re-time DEVICE records: when a CUDA context already exists,
-    # cuptiSubscribe latches the device-record (GPU->CPU) correlation base immediately, on the
-    # clock active at subscribe time. Our callback is a per-subscriber attribute that can only
-    # be set after subscribe, so device records are already pinned to the default clock and end
-    # up ~1e4x off the host approx clock, then get dropped by windowing. It is only safe when
-    # the monitor subscribes before any CUDA context exists (standalone, first CUPTI consumer),
-    # so it stays opt-in via configure(use_approx_timestamps=True).
+    # use_approx_timestamps defaults OFF; when on, the per-subscriber timestamp callback
+    # re-times HOST and DEVICE records onto the profiler's approx clock (kineto's timebase).
+    # Opt-in via configure(use_approx_timestamps=True).
     _buffer_size: int = 4 * 1024 * 1024
     _background_flush_period_s: float = -1.0
     _background_drain_period_s: float = -1.0
@@ -695,14 +690,13 @@ class CuptiMonitor:
         cuptiActivityRegisterTimestampCallback, which returns CUPTI_ERROR_NOT_COMPATIBLE."""
         if not self._timestamp_callback_enabled:
             return False
-        # cuptiSubscribe latches the device-record correlation base against a pre-existing CUDA
-        # context, so a callback armed now (post-subscribe) can't re-time device records if one
-        # exists -- they stay pinned to CLOCK_REALTIME. Refuse rather than silently drop them.
-        if _has_active_cuda_context():
+        # Older libcupti can't re-time device records when a context predates the subscriber, so
+        # refuse rather than silently drop them; libcupti >= 130303 re-times regardless.
+        if self._cupti.get_version() < 130303 and _has_active_cuda_context():
             logger.warning(
                 "CUPTI monitor: use_approx_timestamps requested but a CUDA context already "
-                "exists; device records were correlated on CLOCK_REALTIME at subscribe and "
-                "cannot be re-timed. Falling back to the CLOCK_REALTIME pass-through."
+                "exists and this libcupti cannot re-time device records; falling back to the "
+                "CLOCK_REALTIME pass-through."
             )
             return False
         addr = _cupti_monitor_native.approximate_time_callback_address()
