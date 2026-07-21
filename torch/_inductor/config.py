@@ -960,11 +960,10 @@ aggressive_fusion = False
 debug_fusion: bool = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion: bool = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
-loop_ordering_after_fusion: bool = (
-    os.environ.get(
-        "TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "0" if is_fbcode() else "1"
-    )
-    == "1"
+loop_ordering_after_fusion: bool = Config(
+    justknob="pytorch/inductor:loop_ordering_after_fusion",
+    env_name_force="TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION",
+    default=True,
 )
 loop_reindexing_after_fusion: bool = (
     os.environ.get("TORCHINDUCTOR_LOOP_REINDEXING_AFTER_FUSION", "1") == "1"
