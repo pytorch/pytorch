@@ -1,4 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
+
+#ifdef USE_C10D_NCCL
+
 #include <torch/csrc/distributed/c10d/nccl2/StoreManager.hpp>
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
@@ -80,3 +83,5 @@ c10::intrusive_ptr<c10d::Store> dupPrefixStore(
 }
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL

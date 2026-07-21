@@ -40,4 +40,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      load_compiled_function
      save_cache_artifacts
      wrap_numpy
+     precompile
+     PrecompileError
 ```
