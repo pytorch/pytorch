@@ -964,6 +964,9 @@ class _TorchDynamoContext:
 
         fn = innermost_fn(fn)
 
+        if isinstance(fn, staticmethod):
+            return staticmethod(self(fn.__func__))
+
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
 
