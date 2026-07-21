@@ -229,6 +229,7 @@ enum class PyTypeSlotBit : int64_t {
   TP_DESCR_GET = 8,
   TP_DESCR_SET = 9,
   TP_STR = 10,
+  TP_INIT = 11,
 };
 
 int64_t get_pysequence_slots(PyTypeObject* type) {
@@ -379,6 +380,8 @@ int64_t get_pytype_slots(PyTypeObject* type) {
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_DESCR_SET));
   if (PyType_GetSlot(type, Py_tp_str) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_STR));
+  if (PyType_GetSlot(type, Py_tp_init) != nullptr)
+    slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_INIT));
   return slots;
 }
 
@@ -603,7 +606,8 @@ void initDynamoBindings(PyObject* torch) {
       .value("TP_SETATTRO", PyTypeSlotBit::TP_SETATTRO)
       .value("TP_DESCR_GET", PyTypeSlotBit::TP_DESCR_GET)
       .value("TP_DESCR_SET", PyTypeSlotBit::TP_DESCR_SET)
-      .value("TP_STR", PyTypeSlotBit::TP_STR);
+      .value("TP_STR", PyTypeSlotBit::TP_STR)
+      .value("TP_INIT", PyTypeSlotBit::TP_INIT);
 }
 
 } // namespace torch::dynamo
