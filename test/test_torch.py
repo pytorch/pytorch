@@ -10976,9 +10976,37 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 with self.assertRaisesRegex(RuntimeError, "AccumulateGrad node that was poisoned by swap_tensors"):
                     out.sum().backward()
 
-            _wr = weakref.ref(t1)
-            with self.assertRaisesRegex(RuntimeError, "has weakref"):
-                torch.utils.swap_tensors(t1, t2)
+            # A weakref no longer blocks the swap. It keeps pointing at the
+            # same object (identity is preserved) and observes the new content.
+            wr = weakref.ref(t1)
+            t2_id = id(t2)
+            torch.utils.swap_tensors(t1, t2)
+            self.assertIs(wr(), t1)
+            self.assertEqual(id(t2), t2_id)
+
+
+    def test_swap_allows_weakref(self):
+        from torch.utils.weak import TensorWeakRef
+
+        # Plain weakref on either operand: swap succeeds, identity preserved,
+        # content swapped in.
+        t1 = torch.zeros(4, 4)
+        t2 = torch.ones(4, 4)
+        wr1 = weakref.ref(t1)
+        wr2 = weakref.ref(t2)
+        torch.utils.swap_tensors(t1, t2)
+        self.assertIs(wr1(), t1)
+        self.assertIs(wr2(), t2)
+        self.assertTrue(bool((t1 == 1).all()))
+        self.assertTrue(bool((t2 == 0).all()))
+
+        # Dynamo's guard weakref type on a parameter (the issue's repro).
+        p = torch.nn.Parameter(torch.zeros(4, 4))
+        tw = TensorWeakRef(p)
+        torch.utils.swap_tensors(p, torch.nn.Parameter(torch.ones(4, 4)))
+        self.assertTrue(bool((p == 1).all()))
+        self.assertIs(tw(), p)
+        self.assertTrue(bool((tw() == 1).all()))
 
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
