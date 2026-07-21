@@ -1919,6 +1919,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("tile", lambda m, n: (m, n)),
             ("row", lambda m, n: (1, n)),
             ("col", lambda m, n: (m, 1)),
+            ("scalar", lambda m, n: (1, 1)),
         ),
         name_fn=lambda case: case[0],
     )
@@ -1954,12 +1955,46 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_preserves_integer_scalar_captured_tensor_epilogue_arg(self):
+        def epilogue_fn(acc, selector):
+            acc_float = acc.float()
+            return torch.where(selector.bitwise_and(1).bool(), acc_float, -acc_float)
+
+        def fn(a, b, selector):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, selector),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        m, k, n = 128, 64, 128
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        selector = torch.tensor([[2**24 + 1]], device="cuda", dtype=torch.int64)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, selector
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b, selector),
+            epilogue_fn(a.double() @ b.double(), selector),
+            a.shape[1],
+        )
+        FileCheck().check("epilogue_arg_kinds=('scalar',)").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize(
         "case",
         (
             ("tile", lambda m, n: (m, n)),
             ("row", lambda m, n: (1, n)),
             ("col", lambda m, n: (m, 1)),
+            ("scalar", lambda m, n: (1, 1)),
         ),
         name_fn=lambda case: case[0],
     )
