@@ -5423,11 +5423,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             # Small reductions are already cheap on the vector path, and the
             # 65536 hint bucket covers vocab-sized softmax reductions where
-            # scalar accumulation is slower than the vector path. Keep this
-            # first change within the measured scheduling range.
+            # scalar accumulation is slower than the vector path.
             skip_scalar_online_softmax = (
                 reduction_numel_hint < 8192 or reduction_numel_hint == 65536
-                or reduction_numel_hint > 1 << 20
             )
             use_scalar_online_softmax = (
                 config.triton.scalar_online_softmax_accumulators
