@@ -144,12 +144,19 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
   Tensor dst = dst_;
   Tensor src = src_;
 
-  if (dst_.strides() != src_.strides()) {
+  // Equal strides alone don't make the flat blit/castout below valid: both
+  // sides must also map a contiguous storage segment. Views like x[::2] share
+  // strides yet have holes, so a flat copy reads/writes the wrong bytes and
+  // clobbers out-of-view storage (the CPU-to-MPS direction already guards
+  // this with is_dense_in_storage). Gather/scatter through contiguous
+  // temporaries in that case.
+  const bool direct_copy = dst_.strides() == src_.strides() && is_dense_in_storage(src_);
+  if (!direct_copy) {
     dst = at::empty_like(dst_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
-  if (dst_.strides() != src_.strides()) {
+  if (!direct_copy) {
     Tensor emptyShell = Tensor();
     src = gatherViewTensor(src_, emptyShell);
     if (src.has_storage()) {
