@@ -1149,6 +1149,15 @@ class FSDPParam:
         return self._get_grad_inner_tensor(torch.zeros_like(self.unsharded_param))
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
+        if self.reduce_dtype is not None and grad.dtype != self.reduce_dtype:
+            # This method may issue a Partial -> Replicate all-reduce over
+            # non-DP mesh dims (e.g. for a TP-replicated norm weight), and
+            # reduce_dtype is documented to apply to gradient reduction
+            # including all-reduce. Upcast before the redistribute, mirroring
+            # to_accumulated_grad_if_needed on the accumulation path; this
+            # also keeps the gradient dtype uniform with accumulated
+            # gradients so foreach_reduce sees one dtype.
+            grad = grad.to(self.reduce_dtype)
         if self.is_spmd_types:
             if self._unsharded_dtensor_spec is None:
                 raise AssertionError(
