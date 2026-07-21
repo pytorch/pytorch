@@ -8,9 +8,11 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/TransposeType.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <ATen/native/mps/operations/GemmHeuristics.h>
 
 #include <fmt/format.h>
 
@@ -37,8 +39,8 @@
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_lu_native.h>
+#include <ATen/ops/linalg_lu_solve.h>
 #include <ATen/ops/linalg_qr.h>
-#include <ATen/ops/linalg_qr_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/linalg_svd.h>
 #include <ATen/ops/linalg_vector_norm.h>
@@ -90,6 +92,170 @@ AlphaBeta make_alpha_beta(const Scalar& alpha, const Scalar& beta, ScalarType sc
     alpha_beta.f32 = {alpha.toFloat(), beta.toFloat()};
   }
   return alpha_beta;
+}
+
+// Describes how a kernel reads one logical matrix.
+struct ResolvedMatrix {
+  Tensor tensor;
+  int64_t ld; // leading stride in the selected orientation
+  int64_t stride; // stride along the reduction/output dimension
+  bool transposed; // true when stored column-major
+};
+
+ResolvedMatrix resolve_matrix(const Tensor& matrix) {
+  const auto rows = matrix.size(0);
+  const auto cols = matrix.size(1);
+  const auto row_stride = matrix.stride(0);
+  const auto col_stride = matrix.stride(1);
+  if (col_stride == 1 && row_stride >= cols) {
+    return {matrix, row_stride, col_stride, false};
+  }
+  if (row_stride == 1 && col_stride >= rows) {
+    return {matrix, col_stride, row_stride, true};
+  }
+  return {matrix, row_stride, col_stride, false};
+}
+
+// Rank-1 GEMV launch. Matrix orientation selects gemv_t vs gemv_nt; one
+// GemvDims packing handles all four mat/vec layouts.
+void dispatch_gemv(const Tensor& A,
+                   const Tensor& B,
+                   const Tensor& out,
+                   const std::optional<Tensor>& bias,
+                   const ResolvedMatrix& matrix,
+                   const Scalar& alpha,
+                   const Scalar& beta,
+                   GemmEpilogue epi,
+                   const GemvPolicy& policy,
+                   bool m_is_one,
+                   int64_t outlen,
+                   bool idx64) {
+  const auto dt = out.scalar_type();
+  const std::string dt_str = scalarToMetalTypeString(out);
+  constexpr int64_t r = 0, c = 1;
+  const auto K = A.size(1);
+
+  // gemv_t when the output runs along the matrix's columns; else gemv_nt.
+  const bool gemv_use_t = m_is_one ? !matrix.transposed : matrix.transposed;
+  const bool matrix_contiguous = matrix.stride == 1;
+  const int64_t align = matrix_contiguous ? matrix.ld | matrix.tensor.storage_offset() : 0;
+  GemvConfig cfg;
+  if (idx64) {
+    // Offsets overflow int32: such operands are DRAM-bound, so skip the
+    // policy and use the fixed configs the _i64 variants are built at.
+    cfg = gemv_use_t ? GemvConfig{16, 2} : GemvConfig{8, dt == at::kFloat ? 4 : 8};
+    cfg = GemvPolicy::clamp_vec(cfg, align);
+  } else {
+    cfg = gemv_use_t ? policy.pick_t(dt, outlen, K, align) : policy.pick_nt(dt, outlen, K, align);
+  }
+  // T2D loads a full 16 bytes per lane; misaligned matrices fall back to the
+  // scalar-column standard kernel.
+  const int t2d_vec = static_cast<int>(16 / c10::elementSize(dt));
+  if (cfg.kernel == GemvKernel::T2D && (!matrix_contiguous || (align & (t2d_vec - 1)))) {
+    cfg.kernel = GemvKernel::Standard;
+    cfg.vec = matrix_contiguous ? 1 : 2;
+  }
+  const GemvConfig launch_cfg = cfg;
+  const bool gemv_t2d = gemv_use_t && launch_cfg.kernel == GemvKernel::T2D;
+
+  const auto vvec = m_is_one ? A : B;
+  const auto vec_xs = m_is_one ? A.stride(c) : B.stride(r);
+  // Vectorized x loads need x unit-stride and VEC-aligned (nt only).
+  const bool xc = !gemv_use_t && launch_cfg.vec > 1 && vec_xs == 1 && (vvec.storage_offset() % launch_cfg.vec) == 0;
+
+  Tensor expanded_bias;
+  int64_t out_stride = 0;
+  if (epi == GemmEpilogue::Bias) {
+    TORCH_INTERNAL_ASSERT(bias.has_value());
+    expanded_bias = bias->expand_as(out);
+    out_stride = m_is_one ? expanded_bias.stride(c) : expanded_bias.stride(r);
+  } else {
+    expanded_bias = matrix.tensor; // dummy binding for buffer(4); never dereferenced
+  }
+
+  // gemv_t indexes bias at (0,n); gemv_nt indexes it at (row,0).
+  GemvDims dims;
+  dims.n = outlen;
+  dims.K = K;
+  dims.ld = matrix.ld;
+  dims.ms = matrix.stride;
+  dims.xs = vec_xs;
+  dims.bias_r = gemv_use_t ? 0 : out_stride;
+  dims.bias_c = gemv_use_t ? out_stride : 0;
+
+  const auto epi_str = epi == GemmEpilogue::Bias ? "ab" : "none";
+  const auto matrix_str = matrix_contiguous ? "" : "_strided";
+  const auto idx_str = idx64 ? "_i64" : "";
+  std::string fname;
+  if (gemv_t2d) {
+    fname = fmt::format("gemv_t2d_{}_{}_{}_{}", dt_str, launch_cfg.nsimd, launch_cfg.kq, epi_str);
+  } else if (gemv_use_t) {
+    fname =
+        fmt::format("gemv_t_{}_{}_{}_{}{}{}", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str, matrix_str, idx_str);
+  } else {
+    fname = fmt::format("gemv_nt_{}_{}_{}_{}_{}{}{}",
+                        dt_str,
+                        launch_cfg.nsimd,
+                        launch_cfg.vec,
+                        epi_str,
+                        xc ? "xc" : "xs",
+                        matrix_str,
+                        idx_str);
+  }
+  auto pso = lib.getPipelineStateForFunc(fname);
+  const NSUInteger threads_per_tg = static_cast<NSUInteger>(launch_cfg.nsimd * c10::metal::simdgroup_size);
+  const int64_t rows_per_tg = gemv_t2d ? (c10::metal::simdgroup_size / launch_cfg.kq) * t2d_vec
+      : gemv_use_t                     ? c10::metal::simdgroup_size * launch_cfg.vec
+                                       : launch_cfg.nsimd;
+  const int64_t num_groups = (outlen + rows_per_tg - 1) / rows_per_tg;
+  const std::array<float, 2> ab = {static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "gemm_gemv", {matrix.tensor, vvec});
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, matrix.tensor, vvec, out, dims, expanded_bias, ab);
+      [enc dispatchThreadgroups:MTLSizeMake(num_groups, 1, 1) threadsPerThreadgroup:MTLSizeMake(threads_per_tg, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+}
+
+// Rank-1 GEMV gate for mm/addmm: dispatch when out is rank-1 (M==1 xor N==1)
+// and unit-stride along its length, otherwise return false to fall back to MPSGraph
+// A=(M,K), B=(K,N).
+bool try_mps_gemv(const Tensor& A,
+                  const Tensor& B,
+                  const Tensor& out,
+                  const std::optional<Tensor>& bias,
+                  const Scalar& alpha,
+                  const Scalar& beta,
+                  GemmEpilogue epi) {
+  const auto dtype = out.scalar_type();
+  if (dtype != at::kFloat && dtype != at::kHalf && dtype != at::kBFloat16) {
+    return false;
+  }
+  const auto M = A.size(0);
+  const auto N = B.size(1);
+  const auto K = A.size(1);
+  if (M != 1 && N != 1) {
+    return false;
+  }
+  const auto m_is_one = (M == 1);
+  const auto outlen = m_is_one ? N : M;
+  // Output must be unit-stride along its length for the flat store.
+  const auto out_unit = m_is_one ? (out.stride(1) == 1) : (out.stride(0) == 1);
+  if (!out_unit) {
+    return false;
+  }
+  const auto matrix = resolve_matrix(m_is_one ? B : A);
+  // Dispatch 64-bit-index variants when numel or storage offsets exceed int32.
+  const bool idx64 = !offsetsFitIn<int32_t>(A, B, out) || (bias.has_value() && !offsetsFitIn<int32_t>(*bias));
+  const GemvPolicy policy = GemvPolicy::current();
+  dispatch_gemv(A, B, out, bias, matrix, alpha, beta, epi, policy, m_is_one, outlen, idx64);
+  return true;
 }
 
 Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
@@ -349,34 +515,7 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
        other.size(0) > max_stride_size || other.size(1) > max_stride_size);
 }
 
-void map_mps_decomposition_error_code_to_blas(const Tensor& status) {
-  const auto& status_flat = status.view(-1);
-
-  for (const auto i : c10::irange(status_flat.size(0))) {
-    int code = status_flat[i].item<int>();
-    switch (code) {
-      case MPSMatrixDecompositionStatusSuccess:
-        status_flat[i] = 0;
-        break;
-      case MPSMatrixDecompositionStatusNonPositiveDefinite:
-      case MPSMatrixDecompositionStatusSingular:
-        status_flat[i] = 2;
-        break;
-      case MPSMatrixDecompositionStatusFailure:
-        status_flat[i] = -1;
-        break;
-      default:
-        TORCH_INTERNAL_ASSERT(false, "Unknown MPSMatrixDecompositionStatus enum value: ", code);
-    }
-  }
-}
-
 } // anonymous namespace
-
-static bool lu_has_matmul2d() {
-  // matmul2d needs macOS 26.2+; below that the simdgroup gemm fallback is used
-  return is_macos_at_least(MacOSVersion::MACOS_26_2);
-}
 
 // Blocked right-looking LU with partial pivoting, factored in place on a
 // row-major fp32 (B, M, N) buffer; pivots are 1-based, info follows LAPACK.
@@ -388,7 +527,7 @@ static void lu_factor_panel_encode(const Tensor& LU,
                                    int64_t B,
                                    bool transposeResult) {
   auto stream = getCurrentMPSStream();
-  const bool useMpp = lu_has_matmul2d();
+  const bool useMpp = has_mpp();
 
   auto factorW32PSO = lib.getPipelineStateForFunc("factorPanelLU_1_32");
   auto factorW16PSO = lib.getPipelineStateForFunc("factorPanelLU_2_16");
@@ -635,6 +774,120 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
   }
 }
 
+static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, int64_t k, int64_t Bnum, bool adjoint) {
+  auto stream = getCurrentMPSStream();
+  const auto useMpp = has_mpp();
+  const auto un = static_cast<uint32_t>(n);
+  const auto uk = static_cast<uint32_t>(k);
+  const auto uB = static_cast<uint32_t>(Bnum);
+  const auto N = un + uk;
+
+  auto pivotPSO = lib.getPipelineStateForFunc("luApplyPivotsRHS");
+  auto fwdPSO = lib.getPipelineStateForFunc(adjoint ? "trsmDiagSolveLU_lower_nonunit" : "trsmDiagSolveLU_lower_unit");
+  auto backPSO = lib.getPipelineStateForFunc(adjoint ? "trsmDiagSolveLU_upper_unit" : "trsmDiagSolveLU_upper_nonunit");
+  auto gemmBigPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_64_64_4") : nil;
+  auto gemmSmallPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_32_64_2") : nil;
+  auto gemmSimdPSO = useMpp ? nil : lib.getPipelineStateForFunc("gemmSimdLU");
+
+  @autoreleasepool {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      auto enc = stream->commandEncoder();
+      mtl_setArgs(enc, W, pivots);
+      mtl_setArgs<3>(enc, std::array<uint32_t, 2>{un, N});
+
+      auto setP4 = [&](uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+        mtl_setArgs<4>(enc, std::array<uint32_t, 4>{a, b, c, d});
+      };
+      auto setP5 = [&](uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+        mtl_setArgs<5>(enc, std::array<uint32_t, 4>{a, b, c, d});
+      };
+      auto pivotApply = [&](bool inverse) {
+        setP4(un, uk, un, inverse ? 1u : 0u);
+        [enc setComputePipelineState:pivotPSO];
+        [enc dispatchThreadgroups:MTLSizeMake(uB, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(std::clamp(uk, 1u, 256u), 1, 1)];
+      };
+      auto trsm = [&](id<MTLComputePipelineState> pso, uint32_t d0, uint32_t nr) {
+        setP4(d0, un, N, nr);
+        [enc setComputePipelineState:pso];
+        [enc dispatchThreadgroups:MTLSizeMake(uB, at::ceil_div(uk, 128u), 1)
+            threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+      };
+      auto gemm = [&](uint32_t rs, uint32_t re, uint32_t kc, uint32_t kw) {
+        if (rs >= re || uk == 0) {
+          return;
+        }
+        const auto Tm = re - rs;
+        setP4(rs, re, un, N);
+        setP5(kc, kw, 0, 0);
+        if (!useMpp) {
+          [enc setComputePipelineState:gemmSimdPSO];
+          [enc dispatchThreadgroups:MTLSizeMake(at::ceil_div(uk, 64u), at::ceil_div(Tm, 32u), uB)
+              threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+          return;
+        }
+        const auto big = Tm >= 1024 && uk >= 64;
+        const auto BM = big ? 64u : 32u;
+        const auto BN = 64u;
+        const auto NSG = big ? 4u : 2u;
+        [enc setComputePipelineState:(big ? gemmBigPSO : gemmSmallPSO)];
+        [enc dispatchThreadgroups:MTLSizeMake(at::ceil_div(uk, BN), at::ceil_div(Tm, BM), uB)
+            threadsPerThreadgroup:MTLSizeMake(NSG * 32, 1, 1)];
+      };
+
+      if (!adjoint) {
+        pivotApply(false);
+      }
+      for (auto p0 = 0u; p0 < un; p0 += 32) {
+        const auto pw = std::min(32u, un - p0);
+        trsm(fwdPSO, p0, pw);
+        gemm(p0 + pw, un, p0, pw);
+      }
+      for (auto pb = un ? (static_cast<int64_t>(un) - 1) / 32 * 32 : int64_t{0}; pb >= 0; pb -= 32) {
+        const auto p0 = static_cast<uint32_t>(pb);
+        const auto pw = std::min(32u, un - p0);
+        trsm(backPSO, p0, pw);
+        gemm(0, p0, p0, pw);
+      }
+      if (adjoint) {
+        pivotApply(true);
+      }
+    });
+  }
+}
+
+static void mps_lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  using namespace mps;
+  TORCH_CHECK(LU.scalar_type() == kFloat, "linalg.lu_solve(): MPS only supports float32.");
+  if (B.numel() == 0) {
+    return;
+  }
+  const auto adjoint = trans != TransposeType::NoTranspose;
+  const auto n = LU.size(-1);
+  const auto k = B.size(-1);
+
+  std::vector<int64_t> batch(B.sizes().begin(), B.sizes().end() - 2);
+  const auto Bnum = c10::multiply_integers(batch);
+  auto with_mat = [&](int64_t r, int64_t c) {
+    auto s = batch;
+    s.push_back(r);
+    s.push_back(c);
+    return s;
+  };
+  auto piv_shape = batch;
+  piv_shape.push_back(n);
+  auto piv_b = pivots.expand(piv_shape).contiguous().reshape({Bnum, n});
+
+  auto W = at::empty({Bnum, n, n + k}, LU.options());
+  auto factor = adjoint ? LU.expand(with_mat(n, n)).mH() : LU.expand(with_mat(n, n));
+  W.narrow(-1, 0, n).copy_(factor.reshape({Bnum, n, n}));
+  W.narrow(-1, n, k).copy_(B.reshape({Bnum, n, k}));
+
+  lu_solve_encode(W, piv_b, n, k, Bnum, adjoint);
+
+  B.copy_(W.narrow(-1, n, k).reshape(with_mat(n, k)));
+}
+
 static void linalg_solve_out_mps_impl(const Tensor& A,
                                       const Tensor& B,
                                       bool left,
@@ -644,170 +897,14 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
                                       const Tensor& pivots,
                                       const Tensor& info) {
   using namespace mps;
-
-  TORCH_CHECK(A.scalar_type() == kFloat && LU.scalar_type() == kFloat, "linalg.lu_factor(): MPS only supports floats.");
-  Tensor A_t, B_t;
-  // If 'left' is false, reinterpret the problem so that Ax = B becomes A^T ⋅ (x^T) = B^T
-  // Then we solve the normal "left" case on the transposed matrices and transpose x finally to get the output
-  if (left) {
-    A_t = A.contiguous();
-    B_t = B.contiguous();
-  } else {
-    A_t = A.transpose(-2, -1).contiguous();
-    B_t = B.transpose(-2, -1).contiguous();
-  }
-
-  uint64_t aRows = A_t.size(-2);
-  uint64_t aCols = A_t.size(-1);
-  uint64_t aElemSize = A_t.element_size();
-  int a_ndim = A_t.dim();
-  int b_ndim = B_t.dim();
-  int numberOfRightHandSides = (b_ndim == a_ndim - 1) ? 1 : (b_ndim >= 2 ? B_t.size(-1) : 1);
-
-  uint64_t numPivots = std::min(aRows, aCols);
-  std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
-  resize_output(info, pivot_sizes);
-  info.fill_(0); // will be set by kernel on failure
-  pivot_sizes.push_back(numPivots);
-  resize_output(pivots, pivot_sizes);
-
-  if (A_t.numel() == 0) {
-    return;
-  }
-
-  // Save original shape before flattening for the LU output
-  auto A_original_sizes = A_t.sizes().vec();
-
-  if (A_t.dim() > 3) {
-    A_t = A_t.flatten(0, -3);
-  }
-
-  uint64_t batchSize = (A_t.dim() > 2) ? A_t.size(0) : 1;
-  std::vector<Tensor> status_tensors;
-  status_tensors.reserve(batchSize);
-  for ([[maybe_unused]] const auto i : c10::irange(batchSize)) {
-    status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
-  }
-
-  // LU must keep the original (unflattened) shape for the backward pass
-  resize_output(LU, A_original_sizes);
-  Tensor LU_ = (LU.dim() > 3) ? LU.flatten(0, -3) : LU;
-  if (!LU_.is_same(A_t)) {
-    A_t = LU_.copy_(A_t);
-  } else {
-    A_t = LU_;
-  }
-
-  TORCH_INTERNAL_ASSERT(A_t.is_contiguous());
-
-  Tensor result_t;
-  if (!left) {
-    // For right solve, we'll need to transpose the result back later
-    result_t = at::empty_like(B_t, B_t.options());
-  } else {
-    result_t = result;
-  }
-  id<MTLBuffer> luBuffer = getMTLBufferStorage(LU_);
-  id<MTLBuffer> bBuffer = getMTLBufferStorage(B_t);
-  id<MTLBuffer> resultBuffer = getMTLBufferStorage(result_t);
-  id<MTLBuffer> pivotsBuffer = getMTLBufferStorage(pivots);
-
-  MPSStream* mpsStream = getCurrentMPSStream();
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
-
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      mpsStream->endKernelCoalescing();
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-
-      auto lu_decomp = [[[MPSMatrixDecompositionLU alloc] initWithDevice:device rows:aRows columns:aCols] autorelease];
-
-      auto solver = [[[MPSMatrixSolveLU alloc] initWithDevice:device
-                                                    transpose:false
-                                                        order:aRows
-                                       numberOfRightHandSides:numberOfRightHandSides] autorelease];
-
-      auto luMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
-                                                                columns:aCols
-                                                               matrices:1
-                                                               rowBytes:aCols * aElemSize
-                                                            matrixBytes:aRows * aCols * aElemSize
-                                                               dataType:getMPSDataType(LU_)];
-      auto rhsMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
-                                                                 columns:numberOfRightHandSides
-                                                                matrices:1
-                                                                rowBytes:numberOfRightHandSides * aElemSize
-                                                             matrixBytes:aRows * numberOfRightHandSides * aElemSize
-                                                                dataType:getMPSDataType(B_t)];
-      auto resultMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
-                                                                    columns:numberOfRightHandSides
-                                                                   matrices:1
-                                                                   rowBytes:numberOfRightHandSides * aElemSize
-                                                                matrixBytes:aRows * numberOfRightHandSides * aElemSize
-                                                                   dataType:getMPSDataType(result_t)];
-      auto pivotsMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:1
-                                                                    columns:numPivots
-                                                                   matrices:1
-                                                                   rowBytes:numPivots * sizeof(uint32_t)
-                                                                matrixBytes:numPivots * sizeof(uint32_t)
-                                                                   dataType:MPSDataTypeUInt32];
-
-      for (const auto i : c10::irange(batchSize)) {
-        const uint64_t batchOffsetA = i * aRows * aCols;
-        const uint64_t batchOffsetB = i * aRows * numberOfRightHandSides;
-        MPSMatrix* mpsLU = [[[MPSMatrix alloc] initWithBuffer:luBuffer
-                                                       offset:(LU_.storage_offset() + batchOffsetA) * aElemSize
-                                                   descriptor:luMatrixDesc] autorelease];
-
-        MPSMatrix* mpsRHS = [[[MPSMatrix alloc] initWithBuffer:bBuffer
-                                                        offset:(B_t.storage_offset() + batchOffsetB) * aElemSize
-                                                    descriptor:rhsMatrixDesc] autorelease];
-
-        MPSMatrix* mpsResult = [[[MPSMatrix alloc] initWithBuffer:resultBuffer
-                                                           offset:(result_t.storage_offset() + batchOffsetB) * aElemSize
-                                                       descriptor:resultMatrixDesc] autorelease];
-
-        auto mpsPivots = [[[MPSMatrix alloc] initWithBuffer:pivotsBuffer
-                                                     offset:(pivots.storage_offset() + i * numPivots) * sizeof(uint32_t)
-                                                 descriptor:pivotsMatrixDesc] autorelease];
-        [lu_decomp encodeToCommandBuffer:commandBuffer
-                            sourceMatrix:mpsLU
-                            resultMatrix:mpsLU
-                            pivotIndices:mpsPivots
-                                  status:getMTLBufferStorage(status_tensors[i])];
-        [solver encodeToCommandBuffer:commandBuffer
-                         sourceMatrix:mpsLU
-                  rightHandSideMatrix:mpsRHS
-                         pivotIndices:mpsPivots
-                       solutionMatrix:mpsResult];
-      }
-    }
-  });
-
-  pivots.add_(1); // MPS is 0-based, PyTorch/LAPACK is 1-based
-
-  auto stacked_status = batchSize > 1 ? at::stack(status_tensors) : status_tensors[0];
-  info.copy_(stacked_status.view(info.sizes()));
-
+  linalg_lu_factor_ex_out_mps_impl(A, true, LU, pivots, info, false);
   if (check_errors) {
-    for (const auto i : c10::irange(batchSize)) {
-      int status = status_tensors[i].item<int>();
-      TORCH_CHECK(status == 0,
-                  "solve(): Linear solve failed at the ",
-                  i + 1,
-                  " sample with status: ",
-                  status,
-                  ". See https://developer.apple.com/documentation/metalperformanceshaders/"
-                  "mpsmatrixdecompositionstatus for details.");
-    }
+    at::_linalg_check_errors(info, "torch.linalg.solve_ex", A.dim() == 2);
   }
-
-  map_mps_decomposition_error_code_to_blas(info);
-
-  if (!left) {
-    // If this was a right solve, transpose the result back
-    result.copy_(result_t.transpose(-2, -1).contiguous());
-  }
+  const auto vector_case = at::native::linalg_solve_is_vector_rhs(LU, B);
+  auto result_ = vector_case ? result.unsqueeze(-1) : result;
+  const auto B_ = vector_case ? B.unsqueeze(-1) : B;
+  at::linalg_lu_solve_out(result_, LU, pivots, B_, left, false);
 }
 
 static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
@@ -855,6 +952,11 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
   // Outer or inner dimension is 0
   if (output.numel() == 0 || self.size(1) == 0) {
     return output.zero_();
+  }
+
+  // Rank-1 (M==1 xor N==1): route mm/mv to the metal GEMV kernels.
+  if (try_mps_gemv(self, other, output, std::nullopt, 1, 0, GemmEpilogue::None)) {
+    return output;
   }
 
   // MPS matmul returns silently incorrect results if one of the matrix dimensions is greater than 2**15
@@ -1069,6 +1171,11 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
       output.copy_(*bias_);
       output.mul_(beta);
     }
+    return output;
+  }
+
+  // Rank-1 (M==1 xor N==1): route addmm/addmv to the metal GEMV kernels.
+  if (try_mps_gemv(self, other, output, *bias_, alpha, beta, GemmEpilogue::Bias)) {
     return output;
   }
 
@@ -1556,7 +1663,7 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
   auto device = MPSDevice::getInstance()->device();
   auto info_ = info.dim() >= 2 ? info.view({B}) : info;
   auto info_sizes = info.sizes();
-  if (is_macos_at_least(MacOSVersion::MACOS_26_2)) {
+  if (has_mpp()) {
     return cholesky_panel_impl(out, info_, N, B, upper);
   }
   info_.fill_(0);
@@ -1960,105 +2067,51 @@ static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, b
   return result;
 }
 
-static void metal_qr_kernel_impl(const Tensor& A, const Tensor& Q, const Tensor& R, bool reduced_mode) {
+static void geqrf_kernel_mps(const Tensor& A, const Tensor& tau) {
   using namespace mps;
 
-  auto m = A.size(-2);
-  auto n = A.size(-1);
-
-  int64_t batch_size = 1;
-  for (int64_t i = 0; i < A.dim() - 2; i++) {
-    batch_size *= A.size(i);
-  }
-
-  auto A_work = A.reshape({batch_size, m, n}).contiguous();
-
-  QrParams params;
-  params.m = m;
-  params.n = n;
-
-  auto info = at::zeros({1}, A.options().dtype(kInt));
-  MPSStream* stream = getCurrentMPSStream();
-
-  Tensor Q_work = at::empty({batch_size, m, m}, A.options());
-  Tensor R_work = at::empty({batch_size, m, n}, A.options());
-  Tensor v_work = at::empty({batch_size, m}, A.options());
-
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto compute_encoder = stream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc(fmt::format("linalg_qr_householder_{}", scalarToMetalTypeString(A)));
-
-      getMPSProfiler().beginProfileKernel(pso, "linalg_qr", {A});
-      [compute_encoder setComputePipelineState:pso];
-
-      MTLSize threadGroupSize = MTLSizeMake(1024, 1, 1);
-      // one threadgroup per matrix in batch
-      MTLSize gridSize = MTLSizeMake(batch_size, 1, 1);
-
-      mtl_setArgs(compute_encoder, A_work, Q_work, R_work, info, params, v_work);
-      [compute_encoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
-
-      getMPSProfiler().endProfileKernel(pso);
-    }
-  });
-
-  bool is_batched = A.dim() > 2;
-
-  if (reduced_mode) {
-    auto k = std::min(m, n);
-    auto Q_reduced = Q_work.narrow(-1, 0, k); // [batch, m, k]
-    auto R_reduced = R_work.narrow(-2, 0, k); // [batch, k, n]
-
-    if (is_batched) {
-      Q.copy_(Q_reduced.reshape(Q.sizes()));
-      R.copy_(R_reduced.reshape(R.sizes()));
-    } else {
-      Q.copy_(Q_reduced.squeeze(0));
-      R.copy_(R_reduced.squeeze(0));
-    }
-  } else {
-    // Q=mxm, R=mxn
-    if (is_batched) {
-      Q.copy_(Q_work.reshape(Q.sizes()));
-      R.copy_(R_work.reshape(R.sizes()));
-    } else {
-      Q.copy_(Q_work.squeeze(0));
-      R.copy_(R_work.squeeze(0));
-    }
-  }
-
-  if (info.item<int>() != 0) {
-    TORCH_CHECK(false, "linalg_qr: MPS kernel failed with error code ", info.item<int>());
-  }
-}
-
-static void linalg_qr_out_impl_mps(const Tensor& A, const Tensor& Q, const Tensor& R, const c10::string_view mode) {
-  using namespace mps;
-
-  TORCH_CHECK(A.scalar_type() == kFloat, "linalg_qr: MPS currently supports float32 only");
+  TORCH_CHECK(A.scalar_type() == kFloat, "geqrf: MPS currently supports float32 only");
 
   if (A.numel() == 0) {
     return;
   }
 
   auto m = A.size(-2);
-  auto n = A.size(-1);
+  auto batch_size = c10::multiply_integers(A.sizes().slice(0, A.dim() - 2));
+  auto v_work = at::empty({batch_size, m}, A.options());
 
-  if (std::min(m, n) > 512) {
-    TORCH_WARN_ONCE(
-        "linalg_qr: MPS implementation is currently limited to min(m,n) <= 512, "
-        "falling back to CPU.");
-    auto A_cpu = A.to(at::kCPU);
-    auto [Q_cpu, R_cpu] = at::linalg_qr(A_cpu, mode);
-    const_cast<Tensor&>(Q).copy_(Q_cpu.to(at::kMPS));
-    const_cast<Tensor&>(R).copy_(R_cpu.to(at::kMPS));
-    return;
+  GeqrfParams params;
+
+  for (const auto dim : c10::irange(A.dim())) {
+    params.A_sizes[dim] = A.size(dim);
+    params.A_strides[dim] = A.stride(dim);
+
+    if (dim < tau.dim()) {
+      params.tau_strides[dim] = tau.stride(dim);
+    }
   }
 
-  bool reduced_mode = (mode != "complete");
+  params.num_batch_dims = A.dim() - 2;
 
-  metal_qr_kernel_impl(A, Q, R, reduced_mode);
+  MPSStream* stream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto compute_encoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(fmt::format("geqrf_{}", scalarToMetalTypeString(A)));
+
+      getMPSProfiler().beginProfileKernel(pso, "geqrf", {A});
+      [compute_encoder setComputePipelineState:pso];
+
+      MTLSize threadGroupSize = MTLSizeMake([pso maxTotalThreadsPerThreadgroup], 1, 1);
+      MTLSize gridSize = MTLSizeMake(batch_size, 1, 1);
+
+      mtl_setArgs(compute_encoder, A, tau, params, v_work);
+      [compute_encoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
+
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
 }
 
 static void lstsq_kernel_mps(const Tensor& a,
@@ -2346,6 +2399,8 @@ TORCH_IMPL_FUNC(_linalg_solve_ex_out_mps)
   mps::linalg_solve_out_mps_impl(A, B, left, check_errors, result, LU, pivots, info);
 }
 
+REGISTER_MPS_DISPATCH(lu_solve_stub, &mps::mps_lu_solve_kernel)
+
 TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)
 (const Tensor& A, bool pivot, bool check_errors, const Tensor& LU, const Tensor& pivots, const Tensor& info) {
   mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, check_errors);
@@ -2355,10 +2410,6 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
   mps::linalg_inv_ex_out_mps_impl(A, check_errors, result, info);
 }
 
-TORCH_IMPL_FUNC(linalg_qr_out_mps)(const Tensor& A, c10::string_view mode, const Tensor& Q, const Tensor& R) {
-  mps::linalg_qr_out_impl_mps(A, Q, R, mode);
-}
-
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
 REGISTER_DISPATCH(unpack_pivots_stub, mps::unpack_pivots_stub_impl)
 REGISTER_DISPATCH(orgqr_stub, mps::orgqr_stub_impl);
@@ -2366,5 +2417,6 @@ REGISTER_DISPATCH(cholesky_inverse_stub, mps::cholesky_inverse_kernel_impl_mps);
 REGISTER_DISPATCH(svd_stub, mps::svd_kernel_mps);
 REGISTER_DISPATCH(linalg_eigh_stub, mps::eigh_kernel_mps);
 REGISTER_DISPATCH(lstsq_stub, mps::lstsq_kernel_mps);
+REGISTER_DISPATCH(geqrf_stub, mps::geqrf_kernel_mps)
 
 } // namespace at::native

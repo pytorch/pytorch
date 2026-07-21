@@ -60,7 +60,7 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
             ),
             functorch_config.patch({"enable_autograd_cache": False}),
         ):
-            opt_fn = torch.compile(fn, dynamic=True)
+            opt_fn = torch.compile(fn, dynamic=True)  # noqa: UNSPECIFIED_BACKEND
             inp = torch.randn(4)
             self.assertEqual(opt_fn(inp), fn(inp))
 
@@ -335,7 +335,7 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         from torch._dynamo.debug_utils import minifier_dir
         from torch._inductor.codegen.simd import SIMDScheduling
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
             extra_import_kernel.triton_kernel_with_extra_import[(1,)](x, BLOCK=16)
             return x + 1

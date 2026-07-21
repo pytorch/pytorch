@@ -1135,7 +1135,7 @@ class OpInfo:
         if self.supports_njt is None:
             self.supports_njt = False
 
-        # We run the sampling functions without tracking the gradiends of the creation of inputs
+        # We run the sampling functions without tracking the gradients of the creation of inputs
         self.sample_inputs_func = torch.no_grad()(self.sample_inputs_func)
         self.sample_inputs_sparse_coo_func = torch.no_grad()(
             self.sample_inputs_sparse_coo_func

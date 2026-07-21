@@ -147,8 +147,8 @@ class CacheCompiledArtifact(CompiledArtifact):
         # (we only expect one)
         return len(cache_info.aot_autograd_artifacts) == 1
 
-    def _validate_and_unpack(self) -> tuple[bytes, CacheInfo, str]:
-        """Validate the cached artifact, returning ``(artifact_bytes, cache_info, key)``.
+    def _validate_and_unpack(self) -> tuple[bytes, str]:
+        """Validate the cached artifact, returning ``(artifact_bytes, key)``.
 
         Single source of the None / empty / multiple aot_autograd_artifacts checks,
         shared by ``_to_binary_bytes`` and ``save``'s unpacked branch. Messages are
@@ -170,7 +170,7 @@ class CacheCompiledArtifact(CompiledArtifact):
                 f"CompiledArtifact has more than one aot_autograd artifact but we only "
                 f"expected one. {cache_info}"
             )
-        return artifact_bytes, cache_info, cache_info.aot_autograd_artifacts[0]
+        return artifact_bytes, cache_info.aot_autograd_artifacts[0]
 
     def _to_binary_bytes(self) -> bytes:
         """Serialize this artifact to the in-memory ``binary`` byte format.
@@ -181,7 +181,7 @@ class CacheCompiledArtifact(CompiledArtifact):
         ``load(format="binary")`` reads back: header, ``torch_key``, the autograd-cache
         ``key`` string, then the opaque ``artifact_bytes``.
         """
-        artifact_bytes, _cache_info, key = self._validate_and_unpack()
+        artifact_bytes, key = self._validate_and_unpack()
 
         from torch.utils._appending_byte_serializer import BytesWriter
 
@@ -214,7 +214,7 @@ class CacheCompiledArtifact(CompiledArtifact):
                     raise AssertionError(f"expected format == 'unpacked', got {format}")
                 # Same None / empty / multiple validation as the binary branch, shared via
                 # _validate_and_unpack; the unpacked branch needs only artifact_bytes.
-                artifact_bytes, _cache_info, _key = self._validate_and_unpack()
+                artifact_bytes, _key = self._validate_and_unpack()
                 if os.path.exists(path):
                     if not os.path.isdir(path):
                         raise AssertionError(f"expected path to be a dir: {path}")

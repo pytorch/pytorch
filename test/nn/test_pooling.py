@@ -44,7 +44,6 @@ from torch.testing._internal.common_utils import (
     parametrize as parametrize_test,
     run_tests,
     set_default_dtype,
-    skipIfTorchDynamo,
     slowTest,
     subtest,
     TEST_WITH_UBSAN,
@@ -874,7 +873,7 @@ torch.cuda.synchronize()
                 )
                 self.assertTrue(
                     has_cuda_assert or has_hip_error,
-                    f"Expected device assert error, got: {output[-500:]}",
+                    lambda msg: f"{msg}\nExpected device assert error, got: {output[-500:]}",
                 )
             else:
                 self.assertNotIn("Error", output, "Should not have produced an error")
@@ -1316,7 +1315,6 @@ torch.cuda.synchronize()
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
-    @skipIfTorchDynamo("OOMs https://github.com/pytorch/pytorch/issues/111320")
     def test_max_pool1d(self, device, dtype):
         # FIXME For now compare against max_pool1d with indices
         def check(x, *args, **kwargs):
