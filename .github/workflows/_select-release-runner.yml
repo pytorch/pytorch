@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: releng"]
-name: Select OSDC runner
+name: Select release runner
 
 # Single source of truth for the OSDC build-runner labels used by the docker
 # image / wheel build workflows: release-isolated (rel-l-*) runners on protected
