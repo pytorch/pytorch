@@ -934,6 +934,9 @@ class _TorchDynamoContext:
         return None
 
     def __call__(self, fn: Any) -> Any:
+        if isinstance(fn, staticmethod):
+            return staticmethod(self(fn.__func__))
+
         # public api for compiler config/options
         def get_compiler_config() -> CompilerConfig | None:
             return self.compiler_config
@@ -963,9 +966,6 @@ class _TorchDynamoContext:
                         )
 
         fn = innermost_fn(fn)
-
-        if isinstance(fn, staticmethod):
-            return staticmethod(self(fn.__func__))
 
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
