@@ -14,7 +14,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
-#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #endif
 
 namespace at {
@@ -76,7 +77,7 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
     MPSGraphTensor* outputTensor = nil;
     MPSGraphTensor* attnTensor = nil;
   };
-  const auto macOS15_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  const auto macOS15_0_plus = is_macos_at_least(MacOSVersion::MACOS_15_0);
   int64_t batchSize = query.size(0);
   int64_t num_head = query.size(1);
   int64_t qSize = query.size(2);
@@ -205,7 +206,7 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                                                        bool unsqueezed) {
   TORCH_CHECK(q_.size(3) == k_.size(3) && q_.size(3) == v_.size(3),
               "sdpa_vector_fast_mps expects query, key, and value to have the same head dimension");
-  const auto macOS15_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  const auto macOS15_0_plus = is_macos_at_least(MacOSVersion::MACOS_15_0);
   using namespace mps;
   uint batchSize = q_.size(0);
   uint num_head = q_.size(1);
@@ -561,7 +562,7 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
   const int64_t num_kv_heads = k_.size(1);
   const int gqa_factor = static_cast<int>(num_heads / num_kv_heads);
 
-  auto out = at::empty_like(q_);
+  auto out = at::empty(q_.sizes(), q_.options());
 
   // Strides for [B, H, L, D] layout. Last-dim stride must be 1.
   TORCH_CHECK(q_.stride(-1) == 1, "sdpa prefill:query last-dim must be contiguous");

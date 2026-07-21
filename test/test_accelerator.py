@@ -6,6 +6,7 @@ import unittest
 from contextlib import nullcontext
 
 import torch
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     NoTest,
     run_tests,
@@ -27,17 +28,12 @@ if not TEST_ACCELERATOR:
 class TestAccelerator(TestCase):
     def test_current_accelerator(self):
         self.assertTrue(torch.accelerator.is_available())
-        accelerators = ["cuda", "xpu", "mps"]
-        for accelerator in accelerators:
-            if torch.get_device_module(accelerator).is_available():
-                self.assertEqual(
-                    torch.accelerator.current_accelerator().type, accelerator
-                )
-                self.assertIsNone(torch.accelerator.current_accelerator().index)
-                with self.assertRaisesRegex(
-                    ValueError, "doesn't match the current accelerator"
-                ):
-                    torch.accelerator.set_device_index("cpu")
+        self.assertEqual(torch.accelerator.current_accelerator().type, self.device_type)
+        self.assertIsNone(torch.accelerator.current_accelerator().index)
+        with self.assertRaisesRegex(
+            ValueError, "doesn't match the current accelerator"
+        ):
+            torch.accelerator.set_device_index("cpu")
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_generic_multi_device_behavior(self):
@@ -220,7 +216,7 @@ class TestAccelerator(TestCase):
         self.assertEqual(
             len(missing_stats),
             0,
-            f"Missing expected memory statistics: {missing_stats}",
+            lambda msg: f"{msg}\nMissing expected memory statistics: {missing_stats}",
         )
 
         prev_allocated = torch.accelerator.memory_allocated()
@@ -307,6 +303,15 @@ class TestAccelerator(TestCase):
                     t = torch.empty(16, dtype=dtype, device=acc)
                     t = t.to(reference_dtype)
                     t = t.to(dtype)
+
+
+instantiate_device_type_tests(
+    TestAccelerator,
+    globals(),
+    except_for=("cpu",),
+    allow_mps=True,
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

@@ -334,7 +334,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             self.assertIsInstance(
                 param,
                 DTensor,
-                f"Expects parameters to be sharded as DTensors but got {param_name} "
+                lambda msg: f"{msg}\nExpects parameters to be sharded as DTensors but got {param_name} "
                 f"as {type(param)}: {param}",
             )
         old_fill_value = 1

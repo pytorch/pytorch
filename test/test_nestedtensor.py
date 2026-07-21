@@ -4937,7 +4937,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
             self.assertFalse(
                 out_actual.is_nested,
-                f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
+                lambda msg: f"{msg}\n{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
             )  # output is a dense tensor
             self.assertEqual(out_actual, out_expected)
 
@@ -5209,7 +5209,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
                 self.assertFalse(
                     out_actual.is_nested,
-                    f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
+                    lambda msg: f"{msg}\n{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
                 )  # output is a dense tensor
                 self.assertEqual(out_actual, out_expected)
 
@@ -7136,7 +7136,8 @@ torch.cuda.synchronize()
             with torch.nn.attention.sdpa_kernel(
                 torch.nn.attention.SDPBackend.CUDNN_ATTENTION
             ):
-                check_forward_backward()
+                with self.assertRaisesRegex(RuntimeError, "No viable backend"):
+                    check_forward_backward(skip_backward=True)
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")

@@ -108,7 +108,7 @@ __all__ = [
 
 
 def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
-    # No need to check that two args are not the same, since expr is pr-optimized but we do it anyway.
+    # No need to check that two args are not the same, since expr is pre-optimized but we do it anyway.
     return (
         isinstance(expr, sympy.Expr)
         and expr.is_Add
@@ -187,7 +187,7 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
 
 # It would be nice to have assertions on whether or not inputs is_integer
 # However, with bugs like https://github.com/sympy/sympy/issues/26620 sympy
-# sometimes inconsistently reports floats an integers.
+# sometimes inconsistently reports floats as integers.
 #
 # What we can assume from sympy is that if something is an int, it
 # definitely is is_integer, but if it is a float it may or may not
@@ -677,6 +677,37 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         return obj
 
     @classmethod
+    def _collapse_known_multiplicative_terms(cls, values):
+        if len(values) != 2:
+            return None
+
+        a, b = values
+        a_coeff, a_term = a.as_coeff_Mul()
+        b_coeff, b_term = b.as_coeff_Mul()
+        if a_term != b_term:
+            return None
+
+        if not (a_coeff.is_comparable and b_coeff.is_comparable):
+            return None
+
+        if a_coeff == b_coeff:
+            return a
+
+        if a_term.is_nonnegative:
+            a_is_smaller = a_coeff < b_coeff
+        elif a_term.is_nonpositive:
+            a_is_smaller = a_coeff > b_coeff
+        else:
+            return None
+
+        if cls is Min:
+            return a if a_is_smaller else b
+        if cls is Max:
+            return b if a_is_smaller else a
+
+        raise AssertionError(f"impossible {cls}")
+
+    @classmethod
     def _satisfy_unique_summations_symbols(
         cls, args
     ) -> set[sympy.core.symbol.Symbol] | None:
@@ -946,6 +977,9 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
 
         # Special cases when there is only one symbolic value
         if num_value is None:
+            collapsed_value = cls._collapse_known_multiplicative_terms(other_values)
+            if collapsed_value is not None:
+                return {collapsed_value}
             return other_values
 
         if len(other_values) == 0:

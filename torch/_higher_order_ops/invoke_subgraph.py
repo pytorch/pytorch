@@ -29,7 +29,7 @@ from torch._higher_order_ops.utils import (
     saved_values,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
@@ -246,7 +246,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             isinstance(
                 o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
             )
-            or is_opaque_type(type(o))
+            or is_custom_class(type(o))
             for o in operands
             if o is not None
         ):
@@ -779,7 +779,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx._identifier = identifier
         ctx._output_metadata = output_metadata
         ctx._call_id = _next_invoke_subgraph_call_id()
-        # We snapshot the dispatch keys in forward for materializing the
+        # We snapshot the dispatch keys in forward for materializing
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
@@ -951,6 +951,15 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
 
 @invoke_subgraph.py_autograd_impl
 def _(subgraph, identifier, *operands):
+    from torch._guards import detect_fake_mode
+
+    # Eager backends run the captured HOP with real tensors and no AOTAutograd
+    # fake mode. Let regular autograd record through the subgraph in that case.
+    if detect_fake_mode(operands) is None:
+        if getattr(subgraph, "_boxed_call", False):
+            return subgraph(list(operands))
+        return subgraph(*operands)
+
     # Check if we have already traced the subgraph.
     invoke_subgraph_cache = get_invoke_subgraph_cache()
     if invoke_subgraph_cache:
