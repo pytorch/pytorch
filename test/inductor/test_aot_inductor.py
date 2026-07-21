@@ -194,6 +194,7 @@ try:
             CondModels,
             prepend_counters,
             prepend_predicates,
+            SwitchModels,
             WhileLoopModels,
         )
         from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
@@ -208,6 +209,7 @@ try:
             CondModels,
             prepend_counters,
             prepend_predicates,
+            SwitchModels,
             WhileLoopModels,
         )
         from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
@@ -2997,6 +2999,19 @@ class AOTInductorTestsTemplate:
                 Model().to(self.device),
                 example_inputs=example_inputs,
             )
+
+    def test_switch_simple(self):
+        inputs = (torch.randn((10, 20), device=self.device),)
+        dim0_x = Dim("s0", min=2, max=1024)
+        dynamic_shapes = {
+            "idx": {},
+            "x": {0: dim0_x, 1: None},
+        }
+        self.check_model_with_multiple_inputs(
+            SwitchModels.Simple(),
+            prepend_counters(inputs, counter_values=(0, 1, 2)),
+            dynamic_shapes=dynamic_shapes,
+        )
 
     def test_while_loop_simple(self):
         inputs = (

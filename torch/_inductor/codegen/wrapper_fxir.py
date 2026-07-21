@@ -743,7 +743,8 @@ class FxConverter:
                 raise AssertionError(
                     f"cond requires exactly 2 branches, got {len(branch_subgms)}"
                 )
-            true_subgm, false_subgm = branch_subgms
+            # branches are stored as [false_fn, true_fn] in ir.Switch
+            false_subgm, true_subgm = branch_subgms
             fx_node = self.gm.graph.call_function(
                 torch.ops.higher_order.cond,
                 args=(selector, true_subgm, false_subgm, operands),
