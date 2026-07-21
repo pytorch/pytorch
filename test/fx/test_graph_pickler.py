@@ -6,6 +6,7 @@
 
 import contextlib
 import importlib
+import inspect
 import os
 import sys
 import unittest
@@ -542,7 +543,11 @@ class TestDillSerializationFeatures(TestCase):
         options = self.Options(node_metadata_key_filter=None)
         serialized = self.GraphPickler.dumps(gm, options)
         load_mode = FakeTensorMode(shape_env=ShapeEnv())
-        deserialized = self.GraphPickler.loads(serialized, load_mode)
+        with patch(
+            "torch._subclasses.meta_utils.inspect.signature", wraps=inspect.signature
+        ) as mock_signature:
+            deserialized = self.GraphPickler.loads(serialized, load_mode)
+        self.assertEqual(mock_signature.call_count, 0)
 
         restored = next(
             node.meta["val"]

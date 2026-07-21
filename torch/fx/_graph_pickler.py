@@ -598,6 +598,7 @@ class _TensorPickleData:
             with_fake,
             None,
             None,
+            callback_accepts_source_desc=True,
         )
 
 

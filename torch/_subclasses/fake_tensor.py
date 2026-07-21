@@ -724,6 +724,7 @@ class FakeTensorConverter:
             callback=mk_fake_tensor,
             source=source,
             symbolic_context=symbolic_context,
+            callback_accepts_source_desc=True,
             trace=trace,
         )
         if out is NotImplemented:

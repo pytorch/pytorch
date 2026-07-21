@@ -688,6 +688,8 @@ def _callback_accepts_source_desc(callback: Callable[..., Any]) -> bool:
     for parameter in parameters:
         if parameter.kind is inspect.Parameter.VAR_KEYWORD:
             return True
+        # External callbacks opt in by accepting this kwarg. Keep the name
+        # stable: FakeTensor uses it to preserve source tensor metadata.
         if parameter.name == "source_desc" and parameter.kind in (
             inspect.Parameter.KEYWORD_ONLY,
             inspect.Parameter.POSITIONAL_OR_KEYWORD,
@@ -1066,6 +1068,7 @@ class MetaConverter(Generic[_TensorT]):
         symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext | None,
         callback: _MetaTensorCallbackOptDevice[_TensorT],
         source: torch._guards.Source,
+        callback_accepts_source_desc: bool | None = None,
     ) -> _TensorT:
         from torch._dynamo.source import AttrSource
         from torch.fx.experimental.symbolic_shapes import SubclassSymbolicContext
@@ -1079,6 +1082,7 @@ class MetaConverter(Generic[_TensorT]):
                 callback,
                 source,
                 symbolic_context,
+                callback_accepts_source_desc=callback_accepts_source_desc,
             )
 
         inner_tensors: dict[str, torch.Tensor | CustomClassBase] = {}
@@ -1111,6 +1115,7 @@ class MetaConverter(Generic[_TensorT]):
                 current_context,
                 inner_callback,
                 current_source,
+                callback_accepts_source_desc=True,
             )
             inner_tensors[attr] = new_empty_tensor
 
@@ -1137,13 +1142,16 @@ class MetaConverter(Generic[_TensorT]):
         callback_: _MetaTensorCallback[_TensorT],
         source: Source | None,
         symbolic_context: SymbolicContext | None,
+        *,
+        callback_accepts_source_desc: bool | None = None,
     ) -> _TensorT:
         from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_real_tensor
 
         base_callback: _MetaTensorCallbackOptDevice[_TensorT] = functools.partial(
             callback_, device=t.device
         )
-        callback_accepts_source_desc = _callback_accepts_source_desc(callback_)
+        if callback_accepts_source_desc is None:
+            callback_accepts_source_desc = _callback_accepts_source_desc(callback_)
 
         def callback(
             make_meta_t: Callable[[], torch.Tensor],
@@ -1359,6 +1367,7 @@ class MetaConverter(Generic[_TensorT]):
                 symbolic_context,
                 callback,
                 source,
+                callback_accepts_source_desc=True,
             )
 
             # NB: Purposefully guard here to simplify the inner / outer symbols.
@@ -1592,6 +1601,7 @@ class MetaConverter(Generic[_TensorT]):
                         all_dynamic_symbolic_context(
                             visited_desc, temp_source, shape_env, callback
                         ),
+                        callback_accepts_source_desc=True,
                     )
 
                 # Replay the view, swapping out any non-symbolic SymInts or real tensors
@@ -1895,6 +1905,7 @@ class MetaConverter(Generic[_TensorT]):
                                 # work, take a closer look.
                                 source,
                                 symbolic_context,
+                                callback_accepts_source_desc=True,
                             )
                             r = self._checked_cast_tensor_t(
                                 _wrap_functional_tensor(ft, t.current_level),
@@ -1948,6 +1959,7 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         source,
                         symbolic_context,
+                        callback_accepts_source_desc=True,
                     )
                     r = self._checked_cast_tensor_t(
                         torch._to_functional_tensor(unwrapped)
@@ -1993,6 +2005,7 @@ class MetaConverter(Generic[_TensorT]):
                             callback,
                             torch._dynamo.source.AttrSource(source, "_base"),
                             base_symbolic_context,
+                            callback_accepts_source_desc=True,
                         )
 
                     def is_c_of_r(
@@ -2348,6 +2361,7 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         grad_source,
                         grad_symbolic_context,
+                        callback_accepts_source_desc=True,
                     )
                 # pyrefly: ignore [unbound-name]
                 torch._C._set_conj(r, t.is_conj)
@@ -2413,6 +2427,7 @@ class MetaConverter(Generic[_TensorT]):
         callback: _MetaTensorCallback[_TensorT] | None = None,
         source: Source | None = None,
         symbolic_context: SymbolicContext | None = None,
+        callback_accepts_source_desc: bool | None = None,
         # Controls whether or not we should dump the tensor metadata to structured logs
         # when source is not None.  Because we refakify after Dynamo is done,
         # we don't want to dump info again from AOTAutograd, it is redundant.
@@ -2421,6 +2436,8 @@ class MetaConverter(Generic[_TensorT]):
         callback_: _MetaTensorCallback[_TensorT]
         if callback is None:
             callback_ = self._identity_callable
+            if callback_accepts_source_desc is None:
+                callback_accepts_source_desc = True
         else:
             callback_ = callback
         # TODO: zero tensors?  We appear to have eliminated them by
@@ -2492,6 +2509,7 @@ class MetaConverter(Generic[_TensorT]):
                 callback_,
                 source,
                 symbolic_context,
+                callback_accepts_source_desc=callback_accepts_source_desc,
             )
 
         if type(t) is torch.nn.Parameter:

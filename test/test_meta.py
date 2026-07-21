@@ -2,10 +2,12 @@
 # ruff: noqa: F841
 
 import itertools
+import inspect
 import torch
 import os
 import numpy as np
 from enum import Enum
+from unittest.mock import patch
 from torch.overrides import resolve_name
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._pytree import tree_map, tree_map_only, tree_flatten, tree_unflatten
@@ -113,6 +115,25 @@ class TestMetaConverter(TestCase):
 
         m = MetaConverter()(x, callback=callback)
         self.assertMetadataMatches(m, x)
+
+    def test_source_desc_callback_introspection_once_for_recursive_meta_tensor(self):
+        x = torch.randn(4, requires_grad=True)
+        x.grad = torch.randn(4)
+        source_descs = []
+
+        def callback(make_meta_t, device, source_desc=None):
+            self.assertIsNotNone(source_desc)
+            source_descs.append(source_desc)
+            return make_meta_t()
+
+        with patch(
+            "torch._subclasses.meta_utils.inspect.signature", wraps=inspect.signature
+        ) as mock_signature:
+            m = MetaConverter()(x, callback=callback)
+
+        self.assertMetadataMatches(m, x)
+        self.assertGreater(len(source_descs), 1)
+        self.assertEqual(mock_signature.call_count, 1)
 
     def test_view_of_non_leaf(self):
         x = torch.randn(4, requires_grad=True)
