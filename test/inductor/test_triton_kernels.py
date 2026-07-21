@@ -22,7 +22,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
 )
-from torch._inductor import config as inductor_config, metrics
+from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.pattern_matcher import (
     CallFunctionVarArgs,
     PatternMatcherPass,
@@ -31,6 +31,7 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.utils import (
     fresh_cache,
     run_and_get_code,
+    run_and_get_graph_lowering,
     triton_version_uses_attrs_dict,
 )
 from torch._library import capture_triton
@@ -1115,25 +1116,89 @@ def forward(self, x_1, output_1):
         t = torch.rand(4, 4, device=GPU_TYPE)
         t2 = t.clone()
 
-        log_stream, ctx = logs_to_string("torch._inductor.debug", "ir_post_fusion")
-        with ctx():
-            compiled_func = torch.compile(
-                call_triton_inplace_view,
-                fullgraph=True,
-            )
-            compiled_func(t2)
+        _, (graph,) = run_and_get_graph_lowering(
+            torch.compile(call_triton_inplace_view, fullgraph=True),
+            t2,
+        )
 
         t[2:] *= 2
         self.assertEqual(t, t2)
 
-        log = log_stream.getvalue()
+        triton_kernels = [
+            op for op in graph.operations if isinstance(op, ir.UserDefinedTritonKernel)
+        ]
+        self.assertEqual(len(triton_kernels), 1)
 
-        self.assertNotIn("ComputedBuffer", log)
+        kernel_mutations = {
+            name
+            for output in triton_kernels[0].mutation_outputs
+            for name in output.get_mutation_names()
+        }
 
-        # Assert that the UserDefinedTritonKernel node directly mutates the argument.
-        FileCheck().check("UserDefinedTritonKernel").check(
-            "buf0: MutationOutput"
-        ).check("buf0.mutations = ['arg0_1']").run(log)
+        # The re-inplacement should mean that the kernel directly mutates the
+        # single graph input in this case, rather than through the scatter
+        # view copy-back pattern.
+        self.assertEqual(kernel_mutations, set(graph.graph_inputs))
+
+        # The scatter should be gone from the graph, so there should be no
+        # ComputedBuffers that mutates anything already mutated by the kernel.
+        scatter_buffers = [
+            buffer
+            for buffer in graph.buffers
+            if isinstance(buffer, ir.ComputedBuffer)
+            and any(name in kernel_mutations for name in buffer.get_mutation_names())
+        ]
+        self.assertEqual(len(scatter_buffers), 0)
+
+    @requires_gpu
+    def test_triton_kernel_reinplace_preserves_scatter_with_multiple_users(self):
+        # Demonstrates that if there are multiple users of the scatter in the
+        # scatter copy-back pattern, the scatter is not erroneously erased by
+        # the re-inplacing pass.
+        def call_triton_inplace_view(x: torch.Tensor):
+            x_slice = x[2:]
+            n_elements = x_slice.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            mul2_inplace_kernel[grid](x_slice, n_elements, BLOCK_SIZE=16)
+            # Using the mutated base gives the scatter another user in addition to
+            # the copy back to the graph input.
+            return x + 1
+
+        t = torch.rand(4, 4, device=GPU_TYPE)
+        t2 = t.clone()
+
+        result, (graph,) = run_and_get_graph_lowering(
+            torch.compile(call_triton_inplace_view, fullgraph=True),
+            t2,
+        )
+
+        t[2:] *= 2
+        self.assertEqual(t, t2)
+        self.assertEqual(t + 1, result)
+
+        triton_kernels = [
+            op for op in graph.operations if isinstance(op, ir.UserDefinedTritonKernel)
+        ]
+        self.assertEqual(len(triton_kernels), 1)
+
+        kernel_mutations = {
+            name
+            for output in triton_kernels[0].mutation_outputs
+            for name in output.get_mutation_names()
+        }
+
+        # The Triton kernel can still be reinplaced, but the scatter must remain
+        # because the pointwise output also uses it. The scatter lowers to a
+        # mutation-producing ComputedBuffer.
+        self.assertEqual(kernel_mutations, set(graph.graph_inputs))
+
+        scatter_buffers = [
+            buffer
+            for buffer in graph.buffers
+            if isinstance(buffer, ir.ComputedBuffer)
+            and set(buffer.get_mutation_names()) == kernel_mutations
+        ]
+        self.assertEqual(len(scatter_buffers), 1)
 
     @requires_gpu
     @common_utils.parametrize("grad", [False, True])
