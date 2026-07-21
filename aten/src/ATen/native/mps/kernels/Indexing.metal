@@ -318,12 +318,12 @@ kernel void index_reduce(
     if (dim == params.reduce_dim) {
       // Clamp keeps the access in bounds; out-of-range indices are reported
       // separately by the index_check_bounds pass, which invalidates the
-      // result.
-      long idx = clamp(
-          long(index[dim_idx * params.index_stride]),
-          0L,
-          long(params.self_sizes[dim]) - 1);
-      self_offset += static_cast<uint32_t>(idx) * params.self_strides[dim];
+      // result. The wrapping uint32 cast keeps the math 32-bit: any negative
+      // or too-large index still lands in [0, self_size - 1].
+      uint32_t idx = min(
+          static_cast<uint32_t>(index[dim_idx * params.index_stride]),
+          params.self_sizes[dim] - 1);
+      self_offset += idx * params.self_strides[dim];
     } else {
       self_offset += dim_idx * params.self_strides[dim];
     }
@@ -387,12 +387,12 @@ kernel void index_add(
     if (dim == params.reduce_dim) {
       // Clamp keeps the access in bounds; out-of-range indices are reported
       // separately by the index_check_bounds pass, which invalidates the
-      // result.
-      long idx = clamp(
-          long(index[dim_idx * params.index_stride]),
-          0L,
-          long(params.self_sizes[dim]) - 1);
-      self_offset += static_cast<uint32_t>(idx) * params.self_strides[dim];
+      // result. The wrapping uint32 cast keeps the math 32-bit: any negative
+      // or too-large index still lands in [0, self_size - 1].
+      uint32_t idx = min(
+          static_cast<uint32_t>(index[dim_idx * params.index_stride]),
+          params.self_sizes[dim] - 1);
+      self_offset += idx * params.self_strides[dim];
     } else {
       self_offset += dim_idx * params.self_strides[dim];
     }
@@ -493,12 +493,13 @@ kernel void index_select_dim(
 
     if (dim == params.reduce_dim) {
       // Clamp keeps the access in bounds; index_check_bounds reports any
-      // out-of-range index and invalidates the result.
-      long idx = clamp(
-          long(index[dim_idx * params.index_stride]),
-          0L,
-          long(params.self_sizes[dim]) - 1);
-      input_offset += static_cast<uint32_t>(idx) * params.self_strides[dim];
+      // out-of-range index and invalidates the result. The wrapping uint32
+      // cast keeps the math 32-bit: any negative or too-large index still
+      // lands in [0, self_size - 1].
+      uint32_t idx = min(
+          static_cast<uint32_t>(index[dim_idx * params.index_stride]),
+          params.self_sizes[dim] - 1);
+      input_offset += idx * params.self_strides[dim];
     } else {
       input_offset += dim_idx * params.self_strides[dim];
     }
@@ -537,11 +538,11 @@ kernel void index_select_dim_dense(
     constant IndexSelectParams& params [[buffer(3)]],
     uint3 tid [[thread_position_in_grid]]) {
   // Clamp keeps the read in bounds; index_check_bounds reports any out-of-range
-  // index and invalidates the result.
-  long in_row = clamp(
-      long(index[tid.y * params.index_stride]),
-      0L,
-      long(params.in_dim_size) - 1);
+  // index and invalidates the result. The wrapping uint32 cast keeps the
+  // clamp 32-bit; any negative or too-large index lands in [0, in_dim_size - 1].
+  uint32_t in_row = min(
+      static_cast<uint32_t>(index[tid.y * params.index_stride]),
+      params.in_dim_size - 1);
   long out_off =
       (static_cast<long>(tid.z) * params.out_dim_size + tid.y) * params.inner +
       tid.x;
@@ -657,7 +658,8 @@ kernel void index_copy_dense(
   OffsetT before = gid.z;
   // Clamp keeps the access in bounds; out-of-range indices are reported
   // separately by the index_check_bounds pass, which invalidates the result.
-  OffsetT idx = OffsetT(clamp(long(indices[i]), 0L, long(dim_size) - 1));
+  // Clamping in OffsetT keeps the 32-bit kernel variant free of long math.
+  OffsetT idx = clamp(OffsetT(indices[i]), OffsetT(0), OffsetT(dim_size - 1));
   output[(before * OffsetT(dim_size) + idx) * OffsetT(inner) + after] =
       source[(before * OffsetT(indices_numel) + i) * OffsetT(inner) + after];
 }
@@ -682,8 +684,11 @@ kernel void index_copy_strided(
   // Clamp keeps the access in bounds; out-of-range indices (including
   // negative ones, which index_copy_ rejects) are reported separately by the
   // index_check_bounds pass, which invalidates the result.
-  OffsetT idx = OffsetT(clamp(
-      long(indices[i * OffsetT(indices_stride)]), 0L, long(dim_size) - 1));
+  // Clamping in OffsetT keeps the 32-bit kernel variant free of long math.
+  OffsetT idx = clamp(
+      OffsetT(indices[i * OffsetT(indices_stride)]),
+      OffsetT(0),
+      OffsetT(dim_size - 1));
   OffsetT slice_pos[max_ndim];
   pos_from_thread_index(j, slice_pos, slice_sizes, slice_ndim);
   OffsetT out_offset =
