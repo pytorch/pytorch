@@ -478,7 +478,7 @@ def generic_str(
         return obj
 
     try:
-        if obj.tp_str:
+        if obj.tp_str and type(obj).str_impl is not VariableTracker.str_impl:
             result = obj.str_impl(tx)
         else:
             result = generic_repr(tx, obj)
