@@ -324,6 +324,7 @@ class InductorMeta(typing.TypedDict, total=False):
     tiling_scores: typing.Any
     min_xblock: int
     min_rblock: int
+    has_scalar_online_softmax_reduction: bool
     persistent_reduction: bool
     native_matmul_persistent_rblock: int
     add_persistent_rblock: bool
