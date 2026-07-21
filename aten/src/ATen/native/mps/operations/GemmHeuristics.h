@@ -41,8 +41,8 @@ struct GemvTuning {
 GemvTuning gemv_tuning(c10::ScalarType dt);
 
 // One shape-based launch heuristic shared by every GPU generation; only the
-// device core count scales the occupancy targets. Per-device peak is deferred
-// to an opt-in autotuner (follow-up).
+// device core count scales the occupancy targets. The opt-in autotuner can
+// replace this choice with a measured, per-signature winner.
 class GemvPolicy {
  public:
   explicit GemvPolicy(uint32_t cores);

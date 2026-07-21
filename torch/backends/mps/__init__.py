@@ -79,7 +79,7 @@ def autotune_trace(
 ) -> AutotuneTrace:
     r"""Capture the MPS kernels and tile configurations used by autotuning.
 
-    The trace records heuristic, exploratory, cached, and forced launches. It
+    The trace records heuristic, tuned, cached, and forced launches. It
     contains tensor metadata but never tensor contents or memory addresses.
     After the context exits, ``records`` is a JSON-serializable list of launch
     and selection records. ``dropped`` reports records evicted by the bound.
@@ -90,9 +90,8 @@ def autotune_trace(
     Args:
         max_entries: Maximum number of records retained. The oldest record is
             discarded when the trace exceeds this bound.
-        wait_until_completed: Synchronize MPS and wait for pending autotuning
-            measurements so their selection records are included. When False,
-            late selection records can be omitted.
+        wait_until_completed: Synchronize MPS before collecting the trace.
+            Cache-miss tuning itself is synchronous regardless of this option.
     """
     return AutotuneTrace(max_entries, wait_until_completed)
 

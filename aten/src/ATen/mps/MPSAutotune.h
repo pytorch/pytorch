@@ -23,7 +23,7 @@ struct MPSAutotuneTensorInfo {
 struct MPSAutotuneCandidateResult {
   std::string config;
   std::string kernel;
-  double median_us = 0.0;
+  double mean_us = 0.0;
   int samples = 0;
   bool active = false;
 };
@@ -48,12 +48,8 @@ struct MPSAutotuneSnapshot {
 
 TORCH_API bool isMPSAutotuneTraceEnabled();
 TORCH_API void startMPSAutotuneTrace(size_t max_entries);
-TORCH_API MPSAutotuneSnapshot stopMPSAutotuneTrace(bool wait_for_callbacks);
-TORCH_API void recordMPSAutotuneEvent(
-    MPSAutotuneRecord record,
-    bool retained = false);
-TORCH_API bool retainMPSAutotuneTrace();
-TORCH_API void releaseMPSAutotuneTrace();
+TORCH_API MPSAutotuneSnapshot stopMPSAutotuneTrace();
+TORCH_API void recordMPSAutotuneEvent(MPSAutotuneRecord record);
 
 TORCH_API std::optional<std::string> getMPSAutotuneOverride(
     std::string_view operation);

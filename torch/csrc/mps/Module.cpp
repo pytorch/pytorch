@@ -452,7 +452,7 @@ py::dict autotune_record_to_python(const at::mps::MPSAutotuneRecord& record) {
     py::dict value;
     value["config"] = candidate.config;
     value["kernel"] = candidate.kernel;
-    value["median_us"] = candidate.median_us;
+    value["mean_us"] = candidate.mean_us;
     value["samples"] = candidate.samples;
     value["active"] = candidate.active;
     candidate_results.append(std::move(value));
@@ -609,16 +609,14 @@ void initModule(PyObject* module) {
     return at::mps::MPSDevice::getInstance()->getCoreCount();
   });
   m.def("_mps_start_autotune_trace", [](size_t max_entries) {
-    // See MPSModule_deviceSynchronize; starting can wait on GPU callbacks.
     pybind11::gil_scoped_release no_gil;
     at::mps::startMPSAutotuneTrace(max_entries);
   });
-  m.def("_mps_stop_autotune_trace", [](bool wait_for_callbacks) {
+  m.def("_mps_stop_autotune_trace", [](bool /*wait_until_completed*/) {
     at::mps::MPSAutotuneSnapshot snapshot;
     {
-      // See MPSModule_deviceSynchronize; stopping can wait on GPU callbacks.
       pybind11::gil_scoped_release no_gil;
-      snapshot = at::mps::stopMPSAutotuneTrace(wait_for_callbacks);
+      snapshot = at::mps::stopMPSAutotuneTrace();
     }
     return autotune_snapshot_to_python(snapshot);
   });

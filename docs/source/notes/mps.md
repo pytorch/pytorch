@@ -46,8 +46,9 @@ else:
 
 Set `torch.backends.mps.benchmark = True` to benchmark supported MPS kernel
 tile configurations and cache the fastest configuration for each input shape
-and layout. The first executions of a new shape can therefore be slower. The
-setting is disabled by default.
+and layout. The first invocation of a new input signature blocks while the
+candidates are timed; later invocations use the cached winner. The setting is
+disabled by default.
 
 Because the winning configuration is selected from timing measurements, it can
 differ between otherwise identical runs, which can change results at

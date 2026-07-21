@@ -11,6 +11,7 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TransposeType.h>
+#include <ATen/native/TunableOp.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
@@ -61,14 +62,12 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-#include <c10/util/FunctionRef.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/env.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <cstdio>
-#include <limits>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -281,22 +280,19 @@ void encode_gemv_launch(at::mps::MPSStream* stream,
                         const Tensor& out,
                         const GemvDims& dims,
                         const Tensor& bias,
-                        const std::array<float, 2>& alpha_beta) {
-  getMPSProfiler().beginProfileKernel(launch.pso, "gemm_gemv/" + launch.kernel, {mat, vec});
+                        const std::array<float, 2>& alpha_beta,
+                        bool profile = true) {
+  if (profile) {
+    getMPSProfiler().beginProfileKernel(launch.pso, "gemm_gemv/" + launch.kernel, {mat, vec});
+  }
   auto enc = stream->commandEncoder();
   [enc setComputePipelineState:launch.pso];
   mtl_setArgs(enc, mat, vec, out, dims, bias, alpha_beta);
   [enc dispatchThreadgroups:MTLSizeMake(launch.num_groups, 1, 1)
       threadsPerThreadgroup:MTLSizeMake(launch.threads_per_tg, 1, 1)];
-  getMPSProfiler().endProfileKernel(launch.pso);
-}
-
-double median_gemv_time(const std::vector<double>& samples) {
-  TORCH_INTERNAL_ASSERT(!samples.empty());
-  auto sorted = samples;
-  std::sort(sorted.begin(), sorted.end());
-  const auto mid = sorted.size() / 2;
-  return sorted.size() % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) * 0.5;
+  if (profile) {
+    getMPSProfiler().endProfileKernel(launch.pso);
+  }
 }
 
 struct GemvBenchmarkKey {
@@ -335,15 +331,9 @@ struct GemvBenchmarkKeyHash {
   }
 };
 
-// Unseen shapes round-robin candidates across real calls. GPU completion
-// handlers prune clear losers after four samples and cache a winner by 50.
-constexpr int kGemvMinBenchmarkSamples = 4;
-constexpr int kGemvMaxBenchmarkIterations = 50;
-
 enum class GemvLaunchPhase {
   Heuristic,
-  Explore,
-  Provisional,
+  Tuned,
   Cached,
   Forced,
 };
@@ -352,10 +342,8 @@ const char* gemv_phase_name(GemvLaunchPhase phase) {
   switch (phase) {
     case GemvLaunchPhase::Heuristic:
       return "heuristic";
-    case GemvLaunchPhase::Explore:
-      return "explore";
-    case GemvLaunchPhase::Provisional:
-      return "provisional";
+    case GemvLaunchPhase::Tuned:
+      return "tuned";
     case GemvLaunchPhase::Cached:
       return "cached";
     case GemvLaunchPhase::Forced:
@@ -364,222 +352,88 @@ const char* gemv_phase_name(GemvLaunchPhase phase) {
   TORCH_INTERNAL_ASSERT(false, "invalid GEMV launch phase");
 }
 
-struct GemvBenchmarkState {
-  std::vector<GemvConfig> candidates;
-  std::vector<std::string> candidate_kernels;
-  std::vector<std::vector<double>> times;
-  std::vector<int> in_flight;
-  std::vector<bool> active;
-  int issued = 0;
-  int next_prune_samples = kGemvMinBenchmarkSamples;
-  size_t cursor = 0;
-  bool settled = false;
-  GemvConfig config{};
-  uint64_t generation = 0;
-  at::mps::MPSAutotuneRecord trace;
-};
-
-using GemvBenchmarkStates =
-    std::unordered_map<GemvBenchmarkKey, std::shared_ptr<GemvBenchmarkState>, GemvBenchmarkKeyHash>;
-
 struct GemvBenchmarkCache {
-  GemvBenchmarkStates states;
+  std::unordered_map<GemvBenchmarkKey, GemvConfig, GemvBenchmarkKeyHash> configs;
   std::mutex mutex;
   uint64_t generation = 0;
 };
 
 GemvBenchmarkCache& gemv_benchmark_cache() {
-  // Metal completion handlers can still drain during static teardown.
   static auto* cache = new GemvBenchmarkCache();
   return *cache;
 }
 
-std::vector<double> gemv_candidate_medians(const GemvBenchmarkState& state) {
-  std::vector<double> medians(state.candidates.size(), std::numeric_limits<double>::infinity());
-  for (size_t i = 0; i < state.candidates.size(); ++i) {
-    if (!state.times[i].empty()) {
-      medians[i] = median_gemv_time(state.times[i]);
-    }
-  }
-  return medians;
-}
-
-size_t fastest_gemv_candidate(const GemvBenchmarkState& state, const std::vector<double>& medians) {
-  size_t best = state.candidates.size();
-  double best_time = std::numeric_limits<double>::infinity();
-  for (size_t i = 0; i < state.candidates.size(); ++i) {
-    if (state.active[i] && medians[i] < best_time) {
-      best = i;
-      best_time = medians[i];
-    }
-  }
-  if (best == state.candidates.size()) {
-    return std::find(state.active.begin(), state.active.end(), true) - state.active.begin();
-  }
-  return best;
-}
-
-bool update_gemv_benchmark_state(GemvBenchmarkState& state, const std::vector<double>& medians) {
-  const bool was_settled = state.settled;
-  while (!state.settled) {
-    bool ready_to_prune = true;
-    for (size_t i = 0; i < state.candidates.size(); ++i) {
-      if (state.active[i] && static_cast<int>(state.times[i].size()) < state.next_prune_samples) {
-        ready_to_prune = false;
-        break;
-      }
-    }
-    if (!ready_to_prune) {
-      break;
-    }
-
-    const size_t best = fastest_gemv_candidate(state, medians);
-    const double best_time = medians[best];
-    double threshold = 1.07;
-    if (state.next_prune_samples == kGemvMinBenchmarkSamples) {
-      threshold = 1.20;
-    } else if (state.next_prune_samples < 12) {
-      threshold = 1.12;
-    }
-    int active_count = 0;
-    for (size_t i = 0; i < state.candidates.size(); ++i) {
-      if (state.active[i] && medians[i] > best_time * threshold) {
-        state.active[i] = false;
-      }
-      active_count += state.active[i];
-    }
-    state.config = state.candidates[best];
-    state.next_prune_samples += kGemvMinBenchmarkSamples;
-    if (active_count == 1) {
-      state.config = state.candidates[fastest_gemv_candidate(state, medians)];
-      state.settled = true;
-    }
-  }
-
-  int outstanding = 0;
-  for (int count : state.in_flight) {
-    outstanding += count;
-  }
-  if (!state.settled && state.issued == kGemvMaxBenchmarkIterations && outstanding == 0) {
-    state.config = state.candidates[fastest_gemv_candidate(state, medians)];
-    state.settled = true;
-  }
-  return !was_settled && state.settled;
-}
-
-GemvConfig pick_gemv_benchmark_config(const GemvBenchmarkKey& key,
-                                      c10::function_ref<const std::vector<GemvConfig>&()> candidates_fn,
-                                      const std::vector<std::string>& candidate_kernels,
-                                      const at::mps::MPSAutotuneRecord* trace,
-                                      std::shared_ptr<GemvBenchmarkState>& state_out,
-                                      int& candidate_index,
-                                      GemvLaunchPhase& phase) {
+template <typename Tune>
+GemvConfig get_or_tune_gemv_config(const GemvBenchmarkKey& key, bool& tuned, Tune&& tune) {
   auto& cache = gemv_benchmark_cache();
   std::lock_guard<std::mutex> guard(cache.mutex);
   const auto generation = at::mps::getMPSAutotuneCacheGeneration();
   if (cache.generation != generation) {
-    cache.states.clear();
+    cache.configs.clear();
     cache.generation = generation;
   }
-  auto& state = cache.states[key];
-  if (!state) {
-    const auto& candidates = candidates_fn();
-    TORCH_INTERNAL_ASSERT(!candidates.empty());
-    const auto minimum_samples = candidates.size() * kGemvMinBenchmarkSamples;
-    TORCH_INTERNAL_ASSERT(minimum_samples <= kGemvMaxBenchmarkIterations);
-    state = std::make_shared<GemvBenchmarkState>();
-    state->candidates = candidates;
-    state->times.resize(candidates.size());
-    state->in_flight.resize(candidates.size());
-    state->active.assign(candidates.size(), true);
-    state->config = candidates.front();
-    state->settled = candidates.size() == 1;
-    state->generation = generation;
+  const auto cached = cache.configs.find(key);
+  if (cached != cache.configs.end()) {
+    tuned = false;
+    return cached->second;
   }
-  candidate_index = -1;
-  if (state->settled) {
-    phase = GemvLaunchPhase::Cached;
-    return state->config;
-  }
-  if (state->issued == kGemvMaxBenchmarkIterations) {
-    phase = GemvLaunchPhase::Provisional;
-    return state->config;
-  }
-
-  size_t min_samples = std::numeric_limits<size_t>::max();
-  for (size_t i = 0; i < state->candidates.size(); ++i) {
-    if (state->active[i]) {
-      min_samples = std::min(min_samples, state->times[i].size() + state->in_flight[i]);
-    }
-  }
-  for (size_t offset = 0; offset < state->candidates.size(); ++offset) {
-    const size_t i = (state->cursor + offset) % state->candidates.size();
-    if (state->active[i] && state->in_flight[i] == 0 && state->times[i].size() == min_samples) {
-      candidate_index = static_cast<int>(i);
-      state->in_flight[i] = 1;
-      ++state->issued;
-      state->cursor = (i + 1) % state->candidates.size();
-      state_out = state;
-      if (trace != nullptr) {
-        state->trace = *trace;
-        state->candidate_kernels = candidate_kernels;
-      }
-      phase = GemvLaunchPhase::Explore;
-      return state->candidates[i];
-    }
-  }
-  phase = GemvLaunchPhase::Provisional;
-  return state->config;
+  auto config = tune();
+  cache.configs.emplace(key, config);
+  tuned = true;
+  return config;
 }
 
-void record_gemv_benchmark_sample(const std::shared_ptr<GemvBenchmarkState>& state,
-                                  int candidate_index,
-                                  double seconds,
-                                  bool record_selection) {
-  std::optional<at::mps::MPSAutotuneRecord> selection;
-  {
-    auto& cache = gemv_benchmark_cache();
-    std::lock_guard<std::mutex> guard(cache.mutex);
-    if (state->generation != at::mps::getMPSAutotuneCacheGeneration() || candidate_index < 0 ||
-        candidate_index >= static_cast<int>(state->candidates.size())) {
-      return;
-    }
-    state->in_flight[candidate_index] = 0;
-    if (state->settled) {
-      return;
-    }
-    if (seconds > 0.0) {
-      state->times[candidate_index].push_back(seconds);
-    }
-    const auto medians = gemv_candidate_medians(*state);
-    if (seconds > 0.0) {
-      state->config = state->candidates[fastest_gemv_candidate(*state, medians)];
-    }
-    const bool settled = update_gemv_benchmark_state(*state, medians);
-    if (settled && record_selection && !state->trace.operation.empty()) {
-      selection = state->trace;
-      selection->event = "selection";
-      selection->phase = "settled";
-      selection->config = gemv_config_id(state->config);
-      for (size_t i = 0; i < state->candidates.size(); ++i) {
-        if (same_gemv_config(state->candidates[i], state->config)) {
-          selection->kernel = state->candidate_kernels[i];
-        }
-        selection->results.push_back({gemv_config_id(state->candidates[i]),
-                                      state->candidate_kernels[i],
-                                      state->times[i].empty() ? 0.0 : medians[i] * 1.0e6,
-                                      static_cast<int>(state->times[i].size()),
-                                      state->active[i]});
+double run_gemv_batch(at::mps::MPSStream* stream,
+                      const GemvLaunch& launch,
+                      const Tensor& mat,
+                      const Tensor& vec,
+                      const Tensor& out,
+                      const GemvDims& dims,
+                      const Tensor& bias,
+                      const std::array<float, 2>& alpha_beta,
+                      int iterations) {
+  if (iterations == 0) {
+    return 0.0;
+  }
+  __block double duration_ms = 0.0;
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      for (int i = 0; i < iterations; ++i) {
+        encode_gemv_launch(stream, launch, mat, vec, out, dims, bias, alpha_beta, false);
       }
+      id<MTLCommandBuffer> command_buffer = [stream->commandBuffer() retain];
+      try {
+        stream->synchronize(SyncType::COMMIT_AND_WAIT);
+        const double kernel_seconds = command_buffer.kernelEndTime - command_buffer.kernelStartTime;
+        const double gpu_seconds = command_buffer.GPUEndTime - command_buffer.GPUStartTime;
+        duration_ms = (kernel_seconds > 0.0 ? kernel_seconds : gpu_seconds) * 1.0e3;
+      } catch (...) {
+        [command_buffer release];
+        throw;
+      }
+      [command_buffer release];
     }
-    if (settled) {
-      state->trace = {};
-      state->candidate_kernels.clear();
-    }
+  });
+  return duration_ms;
+}
+
+at::native::tunable::Stats profile_gemv_candidate(at::mps::MPSStream* stream,
+                                                  const GemvLaunch& launch,
+                                                  const Tensor& mat,
+                                                  const Tensor& vec,
+                                                  const Tensor& out,
+                                                  const GemvDims& dims,
+                                                  const Tensor& bias,
+                                                  const std::array<float, 2>& alpha_beta,
+                                                  int iterations) {
+  run_gemv_batch(stream, launch, mat, vec, out, dims, bias, alpha_beta, 2);
+  const double duration_ms = run_gemv_batch(stream, launch, mat, vec, out, dims, bias, alpha_beta, iterations);
+  at::native::tunable::Stats stats;
+  const double mean_ms = duration_ms / iterations;
+  for (int i = 0; i < iterations; ++i) {
+    stats.sample_value(mean_ms);
   }
-  if (selection.has_value()) {
-    at::mps::recordMPSAutotuneEvent(std::move(*selection), true);
-  }
+  return stats;
 }
 
 // Rank-1 GEMV launch. Matrix orientation selects gemv_t vs gemv_nt; one
@@ -662,14 +516,18 @@ void dispatch_gemv(const Tensor& A,
 
   std::vector<std::string> candidate_ids;
   std::vector<std::string> candidate_kernels;
-  if (trace_enabled || forced.has_value()) {
+  if (trace_enabled || forced.has_value() || benchmark_enabled) {
     ensure_candidates();
-    candidate_ids.reserve(candidates.size());
+    if (trace_enabled || forced.has_value()) {
+      candidate_ids.reserve(candidates.size());
+    }
     if (trace_enabled) {
       candidate_kernels.reserve(candidates.size());
     }
     for (const auto& candidate : candidates) {
-      candidate_ids.push_back(gemv_config_id(candidate));
+      if (trace_enabled || forced.has_value()) {
+        candidate_ids.push_back(gemv_config_id(candidate));
+      }
       if (trace_enabled) {
         candidate_kernels.push_back(
             gemv_kernel_name(dt_str, candidate, epi, gemv_use_t, matrix_contiguous, idx64, vec_xs, vec_offset));
@@ -700,8 +558,9 @@ void dispatch_gemv(const Tensor& A,
     trace->candidates = candidate_ids;
   }
 
-  std::shared_ptr<GemvBenchmarkState> benchmark_state;
-  int benchmark_candidate = -1;
+  auto stream = getCurrentMPSStream();
+  at::native::tunable::TuningResult tuning_result;
+  bool tuned = false;
   GemvLaunchPhase phase = GemvLaunchPhase::Heuristic;
   if (forced.has_value()) {
     const auto it = std::find(candidate_ids.begin(), candidate_ids.end(), *forced);
@@ -732,63 +591,83 @@ void dispatch_gemv(const Tensor& A,
                                m_is_one,
                                beta_nonzero,
                                epi};
-    config = pick_gemv_benchmark_config(key,
-                                        ensure_candidates,
-                                        candidate_kernels,
-                                        trace.has_value() ? &*trace : nullptr,
-                                        benchmark_state,
-                                        benchmark_candidate,
-                                        phase);
+    config = get_or_tune_gemv_config(key, tuned, [&] {
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        stream->synchronize(SyncType::COMMIT_AND_WAIT);
+      });
+      const auto& tuning_candidates = ensure_candidates();
+      std::vector<GemvLaunch> launches;
+      launches.reserve(tuning_candidates.size());
+      for (const auto& candidate : tuning_candidates) {
+        launches.push_back(prepare_gemv_launch(
+            dt_str, dt, candidate, epi, gemv_use_t, matrix_contiguous, idx64, outlen, vec_xs, vec_offset));
+      }
+
+      const auto scratch = at::empty_like(out, MemoryFormat::Contiguous);
+      // GEMV launches are short, so use longer and more conservative pruning
+      // than the TunableOp defaults.
+      at::native::tunable::TuningPolicy tuning_policy;
+      tuning_policy.first_profile_iterations = 10;
+      tuning_policy.first_prune_ratio = 2.0;
+      tuning_policy.second_profile_iterations = 50;
+      tuning_policy.second_prune_ratio = 1.5;
+      tuning_policy.default_tuning_iterations = 1000;
+      tuning_policy.max_tuning_duration_ms = 5.0;
+      tuning_policy.max_tuning_iterations = 1000;
+
+      auto run = [&](size_t index, int iterations) {
+        return run_gemv_batch(
+            stream, launches[index], matrix.tensor, vvec, scratch, dims, expanded_bias, alpha_beta, iterations);
+      };
+      tuning_result = at::native::tunable::findFastest(
+          tuning_candidates.size(),
+          0,
+          tuning_policy,
+          [](size_t) { return true; },
+          [&](size_t index, int iterations) {
+            return profile_gemv_candidate(
+                stream, launches[index], matrix.tensor, vvec, scratch, dims, expanded_bias, alpha_beta, iterations);
+          },
+          [](size_t) { return true; },
+          [&](size_t index, int iterations) { run(index, iterations); });
+      return tuning_candidates[tuning_result.candidate_index];
+    });
+    phase = tuned ? GemvLaunchPhase::Tuned : GemvLaunchPhase::Cached;
   }
 
-  auto stream = getCurrentMPSStream();
-  const bool benchmarking = benchmark_candidate >= 0;
-  const auto state = benchmark_state;
-  const int candidate = benchmark_candidate;
-  __block bool handler_installed = false;
-  try {
-    const auto launch =
-        prepare_gemv_launch(dt_str, dt, config, epi, gemv_use_t, matrix_contiguous, idx64, outlen, vec_xs, vec_offset);
-    if (trace.has_value()) {
-      trace->event = "launch";
-      trace->phase = gemv_phase_name(phase);
-      trace->config = gemv_config_id(config);
-      trace->kernel = launch.kernel;
-      at::mps::recordMPSAutotuneEvent(std::move(*trace));
-    }
-    dispatch_sync_with_rethrow(stream->queue(), ^() {
-      @autoreleasepool {
-        if (benchmarking) {
-          stream->synchronize(SyncType::COMMIT);
-        }
-        encode_gemv_launch(stream, launch, matrix.tensor, vvec, out, dims, expanded_bias, alpha_beta);
-        if (benchmarking) {
-          const bool trace_callback = at::mps::retainMPSAutotuneTrace();
-          [stream->commandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> command_buffer) {
-            record_gemv_benchmark_sample(
-                state, candidate, command_buffer.GPUEndTime - command_buffer.GPUStartTime, trace_callback);
-            if (trace_callback) {
-              at::mps::releaseMPSAutotuneTrace();
-            }
-          }];
-          handler_installed = true;
-          stream->synchronize(SyncType::COMMIT);
-        }
+  if (tuned && trace.has_value()) {
+    auto selection = *trace;
+    selection.event = "selection";
+    selection.phase = "tuned";
+    selection.config = gemv_config_id(config);
+    for (size_t i = 0; i < candidates.size(); ++i) {
+      const auto& result = tuning_result.candidates[i];
+      if (i == tuning_result.candidate_index) {
+        selection.kernel = candidate_kernels[i];
       }
-    });
-  } catch (...) {
-    // A launch that failed before its completion handler was installed must
-    // release its benchmark slot or the shape's tuner can never settle.
-    if (benchmarking && !handler_installed) {
-      auto& cache = gemv_benchmark_cache();
-      std::lock_guard<std::mutex> guard(cache.mutex);
-      if (state->generation == at::mps::getMPSAutotuneCacheGeneration()) {
-        state->in_flight[candidate] = 0;
-        --state->issued;
-      }
+      selection.results.push_back({candidate_ids[i],
+                                   candidate_kernels[i],
+                                   result.stats._mean * 1.0e3,
+                                   static_cast<int>(result.samples),
+                                   result.status == at::native::tunable::CandidateStatus::Profiled});
     }
-    throw;
+    at::mps::recordMPSAutotuneEvent(std::move(selection));
   }
+
+  const auto launch =
+      prepare_gemv_launch(dt_str, dt, config, epi, gemv_use_t, matrix_contiguous, idx64, outlen, vec_xs, vec_offset);
+  if (trace.has_value()) {
+    trace->event = "launch";
+    trace->phase = gemv_phase_name(phase);
+    trace->config = gemv_config_id(config);
+    trace->kernel = launch.kernel;
+    at::mps::recordMPSAutotuneEvent(std::move(*trace));
+  }
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      encode_gemv_launch(stream, launch, matrix.tensor, vvec, out, dims, expanded_bias, alpha_beta);
+    }
+  });
 }
 
 // Rank-1 GEMV gate for mm/addmm: dispatch when out is rank-1 (M==1 xor N==1)

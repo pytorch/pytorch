@@ -328,9 +328,10 @@ These backends include:
 .. attribute:: benchmark
 
     A :class:`bool` that enables MPS kernel tile autotuning. For each eligible
-    operation and input shape, the first executions benchmark multiple kernel
-    and tile configurations and cache the fastest one. The setting applies to
-    MPS operations that implement autotuning. The default value is False.
+    operation and input signature, the first invocation synchronously
+    benchmarks multiple kernel and tile configurations and caches the fastest
+    one. The setting applies to MPS operations that implement autotuning. The
+    default value is False.
 
     Because the winner is selected from timing measurements, the cached
     configuration can differ between otherwise identical runs, which can

@@ -11661,8 +11661,9 @@ class TestAutotuneMPS(TestCaseMPS):
     """Tests for MPS kernel autotuning (torch.backends.mps.benchmark).
 
     Covers the flag itself, autotune_trace records, forced-config overrides,
-    cache clearing, and the GEMV tuner's candidate pools, phases, and kernel
-    routing. setUp enables benchmarking with a fresh autotune cache per test.
+    cache clearing, and the GEMV tuner's candidate pools, synchronous
+    selection, and kernel routing. setUp enables benchmarking with a fresh
+    autotune cache per test.
     """
 
     def setUp(self):
@@ -11727,8 +11728,8 @@ class TestAutotuneMPS(TestCaseMPS):
         self.assertEqual(trace.records[0]["phase"], "heuristic")
 
     def test_trace_no_wait_back_to_back(self, device):
-        # Explore launches retain callbacks that outlive a no-wait trace; the
-        # next trace must wait for them instead of raising "already active".
+        # A no-wait trace may leave its launch queued, but the next trace must
+        # still start without raising "already active".
         a = torch.randn(1, 259, device=device)
         b = torch.randn(259, 515, device=device)
         for _ in range(2):
@@ -11744,13 +11745,8 @@ class TestAutotuneMPS(TestCaseMPS):
         else:
             b = torch.randn(257, 513, device=device, dtype=dtype)
         expected = a.cpu() @ b.cpu()
-        records = []
-        for _ in range(50):
-            with torch.backends.mps.autotune_trace(max_entries=2) as trace:
-                result = a @ b
-            records.extend(trace.records)
-            if any(record["event"] == "selection" for record in trace.records):
-                break
+        with torch.backends.mps.autotune_trace(max_entries=2) as trace:
+            result = a @ b
         with torch.backends.mps.autotune_trace(max_entries=1) as cached_trace:
             cached = a @ b
         tol = (
@@ -11760,18 +11756,19 @@ class TestAutotuneMPS(TestCaseMPS):
         )
         self.assertEqual(expected, result.cpu(), **tol)
         self.assertEqual(expected, cached.cpu(), **tol)
-        selections = [
-            record for record in records if record["event"] == "selection"
-        ]
-        self.assertEqual(len(selections), 1)
-        self.assertEqual(cached_trace.records[0]["phase"], "cached")
-        selection = selections[0]
-        self.assertIn(selection["config"], selection["candidates"])
-        self.assertLessEqual(
-            sum(result["samples"] for result in selection["results"]), 50
+        self.assertEqual(
+            [record["event"] for record in trace.records],
+            ["selection", "launch"],
         )
+        self.assertEqual(trace.records[-1]["phase"], "tuned")
+        self.assertEqual(cached_trace.records[0]["phase"], "cached")
+        selection = trace.records[0]
+        self.assertIn(selection["config"], selection["candidates"])
         self.assertGreaterEqual(
-            min(result["samples"] for result in selection["results"]), 4
+            min(result["samples"] for result in selection["results"]), 10
+        )
+        self.assertLessEqual(
+            max(result["samples"] for result in selection["results"]), 1060
         )
         selected_result = next(
             result
@@ -11779,6 +11776,16 @@ class TestAutotuneMPS(TestCaseMPS):
             if result["config"] == selection["config"]
         )
         self.assertEqual(selection["kernel"], selected_result["kernel"])
+        self.assertTrue(selected_result["active"])
+        self.assertGreater(selected_result["mean_us"], 0)
+        self.assertEqual(
+            selected_result["mean_us"],
+            min(
+                result["mean_us"]
+                for result in selection["results"]
+                if result["active"]
+            ),
+        )
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("matrix_layout", ["dense", "transposed", "strided", "sliced"])
@@ -11918,9 +11925,16 @@ class TestAutotuneMPS(TestCaseMPS):
         torch.backends.mps._clear_autotune_cache()
         with torch.backends.mps.autotune_trace() as second:
             _ = a @ b
-        self.assertEqual(first.records[-1]["phase"], "explore")
-        self.assertEqual(second.records[-1]["phase"], "explore")
-        self.assertEqual(first.records[-1]["config"], second.records[-1]["config"])
+        self.assertEqual(
+            [record["event"] for record in first.records],
+            ["selection", "launch"],
+        )
+        self.assertEqual(
+            [record["event"] for record in second.records],
+            ["selection", "launch"],
+        )
+        self.assertEqual(first.records[-1]["phase"], "tuned")
+        self.assertEqual(second.records[-1]["phase"], "tuned")
 
 
 class TestLinalgMPS(TestCaseMPS):
