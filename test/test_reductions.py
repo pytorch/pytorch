@@ -16,7 +16,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, highest_precision_float,
     integral_types, complex_types, floating_types_and,
-    integral_types_and, floating_and_complex_types_and, all_types_and, all_types,
+    integral_types_and, floating_and_complex_types_and, all_types_and, all_types, onlyNativeDeviceTypes,
 )
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
@@ -1004,7 +1004,7 @@ class TestReductions(TestCase):
 
 
     @expectedFailureMeta  # mode only supports CPU and CUDA device type
-    @onlyAccelerator
+    @onlyNativeDeviceTypes
     @skipIfMPS
     def test_mode_wrong_dtype(self, device):
         def test_for_dtypes(x_ty, v_ty, i_ty, message):
@@ -1180,7 +1180,7 @@ class TestReductions(TestCase):
     def test_amax(self, device, dtype):
         self._test_minmax_helper(torch.amax, np.amax, device, dtype)
 
-    @onlyAccelerator
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     @dtypesIfXPU(torch.half, torch.float, torch.bfloat16)
@@ -1196,7 +1196,7 @@ class TestReductions(TestCase):
         self._test_minmax_helper(_amin_wrapper, np.amin, device, dtype)
         self._test_minmax_helper(_amax_wrapper, np.amax, device, dtype)
 
-    @onlyAccelerator
+    @onlyNativeDeviceTypes
     @dtypes(*complex_types())
     @dtypesIfMPS(torch.complex64)
     def test_invalid_0dim_aminmax(self, device, dtype):
@@ -1727,7 +1727,7 @@ class TestReductions(TestCase):
                                                  atol=atol, rtol=rtol, exact_dtype=exact_dtype,
                                                  with_keepdim=with_keepdim, with_extremal=with_extremal)
 
-    @onlyAccelerator
+    @onlyNativeDeviceTypes
     @dtypes(*set(all_types_and(torch.half)) - {torch.uint8})
     @skipIfMPS
     def test_sum_vs_numpy(self, device, dtype):
@@ -1735,7 +1735,7 @@ class TestReductions(TestCase):
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_keepdim=True)
 
-    @onlyAccelerator
+    @onlyNativeDeviceTypes
     @dtypes(*set(all_types_and(torch.half)) - {torch.uint8})
     @skipIfMPS
     def test_nansum_vs_numpy(self, device, dtype):
@@ -2001,7 +2001,7 @@ class TestReductions(TestCase):
                 _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
 
     # TODO: part of this test covers torch.norm, with should be covered by test_linalg
-    @onlyAccelerator
+    @onlyNativeDeviceTypes
     @skipIfMPS
     def test_repeated_dim(self, device):
         ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
@@ -2088,7 +2088,7 @@ class TestReductions(TestCase):
                 torch.sum(x, dim=[0], dtype=torch.float32, out=y)
 
     # Assert for illegal dtype would not be raised on XLA
-    @onlyAccelerator
+    @onlyNativeDeviceTypes
     @skipIfMPS
     def test_minmax_illegal_dtype(self, device):
         x = torch.randn(5, 5, dtype=torch.float32, device=device)
@@ -2621,7 +2621,7 @@ class TestReductions(TestCase):
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/pull/138657 discovers a latent bug")
-    @onlyAccelerator
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @skipIfMPS
     def test_quantile(self, device, dtype):
@@ -2711,7 +2711,7 @@ class TestReductions(TestCase):
                 torch.quantile(torch.randn(1, device=device), 0.5, out=torch.scalar_tensor(1))
 
     @skipIfMPS  # MPS caps float32 at 2^24 and has no float64, so >2^24 can't run there
-    @onlyAccelerator
+    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     def test_quantile_large_input(self, device, dtype):
         # gh-64947: quantile must stay correct past the old 2^24 cap. float32
@@ -2735,7 +2735,7 @@ class TestReductions(TestCase):
             expected_nan = np.nanquantile(a_nan_np, q_np, method=interpolation)
             self.assertEqual(res_nan.cpu(), torch.from_numpy(np.asarray(expected_nan)).to(res_nan))
 
-    @onlyAccelerator
+    @onlyNativeDeviceTypes
     def test_quantile_size_limit(self, device):
         # float32 ranks are exact only to 2^24; computing them in float64 lifts
         # the limit to 2^53. MPS has no float64, so it keeps the 2^24 cap and
