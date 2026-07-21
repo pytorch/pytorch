@@ -1782,6 +1782,49 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_fast_math_kernel_option_controls_cutedsl_math(self):
+        def epilogue_fn(acc):
+            magnitude = acc.abs() + 1.0
+            return (
+                torch.tanh(acc)
+                + torch.sigmoid(acc)
+                + torch.log1p(acc.abs())
+                + torch.sqrt(magnitude)
+                + torch.rsqrt(magnitude)
+            )
+
+        def compile_with_fast_math(a, b, fast_math):
+            def fn(a, b):
+                return flex_gemm(
+                    torch.mm,
+                    (a, b),
+                    epilogue_fn,
+                    kernel_options={"backend": "QUACK", "fast_math": fast_math},
+                )
+
+            torch._dynamo.reset()
+            return run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+
+        a = self.makeTensor(128, 64)
+        b = self.makeTensor(64, 128)
+        fast_result, (fast_code,) = compile_with_fast_math(a, b, True)
+        precise_result, (precise_code,) = compile_with_fast_math(a, b, False)
+        expected = epilogue_fn(a.double() @ b.double())
+
+        torch.testing.assert_close(fast_result.double(), expected, atol=0.2, rtol=0.02)
+        torch.testing.assert_close(
+            precise_result.double(), expected, atol=0.02, rtol=0.002
+        )
+        for op_name in ("tanh", "exp2", "log", "sqrt", "rsqrt"):
+            self.assertIn(f"cute.math.{op_name}", fast_code)
+        self.assertIn("fastmath=True", fast_code)
+        self.assertNotIn("fastmath=True", precise_code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_dynamic_shapes_compiled_matches_reference(self):
         def epilogue_fn(acc):
             return (acc + 1).relu()
@@ -5364,6 +5407,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 lambda acc: acc.relu(),
                 {"backend": "QUACK", "split_k": 2},
                 "unsupported FlexGEMM kernel options",
+            ),
+            (
+                "invalid_fast_math_option",
+                lambda acc: acc.relu(),
+                {"backend": "QUACK", "fast_math": 1},
+                "fast_math kernel option must be bool",
             ),
         ),
         name_fn=lambda case: case[0],
