@@ -70,6 +70,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = c10d.get_default_backend_for_device(device_type)
+
+
 # Opaque custom op so torch.compile traces the coalescing manager into the graph
 # (Dynamo otherwise graph-breaks on it) and reduce-overhead captures the
 # coalesced collective into a cudagraph. Used by
