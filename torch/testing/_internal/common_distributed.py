@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TEST_CUDA,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TEST_XPU,
@@ -295,6 +296,8 @@ def at_least_x_gpu(x):
     if TEST_HPU and torch.hpu.device_count() >= x:
         return True
     if TEST_XPU and torch.xpu.device_count() >= x:
+        return True
+    if TEST_PRIVATEUSE1 and torch.accelerator.device_count() >= x:
         return True
     return False
 
