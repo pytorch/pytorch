@@ -9,7 +9,7 @@ high-performance GEMM kernels for NVIDIA GPUs.
 import itertools
 import re
 from enum import auto, Enum
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from torch._inductor import config
@@ -148,11 +148,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             # bias is the last input; the rest are the GEMM operands.
             return self._make_bias_run_fn(input_tensors, out)
 
-        # For swap_ab, transpose mat_a/mat_b and swap scales before creating
-        # GemmArguments. The swapped GEMM computes (N, M) = out.t(); write it
-        # zero-copy into a transposed (column-major) view of the real (M, N)
-        # output, so no temp buffer / copy is needed (the kernel handles a
-        # column-major C via its out-layout detection).
+        # swap_ab: transpose operands and write into a transposed view of `out`
+        # (zero-copy). See _nvgemm_run for the full explanation.
         if self.swap_ab and len(input_tensors) >= 2:
             a, b = input_tensors[0], input_tensors[1]
             if len(input_tensors) >= 4:
@@ -758,10 +755,13 @@ def _add_nv_gemm_choices_impl(
     # The args-filtered fast query is complete only for dense GEMM; scaled uses
     # direct block-scaled sub-provider enumeration (get_operators under-generates
     # operands from scaled args); anything else falls back to the full manifest.
-    candidate_source = {
-        GemmVariant.GEMM: "args",
-        GemmVariant.SCALED_GEMM: "scaled",
-    }.get(variant, "manifest")
+    candidate_source: Literal["args", "scaled", "manifest"]
+    if variant == GemmVariant.GEMM:
+        candidate_source = "args"
+    elif variant == GemmVariant.SCALED_GEMM:
+        candidate_source = "scaled"
+    else:
+        candidate_source = "manifest"
     non_efc_kernels, efc_kernels = partition_compatible_kernels(
         args,
         cc_int,
@@ -769,6 +769,7 @@ def _add_nv_gemm_choices_impl(
         num_buckets=2,
         efc_only=bias_node is not None,
         candidate_source=candidate_source,
+        classifier_key="nvgemm_efc_partition_v1",
     )
     if not config.epilogue_fusion or swap_ab:
         efc_kernels = []
@@ -1022,8 +1023,8 @@ def add_nv_universal_scaled_gemm_choices(
         swizzle_type_b=swizzle_type_b,
     )
 
-    # swap_ab: swap A/B operands so the large N goes on the M-axis.
-    # Improves tile utilization for small-M decode shapes (M << N).
+    # swap_ab: see add_nv_universal_gemm_choices for the rationale (swap A/B so
+    # the large N lands on the well-tiled M-axis for small-M shapes).
     if not config.nvgemm_swap_ab:
         return
 

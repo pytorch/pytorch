@@ -855,7 +855,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
 
         if self.device_type == "cpu":
             # NOTE: when `device_id` is not None, barrier() will choose the accelerator
-            # of the most pripority, which means if the test specifies to use CPU for
+            # of the most priority, which means if the test specifies to use CPU for
             # testing while CUDA is available on the host, the barrier() will use CUDA.
             # To avoid this and better respect `self.device_type`, we add this branch to
             # enforce barrier() to use CPU when `self.device_type` is CPU and other

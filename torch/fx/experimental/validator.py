@@ -170,7 +170,7 @@ try:
 
     # Implementation of Python semantics as Z3 expressions.
     #
-    # Z3 Real-Int theory has operators with semantics that differ that of
+    # Z3 Real-Int theory has operators with semantics that differ from that of
     # Python. Therefore, in order to get it right, we need to implement
     # the (Python) semantics we are relying on in Z3.
     @dataclass
