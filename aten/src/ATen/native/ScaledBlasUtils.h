@@ -199,6 +199,11 @@ void validate_scaled_mm_v2_inputs(
     ArrayRef<ScalingType> recipe_b,
     ArrayRef<SwizzleType> swizzle_b);
 
+#if defined(USE_CUDA) || defined(USE_ROCM)
+TORCH_API
+bool scaled_mm_allowed_device(bool sm90_only = false, bool sm100_only = false);
+#endif
+
 /**
  * Validate the basic (recipe-independent) inputs of `_scaled_grouped_mm_v2`.
  * Centralized here so it can be called from TORCH_META_FUNC, which runs both
