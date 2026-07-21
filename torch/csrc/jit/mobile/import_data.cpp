@@ -62,7 +62,8 @@ c10::IValue IValueUnpickler::readArchive(
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
   size_t pickle_size = 0;
-  std::tie(pickle_ptr, pickle_size) = reader_->getRecord(picklename.str());
+  std::tie(pickle_ptr, pickle_size) =
+      reader_->getRecord(std::move(picklename).str());
 
   size_t bytes_read = 0;
   auto data = reinterpret_cast<const char*>(pickle_ptr.get());
@@ -128,7 +129,7 @@ c10::IValue IValueUnpickler::readArchive(
       for (const auto i : c10::irange(ndict)) {
         std::stringstream name;
         name << it->key();
-        cls->addOrCheckAttribute(name.str(), it->key().type());
+        cls->addOrCheckAttribute(std::move(name).str(), it->key().type());
         obj->setSlot(i, it->value());
         ++it;
       }
@@ -139,7 +140,7 @@ c10::IValue IValueUnpickler::readArchive(
   auto read_record = [&](const std::string& name) {
     std::stringstream ss;
     ss << archive_name << '/' << name;
-    return std::get<0>(reader_->getRecord(ss.str()));
+    return std::get<0>(reader_->getRecord(std::move(ss).str()));
   };
 
   Unpickler unpickler(

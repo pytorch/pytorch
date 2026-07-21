@@ -13,7 +13,7 @@ inline float load_affine_scale(constant T* ptr, uint idx) {
 }
 
 template <>
-inline float load_affine_scale(constant void* ptr, uint idx) {
+inline float load_affine_scale(constant void*, uint) {
   return 1;
 }
 
@@ -23,7 +23,7 @@ inline float load_affine_bias(constant T* ptr, uint idx) {
 }
 
 template <>
-inline float load_affine_bias(constant void* ptr, uint idx) {
+inline float load_affine_bias(constant void*, uint) {
   return 0;
 }
 

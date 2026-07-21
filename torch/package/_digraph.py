@@ -27,7 +27,7 @@ class DiGraph:
         """Add a node to the graph.
 
         Args:
-            n: the node. Can we any object that is a valid dict key.
+            n: the node. Can be any object that is a valid dict key.
             **kwargs: any attributes you want to attach to the node.
         """
         if n not in self._node:
@@ -60,7 +60,7 @@ class DiGraph:
             raise ValueError(f"The node {n} is not in the digraph.") from e
 
     def predecessors(self, n):
-        """Returns an iterator over predecessors nodes of n."""
+        """Returns an iterator over predecessor nodes of n."""
         try:
             return iter(self._pred[n])
         except KeyError as e:
