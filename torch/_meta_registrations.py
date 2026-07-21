@@ -875,15 +875,18 @@ _PHILOX_DISTRIBUTION_NORMAL = 0
 _PHILOX_DISTRIBUTION_UNIFORM = 1
 
 
-def _check_philox_shards_distribution(self, kind, params):
+def _check_philox_shards_distribution(self, distribution, params):
     torch._check(
-        kind in (_PHILOX_DISTRIBUTION_NORMAL, _PHILOX_DISTRIBUTION_UNIFORM),
-        lambda: (f"_philox_distribution_shards_: unsupported distribution kind {kind}"),
+        distribution in (_PHILOX_DISTRIBUTION_NORMAL, _PHILOX_DISTRIBUTION_UNIFORM),
+        lambda: (
+            "_philox_distribution_shards_: unsupported distribution kind "
+            f"{distribution}"
+        ),
     )
     torch._check(
         len(params) == 2,
         lambda: (
-            f"_philox_distribution_shards_: distribution kind {kind} "
+            f"_philox_distribution_shards_: distribution kind {distribution} "
             f"expects 2 parameters, got {len(params)}"
         ),
     )
@@ -891,7 +894,7 @@ def _check_philox_shards_distribution(self, kind, params):
         all(not isinstance(param, complex) for param in params),
         lambda: "_philox_distribution_shards_: parameters must be real",
     )
-    if kind == _PHILOX_DISTRIBUTION_NORMAL:
+    if distribution == _PHILOX_DISTRIBUTION_NORMAL:
         _check_philox_normal_std(params[1])
     else:
         _check_philox_uniform_bounds(self, params[0], params[1])
@@ -905,11 +908,11 @@ def meta_philox_distribution_shards_(
     local_offsets,
     local_sizes,
     chunk_count,
-    kind,
+    distribution,
     params,
     generator=None,
 ):
-    _check_philox_shards_distribution(self, kind, params)
+    _check_philox_shards_distribution(self, distribution, params)
     _check_philox_shards_args(
         "_philox_distribution_shards_",
         self,
