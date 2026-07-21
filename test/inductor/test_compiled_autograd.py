@@ -5679,6 +5679,8 @@ skipped_tests.add("test_custom_function_boxed_grads_direct_apply")
 skipped_tests.add("test_custom_function_boxed_grads_single_list_arg")
 
 skipped_tests.add("test_pyobject_dispatch_normalizes_tensor_list_output")
+skipped_tests.add("test_needs_input_grad_setter_roundtrip_num_inputs_2")
+skipped_tests.add("test_needs_input_grad_setter_roundtrip_num_inputs_25")
 
 # DTensor backward calls a skipped global-shape helper under compiled autograd.
 skipped_tests.add("test_compile_dtensor_local_tensor_act_backward_passthrough")

@@ -59,7 +59,7 @@ PyObject* THPGradientEdgeClass = nullptr;
 #define THPFunction_assert(condition, ...) \
   if (!(condition)) {                      \
     THPUtils_setError(__VA_ARGS__);        \
-    throw python_error();                  \
+    throw_python_error();                  \
   }
 
 // Anonymous namespace for helpful functions used in this file
@@ -90,7 +90,36 @@ inline void check_legacy_fn_attr_access(
 void throw_python_error() {
   python_error err;
   err.persist();
+  // NOLINTNEXTLINE(hicpp-exception-baseclass)
   throw std::move(err);
+}
+
+PyObject* materialize_needs_input_grad(THPFunction* self) {
+  if (self->needs_input_grad) {
+    return Py_NewRef(self->needs_input_grad);
+  }
+  if (!self->needs_input_grad_bits.has_value()) {
+    // needs_input_grad=None is represented as needs_input_grad=nullptr and
+    // needs_input_grad_bits=nullopt. The needs_input_grad setter/getter, like
+    // other autograd.Function fields, normalizes Py_None to nullptr.
+    Py_RETURN_NONE;
+  }
+
+  const auto& needs_input_grad_bits = *self->needs_input_grad_bits;
+  THPObjectPtr result(
+      PyTuple_New(static_cast<Py_ssize_t>(needs_input_grad_bits.size())));
+  if (!result) {
+    return nullptr;
+  }
+  for (const auto i : c10::irange(needs_input_grad_bits.size())) {
+    PyTuple_SET_ITEM(
+        result.get(),
+        static_cast<Py_ssize_t>(i),
+        Py_NewRef(needs_input_grad_bits[i] ? Py_True : Py_False));
+  }
+  self->needs_input_grad = result.release();
+  self->needs_input_grad_bits.reset();
+  return Py_NewRef(self->needs_input_grad);
 }
 
 static PyObject* unpack_saved_variables(
@@ -135,7 +164,7 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
   auto ret = THPObjectPtr(THPSizeType.tp_alloc(
       &THPSizeType, static_cast<Py_ssize_t>(sym_sizes.size())));
   if (!ret)
-    throw python_error();
+    throw_python_error();
 
   for (auto i : c10::irange(sym_sizes.size())) {
     auto symint = sym_sizes[i];
@@ -257,7 +286,7 @@ auto PyNode::apply_with_saved_impl(
   THPObjectPtr fwdInputMetadatas(
       PyTuple_New(static_cast<Py_ssize_t>(is_variable_input.size())));
   if (!fwdInputMetadatas)
-    throw python_error();
+    throw_python_error();
 
   int offset = 0;
   for (const auto i : c10::irange(is_variable_input.size())) {
@@ -276,7 +305,7 @@ auto PyNode::apply_with_saved_impl(
     // Metadata is a tuple of 4 elements: (layout, device, dtype, size)
     THPObjectPtr fwdInputMetadata(PyTuple_New(4));
     if (!fwdInputMetadata)
-      throw python_error();
+      throw_python_error();
     PyTuple_SET_ITEM(
         fwdInputMetadata.get(), 0, autograd::utils::wrap(input_info.layout));
     PyTuple_SET_ITEM(fwdInputMetadata.get(), 1, device.release());
@@ -413,6 +442,10 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
   args.collect(f->saved_variables, true); // always unpacked as output in eager
   args.collect(f->materialize_grads);
   args.collect(f->is_variable_input);
+  THPObjectPtr needs_input_grad(materialize_needs_input_grad(f));
+  if (!needs_input_grad) {
+    throw_python_error();
+  }
   args.collect(f->needs_input_grad);
   args.collect(f->materialize_non_diff_grads);
   args.collect(f->output_info);
@@ -455,6 +488,10 @@ variable_list PyNode::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
   auto* f = reinterpret_cast<THPFunction*>(pyobj());
+  THPObjectPtr needs_input_grad(materialize_needs_input_grad(f));
+  if (!needs_input_grad) {
+    throw_python_error();
+  }
   saved.before(f->compiled_autograd_symints);
   saved.before(f->saved_variables);
   saved.before(f->needs_input_grad);
@@ -570,6 +607,7 @@ static void THPFunction_dealloc(THPFunction* self) {
   self->input_info.~vector();
   self->saved_variables.~vector();
   self->is_variable_input.~vector();
+  std::destroy_at(&self->needs_input_grad_bits);
   if (self->cdata) {
     auto* slot = self->cdata->pyobj_slot();
     if (slot->load_pyobj() == reinterpret_cast<PyObject*>(self)) {
@@ -595,6 +633,8 @@ static PyObject* THPFunction_new(
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
+  new (&self->needs_input_grad_bits)
+      std::optional<c10::SmallVector<bool, 24>>();
   self->materialize_grads = true;
   self->pure_view = false;
   self->materialize_non_diff_grads = true;
@@ -756,13 +796,13 @@ static void _wrap_outputs(
     THPObjectPtr py_x(THPVariable_Wrap(x));
     THPObjectPtr py_view_as_method(PyObject_GetAttrString(py_x, "view_as"));
     if (!py_view_as_method)
-      throw python_error();
+      throw_python_error();
     THPObjectPtr args(PyTuple_Pack(1, py_x.get()));
     if (!args)
-      throw python_error();
+      throw_python_error();
     THPObjectPtr result(PyObject_CallObject(py_view_as_method, args));
     if (!result)
-      throw python_error();
+      throw_python_error();
     return THPVariable_Unpack(result);
   };
 
@@ -943,7 +983,7 @@ struct UnpackedInput {
 struct InputFlags {
   bool is_executable = false;
   edge_list next_edges;
-  THPObjectPtr needs_input_grad;
+  c10::SmallVector<bool, 24> needs_input_grad;
   std::vector<bool> is_variable_input;
 };
 
@@ -965,7 +1005,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(
 
   auto num_args = PyTuple_GET_SIZE(args);
   unpacked.input_tuple = PyTuple_New(num_args);
-  flags.needs_input_grad = PyTuple_New(num_args);
+  flags.needs_input_grad.reserve(num_args);
   unpacked.input_vars.reserve(num_args);
   flags.is_variable_input.reserve(num_args);
   bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
@@ -979,7 +1019,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(
     flags.is_variable_input.push_back(is_variable);
     if (!is_variable) {
       // Non-tensor argument: it can't require grad.
-      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_NewRef(Py_False));
+      flags.needs_input_grad.push_back(false);
 
       if (profiler_need_input) {
         // The following conversion from PyObject to IValue is expensive
@@ -995,9 +1035,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(
       unpacked.input_vars.push_back(&tensor);
       const bool requires_grad = tensor.requires_grad();
       any_requires_grad |= requires_grad;
-      PyObject* needs_grad = requires_grad ? Py_True : Py_False;
-      Py_INCREF(needs_grad);
-      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
+      flags.needs_input_grad.push_back(requires_grad);
       // tensor -> IValue conversion is expensive, only do it if we need it.
       if (fill_record_function_inputs) {
         unpacked.record_function_inputs.emplace_back(tensor);
@@ -1191,7 +1229,7 @@ PyObject* process_outputs(
 
   THPObjectPtr outputs(PyTuple_New(num_outputs));
   if (!outputs)
-    throw python_error();
+    throw_python_error();
 
   grad_fn->cdata->clear_input_metadata();
 
@@ -1577,7 +1615,8 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
   // Initialize backward function (and ctx)
   bool is_executable = input_info.is_executable;
   cdata->set_next_edges(std::move(input_info.next_edges));
-  ctx->needs_input_grad = input_info.needs_input_grad.release();
+  Py_CLEAR(ctx->needs_input_grad);
+  ctx->needs_input_grad_bits.emplace(std::move(input_info.needs_input_grad));
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
   // Get clear_saved_tensors_on_access from the Function class
@@ -1797,7 +1836,7 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
       "'saved_variables' is deprecated; use 'saved_tensors'",
       0);
   if (r != 0)
-    throw python_error();
+    throw_python_error();
   TORCH_CHECK(
       !self->saved_tensors_accessed_and_cleared,
       "saved_tensors can only be accessed once when "
@@ -1827,7 +1866,7 @@ PyObject* THPFunction_get_compiled_autograd_symints(
   auto size = self->compiled_autograd_symints.size();
   THPObjectPtr result(PyTuple_New(static_cast<Py_ssize_t>(size)));
   if (!result) {
-    throw python_error();
+    throw_python_error();
   }
   for (const auto i : c10::irange(size)) {
     PyTuple_SET_ITEM(
@@ -1961,6 +2000,23 @@ int setObject(PyObject* obj, PyObject* value, void* _unused) {
   return 0;
 }
 
+PyObject* getNeedsInputGrad(PyObject* obj, void* _unused) {
+  auto self = (THPFunction*)obj;
+  return materialize_needs_input_grad(self);
+}
+
+int setNeedsInputGrad(PyObject* obj, PyObject* value, void* _unused) {
+  auto self = (THPFunction*)obj;
+  if (Py_IsNone(value)) {
+    value = nullptr;
+  }
+  Py_XDECREF(self->needs_input_grad);
+  Py_XINCREF(value);
+  self->needs_input_grad = value;
+  self->needs_input_grad_bits.reset();
+  return 0;
+}
+
 template <typename M, M THPFunction::* ptr, PyObject* (*Convert)(long)>
 PyObject* getMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
@@ -2022,8 +2078,8 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr,
      nullptr},
     {"needs_input_grad",
-     &getObject<&THPFunction::needs_input_grad>,
-     &setObject<&THPFunction::needs_input_grad>,
+     &getNeedsInputGrad,
+     &setNeedsInputGrad,
      nullptr,
      nullptr},
     {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
