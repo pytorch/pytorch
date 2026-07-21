@@ -399,19 +399,22 @@ double run_gemv_batch(at::mps::MPSStream* stream,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       for (int i = 0; i < iterations; ++i) {
+        if (i > 0) {
+          // MPS tensors live in untracked heaps, so without a barrier the GPU
+          // overlaps the profiled dispatches and the measured span stops
+          // scaling with the iteration count, which skews candidate means
+          // toward whichever candidate ran the most iterations.
+          [stream->commandEncoder() memoryBarrierWithScope:MTLBarrierScopeBuffers];
+        }
         encode_gemv_launch(stream, launch, mat, vec, out, dims, bias, alpha_beta, false);
       }
-      id<MTLCommandBuffer> command_buffer = [stream->commandBuffer() retain];
-      try {
-        stream->synchronize(SyncType::COMMIT_AND_WAIT);
-        const double kernel_seconds = command_buffer.kernelEndTime - command_buffer.kernelStartTime;
-        const double gpu_seconds = command_buffer.GPUEndTime - command_buffer.GPUStartTime;
-        duration_ms = (kernel_seconds > 0.0 ? kernel_seconds : gpu_seconds) * 1.0e3;
-      } catch (...) {
-        [command_buffer release];
-        throw;
-      }
-      [command_buffer release];
+      // kernelStartTime/kernelEndTime cover CPU-side scheduling, not GPU
+      // execution, and the MPSCommandBuffer proxy can rotate its underlying
+      // buffer on commit; read GPU timestamps from the completed buffer.
+      [stream->commandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> command_buffer) {
+        duration_ms = (command_buffer.GPUEndTime - command_buffer.GPUStartTime) * 1.0e3;
+      }];
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
     }
   });
   return duration_ms;
