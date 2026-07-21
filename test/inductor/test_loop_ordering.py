@@ -767,22 +767,16 @@ class LoopOrderingTest(TestCase):
     @inductor_config.patch(fx_graph_cache=False)
     def test_rejected_reindex_for_index_inversion_rollback(self):
         from torch._inductor.choices import InductorChoices
-        from torch._inductor.scheduler import Scheduler
 
-        reindexed_nodes = OrderedSet()
         observed_sizes = []
-        original_reindex = Scheduler._reindex_consumer_for_index_inversion
-
-        def record_reindex(scheduler, *args, **kwargs):
-            snapshot = original_reindex(scheduler, *args, **kwargs)
-            if snapshot is not None:
-                reindexed_nodes.add(args[-1])
-            return snapshot
 
         class RejectReindexedFusion(InductorChoices):
             def can_fuse(self, scheduler, node1, node2, shared_data_score):
-                if node2 in reindexed_nodes:
-                    observed_sizes.append(tuple(node2._sizes[0]))
+                node2_sizes = (
+                    tuple(node2._sizes[0]) if isinstance(node2, SchedulerNode) else ()
+                )
+                if node2_sizes == (1024,):
+                    observed_sizes.append(node2_sizes)
                     return False
                 return InductorChoices.can_fuse(
                     scheduler, node1, node2, shared_data_score
@@ -794,17 +788,9 @@ class LoopOrderingTest(TestCase):
 
         x = torch.randn(2, 16, 32, device=self.device)
         choices = RejectReindexedFusion()
-        with (
-            mock.patch.object(
-                Scheduler,
-                "_reindex_consumer_for_index_inversion",
-                record_reindex,
-            ),
-            V.set_choices_handler(choices),
-        ):
+        with V.set_choices_handler(choices):
             actual = torch.compile(f, fullgraph=True)(x)
 
-        self.assertTrue(reindexed_nodes)
         self.assertTrue(observed_sizes)
         self.assertEqual(set(observed_sizes), {(1024,)})
         self.assertEqual(actual, f(x))

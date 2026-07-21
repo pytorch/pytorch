@@ -7022,31 +7022,17 @@ class Scheduler:
 
         return str(reasons)
 
-    @staticmethod
-    def _generate_indexing_inverse(
-        read_expr: sympy.Expr,
-        index_var: sympy.Symbol,
-        index_range: sympy.Expr,
-    ) -> sympy.Expr | None:
-        simplified_read = sum(
-            V.graph.sizevars.combine_modular_indexing_pairs(term)
-            for term in sympy.Add.make_args(read_expr)
-        )
-
-        from torch._inductor.invert_expr_analysis import generate_inverse_formula
-
-        return generate_inverse_formula(simplified_read, index_var, index_range)
-
-    def _reindex_consumer_for_index_inversion(
+    def _can_reindex_consumer_for_index_inversion(
         self,
         producer_write: MemoryDep,
         consumer_read: MemoryDep,
         consumer_write: MemoryDep,
         consumer: SchedulerNode,
-    ) -> _LoopStateSnapshot | None:
-        """Flatten an equal-numel layout consumer before index inversion."""
+        read_expr: sympy.Expr,
+    ) -> bool:
+        """Return whether flattening the consumer produces an invertible read."""
         if consumer.is_reduction() or consumer_read.size != consumer_write.size:
-            return None
+            return False
 
         flat_size = sympy_product(producer_write.size)
         if not V.graph.sizevars.statically_known_equals(
@@ -7054,39 +7040,33 @@ class Scheduler:
         ) or not V.graph.sizevars.statically_known_equals(
             sympy_product(consumer._sizes[0]), flat_size
         ):
-            return None
+            return False
         if tuple(consumer._sizes[0]) == (flat_size,):
-            return None
+            return False
 
         body = consumer._body
-        if (
-            body is None
-            or body.subblocks
-            or len(body.indexing_exprs) != 2
-            or not consumer_write.normalize().is_contiguous()
-        ):
-            return None
+        if body is None or not consumer_write.normalize().is_contiguous():
+            return False
 
-        read_exprs = OrderedSet(body.get_read_exprs())
         iter_vars = body.vars[0]
         iter_sizes = body.sizes[0]
-        if len(read_exprs) != 1 or len(iter_vars) != len(iter_sizes):
-            return None
+        if len(iter_vars) != len(iter_sizes):
+            return False
 
+        # A flat reindex decomposes one new loop variable into the old loop domain.
+        # Apply that substitution to the read without rebuilding the LoopBody.
         flat_var = sympy.Dummy("reindex_flat", integer=True, nonnegative=True)
         flattened_read = sympy_subs(
-            next(iter(read_exprs)),
+            read_expr,
             dict(zip(iter_vars, decompose_index(flat_var, iter_sizes))),
         )
         flattened_read = V.graph.sizevars.simplify_with_ranges(
             sympy.expand(flattened_read), {flat_var: flat_size}
         )
-        if self._generate_indexing_inverse(flattened_read, flat_var, flat_size) is None:
-            return None
 
-        snapshot = _LoopStateSnapshot.create((consumer,))
-        consumer.apply_loop_reindexing([flat_size])
-        return snapshot
+        from torch._inductor.invert_expr_analysis import generate_inverse_formula
+
+        return generate_inverse_formula(flattened_read, flat_var, flat_size) is not None
 
     def shared_data_after_inverting_indexing(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -7116,7 +7096,8 @@ class Scheduler:
             return -1
         if not isinstance(node2.node, ir.ComputedBuffer):
             return -1
-        if node2._body is None:
+        body = node2._body
+        if body is None:
             return -1
 
         # Check for shared buffers between nodes
@@ -7158,20 +7139,26 @@ class Scheduler:
         if not isinstance(node1_write, MemoryDep):
             return -1
 
-        reindex_snapshot = self._reindex_consumer_for_index_inversion(
-            node1_write, node2_read, node2_write, node2
-        )
-        if reindex_snapshot is not None:
+        # Index inversion supports one read and one write expression without subblocks.
+        if len(body.indexing_exprs) != 2 or body.subblocks:
+            return -1
+        node2_read_exprs = OrderedSet(body.get_read_exprs())
+        if len(node2_read_exprs) != 1:
+            return -1
+        read_expr = next(iter(node2_read_exprs))
+
+        # Check the flattened read before rebuilding the consumer LoopBody.
+        if self._can_reindex_consumer_for_index_inversion(
+            node1_write, node2_read, node2_write, node2, read_expr
+        ):
+            reindex_snapshot = _LoopStateSnapshot.create((node2,))
+            node2.apply_loop_reindexing([sympy_product(node1_write.size)])
             score = self.shared_data_after_inverting_indexing(node1, node2)
             if score < 0:
                 reindex_snapshot.restore()
             return score
 
         if not node2_write.is_contiguous():
-            return -1
-
-        body = node2._body
-        if body is None:
             return -1
 
         # We are checking for compatibility with the normalized node1 write
@@ -7189,23 +7176,8 @@ class Scheduler:
         if node2_read.size != node2_write.size or len(node2_read.var_names) != 1:
             return -1
 
-        # Verify we have exactly two indexing expressions (one read, one write)
-        if len(body.indexing_exprs) != 2:
-            return -1
-
-        # No subblocks allowed for this optimization
-        if body.subblocks:
-            return -1
-
         if not ("index0" in body.indexing_exprs and "index1" in body.indexing_exprs):
             raise AssertionError("expected index0 and index1 in node2 indexing_exprs")
-
-        # Extract and verify single read expression
-        node2_read_exprs = OrderedSet(body.get_read_exprs())
-        if len(node2_read_exprs) != 1:
-            return -1
-
-        read_expr = next(iter(node2_read_exprs))
 
         # Determine which index is for reading vs writing
         if read_expr == body.indexing_exprs["index0"]:
@@ -7221,7 +7193,9 @@ class Scheduler:
         if len(index_vars) != 1:
             return -1
 
-        inverse_formula = self._generate_indexing_inverse(
+        from torch._inductor.invert_expr_analysis import generate_inverse_formula
+
+        inverse_formula = generate_inverse_formula(
             read_expr, index_vars[0], node2_read.size[0]
         )
 
