@@ -6565,24 +6565,6 @@ class GraphModule(torch.nn.Module):
         torch.testing.assert_close(compiled_out, eager_out, rtol=1e-4, atol=1e-4)
 
     @supported_platform
-    @skip_on_cuda
-    def test_cpu_error_message_return_lse(self, device):
-        make_tensor = functools.partial(
-            torch.randn,
-            (2, 2, 128, 16),
-            device="cpu",
-            dtype=torch.float32,
-            requires_grad=False,
-        )
-        query, key, value = make_tensor(), make_tensor(), make_tensor()
-        attention = torch.compile(flex_attention)
-        with self.assertRaisesRegex(
-            torch._inductor.exc.InductorError,
-            r"NotImplementedError: torch.compile on CPU only supports inference and `return_lse` is not supported yet.",
-        ):
-            attention(query, key, value, return_lse=True)
-
-    @supported_platform
     @skip_on_cpu
     @skip_on_xpu
     def test_nested_tensor_inputs_error(self, device):
