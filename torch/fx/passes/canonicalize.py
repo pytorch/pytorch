@@ -65,7 +65,7 @@ def _canonical_node_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> obj
         return _computation_node_key(node, canonical_idx)
 
 
-def is_safe_to_reorder(node: fx.Node) -> bool:
+def _is_safe_to_reorder(node: fx.Node) -> bool:
     """Check if a node is safe to reorder during graph canonicalization.
 
     Builds on Node.is_impure() (used by DCE) with two additional checks for
@@ -181,7 +181,6 @@ def canonicalize_graph(
     canonical_key_fn: Callable[[fx.Node, dict[fx.Node, int]], object],
     is_safe_to_reorder: Callable[[fx.Node], bool],
     *,
-    rename: bool = True,
     skip_rename_ops: frozenset[str] = frozenset(),
 ) -> dict[str, str]:
     """Reorder graph nodes into a canonical topological order and rename them.
@@ -202,15 +201,12 @@ def canonicalize_graph(
         is_safe_to_reorder: ``(node) -> bool``.  Nodes for which this returns
             ``False`` act as barriers: they are chained in original order, and
             pure nodes are confined to their barrier segment.
-        rename: If ``True`` (default), rename nodes after reordering via
-            ``rename_nodes_to_canonical``. Pass ``False`` to reorder only,
-            preserving all existing node names.
-        skip_rename_ops: Node ops to skip renaming (only applies when
-            ``rename=True``). Skipped nodes keep their original names.
+        skip_rename_ops: Node ops to skip renaming. Skipped nodes keep their
+            original names.
 
     Returns:
         A mapping from old node name to new node name for nodes that were
-        renamed.  Empty when ``rename=False``.
+        renamed.
     """
     indeg: dict[fx.Node, int] = {
         node: len(node.all_input_nodes) for node in graph.nodes
@@ -299,7 +295,4 @@ def canonicalize_graph(
         cursor.append(node)
         cursor = node
 
-    if rename:
-        return rename_nodes_to_canonical(graph, skip_ops=skip_rename_ops)
-
-    return {}
+    return rename_nodes_to_canonical(graph, skip_ops=skip_rename_ops)
