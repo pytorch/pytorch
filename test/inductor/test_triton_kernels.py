@@ -384,6 +384,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 self.assertGreater(record_idx, h2d_sync_idx)
                 self.assertGreater(synchronize_idx, record_idx)
                 self.assertLess(synchronize_idx, launch_idx)
+                launch_record_idx = code.index(
+                    ".record_stream(torch.accelerator.current_stream(", launch_idx
+                )
+                self.assertGreater(launch_record_idx, launch_idx)
                 marker = "torch.ops.prims._data_ptr.default("
                 for line in code.splitlines():
                     if marker in line:
@@ -422,7 +426,18 @@ class KernelTests(torch._inductor.test_case.TestCase):
                     self.assertEqual(actual, expected)
                     stream_code = "\n".join(stream_codes)
                     self.assertIn("with stream1:", stream_code)
-                    self.assertIn(".record_stream(stream1)", stream_code)
+                    stream_launch_idx = stream_code.index("add_kernel_0.run(")
+                    stream_record_idx = stream_code.index(
+                        ".record_stream(torch.accelerator.current_stream(",
+                        stream_launch_idx,
+                    )
+                    self.assertGreater(stream_record_idx, stream_launch_idx)
+                    stream_record_line = next(
+                        line
+                        for line in stream_code[stream_launch_idx:].splitlines()
+                        if ".record_stream(torch.accelerator.current_stream(" in line
+                    )
+                    self.assertTrue(stream_record_line.startswith("                "))
 
                 with inductor_config.patch(memory_planning=True):
                     compiled_memory_planning = torch.compile(f, fullgraph=True)
@@ -439,7 +454,9 @@ class KernelTests(torch._inductor.test_case.TestCase):
                     "hipDeviceSynchronize" if torch.version.hip else "cuCtxSynchronize"
                 )
                 self.assertIn(sync_fn, code)
-                sync_idx = code.index(sync_fn)
+                launch_idx = code.index("    call_add_kernel_0(")
+                sync_idx = code.index(sync_fn, launch_idx)
+                self.assertGreater(sync_idx, launch_idx)
                 self.assertIn("device_guard.set_index(", code[:sync_idx])
 
     @requires_gpu

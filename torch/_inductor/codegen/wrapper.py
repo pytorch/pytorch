@@ -2096,6 +2096,37 @@ class PythonWrapperCodegen(CodeGen):
             raise AssertionError("CUDA MemPool contexts require Python wrapper")
         self.writeline(ExitCudaMemPoolContextLine())
 
+    def _data_ptr_keepalive_sources_for_raw_args(
+        self, raw_args: Sequence[Any] | None
+    ) -> OrderedSet[str]:
+        sources: OrderedSet[str] = OrderedSet()
+
+        def add_sources(raw_arg: Any) -> None:
+            if isinstance(raw_arg, IRNode):
+                sources.update(ir.data_ptr_keepalive_sources(raw_arg))
+            elif isinstance(raw_arg, (list, tuple)):
+                for value in raw_arg:
+                    add_sources(value)
+
+        if raw_args is not None:
+            for raw_arg in raw_args:
+                add_sources(raw_arg)
+        return sources
+
+    def generate_data_ptr_keepalive_records_for_raw_args(
+        self, raw_args: Sequence[Any] | None
+    ) -> None:
+        for name in self._data_ptr_keepalive_sources_for_raw_args(raw_args):
+            buf = V.graph.try_get_buffer(name)
+            if buf is None:
+                continue
+            device = buf.get_device()
+            if device is None or device.type not in ("cuda", "xpu"):
+                continue
+            self.writeline(
+                f"{name}.record_stream(torch.accelerator.current_stream({name}.device))"
+            )
+
     def generate_data_ptr_keepalive_records(self) -> None:
         for name in V.graph.data_ptr_keepalive_buffers:
             buf = V.graph.try_get_buffer(name)
@@ -2108,23 +2139,9 @@ class PythonWrapperCodegen(CodeGen):
             # wrapper locals go out of scope.  This includes caller-owned graph
             # inputs when their raw address escapes, so record_stream may extend
             # the caller's storage lifetime on the compute stream.
-            if V.graph.scheduler._has_multi_stream_nodes():
-                stream_idxs = OrderedSet(
-                    stream_idx
-                    for node, stream_idx in V.graph.scheduler.node_to_stream.items()
-                    if node.get_device() == device
-                )
-                for stream_idx in stream_idxs:
-                    stream_name = (
-                        DEFAULT_STREAM
-                        if stream_idx == DEFAULT_STREAM_IDX
-                        else get_stream_name(stream_idx)
-                    )
-                    self.wrapper_call.writeline(f"{name}.record_stream({stream_name})")
-            else:
-                self.wrapper_call.writeline(
-                    f"{name}.record_stream(torch.accelerator.current_stream({name}.device))"
-                )
+            self.wrapper_call.writeline(
+                f"{name}.record_stream(torch.accelerator.current_stream({name}.device))"
+            )
 
     def generate_return(self, output_refs: list[str]) -> None:
         self.generate_data_ptr_keepalive_records()
@@ -4171,6 +4188,7 @@ class PythonWrapperCodegen(CodeGen):
         debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
         with debug_printer_manager:
             self.writeline(f"{kernel_name}.run({call_args_str}, stream={stream_name})")
+        self.generate_data_ptr_keepalive_records_for_raw_args(raw_args)
         self.write_triton_header_once()
 
     def writeline(self, line):
