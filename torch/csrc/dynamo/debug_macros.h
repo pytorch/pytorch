@@ -68,6 +68,17 @@ extern "C" {
     abort();                                                    \
   }
 
+#define FAIL_IF_SYS_MONITORING_ENABLED()                            \
+  if (use_sys_monitoring()) {                                       \
+    fprintf(                                                        \
+        stderr,                                                     \
+        "ERROR: %s:%d sys.monitoring is enabled, cannot proceed\n", \
+        __FILE__,                                                   \
+        __LINE__);                                                  \
+    abort();                                                        \
+  }
+
+
 inline _PyFrameEvalFunction _debug_set_eval_frame(
     PyThreadState* tstate,
     _PyFrameEvalFunction eval_frame) {

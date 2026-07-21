@@ -73,6 +73,11 @@ PyObject* dynamo_frame_hook_custom(
     int throw_flag);
 
 int use_frame_hook(void);
+int use_sys_monitoring(void);
+int dynamo_uses_code_replacement(void);
+
+void enable_sys_monitoring_shim(PyThreadState* tstate);
+void clear_sys_monitoring_shim(PyThreadState* tstate);
 
 #ifdef __cplusplus
 
