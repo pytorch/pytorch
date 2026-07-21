@@ -597,7 +597,7 @@ def ttir_to_functions(
                         reindex(parent_block.get_argument(i).id()),
                     )
                 # the region info is collected via ops' parent blocks to be
-                # used later when the region's encloding op is traversed
+                # used later when the region's enclosing op is traversed
                 parent_region = parent_block.get_parent()
                 if parent_region is not None:
                     region_id_to_block_ids[parent_region.id()].append(parent_block_id)
