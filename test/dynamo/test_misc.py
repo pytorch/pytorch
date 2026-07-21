@@ -98,6 +98,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     scoped_load_inline,
     set_default_dtype,
+    skipCUDAMemoryLeakCheckIf,
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -230,6 +231,34 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
         self.assertEqual(len(entries), 0)
+
+    @torch.testing._internal.common_utils.scoped_load_inline
+    def test_pybind11_enum_conversion(self, load_inline):
+        cpp_source = """
+        #include <torch/extension.h>
+
+        enum class E { A = 0, B = 1 };
+
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+            py::enum_<E>(m, "E")
+                .value("A", E::A)
+                .value("B", E::B);
+        }
+        """
+        mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
+        e = mod.E.A
+        self.assertEqual(
+            torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
+        )
+        self.assertEqual(
+            torch.compile(lambda x: float(x), backend="eager", fullgraph=True)(e), 0.0
+        )
+        self.assertEqual(
+            torch.compile(lambda x: [10, 20][x], backend="eager", fullgraph=True)(
+                mod.E.B
+            ),
+            20,
+        )
 
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
@@ -3245,6 +3274,43 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(ref, res)
         self.assertEqual(foo1.field, foo2.field)
 
+    def test_member_descriptor_set_delete_slot(self):
+        # member_descriptor (a __slots__ field) exposes __set__/__delete__ via
+        # the shared tp_descr_set slot; explicit calls should trace.
+        class Slotted:
+            __slots__ = ("a",)
+
+        def set_fn(x):
+            o = Slotted()
+            type(o).a.__set__(o, 9)
+            return x + o.a
+
+        def del_fn(x):
+            o = Slotted()
+            o.a = 4
+            type(o).a.__delete__(o)
+            return x + (0 if hasattr(o, "a") else 100)
+
+        for fn in (set_fn, del_fn):
+            opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+            self.assertEqual(opt_fn(torch.zeros(2)), fn(torch.zeros(2)))
+
+    def test_tuplegetter_readonly_slot(self):
+        # namedtuple field accessors are read-only; __set__/__delete__ raise
+        # AttributeError through the tp_descr_set slot.
+        P = collections.namedtuple("P", ["x", "y"])
+
+        def fn(t):
+            p = P(1, 2)
+            try:
+                type(p).x.__set__(p, 5)
+                return t + 1
+            except AttributeError as e:
+                return t, str(e)
+
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        self.assertEqual(opt_fn(torch.zeros(2)), fn(torch.zeros(2)))
+
     def test_dict_with_descriptor(self):
         class MyDescriptor:
             def __get__(self, obj, objtype=None):
@@ -4826,6 +4892,42 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # Verify deepcopy didn't mutate original
         self.assertEqual(cfg.sizes[0], 1)
         self.assertEqual(cfg.mapping["a"], 10)
+
+    def test_copy_namedtuple_and_user_object(self):
+        # namedtuple is a tuple subclass with __slots__ = () and no __dict__; it
+        # must reduce via __getnewargs__ rather than obj.__dict__. Also exercise
+        # a plain user object (has __dict__) to guard the common path.
+        from collections import namedtuple
+
+        NT = namedtuple("NT", "x y z")
+
+        class Plain:
+            def __init__(self):
+                self.a = 1
+                self.b = [10, 20]
+
+        def fn(o):
+            return copy.copy(o), copy.deepcopy(o)
+
+        cfn = torch.compile(fn, fullgraph=True, backend="eager")
+
+        nt = NT(10, 20, 30)
+        c, d = cfn(nt)
+        self.assertEqual(c, nt)
+        self.assertEqual(d, nt)
+        self.assertIs(type(c), NT)
+        self.assertIs(type(d), NT)
+        self.assertEqual(c._fields, nt._fields)
+
+        p = Plain()
+        c, d = cfn(p)
+        self.assertEqual(c.a, 1)
+        self.assertEqual(c.b, [10, 20])
+        self.assertIs(c.b, p.b)  # shallow copy shares the list
+        self.assertEqual(d.a, 1)
+        self.assertEqual(d.b, [10, 20])
+        self.assertIsNot(d.b, p.b)  # deep copy clones the list
+        self.assertIs(type(d), Plain)
 
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
@@ -8850,6 +8952,22 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(result.shape, expected.shape)
         self.assertEqual(result, expected)
+
+    def test_python_type_name_mirrors_cpython_tp_name(self):
+        """Test python_type_name() mirrors CPython's tp_name slot."""
+        from torch._dynamo.variables.constant import ConstantVariable
+
+        # python_type_name() should return CPython's tp_name string
+        test_cases = [
+            (42, "int"),
+            ("hello", "str"),
+            (None, "NoneType"),
+            (..., "ellipsis"),
+        ]
+
+        for value, expected_tp_name in test_cases:
+            vt = ConstantVariable(value)
+            self.assertEqual(vt.python_type_name(), expected_tp_name)
 
     def test_guard_failure_fn(self):
         def fn(x, y, k):
@@ -17504,6 +17622,10 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             res = opt_func(a)
             self.assertIsInstance(res, torch.Tensor)
 
+    # Known CUDA memory leak: under propagate_real_tensors, a data-dependent
+    # .tolist() retains the real input tensor (via FakeTensor.real_tensor held by
+    # a TrackedFake) past torch._dynamo.reset(). See #190093.
+    @skipCUDAMemoryLeakCheckIf(True)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
