@@ -6675,7 +6675,7 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
     make_scalar_tensor = partial(make_tensor, (), device='cpu', dtype=dtype, requires_grad=requires_grad)
     supported_dtypes = op.supported_dtypes(device)
 
-    # broadcasting and oncontiguous cases
+    # broadcasting and noncontiguous cases
     cases = (
         ((4, 4), (4, 4), (4, 4)),
         ((4, 4), (1, 4, 4), (4, 4)),
@@ -17950,7 +17950,7 @@ op_db: list[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=True,
                     supports_one_python_scalar=True,
-                    # Integer types do not support negative exponentes
+                    # Integer types do not support negative exponents
                     rhs_make_tensor_kwargs=dict(low=0),
                     # Raising negative real numbers to fractional powers is not supported
                     lhs_make_tensor_kwargs=dict(low=0),
@@ -18004,7 +18004,7 @@ op_db: list[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
-                    # Integer types do not support negative exponentes
+                    # Integer types do not support negative exponents
                     rhs_make_tensor_kwargs=dict(low=0),
                     # Raising negative real numbers to fractional powers is not supported
                     lhs_make_tensor_kwargs=dict(low=0),
