@@ -726,12 +726,11 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, 1)
 
     def test_bmv_defers_graph_break_to_call_time(self):
-        """A bound-method VT defers graph breaks from LOAD_ATTR to CALL.
+        """CallMethodVariable defers graph breaks from LOAD_ATTR to CALL.
 
         When a method exists on the type (MRO walk finds it) but the VT's
-        call_method doesn't handle it, the bound-method VT is returned at load
-        time and the graph break happens at call time, not at attribute access
-        time.
+        call_method doesn't handle it, CMV is returned at load time and
+        the graph break happens at call time, not at attribute access time.
         """
 
         # Loading the method succeeds (CMV returned, no graph break).
@@ -755,7 +754,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn_call, backend="eager", fullgraph=True)(x)
 
-    # --- ConstantVariable: bound C method (format/join have call_method) ---
+    # --- ConstantVariable: CallMethodVariable (format/join have call_method) ---
 
     def test_str_format_via_bound_method(self):
         def fn():

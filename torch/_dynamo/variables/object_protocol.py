@@ -353,7 +353,8 @@ def pyiter_send(
     ref: https://github.com/python/cpython/blob/51b511d7299f91a458e40d1ea997bd7e6cd3deef/Objects/abstract.c#L2930-L2953
     """
 
-    if arg.is_constant_none() and pyiter_check(iter_.python_type()):
+    tp_iternext = iter_.tp_iternext
+    if arg.is_constant_none() and tp_iternext is not None:
         return iter_.tp_iternext_impl(tx)
     else:
         return iter_.call_method(tx, "send", [arg], {})
@@ -363,9 +364,8 @@ def vt_mapping_size(
     tx: "InstructionTranslatorBase", obj: "VariableTracker"
 ) -> "VariableTracker":
     # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/abstract.c#L2308-L2330
-    mp_length = obj.tp_as_mapping.mp_length
-    if mp_length is not None:
-        return mp_length(tx, obj)
+    if obj.tp_as_mapping.mp_length:
+        return obj.mp_length(tx)
 
     if obj.tp_as_sequence.sq_length is not None:
         raise_type_error(tx, f"{obj.python_type_name()} is not a mapping")
@@ -382,9 +382,8 @@ def generic_len(
     Dispatches to sq_length (sequences) or mp_length (mappings) depending on the VT type.
     """
 
-    sq_length = obj.tp_as_sequence.sq_length
-    if sq_length is not None:
-        return sq_length(tx, obj)
+    if obj.tp_as_sequence.sq_length:
+        return obj.sq_length(tx)
     return vt_mapping_size(tx, obj)
 
 
@@ -405,9 +404,7 @@ def generic_bool(
         except Exception as e:
             raise_observed_exception(type(e), tx, args=[str(e)])
 
-    obj_type = maybe_get_python_type(obj)
-
-    if type_implements_nb_bool(obj_type):
+    if obj.tp_as_number.nb_bool:
         result = obj.bool_impl(tx)
         if result is not None:
             return result
@@ -444,7 +441,8 @@ def generic_repr(
     """
     obj_type = maybe_get_python_type(obj)
 
-    if obj.tp_type.tp_repr is not None:
+    tp_repr = obj.tp_repr
+    if tp_repr is not None:
         obj_id = id(obj)
         if obj_id in _repr_running:
             sentinel = {list: "[...]", dict: "{...}", collections.deque: "[...]"}
@@ -479,12 +477,8 @@ def generic_str(
     if maybe_get_python_type(obj) is str:
         return obj
 
-    obj_type = maybe_get_python_type(obj)
     try:
-        if (
-            type_implements_tp_str(obj_type)
-            and type(obj).str_impl is not VariableTracker.str_impl
-        ):
+        if obj.tp_str:
             result = obj.str_impl(tx)
         else:
             result = generic_repr(tx, obj)
@@ -522,9 +516,8 @@ def vt_getitem(
     """
     obj_type = maybe_get_python_type(obj)
     # Branch 1: mp_subscript
-    mp_subscript = obj.tp_as_mapping.mp_subscript
-    if mp_subscript is not None:
-        return mp_subscript(tx, obj, key)
+    if obj.tp_as_mapping.mp_subscript:
+        return obj.mp_subscript_impl(tx, key)
     # Branch 2: sq_item (only if mp_subscript is absent)
     # CPython: abstract.c L168-181 — _PyIndex_Check(key) → PyNumber_AsSsize_t
     #          → PySequence_GetItem (wraps negative, calls sq_item)
@@ -566,11 +559,11 @@ def vt_sequence_getitem(
             index_val = index.as_python_constant()
             if isinstance(index_val, int) and index_val < 0:
                 if obj.tp_as_sequence.sq_length is not None:
-                    length = obj.tp_as_sequence.sq_length(tx, obj)
+                    length = obj.sq_length(tx)
                     index = ConstantVariable.create(
                         index_val + length.as_python_constant()
                     )
-        return sq_item(tx, obj, index)
+        return obj.sq_item_impl(tx, index)
 
     if obj.tp_as_mapping.mp_subscript is not None:
         raise_type_error(tx, f"'{obj.python_type_name()}' is not a sequence")
@@ -592,9 +585,9 @@ def vt_sequence_setitem(
             index_val = i.as_python_constant()
             if isinstance(index_val, int) and index_val < 0:
                 if s.tp_as_sequence.sq_length is not None:
-                    length = s.tp_as_sequence.sq_length(tx, s)
+                    length = s.sq_length(tx)
                     i = ConstantVariable.create(index_val + length.as_python_constant())
-        return sq_ass_item(tx, s, i, o)
+        return s.sq_ass_item_impl(tx, i, o)
 
     if s.tp_as_mapping.mp_ass_subscript is not None:
         raise_type_error(tx, f"'{s.python_type_name()}' is not a sequence")
@@ -613,7 +606,7 @@ def generic_setitem(
     # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L222-L254
     mp_ass_subscript = o.tp_as_mapping.mp_ass_subscript
     if mp_ass_subscript is not None:
-        return mp_ass_subscript(tx, o, key, value)
+        return o.mp_ass_subscript_impl(tx, key, value)
 
     if o.tp_as_sequence.sq_ass_item is not None:
         key_type = maybe_get_python_type(key)
@@ -641,9 +634,9 @@ def sequence_delitem(
             idx = i.as_python_constant()
             if idx < 0:
                 if s.tp_as_sequence.sq_length is not None:
-                    length = s.tp_as_sequence.sq_length(tx, s)
+                    length = s.sq_length(tx)
                     i = generic_add(tx, i, length)
-        return sq_ass_item(tx, s, i, None)
+        return s.sq_ass_item_impl(tx, i, None)
 
     if s.tp_as_mapping.mp_ass_subscript is not None:
         raise_type_error(tx, f"'{s.python_type_name()}' is not a sequence")
@@ -662,7 +655,7 @@ def generic_delitem(
 
     mp_ass_subscript = o.tp_as_mapping.mp_ass_subscript
     if mp_ass_subscript is not None:
-        return mp_ass_subscript(tx, o, key, None)
+        return o.mp_ass_subscript_impl(tx, key, None)
 
     key_type = maybe_get_python_type(key)
     if pyindex_check(key_type):
@@ -750,7 +743,7 @@ def generic_float(
 
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1674-L1685
     if obj.tp_as_number.nb_index is not None:
-        return obj.tp_as_number.nb_index(tx, obj)
+        return obj.nb_index_impl(tx)
 
     # PyFloat_FromString fallback — handles str and bytes.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1691
@@ -765,21 +758,6 @@ def generic_float(
         f"float() argument must be a string or a real number, "
         f"not '{obj.python_type_name()}'",
     )
-
-
-def getindex(
-    tx: "InstructionTranslatorBase",
-    obj: VariableTracker,
-    arg: VariableTracker,
-) -> VariableTracker:
-    """Mirrors typeobject.c::getindex: calls PyNumber_AsSsize_t then tp_as_sequence.sq_length"""
-
-    i = pynumber_as_ssize_t(tx, arg, err=OverflowError)
-    if i.as_python_constant() < 0:
-        if obj.tp_as_sequence.sq_length is not None:
-            length = obj.tp_as_sequence.sq_length(tx, obj)
-            i = generic_add(tx, i, length)
-    return i
 
 
 def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
@@ -874,7 +852,8 @@ def generic_iternext(
     """
     # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2865
 
-    if obj.tp_type.tp_iternext is None:
+    tp_iternext = obj.tp_iternext
+    if tp_iternext is None:
         raise_type_error(tx, f"expected an iterator, got '{obj.python_type_name()}'")
 
     return obj.tp_iternext_impl(tx)
@@ -894,7 +873,7 @@ def generic_neg(
 
     nb_negative = obj.tp_as_number.nb_negative
     if nb_negative is not None:
-        return nb_negative(tx, obj)
+        return obj.nb_negative_impl(tx)
 
     raise_type_error(
         tx,
@@ -916,7 +895,7 @@ def generic_pos(
 
     nb_positive = obj.tp_as_number.nb_positive
     if nb_positive is not None:
-        return nb_positive(tx, obj)
+        return obj.nb_positive_impl(tx)
 
     raise_type_error(
         tx,
@@ -938,7 +917,7 @@ def generic_abs(
 
     nb_absolute = obj.tp_as_number.nb_absolute
     if nb_absolute is not None:
-        return nb_absolute(tx, obj)
+        return obj.nb_absolute_impl(tx)
 
     raise_type_error(
         tx,
@@ -949,7 +928,7 @@ def generic_abs(
 def vt_is_iterable(obj: VariableTracker) -> bool:
     """Check if the object supports iteration (i.e. has tp_iter or sequence protocol)."""
     T = maybe_get_python_type(obj)
-    return obj.tp_type.tp_iter is not None or pysequence_check(T)
+    return obj.tp_iter is not None or pysequence_check(T)
 
 
 def generic_invert(
@@ -966,7 +945,7 @@ def generic_invert(
 
     nb_invert = obj.tp_as_number.nb_invert
     if nb_invert is not None:
-        return nb_invert(tx, obj)
+        return obj.nb_invert_impl(tx)
 
     raise_type_error(
         tx,
@@ -991,7 +970,8 @@ def generic_getiter(
     # 3. Otherwise, raise a TypeError
 
     T = maybe_get_python_type(obj)
-    if obj.tp_type.tp_iter is not None:
+    tp_iter = obj.tp_iter
+    if tp_iter is not None:
         res = obj.tp_iter_impl(tx)
         res_T = maybe_get_python_type(res)
         if not pyiter_check(res_T):
@@ -1028,6 +1008,8 @@ NB_SLOT_MAPPING = {
     "nb_inplace_add": PyNumberSlots.NB_INPLACE_ADD,
     "nb_multiply": PyNumberSlots.NB_MULTIPLY,
     "nb_inplace_multiply": PyNumberSlots.NB_INPLACE_MULTIPLY,
+    "nb_matrix_multiply": PyNumberSlots.NB_MATRIX_MULTIPLY,
+    "nb_inplace_matrix_multiply": PyNumberSlots.NB_INPLACE_MATRIX_MULTIPLY,
     "nb_and": PyNumberSlots.NB_AND,
     "nb_inplace_and": PyNumberSlots.NB_INPLACE_AND,
     "nb_xor": PyNumberSlots.NB_XOR,
@@ -1307,7 +1289,7 @@ def generic_add(
 
     sq_concat = v.tp_as_sequence.sq_concat
     if sq_concat is not None:
-        return sq_concat(tx, v, w)
+        return v.sq_concat_impl(tx, w)
     binop_type_error(tx, v, w, "+")
 
 
@@ -1323,9 +1305,9 @@ def generic_inplace_add(
         sq_inplace_concat = v.tp_as_sequence.sq_inplace_concat
         sq_concat = v.tp_as_sequence.sq_concat
         if sq_inplace_concat is not None:
-            return sq_inplace_concat(tx, v, w)
+            return v.sq_inplace_concat_impl(tx, w)
         elif sq_concat is not None:
-            return sq_concat(tx, v, w)
+            return v.sq_concat_impl(tx, w)
         else:
             binop_type_error(tx, v, w, "+=")
     return result
@@ -1460,6 +1442,31 @@ def generic_inplace_multiply(
     )
 
 
+def generic_matmul(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyNumber_MatrixMultiply."""
+    return binary_op(tx, v, w, "nb_matrix_multiply", "@")
+
+
+def generic_inplace_matmul(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyNumber_InPlaceMatrixMultiply."""
+    return binary_iop(
+        tx,
+        v,
+        w,
+        "nb_inplace_matrix_multiply",
+        "nb_matrix_multiply",
+        "@=",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Type-object slot wrappers for ``__mul__`` / ``__rmul__`` / ``__imul__``
 #
@@ -1504,7 +1511,7 @@ def slot_wrapper_mul(
     """``self.__mul__(other)`` / ``self.__rmul__(other)`` slot wrapper."""
     nb_multiply = self.tp_as_number.nb_multiply
     if nb_multiply is not None:
-        return nb_multiply(tx, self, other, reverse=reverse)
+        return self.nb_multiply_impl(tx, other, reverse=reverse)
     if self.tp_as_sequence.sq_repeat is not None:
         # SQSLOT for __mul__ and __rmul__ both use ``wrap_indexargfunc`` —
         # the wrapper ignores the reverse flag because sq_repeat takes
@@ -1533,7 +1540,7 @@ def slot_wrapper_imul(
     """
     nb_inplace_multiply = self.tp_as_number.nb_inplace_multiply
     if nb_inplace_multiply is not None:
-        return nb_inplace_multiply(tx, self, other)
+        return self.nb_inplace_multiply_impl(tx, other)
     if self.tp_as_sequence.sq_inplace_repeat is not None:
         return sequence_inplace_repeat(tx, self, other)
     return slot_wrapper_mul(tx, self, other)
@@ -1562,11 +1569,11 @@ def slot_wrapper_add(
     """``self.__add__(other)`` / ``self.__radd__(other)`` slot wrapper."""
     nb_add = self.tp_as_number.nb_add
     if nb_add is not None:
-        return nb_add(tx, self, other, reverse=reverse)
+        return self.nb_add_impl(tx, other, reverse=reverse)
     # No SQSLOT(__radd__): sq_concat backs only the forward __add__.
     sq_concat = self.tp_as_sequence.sq_concat
     if not reverse and sq_concat is not None:
-        return sq_concat(tx, self, other)
+        return self.sq_concat_impl(tx, other)
     raise_type_error(
         tx,
         f"unsupported operand type(s) for +: "
@@ -1586,10 +1593,10 @@ def slot_wrapper_iadd(
     """
     nb_inplace_add = self.tp_as_number.nb_inplace_add
     if nb_inplace_add is not None:
-        return nb_inplace_add(tx, self, other)
+        return self.nb_inplace_add_impl(tx, other)
     sq_inplace_concat = self.tp_as_sequence.sq_inplace_concat
     if sq_inplace_concat is not None:
-        return sq_inplace_concat(tx, self, other)
+        return self.sq_inplace_concat_impl(tx, other)
     return slot_wrapper_add(tx, self, other)
 
 
@@ -1855,7 +1862,7 @@ def generic_contains(
     # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2272-L2283
     sq_contains = obj.tp_as_sequence.sq_contains
     if sq_contains is not None:
-        return sq_contains(tx, obj, item)
+        return obj.sq_contains(tx, item)
     else:
         # iter fallback handles both __iter__ and __getitem__ sequence protocol cases
         it = generic_getiter(tx, obj)
@@ -2089,6 +2096,15 @@ def _is_method_type(type_attr: object) -> bool:
     return isinstance(type_attr, _METHOD_TYPES)
 
 
+def _has_custom_call_method(obj: VariableTracker) -> bool:
+    for cls in type(obj).__mro__:
+        if cls is VariableTracker:
+            return False
+        if "call_method" in cls.__dict__:
+            return True
+    return False
+
+
 def object_generic_getattr(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
@@ -2137,6 +2153,14 @@ def object_generic_getattr(
 
     # Step 4: Non-data descriptor with __get__.
     if type_attr is not NO_SUCH_SUBOBJ and hasattr(type(type_attr), "__get__"):
+        # If the VT has custom call_method and this is a method, return a
+        # CallMethodVariable that dispatches through call_method instead of
+        # inlining the resolved method directly.  This preserves custom
+        # tracing logic (side effects, graph nodes, suppression) that
+        # MRO-based resolution via UserMethodVariable would bypass.
+        if _is_method_type(type_attr) and _has_custom_call_method(obj):
+            return variables.CallMethodVariable(obj, name, source=source)
+
         class_vt = VariableTracker.build(tx, py_type)
         result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
         if result is not None:

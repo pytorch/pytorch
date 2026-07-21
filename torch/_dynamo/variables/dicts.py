@@ -63,7 +63,6 @@ from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
 from .object_protocol import (
     _is_method_type,
-    _resolve_descriptor_get,
     generic_richcompare_bool,
     mro_lookup,
     vt_getitem,
@@ -841,17 +840,13 @@ class ConstDictVariable(VariableTracker):
     def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         if name == "__class__":
             return VariableTracker.build(tx, self.python_type())
-        # DictGuardManager does not support getattr_manager for plain dicts, so
-        # AttrSource chains through a dict source break guard creation.  Bind the
-        # method descriptor sourcelessly here (mirroring CPython tp_descr_get),
-        # bypassing the sourced MRO walk in object_generic_getattr that would
-        # create that chain.
+        # DictGuardManager does not support getattr_manager for plain dicts,
+        # so AttrSource chains through a dict source break guard creation.
+        # Return CallMethodVariable directly for methods, bypassing the
+        # MRO walk in object_generic_getattr that would create that chain.
         type_attr = mro_lookup(self.python_type(), name)
         if type_attr is not NO_SUCH_SUBOBJ and _is_method_type(type_attr):
-            class_vt = VariableTracker.build(tx, self.python_type())
-            result = _resolve_descriptor_get(tx, type_attr, self, class_vt, None)
-            if result is not None:
-                return result
+            return variables.CallMethodVariable(self, name)
         return super().getattro_impl(tx, name)
 
 
@@ -1104,15 +1099,14 @@ class DictViewVariable(VariableTracker):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.kv == "keys":
             items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
-            return VariableTracker.build(tx, f"dict_keys([{items}])")
-        if self.kv == "values":
+        elif self.kv == "values":
             items = ", ".join(tracked_repr(tx, value) for value in self.view_items)
-            return VariableTracker.build(tx, f"dict_values([{items}])")
-        items = ", ".join(
-            f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
-            for key, value in self.view_items
-        )
-        return VariableTracker.build(tx, f"dict_items([{items}])")
+        else:  # items
+            items = ", ".join(
+                f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
+                for key, value in self.view_items
+            )
+        return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
     def call_method(
         self,

@@ -1618,27 +1618,6 @@ class FunctionDecoratedByContextlibContextManagerVariable(
             **kwargs,
         )
 
-    def _build_inline_tracer(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> "InliningGeneratorInstructionTranslator":
-        # NOTE: This only exists to not break support for context manager when
-        # config.enable_faithful_generator_behavior = False and
-        # config.enable_trace_contextlib = True. In case the former is false,
-        # Dynamo should still be able to trace through @contextmanager functions
-        tracer = super()._build_inline_tracer(tx, args, kwargs)
-        if not isinstance(
-            tracer,
-            torch._dynamo.symbolic_convert.InliningGeneratorInstructionTranslator,
-        ):
-            raise AssertionError(
-                f"expected InliningGeneratorInstructionTranslator, got {type(tracer)}"
-            )
-        tracer.is_generator_from_ctx_manager = True
-        return tracer
-
 
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
@@ -2323,7 +2302,9 @@ class SkipFunctionVariable(VariableTracker):
             guard_on_source = source
             guard_on_value = value
 
-            while getattr(guard_on_value, "_torchdynamo_orig_callable", False):
+            while inspect.getattr_static(
+                guard_on_value, "_torchdynamo_orig_callable", False
+            ):
                 guard_on_value = guard_on_value._torchdynamo_orig_callable
                 guard_on_source = AttrSource(
                     guard_on_source, "_torchdynamo_orig_callable"
@@ -2683,9 +2664,11 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         # (the wrapper's original callable matches the root frame's code).
         is_inner_torch_compile = (
             self.attr_to_trace == "_torchdynamo_inline"
-            and getattr(self.wrapper_obj, "_is_torch_compile", False)
+            and inspect.getattr_static(self.wrapper_obj, "_is_torch_compile", False)
             and getattr(
-                getattr(self.wrapper_obj, "_torchdynamo_orig_callable", None),
+                inspect.getattr_static(
+                    self.wrapper_obj, "_torchdynamo_orig_callable", None
+                ),
                 "__code__",
                 None,
             )
@@ -4528,21 +4511,6 @@ class MemberDescriptorVariable(VariableTracker):
         result_source = obj.source and AttrSource(obj.source, attr_name)
         return VariableTracker.build(tx, resolved, result_source)
 
-    def tp_descr_set_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
-        value: VariableTracker | None,
-    ) -> VariableTracker:
-        # Mirrors member_set (PyMember_SetOne): store into the C struct field.
-        # STORE_ATTR itself applies the descriptor, so replay via store_attr on
-        # the target (mirrors the __slots__ path in UserDefinedObjectVariable).
-        # value is None for __delete__.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L180-L196
-        stored = variables.DeletedVariable() if value is None else value
-        tx.output.side_effects.store_attr(obj, self.descriptor.__name__, stored)
-        return variables.ConstantVariable.create(None)
-
 
 class GetSetDescriptorVariable(VariableTracker):
     """C getter/setter descriptor (getset_descriptor on a type).
@@ -4748,15 +4716,3 @@ class TupleGetterVariable(VariableTracker):
         return obj.call_method(
             tx, "__getitem__", [variables.ConstantVariable.create(idx)], {}
         )
-
-    def tp_descr_set_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
-        value: VariableTracker | None,
-    ) -> VariableTracker:
-        # _tuplegetter fields are read-only; tuplegetter_descr_set always
-        # raises AttributeError for both set and delete.
-        # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2665-L2673
-        msg = "can't delete attribute" if value is None else "can't set attribute"
-        raise_observed_exception(AttributeError, tx, args=[msg])
