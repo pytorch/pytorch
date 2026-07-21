@@ -3198,8 +3198,8 @@ main()
     def test_cudagraphs_cpu_division(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
 
-        model = torch.nn.Linear(10, 10, dtype=torch.float16).cuda()
-        inputs = torch.randn(10, 10, dtype=torch.float16).cuda()
+        model = torch.nn.Linear(10, 10, device=GPU_TYPE, dtype=torch.float16)
+        inputs = torch.randn(10, 10, device=GPU_TYPE, dtype=torch.float16)
         out = model(inputs)
         loss = reduce_to_scalar_loss(out)
 
@@ -3279,7 +3279,7 @@ main()
                 expand = gO * torch.ones_like(x)
                 return expand * cpu_tensor * ctx.cpu_scalar
 
-        x = torch.randn(10, requires_grad=True, device="cuda")
+        x = torch.randn(10, requires_grad=True, device=GPU_TYPE)
         out = MyFn.apply(x)
         with (
             config.patch(compiled_autograd=True),
@@ -3349,7 +3349,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             verbose=True,
         )
 
-        x = torch.randn(2, 2, requires_grad=True, device="cuda")
+        x = torch.randn(2, 2, requires_grad=True, device=GPU_TYPE)
         with (
             config.patch(compiled_autograd=True),
             inductor_config.patch("triton.cudagraphs", True),
@@ -4118,7 +4118,7 @@ class CompiledAutograd0(torch.nn.Module):
                 return x.cpu()
 
             def unpack(x):
-                return x.cuda()
+                return x.to("meta")
 
             class MyMatMul(torch.autograd.Function):
                 @staticmethod
@@ -4133,7 +4133,7 @@ class CompiledAutograd0(torch.nn.Module):
 
             with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
                 for i in [10, 100, 10, 20, 30]:
-                    x = torch.randn(i, requires_grad=True).cuda()
+                    x = torch.randn(i, requires_grad=True).to("meta")
                     MyMatMul.apply(x).sum().backward()
                     yield x.grad
 
@@ -4157,12 +4157,12 @@ class CompiledAutograd1(torch.nn.Module):
         getitem_3 = sizes[1]
         getitem_4 = sizes[2];  sizes = None
 
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem = None
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type="meta", index=0), 6, 0, None), [], False)]);  getitem = None
         getitem_5 = validate_outputs[0];  validate_outputs = None
 
         sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_5], [True], []);  getitem_5 = None
         getitem_6 = sum_backward0[0];  sum_backward0 = None
-        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem_6 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type="meta", index=0), 6, 0, None), [], False)]);  getitem_6 = None
         getitem_7 = validate_outputs_1[0];  validate_outputs_1 = None
 
         getitem_8 = hooks[0]
@@ -4171,7 +4171,7 @@ class CompiledAutograd1(torch.nn.Module):
         call_hook = torch__dynamo_external_utils_call_hook(getitem_8, getitem_9, hook_type = 'unpack_hook');  getitem_8 = getitem_9 = None
         call_backward = torch__dynamo_external_utils_call_backward(getitem_10, (call_hook,), getitem_7);  getitem_10 = call_hook = getitem_7 = None
         getitem_12 = call_backward[0];  call_backward = None
-        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_12], [((None, None, device(type='cuda', index=0), 6, 0, None), [getitem_3], False)]);  getitem_12 = getitem_3 = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_12], [((None, None, device(type="meta", index=0), 6, 0, None), [getitem_3], False)]);  getitem_12 = getitem_3 = None
         getitem_13 = validate_outputs_2[0];  validate_outputs_2 = None
 
         to_copy_backward0 = torch__dynamo_compiled_autograd_ops_ToCopyBackward0([getitem_13], [True], (None, None, device(type='cpu'), 6, 0, None));  getitem_13 = None
