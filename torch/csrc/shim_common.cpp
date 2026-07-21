@@ -190,11 +190,13 @@ static c10::IValue to_ivalue(
     uint64_t extension_build_version) {
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
-      auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
-          torch::stable::detail::_to<AtenTensorHandle>(
-              stable_ivalue, extension_build_version));
-      return (c10::IValue(*torch::aot_inductor::tensor_handle_to_tensor_pointer(
-          ret_raiiath.get())));
+      // unique_ptr frees the owning handle; we move the Tensor into the IValue
+      // (stealing its TensorImpl ref) instead of copying it.
+      std::unique_ptr<at::Tensor> tensor(
+          torch::aot_inductor::tensor_handle_to_tensor_pointer(
+              torch::stable::detail::_to<AtenTensorHandle>(
+                  stable_ivalue, extension_build_version)));
+      return c10::IValue(std::move(*tensor));
     }
     case c10::TypeKind::IntType: {
       return c10::IValue(torch::stable::detail::_to<int64_t>(
@@ -665,6 +667,15 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
     at::Tensor* t =
         torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
     t->set_requires_grad(requires_grad);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_has_storage = t->has_storage();
   });
 }
 
