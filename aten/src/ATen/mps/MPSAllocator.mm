@@ -9,6 +9,7 @@
 #include <c10/util/env.h>
 
 #include <atomic>
+#include <unordered_map>
 
 namespace at::mps {
 
@@ -298,7 +299,11 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
         // Free enough available cached blocks to satisfy alloc and retry alloc.
         (release_available_cached_buffers(params) && alloc_buffer(params)) ||
         // Free all cached buffers and retry alloc.
-        (release_cached_buffers() && alloc_buffer(params));
+        (release_cached_buffers() && alloc_buffer(params)) ||
+        // Last resort: wait for buffers parked in-flight (freed but still used by
+        // the GPU) to complete, reclaim them, and retry -- avoids a spurious
+        // watermark OOM when those buffers are about to drain anyway.
+        (wait_for_pending_free_buffers(pool) && (get_free_buffer(params) || alloc_buffer(params)));
   }
 
   BufferBlock* buffer_block = params.buffer_block;
@@ -550,6 +555,9 @@ void MPSHeapAllocatorImpl::garbage_collect_cached_buffers(AllocParams& params) {
 id<MTLBuffer> MPSHeapAllocatorImpl::malloc(size_t size, uint32_t usage) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
+  // Return any buffers parked in-flight by free() whose GPU work has since
+  // completed back to their pools before serving this allocation.
+  freeInactiveBuffers();
   BufferBlock* buffer_block = alloc_buffer_block(size, usage);
   return buffer_block ? buffer_block->buffer : nullptr;
 }
@@ -685,6 +693,20 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
   return waitedForEvent;
 }
 
+bool MPSHeapAllocatorImpl::wait_for_pending_free_buffers(BufferPool& pool) {
+  std::vector<const void*> buffers;
+  {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    buffers.reserve(pool.buffers_pending_free.size());
+    for (BufferBlock* buffer_block : pool.buffers_pending_free) {
+      buffers.push_back(buffer_block->buffer);
+    }
+  }
+  // waitForEvents CPU-waits on the in-flight buffers and calls freeInactiveBuffers,
+  // returning the completed ones to the pool for the caller to retry allocation.
+  return !buffers.empty() && waitForEvents(buffers);
+}
+
 id_t MPSHeapAllocatorImpl::getBufferId(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
@@ -731,9 +753,20 @@ void MPSHeapAllocatorImpl::free(void* ptr) {
 
     buffer_block = get_allocated_buffer_block(ptr);
     TORCH_INTERNAL_ASSERT(buffer_block);
-    const BufferPool& pool = *buffer_block->heap->pool;
+    BufferPool& pool = *buffer_block->heap->pool;
     if (!(pool.usage & UsageFlags::SCALAR)) {
-      free_buffer(buffer_block);
+      // A buffer marked by recordEvents (used by the GPU in a context where a
+      // subsequent CPU reuse could race it, e.g. a pinned-memory copy) and still
+      // referenced by an in-flight command buffer must not be recycled yet:
+      // handing it to a new allocation could let the CPU overwrite it before the
+      // GPU is done. Park it in limbo; freeInactiveBuffers() reclaims it once its
+      // command buffer completes. Unmarked buffers are only GPU-accessed, so
+      // serial-stream ordering already makes immediate reuse safe.
+      if (buffer_block->event && buffer_block->retainCount() > 1) {
+        pool.buffers_pending_free.insert(buffer_block);
+      } else {
+        free_buffer(buffer_block);
+      }
       return;
     }
   }
@@ -971,7 +1004,10 @@ class MPSPinnedAllocator final : public c10::Allocator {
     }
     auto& shared = _getSharedAllocator();
     c10::DataPtr mps_dp = shared.allocate(nbytes);
-    auto host_ptr_pair = shared.getSharedBufferPtr(mps_dp.get());
+    // shared.allocate() returns a DataPtr whose data pointer is the id<MTLBuffer>
+    // itself; capture it before mps_dp is moved into the backing storage.
+    void* mtl_buffer = mps_dp.get();
+    auto host_ptr_pair = shared.getSharedBufferPtr(mtl_buffer);
     TORCH_INTERNAL_ASSERT(host_ptr_pair.first, "MPS pinned allocator: failed to map shared buffer");
     void* cpu_ptr = const_cast<void*>(host_ptr_pair.first);
     // Hold a refcount on the source MPS storage so the MTLBuffer stays alive
@@ -984,7 +1020,7 @@ class MPSPinnedAllocator final : public c10::Allocator {
     auto* ctx = new PinnedCtx{std::move(mps_storage), cpu_ptr};
     {
       std::lock_guard<std::mutex> lk(s_mutex);
-      s_pinned_ptrs.insert(cpu_ptr);
+      s_pinned_buffers.emplace(cpu_ptr, mtl_buffer);
     }
     return {cpu_ptr, ctx, &deleter, c10::Device(c10::DeviceType::CPU)};
   }
@@ -995,11 +1031,17 @@ class MPSPinnedAllocator final : public c10::Allocator {
     default_copy_data(dest, src, count);
   }
   static bool isPinned(const void* ptr) {
+    return getMTLBuffer(ptr) != nullptr;
+  }
+  // Returns the shared MTLBuffer backing a pinned host allocation (the base of
+  // the storage, keyed by the host-visible pointer), or nullptr if not pinned.
+  static void* getMTLBuffer(const void* ptr) {
     if (!ptr) {
-      return false;
+      return nullptr;
     }
     std::lock_guard<std::mutex> lk(s_mutex);
-    return s_pinned_ptrs.find(ptr) != s_pinned_ptrs.end();
+    auto it = s_pinned_buffers.find(ptr);
+    return it == s_pinned_buffers.end() ? nullptr : it->second;
   }
 
  private:
@@ -1014,15 +1056,15 @@ class MPSPinnedAllocator final : public c10::Allocator {
     auto* pinned = static_cast<PinnedCtx*>(ctx);
     {
       std::lock_guard<std::mutex> lk(s_mutex);
-      s_pinned_ptrs.erase(pinned->cpu_ptr);
+      s_pinned_buffers.erase(pinned->cpu_ptr);
     }
     delete pinned;
   }
   static std::mutex s_mutex;
-  static std::unordered_set<const void*> s_pinned_ptrs;
+  static std::unordered_map<const void*, void*> s_pinned_buffers;
 };
 std::mutex MPSPinnedAllocator::s_mutex;
-std::unordered_set<const void*> MPSPinnedAllocator::s_pinned_ptrs;
+std::unordered_map<const void*, void*> MPSPinnedAllocator::s_pinned_buffers;
 
 MPSPinnedAllocator& _getPinnedAllocator() {
   static MPSPinnedAllocator s_mps_pinned_alloc;
@@ -1041,6 +1083,10 @@ c10::Allocator* getMPSPinnedAllocator() {
   // MPS requires unified memory (enforced in MPSHeapAllocatorImpl::init_allocator),
   // so shared (unified-memory) buffers backing the pinned alias are always usable.
   return &_getPinnedAllocator();
+}
+
+void* getMPSPinnedMTLBuffer(const void* host_ptr) {
+  return MPSPinnedAllocator::getMTLBuffer(host_ptr);
 }
 
 // torch.is_pinned() implementation
