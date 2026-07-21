@@ -1297,12 +1297,11 @@ class MPSPinnedAllocator final : public c10::Allocator {
     }
     auto& shared = _getSharedAllocator();
     c10::DataPtr mps_dp = shared.allocate(nbytes);
-    // shared.allocate() returns a DataPtr whose data pointer is the id<MTLBuffer>
-    // itself; capture it before mps_dp is moved into the backing storage.
-    void* mtl_buffer = mps_dp.get();
-    auto host_ptr_pair = shared.getSharedBufferPtr(mtl_buffer);
-    TORCH_INTERNAL_ASSERT(host_ptr_pair.first, "MPS pinned allocator: failed to map shared buffer");
-    void* cpu_ptr = const_cast<void*>(host_ptr_pair.first);
+    void* cpu_ptr = mps_dp.get();
+    // DataPtr exposes the unified-memory address, so resolve the Metal object
+    // separately for pinned CPU-to-MPS copies.
+    void* mtl_buffer = shared.getMTLBuffer(cpu_ptr);
+    TORCH_INTERNAL_ASSERT(mtl_buffer, "MPS pinned allocator: failed to resolve shared buffer");
     // Hold a refcount on the source MPS storage so the MTLBuffer stays alive
     // for as long as the host alias is in use.
     c10::Storage mps_storage(c10::Storage::use_byte_size_t(),
