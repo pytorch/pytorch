@@ -10807,6 +10807,22 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertFalse(torch.finfo(torch.float32) == torch.iinfo(torch.int32))
         self.assertTrue(torch.finfo(torch.float32) != torch.iinfo(torch.int32))
 
+        # The cases above also pass without the fix by accident: the stray
+        # read almost never equals the enum, so == still answers False. What
+        # deterministically distinguishes the fix is the reflected comparison:
+        # returning NotImplemented lets the right operand decide, while the
+        # unfixed slot answers from the garbage read and never defers.
+        class _AnyEq:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        for info in (torch.finfo(torch.float32), torch.iinfo(torch.int32)):
+            self.assertTrue(info == _AnyEq())
+            self.assertFalse(info != _AnyEq())
+
     @unittest.skipIf(torch.backends.cuda.is_built(), "Skipped for cuda-enabled build")
     def test_no_cuda_monkeypatch(self):
         # Note that this is not in test_cuda.py as this whole file is skipped when cuda
