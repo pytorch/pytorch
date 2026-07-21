@@ -1301,6 +1301,64 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
             )
 
 
+class SetDelItemTests(torch._dynamo.test_case.TestCase):
+    """Tests for call_setitem / call_delitem: operator.setitem / operator.delitem
+    dispatch (also the STORE_SUBSCR / DELETE_SUBSCR bytecode paths)."""
+
+    def _compile(self, fn, *args):
+        return torch.compile(fn, backend="eager", fullgraph=True)(*args)
+
+    def test_list_setitem(self):
+        def fn(x):
+            lst = [1, 2, 3]
+            lst[0] = 99  # STORE_SUBSCR
+            operator.setitem(lst, 2, 7)
+            return lst, x + 1
+
+        self.assertEqual(self._compile(fn, torch.zeros(1)), fn(torch.zeros(1)))
+
+    def test_list_delitem(self):
+        def fn(x):
+            lst = [1, 2, 3, 4]
+            del lst[0]  # DELETE_SUBSCR
+            operator.delitem(lst, 1)
+            return lst, x + 1
+
+        self.assertEqual(self._compile(fn, torch.zeros(1)), fn(torch.zeros(1)))
+
+    def test_dict_setitem_delitem(self):
+        def fn(x):
+            d = {"a": 1}
+            d["b"] = 2  # STORE_SUBSCR
+            operator.setitem(d, "c", 3)
+            del d["a"]  # DELETE_SUBSCR
+            operator.delitem(d, "b")
+            return d, x + 1
+
+        self.assertEqual(self._compile(fn, torch.zeros(1)), fn(torch.zeros(1)))
+
+    def test_tensor_setitem(self):
+        def fn(t):
+            t = t.clone()
+            t[0] = 5.0  # STORE_SUBSCR
+            operator.setitem(t, 1, 9.0)
+            return t
+
+        self.assertEqual(self._compile(fn, torch.arange(3.0)), fn(torch.arange(3.0)))
+
+    def test_tensor_delitem_raises(self):
+        # Tensor.mp_ass_subscript_impl rejects deletion (value is None).
+        def fn(t):
+            try:
+                del t[0]
+                return "no error"
+            except TypeError as e:
+                return str(e)
+
+        result = self._compile(fn, torch.arange(3.0))
+        self.assertIn("Tensor does not support deleting items", result)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
