@@ -148,10 +148,22 @@ struct TORCH_CUDA_CPP_API ConvolutionDescriptor
           miopenConvolutionDescriptor,
           &miopenCreateConvolutionDescriptor,
           &miopenDestroyConvolutionDescriptor> {
-  void set(miopenDataType_t dataType, miopenConvolutionMode_t c_mode,  int dim, int* pad, int* stride, int * upscale /* aka dilation */, int groups, bool benchmark, bool deterministic) {
+  void set(miopenDataType_t dataType, miopenConvolutionMode_t c_mode,  int dim, int* pad, int* stride, int * upscale /* aka dilation */, int groups, bool benchmark, bool deterministic, bool allow_tf32) {
     MIOPEN_CHECK(miopenInitConvolutionNdDescriptor(mut_desc(), dim, pad, stride, upscale, c_mode));
     MIOPEN_CHECK(miopenSetConvolutionGroupCount(mut_desc(), groups));
     MIOPEN_CHECK(miopenSetConvolutionAttribute(mut_desc(), MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, deterministic ? 1 : 0));
+#if MIOPEN_VERSION_MAJOR > 3 || (MIOPEN_VERSION_MAJOR == 3 && (MIOPEN_VERSION_MINOR > 5 || (MIOPEN_VERSION_MINOR == 5 && MIOPEN_VERSION_PATCH >= 2)))
+    // TF32 is an fp32 compute mode: miopenMathDefault uses TF32 when possible,
+    // miopenMathPedantic keeps strict IEEE fp32. Only meaningful for fp32 input.
+    // The math-type knob (miopenMathType_t) first exists in MIOpen >= 3.5.2; on
+    // older MIOpen there is no math-type attribute, so TF32 conv is never enabled.
+    if (dataType == miopenFloat) {
+      MIOPEN_CHECK(miopenSetConvolutionAttribute(mut_desc(), MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, allow_tf32 ? miopenMathDefault : miopenMathPedantic));
+    }
+#else
+    // On MIOpen < 3.5.2 allow_tf32 is unused; suppress -Wunused-parameter.
+    (void)allow_tf32;
+#endif
     if (benchmark) {
       MIOPEN_CHECK(miopenSetConvolutionFindMode(mut_desc(), miopenConvolutionFindModeNormal));
     }
