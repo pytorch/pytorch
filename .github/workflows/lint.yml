@@ -61,10 +61,10 @@ jobs:
       script: |
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         if [ "$CHANGED_FILES" = "*" ]; then
-          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
-        else
-          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT $CHANGED_FILES"
+          CHANGED_FILES="--all-files"
         fi
+        export CHANGED_FILES
+        export LINTER_GROUP=clang
         export CLANG=1
         # Cap parallelism to the pod's CPU budget; os.cpu_count() overcounts on k8s and OOMs.
         export MAX_JOBS="$(nproc --ignore=2)"
@@ -88,9 +88,8 @@ jobs:
       runner: mt-l-x86iamx-8-16
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-linter-${{ needs.get-label-type.outputs.ci-docker-hash }}
       script: |
-        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         echo "Running pyrefly"
-        ADDITIONAL_LINTRUNNER_ARGS="--take PYREFLY --all-files" .github/scripts/lintrunner.sh
+        LINTER_GROUP=pyrefly .github/scripts/lintrunner.sh
 
   lintrunner-noclang:
     uses: ./.github/workflows/_lint.yml
@@ -105,10 +104,11 @@ jobs:
         # Cap parallelism to the pod's CPU budget; os.cpu_count() overcounts on k8s and OOMs.
         export MAX_JOBS="$(nproc --ignore=2)"
         if [ "$CHANGED_FILES" = '*' ]; then
-          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY --all-files" .github/scripts/lintrunner.sh
-        else
-          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY ${CHANGED_FILES}" .github/scripts/lintrunner.sh
+          CHANGED_FILES="--all-files"
         fi
+        export CHANGED_FILES
+        export LINTER_GROUP=other
+        .github/scripts/lintrunner.sh
 
   quick-checks:
     if: github.repository_owner == 'pytorch'
