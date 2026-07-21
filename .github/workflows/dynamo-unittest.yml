@@ -4,16 +4,13 @@
 name: dynamo-unittest
 
 on:
-  push:
-    branches:
-      - main
-      - release/*
-    tags:
-      - ciflow/dynamo/*
   workflow_call:
+  pull_request:
+    paths:
+      - .github/workflows/dynamo-unittest.yml
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-dynamo-unittest
   cancel-in-progress: true
 
 permissions:
@@ -31,7 +28,6 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc
       opt_out_experiments: lf
 
   dynamo-build:
@@ -50,9 +46,13 @@ jobs:
       test-matrix: |
         { include: [
           { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
       python-version: ${{ matrix.python-version }}
       compiler: clang18
