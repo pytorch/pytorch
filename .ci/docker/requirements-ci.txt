@@ -413,7 +413,11 @@ cupti-python>13.0 ; platform_system == "Linux" and (platform_machine == "x86_64"
 #test that import: test_profiler.py
 
 setuptools-git-versioning==2.1.0
+# scikit-build (non-core) is consumed by the FBGEMM / torchrec builds noted
+# below, not by PyTorch itself; PyTorch uses scikit-build-core. Keep both
+# pinned independently.
 scikit-build==0.18.1
+scikit-build-core==1.0.0
 pyre-extensions==0.0.32
 tabulate==0.9.0
 #Description: These package are needed to build FBGEMM and torchrec on PyTorch CI
