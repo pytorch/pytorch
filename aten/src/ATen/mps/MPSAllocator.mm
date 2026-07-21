@@ -175,7 +175,9 @@ bool MPSHeapAllocatorImpl::alloc_buffer(AllocParams& params) {
   // insert heap after a buffer was created on it to update the order of heap's set
   pool.heaps.insert(heap);
   params.buffer_block = new BufferBlock(params.size(), params.requested_size, buffer, heap);
-  m_allocated_buffers[params.buffer_block->buffer] = params.buffer_block;
+  params.buffer_block->cpu_ptr = [buffer contents];
+  TORCH_INTERNAL_ASSERT(params.buffer_block->cpu_ptr);
+  m_allocated_buffers[params.buffer_block->cpu_ptr] = params.buffer_block;
   pool.allocated_size += params.size();
   pool.n_buffers++;
 
@@ -377,7 +379,7 @@ bool MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove
   BufferPool& pool = *heap_block->pool;
   pool.allocated_size -= buffer_block->size;
   pool.available_size -= buffer_block->size;
-  m_allocated_buffers.erase(buffer_block->buffer);
+  m_allocated_buffers.erase(buffer_block->cpu_ptr);
   pool.available_buffers.erase(buffer_block);
   pool.n_buffers--;
   // will re-insert later to keep the heaps list sorted based on heap's new available size (if heap not empty)
@@ -552,14 +554,21 @@ void MPSHeapAllocatorImpl::garbage_collect_cached_buffers(AllocParams& params) {
 }
 
 // public interface to MPSAllocator
-id<MTLBuffer> MPSHeapAllocatorImpl::malloc(size_t size, uint32_t usage) {
+void* MPSHeapAllocatorImpl::malloc(size_t size, uint32_t usage) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   // Return any buffers parked in-flight by free() whose GPU work has since
   // completed back to their pools before serving this allocation.
   freeInactiveBuffers();
   BufferBlock* buffer_block = alloc_buffer_block(size, usage);
-  return buffer_block ? buffer_block->buffer : nullptr;
+  return buffer_block ? buffer_block->cpu_ptr : nullptr;
+}
+
+id<MTLBuffer> MPSHeapAllocatorImpl::bufferForData(const void* ptr) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  return buffer_block ? buffer_block->buffer : nil;
 }
 
 bool MPSHeapAllocatorImpl::isSharedBuffer(const void* ptr) {
@@ -570,7 +579,7 @@ bool MPSHeapAllocatorImpl::isSharedBuffer(const void* ptr) {
   return buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED);
 }
 
-id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size_t size) {
+void* MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size_t size) {
   BufferBlock* buffer_block = nullptr;
   {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
@@ -579,13 +588,10 @@ id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size
     if (!buffer_block) {
       return nullptr;
     }
-    if (!buffer_block->cpu_ptr) {
-      buffer_block->cpu_ptr = [buffer_block->buffer contents];
-    }
   }
   // buffer is out of the pool, so no mutex lock is needed
   memcpy(buffer_block->cpu_ptr, value, size);
-  return buffer_block->buffer;
+  return buffer_block->cpu_ptr;
 }
 
 std::pair<const void*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtr(const void* ptr) {
@@ -595,9 +601,6 @@ std::pair<const void*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtr(const 
   // return if buffer was not allocated on MPSAllocator or isn't a Shared buffer
   if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
     return {nullptr, 0};
-  }
-  if (!buffer_block->cpu_ptr) {
-    buffer_block->cpu_ptr = [buffer_block->buffer contents];
   }
   return {buffer_block->cpu_ptr, buffer_block->retainCount()};
 }
@@ -622,10 +625,6 @@ c10::Storage MPSHeapAllocatorImpl::getHostAliasStorage(const c10::Storage& mps_s
   TORCH_CHECK(buffer_block, "getHostAliasStorage: storage was not allocated by the MPSAllocator");
   TORCH_CHECK(buffer_block->heap->pool->usage & UsageFlags::SHARED,
               "getHostAliasStorage: storage is not backed by a shared (unified) MTLBuffer");
-
-  if (!buffer_block->cpu_ptr) {
-    buffer_block->cpu_ptr = [buffer_block->buffer contents];
-  }
 
   // Retain the source MPS storage through the DataPtr's context so the
   // MTLBuffer cannot be recycled while the host alias is in use.
@@ -864,14 +863,17 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
 
   DataPtr allocate(const size_t nbytes) override {
-    __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
-    return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
+    void* ptr = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
+    return {ptr, ptr, &Delete, at::Device(at::DeviceType::MPS, 0)};
   }
 
   // implementation of IMPSAllocator interface
   DataPtr allocScalarBufferWithValue(void* value, size_t size) const override {
-    id<MTLBuffer> buf = _getAllocImpl().allocScalarBufferWithValue(value, size);
-    return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
+    void* ptr = _getAllocImpl().allocScalarBufferWithValue(value, size);
+    return {ptr, ptr, &Delete, at::Device(at::DeviceType::MPS, 0)};
+  }
+  void* getMTLBuffer(const void* ptr) const override {
+    return _getAllocImpl().bufferForData(ptr);
   }
   std::pair<const void*, uint32_t> getSharedBufferPtr(const void* ptr) const override {
     return _getAllocImpl().getSharedBufferPtr(ptr);
@@ -1004,12 +1006,11 @@ class MPSPinnedAllocator final : public c10::Allocator {
     }
     auto& shared = _getSharedAllocator();
     c10::DataPtr mps_dp = shared.allocate(nbytes);
-    // shared.allocate() returns a DataPtr whose data pointer is the id<MTLBuffer>
-    // itself; capture it before mps_dp is moved into the backing storage.
-    void* mtl_buffer = mps_dp.get();
-    auto host_ptr_pair = shared.getSharedBufferPtr(mtl_buffer);
-    TORCH_INTERNAL_ASSERT(host_ptr_pair.first, "MPS pinned allocator: failed to map shared buffer");
-    void* cpu_ptr = const_cast<void*>(host_ptr_pair.first);
+    void* cpu_ptr = mps_dp.get();
+    // DataPtr exposes the unified-memory address, so resolve the Metal object
+    // separately for pinned CPU-to-MPS copies.
+    void* mtl_buffer = shared.getMTLBuffer(cpu_ptr);
+    TORCH_INTERNAL_ASSERT(mtl_buffer, "MPS pinned allocator: failed to resolve shared buffer");
     // Hold a refcount on the source MPS storage so the MTLBuffer stays alive
     // for as long as the host alias is in use.
     c10::Storage mps_storage(c10::Storage::use_byte_size_t(),

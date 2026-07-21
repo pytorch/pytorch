@@ -110,17 +110,18 @@ static std::pair<id<MTLBuffer>, NSUInteger> buffer_with_offset_from_tensor(const
                                                                            size_t nbytes,
                                                                            bool non_blocking) {
   const auto byte_offset = cpu_tensor.storage_offset() * cpu_tensor.itemsize();
+  const void* storage_ptr = cpu_tensor.storage().data();
   // Blit directly from/to the pinned tensor's own shared MTLBuffer, avoiding the
   // newBufferWithBytesNoCopy wrapper. Metal blit offsets must be 4-byte aligned.
-  if (void* pinned = at::mps::getMPSPinnedMTLBuffer(cpu_tensor.storage().data()); pinned && byte_offset % 4 == 0) {
+  if (void* pinned = at::mps::getMPSPinnedMTLBuffer(storage_ptr); pinned && byte_offset % 4 == 0) {
     // Mark the buffer so that if it is freed while this copy's blit is still in
     // flight, the allocator defers recycling it instead of handing it to a new
     // allocation that could CPU-overwrite it before the GPU is done.
-    at::mps::getIMPSAllocator()->recordEvents({pinned});
+    at::mps::getIMPSAllocator()->recordEvents({storage_ptr});
     return {__builtin_bit_cast(id<MTLBuffer>, pinned), static_cast<NSUInteger>(byte_offset)};
   }
   id<MTLDevice> device = MPSDevice::getInstance()->device();
-  const void* host = static_cast<const char*>(cpu_tensor.storage().data()) + byte_offset;
+  const void* host = static_cast<const char*>(storage_ptr) + byte_offset;
   NSUInteger alignedLength = 0;
   void* alignedPtr = pageAlignedBlockPtr(host, (NSUInteger)nbytes, &alignedLength);
   // Only capture on non_blocking - capturing across waitUntilCompleted would
@@ -276,8 +277,12 @@ void copy_blit_mps(void* dst, const void* src, size_t size) {
   uint64_t profile_id =
       getMPSProfiler().beginProfileCopy(src, dst, at::OptionalTensorRef(), at::OptionalTensorRef(), size, false);
 
+  auto* allocator = at::mps::getIMPSAllocator();
+  id<MTLBuffer> srcBuf = __builtin_bit_cast(id<MTLBuffer>, allocator->getMTLBuffer(src));
+  id<MTLBuffer> dstBuf = __builtin_bit_cast(id<MTLBuffer>, allocator->getMTLBuffer(dst));
+  TORCH_INTERNAL_ASSERT(srcBuf && dstBuf, "copy_blit_mps: pointers must be MPSAllocator base data pointers");
   MPSStream* stream = getCurrentMPSStream();
-  stream->copy_and_sync((id<MTLBuffer>)(src), (id<MTLBuffer>)(dst), size, 0, 0, true, profile_id);
+  stream->copy_and_sync(srcBuf, dstBuf, size, 0, 0, true, profile_id);
 }
 
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {

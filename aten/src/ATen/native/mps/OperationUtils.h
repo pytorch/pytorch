@@ -7,6 +7,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/Utils.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
@@ -40,12 +41,12 @@ namespace at::native::mps {
 
 struct MPSScalar {
   id<MTLBuffer> getMTLBuffer() const {
-    return __builtin_bit_cast(id<MTLBuffer>, buffer.get());
+    return __builtin_bit_cast(id<MTLBuffer>, at::mps::getIMPSAllocator()->getMTLBuffer(buffer.get()));
   }
 
   size_t size = 0;
   ScalarType type = ScalarType::Undefined;
-  c10::DataPtr buffer; // stores MTLBuffer (frees buffer if MPSScalar instance goes out of scope)
+  c10::DataPtr buffer; // stores the data pointer (frees the backing MTLBuffer when MPSScalar goes out of scope)
   union {
     float f; // MPS doesn't support 'double'
     at::Half h;
@@ -125,7 +126,13 @@ MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = Memor
 bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
-  return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
+  const void* data = tensor.storage().data();
+  if (C10_UNLIKELY(!data)) {
+    return nil;
+  }
+  auto buffer = at::mps::getIMPSAllocator()->getMTLBuffer(data);
+  TORCH_CHECK(buffer, "data pointer of the MPS tensor was not allocated by the MPSAllocator");
+  return __builtin_bit_cast(id<MTLBuffer>, buffer);
 }
 
 class Placeholder {
@@ -532,10 +539,10 @@ static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const MPSS
 }
 
 static size_t iter_tensor_offset(TensorIteratorBase& iter, unsigned idx) {
-  // At the moment, MPS storage data is not the real GPU pointer, but rather a pointer to id<MTLBuffer> object
-  // But TensorIterator constructs data_ptr as if base was just a raw pointer
-  // Workaround this problem by computing an offset from the start of the tensor, which works for both
-  // tensor views and sliced 64-bit iterators
+  // MPS storage data is the buffer's unified-memory base address, so
+  // TensorIterator's pointer arithmetic is real; subtracting the storage base
+  // recovers the byte offset (storage_offset plus any iterator slicing) to
+  // pass alongside the MTLBuffer binding.
   return reinterpret_cast<size_t>(iter.data_ptr(idx)) -
       reinterpret_cast<size_t>(iter.tensor_base(idx).storage().data());
 }

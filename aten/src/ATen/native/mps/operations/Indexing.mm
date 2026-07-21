@@ -81,7 +81,10 @@ id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEnco
   auto kernelDataOffsetsPSO =
       lib.getPipelineStateForFunc(use_64bit_index ? "kernel_index_offsets_64" : "kernel_index_offsets_32");
   const auto elementSize = use_64bit_index ? sizeof(simd_ulong3) : sizeof(simd_uint3);
-  id<MTLBuffer> kernelDataOffsets = (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * elementSize).get();
+  auto* allocator = getIMPSAllocator();
+  auto kernelDataOffsetsData = allocator->allocate(numThreads * elementSize);
+  id<MTLBuffer> kernelDataOffsets =
+      __builtin_bit_cast(id<MTLBuffer>, allocator->getMTLBuffer(kernelDataOffsetsData.get()));
 
   [commandEncoder setComputePipelineState:kernelDataOffsetsPSO];
   [commandEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
