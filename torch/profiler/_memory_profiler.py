@@ -927,7 +927,7 @@ class MemoryProfile:
         snapshot = self._category_snapshot()
 
         # Determine which Tensors might be parameters based on forward pass
-        # data flow. Note this these are only candidates; we filter nodes that
+        # data flow. Note that these are only candidates; we filter nodes that
         # we know are part of the backward pass but that doesn't guarantee that
         # they are part of the forward pass.
         candidate_parameters: set[TensorAndID] = set()

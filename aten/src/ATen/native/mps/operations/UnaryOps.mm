@@ -13,11 +13,8 @@
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
 #include <ATen/ops/acos_native.h>
-#include <ATen/ops/acosh_native.h>
 #include <ATen/ops/asin_native.h>
-#include <ATen/ops/asinh_native.h>
 #include <ATen/ops/atan_native.h>
-#include <ATen/ops/atanh_native.h>
 #include <ATen/ops/conj_physical_native.h>
 #include <ATen/ops/cos_native.h>
 #include <ATen/ops/cosh_native.h>
@@ -63,7 +60,7 @@ static bool is_empty_tensor(const Tensor& self) {
 }
 
 static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::string op_name, UnaryOpBlock unaryBlock) {
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
 
   auto output = output_;
   bool needsCopyToOutput = false;
@@ -178,20 +175,12 @@ TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
   }                                                                                                                    \
   REGISTER_DISPATCH(func##_stub, mps_##func##_kernel)
 
+REGISTER_MPS_UNARY_STUB(acosh, acosh);
+REGISTER_MPS_UNARY_STUB(asinh, asinh);
+REGISTER_MPS_UNARY_STUB(atanh, atanh);
 REGISTER_MPS_UNARY_STUB(ceil, ceil);
 REGISTER_MPS_UNARY_STUB(floor, floor);
 REGISTER_MPS_UNARY_STUB(trunc, truncate);
-
-#define CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                         \
-  TORCH_IMPL_FUNC(func_out)(const Tensor& self, const Tensor& output) {                                          \
-    mps::unary_op(self, output, #func_out, ^MPSGraphTensor*(MPSGraph * mpsGraph, MPSGraphTensor * inputTensor) { \
-      return [mpsGraph func_stub##WithTensor:inputTensor name:nil];                                              \
-    });                                                                                                          \
-  }
-
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
 
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
   TORCH_CHECK(isFloatingType(self.scalar_type()), "frac_out_mps is only implemented for floating types");

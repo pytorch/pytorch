@@ -1119,6 +1119,10 @@
   self: linalg_matrix_exp_differential(self, grad, /*adjoint*/ true)
   result: linalg_matrix_exp_differential(self_p, self_t, /*adjoint*/ false)
 
+- name: linalg_matrix_sqrth(Tensor self) -> Tensor
+  self: linalg_matrix_sqrth_differential(self, grad)
+  result: linalg_matrix_sqrth_differential(self_p, self_t)
+
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
@@ -1344,10 +1348,8 @@
 - name: _pdist_forward(Tensor self, float p=2) -> Tensor
   self: _pdist_backward(grad, self, p, result)
 
-- name: _pdist_backward(Tensor grad, Tensor self, float p, Tensor pdist) -> Tensor
-  grad: not_implemented("_pdist_backward")
-  self: not_implemented("_pdist_backward")
-  pdist: not_implemented("_pdist_backward")
+- name: _pdist_backward(Tensor grad_output, Tensor self, float p, Tensor pdist) -> Tensor
+  grad_output, self, pdist: "_pdist_backward_backward(grad, grad_output, self, p, pdist, grad_input_mask)"
 
 - name: _euclidean_dist(Tensor x1, Tensor x2) -> Tensor
   x1, x2: _euclidean_dist_backward(grad, x1, x2, result)
@@ -1356,11 +1358,8 @@
   x1: _cdist_backward(grad.contiguous(), x1, x2, p, result)
   x2: _cdist_backward(grad.mT().contiguous(), x2, x1, p, result.mT().contiguous())
 
-- name: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
-  grad: not_implemented("_cdist_backward")
-  x1: not_implemented("_cdist_backward")
-  x2: not_implemented("_cdist_backward")
-  cdist: not_implemented("_cdist_backward")
+- name: _cdist_backward(Tensor grad_output, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
+  grad_output, x1, x2, cdist: "_cdist_backward_backward(grad, grad_output, x1, x2, p, cdist, grad_input_mask)"
 
 - name: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)

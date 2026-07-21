@@ -468,10 +468,14 @@ def _write_files_from_queue(
                     )
 
                 if use_fsync:
+                    # Flush Python-level buffers (OS for local files, network for cloud storage) before fsync.
+                    stream.flush()
                     try:
                         os.fsync(stream.fileno())
-                    except (AttributeError, UnsupportedOperation):
-                        os.sync()
+                    except (AttributeError, UnsupportedOperation) as e:
+                        warnings.warn(
+                            f"fsync not supported for this stream, relying on flush(): {e}"
+                        )
                 stream.close()
             result_queue.put(write_results)
     except queue.Empty:
@@ -773,10 +777,14 @@ class _FileSystemWriter(StorageWriter):
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
+                # Flush Python-level buffers (OS for local files, network for cloud storage) before fsync.
+                metadata_file.flush()
                 try:
                     os.fsync(metadata_file.fileno())
-                except (AttributeError, UnsupportedOperation):
-                    os.sync()
+                except (AttributeError, UnsupportedOperation) as e:
+                    warnings.warn(
+                        f"fsync not supported for this stream, relying on flush(): {e}"
+                    )
 
         # delete in-case other checkpoints were present.
         if not self.use_collectives and self.rank is not None:
