@@ -125,7 +125,7 @@ def _rewrite_spec_if_needed(
     """
     Rewrite ``spec`` to match the device of ``tensor``.
 
-    FSDP.sharded_optim_state_dict sneakly ships optimizer state to CPU so if the original ShardingSpec
+    FSDP.sharded_optim_state_dict sneakily ships optimizer state to CPU so if the original ShardingSpec
     produces CUDA metadata, ST construction bombs.
     """
     if not isinstance(spec, ChunkShardingSpec):

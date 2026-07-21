@@ -50,7 +50,10 @@ class TestBase(TestCase):
         metrics.reset()
         torch._dynamo.utils.clear_compilation_metrics()
         self._nested_reduction_ctx = inductor_config.patch(
-            "triton.nested_reduction", True
+            {
+                "triton.nested_reduction": True,
+                "loop_ordering_after_fusion": True,
+            }
         )
         self._nested_reduction_ctx.__enter__()
         self._choices_ctx = _choices_context(self.force_persistent_outer_reduction)

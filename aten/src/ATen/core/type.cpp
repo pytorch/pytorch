@@ -510,7 +510,7 @@ MatchTypeReturn matchTypeVariables(
     ss << "Type variable '" << vt->name() << "' previously matched to type "
        << it->second->repr_str() << " is matched to type "
        << actual->repr_str();
-    return ss.str();
+    return std::move(ss).str();
   } else if (auto lt_formal = formal->castRaw<ListType>()) {
     if (auto lt_actual = actual->castRaw<ListType>()) {
       auto innerMatch = matchTypeVariables(
@@ -532,7 +532,7 @@ MatchTypeReturn matchTypeVariables(
     std::stringstream ss;
     ss << "Cannot match " << lt_formal->repr_str() << " to "
        << actual->repr_str();
-    return ss.str();
+    return std::move(ss).str();
   } else if (auto tp_formal = formal->castRaw<TupleType>()) {
     if (auto tp_actual = actual->castRaw<TupleType>()) {
       if (tp_formal->elements().size() != tp_actual->elements().size()) {
@@ -549,7 +549,7 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a tuple to " << actual->repr_str();
-      return MatchTypeReturn(ss.str());
+      return MatchTypeReturn(std::move(ss).str());
     }
   } else if (auto lt_formal = formal->castRaw<FutureType>()) {
     if (auto lt_actual = actual->castRaw<FutureType>()) {
@@ -562,7 +562,7 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a future to " << actual->repr_str();
-      return ss.str();
+      return std::move(ss).str();
     }
   } else if (auto lt_formal = formal->castRaw<AwaitType>()) {
     if (auto lt_actual = actual->castRaw<AwaitType>()) {
@@ -575,7 +575,7 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match an await to " << actual->repr_str();
-      return ss.str();
+      return std::move(ss).str();
     }
   } else if (auto lt_formal = formal->castRaw<RRefType>()) {
     if (auto lt_actual = actual->castRaw<RRefType>()) {
@@ -588,7 +588,7 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a rref to " << actual->repr_str();
-      return ss.str();
+      return std::move(ss).str();
     }
   } else if (auto opt_formal = formal->castRaw<OptionalType>()) {
     if (auto opt_actual = actual->castRaw<OptionalType>()) {
@@ -625,7 +625,7 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a dict to " << actual->repr_str();
-      return ss.str();
+      return std::move(ss).str();
     }
   }
 
@@ -913,7 +913,7 @@ std::string TupleType::str() const {
     }
     ss << ')';
   }
-  return ss.str();
+  return std::move(ss).str();
 }
 std::string TupleType::annotation_str_impl(const TypePrinter& printer) const {
   if (schema_ && name()) {

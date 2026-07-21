@@ -11,7 +11,16 @@ if TYPE_CHECKING:
     from ._fsdp_api import DataParallelMeshDims
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+
+
+if dist._is_spmd_types_available():
+    import spmd_types as spmd
+    from spmd_types._mesh_axis import flatten_axes
+    from spmd_types.runtime import get_partition_spec
+    from spmd_types.types import partition_spec_to_shard_types
+
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
@@ -43,6 +52,15 @@ def _get_orig_param_uid(param: nn.Parameter) -> int:
         uid = next(_orig_param_uid_counter)
         param._fsdp_orig_uid = uid  # pyrefly: ignore[missing-attribute]
     return param._fsdp_orig_uid  # pyrefly: ignore[missing-attribute]
+
+
+def _spans_same_mesh(lhs_axes: tuple[Any, ...], rhs_axes: tuple[Any, ...]) -> bool:
+    """Return whether two axis sets span the same normalized rank mesh."""
+    lhs_mesh = spmd.normalize_mesh(frozenset(lhs_axes))
+    rhs_mesh = spmd.normalize_mesh(frozenset(rhs_axes))
+    if not lhs_mesh or not rhs_mesh:
+        return lhs_mesh == rhs_mesh
+    return flatten_axes(tuple(lhs_mesh)) == flatten_axes(tuple(rhs_mesh))
 
 
 """
@@ -80,6 +98,9 @@ This implies that we construct the unsharded parameter object once and write to
 it in-place thereafter. For the default ``torch.Tensor` original parameter
 case, the all-gather output and unsharded parameter share the same
 data, so we use storage resizing on the all-gather output.
+
+[Note: FSDP and spmd_types]
+Refer to https://github.com/meta-pytorch/spmd_types/blob/main/docs/local_spmd_types.md
 """
 
 lib = torch.library.Library("fsdp", "FRAGMENT")
@@ -232,13 +253,14 @@ class FSDPParam:
         shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
         mesh_info: DataParallelMeshInfo,
     ):
+        shard_placement_result = None
         if callable(shard_placement_fn):
-            shard_result = resolve_shard_placement(
+            shard_placement_result = resolve_shard_placement(
                 shard_placement_fn(param),
                 cast(FSDPMeshInfo, mesh_info),
             )
-            self.mesh_info = shard_result.mesh_info
-            fsdp_placement = shard_result.placement
+            self.mesh_info = shard_placement_result.mesh_info
+            fsdp_placement = shard_placement_result.placement
         else:
             self.mesh_info = mesh_info  # pyrefly: ignore[bad-assignment]
             fsdp_placement = None
@@ -265,6 +287,17 @@ class FSDPParam:
         # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
+        # Tracks that this parameter contained FSDP-init-time spmd_types annotations;
+        # this remains true even if spmd typechecking is disabled at runtime.
+        self.is_spmd_types = (
+            dist._is_spmd_types_available()
+            and bool(spmd_local_type := spmd.get_local_type(param))
+            and not isinstance(param, DTensor)
+        )
+        if self.is_spmd_types:
+            param = self._resolve_spmd_types_for_storage(
+                param, get_partition_spec(param), spmd_local_type, self.mesh_info
+            )
         self.is_dtensor = isinstance(param, DTensor)
         self._orig_param_uid = _get_orig_param_uid(param)
         param_data = self._init_sharding_spec(param, fsdp_placement, shard_dim)
@@ -330,6 +363,188 @@ class FSDPParam:
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
         self.sharded_state = ShardedState.SHARDED
+
+    def _resolve_spmd_types_for_storage(
+        self,
+        param: nn.Parameter,
+        partition_spec: "spmd.PartitionSpec | None",
+        init_local_type: "spmd.LocalSpmdType",
+        mesh_info: DataParallelMeshInfo,
+    ) -> nn.Parameter:
+        """
+        Resolve spmd_types metadata and translate it into FSDP storage.
+
+        The original parameter is a plain tensor annotated for module compute
+        on the typechecking mesh. FSDP stores parameters as DTensors on
+        ``mesh_info.spmd_mesh``, so init time only needs enough type information
+        to translate into DTensor placements on the storage mesh axes. Axes
+        named by ``dp_mesh_dims`` are FSDP-managed DP axes and are treated as
+        ``spmd.R``; non-FSDP storage axes must have a direct spmd_types
+        annotation.
+
+        The original compute annotations and PartitionSpec are saved. At
+        compute time, FSDP all-gathers the DTensor storage, exposes a plain
+        tensor parameter, and restores spmd_types metadata on the init-time
+        compute mesh. Missing compute axes are filled in as ``spmd.R``.
+
+        Gradient storage placements are derived from the backward spmd_type.
+        FSDP-managed "DP" axes require forward ``spmd.R`` since FSDP owns
+        their gradient reduction. Consequently, the backward type is ``spmd.P``,
+        so the incoming plain grad is wrapped as a ``Partial()`` DTensor on those
+        axes, pending the gradient all-reduce/reduce-scatter to storage-time
+        placement.
+
+        For non-FSDP axes (e.g. TP), annotations are flexible. For a parameter
+        annotated with ``spmd.I`` on TP, the grad is wrapped as ``Replicate()`` and no
+        reduction is pending. ``spmd.S(dim)`` stays ``Shard(dim)``.
+
+        This follows tied FWD/BWD typing for spmd_types: ``R`` -> ``P``,
+        ``P`` -> ``R``, ``I`` -> ``I``, and ``S(dim)`` -> ``S(dim)``.
+        """
+        storage_mesh = mesh_info.spmd_mesh
+        if storage_mesh is None or storage_mesh.mesh_dim_names is None:
+            raise ValueError(
+                "spmd_types parameters require fully_shard() to be called with both "
+                "a named full DeviceMesh for FSDP storage and "
+                "dp_mesh_dims=DataParallelMeshDims(shard=..., replicate=...), "
+                "where shard names the mesh axis or axes FSDP shards parameters "
+                "across and replicate names the HSDP/DDP mesh axis or axes FSDP "
+                "replicates across."
+            )
+
+        storage_mesh_dim_names = storage_mesh.mesh_dim_names
+        storage_mesh_axes = tuple(
+            (name, spmd.MeshAxis.of(storage_mesh.get_group(name)))
+            for name in storage_mesh_dim_names
+        )
+        storage_axes = tuple(axis for _, axis in storage_mesh_axes)
+        local_type: spmd.PerMeshAxisSpmdTypes = dict(init_local_type)
+        if partition_spec is not None:
+            local_type.update(  # pyrefly: ignore [no-matching-overload]
+                partition_spec_to_shard_types(partition_spec)
+            )
+        annotated_axes = tuple(local_type.keys())
+
+        # resolve typechecking mesh on which parameters are annotated
+        if _spans_same_mesh(annotated_axes, storage_axes):
+            restore_mesh = annotated_axes
+        elif (current_mesh := spmd.current_mesh()) is not None:
+            restore_mesh = tuple(current_mesh)
+        else:
+            raise ValueError(
+                f"Parameter '{self._module_info.param_name}' has partial "
+                "spmd_types annotations that cannot be restored from its FSDP "
+                "storage mesh. Fully annotate the parameter on its storage "
+                "mesh, or wrap fully_shard() in spmd.set_current_mesh(...) "
+                "when all parameters in the FSDP unit share one typechecking "
+                "mesh. Mixed per-parameter typechecking meshes with partial "
+                "annotations are not supported. "
+                f"Annotated axes: {annotated_axes}. "
+                f"Storage mesh axes: {storage_axes}."
+            )
+
+        # Validate the typechecking mesh with FSDP storage mesh.
+        unknown_axes = tuple(
+            axis for axis in init_local_type if axis not in restore_mesh
+        )
+        if unknown_axes:
+            raise ValueError(
+                f"FSDP found spmd_types annotations on parameter "
+                f"'{self._module_info.param_name}' and will restore runtime "
+                f"annotations on compute mesh axes {restore_mesh}, but the "
+                f"parameter is annotated on axes {unknown_axes} that are not in "
+                "that mesh. Annotate only axes in the compute mesh."
+            )
+        if not _spans_same_mesh(restore_mesh, storage_axes):
+            raise ValueError(
+                f"Parameter '{self._module_info.param_name}' uses spmd_types "
+                "annotations on a typechecking mesh that does not span the "
+                "same ranks as its FSDP storage mesh. FSDP can fill omitted "
+                "FSDP-managed axes only when these meshes span the same "
+                f"rank set. Typechecking mesh axes: {restore_mesh}. "
+                f"Storage mesh axes: {storage_axes}."
+            )
+        dp_names = set(
+            itertools.chain(
+                mesh_info.dp_mesh_dims.shard_names,  # pyrefly: ignore [missing-attribute]
+                mesh_info.dp_mesh_dims.replicate_names,  # pyrefly: ignore [missing-attribute]
+            )
+        )
+        fsdp_axis = flatten_axes(
+            tuple(axis for name, axis in storage_mesh_axes if name in dp_names)
+        )
+        non_fsdp_storage_mesh_axes = {
+            axis for name, axis in storage_mesh_axes if name not in dp_names
+        }
+        storage_axis_types: spmd.PerMeshAxisSpmdTypes = {
+            axis: spmd.R for name, axis in storage_mesh_axes if name in dp_names
+        }
+        # Param annotations are either optional spmd.R on FSDP axes or explicit
+        # annotations on non-FSDP storage axes.
+        for axis, axis_type in local_type.items():
+            # MeshAxis ordering implements the FSDP-submesh containment check.
+            if axis <= fsdp_axis:  # pyrefly: ignore [unsupported-operation]
+                if axis_type is not spmd.R:
+                    raise ValueError(
+                        f"Expected spmd.R on FSDP DP axis {axis} for parameter "
+                        f"'{self._module_info.param_name}' but got {axis_type}. "
+                        "FSDP requires DP parameters to be R since it handles "
+                        "the DP gradient reduction."
+                    )
+            else:
+                if axis not in non_fsdp_storage_mesh_axes:
+                    raise ValueError(
+                        f"Parameter '{self._module_info.param_name}' has spmd_types "
+                        f"annotation on axis {axis}, which is neither a non-FSDP "
+                        "storage-mesh axis nor contained in the FSDP DP mesh."
+                    )
+                storage_axis_types[axis] = axis_type
+
+        if set(storage_axes) != set(storage_axis_types.keys()):
+            raise ValueError(
+                f"Parameter '{self._module_info.param_name}' has incomplete "
+                "spmd_types annotations for FSDP storage. "
+                f"Annotated axes: {tuple(local_type.keys())}. "
+                f"Storage mesh axes: {storage_axes}. "
+                f"FSDP mesh dims: {mesh_info.dp_mesh_dims}. "
+                "Missing non-FSDP storage axes: "
+                f"{tuple(axis for _, axis in storage_mesh_axes if axis not in storage_axis_types)}."
+            )
+
+        # Translate to DTensor FWD/BWD placements; R@FSDP axes are optional.
+        restore_type: spmd.PerMeshAxisSpmdTypes = {
+            axis: init_local_type.get(axis, spmd.R) for axis in restore_mesh
+        }
+        placements = []
+        grad_placements = []
+        for axis_type in storage_axis_types.values():
+            placements.append(spmd.spmd_type_to_dtensor_placement(axis_type))
+            grad_placements.append(
+                spmd.spmd_type_to_dtensor_placement(axis_type.backward_type())
+            )
+        dtensor_param = nn.Parameter(
+            DTensor.from_local(param.data, storage_mesh, placements, run_check=False),
+            requires_grad=param.requires_grad,
+        )
+
+        # Assign spmd_types state after validation succeeds.
+        self._spmd_partition_spec: spmd.PartitionSpec | None = partition_spec
+        self._spmd_init_local_type: spmd.LocalSpmdType = init_local_type
+        self._spmd_restore_mesh: tuple[Any, ...] = restore_mesh
+        self._spmd_restore_type: spmd.PerMeshAxisSpmdTypes = restore_type
+        self._spmd_grad_placements: tuple[Placement, ...] = tuple(grad_placements)
+        return dtensor_param
+
+    def _restore_spmd_types(self, tensor: torch.Tensor) -> None:
+        """Restore the saved spmd_types annotation onto a tensor."""
+        if not self.is_spmd_types or not spmd.is_type_checking():
+            return
+        if self._spmd_restore_type:
+            spmd.assert_type(
+                tensor,
+                self._spmd_restore_type,
+                partition_spec=self._spmd_partition_spec,
+            )
 
     def _init_sharding_spec(
         self,
@@ -468,7 +683,9 @@ class FSDPParam:
                 submeshes.append(self.mesh_info.mesh)
                 if isinstance(self.mesh_info, HSDPMeshInfo):
                     spec_placements.append(Replicate())
-                spec_placements.append(fsdp_placement)
+                # Reuse the placement already computed for this DP shard dim
+                # so that we don't loss _StridedShard.
+                spec_placements.append(spmd_placements[i])
                 skip = len(dp_dim_names.shard_names) - 1
             elif name in replicate_names_set and isinstance(
                 self.mesh_info, HSDPMeshInfo
@@ -667,7 +884,9 @@ class FSDPParam:
             self._contiguous_orig_stride,
             storage_offset=0,
         )
-        if self._unsharded_dtensor_spec is not None:
+        if self.is_spmd_types:
+            pass  # keep as plain tensor; spmd_types restored before module compute
+        elif self._unsharded_dtensor_spec is not None:
             unsharded_dtensor_spec = self._get_unsharded_dtensor_spec(unsharded_param)
             unsharded_param = _from_local_no_grad(
                 unsharded_param, unsharded_dtensor_spec
@@ -930,6 +1149,23 @@ class FSDPParam:
         return self._get_grad_inner_tensor(torch.zeros_like(self.unsharded_param))
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
+        if self.is_spmd_types:
+            if self._unsharded_dtensor_spec is None:
+                raise AssertionError(
+                    "Expected _unsharded_dtensor_spec for spmd_types param"
+                )
+            grad = DTensor.from_local(
+                grad,
+                self._unsharded_dtensor_spec.mesh,
+                tuple(self._spmd_grad_placements),
+                run_check=False,
+            )
+            if not self.is_dtensor:
+                raise AssertionError(
+                    "Expected spmd_types -> DTensor wrapping to use the DTensor gradient "
+                    "path for correct gradient redistribution."
+                )
+
         if self.is_dtensor:
             if isinstance(grad, AsyncCollectiveTensor):
                 grad = grad.wait()
