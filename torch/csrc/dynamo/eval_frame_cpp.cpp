@@ -408,17 +408,41 @@ PyObject* dynamo__custom_eval_frame(
   const char* trace_annotation = "";
   PyObject* eval_result = nullptr; // strong reference
 
+  /* Notes about restoring the callback with the hook API.
+
+  The two callback variables (callback and recursive_callback) have different
+  purposes:
+    - callback: the current frame compilation callback
+    - recursive_callback: controls what happens when the current frame calls
+      other frames
+  The hook API, more specifically the `dynamo_eval_hook_*` functions, do not
+  execute any code, they just return the code object to be executed later on.
+  With that said, when using the hook API, one should not restore the callback
+  after executing the hook.
+
+  Restoring the callback here is WRONG and can cause some tests to fail:
+  - test_recompile_ux.py::test_recompile_child_run_only
+  */
+
   // exit functions
   auto eval_default = [&]() {
     eval_frame_callback_set(recursive_callback.ptr());
-    eval_result = dynamo_eval_frame_default(tstate, frame, throw_flag);
-    if (!callback.is(recursive_callback)) {
-      // NB: Only set the callback if it's different than the recursive
-      // callback! Setting the callback is dangerous in the case that `frame`
-      // also sets the eval frame callback. This happens in some functions in
-      // eval_frame.py. These functions should be skipped with DEFAULT recursive
-      // action, so we won't accidentally overwrite the callback.
-      eval_frame_callback_set(callback.ptr());
+
+    DEBUG_TRACE("eval default %s", get_frame_name(frame));
+
+    if (use_frame_hook()) {
+      eval_result = dynamo_frame_hook_default(tstate, frame, throw_flag);
+    } else {
+      eval_result = dynamo_eval_frame_default(tstate, frame, throw_flag);
+
+      if (!callback.is(recursive_callback)) {
+        // NB: Only set the callback if it's different than the recursive
+        // callback! Setting the callback is dangerous in the case that `frame`
+        // also sets the eval frame callback. This happens in some functions in
+        // eval_frame.py. These functions should be skipped with DEFAULT
+        // recursive action, so we won't accidentally overwrite the callback.
+        eval_frame_callback_set(callback.ptr());
+      }
     }
   };
 
@@ -454,6 +478,7 @@ PyObject* dynamo__custom_eval_frame(
         }
       }
     }
+    DEBUG_TRACE("eval custom %s", get_frame_name(frame));
     eval_frame_callback_set(recursive_callback.ptr());
     DEBUG_NULL_CHECK(cached_code);
     // Auto-activate debugger for code objects with breakpoints.
@@ -473,12 +498,22 @@ PyObject* dynamo__custom_eval_frame(
     if (!debugger_cb.is_none()) {
       debugger_cb(py::handle((PyObject*)cached_code));
     }
-    eval_result = dynamo_eval_custom_code(
-        tstate, frame, cached_code, trace_annotation, throw_flag);
-    if (!callback.is(recursive_callback)) {
-      eval_frame_callback_set(callback.ptr());
+
+    if (use_frame_hook()) {
+      eval_result = dynamo_frame_hook_custom(
+          tstate, frame, cached_code, trace_annotation, throw_flag);
+    } else {
+      eval_result = dynamo_eval_custom_code(
+          tstate, frame, cached_code, trace_annotation, throw_flag);
+
+      // Only restore the callback if it is using the eval frame API.
+      // The `dynamo_frame_hook_custom` doesn't execute anything. It only
+      // returns the code object.
+      if (!callback.is(recursive_callback)) {
+        eval_frame_callback_set(callback.ptr());
+      }
+      clear_old_frame_if_python_312_plus(tstate, frame);
     }
-    clear_old_frame_if_python_312_plus(tstate, frame);
   };
 
   auto fail = [&]() { clear_old_frame_if_python_312_plus(tstate, frame); };

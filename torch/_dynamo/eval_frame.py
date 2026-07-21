@@ -1285,6 +1285,8 @@ class _TorchDynamoContext:
                         """
                     )
                 )
+            # This won't work with multiple frame hooks as the code object
+            # might be changed by a previous hook
             always_optimize_code_objects[fn.__code__] = True
 
         return compile_wrapper
