@@ -42,8 +42,8 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
-    _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context, ROCM_VERSION
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, \
+    _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context, ROCM_VERSION
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -10070,10 +10070,12 @@ class TestLinalgCudaOnly(TestCase):
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
-    @skipCUDAIfNotRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @dtypes(e4m3_type, e5m2_type)
     def test_scaled_gemm_offline_tunableop(self, device, dtype):
+        if not TEST_WITH_ROCM and dtype is e5m2_type:
+            raise unittest.SkipTest("CUDA does not support e5m2 x e5m2 scaled GEMM")
+
         import os
         # This test is the offline version of test_scaled_gemm_tunableop
 
@@ -10149,7 +10151,7 @@ class TestLinalgCudaOnly(TestCase):
 
             # Rowwise case will have an extra solution
             if dtype is e4m3_type:  # rowwise
-                count = 7
+                count = 7 if TEST_WITH_ROCM or IS_SM90 else 6
             else:
                 count = 6
             self.assertEqual(total_num_results, count)
@@ -10821,7 +10823,6 @@ class TestLinalgCudaOnly(TestCase):
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
-    @skipCUDAIfNotRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @dtypes(e4m3_type, e5m2_type)
     def test_scaled_gemm_tunableop(self, device, dtype):
@@ -10835,6 +10836,8 @@ class TestLinalgCudaOnly(TestCase):
         #
         # Refer to test/test_matmul_cuda for support combinations that are
         # tested by PyTorch
+        if not TEST_WITH_ROCM and dtype is e5m2_type:
+            raise unittest.SkipTest("CUDA does not support e5m2 x e5m2 scaled GEMM")
         with self._tunableop_ctx():
             # set these to single iterations to keep it short but still exercise the code
             torch.cuda.tunable.set_rotating_buffer_size(0)
@@ -10889,7 +10892,7 @@ class TestLinalgCudaOnly(TestCase):
 
             # Rowwise case will have an extra solution
             if dtype is e4m3_type:  # rowwise
-                count = 7
+                count = 7 if TEST_WITH_ROCM or IS_SM90 else 6
             else:
                 count = 6
             self.assertEqual((total_num_results - ref_num_results), count)
@@ -11445,7 +11448,6 @@ class TestLinalgCudaOnly(TestCase):
                                 if l and not l.startswith('Validator')]
                 self.assertGreater(len(result_lines), 0)
 
-    @skipCUDAIfNotRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @dtypes(e4m3_type)
     def test_rowwise_scaled_gemm_numerics_tunableop(self, device, dtype):
