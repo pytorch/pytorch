@@ -1,18 +1,15 @@
 # Owner(s): ["module: rocm"]
-# Unneeded for CI: trunk.yml covers the same ROCm testing.
-# Kept in-repo for metrics; auto-triggers below are commented out.
-# workflow_dispatch remains for manual runs.
 name: periodic-rocm-mi350
 
 on:
-  #schedule:
-  #  - cron: 0 0,3,6,9,12,15,18,21 * * *
-  #  - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
-  #push:
-  #  tags:
-  #    - ciflow/periodic-rocm-mi350/*
-  #  branches:
-  #    - release/*
+  schedule:
+    - cron: 0 0,3,6,9,12,15,18,21 * * *
+    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
+  push:
+    tags:
+      - ciflow/periodic-rocm-mi350/*
+    branches:
+      - release/*
   workflow_dispatch:
 
 concurrency:
@@ -55,11 +52,15 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-noble-rocm-py3.12-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
+      # The distributed_4gpu config only runs the distributed tests that need
+      # more than 2 GPUs, so it must run on the gfx950.4 (4-GPU) runner labels.
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 
