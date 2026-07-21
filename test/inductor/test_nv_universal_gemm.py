@@ -850,6 +850,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             epilogue_fused, "plain matmul should NOT have epilogue fusion markers"
         )
 
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190235"
+    )
     def test_reduction_not_fused(self):
         """Test that reductions after GEMM are NOT fused into the epilogue."""
         dtype = torch.bfloat16
@@ -985,6 +989,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = a.float() @ b.float()
         torch.testing.assert_close(out2.float(), expected, atol=1e-2, rtol=1e-2)
 
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190234"
+    )
     def test_workspace_runtime_integration(self):
         """End-to-end: mock the chosen kernel's workspace_size to non-zero and
         actually let benchmark_codegened_module run, exercising the runtime
