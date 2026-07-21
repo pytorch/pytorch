@@ -244,6 +244,8 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         ranks = list(range(self.world_size))
         with self.assertRaisesRegex(NotImplementedError, "use_local_synchronization"):
             dist.new_group(ranks=ranks, use_local_synchronization=True)
+        with self.assertRaisesRegex(TypeError, "C10DBackend.Options"):
+            dist.new_group(ranks=ranks, pg_options=object())
 
     def test_new_group_backend_none_narrows_to_default_device(self):
         ranks = list(range(self.world_size))
