@@ -591,7 +591,7 @@ def tree_flatten(
                 (),
                 None,
                 none_is_leaf=none_is_leaf,
-                namespace=namespace,
+                namespace="",
             )
 
         (
