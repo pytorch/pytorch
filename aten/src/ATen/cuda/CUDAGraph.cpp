@@ -345,20 +345,12 @@ cudaGraphExec_t CUDAGraph::raw_cuda_graph_exec() {
 }
 
 void CUDAGraph::reset() {
-  // I'd prefer these checks throw exceptions, not print warnings,
-  // but the destructor calls reset(), and at least one CI build
-  // refuses to compile with a throwing destructor.
-  //
-  // Instead of calling reset() in the destructor to clean up, I could
-  // call reset() in the __del__ method of a thin Python wrapper,
-  // in which case reset would be allowed to throw exceptions.
-  // But Stackoverflow does not like user-defined __del__.
-  // __del__ prevents Graph instances from EVER being garbage collected
-  // if they participate in a reference cycle.
-  // And exceptions thrown in __del__ only print a warning anyway.
-  //
-  // Calling reset() in the C++ destructor, with warnings instead of exceptions
-  // if calls fail, is the compromise we chose.
+  // These checks warn instead of throwing: reset() is called from the
+  // destructor, and at least one CI build refuses to compile with a throwing
+  // destructor. Resource cleanup lives here in C++ so it runs on garbage
+  // collection regardless of Python state; the Python __del__ on
+  // torch.cuda.CUDAGraph only tears down bookkeeping and intentionally does not
+  // call reset().
   //
   // If capture_begin, the capture, or capture_end failed at some point, this CUDAGraph, the generator,
   // and the allocator could end up in all kinds of weird states depending where failure occurred.
