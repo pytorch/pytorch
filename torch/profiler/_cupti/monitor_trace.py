@@ -784,22 +784,21 @@ def _gpu_user_annotation_events(
             continue
         corr_l = c["correlation_id"].tolist()
         dev_l = c["device_id"].tolist()
-        str_l = c["stream_id"].tolist()
-        start_l = c["start_ns"].tolist()
-        end_l = c["end_ns"].tolist()
         # Follow graphed ops onto their reassigned logical lane so the spanning annotation
         # lands on the same lane as its kernels (else it stays on the capture stream).
+        stream_arr = c["stream_id"]
         lane_col = c.get("logical_lane")
-        lane_l = lane_col.tolist() if lane_col is not None else None
-        gnid_l = c["graph_node_id"].tolist() if lane_l is not None else None
+        if lane_col is not None:
+            reassign = (c["graph_node_id"] != 0) & (lane_col != stream_arr)
+            stream_arr = np.where(reassign, lane_col, stream_arr)
+        str_l = stream_arr.tolist()
+        start_l = c["start_ns"].tolist()
+        end_l = c["end_ns"].tolist()
         for i in range(len(corr_l)):
             external_id = correlation_to_user_external.get(corr_l[i])
             if external_id is None:
                 continue
-            stream = str_l[i]
-            if lane_l is not None and gnid_l[i] and lane_l[i] != stream:
-                stream = lane_l[i]
-            key = (external_id, dev_l[i], stream)
+            key = (external_id, dev_l[i], str_l[i])
             start_ns = start_l[i]
             end_ns = end_l[i]
             span = span_map.get(key)
@@ -1089,15 +1088,16 @@ def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: 
     # (gpu_id, hw_queue_iid). The spanning annotation and its kernels share the lane and the
     # viewer depth-nests them (annotation at depth 0, kernels at depth 1) once the kernels are
     # clamped to not overlap each other. Perfetto sorts lanes lexicographically by name, so
-    # prefix every lane (resolver-named or "stream N") with the zero-padded lane id -> the lane
-    # order matches the chrome path's numeric lane-id order (otherwise "stream 7" sorts after
-    # "stream 26674", and resolver-named lanes like "DP" interleave alphabetically).
+    # prefix every lane (resolver-named or "stream N") with a bracketed zero-padded lane id ->
+    # the lane order matches the chrome path's numeric lane-id order (otherwise "stream 7" sorts
+    # after "stream 26674", and resolver-named lanes like "DP" interleave alphabetically). The
+    # "[" is a constant leading char, so the padded digits still decide the order.
     uniq, inv = np.unique(stream, return_inverse=True)
     width = len(str(int(uniq.max()))) if len(uniq) else 1
     labels = [lane_names_by_id.get(int(k), f"stream {int(k)}") for k in uniq.tolist()]
     specs = [(iid, name, cat) for _ks, iid, name, cat in _RENDER_STAGES]
     specs += [
-        (_HW_QUEUE_IID_BASE + j, f"{int(k):0{width}d} {labels[j]}", 0)
+        (_HW_QUEUE_IID_BASE + j, f"[{int(k):0{width}d}] {labels[j]}", 0)
         for j, k in enumerate(uniq.tolist())
     ]
     hw_queue_iid = (inv + _HW_QUEUE_IID_BASE).astype(np.uint64)

@@ -621,7 +621,9 @@ class TestCuptiRecords(TestCase):
         # events follow _RENDER_STAGES order: [graphed kernel, eager kernel, annotation]
         # Lane names carry a zero-padded lane-id prefix (for ordering), then the label.
         lanes = [name_by_iid[int(q)] for q in stage_cols[4].tolist()]
-        self.assertTrue(lanes[0].endswith("side comms"))  # graphed kernel moved to named lane
+        self.assertTrue(
+            lanes[0].endswith("side comms")
+        )  # graphed kernel moved to named lane
         self.assertEqual(lanes[2], lanes[0])  # annotation shares the reassigned lane
         self.assertNotEqual(lanes[1], lanes[0])  # eager kernel is elsewhere
         self.assertIn("stream", lanes[1])  # eager kept its default "stream N" lane
@@ -659,7 +661,9 @@ class TestCuptiRecords(TestCase):
         # the names sorted lexicographically must equal that ascending-id order.
         lane_names = [name for iid, name, _cat in specs if iid >= _HW_QUEUE_IID_BASE]
         self.assertEqual(len(lane_names), 2)
-        self.assertEqual(sorted(lane_names), lane_names)  # lexicographic == lane-id order
+        self.assertEqual(
+            sorted(lane_names), lane_names
+        )  # lexicographic == lane-id order
         self.assertIn("stream 7", lane_names[0])  # lane 7 first
         self.assertIn("aaa_comm", lane_names[1])  # lane 50 second, despite the name
 
@@ -696,7 +700,9 @@ class TestCuptiRecords(TestCase):
         self.assertIsNotNone(col)
         self.assertEqual(col["name"].tolist(), ["all_reduce"])
         self.assertEqual(col["device_id"].tolist(), [0])
-        self.assertEqual(col["stream_id"].tolist(), [8])  # on the reassigned logical lane
+        self.assertEqual(
+            col["stream_id"].tolist(), [8]
+        )  # on the reassigned logical lane
         # no annotations in the window -> no column
         self.assertIsNone(
             _gpu_annotation_render_column(
