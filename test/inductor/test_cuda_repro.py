@@ -269,8 +269,8 @@ class CudaReproTests(TestCase):
     # Mismatched elements: 23 / 33062912 (0.0%)
     # Greatest absolute difference: 0.07861328125 at index (14, 13, 1008, 36) (up to 1e-05 allowed)
     # Greatest relative difference: 2.90625 at index (14, 13, 1008, 36) (up to 0.016 allowed)
+    @skipIfXpu(msg="RuntimeError, not target, torch-xpu-ops: 2697")
     @skipIfRocmArch(MI350_ARCH)
-    @skipIfXpu(msg="RuntimeError, torch-xpu-ops: 2697")
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -2551,7 +2551,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         eager = fwd(x, targets, W, bias)
         opt = torch.compile(fwd, dynamic=False, fullgraph=True)
         compiled = opt(x, targets, W, bias)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         # bf16 matmul + log_sum_exp leaves some slack; loose tol is fine here,
         # the test is about not crashing.
         self.assertTrue(torch.allclose(eager, compiled, atol=1e-2, rtol=1e-2))
