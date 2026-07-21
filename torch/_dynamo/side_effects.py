@@ -984,7 +984,7 @@ class SideEffects:
         # that are sensitive to when certain objects get released.
         del visit
 
-        # NB: cell variable handling.is tricky.
+        # NB: cell variable handling is tricky.
         # cell variables must stay alive if any NestedUserFunctionVariable
         # are live. "visit"-ing the NestedUserFunctionVariable visits
         # the .closures field, from which we will see if we need to keep
