@@ -109,11 +109,20 @@ runner_mapping:
   linux.rocm.gpu.mi300.4: linux.rocm.gpu.mi300.4
   linux.rocm.gpu.gfx950.1: linux.rocm.gpu.gfx950.1
   linux.rocm.gpu.gfx950.2: linux.rocm.gpu.gfx950.2
+  linux.rocm.gpu.gfx950.4: linux.rocm.gpu.gfx950.4
   linux.rocm.gpu.gfx1100: linux.rocm.gpu.gfx1100
+<<<<<<< HEAD
   # amd-sandbox experiment routes trunk-rocm-sandbox tests to AMD's dedicated
   # runners via this prefix; passthrough so the OSDC build's runner mapping keeps it.
   amd-sandbox-linux.rocm.gpu.mi350.1: amd-sandbox-linux.rocm.gpu.mi350.1
   amd-sandbox-linux.rocm.gpu.mi350.2: amd-sandbox-linux.rocm.gpu.mi350.2
+=======
+  # amd-do experiment routes mi350 tests to AMD's dedicated runners via this
+  # prefix; kept as passthrough so the OSDC build's runner mapping preserves it.
+  amd-do-linux.rocm.gpu.gfx950.1: amd-do-linux.rocm.gpu.gfx950.1
+  amd-do-linux.rocm.gpu.gfx950.2: amd-do-linux.rocm.gpu.gfx950.2
+  amd-do-linux.rocm.gpu.gfx950.4: amd-do-linux.rocm.gpu.gfx950.4
+>>>>>>> [ROCm][CI] periodic-rocm-mi350: run >2-GPU distributed tests via multigpu marker
 
 # Runners whose hardware exists only on the Meta fleet (no LF / no AWS EC2
 # equivalent). The mapper forces the 'mt-' prefix on these regardless of which

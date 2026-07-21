@@ -1461,12 +1461,14 @@ def parse_args():
     )
     parser.add_argument(
         "--multigpu-filter",
-        choices=["multigpu", "not-multigpu"],
+        choices=["multigpu", "not-multigpu", "multigpu-extra"],
         default=None,
-        help="Restrict distributed tests by the auto-applied `multigpu` marker "
+        help="Restrict distributed tests by the auto-applied `multigpu` markers "
         "(see test/conftest.py). `multigpu` runs only tests that need multiple "
         "GPUs; `not-multigpu` runs only single-GPU "
-        "tests, which can run on a single-GPU runner. Combined (AND) with the "
+        "tests, which can run on a single-GPU runner; `multigpu-extra` runs only "
+        "tests that need more GPUs than the standard 2-GPU runner provides (3-4 "
+        "GPU tests), for a larger-runner config. Combined (AND) with the "
         "existing serial/not-serial split.",
     )
     parser.add_argument(
@@ -2165,6 +2167,7 @@ def run_tests(
     multigpu_marker = {
         "multigpu": "multigpu",
         "not-multigpu": "not multigpu",
+        "multigpu-extra": "multigpu_extra",
     }.get(getattr(options, "multigpu_filter", None))
 
     def marker_args(serial_expr: str | None) -> list[str]:
