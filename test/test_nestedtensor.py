@@ -4200,7 +4200,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         # for higher dim input sizes.
         # See https://github.com/pytorch/pytorch/issues/141112
         B, D, max_seq_len = 64, 512, 100
-        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda._clear_cublas_workspaces()
         m = torch.nn.Linear(D, D, device=device)
         nt = torch.nested.as_nested_tensor(
             [
@@ -4937,7 +4937,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
             self.assertFalse(
                 out_actual.is_nested,
-                f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
+                lambda msg: f"{msg}\n{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
             )  # output is a dense tensor
             self.assertEqual(out_actual, out_expected)
 
@@ -5209,7 +5209,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
                 self.assertFalse(
                     out_actual.is_nested,
-                    f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
+                    lambda msg: f"{msg}\n{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
                 )  # output is a dense tensor
                 self.assertEqual(out_actual, out_expected)
 

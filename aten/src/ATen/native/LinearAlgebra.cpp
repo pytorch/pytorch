@@ -3390,7 +3390,7 @@ Tensor linalg_cond(const Tensor& self, std::string_view ord) {
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
-  if (self.numel() == 0) {
+  if (self.sym_numel() == 0) {
     return _linalg_cond_empty_matrix(self, self.scalar_type());
   }
 

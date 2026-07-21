@@ -165,7 +165,7 @@ if not IS_WINDOWS:
 
             self.assertFalse(
                 success,
-                f"Function {func_name} compiled successfully with TORCH_TARGET_VERSION=2.9.0. "
+                lambda msg: f"{msg}\nFunction {func_name} compiled successfully with TORCH_TARGET_VERSION=2.9.0. "
                 f"This could mean two things.\n\t1. It should run with 2.9.0 and should be "
                 "moved to libtorch_agn_2_9_extension\n\t2. The function(s) it tests do not use the "
                 "proper TORCH_FEATURE_VERSION guards\n\nThe libtorch_agnostic_targetting CI workflow will "
@@ -207,7 +207,7 @@ if not IS_WINDOWS:
 
             self.assertTrue(
                 success,
-                f"mv_tensor_accessor_cpu.cpp failed to compile with TORCH_TARGET_VERSION=2.9.0. "
+                lambda msg: f"{msg}\nmv_tensor_accessor_cpu.cpp failed to compile with TORCH_TARGET_VERSION=2.9.0. "
                 f"This file is expected to work with 2.9.0 since it doesn't use 2.10+ features. "
                 f"Error: {error_msg}",
             )
@@ -248,7 +248,7 @@ if not IS_WINDOWS:
 
             self.assertTrue(
                 success,
-                f"cuda_kernel.cu failed to compile with TORCH_TARGET_VERSION=2.9.0. "
+                lambda msg: f"{msg}\ncuda_kernel.cu failed to compile with TORCH_TARGET_VERSION=2.9.0. "
                 f"This file is expected to work with 2.9.0 since it doesn't use 2.10+ features. "
                 f"Error: {error_msg}",
             )
