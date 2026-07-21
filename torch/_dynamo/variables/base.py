@@ -279,6 +279,21 @@ def is_side_effect_safe(m: MutationType) -> bool:
     return m.scope == scope_id
 
 
+def maybe_get_python_type(obj: VariableTracker) -> type:
+    try:
+        return obj.python_type()
+    except NotImplementedError:
+        unimplemented(
+            gb_type="Unsupported python_type() call",
+            context=f"{obj} does not implement python_type()",
+            explanation="This VariableTracker does not implement python_type(), "
+            "which is required for object protocol operations.",
+            hints=[
+                *graph_break_hints.DYNAMO_BUG,
+            ],
+        )
+
+
 class NO_SUCH_SUBOBJ:
     """Sentinel indicating no concrete Python object is available."""
 
@@ -635,11 +650,8 @@ class SlotGroup(Enum):
 @dataclasses.dataclass(frozen=True)
 class Slot:
     """A CPython type slot: the name of the VariableTracker method implementing
-    the slot function.  Distinct from SlotDef (a slotdefs[] dunder entry) -- e.g.
-    the mp_length slot fn is the raw ``mp_length`` getter, not ``__len__``'s
-    ``tp_len_impl`` wrapper.  Mirrors the function pointer in a type's Py*Methods
-    struct: unbound, so the receiving ``vt`` is passed at call time as CPython
-    passes ``self`` to ``Py_TYPE(vt)->...->slot(vt, ...)``."""
+    the slot function.
+    """
 
     impl: str
 
@@ -882,7 +894,7 @@ _SLOTDEFS: list[SlotDef] = [
     # SlotDef("__setattr__", ),
     # SlotDef("__delattr__", ),
     TPSLOT("__repr__", "repr_impl", PyTypeSlots.TP_REPR, _wrap_unaryfunc),
-    TPSLOT("__hash__", "tp_hash_impl", PyTypeSlots.TP_HASH, _wrap_unaryfunc),
+    # TPSLOT("__hash__", "tp_hash_impl", PyTypeSlots.TP_HASH, _wrap_unaryfunc),
     TPSLOT("__call__", "call_function", PyTypeSlots.TP_CALL, wrap_call),
     TPSLOT("__str__", "str_impl", PyTypeSlots.TP_STR, _wrap_unaryfunc),
     TPSLOT(
@@ -897,18 +909,19 @@ _SLOTDEFS: list[SlotDef] = [
         PyTypeSlots.TP_GETATTRO,
         _wrap_getattro,
     ),
-    TPSLOT(
-        "__setattr__",
-        "setattro_impl",
-        PyTypeSlots.TP_SETATTRO,
-        _wrap_setattr,
-    ),
-    TPSLOT(
-        "__delattr__",
-        "delattro_impl",
-        PyTypeSlots.TP_SETATTRO,
-        _wrap_delattr,
-    ),
+    # This needs one to model tp_setattro first + PyObject_GenericSetAttr / PyObject_GenericDelAttr
+    # TPSLOT(
+    #     "__setattr__",
+    #     "setattro_impl",
+    #     PyTypeSlots.TP_SETATTRO,
+    #     _wrap_setattr,
+    # ),
+    # TPSLOT(
+    #     "__delattr__",
+    #     "delattro_impl",
+    #     PyTypeSlots.TP_SETATTRO,
+    #     _wrap_delattr,
+    # ),
     TPSLOT(
         "__lt__",
         "richcompare_impl",
@@ -1068,7 +1081,12 @@ _SLOTDEFS: list[SlotDef] = [
         PyNumberSlots.NB_ABSOLUTE,
         _wrap_unaryfunc,
     ),
-    # SlotDef("__bool__", ...), # missing
+    NBSLOT(
+        "__bool__",
+        "bool_impl",
+        PyNumberSlots.NB_BOOL,
+        _wrap_unaryfunc,
+    ),
     NBSLOT(
         "__invert__",
         "nb_invert_impl",
@@ -1270,7 +1288,7 @@ _SLOTDEFS: list[SlotDef] = [
     # Mapping
     MPSLOT(
         "__len__",
-        "tp_len_impl",
+        "mp_length",
         PyMappingSlots.MP_LENGTH,
         _wrap_unaryfunc,
     ),
@@ -1295,7 +1313,7 @@ _SLOTDEFS: list[SlotDef] = [
     # Sequence
     SQSLOT(
         "__len__",
-        "tp_len_impl",
+        "sq_length",
         PySequenceSlots.SQ_LENGTH,
         _wrap_unaryfunc,
     ),
@@ -1765,34 +1783,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return variables.ConstantVariable.create(value, source=source)
 
-    def setattro_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        name: VariableTracker,
-        value: VariableTracker,
-    ) -> VariableTracker:
-        """tp_setattro slot (__setattr__).  Routes through the builtin setattr
-        handler, which performs the attribute store via side effects (the same
-        path STORE_ATTR uses)."""
-        return variables.BuiltinVariable(setattr).call_function(
-            tx, [self, name, value], {}
-        )
-
-    def delattro_impl(
-        self, tx: InstructionTranslatorBase, name: VariableTracker
-    ) -> VariableTracker:
-        """tp_setattro slot (__delattr__).  Routes through the builtin delattr
-        handler (the same path DELETE_ATTR uses)."""
-        return variables.BuiltinVariable(delattr).call_function(tx, [self, name], {})
-
-    def tp_hash_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
-        """tp_hash slot (__hash__).  Routes through generic_hash (PyObject_Hash),
-        which returns a VariableTracker -- unlike hash_impl, which returns a
-        (hash, needs_guard) tuple for internal use."""
-        from .object_protocol import generic_hash
-
-        return generic_hash(tx, self)
-
     def get_dict_vt(
         self, tx: InstructionTranslatorBase
     ) -> variables.DunderDictVariable:
@@ -1937,17 +1927,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 "Please report an issue to PyTorch.",
             ],
         )
-
-    def tp_len_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
-        """__len__ slot: PyObject_Size, dispatches sq_length then mp_length.
-
-        Routed through generic_len so a type that reports mp_length first (e.g.
-        list, whose descriptor resolves to mp_length) still uses whichever of
-        sq_length/mp_length the VT actually overrides.
-        """
-        from .object_protocol import generic_len
-
-        return generic_len(tx, self)
 
     def sq_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when sq_length is not implemented."""
@@ -2922,35 +2901,35 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     @property
     def tp_type(self) -> PyTypeObject:
-        return _tp_type(self.python_type())
+        return _tp_type(maybe_get_python_type(self))
 
     @property
     def tp_as_number(self) -> PyNumberMethods:
-        return _tp_type(self.python_type()).tp_as_number
+        return _tp_type(maybe_get_python_type(self)).tp_as_number
 
     @property
     def tp_as_sequence(self) -> PySequenceMethods:
-        return _tp_type(self.python_type()).tp_as_sequence
+        return _tp_type(maybe_get_python_type(self)).tp_as_sequence
 
     @property
     def tp_as_mapping(self) -> PyMappingMethods:
-        return _tp_type(self.python_type()).tp_as_mapping
+        return _tp_type(maybe_get_python_type(self)).tp_as_mapping
 
     @property
     def tp_iter(self) -> Slot | None:
-        return _tp_type(self.python_type()).tp_iter
+        return _tp_type(maybe_get_python_type(self)).tp_iter
 
     @property
     def tp_iternext(self) -> Slot | None:
-        return _tp_type(self.python_type()).tp_iternext
+        return _tp_type(maybe_get_python_type(self)).tp_iternext
 
     @property
     def tp_str(self) -> Slot | None:
-        return _tp_type(self.python_type()).tp_str
+        return _tp_type(maybe_get_python_type(self)).tp_str
 
     @property
     def tp_repr(self) -> Slot | None:
-        return _tp_type(self.python_type()).tp_repr
+        return _tp_type(maybe_get_python_type(self)).tp_repr
 
     @property
     def tp_dict(self):
