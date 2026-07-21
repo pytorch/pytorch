@@ -73,6 +73,11 @@ FLEX_GEMM_BODY_GRAPH_PASSES: tuple[
 ] = (mark_flex_gemm_body_gemm_node,)
 
 
+def flex_gemm_fast_math_sigmoid(x: torch.Tensor) -> torch.Tensor:
+    """Use the tanh sigmoid identity selected by QUACK fast math."""
+    return torch.tanh(x * 0.5) * 0.5 + 0.5
+
+
 def flex_gemm_fast_math_silu(x: torch.Tensor) -> torch.Tensor:
     """Use the tanh SiLU identity selected by QUACK fast math."""
     half = x * 0.5
@@ -80,7 +85,8 @@ def flex_gemm_fast_math_silu(x: torch.Tensor) -> torch.Tensor:
 
 
 FLEX_GEMM_FAST_MATH_DECOMPOSITIONS: dict[torch._ops.OpOverload, Callable[..., Any]] = {
-    torch.ops.aten.silu.default: flex_gemm_fast_math_silu
+    torch.ops.aten.sigmoid.default: flex_gemm_fast_math_sigmoid,
+    torch.ops.aten.silu.default: flex_gemm_fast_math_silu,
 }
 
 
