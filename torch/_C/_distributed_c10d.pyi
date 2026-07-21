@@ -629,12 +629,6 @@ class ProcessGroup:
         root: int,
         timeout: timedelta | None = None,
     ) -> Work: ...
-    def gather_into_tensor(
-        self,
-        output: Tensor,
-        input: Tensor,
-        opts=...,
-    ) -> Work: ...
     @overload
     def scatter(
         self,

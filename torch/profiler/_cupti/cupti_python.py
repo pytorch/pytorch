@@ -545,12 +545,8 @@ class _PyLibCupti:
             ),
             "cuptiActivityEnable_v2",
         )
-        # ``kind`` is passed as a plain int (the monitor keys its selection by int), so
-        # the old ``kind.name`` check never matched and these were dead code. Compare the
-        # kind value instead. The disable is best-effort: the per-cbid runtime/driver
-        # activity filter returns CUPTI_ERROR_NOT_COMPATIBLE under the user-defined-record
-        # subscriber (a no-op on the monitor's UDR path), so the post-decode blocklist in
-        # monitor_trace is what actually keeps the noise out of the trace.
+        # ``kind`` is a plain int here, so compare by value. The per-cbid runtime/driver
+        # disable must follow the kind enable.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
         k = int(kind)
@@ -560,10 +556,9 @@ class _PyLibCupti:
             self.disable_noisy_driver_apis(sub_handle)
 
     def disable_noisy_runtime_apis(self, sub_handle: int) -> None:
-        """Best-effort: stop CUPTI emitting RUNTIME records for the noise-only cbids
+        """Stop CUPTI emitting RUNTIME records for the noise-only cbids
         (cudaGetDevice/SetDevice/GetLastError) so they don't fill the UDR buffers, via the
-        subscriber-scoped _v2 entry (the UDR path's form). A no-op if it is absent (the
-        post-decode blocklist still keeps them out of the chrome trace)."""
+        subscriber-scoped _v2 entry (the UDR path's form). A no-op if it is absent."""
         cbids = _noisy_runtime_cbids()
         fn_v2 = getattr(self._lib, "cuptiActivityEnableRuntimeApi_v2", None)
         if not cbids or fn_v2 is None:
@@ -572,10 +567,10 @@ class _PyLibCupti:
             fn_v2(ctypes.c_void_p(sub_handle), ctypes.c_uint32(cbid), ctypes.c_uint8(0))
 
     def disable_noisy_driver_apis(self, sub_handle: int) -> None:
-        """Best-effort: stop CUPTI emitting DRIVER records for the noise-only cbids
+        """Stop CUPTI emitting DRIVER records for the noise-only cbids
         (cuKernelGetAttribute/cuDevicePrimaryCtxGetState/cuCtxGetCurrent) so they don't
         fill the UDR buffers, via the subscriber-scoped _v2 entry (the UDR path's form). A
-        no-op if it is absent (the post-decode driver allowlist still keeps them out)."""
+        no-op if it is absent."""
         cbids = _noisy_driver_cbids()
         fn_v2 = getattr(self._lib, "cuptiActivityEnableDriverApi_v2", None)
         if not cbids or fn_v2 is None:

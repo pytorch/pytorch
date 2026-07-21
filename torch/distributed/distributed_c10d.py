@@ -106,7 +106,6 @@ __all__ = [
     "broadcast_object_list",
     "destroy_process_group",
     "gather",
-    "gather_into_tensor",
     "gather_object",
     "get_backend_config",
     "get_backend",
@@ -2552,7 +2551,12 @@ def _new_process_group_helper(
             # parent group, even those not in the new group.  This is
             # a requirement of the NCCL API as otherwise we would get
             # out of sync.
-            if split_from:
+            #
+            # Under TorchComms, subgroups are built with `new_comm` (a
+            # members-only store rendezvous), not by splitting the parent, so
+            # non-members must NOT issue a no-color split -- doing so would
+            # desync against members that never split.
+            if split_from and not _use_torchcomms_enabled():
                 split_from.perform_nocolor_split(_get_default_group().bound_device_id)
             return GroupMember.NON_GROUP_MEMBER, None
 
@@ -2603,6 +2607,20 @@ def _new_process_group_helper(
 
         if _use_torchcomms_enabled() and backend_str not in [Backend.FAKE]:
             torch_device = torch.device(device)
+            # Pass this rank's actual device WITH its index. A device-type-only
+            # torch.device(device) makes the TorchComms bootstrap default the
+            # device to (group-local rank % device_count) -- correct only for the
+            # world group (group-local == global rank). For a subgroup the
+            # group-local rank differs from the rank's physical device, so the
+            # comm (and its lazy P2P pair comms) would be created on the wrong
+            # device, causing illegal memory access. The default PG's
+            # bound_device_id is this rank's device for every group it joins.
+            if (
+                device_id is not None
+                and device_id.index is not None
+                and device_id.type == torch_device.type
+            ):
+                torch_device = device_id
             logger.warning(
                 "Using TorchComms backend (enabled via %s) for device %s with backend %s",
                 "TORCH_DISTRIBUTED_USE_TORCHCOMMS env var"
@@ -2621,13 +2639,31 @@ def _new_process_group_helper(
                 extra = _pg_options_to_hints(backend_options)
                 if extra:
                     hints.update(extra)
-            comm = new_comm(
-                backend_str,
-                torch_device,
-                name=group_name,
-                store=backend_prefix_store,
-                hints=hints,
+            # new_comm has no rank/size params -- the TorchComms bootstrap reads
+            # them from TORCHCOMM_RANK/SIZE. Seed from this group's rank/size so
+            # non-Torchrun launchers (which TorchComms cannot auto-detect, e.g.
+            # process-spawning inference servers) work without each caller having
+            # to set these. Save/restore around the call (single-threaded here).
+            _tc_saved = (
+                os.environ.get("TORCHCOMM_RANK"),
+                os.environ.get("TORCHCOMM_SIZE"),
             )
+            os.environ["TORCHCOMM_RANK"] = str(group_rank)
+            os.environ["TORCHCOMM_SIZE"] = str(group_size)
+            try:
+                comm = new_comm(
+                    backend_str,
+                    torch_device,
+                    name=group_name,
+                    store=backend_prefix_store,
+                    hints=hints,
+                )
+            finally:
+                for _k, _v in zip(("TORCHCOMM_RANK", "TORCHCOMM_SIZE"), _tc_saved):
+                    if _v is None:
+                        os.environ.pop(_k, None)
+                    else:
+                        os.environ[_k] = _v
             buffer_size = os.environ.get(
                 "TORCH_FR_BUFFER_SIZE",
                 os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
@@ -5126,114 +5162,6 @@ def gather(
     opts.rootRank = group_dst
     opts.asyncOp = async_op
     work = group.gather(output_tensors, input_tensors, opts)
-
-    if async_op:
-        return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
-        work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
-
-
-@_exception_logger
-def gather_into_tensor(
-    tensor: torch.Tensor,
-    gather_tensor: torch.Tensor | None = None,
-    dst: int | None = None,
-    group: ProcessGroup | None = None,
-    async_op: bool = False,
-    group_dst: int | None = None,
-):
-    """
-    Gather the input tensor from all ranks into a single output tensor on ``dst``.
-
-    This is the single-output-tensor analog of :func:`gather`: instead of
-    filling a Python list of per-rank tensors on the destination rank, each
-    rank's contribution is written directly into a single, correctly-sized
-    ``gather_tensor``. Backends that support a native gather-into-tensor path
-    (e.g. NCCL >= 2.28.3 via ``ncclGather``) avoid the extra per-rank copy that
-    :func:`gather` incurs.
-
-    This function requires ``tensor`` to be the same size on each process.
-
-    Args:
-        tensor (Tensor): Input tensor to be gathered from the current rank.
-        gather_tensor (Tensor, optional): Output tensor to accommodate the
-            gathered contributions from all ranks. It must be contiguous and
-            sized to hold ``world_size`` copies of ``tensor``; only its total
-            number of elements is validated, so either a flat concatenation
-            (``world_size * tensor.numel()``) or a stack
-            (``[world_size, *tensor.shape]``) works, as both share the same
-            contiguous layout. A non-contiguous output (e.g. a strided stacked
-            view) raises a contiguity error rather than a shape error. Only
-            required (and only used) on the destination rank.
-        dst (int, optional): Destination rank on global process group (regardless
-            of ``group`` argument). (If both ``dst`` and ``group_dst`` are None,
-            default is global rank 0)
-        group (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used.
-        async_op (bool, optional): Whether this op should be an async op
-        group_dst (int, optional): Destination rank on ``group``. Invalid to
-            specify both ``dst`` and ``group_dst``
-
-    Returns:
-        Async work handle, if async_op is set to True.
-        None, if not async_op or if not part of the group
-
-    Example::
-        >>> # xdoctest: +SKIP("no rank")
-        >>> # We have 2 process groups, 2 ranks.
-        >>> device = torch.device(f"cuda:{rank}")
-        >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
-        >>> if dist.get_rank() == 0:
-        >>>     gather_tensor = torch.zeros(2 * 2, dtype=torch.int64, device=device)
-        >>> else:
-        >>>     gather_tensor = None
-        >>> dist.gather_into_tensor(tensor, gather_tensor, dst=0)
-        >>> gather_tensor
-        tensor([1, 2, 3, 4], device='cuda:0')  # Rank 0
-        None                                    # Rank 1
-
-    """
-    relevant_args = (tensor,)
-    if has_torch_function(relevant_args):
-        return handle_torch_function(
-            gather_into_tensor,
-            relevant_args,
-            tensor,
-            gather_tensor=gather_tensor,
-            dst=dst,
-            group=group,
-            async_op=async_op,
-            group_dst=group_dst,
-        )
-
-    _check_single_tensor(tensor, "tensor")
-    group = _group_or_default_group(group)
-    if _rank_not_in_group(group):
-        _warn_not_in_group("gather_into_tensor")
-        return
-    if dst is None and group_dst is None:
-        dst = 0
-    group_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=False)
-    my_group_rank = group.rank()
-
-    if group_dst == my_group_rank:
-        if gather_tensor is None:
-            raise ValueError("gather_tensor must be specified on the destination rank")
-        _check_single_tensor(gather_tensor, "gather_tensor")
-        _ensure_all_tensors_same_dtype(tensor, gather_tensor)
-        output_tensor = gather_tensor
-    else:
-        # gather_tensor is unused on non-destination ranks; pass an empty
-        # placeholder so the single-tensor op signature is satisfied.
-        output_tensor = tensor.new_empty(0)
-
-    opts = GatherOptions()
-    opts.rootRank = group_dst
-    opts.asyncOp = async_op
-    work = group.gather_into_tensor(output_tensor, tensor, opts)
 
     if async_op:
         return work

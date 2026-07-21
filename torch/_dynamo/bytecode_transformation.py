@@ -1383,6 +1383,27 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
     instructions[:] = new_insts
 
 
+def remove_load_attr_method_variant(instructions: list[Instruction]) -> None:
+    """On 3.12+, LOAD_ATTR with arg%2==1 is the method variant that pushes 2
+    values (NULL/self + method).  Normalize it to a non-method LOAD_ATTR
+    (1 value) followed by PUSH_NULL (+ SWAP on 3.12 where NULL goes below
+    the callable).  This lets break_graph_if_unsupported handle LOAD_ATTR
+    uniformly as a single-output instruction."""
+    new_insts: list[Instruction] = []
+    for inst in instructions:
+        if inst.opname == "LOAD_ATTR" and inst.arg is not None and inst.arg % 2:
+            replace_insts = [
+                create_instruction("LOAD_ATTR", arg=inst.arg & ~1, argval=inst.argval),
+                create_instruction("PUSH_NULL"),
+            ]
+            if sys.version_info < (3, 13):
+                replace_insts.append(create_instruction("SWAP", arg=2))
+            new_insts.extend(overwrite_instruction(inst, replace_insts))
+        else:
+            new_insts.append(inst)
+    instructions[:] = new_insts
+
+
 FUSED_INSTS = {
     "LOAD_FAST_LOAD_FAST": ("LOAD_FAST", "LOAD_FAST"),
     "LOAD_FAST_BORROW_LOAD_FAST_BORROW": ("LOAD_FAST_BORROW", "LOAD_FAST_BORROW"),
@@ -1942,6 +1963,7 @@ def _cached_cleaned_instructions(
             remove_jump_if_none(instructions)
             if sys.version_info >= (3, 12):
                 remove_binary_store_slice(instructions)
+                remove_load_attr_method_variant(instructions)
             if sys.version_info >= (3, 13):
                 remove_fused_load_store(instructions)
         if config.debug_force_graph_break_on_leaf_return:
