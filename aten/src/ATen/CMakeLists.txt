@@ -204,13 +204,6 @@ file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/fla
 if(USE_FLASH_ATTENTION)
   # Now building CK by default
   if(USE_ROCM)
-    if(DEFINED ENV{USE_ROCM_CK_SDPA})
-        if(ENV{USE_ROCM_CK_SDPA} EQUAL 1)
-          caffe2_update_option(USE_ROCM_CK_SDPA ON)
-        endif()
-    elseif(NOT WIN32)
-      caffe2_update_option(USE_ROCM_CK_SDPA ON)
-    endif()
     # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
     # are in PYTORCH_ROCM_ARCH; otherwise the ck_sdpa target ends up with an
     # empty HIP_ARCHITECTURES and CMake errors out.
@@ -580,10 +573,6 @@ else()
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
 endif()
 
-if(USE_CUDA AND USE_ROCM)
-  message(FATAL_ERROR "ATen doesn't not currently support simultaneously building with CUDA and ROCM")
-endif()
-
 if(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
   # Next two lines are needed because TunableOp uses third-party/fmt
@@ -642,7 +631,7 @@ if(USE_ROCM)
     # a ck/config.h. We just do that part here. Without this, the ck.h from the
     # ROCM SDK may get accidentally used instead.
     rocm_generate_ck_conf(
-      "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
+      "${CMAKE_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
       "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
     )
   endif()
@@ -1012,7 +1001,7 @@ endif()
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
 foreach(HEADER  ${INSTALL_HEADERS})
   string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "ATen/" HEADER_SUB ${HEADER})
-  string(REPLACE "${Torch_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
+  string(REPLACE "${CMAKE_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
   get_filename_component(DIR ${HEADER_SUB} DIRECTORY)
   install(FILES ${HEADER} DESTINATION "${AT_INSTALL_INCLUDE_DIR}/${DIR}")
 endforeach()

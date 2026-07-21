@@ -951,10 +951,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report(
                     "-- Not using Compute Library for the Arm architecture with MKLDNN"
                 )
-            if cmake_cache_vars["USE_MKLDNN_CBLAS"]:
-                report("-- Using CBLAS in MKLDNN")
-            else:
-                report("-- Not using CBLAS in MKLDNN")
         else:
             report("-- Not using MKLDNN")
         if cmake_cache_vars["USE_NCCL"] and cmake_cache_vars["USE_SYSTEM_NCCL"]:

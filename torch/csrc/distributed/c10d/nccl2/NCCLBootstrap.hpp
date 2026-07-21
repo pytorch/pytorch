@@ -9,18 +9,12 @@
 #include <unordered_map>
 
 #include <ATen/ATen.h>
-#include <cuda_runtime.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 
 namespace c10d::nccl2 {
-
-// Default port for TCPStore-based unique ID exchange. This port is chosen
-// to match PyTorch's default TCPStore port (29500) for compatibility.
-// Users can override this via environment variables or configuration.
-constexpr uint16_t kTCPStorePort = 29500;
 
 class NCCLBootstrap {
  public:
@@ -55,24 +49,16 @@ class NCCLBootstrap {
 
  private:
   ncclUniqueId exchangeUniqueId(std::string_view name);
-  ncclUniqueId exchangeUniqueIdStore();
-  ncclUniqueId exchangeUniqueIdTCPStore(std::string_view name);
-  bool isTCPStoreEnabled();
-  void cleanupTCPStore(ncclComm_t nccl_comm);
 
  private:
   const std::chrono::milliseconds timeout_;
   const uint64_t generation_;
 
   c10::intrusive_ptr<c10d::Store> store_;
-  bool created_internal_store_;
   c10::Device device_;
   std::shared_ptr<NcclApi> nccl_api_;
-  at::DataPtr barrier_buffer_;
   int rank_;
   int comm_size_;
-
-  std::string uniqueid_xchg_method_;
 };
 
 // Helper function to populate NCCL config from hints
