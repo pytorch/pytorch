@@ -273,11 +273,16 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             f"FlexGEMM QUACK backend currently supports only aten.{_SUPPORTED_FLEX_GEMM_OP_NAMES}"
         )
     tuned = kernel_options.get("tuned", False)
-    unsupported_options = OrderedSet(kernel_options) - OrderedSet(["backend", "tuned"])
+    fast_math = kernel_options.get("fast_math", False)
+    unsupported_options = OrderedSet(kernel_options) - OrderedSet(
+        ["backend", "tuned", "fast_math"]
+    )
     if unsupported_options:
         raise NotImplementedError(
             f"unsupported FlexGEMM kernel options: {sorted(unsupported_options)}"
         )
+    if not isinstance(fast_math, bool):
+        raise NotImplementedError("FlexGEMM fast_math kernel option must be bool")
 
     from torch._inductor.kernel.flex_gemm.epilogue import (
         analyze_flex_gemm_epilogue,
@@ -387,7 +392,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         outputs.local_reduce, local_reduce_out_index
     )
     epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
-        subgraph.graph_module, gemm_op, epilogue_analysis, epilogue_arg_placeholders
+        subgraph.graph_module,
+        gemm_op,
+        epilogue_analysis,
+        epilogue_arg_placeholders,
+        fast_math=fast_math,
     )
     quack_config_keys = flex_gemm_config_keys_for_local_reduce(
         layout.device,
