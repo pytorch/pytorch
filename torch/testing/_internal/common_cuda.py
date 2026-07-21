@@ -11,6 +11,7 @@ import inspect
 import contextlib
 import os
 import unittest
+import warnings
 
 
 CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
@@ -439,6 +440,49 @@ requires_triton_ptxas_compat = unittest.skipIf(not torch.version.xpu
                                                and torch.version.hip is None
                                                and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
                                                "Requires CUDA {}.{} to match Tritons ptxas version".format(*TRITON_PTXAS_VERSION))
+
+# These platform-capability symbols were moved to
+# torch.testing._internal.common_gpu. Re-export them here for backward
+# compatibility, warning that the common_cuda location is deprecated.
+_MOVED_TO_COMMON_GPU = frozenset({
+    "evaluate_platform_supports_flash_attention",
+    "evaluate_platform_supports_efficient_attention",
+    "evaluate_platform_supports_fp8",
+    "evaluate_platform_supports_bf16",
+    "evaluate_platform_supports_bf16_atomics",
+    "evaluate_platform_supports_half_atomics",
+    "evaluate_platform_supports_fp8_grouped_gemm",
+    "evaluate_platform_supports_mx_gemm",
+    "evaluate_platform_supports_mxfp8_grouped_gemm",
+    "evaluate_platform_supports_fp8_sparse",
+    "PLATFORM_SUPPORTS_FLASH_ATTENTION",
+    "PLATFORM_SUPPORTS_MEM_EFF_ATTENTION",
+    "PLATFORM_SUPPORTS_FUSED_ATTENTION",
+    "PLATFORM_SUPPORTS_FUSED_SDPA",
+    "PLATFORM_SUPPORTS_FP8",
+    "PLATFORM_SUPPORTS_BF16",
+    "PLATFORM_SUPPORTS_BF16_ATOMICS",
+    "PLATFORM_SUPPORTS_HALF_ATOMICS",
+    "PLATFORM_SUPPORTS_MX_GEMM",
+    "PLATFORM_SUPPORTS_FP8_GROUPED_GEMM",
+    "PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM",
+    "PLATFORM_SUPPORTS_FP8_SPARSE",
+})
+
+
+def __getattr__(name):
+    if name in _MOVED_TO_COMMON_GPU:
+        from torch.testing._internal import common_gpu
+        warnings.warn(
+            f"'{name}' has moved from torch.testing._internal.common_cuda to "
+            f"torch.testing._internal.common_gpu. Importing it from common_cuda "
+            f"is deprecated and will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return getattr(common_gpu, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
