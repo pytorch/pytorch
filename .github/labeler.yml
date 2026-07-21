@@ -122,9 +122,6 @@
 - test/distributed/tensor/**
 - torch/distributed/tensor/**
 
-"ciflow/vllm":
-- .github/ci_commit_pins/vllm.txt
-
 "ci-refresh-hf-cache":
 - .github/ci_commit_pins/vllm.txt
 - .ci/docker/ci_commit_pins/timm.txt
