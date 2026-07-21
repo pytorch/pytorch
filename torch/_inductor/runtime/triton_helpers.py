@@ -272,6 +272,17 @@ def fmax2(a, dim):
 
 
 @triton.jit
+def _online_softmax_maximum(a, b):
+    return tl.maximum(a, b, propagate_nan=tl.PropagateNan.ALL)
+
+
+@triton.jit
+def online_softmax_max2(a, dim):
+    # Softmax normalization does not observe the sign of a zero maximum.
+    return tl.reduce(a, dim, _online_softmax_maximum)
+
+
+@triton.jit
 def minimum_with_index(a_value, a_index, b_value, b_index):
     mask = a_value < b_value
     equal = a_value == b_value
@@ -351,6 +362,31 @@ def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexp
     #   out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
     # but since rhs_sum is all 1, we can simplify it.
     out_sum = lhs_sum * lhs_scale + rhs_scale
+    return out_max, out_sum
+
+
+@triton.jit
+def online_softmax_reduce_scalar_combine(
+    lhs_max,
+    lhs_sum,
+    rhs_max,
+    valid_mask,
+    dim,
+    use_fast_math: tl.constexpr,
+):
+    block_max = online_softmax_max2(rhs_max, dim)
+    out_max = maximum(lhs_max, block_max)
+    lhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
+    )
+    out_max_keepdim = tl.expand_dims(out_max, dim)
+    rhs_scale = tl.where(
+        out_max_keepdim == float("-inf"),
+        1.0,
+        exp(rhs_max - out_max_keepdim, use_fast_math),
+    )
+    rhs_scale = tl.where(valid_mask, rhs_scale, 0.0)
+    out_sum = lhs_sum * lhs_scale + tl.sum(rhs_scale, dim)
     return out_max, out_sum
 
 
