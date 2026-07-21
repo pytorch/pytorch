@@ -302,6 +302,17 @@ except ImportError:
     pass
 
 try:
+    # Lazy variant of "nccl2": collectives run on a primary communicator while
+    # each point-to-point peer pair gets its own lazily-created 2-rank comm
+    # (selected via the "nccl-lazy" backend / entry point).
+    from torch._C._distributed_c10d import ProcessGroupNCCLLazy
+
+    ProcessGroupNCCLLazy.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupNCCLLazy"]
+except ImportError:
+    pass
+
+try:
     from torch._C._distributed_c10d import _ProcessGroupWrapper, ProcessGroupGloo
 
     ProcessGroupGloo.__module__ = "torch.distributed.distributed_c10d"
@@ -635,6 +646,28 @@ def _create_nccl2_process_group(
     return ProcessGroupNCCL2(opts.store, opts.group_rank, opts.group_size, pg_options)
 
 
+def _create_nccl_lazy_process_group(
+    opts: _DistributedBackendOptions, backend_options: Any | None
+) -> C10DBackend:
+    if not is_nccl_available():
+        raise RuntimeError("Distributed package doesn't have NCCL built in")
+    if backend_options is not None and isinstance(
+        backend_options, ProcessGroupNCCL2.Options
+    ):
+        pg_options = backend_options
+    else:
+        pg_options = ProcessGroupNCCL2.Options()
+    # pyrefly: ignore [bad-argument-type]
+    pg_options._timeout = opts.timeout
+    pg_options.global_ranks_in_group = opts.global_ranks_in_group
+    pg_options.group_name = opts.group_id
+    if opts.enable_reconfigure:
+        pg_options.enable_reconfigure = True
+    return ProcessGroupNCCLLazy(
+        opts.store, opts.group_rank, opts.group_size, pg_options
+    )
+
+
 def _create_ucc_process_group(
     opts: _DistributedBackendOptions, backend_options: Any | None
 ) -> C10DBackend:
@@ -705,6 +738,16 @@ def _register_builtin_nccl2_backend() -> None:
     Backend.register_backend(
         "nccl2",
         _create_nccl2_process_group,
+        extended_api=True,
+        devices=["cuda"],
+        _backend_type=ProcessGroup.BackendType.CUSTOM,
+    )
+
+
+def _register_builtin_nccl_lazy_backend() -> None:
+    Backend.register_backend(
+        "nccl-lazy",
+        _create_nccl_lazy_process_group,
         extended_api=True,
         devices=["cuda"],
         _backend_type=ProcessGroup.BackendType.CUSTOM,
@@ -2685,7 +2728,7 @@ def _new_process_group_helper(
 
         pg._register_backend(torch.device(device), backend_type, backend_class)
 
-    # set group_name and group_dsec to backend
+    # set group_name and group_desc to backend
     if group_name is None:
         raise AssertionError("group_name must not be None")
     if group_desc is None:
@@ -6042,7 +6085,7 @@ def split_group(
             "No backend for the parent process group or its backend does not support splitting"
         )
 
-    # set the group_desc before the color or no_cloor split
+    # set the group_desc before the color or no_color split
     if hasattr(parent_backend, "comm_split_count") and group_desc is None:
         group_desc = f"{parent_pg.group_desc}:split:{parent_backend.comm_split_count()}"  # type: ignore[attr-defined]
 

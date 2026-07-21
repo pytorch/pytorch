@@ -42,6 +42,12 @@ jobs:
     with:
       jobs-to-include: ${{ github.event.inputs.jobs-to-include || '' }}
 
+  dynamo-unittest:
+    if: github.repository_owner == 'pytorch'
+    name: dynamo-unittest
+    uses: ./.github/workflows/dynamo-unittest.yml
+    secrets: inherit
+
   llm-td:
     if: github.repository_owner == 'pytorch'
     name: before-test
