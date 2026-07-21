@@ -37,6 +37,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/flake8_linter.py',
     '--',
@@ -134,6 +136,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyrefly_linter.py',
     '--config=pyrefly.toml',
@@ -408,6 +412,8 @@ include_patterns=['aten/src/ATen/native/native_functions.yaml']
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/nativefunctions_linter.py',
     '--native-functions-yml=aten/src/ATen/native/native_functions.yaml',
@@ -420,6 +426,8 @@ include_patterns=['.github/workflows/**/*.yml']
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/gha_linter.py',
     '--',
@@ -718,6 +726,31 @@ command = [
 ]
 
 [[linter]]
+code = 'ISINSTANCE_FAKE_TENSOR'
+include_patterns = ['torch/**/*.py']
+exclude_patterns = [
+    '**/fb/**',
+    'torch/testing/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=isinstance\([^)]*\bFakeTensor\b',
+    '--line-allowlist-pattern=noqa: ISINSTANCE_FAKE_TENSOR',
+    '--linter-name=ISINSTANCE_FAKE_TENSOR',
+    '--error-name=isinstance(x, FakeTensor)',
+    """--error-description=\
+        Do not use isinstance(x, FakeTensor) because it only matches \
+        Python FakeTensors and misses C++ FakeTensors. \
+        Use is_fake_tensor(x) for a leaf fake check. \
+        If you must match only a Python FakeTensor instance, keep isinstance \
+        and add a `# noqa: ISINSTANCE_FAKE_TENSOR` comment to the line.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'PYBIND11_SPECIALIZATION'
 include_patterns = [
     '**/*.cpp',
@@ -956,6 +989,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/cmake_linter.py',
     '--config=.cmakelintrc',
@@ -974,6 +1009,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/shellcheck_linter.py',
     '--',
@@ -1092,6 +1129,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/test_has_main_linter.py',
     '--',
@@ -1178,6 +1217,8 @@ include_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/workflow_consistency_linter.py',
     '--',
@@ -1196,6 +1237,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/no_workflows_on_fork.py',
     '--',
@@ -1207,6 +1250,8 @@ code = 'CODESPELL'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/codespell_linter.py',
     '--',
@@ -1242,6 +1287,8 @@ include_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyfmt_linter.py',
     '--',
@@ -1525,6 +1572,8 @@ code = 'PYPROJECT'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyproject_linter.py',
     '--',
@@ -1539,6 +1588,8 @@ code = 'CMAKE_MINIMUM_REQUIRED'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/cmake_minimum_required_linter.py',
     '--',
@@ -1623,6 +1674,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/ruff_linter.py',
     '--config=pyproject.toml',
@@ -1937,4 +1990,16 @@ command = [
     'tools/linter/adapters/generated_shims_version_linter.py',
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'UNSPECIFIED_BACKEND'
+include_patterns = [
+    'test/dynamo/**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/unspecified_backend_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
 ]
