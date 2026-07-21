@@ -397,6 +397,14 @@ def instrument_triton_kernel(
 
 
 def _helion_cache_size(kernel: Any) -> int | None:
+    """Compiled-config count across a Helion Kernel's bound specializations.
+
+    Helion stores compiled configs in ``Kernel._bound_kernels[*]._compile_cache``;
+    the total grows by one each time a new configuration compiles, so a delta
+    across a call tells us whether *this* kernel compiled. Returns None if the
+    object doesn't expose these private attributes (a future Helion that renames
+    them, or a non-kernel in tests).
+    """
     bound_kernels = getattr(kernel, "_bound_kernels", None)
     if bound_kernels is None:
         return None
