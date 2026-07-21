@@ -58,8 +58,7 @@ which will handle all the rough edges of the C API for the user.
 only `libtorch`.
 
 Unlike the rest of the stable ABI, they require `libtorch_python` to be loaded at
-runtime (the conversion is serviced by a vtable it registers on load) and must be
-called with the GIL held. Both hold whenever a Python object is actually in play --
+runtime and must be called with the GIL held. Both hold whenever a Python object is actually in play --
 the process has imported `torch` and you are calling from Python -- and otherwise
 the shims raise an error.
 
