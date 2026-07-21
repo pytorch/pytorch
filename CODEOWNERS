@@ -62,6 +62,9 @@ nn/qat/ @jerryzh168
 /torch/distributed/tensor/_ops/_view_ops.py @weifengpy
 /torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
 
+# TVM backend
+/torch/_dynamo/backends/tvm.py @guan404ming
+
 # ONNX Export
 /torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
 /torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
@@ -124,10 +127,11 @@ test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 torch/fx/proxy.py @zou3519
 
 # HOPs
-torch/_higher_order_ops/*.py @zou3519 @aorenste
-torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste
-test/test_hop_infra.py @zou3519 @aorenste
-torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste
+torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
+torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste @bohnstingl
+docs/source/higher_order_ops/ @bohnstingl
+test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
+torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
 
 # AOTAutograd
 torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste

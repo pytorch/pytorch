@@ -22,8 +22,6 @@ dtype_names = [
     *[f"complex{w}" for w in [64, 128]],
 ]
 
-np_dtype_params = []
-
 np_dtype_params = [
     subtest(("bool", "bool"), name="bool"),
     subtest(
