@@ -43,8 +43,11 @@ def build_libtorch(rerun_cmake: bool, cmake_only: bool) -> None:
         sys.exit(1)
 
     cache_file = build_dir / "CMakeCache.txt"
-    if rerun_cmake and cache_file.exists():
-        cache_file.unlink()
+    if rerun_cmake:
+        cache_file.unlink(missing_ok=True)
+        # Drop generator state too, so a generator or toolchain change
+        # actually takes effect on reconfigure.
+        shutil.rmtree(build_dir / "CMakeFiles", ignore_errors=True)
 
     # Explicit CMAKE_GENERATOR wins; otherwise prefer ninja when available.
     generator = os.environ.get("CMAKE_GENERATOR")
