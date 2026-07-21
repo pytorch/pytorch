@@ -90,11 +90,11 @@ microbench_unbacked_tolist_sum,pass,9
 
 
 
-mnasnet1_0,pass,0
+mnasnet1_0,pass,7
 
 
 
-mobilenet_v2,pass,0
+mobilenet_v2,pass,6
 
 
 
