@@ -279,6 +279,21 @@ def is_side_effect_safe(m: MutationType) -> bool:
     return m.scope == scope_id
 
 
+def maybe_get_python_type(obj: VariableTracker) -> type:
+    try:
+        return obj.python_type()
+    except NotImplementedError:
+        unimplemented(
+            gb_type="Unsupported python_type() call",
+            context=f"{obj} does not implement python_type()",
+            explanation="This VariableTracker does not implement python_type(), "
+            "which is required for object protocol operations.",
+            hints=[
+                *graph_break_hints.DYNAMO_BUG,
+            ],
+        )
+
+
 class NO_SUCH_SUBOBJ:
     """Sentinel indicating no concrete Python object is available."""
 
@@ -2226,35 +2241,35 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     @property
     def tp_type(self) -> PyTypeObject:
-        return _tp_type(self.python_type())
+        return _tp_type(maybe_get_python_type(self))
 
     @property
     def tp_as_number(self) -> PyNumberMethods:
-        return _tp_type(self.python_type()).tp_as_number
+        return _tp_type(maybe_get_python_type(self)).tp_as_number
 
     @property
     def tp_as_sequence(self) -> PySequenceMethods:
-        return _tp_type(self.python_type()).tp_as_sequence
+        return _tp_type(maybe_get_python_type(self)).tp_as_sequence
 
     @property
     def tp_as_mapping(self) -> PyMappingMethods:
-        return _tp_type(self.python_type()).tp_as_mapping
+        return _tp_type(maybe_get_python_type(self)).tp_as_mapping
 
     @property
     def tp_iter(self) -> Slot | None:
-        return _tp_type(self.python_type()).tp_iter
+        return _tp_type(maybe_get_python_type(self)).tp_iter
 
     @property
     def tp_iternext(self) -> Slot | None:
-        return _tp_type(self.python_type()).tp_iternext
+        return _tp_type(maybe_get_python_type(self)).tp_iternext
 
     @property
     def tp_str(self) -> Slot | None:
-        return _tp_type(self.python_type()).tp_str
+        return _tp_type(maybe_get_python_type(self)).tp_str
 
     @property
     def tp_repr(self) -> Slot | None:
-        return _tp_type(self.python_type()).tp_repr
+        return _tp_type(maybe_get_python_type(self)).tp_repr
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """
