@@ -576,7 +576,7 @@ class CapturedScalarLoad(EpiOp):
 
     @cute.jit
     def begin(self, gemm, param, smem_tensor, ctx):
-        return Float32(param[0])
+        return param.load()
 
 
 class ScalarTupleLoad(EpiOp):

@@ -401,9 +401,11 @@ class GemmActMixin(ComposableEpiMixin):
                 scalar_arg_index = 0
                 for arg_kind in params.tensor_epilogue_arg_kinds:
                     if const_expr(arg_kind == 4):
-                        # Scalars broadcast through TensorSSA arithmetic directly.
-                        epilogue_aux_values.append(scalars[scalar_arg_index])
+                        scalar = scalars[scalar_arg_index]
                         scalar_arg_index += 1
+                        tRS_rScalar = cute.make_rmem_tensor_like(tRS_rD, scalar.dtype)
+                        tRS_rScalar.fill(scalar[0])
+                        epilogue_aux_values.append(tRS_rScalar.load())
                     else:
                         if const_expr(arg_kind == 1):
                             epilogue_aux = tRsTileAuxes[tile_arg_index]
