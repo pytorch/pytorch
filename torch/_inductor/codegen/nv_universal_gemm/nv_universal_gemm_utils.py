@@ -40,6 +40,39 @@ def _register_enum_pickling() -> None:
 _register_enum_pickling()
 
 
+def _make_scaled_operand_constraints_picklable() -> None:
+    """Guard ScaledOperandConstraints.__getattr__ against unpickling recursion.
+
+    Its __getattr__ delegates to ``self.quantized``, but reading ``self.quantized``
+    re-enters __getattr__ when ``quantized`` isn't set yet -- which happens while
+    unpickling, since pickle probes ``__setstate__``/``__reduce_ex__`` on the
+    freshly-created, state-less instance before restoring ``__dict__``. That
+    self-delegation recurses infinitely (RecursionError), which blocks shipping a
+    scaled-GEMM operator's metadata to the subprocess precompile pool. Read
+    ``quantized`` from ``__dict__`` (no re-entry) and never delegate dunder
+    lookups; behavior is unchanged once ``quantized`` is set.
+    """
+    try:
+        from cutlass.operators.metadata import ScaledOperandConstraints
+    except ImportError:
+        return
+
+    def __getattr__(self: Any, attr: str) -> Any:
+        if attr == "quantized" or (attr.startswith("__") and attr.endswith("__")):
+            raise AttributeError(attr)
+        quantized = self.__dict__.get("quantized")
+        if quantized is not None and hasattr(quantized, attr):
+            return getattr(quantized, attr)
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{attr}'"
+        )
+
+    ScaledOperandConstraints.__getattr__ = __getattr__
+
+
+_make_scaled_operand_constraints_picklable()
+
+
 def to_cutlass_scale_mode(
     scale_type: Any, swizzle_type: Any
 ) -> tuple[Any | None, Any | None]:
