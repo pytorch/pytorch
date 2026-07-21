@@ -565,6 +565,39 @@ class ColVecTupleLoad(VecTupleLoad):
     vec_op_cls = CapturedColVecLoad
 
 
+class CapturedScalarLoad(EpiOp):
+    """Loads a captured (1,)-shaped tensor's element once per tile. No smem."""
+
+    def param_fields(self):
+        return [(self.name, object, None)]
+
+    def to_params(self, gemm, args):
+        return {self.name: getattr(args, self.name)}
+
+    @cute.jit
+    def begin(self, gemm, param, smem_tensor, ctx):
+        return param.load()
+
+
+class ScalarTupleLoad(EpiOp):
+    """Loads a tuple of captured scalar tensors once per tile. No smem."""
+
+    def param_fields(self):
+        return [(self.name, object, None)]
+
+    def to_params(self, gemm, args):
+        return {self.name: getattr(args, self.name)}
+
+    @cute.jit
+    def begin(self, gemm, param, smem_tensor, ctx):
+        values = []
+        for i, tensor in enumerate(param):
+            values.append(
+                CapturedScalarLoad(f"{self.name}{i}").begin(gemm, tensor, None, ctx)
+            )
+        return tuple(values)
+
+
 class TileStore(EpiOp):
     """Tile-sized output tensor stored via TMA (e.g. postact).
 

@@ -82,7 +82,9 @@ def infer_flex_gemm_epilogue_arg_kinds(
     epilogue_arg_kinds = []
     for epilogue_arg in epilogue_args:
         epilogue_arg_size = epilogue_arg.get_size()
-        if statically_known_shape_equal(epilogue_arg_size, output_size):
+        if statically_known_shape_equal(epilogue_arg_size, [1, 1]):
+            epilogue_arg_kinds.append("scalar")
+        elif statically_known_shape_equal(epilogue_arg_size, output_size):
             epilogue_arg_kinds.append("tile")
         elif statically_known_shape_equal(epilogue_arg_size, [1, n]):
             epilogue_arg_kinds.append("row")
@@ -91,7 +93,7 @@ def infer_flex_gemm_epilogue_arg_kinds(
         else:
             raise NotImplementedError(
                 "FlexGEMM captured tensor epilogue args currently must match "
-                "the GEMM output shape or broadcast as [1, N] / [M, 1]"
+                "the GEMM output shape or broadcast as [1, N] / [M, 1] / [1, 1]"
             )
     return tuple(epilogue_arg_kinds)
 
