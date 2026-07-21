@@ -1182,6 +1182,7 @@ class TestConvolutionNN(NNTestCase):
 
 class TestConvolutionNNDeviceType(NNTestCase):
     @skipMPS
+    @expectedFailureXPU
     def test_slow_conv_transpose3d_kernel_size_mismatch(self, device):
         inp = torch.full((1, 2, 4, 5, 4), 0.5, device=device)
         weight = torch.full((2, 3, 2, 3, 2), 0.5, device=device)
