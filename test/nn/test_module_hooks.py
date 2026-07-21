@@ -1490,12 +1490,7 @@ class TestModuleHookNN(NNTestCase):
         mod = nn.Linear(2, 3)
         inp = torch.rand(1, 2)
         mod.register_full_backward_pre_hook(lambda mod, gO: None)
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            mod(inp).sum().backward()
-        self.assertEqual(
-            [x for x in w if "Full backward hook is firing" in str(x.message)], []
-        )
+        self.assertNotWarn(lambda: mod(inp).sum().backward())
 
     def test_hook_last_arg_requires_grad(self):
         mod = nn.L1Loss()
