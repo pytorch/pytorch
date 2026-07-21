@@ -10141,6 +10141,37 @@ class TestMPS(TestCaseMPS):
         y = x / 64
         self.assertEqual(y, torch.tensor([0., 1023.9844], device="mps"))
 
+    # https://github.com/pytorch/pytorch/issues/170370
+    def test_embeddingbag_first_offset_forced_to_zero(self):
+        # The user's offsets[0] value is ignored for the first bag; output
+        # equals the call with offsets[0]=0.
+        torch.manual_seed(0)
+        weight = torch.randn(10, 3)
+        emb_a = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum").to("mps")
+        emb_b = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum").to("mps")
+        indices = torch.tensor([1, 2, 3], device="mps")
+        r_a = emb_a(indices, torch.tensor([0], device="mps"))
+        r_b = emb_b(indices, torch.tensor([5], device="mps"))
+        self.assertEqual(r_a, r_b)
+
+    def test_embeddingbag_offsets_out_of_range_kernel_error(self):
+        # offsets[-1] > num_indices is reported asynchronously via the kernel
+        # error buffer; the error surfaces at the next host sync.
+        emb = torch.nn.EmbeddingBag(10, 3, mode="sum").to("mps")
+        with self.assertRaisesRegex(RuntimeError, "Invalid offsets"):
+            out = emb(torch.tensor([1, 2], device="mps"),
+                      torch.tensor([0, 10], device="mps"))
+            out.cpu()  # force sync to surface the deferred kernel error
+
+    def test_embeddingbag_valid_offsets_match_cpu(self):
+        torch.manual_seed(0)
+        weight = torch.randn(10, 3)
+        emb_mps = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum").to("mps")
+        emb_cpu = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum")
+        r_mps = emb_mps(torch.tensor([1, 2, 3], device="mps"), torch.tensor([0], device="mps"))
+        r_cpu = emb_cpu(torch.tensor([1, 2, 3]), torch.tensor([0]))
+        self.assertEqual(r_mps.cpu(), r_cpu)
+
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)
