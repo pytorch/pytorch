@@ -12,6 +12,8 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfMPS,
     dtypesIfXPU,
+    expectedFailureCPU,
+    expectedFailureCUDA,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyNativeDeviceTypes,
@@ -1016,6 +1018,87 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             expected[1] = row1  # index 1: 2 occurrences, count 2
             expected[3] = row3  # index 3: 1 occurrence, count 1
             self.assertEqual(weight.grad, expected)
+
+    @onlyOn(["cpu", "cuda", "mps"])
+    @dtypes(torch.bfloat16)
+    def test_embedding_bag_scale_grad_by_freq_exact_counts(self, device, dtype):
+        # scale_grad_by_freq counts must accumulate in integer math: a naive
+        # accumulation of ones in bfloat16 saturates at 256 (256 + 1 == 256)
+        # and would divide index 5's gradient by 256 instead of 300. Only bag
+        # 0 receives gradient, so the numerator (a single 1.0) stays exact
+        # and any mismatch is the divisor's.
+        n = 300
+        w = torch.ones(8, 3, dtype=dtype, device=device, requires_grad=True)
+        indices = torch.full((n,), 5, device=device)
+        offsets = torch.tensor([0, 1], device=device)
+        out = F.embedding_bag(indices, w, offsets, mode="sum", scale_grad_by_freq=True)
+        out[0].sum().backward()
+        expected = torch.zeros(8, 3, dtype=dtype, device=device)
+        expected[5] = torch.tensor(1.0, dtype=dtype) / n
+        self.assertEqual(w.grad, expected)
+
+    # Strict CSR contract: bag membership is defined only by the
+    # [offsets[i], offsets[i + 1]) slices, so indices past the terminal offset
+    # contribute nothing to any mode's output or gradients. CPU consults
+    # trailing indices in some code paths (#52851) and the CUDA kernel runs
+    # the last bag through the end of indices (#29019).
+    @onlyOn(["cpu", "cuda", "mps"])
+    @expectedFailureCPU
+    @expectedFailureCUDA
+    @dtypes(torch.float32)
+    def test_embedding_bag_include_last_offset_trailing_indices(self, device, dtype):
+        W = torch.arange(16.0, device=device, dtype=dtype).reshape(4, 4)
+        indices = torch.tensor([0, 1, 2], device=device)
+        # one bag: indices [0, 2); index 2 is trailing
+        offsets = torch.tensor([0, 2], device=device)
+
+        out_sum = F.embedding_bag(
+            indices, W, offsets, mode="sum", include_last_offset=True
+        )
+        self.assertEqual(
+            out_sum, torch.tensor([[4.0, 6.0, 8.0, 10.0]], device=device, dtype=dtype)
+        )
+
+        out_mean = F.embedding_bag(
+            indices, W, offsets, mode="mean", include_last_offset=True
+        )
+        self.assertEqual(
+            out_mean, torch.tensor([[2.0, 3.0, 4.0, 5.0]], device=device, dtype=dtype)
+        )
+
+        w = W.clone().requires_grad_()
+        out_max = F.embedding_bag(
+            indices, w, offsets, mode="max", include_last_offset=True
+        )
+        self.assertEqual(
+            out_max, torch.tensor([[4.0, 5.0, 6.0, 7.0]], device=device, dtype=dtype)
+        )
+        out_max.sum().backward()
+        expected_max_grad = torch.zeros(4, 4, device=device, dtype=dtype)
+        expected_max_grad[1] = 1.0
+        self.assertEqual(w.grad, expected_max_grad)
+
+        # no gradient may reach the trailing index's weight row or its
+        # per-sample weight
+        psw = torch.tensor(
+            [0.5, 2.0, 3.0], device=device, dtype=dtype, requires_grad=True
+        )
+        w = W.clone().requires_grad_()
+        F.embedding_bag(
+            indices,
+            w,
+            offsets,
+            mode="sum",
+            include_last_offset=True,
+            per_sample_weights=psw,
+        ).sum().backward()
+        expected_w_grad = torch.zeros(4, 4, device=device, dtype=dtype)
+        expected_w_grad[0] = 0.5
+        expected_w_grad[1] = 2.0
+        self.assertEqual(w.grad, expected_w_grad)
+        self.assertEqual(
+            psw.grad, torch.tensor([6.0, 22.0, 0.0], device=device, dtype=dtype)
+        )
 
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 2D indices input. Compare
