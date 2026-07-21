@@ -37,7 +37,7 @@ permissions: read-all
 
 jobs:
   select-runner:
-    uses: ./.github/workflows/_select-runner.yml
+    uses: ./.github/workflows/_select-release-runner.yml
 
   generate-matrix:
     if: github.repository_owner == 'pytorch'
