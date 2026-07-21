@@ -58,9 +58,9 @@ which will handle all the rough edges of the C API for the user.
 only `libtorch`.
 
 Unlike the rest of the stable ABI, they require `libtorch_python` to be loaded at
-runtime and must be called with the GIL held. Both hold whenever a Python object is actually in play --
-the process has imported `torch` and you are calling from Python -- and otherwise
-the shims raise an error.
+runtime and must be called with the GIL held. If you call them from a context that
+may run without the GIL (for example a boxed `STABLE_TORCH_LIBRARY` kernel),
+acquire it first.
 
 ## Migrating your kernel to the LibTorch stable ABI
 
