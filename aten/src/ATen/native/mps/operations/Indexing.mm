@@ -339,6 +339,12 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
   });
 }
 
+// Nonzero kernel-name suffix selecting the flat-index width: "uint" when the
+// tensor's element/output offsets fit 32-bit index math, "ulong" otherwise.
+static inline const char* index_kernel_suffix(bool use_32bit_index) {
+  return use_32bit_index ? "uint" : "ulong";
+}
+
 // Metal kernel-based nonzero using prefix-sum + scatter.
 // Step 1: Per-element exclusive prefix sum of nonzero flags + block totals.
 // Step 2: GPU prefix sum of block totals → block offsets + total count.
@@ -367,12 +373,13 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   // (step 3) also indexes the output, so it recomputes the width including out.
   const bool count_use_32bit_index = canUse32BitIndexMath(input);
   auto pso_step1 = lib.getPipelineStateForFunc(
-      fmt::format("count_nonzero_prefix_sum_{}_{}", type_str, count_use_32bit_index ? "i32" : "i64"));
+      fmt::format("count_nonzero_prefix_sum_{}_{}", type_str, index_kernel_suffix(count_use_32bit_index)));
   // The block-scan running count is bounded by numel, so it fits uint32 (and can
   // use the fast parallel simd_shuffle scan) whenever numel <= UINT32_MAX. Only
-  // genuinely >2^32-element tensors need the serialized 64-bit scan.
+  // genuinely >2^32-element tensors need the 64-bit scan.
   const bool count_fits_u32 = static_cast<uint64_t>(numel) <= std::numeric_limits<uint32_t>::max();
-  auto pso_step2 = lib.getPipelineStateForFunc(count_fits_u32 ? "prefix_sum_blocks" : "prefix_sum_blocks_i64");
+  auto pso_step2 =
+      lib.getPipelineStateForFunc(fmt::format("prefix_sum_blocks_{}", index_kernel_suffix(count_fits_u32)));
 
   uint32_t threads_per_group = static_cast<uint32_t>([pso_step1 maxTotalThreadsPerThreadgroup]);
   uint64_t num_blocks = at::ceil_div(static_cast<uint64_t>(numel), static_cast<uint64_t>(threads_per_group));
@@ -448,7 +455,7 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   // div/mod in the coordinate decomposition); only larger ones pay for 64-bit.
   const bool use_32bit_index = canUse32BitIndexMath(input) && canUse32BitIndexMath(out);
   auto pso_step3 = lib.getPipelineStateForFunc(
-      fmt::format("scatter_nonzero_indices_{}_{}", type_str, use_32bit_index ? "i32" : "i64"));
+      fmt::format("scatter_nonzero_indices_{}_{}", type_str, index_kernel_suffix(use_32bit_index)));
   TORCH_INTERNAL_ASSERT([pso_step1 maxTotalThreadsPerThreadgroup] == [pso_step3 maxTotalThreadsPerThreadgroup],
                         "nonzero: step 1 and step 3 threadgroup sizes must match");
 

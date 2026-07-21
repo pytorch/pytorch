@@ -958,7 +958,7 @@ INSTANTIATE_INDEX_FILL_FROM_MASK(half2)
 // prefix sum of the nonzero flags over its chunk. Per-threadgroup totals are
 // written to block_sums.
 //
-// Step 2 (prefix_sum_blocks): A single threadgroup computes the exclusive
+// Step 2 (prefix_sum_blocks_uint): A single threadgroup computes the exclusive
 // prefix sum of block_sums → block_offsets and writes the total nonzero count
 // to a 1-element buffer. The host reads back only that single int, then
 // allocates the output tensor.
@@ -982,13 +982,13 @@ inline bool is_nonzero(T val) {
 // The cumulative quantities (block_offsets, the total nonzero count, and the
 // scatter output position) can only exceed 2^32 when the tensor itself has
 // more than 2^32 elements, so there are two block-scan kernels: the default
-// prefix_sum_blocks keeps the fast parallel simd_shuffle scan (uint32 accum,
-// used whenever numel <= 2^32, i.e. the common case), and prefix_sum_blocks_i64
-// does the scan in 64-bit for tensors above 2^32 elements. Both write int64
-// block_offsets and total, so scatter stays uniform. (Metal 3.x cannot
-// simd_shuffle 64-bit integers, so the i64 path scans in threadgroup memory.)
-// The input flat index is a separate concern, widened via the index_t template
-// parameter (see scatter_nonzero_indices).
+// prefix_sum_blocks_uint keeps the fast parallel simd_shuffle scan (uint32
+// accum, used whenever numel <= 2^32, i.e. the common case), and
+// prefix_sum_blocks_ulong does the scan in 64-bit for tensors above 2^32
+// elements. Both write int64 block_offsets and total, so scatter stays uniform.
+// (Metal 3.x cannot simd_shuffle 64-bit integers, so the i64 path scans in
+// threadgroup memory.) The input flat index is a separate concern, widened via
+// the index_t template parameter (see scatter_nonzero_indices).
 template <typename T, typename index_t>
 [[max_total_threads_per_threadgroup(1024)]]
 kernel void count_nonzero_prefix_sum(
@@ -1068,7 +1068,7 @@ kernel void count_nonzero_prefix_sum(
 // parallel simd_shuffle scan. block_offsets/total are still int64-typed so the
 // scatter kernel is identical across paths.
 [[max_total_threads_per_threadgroup(1024)]]
-kernel void prefix_sum_blocks(
+kernel void prefix_sum_blocks_uint(
     const device uint* block_sums [[buffer(0)]],
     device long* block_offsets [[buffer(1)]],
     device long* total_nonzero [[buffer(2)]],
@@ -1144,11 +1144,12 @@ kernel void prefix_sum_blocks(
 
 // 64-bit variant for tensors with more than 2^32 elements, where the running
 // count can exceed uint32. Metal 3.x cannot simd_shuffle 64-bit integers, so
-// the cross-thread scan is done serially by thread 0 in threadgroup memory.
-// This path only runs for >2^32-element inputs (>34GB output regime), so its
-// serialized scan never affects normal tensors, which take prefix_sum_blocks.
+// the cross-thread scan uses a threadgroup-memory Hillis-Steele scan in 64-bit
+// instead of the uint path's simd_shuffle scan. This path only runs for
+// >2^32-element inputs (>34GB output regime); it never affects normal tensors,
+// which take prefix_sum_blocks_uint.
 [[max_total_threads_per_threadgroup(1024)]]
-kernel void prefix_sum_blocks_i64(
+kernel void prefix_sum_blocks_ulong(
     const device uint* block_sums [[buffer(0)]],
     device long* block_offsets [[buffer(1)]],
     device long* total_nonzero [[buffer(2)]],
@@ -1168,25 +1169,29 @@ kernel void prefix_sum_blocks_i64(
     chunk_total += block_sums[i];
   }
 
-  threadgroup uint tg_totals[1024];
-  tg_totals[lid] = chunk_total;
+  // Parallel inclusive prefix sum of the per-thread chunk totals, accumulated
+  // in 64-bit (the running count can exceed 2^32 for a large dense input). Uses
+  // a Hillis-Steele scan in threadgroup memory: read the neighbor's partial
+  // sum, barrier, then add, so no simd_shuffle (unavailable for 64-bit) is
+  // needed. offset < tgsize covers all tgsize (<=1024) lanes.
+  threadgroup ulong tg_scan[1024];
+  tg_scan[lid] = static_cast<ulong>(chunk_total);
   threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  // Thread 0 computes the exclusive prefix sum of the per-thread chunk totals
-  // in 64-bit; the running count can exceed 2^32 for a large dense input.
-  threadgroup ulong tg_bases[1024];
-  if (lid == 0) {
-    ulong running = 0;
-    for (uint i = 0; i < tgsize; i++) {
-      tg_bases[i] = running;
-      running += tg_totals[i];
-    }
-    *total_nonzero = static_cast<long>(running);
+  for (uint offset = 1; offset < tgsize; offset <<= 1) {
+    ulong add = (lid >= offset) ? tg_scan[lid - offset] : 0ul;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    tg_scan[lid] += add;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
   }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (lid == tgsize - 1) {
+    *total_nonzero = static_cast<long>(tg_scan[lid]);
+  }
 
   // Each thread writes the exclusive block offsets for its own chunk in 64-bit.
-  ulong running = tg_bases[lid];
+  // tg_scan[lid] is the inclusive prefix, so the exclusive base is it minus
+  // this thread's own chunk_total.
+  ulong running = tg_scan[lid] - static_cast<ulong>(chunk_total);
   for (uint i = start; i < end; i++) {
     block_offsets[i] = static_cast<long>(running);
     running += block_sums[i];
@@ -1234,66 +1239,43 @@ kernel void scatter_nonzero_indices(
   }
 }
 
-#define REGISTER_NONZERO_KERNELS(DTYPE)                                        \
-  template                                                                     \
-      [[host_name("count_nonzero_prefix_sum_" #DTYPE "_i32")]] [[kernel]] void \
-      count_nonzero_prefix_sum<DTYPE, uint>(                                   \
-          const device DTYPE* input [[buffer(0)]],                             \
-          device uint* prefix [[buffer(1)]],                                   \
-          device uint* block_sums [[buffer(2)]],                               \
-          constant ulong& flat_base [[buffer(3)]],                             \
-          constant uint& block_base [[buffer(4)]],                             \
-          uint tid [[thread_position_in_grid]],                                \
-          uint lid [[thread_position_in_threadgroup]],                         \
-          uint tgsize [[threads_per_threadgroup]],                             \
-          uint tgid [[threadgroup_position_in_grid]],                          \
-          uint simd_lane_id [[thread_index_in_simdgroup]],                     \
-          uint simd_group_id [[simdgroup_index_in_threadgroup]]);              \
-                                                                               \
-  template                                                                     \
-      [[host_name("count_nonzero_prefix_sum_" #DTYPE "_i64")]] [[kernel]] void \
-      count_nonzero_prefix_sum<DTYPE, ulong>(                                  \
-          const device DTYPE* input [[buffer(0)]],                             \
-          device uint* prefix [[buffer(1)]],                                   \
-          device uint* block_sums [[buffer(2)]],                               \
-          constant ulong& flat_base [[buffer(3)]],                             \
-          constant uint& block_base [[buffer(4)]],                             \
-          uint tid [[thread_position_in_grid]],                                \
-          uint lid [[thread_position_in_threadgroup]],                         \
-          uint tgsize [[threads_per_threadgroup]],                             \
-          uint tgid [[threadgroup_position_in_grid]],                          \
-          uint simd_lane_id [[thread_index_in_simdgroup]],                     \
-          uint simd_group_id [[simdgroup_index_in_threadgroup]]);              \
-                                                                               \
-  template                                                                     \
-      [[host_name("scatter_nonzero_indices_" #DTYPE "_i32")]] [[kernel]] void  \
-      scatter_nonzero_indices<DTYPE, uint>(                                    \
-          const device DTYPE* input [[buffer(0)]],                             \
-          const device uint* prefix [[buffer(1)]],                             \
-          device int64_t* output [[buffer(2)]],                                \
-          constant int& ndim [[buffer(3)]],                                    \
-          constant int64_t* sizes [[buffer(4)]],                               \
-          constant long* block_offsets [[buffer(5)]],                          \
-          constant long& max_entries [[buffer(6)]],                            \
-          constant ulong& flat_base [[buffer(7)]],                             \
-          constant uint& block_base [[buffer(8)]],                             \
-          uint tid [[thread_position_in_grid]],                                \
-          uint tgid [[threadgroup_position_in_grid]]);                         \
-                                                                               \
-  template                                                                     \
-      [[host_name("scatter_nonzero_indices_" #DTYPE "_i64")]] [[kernel]] void  \
-      scatter_nonzero_indices<DTYPE, ulong>(                                   \
-          const device DTYPE* input [[buffer(0)]],                             \
-          const device uint* prefix [[buffer(1)]],                             \
-          device int64_t* output [[buffer(2)]],                                \
-          constant int& ndim [[buffer(3)]],                                    \
-          constant int64_t* sizes [[buffer(4)]],                               \
-          constant long* block_offsets [[buffer(5)]],                          \
-          constant long& max_entries [[buffer(6)]],                            \
-          constant ulong& flat_base [[buffer(7)]],                             \
-          constant uint& block_base [[buffer(8)]],                             \
-          uint tid [[thread_position_in_grid]],                                \
-          uint tgid [[threadgroup_position_in_grid]])
+// IDX (uint/ulong) is the flat-index width; it also names the registered
+// kernel. The buffers themselves are IDX-independent (prefix/block_sums stay
+// uint32, block_offsets/output stay int64), so only the template arg varies.
+#define REGISTER_NONZERO_KERNELS_FOR_IDX(DTYPE, IDX)          \
+  template [[host_name("count_nonzero_prefix_sum_" #DTYPE     \
+                       "_" #IDX)]] [[kernel]] void            \
+  count_nonzero_prefix_sum<DTYPE, IDX>(                       \
+      const device DTYPE* input [[buffer(0)]],                \
+      device uint* prefix [[buffer(1)]],                      \
+      device uint* block_sums [[buffer(2)]],                  \
+      constant ulong& flat_base [[buffer(3)]],                \
+      constant uint& block_base [[buffer(4)]],                \
+      uint tid [[thread_position_in_grid]],                   \
+      uint lid [[thread_position_in_threadgroup]],            \
+      uint tgsize [[threads_per_threadgroup]],                \
+      uint tgid [[threadgroup_position_in_grid]],             \
+      uint simd_lane_id [[thread_index_in_simdgroup]],        \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]]); \
+                                                              \
+  template [[host_name("scatter_nonzero_indices_" #DTYPE      \
+                       "_" #IDX)]] [[kernel]] void            \
+  scatter_nonzero_indices<DTYPE, IDX>(                        \
+      const device DTYPE* input [[buffer(0)]],                \
+      const device uint* prefix [[buffer(1)]],                \
+      device int64_t* output [[buffer(2)]],                   \
+      constant int& ndim [[buffer(3)]],                       \
+      constant int64_t* sizes [[buffer(4)]],                  \
+      constant long* block_offsets [[buffer(5)]],             \
+      constant long& max_entries [[buffer(6)]],               \
+      constant ulong& flat_base [[buffer(7)]],                \
+      constant uint& block_base [[buffer(8)]],                \
+      uint tid [[thread_position_in_grid]],                   \
+      uint tgid [[threadgroup_position_in_grid]])
+
+#define REGISTER_NONZERO_KERNELS(DTYPE)          \
+  REGISTER_NONZERO_KERNELS_FOR_IDX(DTYPE, uint); \
+  REGISTER_NONZERO_KERNELS_FOR_IDX(DTYPE, ulong)
 
 REGISTER_NONZERO_KERNELS(float);
 REGISTER_NONZERO_KERNELS(half);

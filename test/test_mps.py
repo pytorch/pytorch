@@ -10194,6 +10194,7 @@ class TestMPS(TestCaseMPS):
         r_mps = emb_mps(torch.tensor([1, 2, 3], device="mps"), torch.tensor([0], device="mps"))
         r_cpu = emb_cpu(torch.tensor([1, 2, 3]), torch.tensor([0]))
         self.assertEqual(r_mps.cpu(), r_cpu)
+
     # https://github.com/pytorch/pytorch/issues/149325
     # Generic nonzero correctness (baseline, empty, dtypes, N-D) is covered by
     # the nonzero OpInfo; only the large-tensor paths are MPS-specific and can't
