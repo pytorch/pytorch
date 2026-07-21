@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 import torch
 import torch._appdirs
-from .file_baton import FileBaton
+from ._filelock import FileLock
 from ._cpp_extension_versioner import ExtensionVersioner
 from typing_extensions import deprecated
 from torch.torch_version import TorchVersion, Version
@@ -2342,62 +2342,63 @@ def _jit_compile(name,
             logger.info('Bumping to version %s and re-building as %s_v%s...', version, name, version)
         name = f'{name}_v{version}'
 
-    baton = FileBaton(os.path.join(build_directory, 'lock'))
-    if baton.try_acquire():
-        try:
-            if version != old_version:
+    # Hold an OS-level advisory lock (via filelock) rather than a lock file
+    # whose mere existence blocks: the kernel releases the lock if the holder
+    # is killed, so a builder terminated by SIGKILL/OOM/Slurm no longer leaves
+    # a stale lock that deadlocks every later run
+    # (https://github.com/pytorch/pytorch/issues/189245). Whoever acquires the
+    # lock rechecks the version and (re)builds, so a crashed build is retried
+    # by the next process instead of leaving waiters to load a partial module.
+    with FileLock(os.path.join(build_directory, 'lock')):
+        if version != old_version:
+            if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
+                from .hipify import hipify_python
+                from .hipify.hipify_python import GeneratedFileCleaner
+                clean_ctx_mgr = GeneratedFileCleaner(keep_intermediates=keep_intermediates)
+            else:
+                import contextlib
+                hipify_python = None  # type: ignore[assignment]
+                clean_ctx_mgr = contextlib.nullcontext()
+            with clean_ctx_mgr as clean_ctx:
                 if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
-                    from .hipify import hipify_python
-                    from .hipify.hipify_python import GeneratedFileCleaner
-                    clean_ctx_mgr = GeneratedFileCleaner(keep_intermediates=keep_intermediates)
-                else:
-                    import contextlib
-                    hipify_python = None  # type: ignore[assignment]
-                    clean_ctx_mgr = contextlib.nullcontext()
-                with clean_ctx_mgr as clean_ctx:
-                    if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
-                        assert hipify_python is not None  # noqa: S101
-                        hipify_result = hipify_python.hipify(
-                            project_directory=build_directory,
-                            output_directory=build_directory,
-                            header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
-                            extra_files=[os.path.abspath(s) for s in sources],
-                            ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
-                            show_detailed=verbose,
-                            show_progress=verbose,
-                            is_pytorch_extension=True,
-                            clean_ctx=clean_ctx
-                        )
+                    assert hipify_python is not None  # noqa: S101
+                    hipify_result = hipify_python.hipify(
+                        project_directory=build_directory,
+                        output_directory=build_directory,
+                        header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
+                        extra_files=[os.path.abspath(s) for s in sources],
+                        ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
+                        show_detailed=verbose,
+                        show_progress=verbose,
+                        is_pytorch_extension=True,
+                        clean_ctx=clean_ctx
+                    )
 
-                        hipified_sources = set()
-                        for source in sources:
-                            s_abs = os.path.abspath(source)
-                            if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
-                                hipified_s_abs = hipify_result[s_abs].hipified_path
-                            else:
-                                hipified_s_abs = s_abs
-                            hipified_sources.add(hipified_s_abs)
-                        sources = list(hipified_sources)
+                    hipified_sources = set()
+                    for source in sources:
+                        s_abs = os.path.abspath(source)
+                        if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
+                            hipified_s_abs = hipify_result[s_abs].hipified_path
+                        else:
+                            hipified_s_abs = s_abs
+                        hipified_sources.add(hipified_s_abs)
+                    sources = list(hipified_sources)
 
-                    _write_ninja_file_and_build_library(
-                        name=name,
-                        sources=sources,
-                        extra_cflags=extra_cflags or [],
-                        extra_cuda_cflags=extra_cuda_cflags or [],
-                        extra_sycl_cflags=extra_sycl_cflags or [],
-                        extra_ldflags=extra_ldflags or [],
-                        extra_include_paths=extra_include_paths or [],
-                        build_directory=build_directory,
-                        verbose=verbose,
-                        with_cuda=with_cuda,
-                        with_sycl=with_sycl,
-                        is_standalone=is_standalone)
-            elif verbose:
-                logger.debug('No modifications detected for re-loaded extension module %s, skipping build step...', name)
-        finally:
-            baton.release()
-    else:
-        baton.wait()
+                _write_ninja_file_and_build_library(
+                    name=name,
+                    sources=sources,
+                    extra_cflags=extra_cflags or [],
+                    extra_cuda_cflags=extra_cuda_cflags or [],
+                    extra_sycl_cflags=extra_sycl_cflags or [],
+                    extra_ldflags=extra_ldflags or [],
+                    extra_include_paths=extra_include_paths or [],
+                    build_directory=build_directory,
+                    verbose=verbose,
+                    with_cuda=with_cuda,
+                    with_sycl=with_sycl,
+                    is_standalone=is_standalone)
+        elif verbose:
+            logger.debug('No modifications detected for re-loaded extension module %s, skipping build step...', name)
 
     if verbose:
         logger.info('Loading extension module %s...', name)
