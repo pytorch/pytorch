@@ -458,7 +458,7 @@ class Tensor(torch._C.TensorBase):
             and (
                 isinstance(self, torch._subclasses.functional_tensor.FunctionalTensor)
                 or (
-                    not isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                    not torch._subclasses.fake_tensor.is_fake_tensor(self)
                     and self.data_ptr() == 0
                 )
             )
@@ -478,7 +478,7 @@ class Tensor(torch._C.TensorBase):
             type(self) is not torch.Tensor
             and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
             and (
-                isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                torch._subclasses.fake_tensor.is_fake_tensor(self)
                 and not (skip_data and materialize_fake_tensors)
             )
         ):
@@ -512,7 +512,7 @@ class Tensor(torch._C.TensorBase):
             # don't have _subclasses
             if (
                 hasattr(torch, "_subclasses")
-                and isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                and torch._subclasses.fake_tensor.is_fake_tensor(self)
                 and skip_data
             ):
                 storage._fake_device = self.device
@@ -919,6 +919,11 @@ class Tensor(torch._C.TensorBase):
 
         return eig(self, eigenvectors=eigenvectors)
 
+    def qr(self, some=True):
+        from torch._linalg_utils import qr
+
+        return qr(self, some=some)
+
     def symeig(self, eigenvectors=False):
         from torch._linalg_utils import _symeig
 
@@ -1253,10 +1258,7 @@ class Tensor(torch._C.TensorBase):
 
     # Wrap Numpy array again in a suitable tensor when done, to support e.g.
     # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
-    # NumPy 2 passes `context` and `return_scalar`; torch has no scalars and
-    # does not need the context, so both are accepted and ignored. Declaring
-    # them avoids a NumPy 2 DeprecationWarning about the old call signature.
-    def __array_wrap__(self, array, context=None, return_scalar=False):
+    def __array_wrap__(self, array):
         if has_torch_function_unary(self):
             return handle_torch_function(
                 Tensor.__array_wrap__, (self,), self, array=array

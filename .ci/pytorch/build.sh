@@ -36,6 +36,15 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
   echo "NVCC version:"
   nvcc --version
+
+  # The CUPTI field-id codegen (tools/gen_cupti_stubs.py) parses cupti_activity.h with
+  # libclang's python bindings. Install libclang only when a sufficiently-new CUPTI header is
+  # actually resolvable (find_cupti_header applies the CUPTI_API_VERSION floor) -- so non-13.x
+  # / CPU builds, which have no such header, don't pull it in. Skip it too when LIBCLANG_PATH
+  # already points the codegen at a libclang.so (that env supplies the clang bindings itself).
+  if [ -z "${LIBCLANG_PATH:-}" ] && python -c "import sys; from tools.setup_helpers.cupti import find_cupti_header as f; sys.exit(0 if f() else 1)"; then
+    python -mpip install libclang
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
