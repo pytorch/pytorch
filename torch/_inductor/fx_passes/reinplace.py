@@ -461,9 +461,9 @@ def _same_tensor_metadata(lhs: torch.fx.Node, rhs: torch.fx.Node) -> bool:
 def _is_scatter_view_copy_back(
     dst: torch.fx.Node,
     src: torch.fx.Node,
-    mutated_arg: torch.fx.Node,
-    src_base: torch.fx.Node,
-) -> bool:
+    mutated_arg: torch.fx.Node | None = None,
+    src_base: torch.fx.Node | None = None,
+) -> tuple[torch.fx.Node, torch.fx.Node] | None:
     """
     Checks if this copy and the ops around it represent the pattern:
 
@@ -476,11 +476,15 @@ def _is_scatter_view_copy_back(
             ),
         )
 
-    which is the update of a slice passed as a read-write Triton kernel argument as functionalized
-    by Dynamo.
+    which is the update of a slice passed as a read-write Triton kernel argument
+    as functionalized by Dynamo. If it is, return ``(mutated_arg, src_base)``,
+    else ``None``.
+
+    If ``mutated_arg`` and ``src_base`` are provided, additionally check that the
+    pattern is around a particular mutation.
     """
     if src.target is not _generalized_scatter:
-        return False
+        return None
 
     scatter_dst = src.args[0]
     scatter_src = src.args[1]
@@ -488,58 +492,42 @@ def _is_scatter_view_copy_back(
         scatter_dst is dst
         and isinstance(scatter_src, torch.fx.Node)
         and scatter_src.target is operator.getitem
-        and scatter_src.args[0] is src_base
-        and src_base.target is triton_kernel_wrapper_functional
+        and isinstance(scatter_src.args[0], torch.fx.Node)
+        and scatter_src.args[0].target is triton_kernel_wrapper_functional
     ):
-        return False
+        return None
+
+    if src_base is not None and scatter_src.args[0] is not src_base:
+        return None
+    else:
+        src_base = scatter_src.args[0]
 
     key = cast(str, scatter_src.args[1])
     kwargs = cast(dict[str, Any], src_base.kwargs["kwargs"])
-    if key not in kwargs or kwargs[key] is not mutated_arg:
-        return False
+    if key not in kwargs:
+        return None
+    if mutated_arg is not None and kwargs[key] is not mutated_arg:
+        return None
+    else:
+        mutated_arg = cast(torch.fx.Node, kwargs[key])
 
     if (
         _get_view_base(mutated_arg) is not dst
         or not _same_tensor_metadata(src, dst)
         or not _same_tensor_metadata(scatter_src, mutated_arg)
     ):
-        return False
-
-    view_val = _apply_view_ops(
-        dst.meta["val"], cast(immutable_list[ViewOp], src.args[2])
-    )
-    return _same_tensor_metadata_values(view_val, mutated_arg.meta.get("val"))
-
-
-def _get_scatter_view_copy_back_info(
-    copy_node: torch.fx.Node, dst: torch.fx.Node, src: torch.fx.Node
-) -> tuple[torch.fx.Node, torch.fx.Node, bool] | None:
-    if src.target is not _generalized_scatter:
         return None
 
-    scatter_src = src.args[1]
-    if not (
-        isinstance(scatter_src, torch.fx.Node)
-        and scatter_src.target is operator.getitem
-        and isinstance(scatter_src.args[0], torch.fx.Node)
-    ):
+    dst_val = dst.meta.get("val")
+    if dst_val is None:
         return None
 
-    src_base = scatter_src.args[0]
-    if src_base.target is not triton_kernel_wrapper_functional:
-        return None
+    view_val = _apply_view_ops(dst_val, cast(immutable_list[ViewOp], src.args[2]))
 
-    key = cast(str, scatter_src.args[1])
-    kwargs = cast(dict[str, Any], src_base.kwargs["kwargs"])
-    mutated_arg = kwargs.get(key)
-    if not isinstance(mutated_arg, torch.fx.Node) or not _is_scatter_view_copy_back(
-        dst, src, mutated_arg, src_base
-    ):
-        return None
+    if _same_tensor_metadata_values(view_val, mutated_arg.meta.get("val")):
+        return mutated_arg, src_base
 
-    only_user_is_given_copy_node = len(src.users) == 1 and copy_node in src.users
-
-    return mutated_arg, src_base, only_user_is_given_copy_node
+    return None
 
 
 def _is_layout_preserving_view_copy_back(
@@ -548,7 +536,7 @@ def _is_layout_preserving_view_copy_back(
     mutated_arg: torch.fx.Node,
     src_base: torch.fx.Node,
 ) -> bool:
-    return _is_scatter_view_copy_back(dst, src, mutated_arg, src_base) or (
+    return _is_scatter_view_copy_back(dst, src, mutated_arg, src_base) is not None or (
         _same_tensor_metadata(src_base, mutated_arg) and _same_tensor_metadata(src, dst)
     )
 
@@ -652,18 +640,16 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                                 (mutated_arg, src_base)
                             ] = node
 
-            if scatter_copy_back_info := _get_scatter_view_copy_back_info(
-                node, dst, src
-            ):
-                mutated_arg, src_base, only_user_is_given_copy_node = (
-                    scatter_copy_back_info
+            if scatter_copy_back_info := _is_scatter_view_copy_back(dst, src):
+                copy_args_to_copy_nodes_via_views[scatter_copy_back_info] = node
+                only_user_of_scatter_is_copy_node = (
+                    len(src.users) == 1 and node in src.users
                 )
-                copy_args_to_copy_nodes_via_views[(mutated_arg, src_base)] = node
-                copy_args_to_scatter_view_copy_back_patterns[
-                    (mutated_arg, src_base)
-                ] = ScatterViewCopyBackPattern(
-                    scatter_node=src,
-                    scatter_is_redundant=only_user_is_given_copy_node,
+                copy_args_to_scatter_view_copy_back_patterns[scatter_copy_back_info] = (
+                    ScatterViewCopyBackPattern(
+                        scatter_node=src,
+                        scatter_is_redundant=only_user_of_scatter_is_copy_node,
+                    )
                 )
 
     def any_use_of_views_after_node(
@@ -860,6 +846,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         ReinplaceCounters.add_missed_bytes(trigger, missed_bytes)
 
     replace_dict: dict[torch.fx.Node, torch.fx.Node] = {}
+    skip_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
 
     def reinplace_and_refine_tensors_to_clone(
         old_tensors_to_clone, kwargs, node_name, trigger
@@ -909,6 +896,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                         )
                     ) and pattern.scatter_is_redundant:
                         replace_dict[pattern.scatter_node] = copy_node.args[0]
+                        # We don't need to revisit this scatter node as it will be erased anyway.
+                        skip_nodes.add(pattern.scatter_node)
                 if trigger != ReInplaceTrigger.AUTO_FUNC_V2:
                     for user in node.users:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
@@ -941,7 +930,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         return tensors_to_clone
 
     for node in graph.nodes:
-        if node in replace_dict:
+        if node in skip_nodes:
             continue
 
         if (inplaceable_op := inplaceable_ops.get(node.target)) is not None:
