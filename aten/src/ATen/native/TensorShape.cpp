@@ -2253,10 +2253,8 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
     result = as_strided_qtensorimpl(
         self, sizes, strides, storage_offset, std::move(quantizer));
   } else {
-    std::vector<c10::SymInt> sizes(
-        self.sym_sizes().begin(), self.sym_sizes().end());
-    std::vector<c10::SymInt> strides(
-        self.sym_strides().begin(), self.sym_strides().end());
+    SymDimVector sizes(self.sym_sizes().begin(), self.sym_sizes().end());
+    SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
     auto storage_offset = self.sym_storage_offset() + index * strides[dim];
     sizes.erase(sizes.begin() + dim);
     strides.erase(strides.begin() + dim);
