@@ -54,10 +54,10 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         return super().tearDown()
 
     def assertEqual(self, a, b):
-        return self.assertTrue(a == b, f"{a} != {b}")
+        return self.assertTrue(a == b, lambda msg: f"{msg}\n{a} != {b}")
 
     def assertNotEqual(self, x, y, msg=None, *, atol=None, rtol=None, **kwargs):
-        return self.assertTrue(x != y, f"{x} == {y}")
+        return self.assertTrue(x != y, lambda msg: f"{msg}\n{x} == {y}")
 
     @make_dynamo_test
     def test_count(self):

@@ -265,7 +265,7 @@ def generate_ttir(
     triton_version = get_triton_attrs_descriptor_version()
 
     import torch._inductor.ir
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import is_fake_tensor
 
     if isinstance(kernel, Autotuner):
         if len(kernel.configs) > 0:
@@ -320,7 +320,7 @@ def generate_ttir(
                 )
 
             ordered_args[name] = TensorDescriptor.from_tensor(base_tensor, block_shape)
-        elif isinstance(a, (FakeTensor, torch._inductor.ir.TensorBox)):
+        elif is_fake_tensor(a) or isinstance(a, torch._inductor.ir.TensorBox):
             with torch._C._DisableTorchDispatch():
                 ordered_args[name] = torch.empty(2, dtype=a.dtype)
         else:
@@ -597,7 +597,7 @@ def ttir_to_functions(
                         reindex(parent_block.get_argument(i).id()),
                     )
                 # the region info is collected via ops' parent blocks to be
-                # used later when the region's encloding op is traversed
+                # used later when the region's enclosing op is traversed
                 parent_region = parent_block.get_parent()
                 if parent_region is not None:
                     region_id_to_block_ids[parent_region.id()].append(parent_block_id)

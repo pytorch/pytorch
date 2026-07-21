@@ -281,6 +281,9 @@ class _CuptiMonitorModule:
         get_next_record_fn: int,
         fence_kind: int = 0,
         fence_end_field: int = -1,
+        self_flush: bool = False,
+        flush_period_ns: int = 0,
+        flush_fn: int = 0,
     ) -> None: ...
     @staticmethod
     def set_cbid_filter(
