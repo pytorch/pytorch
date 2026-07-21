@@ -956,7 +956,7 @@ print(t.is_pinned())
                 default_workspace_size = 4096 * 8 * 1024
 
         def check_workspace_size(inp):
-            torch._C._cuda_clearCublasWorkspaces()
+            torch.cuda._clear_cublas_workspaces()
             start = torch.cuda.memory_stats()["active_bytes.all.allocated"]
             with torch.no_grad():
                 torch.matmul(inp, inp)
@@ -981,7 +981,58 @@ print(t.is_pinned())
         torch._C._cuda_resetCublasWorkspaceSize()
         self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
 
-        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda._clear_cublas_workspaces()
+
+    @serialTest()
+    def test_clear_cublas_workspaces_uses_zero_size_cuda_dummy(self):
+        expected_device = torch.device("cuda", torch.cuda.current_device())
+        dummy_metadata = []
+
+        def metadata(tensor):
+            return (
+                tensor.device,
+                tensor.numel(),
+                tensor.untyped_storage().nbytes(),
+                tensor.data_ptr(),
+                torch.autograd.is_multithreading_enabled(),
+            )
+
+        class RecordDevice(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, dummy):
+                dummy_metadata.append(metadata(dummy))
+                return dummy
+
+            @staticmethod
+            def backward(ctx, grad):
+                dummy_metadata.append(metadata(grad))
+                return None
+
+        torch.cuda._clear_cublas_workspaces()
+        stats = torch.cuda.memory_stats()
+        allocator_stats = {
+            key: stats[key]
+            for key in (
+                "allocation.all.allocated",
+                "allocated_bytes.all.allocated",
+                "segment.all.allocated",
+            )
+        }
+        with (
+            torch.device("cpu"),
+            torch.autograd.set_multithreading_enabled(False),
+            patch.object(torch.cuda, "_ClearCublasWorkspaces", RecordDevice),
+            patch.object(torch.cuda, "device_count", side_effect=AssertionError),
+            patch.object(torch.cuda, "device", side_effect=AssertionError),
+        ):
+            torch.cuda._clear_cublas_workspaces()
+
+        self.assertEqual(
+            dummy_metadata,
+            [(expected_device, 0, 0, 0, True), (expected_device, 0, 0, 0, True)],
+        )
+        stats = torch.cuda.memory_stats()
+        self.assertEqual({key: stats[key] for key in allocator_stats}, allocator_stats)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @unittest.skipIf(IS_FBCODE, "not enabled by default on fbcode")
@@ -1087,32 +1138,37 @@ print(t.is_pinned())
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @setBlasBackendsToDefaultFinally
-    def test_cublas_workspace_lazy_reallocation(self):
-        torch.backends.cuda.preferred_blas_library("cublas")
-
-        original_size = torch.backends.cuda.cublas_workspace_size()
-        torch._C._cuda_clearCublasWorkspaces()
+    @parametrize("backend", ("cublas", "cublaslt"))
+    def test_cublas_workspace_lazy_reallocation(self, backend):
+        torch.backends.cuda.preferred_blas_library(backend)
+        small_size = 1024
+        bigger_size = 64 * 1024 * 1024
+        if backend == "cublaslt":
+            torch.backends.cuda.cublas_workspace_size(small_size)
+        torch.backends.cuda.blas_workspace_size(small_size, backend=backend)
+        torch.cuda._clear_cublas_workspaces()
 
         # Trigger initial allocation with matmul
         a = torch.randn(7, 7, device="cuda", requires_grad=False)
         with torch.no_grad():
             torch.matmul(a, a)
 
-        mem_after_first = torch.cuda.memory_stats()["active_bytes.all.allocated"]
+        mem_after_first = torch.cuda.memory_stats()["active_bytes.all.current"]
 
         # Increase workspace size
-        bigger_size = original_size + 32 * 1024 * 1024  # +32 MiB
-        torch.backends.cuda.cublas_workspace_size(bigger_size)
+        if backend == "cublaslt":
+            torch.backends.cuda.cublas_workspace_size(bigger_size)
+        torch.backends.cuda.blas_workspace_size(bigger_size, backend=backend)
 
         # No immediate memory change (lazy reallocation)
-        mem_after_set = torch.cuda.memory_stats()["active_bytes.all.allocated"]
+        mem_after_set = torch.cuda.memory_stats()["active_bytes.all.current"]
         self.assertEqual(mem_after_first, mem_after_set)
 
         # Next matmul triggers reallocation
         with torch.no_grad():
             torch.matmul(a, a)
 
-        mem_after_realloc = torch.cuda.memory_stats()["active_bytes.all.allocated"]
+        mem_after_realloc = torch.cuda.memory_stats()["active_bytes.all.current"]
         self.assertGreater(mem_after_realloc, mem_after_first)
 
     def test_cublas_allow_tf32_get_set(self):
@@ -6036,7 +6092,7 @@ class TestCudaAllocator(TestCase):
     def test_memory_plots_free_segment_stack(self):
         for context in ["alloc", "all", "state"]:
             try:
-                torch._C._cuda_clearCublasWorkspaces()
+                torch.cuda._clear_cublas_workspaces()
                 torch.cuda.memory.empty_cache()
                 torch.cuda.memory._record_memory_history(context=context)
                 x = torch.rand(3, 4, device="cuda")
@@ -6055,7 +6111,7 @@ class TestCudaAllocator(TestCase):
     def test_memory_plots_metadata(self):
         for context in ["alloc", "all", "state"]:
             try:
-                torch._C._cuda_clearCublasWorkspaces()
+                torch.cuda._clear_cublas_workspaces()
                 torch.cuda.memory.empty_cache()
                 torch.cuda.memory._set_memory_metadata("metadata test")
                 torch.cuda.memory._record_memory_history(context=context)
@@ -6075,7 +6131,7 @@ class TestCudaAllocator(TestCase):
     )
     def test_memory_snapshot_script(self):
         try:
-            torch._C._cuda_clearCublasWorkspaces()
+            torch.cuda._clear_cublas_workspaces()
             torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history("state", stacks="python")
 
