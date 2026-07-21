@@ -392,6 +392,16 @@ def is_b2b_gemm_good_on(
     # size checks: we only dispatch to B2B-GEMM when the average load ratio is > 1
     M, N = A.shape
     O, P = C.shape
+
+    # ceildiv() requires int arguments, but FakeTensor shapes may be
+    # torch.SymInt (even wrapping concrete values). Convert to int.
+    # With dynamic shapes enabled, SymInt may be symbolic -> can't compute
+    # the heuristic statically, so skip b2b_gemm.
+    try:
+        M, N, O, P = int(M), int(N), int(O), int(P)
+    except TypeError:
+        return False
+
     ratios = []
     if is_left_assoc:
         for config in b2b_gemm_configs:
