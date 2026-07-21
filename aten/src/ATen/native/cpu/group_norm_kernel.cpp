@@ -609,9 +609,9 @@ CalcDsDb(
     vec::Vectorized<opmath_t> ds_vec(0);
     vec::Vectorized<opmath_t> db_vec(0);
     for (int64_t j = 0; j < d; j += K) {
-      const vec::Vectorized<PT> gamma_vec = (gamma_ptr == nullptr)
-          ? vec::Vectorized<PT>(1)
-          : vec::Vectorized<PT>::loadu(gamma_ptr + j);
+      const vec::Vectorized<PT> gamma_vec = gamma_ptr
+          ? vec::Vectorized<PT>::loadu(gamma_ptr + j)
+          : vec::Vectorized<PT>(1);
       ds_vec = ds_vec + vec::Vectorized<PT>::loadu(ds_ptr + j) * gamma_vec;
       db_vec = db_vec + vec::Vectorized<PT>::loadu(db_ptr + j) * gamma_vec;
     }
@@ -634,7 +634,7 @@ CalcDsDb(
   fVec ds_acc(0);
   fVec db_acc(0);
   for (int64_t j = 0; j < d; j += K) {
-    const Vec gamma_vec = (gamma_ptr == nullptr) ? Vec(1) : Vec::loadu(gamma_ptr + j);
+    const Vec gamma_vec = gamma_ptr ? Vec::loadu(gamma_ptr + j) : Vec(1);
     auto [gamma_vec0, gamma_vec1] = convert_to_float<PT>(gamma_vec);
     ds_acc += fVec::loadu(ds_ptr + j) * gamma_vec0;
     ds_acc += fVec::loadu(ds_ptr + j + fVec::size()) * gamma_vec1;
