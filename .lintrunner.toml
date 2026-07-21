@@ -1900,7 +1900,6 @@ command = [
 code = 'STABLE_SHIM_VERSION'
 include_patterns = [
     'torch/csrc/stable/c/shim.h',
-    'torch/csrc/stable/python/c/shim.h',
     'torch/csrc/inductor/aoti_torch/c/shim.h'
 ]
 command = [

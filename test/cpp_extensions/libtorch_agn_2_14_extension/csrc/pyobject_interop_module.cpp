@@ -1,15 +1,16 @@
 #include <Python.h>
 
 #include <torch/csrc/stable/ops.h>
-#include <torch/csrc/stable/python/interop.h>
+#include <torch/csrc/stable/pyobject.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/version.h>
 
-// A limited-API (abi3) Python module exercising the python-aware stable shims.
-// The entry points are plain PyMethodDef functions, so Python enters them with
-// the GIL held (the shims' contract) without pybind11. Only the stable void*
-// C shim symbols are used, so the module stays limited-API despite linking
-// torch_python.
+// Importable (abi3) module functions that exercise the real use case for the
+// PyObject<->Tensor stable shims: a raw PyObject arrives straight from Python
+// (no dispatcher boxing), so the GIL is naturally held. This is how a consumer
+// (e.g. a python-registered custom op) would actually call from_pyobject /
+// to_pyobject. The module links only libtorch; the conversion is serviced by
+// the vtable that libtorch_python registers.
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 
@@ -17,8 +18,7 @@ using torch::stable::Tensor;
 
 namespace {
 
-// PyObject -> stable Tensor -> PyObject; the result shares storage with the
-// input. Exercises both torch::stable::from_pyobject and to_pyobject.
+// PyObject -> stable Tensor -> PyObject; the result shares storage with input.
 PyObject* pyobject_roundtrip(PyObject* /*self*/, PyObject* obj) {
   try {
     Tensor t = torch::stable::from_pyobject(obj);
@@ -31,8 +31,8 @@ PyObject* pyobject_roundtrip(PyObject* /*self*/, PyObject* obj) {
   }
 }
 
-// Like pyobject_roundtrip, but forces the result's exact Python type via
-// to_pyobject's py_type argument. args = (tensor, py_type).
+// args = (tensor, py_type); forces the result's exact Python type via
+// to_pyobject's py_type argument (e.g. torch.nn.Parameter).
 PyObject* pyobject_to_type(PyObject* /*self*/, PyObject* args) {
   PyObject* obj = nullptr;
   PyObject* py_type = nullptr;
@@ -40,9 +40,9 @@ PyObject* pyobject_to_type(PyObject* /*self*/, PyObject* args) {
     return nullptr;
   }
   try {
-    // Clone so the result wraps a fresh TensorImpl. to_pyobject with an
-    // explicit py_type fails if the TensorImpl already has a Python object of
-    // a different (non-subclass) type -- which is the case for `obj` itself.
+    // Clone so the result wraps a fresh TensorImpl: to_pyobject with an explicit
+    // py_type fails if the TensorImpl already has a Python object of a different
+    // (non-subclass) type, which is the case for `obj` itself.
     Tensor t = torch::stable::clone(torch::stable::from_pyobject(obj));
     return static_cast<PyObject*>(torch::stable::to_pyobject(t, py_type));
   } catch (const std::exception& e) {
@@ -53,12 +53,12 @@ PyObject* pyobject_to_type(PyObject* /*self*/, PyObject* args) {
   }
 }
 
-// Do real work on the tensor through the stable ABI: unwrap the Python tensor,
-// sum all its elements with torch::stable::sum, and return the (fresh) result.
+// Real work through the stable ABI on a tensor obtained from from_pyobject.
 PyObject* pyobject_sum(PyObject* /*self*/, PyObject* obj) {
   try {
     Tensor t = torch::stable::from_pyobject(obj);
-    return static_cast<PyObject*>(torch::stable::to_pyobject(torch::stable::sum(t)));
+    return static_cast<PyObject*>(
+        torch::stable::to_pyobject(torch::stable::sum(t)));
   } catch (const std::exception& e) {
     if (!PyErr_Occurred()) {
       PyErr_SetString(PyExc_RuntimeError, e.what());

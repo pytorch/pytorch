@@ -1,15 +1,16 @@
 #pragma once
 
-#include <torch/csrc/stable/python/c/shim.h>
+#include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/tensor_struct.h>
+#include <torch/csrc/stable/version.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/shim_utils.h>
 
-// Header-only helpers for converting between a Python torch.Tensor (passed
-// as a raw PyObject* / void*) and torch::stable::Tensor. Binding-framework
-// specific casters (pybind11, nanobind, ...) live in separate opt-in
-// headers that build on top of these. The GIL must be held by the caller.
+// Header-only helpers converting between a Python torch.Tensor (passed as a raw
+// PyObject* / void*) and torch::stable::Tensor. These are libtorch-only to link
+// against, but require libtorch_python to be loaded at runtime (see the note in
+// torch/csrc/stable/c/shim.h). The GIL must be held by the caller.
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
@@ -23,9 +24,9 @@ inline Tensor from_pyobject(void* py_obj) {
   return Tensor(ath);
 }
 
-// Wrap a stable Tensor as a new-reference Python torch.Tensor. py_type is
-// an optional PyTypeObject* (passed as void*) used as the result's exact
-// Python type; nullptr means default torch.Tensor.
+// Wrap a stable Tensor as a new-reference Python torch.Tensor. py_type is an
+// optional PyTypeObject* (passed as void*) used as the result's exact Python
+// type; nullptr means default torch.Tensor.
 inline void* to_pyobject(const Tensor& t, void* py_type = nullptr) {
   void* raw = nullptr;
   STABLE_TORCH_ERROR_CODE_CHECK(

@@ -22,6 +22,16 @@ def my_has_storage(t) -> bool:
     return torch.ops.libtorch_agn_2_14.my_has_storage.default(t)
 
 
+def my_pyobject_roundtrip(t):
+    """PyObject<->Tensor roundtrip via the stable shims (2.14+); shares storage."""
+    return torch.ops.libtorch_agn_2_14.my_pyobject_roundtrip.default(t)
+
+
+def my_pyobject_sum(t):
+    """Sum a tensor obtained from ``from_pyobject`` (2.14+)."""
+    return torch.ops.libtorch_agn_2_14.my_pyobject_sum.default(t)
+
+
 def __getattr__(name):
     """Proxy for inherited ops from previous versions."""
     if name.startswith("_"):
