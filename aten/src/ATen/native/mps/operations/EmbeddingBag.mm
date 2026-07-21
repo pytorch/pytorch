@@ -267,12 +267,17 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
 
 Tensor _embedding_bag_per_sample_weights_backward_mps(const Tensor& output_grad,
                                                       const Tensor& weight,
-                                                      const Tensor& indices,
-                                                      const Tensor& offsets,
+                                                      const Tensor& indices_,
+                                                      const Tensor& offsets_,
                                                       const Tensor& offset2bag,
                                                       int64_t mode,
                                                       int64_t padding_idx) {
   TORCH_INTERNAL_ASSERT(static_cast<EmbeddingBagMode>(mode) == EmbeddingBagMode::SUM);
+  // The kernel reads indices and offset2bag with one index type, but autograd
+  // saves the original unpromoted indices while offset2bag comes from the
+  // forward pass already promoted, so mixed int32/int64 inputs would misread
+  // offset2bag. Promote the same way the forward (and the CPU impl) does.
+  const Tensor indices = promoteIndicesAndOffsets(indices_, offsets_).first;
   int64_t num_indices = indices.size(0);
   int64_t feature_size = output_grad.size(1);
   auto per_sample_weights_grad = at::zeros({num_indices}, output_grad.options());
