@@ -43,6 +43,8 @@ void clear_old_frame_if_python_312_plus(
 void eval_frame_callback_set(PyObject* obj);
 
 int64_t get_current_isolate_recompiles_id(void);
+void enable_frame_hook_shim(PyThreadState* tstate);
+void clear_frame_hook_shim(PyThreadState* tstate);
 
 const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame);
 
@@ -57,6 +59,20 @@ PyObject* dynamo_eval_custom_code(
     PyCodeObject* code,
     const char* trace_annotation,
     int throw_flag);
+
+PyObject* dynamo_frame_hook_default(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    int throw_flag);
+
+PyObject* dynamo_frame_hook_custom(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    PyCodeObject* code,
+    const char* trace_annotation,
+    int throw_flag);
+
+int use_frame_hook(void);
 
 #ifdef __cplusplus
 

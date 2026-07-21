@@ -1846,6 +1846,11 @@ def xfailIfWindows(func):
     return unittest.expectedFailure(func) if IS_WINDOWS else func
 
 
+def skipIfFrameHookEnabled(func):
+    USE_EVAL_HOOK = torch._C._dynamo.eval_frame.is_frame_hook_enabled()
+    return unittest.skipIf(USE_EVAL_HOOK, "test doesn't currently work with eval hooks")(func)
+
+
 def xfailIfROCm(func):
     return unittest.expectedFailure(func) if torch.version.hip is not None else func
 
