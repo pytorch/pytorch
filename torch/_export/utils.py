@@ -359,6 +359,10 @@ def get_keystr(key_path: KeyPath) -> str:
         return f"{name}{keystr(key_path[2:])}"
 
 
+def _export_flat_arg_source_for_guard(idx: int) -> str:
+    return f"\x00export-flat-arg-{idx}\x00"
+
+
 def _check_symint(
     symint: int | torch.SymInt,
     arg: int,

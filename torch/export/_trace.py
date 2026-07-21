@@ -27,12 +27,15 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import (
     AttrSource,
+    ConstDictKeySource,
     DictGetItemSource,
     GetItemSource,
     LocalSource,
     TensorProperty,
     TensorPropertySource,
 )
+from torch._dynamo.utils import enumerate_items_with_dict_position
+from torch._dynamo.variables.constant import ConstantVariable
 from torch._export.db.logging import (
     exportdb_error_message,
     get_class_if_classified_error,
@@ -137,6 +140,8 @@ from .graph_signature import (
 
 
 log = logging.getLogger(__name__)
+
+_MISSING = object()
 
 # Dim-based dynamic shapes spec: the raw container forms (dict / tuple / list of
 # ``Dim`` / ``None``) -- i.e. anything accepted as ``dynamic_shapes`` that is
@@ -860,9 +865,28 @@ def _source_from_public_input_path(
     path,
     *,
     base_source: Source | None = None,
+    root_value: Any = _MISSING,
     var_keyword_name: str | None = None,
     explicit_input_names: set[str] | None = None,
 ) -> Source | None:
+    current_value = root_value
+
+    def maybe_get_child_value(value: Any, key) -> Any:
+        if value is _MISSING:
+            return _MISSING
+        try:
+            return key.get(value)
+        except (AttributeError, IndexError, KeyError, TypeError):
+            return _MISSING
+
+    def key_position_in_mapping(mapping: Any, lookup_key: Any) -> int | None:
+        if not isinstance(mapping, dict):
+            return None
+        for idx, key, _ in enumerate_items_with_dict_position(mapping):
+            if key is lookup_key:
+                return idx
+        return None
+
     if base_source is None:
         if not path or not isinstance(path[0], pytree.MappingKey):
             return None
@@ -876,18 +900,34 @@ def _source_from_public_input_path(
             )
         else:
             source = LocalSource(path[0].key, is_input=True)
+        current_value = maybe_get_child_value(current_value, path[0])
         path = path[1:]
     else:
         source = base_source
+
+    def dict_getitem_source(base: Source, key: Any) -> Source | None:
+        if ConstantVariable.is_literal(key):
+            return DictGetItemSource(base, key)
+        # Non-literal dict keys, such as tensor or enum keys, are represented
+        # by their stable key position in Dynamo sources.
+        key_position = key_position_in_mapping(current_value, key)
+        if key_position is None:
+            return None
+        return DictGetItemSource(base, ConstDictKeySource(base, key_position))
+
     for key in path:
         if isinstance(key, pytree.SequenceKey):
             source = GetItemSource(source, key.idx)
         elif isinstance(key, pytree.MappingKey):
-            source = DictGetItemSource(source, key.key)
+            maybe_source = dict_getitem_source(source, key.key)
+            if maybe_source is None:
+                return None
+            source = maybe_source
         elif isinstance(key, pytree.GetAttrKey):
             source = AttrSource(source, key.name)
         else:
             return None
+        current_value = maybe_get_child_value(current_value, key)
     return source
 
 
@@ -905,6 +945,7 @@ def _collect_public_input_source_values(
         var_keyword_name = None
         return _collect_public_input_source_values_from_flat_paths(
             flat_args_with_path,
+            root_value=combined_args,
             var_keyword_name=var_keyword_name,
             explicit_input_names=explicit_input_names,
         )
@@ -918,19 +959,26 @@ def _collect_public_input_source_values(
         public_name: str,
         base_source: Source,
         nested_path,
+        root_value: Any,
         value: Any,
     ) -> None:
         source = _source_from_public_input_path(
             nested_path,
             base_source=base_source,
+            root_value=root_value,
         )
         if source is None:
             return
+        public_source = _source_from_public_input_path(
+            nested_path,
+            base_source=LocalSource(public_name, is_input=True),
+            root_value=root_value,
+        )
+        if public_source is None:
+            return
         public_input_sources.append(source)
         source_to_value[source] = value
-        source_name_to_public_name[source.name] = f"L[{public_name!r}]" + pytree.keystr(
-            nested_path
-        )
+        source_name_to_public_name[source.name] = public_source.name
 
     bound_positional = sig.bind_partial(*fake_args).arguments
     positional_names = set(bound_positional)
@@ -946,6 +994,7 @@ def _collect_public_input_source_values(
                             LocalSource(name, is_input=True), idx
                         ),
                         nested_path=nested_path,
+                        root_value=arg,
                         value=leaf,
                     )
         else:
@@ -955,6 +1004,7 @@ def _collect_public_input_source_values(
                     public_name=name,
                     base_source=LocalSource(name, is_input=True),
                     nested_path=nested_path,
+                    root_value=value,
                     value=leaf,
                 )
 
@@ -990,6 +1040,7 @@ def _collect_public_input_source_values(
                 public_name=name,
                 base_source=base_source,
                 nested_path=nested_path,
+                root_value=value,
                 value=leaf,
             )
 
@@ -999,6 +1050,7 @@ def _collect_public_input_source_values(
 def _collect_public_input_source_values_from_flat_paths(
     flat_args_with_path,
     *,
+    root_value: Any,
     var_keyword_name: str | None,
     explicit_input_names: set[str],
 ) -> tuple[list[Source], dict[Source, Any], dict[str, str]]:
@@ -1008,6 +1060,7 @@ def _collect_public_input_source_values_from_flat_paths(
     for path, value in flat_args_with_path:
         source = _source_from_public_input_path(
             path,
+            root_value=root_value,
             var_keyword_name=var_keyword_name,
             explicit_input_names=explicit_input_names,
         )
@@ -1015,7 +1068,7 @@ def _collect_public_input_source_values_from_flat_paths(
             continue
         public_input_sources.append(source)
         source_to_value[source] = value
-        source_name_to_public_name[source.name] = "L" + pytree.keystr(path)
+        source_name_to_public_name[source.name] = source.name
     return public_input_sources, source_to_value, source_name_to_public_name
 
 

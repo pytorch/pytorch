@@ -6,6 +6,7 @@ import copy
 import dataclasses
 import enum
 import functools
+import io
 import logging
 import math
 import operator
@@ -3906,7 +3907,6 @@ class GraphModule(torch.nn.Module):
             gm = export(m, (torch.rand(64, 64),))
             torch.export.unflatten(gm)
 
-    @testing.expectedFailureStrictV2
     def test_unflatten_closure(self):
         class Dummy(torch.nn.Module):
             def forward(self, fn, x):
@@ -7099,12 +7099,234 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                     )
                 )
                 epm = ep.module()
-                self.assertTrue(torch.allclose(m(**inputs), epm(**inputs)))
+                self.assertEqual(m(**inputs), epm(**inputs))
                 inputs2 = {
                     "a": torch.randn(2, 6),
                     "kwargs": {"a": torch.rand(4, 3)},
                 }
-                self.assertTrue(torch.allclose(m(**inputs2), epm(**inputs2)))
+                self.assertEqual(m(**inputs2), epm(**inputs2))
+
+    def test_export_preserves_unused_tensor_with_enum_dict_key(self):
+        class Key(enum.Enum):
+            USED = "used"
+            UNUSED = "unused"
+
+        class Module(torch.nn.Module):
+            def forward(self, x, flat_args):
+                return x[Key.USED] + flat_args[0].sum()
+
+        class GuardedModule(torch.nn.Module):
+            def forward(self, x):
+                return x[Key.USED].narrow(0, 0, x[Key.UNUSED].shape[0])
+
+        class TokenKeyModule(torch.nn.Module):
+            def forward(self, x):
+                return x["<export-flat-arg-0>"].narrow(0, 0, x["limit"].shape[0])
+
+        tensor_used_key = torch.tensor(0)
+        tensor_unused_key = torch.tensor(1)
+
+        class TensorKeyModule(torch.nn.Module):
+            def forward(self, x):
+                return x[tensor_used_key].narrow(0, 0, x[tensor_unused_key].shape[0])
+
+        inputs = (
+            {
+                Key.USED: torch.randn(3, 2),
+                Key.UNUSED: torch.randn(4, 2),
+            },
+            [torch.randn(3, 7)],
+        )
+        dynamic_shapes = (
+            {
+                Key.USED: {0: Dim("used", min=1)},
+                Key.UNUSED: {0: Dim("unused", min=1)},
+            },
+            [{0: Dim("flat", min=1)}],
+        )
+
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                ep = export(
+                    Module(),
+                    inputs,
+                    dynamic_shapes=dynamic_shapes,
+                    strict=strict,
+                )
+                new_inputs = {
+                    Key.USED: torch.randn(5, 2),
+                    Key.UNUSED: torch.randn(6, 2),
+                }
+                new_flat_args = [torch.randn(5, 7)]
+
+                self.assertEqual(len(ep.graph_signature.user_inputs), 3)
+                self.assertEqual(
+                    ep.module()(new_inputs, new_flat_args),
+                    Module()(new_inputs, new_flat_args),
+                )
+
+        guarded_cases = [
+            (
+                "enum_key",
+                GuardedModule(),
+                (
+                    {
+                        Key.USED: torch.randn(4, 2),
+                        Key.UNUSED: torch.randn(3, 4),
+                    },
+                ),
+                (
+                    {
+                        Key.USED: {
+                            0: Dim("guarded_used", min=2, max=8),
+                            1: Dim.STATIC,
+                        },
+                        Key.UNUSED: {
+                            0: Dim("guarded_unused", min=2, max=8),
+                            1: Dim.STATIC,
+                        },
+                    },
+                ),
+                {
+                    Key.USED: torch.randn(5, 2),
+                    Key.UNUSED: torch.randn(4, 4),
+                },
+            ),
+            (
+                "token_string_key",
+                TokenKeyModule(),
+                (
+                    {
+                        "<export-flat-arg-0>": torch.randn(4, 2),
+                        "limit": torch.randn(3, 4),
+                    },
+                ),
+                (
+                    {
+                        "<export-flat-arg-0>": {
+                            0: Dim("token_used", min=2, max=8),
+                            1: Dim.STATIC,
+                        },
+                        "limit": {0: Dim("token_limit", min=2, max=8), 1: Dim.STATIC},
+                    },
+                ),
+                {
+                    "<export-flat-arg-0>": torch.randn(5, 2),
+                    "limit": torch.randn(4, 4),
+                },
+            ),
+            (
+                "tensor_key",
+                TensorKeyModule(),
+                (
+                    {
+                        tensor_used_key: torch.randn(4, 2),
+                        tensor_unused_key: torch.randn(3, 4),
+                    },
+                ),
+                (
+                    {
+                        tensor_used_key: {
+                            0: Dim("tensor_used", min=2, max=8),
+                            1: Dim.STATIC,
+                        },
+                        tensor_unused_key: {
+                            0: Dim("tensor_unused", min=2, max=8),
+                            1: Dim.STATIC,
+                        },
+                    },
+                ),
+                {
+                    tensor_used_key: torch.randn(5, 2),
+                    tensor_unused_key: torch.randn(4, 4),
+                },
+            ),
+        ]
+        for name, module, args, shapes, new_input in guarded_cases:
+            for strict in (False, True):
+                with self.subTest(name=name, strict=strict):
+                    ep = export(
+                        module,
+                        args,
+                        dynamic_shapes=shapes,
+                        strict=strict,
+                    )
+
+                    self.assertTrue(ep._guards_code)
+                    self.assertEqual(ep.module()(new_input), module(new_input))
+
+    def test_export_install_free_tensors_flat_args_guard_sources(self):
+        free = torch.randn(3, 4)
+        token0 = "\x00export-flat-arg-0\x00"
+        token1 = "\x00export-flat-arg-1\x00"
+
+        class Module(torch.nn.Module):
+            def forward(self, x, flat_args):
+                return x.view(x.shape[0], free.shape[0], -1) + flat_args[0].sum()
+
+        class RelationModule(torch.nn.Module):
+            def forward(self, x, flat_args):
+                y = torch.ones(x.shape[0], device=x.device)
+                return x + y + flat_args[0]
+
+        inputs = (torch.randn(3, 6), [torch.randn(3, 7)])
+        dynamic_shapes = {
+            "x": {0: Dim.STATIC, 1: Dim.AUTO},
+            "flat_args": [{0: Dim.AUTO, 1: Dim.STATIC}],
+        }
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                with torch._dynamo.config.patch(install_free_tensors=True):
+                    ep = export(
+                        Module(),
+                        inputs,
+                        dynamic_shapes=dynamic_shapes,
+                        strict=strict,
+                    )
+                new_inputs = (torch.randn(3, 9), [torch.randn(5, 7)])
+
+                self.assertTrue(ep._guards_code)
+                if strict:
+                    self.assertTrue(any(token0 in guard for guard in ep._guards_code))
+                    buffer = io.BytesIO()
+                    torch.export.save(ep, buffer)
+                    buffer.seek(0)
+                    loaded_ep = torch.export.load(buffer)
+                    self.assertEqual(loaded_ep._guards_code, ep._guards_code)
+                    self.assertEqual(
+                        loaded_ep.module()(*new_inputs), Module()(*new_inputs)
+                    )
+                self.assertEqual(ep.module()(*new_inputs), Module()(*new_inputs))
+
+        relation_inputs = (torch.randn(3), [torch.randn(3)])
+        relation_dim = Dim("relation", min=2, max=8)
+        with torch._dynamo.config.patch(install_free_tensors=True):
+            relation_ep = export(
+                RelationModule(),
+                relation_inputs,
+                dynamic_shapes=({0: relation_dim}, [{0: relation_dim}]),
+                strict=True,
+            )
+        self.assertTrue(
+            any(
+                token0 in guard and token1 in guard
+                for guard in relation_ep._guards_code
+            )
+        )
+        buffer = io.BytesIO()
+        torch.export.save(relation_ep, buffer)
+        buffer.seek(0)
+        loaded_relation_ep = torch.export.load(buffer)
+        self.assertEqual(loaded_relation_ep._guards_code, relation_ep._guards_code)
+        loaded_relation_module = loaded_relation_ep.module()
+        new_x = torch.randn(4)
+        new_flat_args = [torch.randn(4)]
+        self.assertEqual(
+            loaded_relation_module(new_x, new_flat_args),
+            RelationModule()(new_x, new_flat_args),
+        )
+        with self.assertRaisesRegex(AssertionError, "Guard failed"):
+            loaded_relation_module(torch.randn(4), [torch.randn(5)])
 
     def test_dynamic_shapes_kwargs_nested(self):
         class KwargsModel(torch.nn.Module):
@@ -7127,9 +7349,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 epm = export(
                     m, (), kwargs=inputs, dynamic_shapes=dynamic_shapes, strict=strict
                 ).module()
-                self.assertTrue(torch.allclose(m(**inputs), epm(**inputs)))
+                self.assertEqual(m(**inputs), epm(**inputs))
                 inputs2 = {**inputs, "z": torch.rand(6, 4)}
-                self.assertTrue(torch.allclose(m(**inputs2), epm(**inputs2)))
+                self.assertEqual(m(**inputs2), epm(**inputs2))
 
     def test_dynamic_shapes_kwargs_name_collision(self):
         class ArgsKwargsModel(torch.nn.Module):
@@ -7204,9 +7426,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 ).module()
                 args2 = (torch.randn(5, 4),)
                 kwargs2 = {"args": torch.rand(5, 4)}
-                self.assertTrue(
-                    torch.allclose(m(*args2, **kwargs2), epm(*args2, **kwargs2))
-                )
+                self.assertEqual(m(*args2, **kwargs2), epm(*args2, **kwargs2))
 
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC

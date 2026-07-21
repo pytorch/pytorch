@@ -45,6 +45,7 @@ from torch._export.utils import (
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
     _detect_fake_mode_from_gm,
+    _export_flat_arg_source_for_guard,
     _fakify_params_buffers,
     _get_decomp_for_cia,
     _is_preservable_cia_op,
@@ -1810,6 +1811,18 @@ def _convert_guards_to_code(graph_module):
         "dynamo_source_to_public_source_name", {}
     )
 
+    def internal_flat_arg_source_name(name):
+        prefix = "L['flat_args']["
+        if not name.startswith(prefix):
+            return None
+        idx_end = name.find("]", len(prefix))
+        if idx_end == -1:
+            return None
+        idx_str = name[len(prefix) : idx_end]
+        if not idx_str.isdecimal():
+            return None
+        return f"{_export_flat_arg_source_for_guard(int(idx_str))}{name[idx_end + 1 :]}"
+
     def public_source_name(source):
         name = source.name
         for old_name, new_name in sorted(
@@ -1819,6 +1832,9 @@ def _convert_guards_to_code(graph_module):
         ):
             if name == old_name or name.startswith(f"{old_name}."):
                 return f"{new_name}{name[len(old_name) :]}"
+        internal_name = internal_flat_arg_source_name(name)
+        if internal_name is not None:
+            return internal_name
         return name
 
     py_printer = torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter(
