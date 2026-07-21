@@ -538,8 +538,7 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
            get_free_buffer(params)) ||
           (release_available_cached_buffers(params) && (get_free_buffer(params) || alloc_placement_heap(params))) ||
           (release_cached_buffers() && alloc_placement_heap(params)) ||
-          (wait_for_pending_free_buffers(pool) &&
-           (get_free_buffer(params) || alloc_placement_heap(params)));
+          (wait_for_pending_free_buffers(pool) && (get_free_buffer(params) || alloc_placement_heap(params)));
     } else {
       block_found =
           // Attempt allocate
