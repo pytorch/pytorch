@@ -1865,6 +1865,69 @@ class ComboKernelDynamicShapesTests(TestCase):
 class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
     combo_kernel_per_subkernel_blocks = True
 
+    @requires_gpu_and_triton
+    def test_noinline_sub_kernel_bodies(self):
+        # Per-subkernel combos emit each body as a @triton.jit(noinline=True)
+        # device function called from its dispatch branch, so ptxas allocates
+        # registers per body instead of jointly over the merged control-flow
+        # graph (a register-fat member cannot degrade the others' occupancy).
+        def fn(x, y, z):
+            return x + 1, torch.sigmoid(y), torch.tanh(z)
+
+        inps = (
+            torch.rand(8192, device=GPU_TYPE),
+            torch.rand(6144, device=GPU_TYPE),
+            torch.rand(4096, device=GPU_TYPE),
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        code = " ".join(code)
+
+        # Three sub-function definitions before the combo kernel, each
+        # dispatch branch reduced to a call.
+        fc = FileCheck()
+        for num in range(3):
+            fc = fc.check("@triton.jit(noinline=True)").check(f"_body_{num}(")
+        fc = fc.check("pid = tl.program_id(0)")
+        for num in range(3):
+            fc = fc.check(f"pid < num_blocks_{num}:").check(f"_body_{num}(")
+        fc.run(code)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch("combo_kernels_autotune", 0)
+    def test_noinline_sub_kernel_bodies_no_bench(self):
+        # No-benchmark path (combo_kernels_autotune=0 -> bake_blocks): block
+        # sizes are kernel-scope constexprs, threaded into each sub-function
+        # as constexpr call arguments.
+        def fn(x, y):
+            return x + 1, torch.tanh(y)
+
+        inps = (
+            torch.rand(8192, device=GPU_TYPE),
+            torch.rand(4096, device=GPU_TYPE),
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        code = " ".join(code)
+
+        (
+            FileCheck()
+            .check("@triton.jit(noinline=True)")
+            .check("_body_0(")
+            .check("XBLOCK_0 : tl.constexpr")
+            .check("@triton.jit(noinline=True)")
+            .check("_body_1(")
+            .check("XBLOCK_1 : tl.constexpr")
+            .check("XBLOCK_0: tl.constexpr =")
+            .check("pid < num_blocks_0:")
+            .check("_body_0(")
+            .check("pid < num_blocks_1:")
+            .check("_body_1(")
+            .run(code)
+        )
+
 
 class ComboKernelBenchmarkTestsPerSubkernelBlocks(ComboKernelBenchmarkTests):
     combo_kernel_per_subkernel_blocks = True
