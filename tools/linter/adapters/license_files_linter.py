@@ -2,6 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #   "packaging>=24.2",
+#   "tomli==2.2.1 ; python_version < '3.11'",
 # ]
 # ///
 """Lintrunner adapter: PEP 639 license-files / SPDX alignment (issue #183434)."""
