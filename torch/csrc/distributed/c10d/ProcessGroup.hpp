@@ -184,13 +184,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return backendType_;
   }
 
-  inline bool backendSupportsSequenceNumbers(BackendType backendType) {
-    if (backendType == BackendType::GLOO || backendType == BackendType::NCCL ||
-        backendType == BackendType::XCCL || backendType == BackendType::UCC)
-      return true;
-    return false;
-  }
-
   virtual void setTimeout(std::chrono::milliseconds timeout) {
     for (auto& backend : backendTypeToBackend_) {
       backend.second->setTimeout(timeout);
@@ -762,19 +755,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // in sync. If the returned number is not consistent across the group, it
   // may indicate that there is some sort of collective desynchronization.
   virtual uint64_t getSequenceNumberForGroup() {
-    auto backendType = getBackendType();
-
-    // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendSupportsSequenceNumbers(backendType)) {
-      return getDefaultBackend()->getSequenceNumberForGroup();
-    } else {
-      TORCH_CHECK(
-          false,
-          c10::str(
-              "ProcessGroup ",
-              getBackendName(),
-              " does not yet support sequence numbers."));
-    }
+    return getDefaultBackend()->getSequenceNumberForGroup();
   }
 
   virtual c10::intrusive_ptr<Work> send(

@@ -1,0 +1,50 @@
+diff --git a/test/cpython/v3_13/test_decorators.py b/test/cpython/v3_13/test_decorators.py
+index 3a4fc959f6f..d91dba9c4d0 100644
+--- a/test/cpython/v3_13/test_decorators.py
++++ b/test/cpython/v3_13/test_decorators.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_decorators.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ from types import MethodType
+ 
+@@ -68,7 +86,7 @@ def memoize(func):
+ 
+ # -----------------------------------------------
+ 
+-class TestDecorators(unittest.TestCase):
++class TestDecorators(CPythonTestCase):
+ 
+     def test_single(self):
+         class C(object):
+@@ -302,7 +320,7 @@ class TestDecorators(unittest.TestCase):
+         self.assertEqual(B.bar(), 'spam')
+ 
+ 
+-class TestClassDecorators(unittest.TestCase):
++class TestClassDecorators(CPythonTestCase):
+ 
+     def test_simple(self):
+         def plain(x):
+@@ -338,4 +356,4 @@ class TestClassDecorators(unittest.TestCase):
+         self.assertEqual(C.extra, 'second')
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
