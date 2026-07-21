@@ -838,35 +838,35 @@ void XpuIPCSentDataDelete(void* ptr) {
 }
 
 at::DataPtr GetNewRefCountedXpuSentData(void* data, at::Device device) {
-  {
-    std::lock_guard<std::mutex> lock(xpu_ipc_global_entities.ref_counters_mutex_);
-    if (!xpu_ipc_global_entities.next_available_ref_counters_file_) {
-      std::string ref_counter_handle = at::NewProcessWideShmHandle();
-      int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
-      at::DataPtr sptr = at::RefcountedMapAllocator::makeDataPtr(
-          ref_counter_handle.c_str(),
-          flags,
-          sizeof(int64_t) * XPU_IPC_REF_COUNTER_FILE_SIZE,
-          nullptr);
-      auto rc = std::make_shared<XpuIPCRefCountersFile>(
-          ref_counter_handle,
-          XPU_IPC_REF_COUNTER_FILE_SIZE,
-          std::move(sptr));
-      xpu_ipc_global_entities.ref_counters_files_[ref_counter_handle] = rc;
-      xpu_ipc_global_entities.next_available_ref_counters_file_ = rc;
-    }
+  std::lock_guard<std::mutex> lock(xpu_ipc_global_entities.ref_counters_mutex_);
+  
+  if (!xpu_ipc_global_entities.next_available_ref_counters_file_) {
+    std::string ref_counter_handle = at::NewProcessWideShmHandle();
+    int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
+    at::DataPtr sptr = at::RefcountedMapAllocator::makeDataPtr(
+        ref_counter_handle.c_str(),
+        flags,
+        sizeof(int64_t) * XPU_IPC_REF_COUNTER_FILE_SIZE,
+        nullptr);
+    auto rc = std::make_shared<XpuIPCRefCountersFile>(
+        ref_counter_handle,
+        XPU_IPC_REF_COUNTER_FILE_SIZE,
+        std::move(sptr));
+    xpu_ipc_global_entities.ref_counters_files_[ref_counter_handle] = rc;
+    xpu_ipc_global_entities.next_available_ref_counters_file_ = rc;
   }
 
-  xpu_ipc_global_entities.next_available_ref_counters_file_->set_counter(1);
+  auto& file_ref = xpu_ipc_global_entities.next_available_ref_counters_file_;
+  file_ref->set_counter(1);
   auto sent_data = new XpuIPCSentData(
-      xpu_ipc_global_entities.next_available_ref_counters_file_->handle(),
-      xpu_ipc_global_entities.next_available_ref_counters_file_->get_offset(),
-      xpu_ipc_global_entities.next_available_ref_counters_file_->counter_ptr(),
+      file_ref->handle(),
+      file_ref->get_offset(),
+      file_ref->counter_ptr(),
       device);
 
-  xpu_ipc_global_entities.next_available_ref_counters_file_->rotate_offset();
-  if (!xpu_ipc_global_entities.next_available_ref_counters_file_->have_offsets()) {
-    xpu_ipc_global_entities.next_available_ref_counters_file_.reset();
+  file_ref->rotate_offset();
+  if (!file_ref->have_offsets()) {
+    file_ref.reset();
   }
   return at::DataPtr(data, sent_data, XpuIPCSentDataDelete, device);
 }
@@ -1086,11 +1086,11 @@ struct XpuIpcEventRefGuard {
 };
 
 bool isImportedStorage(const c10::StorageImpl& storage) {
-  return const_cast<c10::StorageImpl&>(storage).received_cuda();
+  return const_cast<c10::StorageImpl&>(storage).received_xpu();
 }
 
 void markImportedStorage(c10::StorageImpl& storage) {
-  storage.set_received_cuda(true);
+  storage.set_received_xpu(true);
 }
 
 THPObjectPtr createXpuShareTuple(const at::Storage& storage) {
@@ -1232,12 +1232,21 @@ c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
       +[](void* ctx_) {
         std::unique_ptr<XpuIpcDeleterContext> ctx(
             static_cast<XpuIpcDeleterContext*>(ctx_));
+        // Ensure device context is correct before operations on device memory
+        c10::DeviceGuard device_guard(c10::Device(c10::kXPU, ctx->device));
+        
+        // Synchronize streams to ensure all pending operations complete
+        // BEFORE closing the IPC handle
         if (ctx->device >= 0) {
           c10::xpu::syncStreamsOnDevice(ctx->device);
         }
+        
+        // Close IPC handle after synchronization is complete
+        ctx->base_ptr.reset();
+        
+        // Release reference counter after IPC handle is closed
         ReleaseXpuIPCRefCounter(
             ctx->ref_counter_handle, ctx->ref_counter_offset);
-        ctx->base_ptr.reset();
       },
       at::Device(at::DeviceType::XPU, args.device));
 
