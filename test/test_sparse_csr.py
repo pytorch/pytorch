@@ -9,8 +9,6 @@ import unittest
 import functools
 from contextlib import redirect_stderr
 from torch.testing import make_tensor, FileCheck
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_BF16, PLATFORM_SUPPORTS_BF16_ATOMICS, PLATFORM_SUPPORTS_HALF_ATOMICS)
 from torch.testing._internal.common_utils import \
     (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_CUDSS, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase,
      run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo,
@@ -21,6 +19,11 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_gpu import (
+    PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_BF16_ATOMICS,
+    PLATFORM_SUPPORTS_HALF_ATOMICS,
+)
 from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
     all_types_and_complex, floating_and_complex_types_and)

@@ -21,16 +21,18 @@ from torch.nn.functional import (
 )
 from torch.testing._internal.common_cuda import (
     IS_SM90,
-    _get_torch_cuda_version,
-    PLATFORM_SUPPORTS_FP8,
-    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
-    PLATFORM_SUPPORTS_MX_GEMM,
-    PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
     SM100OrLater,
     SM120OrLater,
     SM89OrLater,
     SM90OrLater,
+    _get_torch_cuda_version,
     with_tf32_off,
+)
+from torch.testing._internal.common_gpu import (
+    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
+    PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
+    PLATFORM_SUPPORTS_MX_GEMM,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,

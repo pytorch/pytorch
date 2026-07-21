@@ -76,7 +76,6 @@ from torch._inductor.utils import fresh_cache
 from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FP8,
     skipIfSM103,
     SM100OrLater,
     SM120OrLater,
@@ -85,6 +84,7 @@ from torch.testing._internal.common_cuda import (
     xfailIfSM120OrLater,
 )
 from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     IN_RE_WORKER,
     instantiate_parametrized_tests,

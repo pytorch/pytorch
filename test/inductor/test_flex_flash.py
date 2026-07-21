@@ -27,7 +27,6 @@ from torch.nn.attention.flex_attention import (
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     IS_SM90,
-    PLATFORM_SUPPORTS_FP8,
     SM120OrLater,
     SM80OrLater,
     SM90OrLater,
@@ -39,6 +38,7 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     instantiate_device_type_tests,
 )
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     decorateIf,
     DeterministicGuard,

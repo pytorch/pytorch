@@ -13,10 +13,8 @@ from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FUSED_ATTENTION,
-    SM80OrLater,
-)
+from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_FUSED_ATTENTION
 from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
