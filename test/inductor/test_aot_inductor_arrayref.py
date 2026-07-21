@@ -359,6 +359,37 @@ if IS_FBCODE:
         CPU_TEST_FAILURES,
     )
 
+
+class TestCppWrapperCpuSelection(TestCase):
+    def test_cpu_cpp_wrapper_follows_current_stack_allocation_config(self):
+        # Regression test: the CPU cpp wrapper class (CppWrapperCpu vs
+        # CppWrapperCpuArrayRef) must track the current allow_stack_allocation
+        # config at each compile. It used to be frozen at the process's first
+        # backend registration, so whichever config was active for the first
+        # compile decided the wrapper for the whole process -- making tests that
+        # toggle the config order-dependent and flaky.
+        from torch._inductor.codegen.common import (
+            get_wrapper_codegen_for_device,
+            init_backend_registration,
+        )
+        from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+        from torch._inductor.codegen.cpp_wrapper_cpu_array_ref import (
+            CppWrapperCpuArrayRef,
+        )
+
+        init_backend_registration()
+        with config.patch({"aot_inductor.allow_stack_allocation": True}):
+            self.assertIs(
+                get_wrapper_codegen_for_device("cpu", cpp_wrapper=True),
+                CppWrapperCpuArrayRef,
+            )
+        with config.patch({"aot_inductor.allow_stack_allocation": False}):
+            self.assertIs(
+                get_wrapper_codegen_for_device("cpu", cpp_wrapper=True),
+                CppWrapperCpu,
+            )
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
