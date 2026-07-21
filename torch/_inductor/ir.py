@@ -1377,6 +1377,8 @@ def get_reduction_combine_fn(
 
 @ir_dataclass
 class Reduction(Loops):
+    """Loop IR node for reductions, including split multi-stage reductions."""
+
     reduction_ranges: Sequence[_IntLike]
     reduction_type: ReductionType
     # self.dtype represents the dst dtype
@@ -1456,6 +1458,7 @@ class Reduction(Loops):
         reduction_type: ReductionType | Literal["scan"],
         reduction_numel: Expr,
         input_node: IRNode | None = None,
+        split_hints: Sequence[int] | None = None,
     ) -> tuple[ReductionHint, _IntLike]:
         """
         Choose the reduction hint and split count from shape and input stride information.
@@ -1501,7 +1504,11 @@ class Reduction(Loops):
 
         props = DeviceProperties.create(device)
         num_sm = props.multi_processor_count
+        warp_size = props.warp_size if props.warp_size is not None else 32
         min_elements_per_thread = 32
+        max_elements_per_thread = 512
+        num_warps = 8
+        num_threads = warp_size * num_warps
         if should_split:
             inner_reduction_splits: Callable[[int, int], int] = functools.partial(
                 V.choices.reduction_split_factor, device, inner_reduction=True
@@ -1519,9 +1526,65 @@ class Reduction(Loops):
 
             outer_reduction_splits = inner_reduction_splits
 
+        def split_aligned_with_reduction_ranges(split: _IntLike) -> _IntLike:
+            if (
+                not _is_static(split)
+                or int(split) <= 1
+                or numel_hint != 1
+                or not all(_is_static(r) for r in reduction_ranges)
+                or not split_hints
+            ):
+                return split
+
+            reduction_dims = [int(r) for r in reduction_ranges]
+            if any(dim <= 0 for dim in reduction_dims):
+                return split
+
+            reduction_numel_from_ranges = functools.reduce(
+                operator.mul, reduction_dims, 1
+            )
+            if reduction_numel_from_ranges != reduction_numel_hint:
+                return split
+
+            split_int = int(split)
+            # Matching an original reduction-dimension prefix can leave each
+            # block with more or less work than the default split heuristic,
+            # but this is worthwhile when it avoids a separate full-tensor
+            # pointwise read.
+            min_block_size = num_threads * min_elements_per_thread // 8
+            max_block_size = num_threads * max_elements_per_thread * 2
+
+            best_split = split_int
+            best_ratio = float("inf")
+            valid_prefixes = OrderedSet[int]()
+            prefix = 1
+            for dim in reduction_dims[:-1]:
+                prefix *= dim
+                valid_prefixes.add(prefix)
+
+            for hint in split_hints:
+                if hint <= 1:
+                    continue
+                if valid_prefixes and hint not in valid_prefixes:
+                    continue
+                if reduction_numel_from_ranges % hint != 0:
+                    continue
+                block_size = reduction_numel_from_ranges // hint
+                if not (min_block_size <= block_size <= max_block_size):
+                    continue
+
+                ratio = max(hint, split_int) / min(hint, split_int)
+                # Bound both fanout increases and decreases from alignment.
+                if ratio <= 16 and ratio < best_ratio:
+                    best_split = hint
+                    best_ratio = ratio
+
+            return best_split
+
         # easy cases
         if numel_hint == 1:
             split = inner_reduction_splits(reduction_numel_hint, numel_hint)
+            split = split_aligned_with_reduction_ranges(split)
             if split == 1:
                 # No need to split.
                 return ReductionHint.INNER, split
@@ -1731,6 +1794,8 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: IRNode | None = None,
+        split_hints: Sequence[int] | None = None,
+        max_split_levels: int | None = None,
     ) -> TensorBox:
         """
         Create a reduction node. May split the reduction to multiple layers to expose
@@ -1824,6 +1889,7 @@ class Reduction(Loops):
             reduction_type,
             reduction_numel,
             input_node,
+            split_hints,
         )
 
         def _maybe_increase_split(split: int) -> int:
@@ -1836,6 +1902,8 @@ class Reduction(Loops):
                 return split
 
         split = _maybe_increase_split(split)
+        if max_split_levels == 0 and split > 1:
+            split = 1
 
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
@@ -1878,6 +1946,7 @@ class Reduction(Loops):
                 split,
                 reduction_hint,
                 input_node,
+                max_split_levels,
             )
 
             # Find the reduction that get split
@@ -2118,6 +2187,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
+        max_split_levels: int | None = None,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2140,6 +2210,7 @@ class Reduction(Loops):
             new_reduction_ranges,
             reduction_type,
             reduction_hint,
+            max_split_levels=None if max_split_levels is None else max_split_levels - 1,
         )
         intermediate.realize()
         intermediate_loader = intermediate.make_loader()
@@ -2184,6 +2255,7 @@ class Reduction(Loops):
         split: _IntLike,
         reduction_hint: ReductionHint,
         input_node: IRNode | None = None,
+        max_split_levels: int | None = None,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2215,6 +2287,7 @@ class Reduction(Loops):
             reduction_type,
             split,
             reduction_hint,
+            max_split_levels,
         )
 
     @classmethod
@@ -2556,6 +2629,7 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
         split: _IntLike,
         reduction_hint: ReductionHint,
         input_node: IRNode | None = None,
+        max_split_levels: int | None = None,
     ) -> Sequence[TensorBox]:
         reduction_numel = sympy_product(reduction_ranges)
         block_size = FloorDiv(reduction_numel + (split - 1), split)
