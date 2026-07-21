@@ -173,6 +173,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         sf_vec_size: int,
         mma_tiler_mn: Tuple[int, int],
         cluster_shape_mn: Tuple[int, int],
+        use_prefetch: bool = False,
     ):
         """Initializes the configuration for a Blackwell dense GEMM kernel.
 
@@ -204,6 +205,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.cta_group = (
             tcgen05.CtaGroup.TWO if self.use_2cta_instrs else tcgen05.CtaGroup.ONE
         )
+
+        # TMA-prefetch tactic: prefetch A/B/SF tiles ahead in the K-loop to
+        # hide latency; helps small-M large-K.
+        self.use_prefetch = use_prefetch
 
         self.occupancy = 1
         # Set specialized warp ids
@@ -342,6 +347,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             self.occupancy,
         )
 
+        # Prefetch depth = AB pipeline depth.
+        self.prefetch_dist = self.num_ab_stage
+
         # Compute A/B/SFA/SFB/C shared memory layout
         self.a_smem_layout_staged = sm100_utils.make_smem_layout_a(
             tiled_mma,
@@ -408,6 +416,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         max_active_clusters: cutlass.Constexpr,
         stream: cuda.CUstream,
         epilogue_op: cutlass.Constexpr = lambda x: x,
+        alpha_tensor: cute.Tensor = None,
     ):
         """Execute the GEMM operation in steps:
         - Setup static attributes before smem/grid/tma computation
@@ -690,6 +699,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             self.epi_tile,
             self.tile_sched_params,
             epilogue_op,
+            alpha_tensor,
         ).launch(
             grid=grid,
             block=[self.threads_per_cta, 1, 1],
@@ -725,6 +735,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         epi_tile: cute.Tile,
         tile_sched_params: utils.PersistentTileSchedulerParams,
         epilogue_op: cutlass.Constexpr,
+        alpha_tensor: cute.Tensor,
     ):
         """
         GPU device kernel performing the Persistent batched GEMM computation.
@@ -1044,6 +1055,18 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                 # ((atom_v, rest_v), RestK)
                 tBgSFB_slice = tBgSFB[(None, slice_n, None, mma_tile_coord_mnl[2])]
 
+                # TMA-prefetch tactic: issue prefetches for the first
+                # prefetch_dist K-tiles to hide latency.
+                # Helps small-M large-K where the mainloop is load-bound.
+                if cutlass.const_expr(self.use_prefetch):
+                    for pf_k_tile in cutlass.range(
+                        0, min(self.prefetch_dist, k_tile_cnt), unroll=1
+                    ):
+                        cute.prefetch(tma_atom_a, tAgA_slice[(None, pf_k_tile)])
+                        cute.prefetch(tma_atom_b, tBgB_slice[(None, pf_k_tile)])
+                        cute.prefetch(tma_atom_sfa, tAgSFA_slice[(None, pf_k_tile)])
+                        cute.prefetch(tma_atom_sfb, tBgSFB_slice[(None, pf_k_tile)])
+
                 # Peek (try_wait) AB buffer empty for k_tile = prefetch_k_tile_cnt
                 ab_producer_state.reset_count()
                 peek_ab_empty_status = cutlass.Boolean(1)
@@ -1089,6 +1112,22 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         tma_bar_ptr=ab_pipeline.producer_get_barrier(ab_producer_state),
                         mcast_mask=sfb_full_mcast_mask,
                     )
+
+                    # Rolling prefetch: stay prefetch_dist tiles ahead each
+                    # iteration to hide TMA latency
+                    # through the whole K-loop. This is the piece that helps
+                    # small-M large-K (the initial pre-loop burst alone does not).
+                    if cutlass.const_expr(self.use_prefetch):
+                        if k_tile < k_tile_cnt - self.prefetch_dist:
+                            future_k_tile = ab_producer_state.count + self.prefetch_dist
+                            cute.prefetch(tma_atom_a, tAgA_slice[(None, future_k_tile)])
+                            cute.prefetch(tma_atom_b, tBgB_slice[(None, future_k_tile)])
+                            cute.prefetch(
+                                tma_atom_sfa, tAgSFA_slice[(None, future_k_tile)]
+                            )
+                            cute.prefetch(
+                                tma_atom_sfb, tBgSFB_slice[(None, future_k_tile)]
+                            )
 
                     # Peek (try_wait) AB buffer empty for k_tile = prefetch_k_tile_cnt + k_tile + 1
                     ab_producer_state.advance()
@@ -1489,6 +1528,17 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     # Convert to C type
                     #
                     acc_vec = tiled_copy_r2s.retile(tTR_rAcc).load()
+                    # Fused global scale: multiply by runtime alpha[0] (a traced
+                    # kernel-arg scalar) when provided. Closure capture cannot
+                    # read a runtime tensor here, so alpha must be a kernel arg.
+                    # Apply in fp32 (acc_dtype) BEFORE the downcast to c_dtype so
+                    # low-range outputs (fp8/fp16) don't overflow/saturate on the
+                    # cast before alpha (typically < 1) restores range, and before
+                    # epilogue_op so the epilogue sees the true scaled value.
+                    # const_expr makes this a compile-time branch (skipped when
+                    # alpha_tensor is None) rather than device control flow.
+                    if cutlass.const_expr(alpha_tensor is not None):
+                        acc_vec = acc_vec * alpha_tensor[0].to(self.acc_dtype)
                     acc_vec = epilogue_op(acc_vec.to(self.c_dtype))
                     tRS_rC.store(acc_vec)
 
