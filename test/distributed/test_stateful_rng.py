@@ -74,6 +74,61 @@ class TestCheckpointableTensorRNG(TestCase):
         setattr(tensor, "local_offsets", local_offsets)  # noqa: B010
         setattr(tensor, "local_sizes", local_sizes)  # noqa: B010
 
+    @staticmethod
+    def _flex_shard_layout_cases():
+        return (
+            (
+                "ragged_shard",
+                (4, 4),
+                (3, 4),
+                ((1, 0),),
+                ((0, 0),),
+                ((3, 4),),
+            ),
+            (
+                "ragged_shard_zero_owner",
+                (4, 4),
+                (0, 4),
+                (),
+                (),
+                (),
+            ),
+            (
+                "grouped_ragged_shard",
+                (4, 2),
+                (2, 2),
+                ((2, 0),),
+                ((0, 0),),
+                ((2, 2),),
+            ),
+            (
+                "grouped_owned_expert_block",
+                (4, 2, 3),
+                (2, 2, 3),
+                ((2, 0, 0),),
+                ((0, 0, 0),),
+                ((2, 2, 3),),
+            ),
+            (
+                "grouped_owned_nonowner",
+                (2, 2),
+                (0, 0),
+                (),
+                (),
+                (),
+            ),
+            # A flat interval crossing row boundaries is representable when the
+            # placement exposes a rank-preserving local view.
+            (
+                "flat_shard_rank_preserving",
+                (3, 4),
+                (1, 6),
+                ((0, 3), (1, 0), (2, 0)),
+                ((0, 0), (0, 1), (0, 5)),
+                ((1, 1), (1, 4), (1, 1)),
+            ),
+        )
+
     def test_plain_tensor_metadata_satisfies_protocol(self):
         tensor = torch.empty(1)
         self.assertNotIsInstance(tensor, CheckpointableTensor)
@@ -95,6 +150,31 @@ class TestCheckpointableTensorRNG(TestCase):
         self.assertEqual(global_offsets, [1, 1, 2, 3, 0, 0])
         self.assertEqual(local_offsets, [0, 0, 0, 2, 0, 0])
         self.assertEqual(local_sizes, [2, 3, 3, 1, 5, 6])
+
+    def test_flattened_flex_shard_layouts_require_matching_rank(self):
+        cases = (
+            ("grouped_ragged_shard_prefix_dims", (2, 3, 4), (3, 4)),
+            ("grouped_owned_flat_segments", (4, 2, 3), (12,)),
+            ("flat_shard", (3, 4), (6,)),
+        )
+        for name, global_shape, local_shape in cases:
+            with self.subTest(layout=name):
+                tensor = torch.empty(local_shape, device="meta")
+
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "global_shape and self must have the same number",
+                ):
+                    torch.ops.aten._philox_distribution_shards_(
+                        tensor,
+                        global_shape,
+                        [],
+                        [],
+                        [],
+                        0,
+                        _PHILOX_DISTRIBUTION_NORMAL,
+                        [0.0, 1.0],
+                    )
 
     def test_strided_shard_metadata_is_forwarded_without_index_lowering(self):
         # _StridedShard(dim=1, split_factor=2) on two ranks gives rank 0
@@ -215,6 +295,55 @@ class TestCheckpointableTensorRNG(TestCase):
 
                 self.assertEqual(actual, expected_shards[rank], rtol=0, atol=0)
                 self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_flex_shard_layouts_match_dense(self):
+        device = torch.device("cuda")
+        for (
+            name,
+            global_shape,
+            local_shape,
+            global_offsets,
+            local_offsets,
+            local_sizes,
+        ) in self._flex_shard_layout_cases():
+            with self.subTest(layout=name):
+                expected_generator = torch.Generator(device=device).manual_seed(123)
+                dense = torch.empty(global_shape, device=device).normal_(
+                    0.1, 0.02, generator=expected_generator
+                )
+                expected_state = expected_generator.get_state()
+                expected = torch.empty(local_shape, device=device)
+                for global_offset, local_offset, local_size in zip(
+                    global_offsets,
+                    local_offsets,
+                    local_sizes,
+                    strict=True,
+                ):
+                    global_slices = tuple(
+                        slice(offset, offset + size)
+                        for offset, size in zip(global_offset, local_size, strict=True)
+                    )
+                    local_slices = tuple(
+                        slice(offset, offset + size)
+                        for offset, size in zip(local_offset, local_size, strict=True)
+                    )
+                    expected[local_slices].copy_(dense[global_slices])
+
+                actual_generator = torch.Generator(device=device).manual_seed(123)
+                actual = torch.empty(local_shape, device=device)
+                self._set_shard_metadata(
+                    actual,
+                    global_shape,
+                    global_offsets,
+                    local_offsets,
+                    local_sizes,
+                )
+                with _StatefulRNGMode():
+                    actual.normal_(0.1, 0.02, generator=actual_generator)
+
+                self.assertEqual(actual, expected, rtol=0, atol=0)
+                self.assertEqual(actual_generator.get_state(), expected_state)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_noncontiguous_local_tensor_matches_dense(self):
