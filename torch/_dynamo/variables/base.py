@@ -889,7 +889,7 @@ _SLOTDEFS: list[SlotDef] = [
         "__getattribute__",
         "getattro_impl",
         PyTypeSlots.TP_GETATTRO,
-        _wrap_binaryfunc,
+        _wrap_getattro,
     ),
     TPSLOT(
         "__getattr__",
@@ -1122,6 +1122,12 @@ _SLOTDEFS: list[SlotDef] = [
         "nb_xor_impl",
         PyNumberSlots.NB_XOR,
         _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__or__",
+        "nb_or_impl",
+        PyNumberSlots.NB_OR,
+        _wrap_binaryfunc,
     ),
     NBSLOT(
         "__ror__",
