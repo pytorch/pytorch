@@ -1905,6 +1905,69 @@ class ComboKernelDynamicShapesTests(TestCase):
 class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
     combo_kernel_per_subkernel_blocks = True
 
+    @requires_gpu_and_triton
+    def test_noinline_sub_kernel_bodies(self):
+        # Per-subkernel combos emit each body as a @triton.jit(noinline=True)
+        # device function called from its dispatch branch, so ptxas allocates
+        # registers per body instead of jointly over the merged control-flow
+        # graph (a register-fat member cannot degrade the others' occupancy).
+        def fn(x, y, z):
+            return x + 1, torch.sigmoid(y), torch.tanh(z)
+
+        inps = (
+            torch.rand(8192, device=GPU_TYPE),
+            torch.rand(6144, device=GPU_TYPE),
+            torch.rand(4096, device=GPU_TYPE),
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        code = " ".join(code)
+
+        # Three sub-function definitions before the combo kernel, each
+        # dispatch branch reduced to a call.
+        fc = FileCheck()
+        for num in range(3):
+            fc = fc.check("@triton.jit(noinline=True)").check(f"_body_{num}(")
+        fc = fc.check("pid = tl.program_id(0)")
+        for num in range(3):
+            fc = fc.check(f"pid < num_blocks_{num}:").check(f"_body_{num}(")
+        fc.run(code)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch("combo_kernels_autotune", 0)
+    def test_noinline_sub_kernel_bodies_no_bench(self):
+        # No-benchmark path (combo_kernels_autotune=0 -> bake_blocks): block
+        # sizes are kernel-scope constexprs, threaded into each sub-function
+        # as constexpr call arguments.
+        def fn(x, y):
+            return x + 1, torch.tanh(y)
+
+        inps = (
+            torch.rand(8192, device=GPU_TYPE),
+            torch.rand(4096, device=GPU_TYPE),
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        code = " ".join(code)
+
+        (
+            FileCheck()
+            .check("@triton.jit(noinline=True)")
+            .check("_body_0(")
+            .check("XBLOCK_0 : tl.constexpr")
+            .check("@triton.jit(noinline=True)")
+            .check("_body_1(")
+            .check("XBLOCK_1 : tl.constexpr")
+            .check("XBLOCK_0: tl.constexpr =")
+            .check("pid < num_blocks_0:")
+            .check("_body_0(")
+            .check("pid < num_blocks_1:")
+            .check("_body_1(")
+            .run(code)
+        )
+
 
 class ComboKernelBenchmarkTestsPerSubkernelBlocks(ComboKernelBenchmarkTests):
     combo_kernel_per_subkernel_blocks = True
@@ -2274,27 +2337,42 @@ class ComboKernelPDLTests(TestCase):
         FileCheck().check("'launch_pdl': True").run(code)
 
         # Each sub-kernel should have exactly one gdc_wait followed by one
-        # gdc_launch_dependents, with no redundant waits in between. Per-subkernel
-        # blocks use flatten-grid dispatch (pid < num_blocks_i); equal-sized
-        # subkernels otherwise use round-robin dispatch (pid % 2).
-        second_branch = (
-            "elif pid < num_blocks_1:" if per_subkernel_blocks else "elif pid % 2 == 1:"
-        )
-        (
-            FileCheck()
-            .check("if pid")
-            .check("tl.extra.cuda.gdc_wait()")
-            .check("tl.load(")
-            .check_not("tl.extra.cuda.gdc_wait()")
-            .check("tl.extra.cuda.gdc_launch_dependents()")
-            .check_not("tl.extra.cuda.gdc_wait()")
-            .check(second_branch)
-            .check("tl.extra.cuda.gdc_wait()")
-            .check("tl.load(")
-            .check_not("tl.extra.cuda.gdc_wait()")
-            .check("tl.extra.cuda.gdc_launch_dependents()")
-            .run(code)
-        )
+        # gdc_launch_dependents, with no redundant waits in between.
+        # Per-subkernel blocks emit each body as a noinline sub-function (the
+        # gdc calls move with the body); equal-sized subkernels otherwise use
+        # round-robin dispatch (pid % 2) with inline bodies.
+        if per_subkernel_blocks:
+            (
+                FileCheck()
+                .check("def triton_poi_fused_0_body_0(")
+                .check("tl.extra.cuda.gdc_wait()")
+                .check("tl.load(")
+                .check_not("tl.extra.cuda.gdc_wait()")
+                .check("tl.extra.cuda.gdc_launch_dependents()")
+                .check_not("tl.extra.cuda.gdc_wait()")
+                .check("def triton_poi_fused_0_body_1(")
+                .check("tl.extra.cuda.gdc_wait()")
+                .check("tl.load(")
+                .check_not("tl.extra.cuda.gdc_wait()")
+                .check("tl.extra.cuda.gdc_launch_dependents()")
+                .run(code)
+            )
+        else:
+            (
+                FileCheck()
+                .check("if pid")
+                .check("tl.extra.cuda.gdc_wait()")
+                .check("tl.load(")
+                .check_not("tl.extra.cuda.gdc_wait()")
+                .check("tl.extra.cuda.gdc_launch_dependents()")
+                .check_not("tl.extra.cuda.gdc_wait()")
+                .check("elif pid % 2 == 1:")
+                .check("tl.extra.cuda.gdc_wait()")
+                .check("tl.load(")
+                .check_not("tl.extra.cuda.gdc_wait()")
+                .check("tl.extra.cuda.gdc_launch_dependents()")
+                .run(code)
+            )
 
     @requires_gpu_and_triton
     @skipIfRocm
@@ -2335,26 +2413,38 @@ class ComboKernelPDLTests(TestCase):
         )
 
         # Verify combo kernel structure with PDL - each sub-kernel should have
-        # exactly one gdc_wait and one gdc_launch_dependents, no redundant waits.
-        # Per-subkernel blocks dispatch on num_blocks_i; otherwise on num_xblocks_i.
-        prefix = "num_blocks" if per_subkernel_blocks else "num_xblocks"
-        (
-            FileCheck()
-            .check("'launch_pdl': True")
-            .check(f"if pid < {prefix}_0:")
-            .check("tl.extra.cuda.gdc_wait()")
-            .check_not("tl.extra.cuda.gdc_wait()")
-            .check("tl.extra.cuda.gdc_launch_dependents()")
-            .check(f"elif pid < {prefix}_1:")
-            .check("tl.extra.cuda.gdc_wait()")
-            .check_not("tl.extra.cuda.gdc_wait()")
-            .check("tl.extra.cuda.gdc_launch_dependents()")
-            .check(f"elif pid < {prefix}_2:")
-            .check("tl.extra.cuda.gdc_wait()")
-            .check_not("tl.extra.cuda.gdc_wait()")
-            .check("tl.extra.cuda.gdc_launch_dependents()")
-            .run(code)
-        )
+        # exactly one gdc_wait and one gdc_launch_dependents, no redundant
+        # waits. Sub-function vs inline form as in test_pdl_codegen_in_combo_kernel.
+        if per_subkernel_blocks:
+            # Sub-function definitions precede the main kernel's jit line
+            # (where launch_pdl appears), so check the bodies first.
+            fc = FileCheck()
+            for num in range(3):
+                fc = (
+                    fc.check(f"def triton_poi_fused_0_body_{num}(")
+                    .check("tl.extra.cuda.gdc_wait()")
+                    .check_not("tl.extra.cuda.gdc_wait()")
+                    .check("tl.extra.cuda.gdc_launch_dependents()")
+                )
+            fc.check("'launch_pdl': True").run(code)
+        else:
+            (
+                FileCheck()
+                .check("'launch_pdl': True")
+                .check("if pid < num_xblocks_0:")
+                .check("tl.extra.cuda.gdc_wait()")
+                .check_not("tl.extra.cuda.gdc_wait()")
+                .check("tl.extra.cuda.gdc_launch_dependents()")
+                .check("elif pid < num_xblocks_1:")
+                .check("tl.extra.cuda.gdc_wait()")
+                .check_not("tl.extra.cuda.gdc_wait()")
+                .check("tl.extra.cuda.gdc_launch_dependents()")
+                .check("elif pid < num_xblocks_2:")
+                .check("tl.extra.cuda.gdc_wait()")
+                .check_not("tl.extra.cuda.gdc_wait()")
+                .check("tl.extra.cuda.gdc_launch_dependents()")
+                .run(code)
+            )
 
     @requires_gpu_and_triton
     @skipIfRocm
