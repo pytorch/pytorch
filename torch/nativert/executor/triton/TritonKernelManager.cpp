@@ -29,6 +29,20 @@ bool isFloat64Param(std::string_view param_type) {
       contains(param_type, "float64") || contains(param_type, "double");
 }
 
+std::vector<int64_t> gridFromTupleConstant(
+    const std::vector<c10::IValue>& values) {
+  std::vector<int64_t> grid;
+  grid.reserve(values.size());
+  for (const auto& value : values) {
+    TORCH_CHECK(
+        value.isInt(),
+        "Triton grid tuple elements must be ints, got ",
+        value.tagKind());
+    grid.push_back(value.toInt());
+  }
+  return grid;
+}
+
 } // namespace
 
 void* KernelInputs::store_scalar_arg(
@@ -93,14 +107,27 @@ void* KernelInputs::store_scalar_arg(
 
 void LaunchParams::parseCommonAttributes(const Node* node) {
   for (const auto& attr : node->attributes()) {
-    std::vector<int64_t> grid;
-    if (set_from_variant<std::vector<int64_t>>(grid, "grid", attr)) {
-      TORCH_CHECK(grid.size() == 3, "grid must be a 3D vector");
-      grid_dims = GridDims(
-          static_cast<int>(grid[0]),
-          static_cast<int>(grid[1]),
-          static_cast<int>(grid[2]));
+    if (attr.name != "grid") {
+      continue;
     }
+
+    std::vector<int64_t> grid;
+    if (const auto* vectorGrid =
+            std::get_if<std::vector<int64_t>>(&attr.value)) {
+      grid = *vectorGrid;
+    } else if (
+        const auto* tupleGrid =
+            std::get_if<std::vector<c10::IValue>>(&attr.value)) {
+      grid = gridFromTupleConstant(*tupleGrid);
+    } else {
+      TORCH_CHECK(false, "Triton grid must be a 3D int list or tuple");
+    }
+
+    TORCH_CHECK(grid.size() == 3, "grid must be a 3D vector");
+    grid_dims = GridDims(
+        static_cast<int>(grid[0]),
+        static_cast<int>(grid[1]),
+        static_cast<int>(grid[2]));
   }
 }
 

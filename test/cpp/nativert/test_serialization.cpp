@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <gtest/gtest.h>
 #include <torch/nativert/graph/Serialization.h>
 
@@ -42,8 +43,79 @@ torch::_export::OptionalTensorArgument makeOptionalTensorArg(
 // Helper to create OptionalTensorArgument with None
 torch::_export::OptionalTensorArgument makeOptionalTensorArgNone() {
   torch::_export::OptionalTensorArgument arg;
-  arg.set_as_none({});
+  arg.set_as_none(true);
   return arg;
+}
+
+torch::_export::Argument makeTensorArgument(const std::string& name) {
+  torch::_export::Argument arg;
+  arg.set_as_tensor(makeTensorArg(name));
+  return arg;
+}
+
+torch::_export::Argument makeIntArgument(int64_t value) {
+  torch::_export::Argument arg;
+  arg.set_as_int(value);
+  return arg;
+}
+
+torch::_export::Argument makeStringArgument(const std::string& value) {
+  torch::_export::Argument arg;
+  arg.set_as_string(value);
+  return arg;
+}
+
+torch::_export::Argument makeBoolArgument(bool value) {
+  torch::_export::Argument arg;
+  arg.set_as_bool(value);
+  return arg;
+}
+
+torch::_export::Argument makeNoneArgument() {
+  torch::_export::Argument arg;
+  arg.set_as_none(true);
+  return arg;
+}
+
+torch::_export::Argument makeSymIntArgument(const std::string& name) {
+  torch::_export::Argument arg;
+  arg.set_as_sym_int(makeSymIntArg(name));
+  return arg;
+}
+
+torch::_export::ForwardRef<torch::_export::Argument> makeArgumentRef(
+    torch::_export::Argument arg) {
+  torch::_export::ForwardRef<torch::_export::Argument> ref;
+  ref.emplace(std::move(arg));
+  return ref;
+}
+
+torch::_export::Argument makeTupleArgument(
+    std::vector<torch::_export::Argument> args) {
+  std::vector<torch::_export::ForwardRef<torch::_export::Argument>> refs;
+  refs.reserve(args.size());
+  for (auto& arg : args) {
+    refs.push_back(makeArgumentRef(std::move(arg)));
+  }
+  torch::_export::Argument tupleArg;
+  tupleArg.set_as_tuple(std::move(refs));
+  return tupleArg;
+}
+
+torch::_export::InputSpec makeUserInputSpec(torch::_export::Argument arg) {
+  torch::_export::UserInputSpec userInput;
+  userInput.set_arg(std::move(arg));
+  torch::_export::InputSpec inputSpec;
+  inputSpec.set_user_input(std::move(userInput));
+  return inputSpec;
+}
+
+torch::_export::OutputSpec makeUserOutputSpec(torch::_export::Argument arg) {
+  torch::_export::UserOutputSpec userOutput;
+  userOutput.set_arg(std::move(arg));
+  torch::_export::OutputSpec outputSpec;
+  outputSpec.set_user_output(std::move(userOutput));
+  return outputSpec;
 }
 
 TEST(SerializationTest, CheckIsSymbolic) {
@@ -73,6 +145,22 @@ TEST(SerializationTest, CheckIsSymbolic) {
   torch::_export::Argument as_string_arg;
   as_string_arg.set_as_string("test_string");
   EXPECT_FALSE(isSymbolic(as_string_arg));
+}
+
+TEST(SerializationTest, CheckIsSymbolicTuple) {
+  auto tensorTuple =
+      makeTupleArgument({makeTensorArgument("x"), makeTensorArgument("y")});
+  EXPECT_TRUE(isSymbolic(tensorTuple));
+
+  auto symIntTuple =
+      makeTupleArgument({makeSymIntArgument("s0"), makeIntArgument(8)});
+  EXPECT_TRUE(isSymbolic(symIntTuple));
+
+  auto intTuple = makeTupleArgument({makeIntArgument(2), makeIntArgument(3)});
+  EXPECT_FALSE(isSymbolic(intTuple));
+
+  auto emptyTuple = makeTupleArgument({});
+  EXPECT_FALSE(isSymbolic(emptyTuple));
 }
 
 // Test isSymbolic for AS_OPTIONAL_TENSOR
@@ -173,7 +261,7 @@ TEST(SerializationTest, CheckIsSymbolicNonSymbolicTypes) {
 
   // AS_INTS
   torch::_export::Argument as_ints;
-  as_ints.set_as_ints({1, 2, 3});
+  as_ints.set_as_ints(std::vector<int64_t>{1, 2, 3});
   EXPECT_FALSE(isSymbolic(as_ints));
 
   // AS_FLOATS
@@ -182,22 +270,23 @@ TEST(SerializationTest, CheckIsSymbolicNonSymbolicTypes) {
   f64_1.set(1.0);
   f64_2.set(2.0);
   f64_3.set(3.0);
-  as_floats.set_as_floats({f64_1, f64_2, f64_3});
+  as_floats.set_as_floats(
+      std::vector<torch::_export::F64>{f64_1, f64_2, f64_3});
   EXPECT_FALSE(isSymbolic(as_floats));
 
   // AS_BOOLS
   torch::_export::Argument as_bools;
-  as_bools.set_as_bools({true, false, true});
+  as_bools.set_as_bools(std::vector<bool>{true, false, true});
   EXPECT_FALSE(isSymbolic(as_bools));
 
   // AS_NONE
   torch::_export::Argument as_none;
-  as_none.set_as_none({});
+  as_none.set_as_none(true);
   EXPECT_FALSE(isSymbolic(as_none));
 
   // AS_STRINGS
   torch::_export::Argument as_strings;
-  as_strings.set_as_strings({"a", "b", "c"});
+  as_strings.set_as_strings(std::vector<std::string>{"a", "b", "c"});
   EXPECT_FALSE(isSymbolic(as_strings));
 }
 
@@ -218,6 +307,34 @@ TEST(SerializationTest, ConstantToValue) {
   EXPECT_EQ(value, Constant("test_string"));
 }
 
+TEST(SerializationTest, ConstantToValueTuple) {
+  auto intTuple = makeTupleArgument({makeIntArgument(2), makeIntArgument(3)});
+  auto value = constantToValue(intTuple, false);
+  auto tupleIValue = constantToIValue(value);
+  ASSERT_TRUE(tupleIValue.isTuple());
+  const auto& intElements = tupleIValue.toTupleRef().elements();
+  ASSERT_EQ(intElements.size(), 2);
+  EXPECT_EQ(intElements[0].toInt(), 2);
+  EXPECT_EQ(intElements[1].toInt(), 3);
+
+  auto mixedTuple = makeTupleArgument(
+      {makeIntArgument(1), makeStringArgument("two"), makeBoolArgument(true)});
+  value = constantToValue(mixedTuple, false);
+  tupleIValue = constantToIValue(value);
+  ASSERT_TRUE(tupleIValue.isTuple());
+  const auto& elements = tupleIValue.toTupleRef().elements();
+  ASSERT_EQ(elements.size(), 3);
+  EXPECT_EQ(elements[0].toInt(), 1);
+  EXPECT_EQ(elements[1].toStringRef(), "two");
+  EXPECT_EQ(elements[2].toBool(), true);
+
+  auto emptyTuple = makeTupleArgument({});
+  value = constantToValue(emptyTuple, false);
+  tupleIValue = constantToIValue(value);
+  ASSERT_TRUE(tupleIValue.isTuple());
+  EXPECT_TRUE(tupleIValue.toTupleRef().elements().empty());
+}
+
 // Test constantToValue for AS_FLOAT
 TEST(SerializationTest, ConstantToValueFloat) {
   torch::_export::Argument arg;
@@ -231,7 +348,7 @@ TEST(SerializationTest, ConstantToValueFloat) {
 // Test constantToValue for AS_INTS
 TEST(SerializationTest, ConstantToValueInts) {
   torch::_export::Argument arg;
-  arg.set_as_ints({1, 2, 3, 4, 5});
+  arg.set_as_ints(std::vector<int64_t>{1, 2, 3, 4, 5});
   auto value = constantToValue(arg, false);
   std::vector<int64_t> expected = {1, 2, 3, 4, 5};
   EXPECT_EQ(value, Constant(expected));
@@ -244,7 +361,7 @@ TEST(SerializationTest, ConstantToValueFloats) {
   f64_1.set(1.0);
   f64_2.set(2.5);
   f64_3.set(3.14);
-  arg.set_as_floats({f64_1, f64_2, f64_3});
+  arg.set_as_floats(std::vector<torch::_export::F64>{f64_1, f64_2, f64_3});
   auto value = constantToValue(arg, false);
   std::vector<double> expected = {1.0, 2.5, 3.14};
   EXPECT_EQ(value, Constant(expected));
@@ -253,7 +370,7 @@ TEST(SerializationTest, ConstantToValueFloats) {
 // Test constantToValue for AS_BOOLS
 TEST(SerializationTest, ConstantToValueBools) {
   torch::_export::Argument arg;
-  arg.set_as_bools({true, false, true});
+  arg.set_as_bools(std::vector<bool>{true, false, true});
   auto value = constantToValue(arg, false);
   std::vector<bool> expected = {true, false, true};
   EXPECT_EQ(value, Constant(expected));
@@ -262,7 +379,7 @@ TEST(SerializationTest, ConstantToValueBools) {
 // Test constantToValue for AS_NONE
 TEST(SerializationTest, ConstantToValueNone) {
   torch::_export::Argument arg;
-  arg.set_as_none({});
+  arg.set_as_none(true);
   auto value = constantToValue(arg, false);
   EXPECT_EQ(value, Constant(None()));
 }
@@ -270,7 +387,7 @@ TEST(SerializationTest, ConstantToValueNone) {
 // Test constantToValue for AS_STRINGS
 TEST(SerializationTest, ConstantToValueStrings) {
   torch::_export::Argument arg;
-  arg.set_as_strings({"hello", "world"});
+  arg.set_as_strings(std::vector<std::string>{"hello", "world"});
   auto value = constantToValue(arg, false);
   std::vector<std::string> expected = {"hello", "world"};
   EXPECT_EQ(value, Constant(expected));
@@ -285,13 +402,15 @@ TEST(SerializationTest, ConstantToValueThrowsOnSymbolicTypes) {
 
   // AS_TENSORS should throw
   torch::_export::Argument as_tensors;
-  as_tensors.set_as_tensors({makeTensorArg("t1"), makeTensorArg("t2")});
+  as_tensors.set_as_tensors(std::vector<torch::_export::TensorArgument>{
+      makeTensorArg("t1"), makeTensorArg("t2")});
   EXPECT_THROW(constantToValue(as_tensors, false), std::exception);
 
   // AS_OPTIONAL_TENSORS should throw
   torch::_export::Argument as_opt_tensors;
   as_opt_tensors.set_as_optional_tensors(
-      {makeOptionalTensorArg("opt_t1"), makeOptionalTensorArgNone()});
+      std::vector<torch::_export::OptionalTensorArgument>{
+          makeOptionalTensorArg("opt_t1"), makeOptionalTensorArgNone()});
   EXPECT_THROW(constantToValue(as_opt_tensors, false), std::exception);
 
   // AS_SYM_INT should throw
@@ -301,7 +420,8 @@ TEST(SerializationTest, ConstantToValueThrowsOnSymbolicTypes) {
 
   // AS_SYM_INTS should throw
   torch::_export::Argument as_sym_ints;
-  as_sym_ints.set_as_sym_ints({makeSymIntArg("s0"), makeSymIntArg("s1")});
+  as_sym_ints.set_as_sym_ints(std::vector<torch::_export::SymIntArgument>{
+      makeSymIntArg("s0"), makeSymIntArg("s1")});
   EXPECT_THROW(constantToValue(as_sym_ints, false), std::exception);
 
   // AS_SYM_BOOL should throw
@@ -311,7 +431,8 @@ TEST(SerializationTest, ConstantToValueThrowsOnSymbolicTypes) {
 
   // AS_SYM_BOOLS should throw
   torch::_export::Argument as_sym_bools;
-  as_sym_bools.set_as_sym_bools({makeSymBoolArg("b0"), makeSymBoolArg("b1")});
+  as_sym_bools.set_as_sym_bools(std::vector<torch::_export::SymBoolArgument>{
+      makeSymBoolArg("b0"), makeSymBoolArg("b1")});
   EXPECT_THROW(constantToValue(as_sym_bools, false), std::exception);
 
   // AS_CUSTOM_OBJ should throw
@@ -328,6 +449,386 @@ TEST(SerializationTest, ConstantToValueThrowsOnSymbolicTypes) {
   EXPECT_THROW(constantToValue(as_opt_tensor, false), std::exception);
 }
 
+TEST(SerializationTest, JsonToGraphTupleTensorInputCreatesListPack) {
+  torch::_export::Graph jsonGraph;
+
+  auto xArg = makeTensorArgument("x");
+  auto yArg = makeTensorArgument("y");
+  jsonGraph.set_inputs(std::vector<torch::_export::Argument>{xArg, yArg});
+
+  torch::_export::Node node;
+  node.set_target("some.op.default");
+
+  torch::_export::NamedArgument tupleInput;
+  tupleInput.set_name("pair");
+  tupleInput.set_arg(
+      makeTupleArgument({makeTensorArgument("x"), makeTensorArgument("y")}));
+  node.set_inputs(std::vector<torch::_export::NamedArgument>{tupleInput});
+
+  auto outArg = makeTensorArgument("out");
+  node.set_outputs(std::vector<torch::_export::Argument>{outArg});
+  jsonGraph.set_nodes(std::vector<torch::_export::Node>{node});
+  jsonGraph.set_outputs(std::vector<torch::_export::Argument>{outArg});
+
+  torch::_export::GraphSignature sig;
+  sig.set_input_specs(std::vector<torch::_export::InputSpec>{
+      makeUserInputSpec(xArg), makeUserInputSpec(yArg)});
+  sig.set_output_specs(
+      std::vector<torch::_export::OutputSpec>{makeUserOutputSpec(outArg)});
+
+  torch::_export::GraphModule graphModule;
+  graphModule.set_graph(jsonGraph);
+  graphModule.set_signature(sig);
+
+  auto graph = jsonToGraph(graphModule);
+
+  for (const auto& n : graph->nodes()) {
+    if (n.target() == "some.op.default") {
+      ASSERT_EQ(n.inputs().size(), 1);
+      EXPECT_EQ(n.inputs()[0].name, "pair");
+      const Value* tupleValue = n.inputs()[0].value;
+      EXPECT_EQ(tupleValue->type().kind(), Type::Kind::TensorList);
+      ASSERT_NE(tupleValue->producer(), nullptr);
+      EXPECT_EQ(tupleValue->producer()->target(), "prim.ListPack");
+      ASSERT_EQ(tupleValue->producer()->inputs().size(), 2);
+      EXPECT_EQ(tupleValue->producer()->inputs()[0].value->name(), "x");
+      EXPECT_EQ(tupleValue->producer()->inputs()[1].value->name(), "y");
+      return;
+    }
+  }
+  FAIL() << "Could not find deserialized tuple input node";
+}
+
+TEST(SerializationTest, JsonToGraphTupleOptionalTensorInputCreatesListPack) {
+  torch::_export::Graph jsonGraph;
+
+  auto xArg = makeTensorArgument("x");
+  jsonGraph.set_inputs(std::vector<torch::_export::Argument>{xArg});
+
+  torch::_export::Node node;
+  node.set_target("some.op.default");
+
+  torch::_export::NamedArgument tupleInput;
+  tupleInput.set_name("optional_pair");
+  tupleInput.set_arg(
+      makeTupleArgument({makeTensorArgument("x"), makeNoneArgument()}));
+  node.set_inputs(std::vector<torch::_export::NamedArgument>{tupleInput});
+
+  auto outArg = makeTensorArgument("out");
+  node.set_outputs(std::vector<torch::_export::Argument>{outArg});
+  jsonGraph.set_nodes(std::vector<torch::_export::Node>{node});
+  jsonGraph.set_outputs(std::vector<torch::_export::Argument>{outArg});
+
+  torch::_export::GraphSignature sig;
+  sig.set_input_specs(
+      std::vector<torch::_export::InputSpec>{makeUserInputSpec(xArg)});
+  sig.set_output_specs(
+      std::vector<torch::_export::OutputSpec>{makeUserOutputSpec(outArg)});
+
+  torch::_export::GraphModule graphModule;
+  graphModule.set_graph(jsonGraph);
+  graphModule.set_signature(sig);
+
+  auto graph = jsonToGraph(graphModule);
+
+  for (const auto& n : graph->nodes()) {
+    if (n.target() == "some.op.default") {
+      ASSERT_EQ(n.inputs().size(), 1);
+      EXPECT_EQ(n.inputs()[0].name, "optional_pair");
+      const Value* tupleValue = n.inputs()[0].value;
+      EXPECT_EQ(tupleValue->type().kind(), Type::Kind::OptionalTensorList);
+      ASSERT_NE(tupleValue->producer(), nullptr);
+      EXPECT_EQ(tupleValue->producer()->target(), "prim.ListPack");
+      ASSERT_EQ(tupleValue->producer()->inputs().size(), 2);
+      EXPECT_EQ(tupleValue->producer()->inputs()[0].value->name(), "x");
+      EXPECT_EQ(
+          tupleValue->producer()->inputs()[1].value->type().kind(),
+          Type::Kind::None);
+      return;
+    }
+  }
+  FAIL() << "Could not find deserialized optional tuple input node";
+}
+
+TEST(SerializationTest, JsonToGraphUnsupportedMixedTupleInputThrows) {
+  torch::_export::Graph jsonGraph;
+
+  // Python export serde can round-trip mixed HOP operand tuples, but nativert
+  // cannot yet materialize one value that mixes tensor and scalar/SymInt
+  // elements. Keep the limitation explicit until that representation exists.
+  auto xArg = makeTensorArgument("x");
+  jsonGraph.set_inputs(std::vector<torch::_export::Argument>{xArg});
+
+  torch::_export::Node node;
+  node.set_target("some.op.default");
+
+  torch::_export::NamedArgument tupleInput;
+  tupleInput.set_name("mixed_pair");
+  tupleInput.set_arg(
+      makeTupleArgument({makeTensorArgument("x"), makeIntArgument(1)}));
+  node.set_inputs(std::vector<torch::_export::NamedArgument>{tupleInput});
+
+  auto outArg = makeTensorArgument("out");
+  node.set_outputs(std::vector<torch::_export::Argument>{outArg});
+  jsonGraph.set_nodes(std::vector<torch::_export::Node>{node});
+  jsonGraph.set_outputs(std::vector<torch::_export::Argument>{outArg});
+
+  torch::_export::GraphSignature sig;
+  sig.set_input_specs(
+      std::vector<torch::_export::InputSpec>{makeUserInputSpec(xArg)});
+  sig.set_output_specs(
+      std::vector<torch::_export::OutputSpec>{makeUserOutputSpec(outArg)});
+
+  torch::_export::GraphModule graphModule;
+  graphModule.set_graph(jsonGraph);
+  graphModule.set_signature(sig);
+
+  try {
+    jsonToGraph(graphModule);
+    FAIL() << "Expected mixed symbolic tuple deserialization to fail";
+  } catch (const c10::Error& e) {
+    EXPECT_NE(
+        std::string(e.what()).find("Mixed symbolic tuple inputs"),
+        std::string::npos)
+        << e.what();
+  }
+}
+
+TEST(SerializationTest, JsonToGraphHigherOrderEmptyTupleCreatesListPack) {
+  torch::_export::Graph jsonGraph;
+
+  auto xArg = makeTensorArgument("x");
+  jsonGraph.set_inputs(std::vector<torch::_export::Argument>{xArg});
+
+  torch::_export::Node node;
+  node.set_target("torch.ops.higher_order.while_loop");
+
+  torch::_export::NamedArgument condInput;
+  condInput.set_name("cond_fn");
+  condInput.set_arg(makeIntArgument(0));
+
+  torch::_export::NamedArgument bodyInput;
+  bodyInput.set_name("body_fn");
+  bodyInput.set_arg(makeIntArgument(1));
+
+  torch::_export::NamedArgument carriedInput;
+  carriedInput.set_name("");
+  carriedInput.set_arg(makeTupleArgument({makeTensorArgument("x")}));
+
+  torch::_export::NamedArgument additionalInput;
+  additionalInput.set_name("");
+  additionalInput.set_arg(makeTupleArgument({}));
+
+  node.set_inputs(std::vector<torch::_export::NamedArgument>{
+      condInput, bodyInput, carriedInput, additionalInput});
+
+  auto outArg = makeTensorArgument("out");
+  node.set_outputs(std::vector<torch::_export::Argument>{outArg});
+  jsonGraph.set_nodes(std::vector<torch::_export::Node>{node});
+  jsonGraph.set_outputs(std::vector<torch::_export::Argument>{outArg});
+
+  torch::_export::GraphSignature sig;
+  sig.set_input_specs(
+      std::vector<torch::_export::InputSpec>{makeUserInputSpec(xArg)});
+  sig.set_output_specs(
+      std::vector<torch::_export::OutputSpec>{makeUserOutputSpec(outArg)});
+
+  torch::_export::GraphModule graphModule;
+  graphModule.set_graph(jsonGraph);
+  graphModule.set_signature(sig);
+
+  auto graph = jsonToGraph(graphModule);
+
+  for (const auto& n : graph->nodes()) {
+    if (n.target() == "torch.ops.higher_order.while_loop") {
+      ASSERT_EQ(n.inputs().size(), 2);
+      const Value* additionalValue = n.inputs()[1].value;
+      EXPECT_EQ(additionalValue->type().kind(), Type::Kind::TensorList);
+      ASSERT_NE(additionalValue->producer(), nullptr);
+      EXPECT_EQ(additionalValue->producer()->target(), "prim.ListPack");
+      EXPECT_TRUE(additionalValue->producer()->inputs().empty());
+      return;
+    }
+  }
+  FAIL() << "Could not find deserialized higher-order node";
+}
+
+TEST(SerializationTest, JsonToGraphHigherOrderIntTupleCreatesListPack) {
+  torch::_export::Graph jsonGraph;
+
+  torch::_export::Node node;
+  node.set_target("torch.ops.higher_order.while_loop");
+
+  torch::_export::NamedArgument condInput;
+  condInput.set_name("cond_fn");
+  condInput.set_arg(makeIntArgument(0));
+
+  torch::_export::NamedArgument bodyInput;
+  bodyInput.set_name("body_fn");
+  bodyInput.set_arg(makeIntArgument(1));
+
+  torch::_export::NamedArgument carriedInput;
+  carriedInput.set_name("");
+  carriedInput.set_arg(makeTupleArgument({makeIntArgument(3)}));
+
+  torch::_export::NamedArgument additionalInput;
+  additionalInput.set_name("");
+  additionalInput.set_arg(makeTupleArgument({}));
+
+  node.set_inputs(std::vector<torch::_export::NamedArgument>{
+      condInput, bodyInput, carriedInput, additionalInput});
+
+  auto outArg = makeTensorArgument("out");
+  node.set_outputs(std::vector<torch::_export::Argument>{outArg});
+  jsonGraph.set_nodes(std::vector<torch::_export::Node>{node});
+  jsonGraph.set_outputs(std::vector<torch::_export::Argument>{outArg});
+
+  torch::_export::GraphSignature sig;
+  sig.set_output_specs(
+      std::vector<torch::_export::OutputSpec>{makeUserOutputSpec(outArg)});
+
+  torch::_export::GraphModule graphModule;
+  graphModule.set_graph(jsonGraph);
+  graphModule.set_signature(sig);
+
+  auto graph = jsonToGraph(graphModule);
+
+  for (const auto& n : graph->nodes()) {
+    if (n.target() == "torch.ops.higher_order.while_loop") {
+      ASSERT_EQ(n.attributes().size(), 2);
+      ASSERT_EQ(n.inputs().size(), 2);
+      const Value* carriedValue = n.inputs()[0].value;
+      EXPECT_EQ(carriedValue->type().kind(), Type::Kind::SymIntList);
+      ASSERT_NE(carriedValue->producer(), nullptr);
+      EXPECT_EQ(carriedValue->producer()->target(), "prim.ListPack");
+      ASSERT_EQ(carriedValue->producer()->inputs().size(), 1);
+      EXPECT_EQ(
+          carriedValue->producer()->inputs()[0].value->type().kind(),
+          Type::Kind::SymInt);
+      return;
+    }
+  }
+  FAIL() << "Could not find deserialized higher-order node";
+}
+
+TEST(SerializationTest, JsonToGraphRunConstGraphTupleArgsCreatesListPack) {
+  torch::_export::Graph jsonGraph;
+
+  auto xArg = makeTensorArgument("x");
+  jsonGraph.set_inputs(std::vector<torch::_export::Argument>{xArg});
+
+  torch::_export::Node node;
+  node.set_target("torch.ops.higher_order.run_const_graph");
+
+  torch::_export::NamedArgument graphInput;
+  graphInput.set_name("");
+  graphInput.set_arg(makeIntArgument(0));
+
+  torch::_export::NamedArgument argsInput;
+  argsInput.set_name("");
+  argsInput.set_arg(makeTupleArgument({makeTensorArgument("x")}));
+
+  node.set_inputs(
+      std::vector<torch::_export::NamedArgument>{graphInput, argsInput});
+
+  auto outArg = makeTensorArgument("out");
+  node.set_outputs(std::vector<torch::_export::Argument>{outArg});
+  jsonGraph.set_nodes(std::vector<torch::_export::Node>{node});
+  jsonGraph.set_outputs(std::vector<torch::_export::Argument>{outArg});
+
+  torch::_export::GraphSignature sig;
+  sig.set_input_specs(
+      std::vector<torch::_export::InputSpec>{makeUserInputSpec(xArg)});
+  sig.set_output_specs(
+      std::vector<torch::_export::OutputSpec>{makeUserOutputSpec(outArg)});
+
+  torch::_export::GraphModule graphModule;
+  graphModule.set_graph(jsonGraph);
+  graphModule.set_signature(sig);
+
+  auto graph = jsonToGraph(graphModule);
+
+  for (const auto& n : graph->nodes()) {
+    if (n.target() == "torch.ops.higher_order.run_const_graph") {
+      ASSERT_EQ(n.attributes().size(), 1);
+      ASSERT_EQ(n.inputs().size(), 1);
+      const Value* argsValue = n.inputs()[0].value;
+      EXPECT_EQ(argsValue->type().kind(), Type::Kind::TensorList);
+      ASSERT_NE(argsValue->producer(), nullptr);
+      EXPECT_EQ(argsValue->producer()->target(), "prim.ListPack");
+      ASSERT_EQ(argsValue->producer()->inputs().size(), 1);
+      EXPECT_EQ(argsValue->producer()->inputs()[0].value->name(), "x");
+      return;
+    }
+  }
+  FAIL() << "Could not find deserialized higher-order node";
+}
+
+TEST(SerializationTest, JsonToGraphNamedHigherOrderEmptyTupleStaysConstant) {
+  torch::_export::Graph jsonGraph;
+
+  torch::_export::Node node;
+  node.set_target("torch.ops.higher_order.auto_functionalized_v2");
+
+  torch::_export::NamedArgument sizeInput;
+  sizeInput.set_name("size");
+  sizeInput.set_arg(makeTupleArgument({}));
+  node.set_inputs(std::vector<torch::_export::NamedArgument>{sizeInput});
+
+  auto outArg = makeTensorArgument("out");
+  node.set_outputs(std::vector<torch::_export::Argument>{outArg});
+  jsonGraph.set_nodes(std::vector<torch::_export::Node>{node});
+  jsonGraph.set_outputs(std::vector<torch::_export::Argument>{outArg});
+
+  torch::_export::GraphSignature sig;
+  sig.set_output_specs(
+      std::vector<torch::_export::OutputSpec>{makeUserOutputSpec(outArg)});
+
+  torch::_export::GraphModule graphModule;
+  graphModule.set_graph(jsonGraph);
+  graphModule.set_signature(sig);
+
+  auto graph = jsonToGraph(graphModule);
+
+  for (const auto& n : graph->nodes()) {
+    if (n.target() == "torch.ops.higher_order.auto_functionalized_v2") {
+      EXPECT_TRUE(n.inputs().empty());
+      ASSERT_EQ(n.attributes().size(), 1);
+      EXPECT_EQ(n.attributes()[0].name, "size");
+      auto tupleIValue = constantToIValue(n.attributes()[0].value);
+      ASSERT_TRUE(tupleIValue.isTuple());
+      EXPECT_TRUE(tupleIValue.toTupleRef().elements().empty());
+      return;
+    }
+  }
+  FAIL() << "Could not find deserialized higher-order node";
+}
+
+TEST(SerializationTest, GraphSignatureTupleNames) {
+  torch::_export::GraphSignature storage;
+  storage.set_input_specs(std::vector<torch::_export::InputSpec>{
+      makeUserInputSpec(makeTupleArgument(
+          {makeTensorArgument("x"), makeTensorArgument("y")}))});
+  storage.set_output_specs(std::vector<torch::_export::OutputSpec>{
+      makeUserOutputSpec(makeTupleArgument(
+          {makeTensorArgument("out0"),
+           makeTensorArgument("out1"),
+           makeNoneArgument()}))});
+
+  GraphSignature signature(storage);
+
+  ASSERT_EQ(signature.userInputs().size(), 2);
+  EXPECT_EQ(signature.userInputs()[0], "x");
+  EXPECT_EQ(signature.userInputs()[1], "y");
+
+  ASSERT_EQ(signature.userOutputs().size(), 3);
+  ASSERT_TRUE(signature.userOutputs()[0].has_value());
+  EXPECT_EQ(signature.userOutputs()[0].value(), "out0");
+  ASSERT_TRUE(signature.userOutputs()[1].has_value());
+  EXPECT_EQ(signature.userOutputs()[1].value(), "out1");
+  EXPECT_FALSE(signature.userOutputs()[2].has_value());
+}
+
 // Verify that None-typed input values deserialized from JSON have nullptr
 // producer. Previously, they were incorrectly assigned the consuming node as
 // producer, which caused dangling pointer crashes in cleanupDeadNodes() when
@@ -342,7 +843,7 @@ TEST(SerializationTest, NoneInputValueHasNullProducer) {
   // Graph input: a tensor named "data"
   torch::_export::Argument graphInput;
   graphInput.set_as_tensor(makeTensorArg("data"));
-  jsonGraph.set_inputs({graphInput});
+  jsonGraph.set_inputs(std::vector<torch::_export::Argument>{graphInput});
 
   // Node: some.op with a tensor input and a None input
   torch::_export::Node node;
@@ -357,22 +858,23 @@ TEST(SerializationTest, NoneInputValueHasNullProducer) {
   torch::_export::NamedArgument noneInput;
   noneInput.set_name("optional_arg");
   torch::_export::Argument noneArg;
-  noneArg.set_as_none({});
+  noneArg.set_as_none(true);
   noneInput.set_arg(noneArg);
 
-  node.set_inputs({dataInput, noneInput});
+  node.set_inputs(
+      std::vector<torch::_export::NamedArgument>{dataInput, noneInput});
 
   // Output: a tensor named "out"
   torch::_export::Argument nodeOutput;
   nodeOutput.set_as_tensor(makeTensorArg("out"));
-  node.set_outputs({nodeOutput});
+  node.set_outputs(std::vector<torch::_export::Argument>{nodeOutput});
 
-  jsonGraph.set_nodes({node});
+  jsonGraph.set_nodes(std::vector<torch::_export::Node>{node});
 
   // Graph output
   torch::_export::Argument graphOutput;
   graphOutput.set_as_tensor(makeTensorArg("out"));
-  jsonGraph.set_outputs({graphOutput});
+  jsonGraph.set_outputs(std::vector<torch::_export::Argument>{graphOutput});
 
   // Build signature with proper input/output specs
   torch::_export::GraphSignature sig;
@@ -381,13 +883,13 @@ TEST(SerializationTest, NoneInputValueHasNullProducer) {
   userInput.set_arg(graphInput);
   torch::_export::InputSpec inputSpec;
   inputSpec.set_user_input(userInput);
-  sig.set_input_specs({inputSpec});
+  sig.set_input_specs(std::vector<torch::_export::InputSpec>{inputSpec});
 
   torch::_export::UserOutputSpec userOutput;
   userOutput.set_arg(graphOutput);
   torch::_export::OutputSpec outputSpec;
   outputSpec.set_user_output(userOutput);
-  sig.set_output_specs({outputSpec});
+  sig.set_output_specs(std::vector<torch::_export::OutputSpec>{outputSpec});
 
   torch::_export::GraphModule graphModule;
   graphModule.set_graph(jsonGraph);

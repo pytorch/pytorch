@@ -47,6 +47,7 @@ from torch._export.serde.serialize import (
     deserialize_torch_artifact,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    GraphModuleDeserializer,
     GraphModuleSerializer,
     serialize,
     SerializeError,
@@ -506,6 +507,17 @@ def forward(self, x):
         self.assertEqual(len(res), 1)
         self.assertEqual(res[0].arg._type, "as_sym_ints")
 
+    def test_nested_tuple_input(self):
+        # HOP operands are flattened before they reach the serialized HOP node,
+        # so nested tuple preservation is covered at the serde argument layer.
+        serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
+        serialized = serializer.serialize_input((1, (2, 3)))
+        self.assertEqual(serialized.type, "as_tuple")
+        self.assertEqual(serialized.as_tuple[1].type, "as_tuple")
+        self.assertEqual(
+            GraphModuleDeserializer().deserialize_input(serialized), (1, (2, 3))
+        )
+
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -792,7 +804,7 @@ def forward(self, x):
             kernel_name = kwargs["name"].as_string
             symbol_name = kernel_name.rpartition("_")[0]
             self.assertEqual(symbol_name, "add_kernel")
-            self.assertEqual(kwargs["grid"].as_ints, [1, 1, 1])
+            self.assertEqual([arg.as_int for arg in kwargs["grid"].as_tuple], [1, 1, 1])
             self.assertEqual(kwargs["output_indices"].as_ints, [2])
             self.assertEqual(
                 kwargs["num_warps"].as_int, 8 if isinstance(m, MyModelAutotune) else 4
@@ -1571,6 +1583,43 @@ class TestDeserialize(TestCase):
 
         inp = (torch.ones(3, 3), torch.ones(3, 3), torch.tensor(2))
         self.check_graph(Mod(), inp, use_pre_dispatch=False)
+
+    def test_hoo_tuple_input(self):
+        class Mod(torch.nn.Module):
+            def forward(self, ci, a, b):
+                def cond_fn(i, x, y):
+                    return i > 0
+
+                def body_fn(i, x, y):
+                    return i - 1, x + y, y - x
+
+                return torch._higher_order_ops.while_loop(cond_fn, body_fn, (ci, a, b))
+
+        def get_while_loop_node(ep):
+            return next(
+                node
+                for node in ep.graph.nodes
+                if node.op == "call_function"
+                and node.target == torch.ops.higher_order.while_loop
+            )
+
+        inp = (
+            torch.tensor(1),
+            torch.randn(10, 20),
+            torch.randn(10, 20),
+        )
+        ep = torch.export.export(Mod(), inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+
+        node = get_while_loop_node(ep)
+        loaded_node = get_while_loop_node(loaded_ep)
+        self.assertEqual(type(node.args[2]), tuple)
+        self.assertEqual(type(loaded_node.args[2]), tuple)
+        self.assertEqual(type(loaded_node.args[3]), tuple)
+        self.assertEqual(loaded_ep.module()(*inp), Mod()(*inp))
 
     def test_none_input(self):
         """

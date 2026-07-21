@@ -997,6 +997,8 @@ c10::IValue constantToIValue(const Constant& constant) {
         using T = std::decay_t<decltype(arg)>;
         if constexpr (is_same_v<T, None>) {
           return c10::IValue();
+        } else if constexpr (is_same_v<T, vector<c10::IValue>>) {
+          return c10::ivalue::Tuple::create(arg);
         } else if constexpr (std::is_convertible_v<T, c10::IValue>) {
           return arg;
         } else if constexpr (is_same_v<T, unique_ptr<Graph>>) {
@@ -1071,6 +1073,18 @@ std::ostream& operator<<(std::ostream& out, const Constant& constant) {
           out << kDevicePrefix << '{' << arg << '}';
         } else if constexpr (is_same_v<T, vector<string>>) {
           out << fmt::format("[{}]", fmt::join(arg, ","));
+        } else if constexpr (is_same_v<T, vector<c10::IValue>>) {
+          out << '(';
+          for (const auto& [idx, el] : c10::enumerate(arg)) {
+            if (idx > 0) {
+              out << ", ";
+            }
+            out << el;
+          }
+          if (arg.size() == 1) {
+            out << ',';
+          }
+          out << ')';
         } else if constexpr (is_same_v<T, vector<vector<int64_t>>>) {
           out << '[';
           for (const auto& [idx, inner_list] : c10::enumerate(arg)) {
