@@ -228,7 +228,11 @@ def meta__transformer_encoder_layer_fwd(
         raise NotImplementedError(
             "_transformer_encoder_layer_fwd fake implementation does not support nested tensors"
         )
-    if src.numel() == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    # Unbacked-safe: known-empty takes the empty path; if the size is symbolic
+    # and can't be decided, assume non-empty (the common case) instead of DDE-ing.
+    if guard_or_false(src.numel() == 0):
         return src.clone()
     return torch.empty_like(src)
 
@@ -7143,27 +7147,44 @@ def _check_scaled_mm_sizes(
             block_size_mn = 128
 
             num_k_blocks = ceil_div(_k, block_size_k)
-            padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
 
-            expected_a_size = (
-                block_size_mn * ceil_div(m, block_size_mn) * padded_num_k_blocks
-            )
-            expected_b_size = (
-                block_size_mn * ceil_div(n, block_size_mn) * padded_num_k_blocks
-            )
+            if device_hint(self) == "xpu":
+                # XPU (oneDNN) uses unswizzled, unpadded blockwise scale shapes,
+                # unlike the L4-padded SWIZZLE_32_4_4 layout CUDA expects.
+                expected_a_size = num_k_blocks * m
+                expected_b_size = num_k_blocks * n
+            else:
+                padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
+
+                expected_a_size = (
+                    block_size_mn * ceil_div(m, block_size_mn) * padded_num_k_blocks
+                )
+                expected_b_size = (
+                    block_size_mn * ceil_div(n, block_size_mn) * padded_num_k_blocks
+                )
 
             if (
                 scale_a.numel() == expected_a_size
                 and scale_b.numel() == expected_b_size
             ):
-                torch._check(
-                    scale_a.is_contiguous(),
-                    lambda: "scale_a must be contiguous",
-                )
-                torch._check(
-                    scale_b.is_contiguous(),
-                    lambda: "scale_b must be contiguous",
-                )
+                if device_hint(self) == "xpu":
+                    torch._check(
+                        scale_a.is_contiguous() or scale_a.t().is_contiguous(),
+                        lambda: "scale_a must be contiguous or column-major contiguous",
+                    )
+                    torch._check(
+                        scale_b.is_contiguous() or scale_b.t().is_contiguous(),
+                        lambda: "scale_b must be contiguous or column-major contiguous",
+                    )
+                else:
+                    torch._check(
+                        scale_a.is_contiguous(),
+                        lambda: "scale_a must be contiguous",
+                    )
+                    torch._check(
+                        scale_b.is_contiguous(),
+                        lambda: "scale_b must be contiguous",
+                    )
             else:
                 torch._check(
                     False,

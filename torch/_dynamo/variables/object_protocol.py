@@ -771,22 +771,6 @@ def generic_float(
     )
 
 
-def getindex(
-    tx: "InstructionTranslatorBase",
-    obj: VariableTracker,
-    arg: VariableTracker,
-) -> VariableTracker:
-    """Mirrors typeobject.c::getindex: calls PyNumber_AsSsize_t then tp_as_sequence.sq_length"""
-    obj_type = maybe_get_python_type(obj)
-
-    i = pynumber_as_ssize_t(tx, arg, err=OverflowError)
-    if i.as_python_constant() < 0:
-        if type_implements_sq_length(obj_type):
-            length = obj.sq_length(tx)
-            i = generic_add(tx, i, length)
-    return i
-
-
 def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
     """Mirrors PyLong_AsSsize_t: requires an int (or subclass).
     values outside the Py_ssize_t range raise OverflowError.
@@ -1035,6 +1019,8 @@ NB_SLOT_MAPPING = {
     "nb_inplace_add": PyNumberSlots.NB_INPLACE_ADD,
     "nb_multiply": PyNumberSlots.NB_MULTIPLY,
     "nb_inplace_multiply": PyNumberSlots.NB_INPLACE_MULTIPLY,
+    "nb_matrix_multiply": PyNumberSlots.NB_MATRIX_MULTIPLY,
+    "nb_inplace_matrix_multiply": PyNumberSlots.NB_INPLACE_MATRIX_MULTIPLY,
     "nb_and": PyNumberSlots.NB_AND,
     "nb_inplace_and": PyNumberSlots.NB_INPLACE_AND,
     "nb_xor": PyNumberSlots.NB_XOR,
@@ -1467,6 +1453,31 @@ def generic_inplace_multiply(
         tx,
         f"unsupported operand type(s) for *=: "
         f"'{v.python_type_name()}' and '{w.python_type_name()}'",
+    )
+
+
+def generic_matmul(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyNumber_MatrixMultiply."""
+    return binary_op(tx, v, w, "nb_matrix_multiply", "@")
+
+
+def generic_inplace_matmul(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyNumber_InPlaceMatrixMultiply."""
+    return binary_iop(
+        tx,
+        v,
+        w,
+        "nb_inplace_matrix_multiply",
+        "nb_matrix_multiply",
+        "@=",
     )
 
 
@@ -2097,6 +2108,15 @@ def _is_method_type(type_attr: object) -> bool:
     return isinstance(type_attr, _METHOD_TYPES)
 
 
+def _has_custom_call_method(obj: VariableTracker) -> bool:
+    for cls in type(obj).__mro__:
+        if cls is VariableTracker:
+            return False
+        if "call_method" in cls.__dict__:
+            return True
+    return False
+
+
 def object_generic_getattr(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
@@ -2145,6 +2165,14 @@ def object_generic_getattr(
 
     # Step 4: Non-data descriptor with __get__.
     if type_attr is not NO_SUCH_SUBOBJ and hasattr(type(type_attr), "__get__"):
+        # If the VT has custom call_method and this is a method, return a
+        # CallMethodVariable that dispatches through call_method instead of
+        # inlining the resolved method directly.  This preserves custom
+        # tracing logic (side effects, graph nodes, suppression) that
+        # MRO-based resolution via UserMethodVariable would bypass.
+        if _is_method_type(type_attr) and _has_custom_call_method(obj):
+            return variables.CallMethodVariable(obj, name, source=source)
+
         class_vt = VariableTracker.build(tx, py_type)
         result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
         if result is not None:
