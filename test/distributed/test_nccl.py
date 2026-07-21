@@ -996,6 +996,44 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 27), "NCCL Symmetric Memory support from nccl 2.27")
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_recycled_barrier(self):
+        # Regression test for the signal-pad pollution bug: ncclMemAlloc does
+        # not zero memory, so a MemPool-recycled NCCL symmetric allocation could
+        # start the CAS-based barrier() protocol from a non-zero signal pad and
+        # deadlock. alloc() zeros the pad up front. Allocate from the SymmMem
+        # MemPool, run a barrier / buffer round-trip, free, then allocate the
+        # same size again (recycling the freed block) and confirm the round-trip
+        # still works on the recycled region.
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+        mempool = symm_mem.get_mem_pool(self.device)
+        numel, dtype = 1024, torch.float
+
+        def barrier_roundtrip():
+            with torch.cuda.use_mem_pool(mempool):
+                t = torch.empty(numel, dtype=dtype, device=self.device)
+            hdl = symm_mem.rendezvous(t, group=group_name)
+            t.fill_(self.rank)
+            # Bounded barriers so a polluted-pad regression fails cleanly
+            # instead of hanging.
+            hdl.barrier(timeout_ms=60000)
+            for peer in range(self.world_size):
+                buf = hdl.get_buffer(peer, (numel,), dtype)
+                self.assertTrue(buf.eq(peer).all())
+            hdl.barrier(timeout_ms=60000)
+            return t, hdl
+
+        t1, hdl1 = barrier_roundtrip()
+        del hdl1, t1
+        t2, hdl2 = barrier_roundtrip()
+        del hdl2, t2
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(
         os.environ.get("NCCL_NVLS_ENABLE", "1") == "0",
         "NCCL_NVLS_ENABLE=0",

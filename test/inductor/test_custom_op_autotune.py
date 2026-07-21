@@ -35,7 +35,20 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-torch.set_float32_matmul_precision("high")
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
 
 
 @unittest.skipIf(IS_MACOS, "TODO: mac")
@@ -100,7 +113,7 @@ class TestCustomOpAutoTune(TestCase):
             # Basic sanity checks
             self.assertTrue(
                 torch.isfinite(result).all(),
-                f"{op_name} {name} produced non-finite values",
+                lambda msg: f"{msg}\n{op_name} {name} produced non-finite values",
             )
 
         # Verify numerical equivalence
@@ -895,7 +908,9 @@ class TestCustomOpAutoTune(TestCase):
         # Verify we got concrete integers during benchmarking (not symbolic)
         unique_shapes = sorted(set(shapes_seen))
         for shape in unique_shapes:
-            self.assertIsInstance(shape, int, f"Expected int, got {type(shape)}")
+            self.assertIsInstance(
+                shape, int, lambda msg: f"{msg}\nExpected int, got {type(shape)}"
+            )
 
         # Verify we hit all 3 ranges during autotuning
         ranges_hit = set()
@@ -1443,7 +1458,7 @@ class TestCustomOpAutoTune(TestCase):
 
         # Clear everything first
         torch.cuda.synchronize()
-        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda._clear_cublas_workspaces()
 
         # Create test tensors and establish baseline with some mm activity
         a = torch.randn(256, 256, device=self.device, dtype=self.dtype)
@@ -1488,7 +1503,7 @@ class TestCustomOpAutoTune(TestCase):
 
         # Clear everything first
         torch.cuda.synchronize()
-        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda._clear_cublas_workspaces()
 
         # Create test tensors
         a = torch.randn(256, 256, device=self.device, dtype=self.dtype)
