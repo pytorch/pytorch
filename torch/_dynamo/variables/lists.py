@@ -54,10 +54,10 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     GetSet,
+    getset_read,
     Member,
     Method,
     MethodFlags,
-    read,
     ValueMutationNew,
     VariableTracker,
 )
@@ -987,8 +987,10 @@ class RangeVariable(BaseListVariable):
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L482-L490
-        return VariableTracker.build(tx, self.range_count(item))
+        # range_contains: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/rangeobject.c#L482-L490
+        if maybe_get_python_type(item) in (int, bool):
+            return VariableTracker.build(tx, bool(self.range_count(item)))
+        return iter_contains(self.unpack_var_sequence(tx), item, tx)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L896-L927
@@ -1080,9 +1082,9 @@ class RangeVariable(BaseListVariable):
     # range_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c (range_members)
     tp_members = {
-        "start": Member(read(lambda s: s.items[0])),
-        "stop": Member(read(lambda s: s.items[1])),
-        "step": Member(read(lambda s: s.items[2])),
+        "start": Member(getset_read(lambda s: s.items[0])),
+        "stop": Member(getset_read(lambda s: s.items[1])),
+        "step": Member(getset_read(lambda s: s.items[2])),
     }
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -1510,10 +1512,10 @@ class DequeVariable(BaseListVariable):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = ", ".join(tracked_repr(tx, item) for item in self.items)
         if self.maxlen.as_python_constant() is None:
-            return VariableTracker.build(tx, f"deque([{items}])")
+            return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
         return VariableTracker.build(
             tx,
-            f"deque([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
+            f"{self.python_type_name()}([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
         )
 
     def as_python_constant(self) -> collections.deque[Any]:
@@ -1554,7 +1556,7 @@ class DequeVariable(BaseListVariable):
     # deque_getset: maxlen is a read-only getset (deque_get_maxlen, no setter).
     # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c (deque_getset)
     tp_getset = {
-        "maxlen": GetSet(read(lambda s: s.maxlen)),
+        "maxlen": GetSet(getset_read(lambda s: s.maxlen)),
     }
 
     def _clamp_maxlen(self, side: str) -> None:
@@ -2206,9 +2208,9 @@ class SliceVariable(VariableTracker):
     # slice_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/sliceobject.c (slice_members)
     tp_members = {
-        "start": Member(read(lambda s: s.items[0])),
-        "stop": Member(read(lambda s: s.items[1])),
-        "step": Member(read(lambda s: s.items[2])),
+        "start": Member(getset_read(lambda s: s.items[0])),
+        "stop": Member(getset_read(lambda s: s.items[1])),
+        "step": Member(getset_read(lambda s: s.items[2])),
     }
 
     def getattro_impl(
