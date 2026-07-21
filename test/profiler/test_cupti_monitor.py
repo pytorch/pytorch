@@ -954,6 +954,91 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertGreater(sum(len(c[int(Kernel.START)]) for c in columns), 0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_noisy_apis_suppressed_at_collection(self):
+        # disable_noisy_runtime_apis / disable_noisy_driver_apis (run inside activity_enable)
+        # should keep the pure-noise cbids out of the records. Assert 0 records for them while
+        # kernels + other records still flow (so the check is not vacuous).
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.cupti_python import (
+            _noisy_driver_cbids,
+            _noisy_runtime_cbids,
+            CuptiError,
+            pylibcupti,
+        )
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Api, Kernel
+
+        if pylibcupti().get_version() < 130303:
+            self.skipTest("libcupti predates the UDR per-cbid disable fix")
+
+        noisy_runtime = set(_noisy_runtime_cbids())
+        noisy_driver = set(_noisy_driver_cbids())
+        self.assertTrue(
+            noisy_runtime, "no noisy runtime cbids resolved from the cupti enum"
+        )
+
+        runtime_seen: dict[int, int] = {}
+        driver_seen: dict[int, int] = {}
+        kernels = 0
+
+        def cb(cols):
+            nonlocal kernels
+            for kind, seen in (
+                (ActivityKind.RUNTIME, runtime_seen),
+                (ActivityKind.DRIVER, driver_seen),
+            ):
+                col = cols.get(kind)
+                if col and int(Api.CBID.id) in col:
+                    for v in col[int(Api.CBID.id)]:
+                        seen[int(v)] = seen.get(int(v), 0) + 1
+            kk = cols.get(ActivityKind.CONCURRENT_KERNEL)
+            if kk:
+                kernels += len(next(iter(kk.values())))
+
+        cupti_monitor.configure(buffer_size=1 << 20)
+        m = CuptiMonitor()
+        want = {
+            ActivityKind.CONCURRENT_KERNEL: {Kernel.START, Kernel.END},
+            ActivityKind.RUNTIME: {Api.CBID},
+            ActivityKind.DRIVER: {Api.CBID},
+        }
+        try:
+            obs = m.register(want, cb)
+        except CuptiError as e:
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        try:
+            x = torch.randn(256, 256, device="cuda")
+            for _ in range(50):
+                x = torch.relu(
+                    x @ x
+                )  # each op calls cudaGetDevice/GetLastError internally
+            x.sum().item()
+            torch.cuda.synchronize()
+            m.flush(sync=True)
+        finally:
+            m.unregister(obs)
+
+        # Records must actually be flowing, else the assertions below are vacuous.
+        self.assertGreater(kernels, 0, "no kernel records -- monitor not collecting")
+        self.assertGreater(
+            sum(runtime_seen.values()), 0, "no RUNTIME records collected"
+        )
+
+        leaked_rt = {c: n for c, n in runtime_seen.items() if c in noisy_runtime}
+        self.assertEqual(
+            leaked_rt, {}, f"noisy runtime cbids not suppressed: {leaked_rt}"
+        )
+        # DRIVER records only flow on some stacks (e.g. NCCL/driver launches); assert only when
+        # driver records are present so the check stays meaningful rather than vacuous.
+        if driver_seen:
+            leaked_dr = {c: n for c, n in driver_seen.items() if c in noisy_driver}
+            self.assertEqual(
+                leaked_dr, {}, f"noisy driver cbids not suppressed: {leaked_dr}"
+            )
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_singleton_flush_accessible(self):
         # A user can reach the process-wide monitor singleton through CuptiMonitor()
         # and flush it: CuptiMonitor() constructs/returns the one instance, and
