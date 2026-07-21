@@ -1,6 +1,8 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <string>
 
@@ -25,3 +27,5 @@ c10::intrusive_ptr<c10d::Store> dupPrefixStore(
     std::chrono::milliseconds timeout);
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL
