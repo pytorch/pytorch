@@ -30,7 +30,7 @@ It consists of
 - torch/csrc/stable/ops.h: Provides a stable interface for calling ATen ops from `native_functions.yaml`.
 - torch/csrc/stable/accelerator.h: Provides a stable interface for device-generic objects and APIs
 (e.g. `getCurrentStream`, `DeviceGuard`).
-- torch/csrc/stable/pyobject.h: Provides `torch::stable::from_pyobject` and `to_pyobject` to convert between a Python `torch.Tensor` and `torch::stable::Tensor`. You still only link `libtorch`, but `libtorch_python` must be loaded at runtime; see the Python interop shims section below.
+- torch/csrc/stable/pyobject.h: Provides conversions between Python objects and their `torch::stable` equivalents, such as `from_pyobject` / `to_pyobject` for a Python `torch.Tensor`. You still only link `libtorch`, but `libtorch_python` must be loaded at runtime; see the Python interop shims section below.
 
 We are continuing to improve coverage in our `torch/csrc/stable` APIs. Please file an issue if you'd like to see support for particular APIs in your custom extension.
 
@@ -52,26 +52,16 @@ which will handle all the rough edges of the C API for the user.
 
 ### Python interop shims
 
-`torch::stable::from_pyobject` and `torch::stable::to_pyobject`
-(`torch/csrc/stable/pyobject.h`) convert between a Python `torch.Tensor` and a
-`torch::stable::Tensor`. Like the rest of the stable ABI, an extension using them
-only links `libtorch`: a `PyObject*` crosses the ABI as an opaque `void*` (the
-public header does not include `Python.h`) and the extension stays abi3.
+`torch/csrc/stable/pyobject.h` converts between Python objects and their
+`torch::stable` equivalents (for example `from_pyobject` / `to_pyobject` for a
+`torch.Tensor`). Like the rest of the stable ABI, an extension using them links
+only `libtorch`.
 
-The one thing that sets them apart is a runtime requirement. The conversion has
-to touch Python objects, which only `libtorch_python` can do, so `libtorch`
-dispatches these calls through a vtable that `libtorch_python` registers when it
-loads (the same indirection used by `c10::impl::PyInterpreter`). Two consequences:
-
-- **`libtorch_python` must be loaded at runtime.** In practice it always is when a
-  Python `torch.Tensor` exists at all (the process has imported `torch`). Calling
-  the shims in a Python-free (libtorch-only) process raises a clear error rather
-  than converting.
-- **The caller must hold the GIL.** Prefer calling these from code entered directly
-  from Python (a `PyMethodDef` or pybind function). If you call them from a boxed
-  `STABLE_TORCH_LIBRARY` op, note the dispatcher may run its kernel with the GIL
-  released (backward, `torch.compile`, intra-op worker threads); the shims assert
-  the GIL is held.
+Unlike the rest of the stable ABI, they require `libtorch_python` to be loaded at
+runtime (the conversion is serviced by a vtable it registers on load) and must be
+called with the GIL held. Both hold whenever a Python object is actually in play --
+the process has imported `torch` and you are calling from Python -- and otherwise
+the shims raise an error.
 
 ## Migrating your kernel to the LibTorch stable ABI
 
