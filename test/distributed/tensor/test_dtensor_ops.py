@@ -212,7 +212,9 @@ dtensor_multi_threaded_fails = {
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
     skip("nn.functional.multi_head_attention_forward"),
-    xfail("multinomial"),
+    # Nondeterministic: DTensor vs reference sample from the shared RNG at
+    # different points, so an xfail is flaky (occasional "unexpected success").
+    skip("multinomial"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/167252
     skip("full_like"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/179779
@@ -771,6 +773,7 @@ ops_unbacked_dtensor_dde = {
     skip("broadcast_to"),
     xfail("bucketize"),
     xfail("cartesian_prod"),
+    xfail("combinations"),
     xfail("constant_pad_nd"),
     xfail("cumprod"),
     xfail("diagonal_scatter"),
@@ -1102,7 +1105,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
                     tuple(output_placements),
                     mesh,
                 ),
-                f"{op.name}: forward {input_placements} -> {tuple(output_placements)} failed",
+                lambda msg: f"{msg}\n{op.name}: forward {input_placements} -> {tuple(output_placements)} failed",
             )
 
             bwd = validate_sharding_rule_sample_backward(
@@ -1115,7 +1118,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             if bwd is not None:
                 self.assertTrue(
                     bwd,
-                    f"{op.name}: backward {input_placements} failed",
+                    lambda msg: f"{msg}\n{op.name}: backward {input_placements} failed",
                 )
 
 
