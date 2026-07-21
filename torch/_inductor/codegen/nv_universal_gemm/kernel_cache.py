@@ -139,6 +139,10 @@ def _operand_sig(operand: Any) -> tuple | None:
     # sets these) so a dense operand's torch.Tensor.mode method isn't captured.
     d = getattr(operand, "__dict__", {})
     mode, swizzle = d.get("mode"), d.get("swizzle")
+    # mode/swizzle are cutlass.operators enums (ScaleMode/ScaleSwizzleMode) that
+    # are unhashable, so key on their .name to keep the sig usable as a dict key.
+    mode = getattr(mode, "name", mode)
+    swizzle = getattr(swizzle, "name", swizzle)
     return (dtype, tuple(shape), tuple(stride), scale_sig, mode, swizzle)
 
 

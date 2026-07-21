@@ -4779,7 +4779,16 @@ class AlgorithmSelectorCache(PersistentCache):
                         kernel_name=c.bmreq.kernel_name, source_code=source_code
                     ).future
                     log.debug("Submitted triton async compile for choice: %s", c)
-                elif nvgemm_choice and use_nvgemm_subprocess:
+                elif (
+                    nvgemm_choice
+                    and use_nvgemm_subprocess
+                    # Scaled-GEMM enum args now pickle (see _register_enum_pickling
+                    # in nv_universal_gemm_utils), but the scaled precompile worker
+                    # still initializes CUDA and then forks -> "Cannot re-initialize
+                    # CUDA in forked subprocess". Keep scaled in-process until that
+                    # worker is made fork-safe (or the pool forced to spawn).
+                    and c.bmreq.variant.name != "SCALED_GEMM"
+                ):
                     from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
                         CUDAContextMetadata,
                     )
