@@ -236,7 +236,7 @@ class _CPUinfo:
         Check whether all cores in core_list are in the same NUMA node.
 
         Cross NUMA will reduce performance.
-        We strongly advice to not use cores on different nodes.
+        We strongly advise to not use cores on different nodes.
         """
         cores_numa_map = self.logical_core_node_map
         numa_ids = []

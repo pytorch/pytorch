@@ -227,10 +227,14 @@ def _worker_nvgemm_autotuning_precompile(
     so CuTeDSL compilation is process-isolated (no thread-safety issues).
     Returns (None, elapsed_us) for compatibility with the precompile callback.
     """
-    import os
     import time
 
-    os.environ.update(extra_env)
+    # Share the persistent-worker env/cache handling used by PyCodeCache workers.
+    from torch._inductor.runtime.compile_tasks import (
+        _apply_subprocess_env_and_clear_caches,
+    )
+
+    _apply_subprocess_env_and_clear_caches(extra_env)
 
     start_ns = time.time_ns()
 
@@ -324,9 +328,17 @@ def _worker_nvgemm_autotuning_precompile(
         # reconstruct exactly that one operator (~us) instead of enumerating the
         # operator space. Done inside the patched region since construction may
         # query max_active_clusters, which the worker can't get from the driver.
-        base_kernel = (
-            metadata.operator_class(metadata) if metadata is not None else None
-        )
+        base_kernel = None
+        if metadata is not None:
+            try:
+                base_kernel = metadata.operator_class(metadata)
+            except Exception:
+                log.warning(
+                    "Failed to reconstruct NVGEMM operator %s from metadata; "
+                    "falling back to argument-based lookup",
+                    kernel_name,
+                    exc_info=True,
+                )
 
         artifact, _, _, was_compiled = _compile_nvgemm(
             variant_name,
