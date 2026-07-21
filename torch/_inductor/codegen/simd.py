@@ -3720,7 +3720,8 @@ class SIMDScheduling(BaseScheduling):
             is_persistent_reduction = (
                 features.is_reduction()
                 and V.choices.should_use_persistent_reduction(
-                    features, cooperative_reduction=False
+                    features.with_tiling_scores(tiling_scores),
+                    cooperative_reduction=False,
                 )
             )
             node_schedule_map[pn] = NodeInfo(
@@ -4634,10 +4635,26 @@ class SIMDScheduling(BaseScheduling):
         if not any(n.is_template() for n in nodes):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            tiling = self.select_tiling(node_schedule, numel, rnumel)
+            coalesce_analysis = None
+            if torch._inductor.config.triton.coalesce_tiling_analysis:
+                from torch._inductor.tiling_utils import (
+                    analyze_memory_coalescing_for_nodes,
+                )
+
+                coalesce_analysis = analyze_memory_coalescing_for_nodes(nodes)
+            features = SIMDKernelFeatures(
+                node_schedule, numel, rnumel, coalesce_analysis=coalesce_analysis
+            )
+            tiling, tiling_scores = self.get_tiling_and_scores(
+                node_schedule,
+                numel,
+                rnumel,
+                features.coalesce_analysis,
+            )
             kernel = self.kernel_type(
                 tiling,
-                features=SIMDKernelFeatures(node_schedule, numel, rnumel),
+                features=features,
+                tiling_scores=tiling_scores,
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
             # Collect config_patches from operations

@@ -2280,6 +2280,40 @@ class CudaReproTests(TestCase):
         self.assertEqual(outer_reduce(a), out)
         self.assertTrue("for roffset" not in code)
 
+    @config.patch(
+        {
+            "triton.multi_kernel": 0,
+            "triton.tile_reductions": True,
+            "triton.prefer_nd_tiling": False,
+            "triton.max_tiles": 3,
+            "split_reductions": False,
+        }
+    )
+    def test_persistent_reduction_selection_uses_tiling_scores(self):
+        if device_type != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(x):
+            hidden = x.shape[1] // 2
+            group_size = 128
+            gate = x[:, :hidden].to(torch.float32)
+            up = x[:, hidden:].to(torch.float32)
+            prod = F.silu(gate) * up
+            grouped = prod.view(x.shape[0], hidden // group_size, group_size)
+            return torch.amax(torch.abs(grouped), dim=-1)
+
+        x = torch.randn(4, 512, device=device_type, dtype=torch.bfloat16)
+        expected = fn(x)
+        out, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(expected, out)
+
+        code = "\n".join(code)
+        self.assertIn("@triton_heuristics.persistent_reduction", code)
+        self.assertEqual(1, code.count("@triton_heuristics.persistent_reduction"))
+        persistent_code = code.split("@triton_heuristics.persistent_reduction", 1)[1]
+        self.assertIn("reduction_hint=ReductionHint.INNER", persistent_code)
+        self.assertNotIn("for roffset", persistent_code)
+
     def test_scaled_dot_product_efficient_attention_backward(self):
         from torch import nn, Tensor
 
