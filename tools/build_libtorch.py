@@ -14,20 +14,22 @@ def _check_env_flag(name: str, default: str = "") -> bool:
     return os.getenv(name, default).upper() in ("ON", "1", "YES", "TRUE", "Y")
 
 
-# Hotpatch CMAKE_BUILD_TYPE based on DEBUG / REL_WITH_DEB_INFO env flags so
-# CMake picks up the build type when build_libtorch.py is invoked directly
-# (the scikit-build-core path handles this via [[tool.scikit-build.overrides]]
-# in pyproject.toml). Explicit CMAKE_BUILD_TYPE wins.
-if "CMAKE_BUILD_TYPE" not in os.environ:
-    if _check_env_flag("DEBUG"):
-        os.environ["CMAKE_BUILD_TYPE"] = "Debug"
-    elif _check_env_flag("REL_WITH_DEB_INFO"):
-        os.environ["CMAKE_BUILD_TYPE"] = "RelWithDebInfo"
-    else:
-        os.environ["CMAKE_BUILD_TYPE"] = "Release"
+def _set_cmake_build_type() -> None:
+    # Hotpatch CMAKE_BUILD_TYPE based on DEBUG / REL_WITH_DEB_INFO env flags so
+    # CMake picks up the build type when build_libtorch.py is invoked directly
+    # (the scikit-build-core path handles this via [[tool.scikit-build.overrides]]
+    # in pyproject.toml). Explicit CMAKE_BUILD_TYPE wins.
+    if "CMAKE_BUILD_TYPE" not in os.environ:
+        if _check_env_flag("DEBUG"):
+            os.environ["CMAKE_BUILD_TYPE"] = "Debug"
+        elif _check_env_flag("REL_WITH_DEB_INFO"):
+            os.environ["CMAKE_BUILD_TYPE"] = "RelWithDebInfo"
+        else:
+            os.environ["CMAKE_BUILD_TYPE"] = "Release"
 
 
 def build_libtorch(rerun_cmake: bool, cmake_only: bool) -> None:
+    _set_cmake_build_type()
     # Resolve the build directory relative to the current working directory,
     # not the repo root: CI invokes this script from a scratch dir to build
     # libtorch outside the source tree (see .ci/pytorch/build.sh and
@@ -44,11 +46,16 @@ def build_libtorch(rerun_cmake: bool, cmake_only: bool) -> None:
     if rerun_cmake and cache_file.exists():
         cache_file.unlink()
 
+    # Explicit CMAKE_GENERATOR wins; otherwise prefer ninja when available.
+    generator = os.environ.get("CMAKE_GENERATOR")
+    if generator is None and shutil.which("ninja"):
+        generator = "Ninja"
+
     # Configure if needed
     if not cache_file.exists():
         args = [cmake]
-        if shutil.which("ninja"):
-            args += ["-GNinja"]
+        if generator:
+            args += ["-G", generator]
         # Install into <repo_root>/torch so CI scripts (setup.bat) can find
         # the headers, libraries, and cmake config at torch/{include,lib,share}.
         install_prefix = REPO_ROOT / "torch"
@@ -80,7 +87,8 @@ def build_libtorch(rerun_cmake: bool, cmake_only: bool) -> None:
     max_jobs = os.getenv("MAX_JOBS")
     if max_jobs is not None:
         build_args += ["-j", max_jobs]
-    elif not shutil.which("ninja"):
+    elif generator != "Ninja":
+        # Ninja parallelizes by default; make and msbuild do not.
         build_args += ["-j", str(multiprocessing.cpu_count())]
     print(" ".join(build_args), file=sys.stderr, flush=True)
     subprocess.check_call(build_args, cwd=build_dir)
