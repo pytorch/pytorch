@@ -1364,6 +1364,62 @@ def current_solver_handle():
     return torch._C._cuda_getCurrentSolverHandle()
 
 
+_ClearCublasWorkspaces = None
+
+
+def _clear_cublas_workspaces() -> None:
+    r"""Clear cuBLAS workspaces on this thread and current CUDA device's autograd worker."""
+    if not hasattr(torch._C, "_cuda_clearCublasWorkspaces"):
+        return
+
+    torch._C._cuda_clearCublasWorkspaces()
+    if not is_initialized():
+        return
+
+    global _ClearCublasWorkspaces
+    if _ClearCublasWorkspaces is None:
+        from torch.autograd import Function
+
+        class ClearCublasWorkspaces(Function):
+            @staticmethod
+            def forward(ctx, dummy):
+                return dummy
+
+            @staticmethod
+            def backward(ctx: Any, *grad_outputs: Any) -> Any:
+                torch._C._cuda_clearCublasWorkspaces()
+                return None
+
+        _ClearCublasWorkspaces = ClearCublasWorkspaces
+
+    # This synthetic backward is internal cleanup; keep it out of compiled
+    # autograd to avoid tracing it while still routing through the CUDA worker.
+    compiled_autograd = getattr(
+        getattr(torch._C, "_dynamo", None), "compiled_autograd", None
+    )
+    set_autograd_compiler = (
+        getattr(compiled_autograd, "set_autograd_compiler", None)
+        if compiled_autograd is not None
+        else None
+    )
+    prior_compiler = prior_dynamic = None
+    if set_autograd_compiler is not None:
+        prior_compiler, prior_dynamic = set_autograd_compiler(None, False)
+
+    try:
+        with (
+            torch.autograd.set_multithreading_enabled(True),
+            torch.inference_mode(False),
+            torch.enable_grad(),
+        ):
+            dummy = torch.empty(0, device="cuda", requires_grad=True)
+            output = _ClearCublasWorkspaces.apply(dummy)
+            output.backward(output.detach())
+    finally:
+        if set_autograd_compiler is not None:
+            set_autograd_compiler(prior_compiler, prior_dynamic)
+
+
 def set_sync_debug_mode(debug_mode: int | str) -> None:
     r"""Set the debug mode for cuda synchronizing operations.
 
