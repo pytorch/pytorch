@@ -1607,13 +1607,15 @@ class ComboKernel(Kernel):
         return result
 
     def imports_for_benchmark_kernel(self) -> str:
+        # Dedent BEFORE substituting get_raw_stream: a multi-line override would
+        # otherwise collapse dedent's common prefix and misindent the imports.
         return textwrap.dedent(
             """
             from torch._dynamo.testing import rand_strided
             {}
             import torch
-        """.format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
-        )
+            """
+        ).format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
 
     def uniquify_block_sizes(
         self, code: IndentedBuffer, num_kernel: int, uniquify: list[str]

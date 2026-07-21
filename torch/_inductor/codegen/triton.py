@@ -6621,13 +6621,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return result
 
     def imports_for_benchmark_kernel(self):
+        # Dedent BEFORE substituting get_raw_stream: a multi-line override would
+        # otherwise collapse dedent's common prefix and misindent the imports.
         return textwrap.dedent(
             """
             from torch._dynamo.testing import rand_strided
             {}
             import torch
-        """.format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
-        )
+            """
+        ).format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
 
     def _get_heuristic(self):
         if self.fixed_config:
