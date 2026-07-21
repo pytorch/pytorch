@@ -487,6 +487,10 @@ def create_setup_with(target: Instruction) -> Instruction:
 
 def create_swap(n: int) -> list[Instruction]:
     if sys.version_info >= (3, 11):
+        # SWAP 1 swaps TOS with itself (a no-op) and is invalid bytecode
+        # (the interpreter requires oparg >= 2). Emit nothing.
+        if n <= 1:
+            return []
         return [create_instruction("SWAP", arg=n)]
     # in Python < 3.11, SWAP is a macro that expands to multiple instructions
     if n == 1:

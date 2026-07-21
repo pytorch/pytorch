@@ -97,6 +97,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     scoped_load_inline,
     set_default_dtype,
+    skipIfFrameHookEnabled,
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -10871,6 +10872,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    # co_framesize (=2201) of the new code object is to big to be allocated
+    # it works on Dynamo because THP_PyThreadState_BumpFramePointerSlow reflects
+    # the old version of _PyThreadState_PushFrame function. The new one, which is
+    # in CPython 3.14, will just bail out if there's not enough space on the stack.
+    @skipIfFrameHookEnabled
     def test_recursion_depth_guards(self):
         @torch.compile(dynamic=True, backend="eager")
         def foo(*args, **kwargs):

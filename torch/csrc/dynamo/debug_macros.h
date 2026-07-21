@@ -35,15 +35,18 @@ extern "C" {
   } else {                                                              \
   }
 
+// Runtime check for PYTORCH_USE_FRAME_HOOK
 // Uncomment next line to print debug message
-// #define TORCHDYNAMO_DEBUG 1
+#define TORCHDYNAMO_DEBUG 1
 #ifdef TORCHDYNAMO_DEBUG
 
 #define DEBUG_CHECK(cond) CHECK(cond)
 #define DEBUG_NULL_CHECK(val) NULL_CHECK(val)
 #define DEBUG_TRACE(msg, ...) \
+  if (getenv("DEBUG_DYNAMO")) \
   fprintf(stderr, "TRACE[%s:%d] " msg "\n", __func__, __LINE__, __VA_ARGS__)
-#define DEBUG_TRACE0(msg) \
+#define DEBUG_TRACE0(msg)     \
+  if (getenv("DEBUG_DYNAMO")) \
   fprintf(stderr, "TRACE[%s:%d] " msg "\n", __func__, __LINE__)
 
 #else
@@ -54,6 +57,16 @@ extern "C" {
 #define DEBUG_TRACE0(msg)
 
 #endif
+
+#define FAIL_IF_FRAME_HOOK_ENABLED()                            \
+  if (use_frame_hook()) {                                       \
+    fprintf(                                                    \
+        stderr,                                                 \
+        "ERROR: %s:%d Frame hook is enabled, cannot proceed\n", \
+        __FILE__,                                               \
+        __LINE__);                                              \
+    abort();                                                    \
+  }
 
 inline _PyFrameEvalFunction _debug_set_eval_frame(
     PyThreadState* tstate,

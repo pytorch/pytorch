@@ -20,6 +20,7 @@
 
 PyObject* guard_error_hook = NULL;
 PyObject* guard_complete_hook = NULL;
+static PyObject* _module_instance = NULL;
 
 typedef struct {
   int active_dynamo_threads;
@@ -27,11 +28,31 @@ typedef struct {
 
 // static int active_dynamo_threads = 0;
 
+static Py_tss_t hook_callback_key = Py_tss_NEEDS_INIT;
+
+PyObject* dynamo_frame_hook_default(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    int throw_flag);
+
+
+inline int use_frame_hook(void) {
+  static int cached_result = -1;
+  if (cached_result == -1) {
+    const char* env_value = getenv("PYTORCH_USE_FRAME_HOOK");
+    cached_result = (env_value != NULL && env_value[0] == '1') ? 1 : 0;
+  }
+  return cached_result;
+}
+
+
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 static int64_t current_isolate_recompiles_id = -1;
 
 static PyObject* eval_frame_callback_get(void) {
-  void* result = PyThread_tss_get(&eval_frame_callback_key);
+  void* result = (use_frame_hook() ? PyThread_tss_get(&hook_callback_key)
+                                   : PyThread_tss_get(&eval_frame_callback_key));
+
   if (unlikely(result == NULL)) {
     return (PyObject*)Py_None;
   } else {
@@ -40,7 +61,11 @@ static PyObject* eval_frame_callback_get(void) {
 }
 
 void eval_frame_callback_set(PyObject* obj) {
-  PyThread_tss_set(&eval_frame_callback_key, obj);
+  if (use_frame_hook()) {
+    PyThread_tss_set(&hook_callback_key, obj);
+  } else {
+    PyThread_tss_set(&eval_frame_callback_key, obj);
+  }
 }
 
 int64_t get_current_isolate_recompiles_id(void) {
@@ -224,6 +249,7 @@ static PyObject* dynamo_custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
+  FAIL_IF_FRAME_HOOK_ENABLED();
   return dynamo__custom_eval_frame_shim(tstate, frame, throw_flag);
 }
 
@@ -231,6 +257,7 @@ PyObject* dynamo_eval_frame_default(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
+  FAIL_IF_FRAME_HOOK_ENABLED();
   if (tstate == NULL) {
     tstate = PyThreadState_GET();
   }
@@ -242,6 +269,7 @@ PyObject* dynamo_eval_frame_default(
 }
 
 static void enable_eval_frame_shim(PyThreadState* tstate) {
+  FAIL_IF_FRAME_HOOK_ENABLED();
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       &dynamo_custom_eval_frame_shim) {
     DEBUG_CHECK(previous_eval_frame == NULL);
@@ -252,6 +280,7 @@ static void enable_eval_frame_shim(PyThreadState* tstate) {
 }
 
 static void enable_eval_frame_default(PyThreadState* tstate) {
+  FAIL_IF_FRAME_HOOK_ENABLED();
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       previous_eval_frame) {
     DEBUG_CHECK(previous_eval_frame != NULL);
@@ -286,6 +315,7 @@ static PyObject* dynamo_eval_custom_code_impl(
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
 
+  FAIL_IF_FRAME_HOOK_ENABLED();
 #if IS_PYTHON_3_11_PLUS
 
   // Generate Python function object and _PyInterpreterFrame in a way similar to
@@ -520,7 +550,11 @@ static PyObject* dynamo__custom_eval_frame_shim(
   PyObject* callback = eval_frame_callback_get();
 
   if (Py_IsNone(callback)) {
-    return dynamo_eval_frame_default(tstate, frame, throw_flag);
+    if (use_frame_hook()) {
+      return dynamo_frame_hook_default(tstate, frame, throw_flag);
+    } else {
+      return dynamo_eval_frame_default(tstate, frame, throw_flag);
+    }
   }
 
   return dynamo__custom_eval_frame(tstate, frame, throw_flag, callback);
@@ -582,7 +616,11 @@ static PyObject* increment_working_threads(
   if (state != NULL) {
     state->active_dynamo_threads = state->active_dynamo_threads + 1;
     if (state->active_dynamo_threads > 0) {
-      enable_eval_frame_shim(tstate);
+      if (use_frame_hook()) {
+        enable_frame_hook_shim(tstate);
+      } else {
+        enable_eval_frame_shim(tstate);
+      }
     }
   }
 
@@ -598,7 +636,11 @@ static PyObject* decrement_working_threads(
     if (state->active_dynamo_threads > 0) {
       state->active_dynamo_threads = state->active_dynamo_threads - 1;
       if (state->active_dynamo_threads == 0) {
-        enable_eval_frame_default(tstate);
+        if (use_frame_hook()) {
+          clear_frame_hook_shim(tstate);
+        } else {
+          enable_eval_frame_default(tstate);
+        }
       }
     }
   }
@@ -655,6 +697,106 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
       Py_IsFalse(callback));
   return set_eval_frame(callback, module);
 }
+
+// begin hook code
+
+PyObject* dynamo_frame_hook_default(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    int throw_flag) {
+  // return the original code object to signal using the original frame
+  PyObject* code = (PyObject*) F_CODE(frame);
+  Py_INCREF(code);
+  return code;
+}
+
+PyObject* dynamo_frame_hook_custom(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    PyCodeObject* code,
+    const char* trace_annotation,
+    int throw_flag) {
+  // Return the code object to use in place of the original frame's code object
+  _PytorchRecordFunctionState* rf =
+      _pytorch_record_function_enter(trace_annotation);
+  Py_INCREF(code);
+  _pytorch_record_function_exit(rf);
+  return (PyObject*)code;
+}
+
+// forward decl.
+PyObject* torch_c_dynamo_eval_frame_init(void);
+
+
+static PyObject* _get_module_instance() {
+  // TODO(guilhermeleobas): find out why PyModule_GetState(_module) doesn't work here
+  if (_module_instance == NULL) {
+    _module_instance = torch_c_dynamo_eval_frame_init();
+  }
+  return _module_instance;
+}
+
+
+PyCodeObject* hook_function(THP_EVAL_API_FRAME_OBJECT* frame) {
+  PyThreadState* tstate = PyThreadState_GET();
+  int throw_flag = 0;
+  PyObject* code = dynamo__custom_eval_frame_shim(tstate, frame, throw_flag);
+  if (code == NULL) {
+    // Error occurred in hook, propagate it to the interpreter
+    DEBUG_CHECK(PyErr_Occurred());
+    PyObject* err = PyErr_GetRaisedException();
+    PyErr_Clear();
+    PyObject* module = _get_module_instance();
+    decrement_working_threads(tstate, module);
+    PyErr_SetRaisedException(err);
+    return NULL;
+  }
+  DEBUG_CHECK(PyCode_Check(code));
+  return (PyCodeObject*)code;
+}
+
+PyObject* __PyEval_EvalFrameDefault(PyThreadState *tstate, _PyInterpreterFrame *frame, int throwflag) {
+  return _PyEval_EvalFrameDefault(tstate, frame, throwflag);
+}
+
+// Cached PyCapsule wrapping hook_function, created once so identity
+// comparisons in PyUnstable_ContainsFrameHook / Enable / Disable work.
+static PyObject* py_hook_function_capsule = NULL;
+
+static PyObject* get_py_hook_function(void) {
+  if (py_hook_function_capsule == NULL) {
+    py_hook_function_capsule = PyUnstable_WrapFrameHookFunction(hook_function);
+  }
+  return py_hook_function_capsule;
+}
+
+void enable_frame_hook_shim(PyThreadState* tstate) {
+  DEBUG_TRACE0("enable_frame_hook_shim entered");
+  PyObject* py_hook_function = get_py_hook_function();
+  if (py_hook_function == NULL)
+    return;
+
+  if (PyUnstable_ContainsFrameHook(tstate->interp, py_hook_function)) {
+    DEBUG_TRACE0("contains hook function, enabling...");
+    PyUnstable_EnableFrameHook(tstate->interp, py_hook_function);
+  } else {
+    PyUnstable_AddFrameHook(tstate->interp, py_hook_function);
+  }
+}
+
+void clear_frame_hook_shim(PyThreadState* tstate) {
+  PyObject* py_hook_function = get_py_hook_function();
+  if (py_hook_function == NULL)
+    return;
+
+  if (PyUnstable_ContainsFrameHook(tstate->interp, py_hook_function)) {
+    DEBUG_TRACE0("contains hook function, disabling...");
+    PyUnstable_DisableFrameHook(tstate->interp, py_hook_function);
+    PyUnstable_ClearFrameHooks(tstate->interp);
+  }
+}
+
+// end hook code
 
 static PyObject* set_skip_guard_eval_unsafe(
     PyObject* dummy,
@@ -745,6 +887,16 @@ static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+
+static PyObject* is_frame_hook_enabled_py(PyObject* dummy, PyObject* obj) {
+  if (use_frame_hook()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
+
 static int clear_state(PyObject* module) {
   ModuleState* state = PyModule_GetState(module);
   if (state) {
@@ -821,6 +973,7 @@ static PyMethodDef _methods[] = {
      NULL},
     {"set_eval_frame_isolate_recompiles_id", set_eval_frame_isolate_recompiles_id_py, METH_O, NULL},
     {"get_eval_frame_isolate_recompiles_id", get_eval_frame_isolate_recompiles_id_py, METH_NOARGS, NULL},
+    {"is_frame_hook_enabled", is_frame_hook_enabled_py, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -843,7 +996,8 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     return NULL;
   }
 
-  int result = PyThread_tss_create(&eval_frame_callback_key);
+  int result = (use_frame_hook() ? PyThread_tss_create(&hook_callback_key)
+                                 : PyThread_tss_create(&eval_frame_callback_key));
   CHECK(result == 0);
 
   Py_INCREF(Py_None);
@@ -862,5 +1016,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     return NULL;
   }
 
+  _module_instance = module;
   return module;
 }
