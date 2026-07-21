@@ -6633,11 +6633,11 @@
     CUDA: _philox_uniform_cuda_
   autogen: _philox_uniform, _philox_uniform.out
 
-- func: _philox_distribution_flat_slice_(Tensor(a!) self, int total_numel, SymInt[] start_indices, SymInt[] block_sizes, SymInt[] block_strides, SymInt[] num_blocks, int kind, Scalar[] params, *, Generator? generator=None) -> Tensor(a!)
+- func: _philox_distribution_shards_(Tensor(a!) self, SymInt[] global_shape, SymInt[] global_offsets, SymInt[] local_offsets, SymInt[] local_sizes, int chunk_count, int kind, Scalar[] params, *, Generator? generator=None) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
-    CUDA: _philox_distribution_flat_slice_cuda_
-  autogen: _philox_distribution_flat_slice, _philox_distribution_flat_slice.out
+    CUDA: _philox_distribution_shards_cuda_
+  autogen: _philox_distribution_shards, _philox_distribution_shards.out
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
   dispatch:
