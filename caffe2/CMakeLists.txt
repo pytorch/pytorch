@@ -1479,13 +1479,6 @@ if(USE_ROCM)
     __HIP_PLATFORM_AMD__
     )
 
-  if(NOT ROCM_SOURCE_DIR)
-    set(ROCM_SOURCE_DIR "$ENV{ROCM_SOURCE_DIR}")
-  endif()
-  if($ROCM_SOURCE_DIR STREQUAL "")
-    set(ROCM_SOURCE_DIR "/opt/rocm")
-  endif()
-  message(INFO "caffe2 ROCM_SOURCE_DIR = ${ROCM_SOURCE_DIR}")
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE
         USE_FLASH_ATTENTION

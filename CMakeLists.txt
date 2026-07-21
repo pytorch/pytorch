@@ -1183,10 +1183,8 @@ if(NOT MSVC)
       message(WARNING "Applying -Og optimization for aarch64 GCC debug build to workaround ICE")
     endif()
     string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -Og")
-    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -Og")
   else()
     string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
-    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   endif()
   # aarch64 C++ stack unwinding uses frame-pointer chain walking, so frame
   # pointers must be present in all build types.  The cost is negligible on
