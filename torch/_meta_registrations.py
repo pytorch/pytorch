@@ -8632,10 +8632,8 @@ def _grouped_mm_fp16_cublaslt_supported(
     if torch.version.cuda:
         parts = torch.version.cuda.split(".")
         cuda_version = (int(parts[0]), int(parts[1]))
-    if device_capability[0] == 9:
-        return cuda_version >= (13, 3)
-    return cuda_version >= (13, 2) and (
-        device_capability[0] == 10 or device_capability == (11, 0)
+    return cuda_version >= (13, 3) and (
+        device_capability[0] >= 9 and device_capability[0] <= 11
     )
 
 
