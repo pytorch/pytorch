@@ -4,7 +4,6 @@ import os
 import sys
 import types
 
-import torch
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
@@ -21,7 +20,7 @@ _TEST_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TEST_ROOT not in sys.path:
     sys.path.insert(0, _TEST_ROOT)
 
-from conftest import (  # noqa: E402
+from conftest import (
     _decorator_gpu_requirement,
     _is_cpu_backed,
     _needs_extra_gpus,

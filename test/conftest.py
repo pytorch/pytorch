@@ -423,10 +423,10 @@ def _probe_world_size(cls: type | None) -> int:
     processes at runtime, not collection). Returns 0 when it cannot be resolved
     to a positive value (e.g. MultiProcContinuousTest's ``-2`` sentinel)."""
     try:
-        resolved = int(getattr(cls.__new__(cls), "world_size"))
+        resolved = int(cls.__new__(cls).world_size)
     except Exception:
         return 0
-    return resolved if resolved > 0 else 0
+    return max(0, resolved)
 
 
 def _is_cpu_backed(item: Any) -> bool:
