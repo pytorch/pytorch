@@ -196,16 +196,36 @@ class TestOnlineSoftmax(TestCase):
             "triton.scalar_online_softmax_accumulators": True,
         }
     )
-    def test_scalar_online_softmax_skips_50k_reduction_bucket(self):
+    def test_scalar_online_softmax_supports_50k_reduction_bucket(self):
         if GPU_TYPE != "cuda" or torch.version.hip is not None:
             self.skipTest("scalar online-softmax accumulators are CUDA-only")
 
-        x = torch.randn(4, 50005, dtype=torch.float32, device=GPU_TYPE)
+        storage = torch.randn(4, 50272, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = storage[:, :50265]
+        act, (code,) = run_and_get_code(torch.compile(_prepare_softmax), x, -1)
+
+        self.assertTrue(same(_prepare_softmax(x, -1), act, tol=1e-2))
+        self.assertIn("online_softmax_reduce_scalar_combine", code)
+
+    @parametrize("reduction_numel", [32768, 32769, 65536, 65537])
+    @inductor_config.patch(
+        {
+            "triton.persistent_reductions": False,
+            "split_reductions": False,
+            "triton.scalar_online_softmax_accumulators": True,
+        }
+    )
+    def test_scalar_online_softmax_reduction_bucket_boundaries(
+        self, reduction_numel
+    ):
+        if GPU_TYPE != "cuda" or torch.version.hip is not None:
+            self.skipTest("scalar online-softmax accumulators are CUDA-only")
+
+        x = torch.randn(2, reduction_numel, dtype=torch.float32, device=GPU_TYPE)
         act, (code,) = run_and_get_code(torch.compile(_prepare_softmax), x, -1)
 
         self.assertTrue(same(_prepare_softmax(x, -1), act, tol=1e-3))
-        self.assertIn("online_softmax_combine(", code)
-        self.assertNotIn("online_softmax_reduce_scalar_combine", code)
+        self.assertIn("online_softmax_reduce_scalar_combine", code)
 
     @inductor_config.patch(
         {
@@ -409,7 +429,7 @@ class TestOnlineSoftmax(TestCase):
             "triton.scalar_online_softmax_accumulators": True,
         }
     )
-    def test_scalar_online_softmax_skips_dynamic_50k_reduction_bucket(self):
+    def test_scalar_online_softmax_dynamic_50k_uses_vector_path(self):
         if GPU_TYPE != "cuda" or torch.version.hip is not None:
             self.skipTest("scalar online-softmax accumulators are CUDA-only")
 
@@ -421,9 +441,10 @@ class TestOnlineSoftmax(TestCase):
         self.assertIn("prepare_softmax_online", code)
         self.assertNotIn("online_softmax_reduce_scalar_combine", code)
 
-        # Dynamic scalar accumulation is deliberately disabled. Confirm that a
-        # graph first compiled in an otherwise eligible bucket remains safe
-        # when reused in the excluded 50k bucket.
+        # Dynamic online softmax lowers to separate max and sum reductions. A
+        # graph first compiled at 8k keeps that vector schedule when reused at
+        # 50k. Confirm that cross-bucket reuse remains correct and does not
+        # recompile.
         torch._dynamo.reset()
         compile_counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         opt_f = torch.compile(
@@ -439,6 +460,23 @@ class TestOnlineSoftmax(TestCase):
         act = opt_f(x, -1)
         self.assertTrue(same(_prepare_softmax(x, -1), act, tol=1e-3))
         self.assertEqual(compile_counter.frame_count, 1)
+
+    @inductor_config.patch(
+        {
+            "triton.persistent_reductions": False,
+            "split_reductions": False,
+            "triton.scalar_online_softmax_accumulators": True,
+        }
+    )
+    def test_scalar_online_softmax_supports_large_reductions(self):
+        if GPU_TYPE != "cuda" or torch.version.hip is not None:
+            self.skipTest("scalar online-softmax accumulators are CUDA-only")
+
+        x = torch.randn(4, 2**20 + 13, dtype=torch.float32, device=GPU_TYPE)
+        act, (code,) = run_and_get_code(torch.compile(_prepare_softmax), x, -1)
+
+        self.assertTrue(same(_prepare_softmax(x, -1), act, tol=1e-3))
+        self.assertIn("online_softmax_reduce_scalar_combine", code)
 
     @inductor_config.patch(
         {
