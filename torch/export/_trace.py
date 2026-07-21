@@ -11,7 +11,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager, ExitStack, nullcontext
 from itertools import chain
-from typing import Any, TYPE_CHECKING, TypeAlias
+from typing import Any, cast, TYPE_CHECKING, TypeAlias
 from unittest import mock
 
 
@@ -81,8 +81,10 @@ from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
+    _combine_args_for_tracing,
     _DimHintType,
     _IntWrapper,
+    _normalize_dynamic_shapes,
     _process_dynamic_shapes,
 )
 from torch.export.exported_program import OutputKind
@@ -923,6 +925,7 @@ def _export_to_torch_ir(
 
     if not is_shapes_spec:
         # Dim-based dynamic shapes.
+        dynamic_shapes = _normalize_dynamic_shapes(dynamic_shapes, f, args, kwargs)
         combined_args = _combine_args(f, args, kwargs)
         _check_dynamic_shapes(combined_args, dynamic_shapes)
         constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
@@ -1538,6 +1541,11 @@ def _process_export_inputs(
         else:
             out_dynamic_shapes = dynamic_shapes
 
+    if not isinstance(out_dynamic_shapes, (ShapesSpec, ParamsSpec)):
+        out_dynamic_shapes = _normalize_dynamic_shapes(
+            cast(_DimDynamicShapesSpec | None, out_dynamic_shapes), mod, args, kwargs
+        )
+
     return args, kwargs, original_in_spec, out_dynamic_shapes, verify_additional_inputs
 
 
@@ -1608,21 +1616,9 @@ def _get_range_constraints(
         ),
         len(export_graph_signature.input_specs),
     )
-    combined_args = _combine_args(mod, args, kwargs)
-
-    # This is because we trace based on the kwargs passed in from user
-    # not based on the signature. I feel it would be better to just enforce
-    # one ordering at the start of tracing to avoid confusions, but that is
-    # bigger refactor, so do this to unblock for now.
-    combined_args_traced_order = {}
-    for arg in combined_args:
-        if arg not in kwargs:
-            combined_args_traced_order[arg] = combined_args[arg]
-
-    for key in kwargs:
-        combined_args_traced_order[key] = kwargs[key]
-
-    combined_args = combined_args_traced_order
+    combined_args, dynamic_shapes = _combine_args_for_tracing(
+        mod, args, kwargs, dynamic_shapes
+    )
 
     range_constraints = make_constraints(
         fake_mode,

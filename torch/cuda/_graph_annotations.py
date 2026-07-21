@@ -34,6 +34,11 @@ Usage during capture::
             z = workload_b(y)
 
     annotations = get_kernel_annotations()
+
+When you need to drive this outside the context manager's automatic path,
+``resolve_and_remap(graph)`` is shorthand for ``resolve_pending_annotations()``
+followed by ``remap_to_exec_graph(graph)``; call those directly for finer
+control (e.g. resolving once before remapping several graphs).
 """
 
 from __future__ import annotations
@@ -510,6 +515,16 @@ def _rekey_annotations(
         else:
             remapped[new_tools_id] = list(ann_list)
     return remapped
+
+
+def resolve_and_remap(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
+    """Resolve any pending scopes and remap one graph in a single call.
+
+    Shorthand for ``resolve_pending_annotations()`` followed by
+    ``remap_to_exec_graph(graph)``; the pair normally run after a capture.
+    """
+    resolve_pending_annotations()
+    remap_to_exec_graph(torch_cuda_graph)
 
 
 def get_kernel_annotations() -> Mapping[int, list[Any]]:
