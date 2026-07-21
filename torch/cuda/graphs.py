@@ -198,6 +198,10 @@ class CUDAGraph(_CUDAGraph):
     # User hooks fired by capture_end / instantiate (see register_*_hook).
     _capture_end_hooks: dict[int, Callable[[CUDAGraph], None]]
     _post_instantiate_hooks: dict[int, Callable[[CUDAGraph], None]]
+    # Replay lifecycle hooks, fired around each replay (hot path -- only iterated
+    # when non-empty). See register_replay_start_hook / register_replay_end_hook.
+    _replay_start_hooks: dict[int, Callable[[CUDAGraph], None]]
+    _replay_end_hooks: dict[int, Callable[[CUDAGraph], None]]
     # Destroy callbacks / retained objects for the current capture cycle, plus
     # the weakref.finalize armed on this graph that fires the holder on
     # collection. reset() fires the current holder and re-arms a fresh pair.
@@ -213,6 +217,8 @@ class CUDAGraph(_CUDAGraph):
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
         instance._capture_end_hooks = OrderedDict()
         instance._post_instantiate_hooks = OrderedDict()
+        instance._replay_start_hooks = OrderedDict()
+        instance._replay_end_hooks = OrderedDict()
         instance._retained_finalizer = None
         instance._arm_retained()
         return instance
@@ -254,6 +260,45 @@ class CUDAGraph(_CUDAGraph):
 
         handle = RemovableHandle(self._post_instantiate_hooks)
         self._post_instantiate_hooks[handle.id] = hook
+        return handle
+
+    def register_replay_start_hook(
+        self, hook: Callable[[CUDAGraph], None]
+    ) -> RemovableHandle:
+        r"""Register ``hook(graph)`` to run at the start of every :meth:`replay`,
+        just before the graph is launched (after any on-demand instantiation, so
+        :meth:`raw_cuda_graph_exec` is valid). Hooks fire in registration order.
+        Returns a handle whose ``remove()`` deregisters the hook.
+
+        .. note::
+            Replay is the hot path and a registered hook runs on every replay --
+            keep it cheap. With no hook registered the cost is a single dict
+            emptiness check.
+        """
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._replay_start_hooks)
+        self._replay_start_hooks[handle.id] = hook
+        return handle
+
+    def register_replay_end_hook(
+        self, hook: Callable[[CUDAGraph], None]
+    ) -> RemovableHandle:
+        r"""Register ``hook(graph)`` to run at the end of every :meth:`replay`,
+        just after the graph is launched. The launch is asynchronous, so the hook
+        runs once the replay is *enqueued*, not once the GPU work completes. Hooks
+        fire in registration order. Returns a handle whose ``remove()``
+        deregisters the hook. See the hot-path note on
+        :meth:`register_replay_start_hook`.
+
+        End hooks fire even if the launch raises -- so a start hook is always
+        balanced by an end -- and the launch error then propagates. (Start hooks
+        that raise abort the replay before launch, and no end hook fires.)
+        """
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._replay_end_hooks)
+        self._replay_end_hooks[handle.id] = hook
         return handle
 
     def register_destroy_callback(
@@ -451,7 +496,15 @@ class CUDAGraph(_CUDAGraph):
         # annotation remap rides on instantiate(), so it is handled by that call.
         if not self._has_graph_exec:
             self.instantiate()
-        super().replay()
+        if self._replay_start_hooks:
+            for hook in list(self._replay_start_hooks.values()):
+                hook(self)
+        try:
+            super().replay()
+        finally:
+            if self._replay_end_hooks:
+                for hook in list(self._replay_end_hooks.values()):
+                    hook(self)
 
     def reset(self) -> None:
         r"""Delete the graph currently held by this instance."""
