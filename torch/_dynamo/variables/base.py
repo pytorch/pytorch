@@ -889,7 +889,7 @@ _SLOTDEFS: list[SlotDef] = [
         "__getattribute__",
         "getattro_impl",
         PyTypeSlots.TP_GETATTRO,
-        _wrap_binaryfunc,
+        _wrap_getattro,
     ),
     TPSLOT(
         "__getattr__",
