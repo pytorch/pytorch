@@ -619,11 +619,49 @@ class TestCuptiRecords(TestCase):
         specs, _gfx, stage_cols, *_ = result
         name_by_iid = {iid: name for iid, name, _cat in specs}
         # events follow _RENDER_STAGES order: [graphed kernel, eager kernel, annotation]
+        # Lane names carry a zero-padded lane-id prefix (for ordering), then the label.
         lanes = [name_by_iid[int(q)] for q in stage_cols[4].tolist()]
-        self.assertEqual(lanes[0], "side comms")  # graphed kernel moved to the named lane
-        self.assertEqual(lanes[2], "side comms")  # annotation shares the reassigned lane
-        self.assertNotEqual(lanes[1], "side comms")  # eager kernel is elsewhere
+        self.assertTrue(lanes[0].endswith("side comms"))  # graphed kernel moved to named lane
+        self.assertEqual(lanes[2], lanes[0])  # annotation shares the reassigned lane
+        self.assertNotEqual(lanes[1], lanes[0])  # eager kernel is elsewhere
         self.assertIn("stream", lanes[1])  # eager kept its default "stream N" lane
+
+    def test_pftrace_lane_names_order_by_id(self):
+        # Perfetto sorts GPU hardware-queue lanes lexicographically by name, so lane names must
+        # be prefixed with the zero-padded lane id -> the lane order matches the chrome path's
+        # numeric lane-id order. A resolver-named lane must not sort ahead of a lower-id stream
+        # lane (regression: "aaa_comm" (lane 50) sorted before "stream 7"). No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _build_render_stages,
+            _HW_QUEUE_IID_BASE,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                "device_id": i64(0, 0),
+                "stream_id": i64(7, 40),  # eager on stream 7; graphed replayed on 40
+                "graph_node_id": i64(0, 202),
+                "logical_lane": i64(7, 50),  # graphed reassigned to lane 50
+                # a name that alphabetically sorts before "stream" -- the regression trigger
+                "lane_name": np.array([None, "aaa_comm"], dtype=object),
+                "name": np.array(["k0", "k1"], dtype=object),
+            },
+        }
+        specs, *_ = _build_render_stages(columns, gfx_pid=1, iid_of={}, name_table=[])
+        # hw-queue lanes are appended in ascending lane-id order; Perfetto re-sorts by name, so
+        # the names sorted lexicographically must equal that ascending-id order.
+        lane_names = [name for iid, name, _cat in specs if iid >= _HW_QUEUE_IID_BASE]
+        self.assertEqual(len(lane_names), 2)
+        self.assertEqual(sorted(lane_names), lane_names)  # lexicographic == lane-id order
+        self.assertIn("stream 7", lane_names[0])  # lane 7 first
+        self.assertIn("aaa_comm", lane_names[1])  # lane 50 second, despite the name
 
     def test_pftrace_annotation_column_from_window(self):
         # pftrace builds its GPU annotation render column from the columnar window (kineto emits

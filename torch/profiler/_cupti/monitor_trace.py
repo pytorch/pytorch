@@ -1086,20 +1086,18 @@ def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: 
         end[order] = np.maximum(ts[order], np.minimum(end[order], cap))
         dur = end - ts
     # One hardware-queue lane per stream; lanes are split per gpu_id by Perfetto from
-    # (gpu_id, hw_queue_iid).
-    # One hardware-queue lane per stream; the spanning annotation and its kernels share the lane
-    # and the viewer depth-nests them (annotation at depth 0, kernels at depth 1) once the kernels
-    # are clamped to not overlap each other. Zero-pad the stream number so the viewer's
-    # lexicographic lane sort is numeric (otherwise "stream 7" sorts after "stream 26674").
+    # (gpu_id, hw_queue_iid). The spanning annotation and its kernels share the lane and the
+    # viewer depth-nests them (annotation at depth 0, kernels at depth 1) once the kernels are
+    # clamped to not overlap each other. Perfetto sorts lanes lexicographically by name, so
+    # prefix every lane (resolver-named or "stream N") with the zero-padded lane id -> the lane
+    # order matches the chrome path's numeric lane-id order (otherwise "stream 7" sorts after
+    # "stream 26674", and resolver-named lanes like "DP" interleave alphabetically).
     uniq, inv = np.unique(stream, return_inverse=True)
     width = len(str(int(uniq.max()))) if len(uniq) else 1
+    labels = [lane_names_by_id.get(int(k), f"stream {int(k)}") for k in uniq.tolist()]
     specs = [(iid, name, cat) for _ks, iid, name, cat in _RENDER_STAGES]
     specs += [
-        (
-            _HW_QUEUE_IID_BASE + j,
-            lane_names_by_id.get(int(k), f"stream {int(k):0{width}d}"),
-            0,
-        )
+        (_HW_QUEUE_IID_BASE + j, f"{int(k):0{width}d} {labels[j]}", 0)
         for j, k in enumerate(uniq.tolist())
     ]
     hw_queue_iid = (inv + _HW_QUEUE_IID_BASE).astype(np.uint64)
