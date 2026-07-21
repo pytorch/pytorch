@@ -381,15 +381,99 @@ def _spawns_multiple_processes(
     return issubclass(cls, (MultiProcessTestCase, MultiProcContinuousTest))
 
 
+@functools.cache
+def _cpu_backend_tokens() -> tuple[str, ...]:
+    """Registered backend names that drive a CPU (non-accelerator) transport,
+    derived from the backend registry so no hand-maintained list can drift."""
+    from torch.distributed.distributed_c10d import Backend
+    from torch.testing._internal.common_distributed import ACCELERATOR_DIST_BACKENDS
+
+    return tuple(
+        b
+        for b in Backend.backend_list
+        if b not in ACCELERATOR_DIST_BACKENDS
+        and b not in (Backend.UNDEFINED, Backend.FAKE)
+    )
+
+
+def _safe_obj(item: Any) -> object | None:
+    try:
+        return item.obj
+    except Exception:
+        return None
+
+
+def _decorator_gpu_requirement(func: object | None) -> int:
+    """Highest accelerator requirement stamped on ``func`` (or anything in its
+    ``__wrapped__`` chain) by ``skip_if_lt_x_gpu`` (``_min_gpus_required``) or
+    ``requires_world_size`` (``_required_world_size``). 0 when unstamped."""
+    best = 0
+    while func is not None:
+        for attr in ("_min_gpus_required", "_required_world_size"):
+            try:
+                best = max(best, int(getattr(func, attr)))  # type: ignore[arg-type]
+            except (AttributeError, TypeError, ValueError):
+                pass
+        func = getattr(func, "__wrapped__", None)
+    return best
+
+
+def _probe_world_size(cls: type | None) -> int:
+    """Read the class ``world_size`` without running ``__init__`` (which spawns
+    processes at runtime, not collection). Returns 0 when it cannot be resolved
+    to a positive value (e.g. MultiProcContinuousTest's ``-2`` sentinel)."""
+    try:
+        resolved = int(getattr(cls.__new__(cls), "world_size"))
+    except Exception:
+        return 0
+    return resolved if resolved > 0 else 0
+
+
+def _is_cpu_backed(item: Any) -> bool:
+    """A multi-process test whose dedicated module targets a CPU backend (e.g.
+    test_c10d_gloo) spawns ranks, not GPUs, so a high world_size does not imply
+    a high GPU count."""
+    module = getattr(item, "module", None)
+    base = (getattr(module, "__name__", "") or "").rsplit(".", 1)[-1].lower()
+    return base.endswith("_cpu") or any(b in base for b in _cpu_backend_tokens())
+
+
+def _needs_extra_gpus(item: Any, cls: type | None) -> bool:
+    """Whether a process-spawning distributed test needs strictly more
+    accelerators than the standard 2-GPU distributed runner provides. An
+    explicit decorator wins; otherwise use the class world_size, gated so
+    CPU-backed tests never qualify. On any ambiguity favor coverage and route
+    the test to the larger runner."""
+    from torch.testing._internal.common_distributed import STANDARD_DISTRIBUTED_GPUS
+
+    dec = _decorator_gpu_requirement(_safe_obj(item))
+    if dec:
+        return dec > STANDARD_DISTRIBUTED_GPUS
+    if _is_cpu_backed(item):
+        return False
+    world_size = _probe_world_size(cls)
+    if world_size == 0:
+        return True
+    return world_size > STANDARD_DISTRIBUTED_GPUS
+
+
 def pytest_itemcollected(item: Any) -> None:
     """
     Auto-apply the `multigpu` marker based on the resolved test class. Runs
     per-item during collection, before pytest applies `-m` deselection, so the
     distributed CI configs can partition a file into multigpu and `not
     multigpu` halves without touching the test source.
+
+    A process-spawning test that needs strictly more accelerators than the
+    standard 2-GPU distributed runner provides additionally gets `multigpu_extra`
+    so a larger-runner config (e.g. the ROCm 4-GPU periodic job) can select just
+    the 3-4 GPU tests with `--multigpu-filter multigpu-extra`.
     """
-    if _spawns_multiple_processes(getattr(item, "cls", None)):
+    cls = getattr(item, "cls", None)
+    if _spawns_multiple_processes(cls):
         item.add_marker("multigpu")
+        if _needs_extra_gpus(item, cls):
+            item.add_marker("multigpu_extra")
 
 
 class StepcurrentPlugin:
