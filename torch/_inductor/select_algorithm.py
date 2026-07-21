@@ -5068,7 +5068,13 @@ class AlgorithmSelectorCache(PersistentCache):
 
     @staticmethod
     def _is_extern(choice: ChoiceCaller) -> bool:
-        return isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
+        from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplateCaller
+
+        # FlyDSL templates run through Python wrappers that preserve view semantics
+        # such as transposed RHS tensors; benchmark them with extern-style tensors.
+        return isinstance(
+            choice, (ExternKernelCaller, SubgraphChoiceCaller, FlyDSLTemplateCaller)
+        )
 
     @classmethod
     def benchmark_choice(
