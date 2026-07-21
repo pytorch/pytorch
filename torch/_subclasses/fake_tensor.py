@@ -33,6 +33,7 @@ from torch._subclasses.meta_utils import (
     is_sparse_any,
     is_sparse_compressed,
     MetaConverter,
+    MetaTensorDesc,
 )
 from torch._utils import _is_privateuse1_backend_available, render_call
 from torch.fx.immutable_collections import immutable_dict
@@ -117,6 +118,159 @@ class _FakeTensorConstructorIgnoredState(TypedDict, total=False):
 _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS = frozenset(
     _FakeTensorConstructorIgnoredState.__annotations__
 )
+
+
+_EMPTY_DISPATCH_KEY_SET = torch._C.DispatchKeySet.from_raw_repr(0)
+_FAKE_TENSOR_BASE_DISPATCH_KEYS_CACHE: dict[tuple[str, int], torch.DispatchKeySet] = {}
+
+
+def _maybe_dispatch_key(name: str) -> torch._C.DispatchKey | None:
+    try:
+        return torch._C._dispatch_key_parse(name)
+    except RuntimeError:
+        return None
+
+
+def _dispatch_key_set_from_names(names: Iterable[str]) -> torch.DispatchKeySet:
+    dispatch_keys = _EMPTY_DISPATCH_KEY_SET
+    for name in names:
+        if dispatch_key := _maybe_dispatch_key(name):
+            dispatch_keys = dispatch_keys.add(dispatch_key)
+    return dispatch_keys
+
+
+_AUTOCAST_DISPATCH_KEY_NAMES = (
+    "AutocastCPU",
+    "AutocastMPS",
+    "AutocastCUDA",
+    "AutocastXPU",
+    "AutocastIPU",
+    "AutocastHPU",
+    "AutocastXLA",
+    "AutocastMTIA",
+    "AutocastMAIA",
+    "AutocastPrivateUse1",
+)
+_PROPAGATED_EXTRA_DISPATCH_KEYS = _dispatch_key_set_from_names(
+    _AUTOCAST_DISPATCH_KEY_NAMES
+)
+# Only keys whose TensorImpl state is represented by the key bit itself can be
+# physically installed here. Mode-owned keys such as Python, FuncTorch, or
+# Tracer need their owning wrapper/mode state and must not be copied blindly.
+_PHYSICAL_EXTRA_DISPATCH_KEYS = _dispatch_key_set_from_names(
+    (
+        "Conjugate",
+        "Negative",
+        *_AUTOCAST_DISPATCH_KEY_NAMES,
+    )
+)
+
+
+def _dispatch_key_set_intersection(
+    lhs: torch.DispatchKeySet,
+    rhs: torch.DispatchKeySet,
+) -> torch.DispatchKeySet:
+    return torch._C.DispatchKeySet.from_raw_repr(lhs.raw_repr() & rhs.raw_repr())
+
+
+def _dispatch_key_set_difference(
+    lhs: torch.DispatchKeySet,
+    rhs: torch.DispatchKeySet,
+) -> torch.DispatchKeySet:
+    return torch._C.DispatchKeySet.from_raw_repr(lhs.raw_repr() & ~rhs.raw_repr())
+
+
+def _empty_dispatch_key_set_to_none(
+    dispatch_keys: torch.DispatchKeySet,
+) -> torch.DispatchKeySet | None:
+    return None if dispatch_keys.raw_repr() == 0 else dispatch_keys
+
+
+def _fake_tensor_base_dispatch_keys(
+    device: torch.device | str,
+    elem: Tensor,
+) -> torch.DispatchKeySet:
+    device = torch.device(device)
+    elem_keys = torch._C._dispatch_keys(elem)
+    cache_key = (device.type, elem_keys.raw_repr())
+    cached_keys = _FAKE_TENSOR_BASE_DISPATCH_KEYS_CACHE.get(cache_key)
+    if cached_keys is not None:
+        return cached_keys
+
+    probe = Tensor._make_subclass(
+        FakeTensor,
+        elem,
+        False,
+        dispatch_device=True,
+        device_for_backend_keys=device,
+    )
+    base_keys = torch._C._dispatch_keys(probe)
+    _FAKE_TENSOR_BASE_DISPATCH_KEYS_CACHE[cache_key] = base_keys
+    return base_keys
+
+
+def _extra_dispatch_keys(
+    device: torch.device | str,
+    elem: Tensor,
+    dispatch_keys: torch.DispatchKeySet | None = None,
+    extra_dispatch_keys: torch.DispatchKeySet | None = None,
+) -> torch.DispatchKeySet | None:
+    extra_keys = _EMPTY_DISPATCH_KEY_SET
+
+    if dispatch_keys is not None:
+        base_keys = _fake_tensor_base_dispatch_keys(device, elem)
+        extra_keys = extra_keys | _dispatch_key_set_intersection(
+            _dispatch_key_set_difference(dispatch_keys, base_keys),
+            _PHYSICAL_EXTRA_DISPATCH_KEYS,
+        )
+    if extra_dispatch_keys is not None:
+        extra_keys = extra_keys | _dispatch_key_set_intersection(
+            extra_dispatch_keys,
+            _PHYSICAL_EXTRA_DISPATCH_KEYS,
+        )
+
+    return _empty_dispatch_key_set_to_none(extra_keys)
+
+
+def _propagated_extra_dispatch_keys(
+    dispatch_keys: torch.DispatchKeySet | None,
+) -> torch.DispatchKeySet | None:
+    if dispatch_keys is None:
+        return None
+    return _empty_dispatch_key_set_to_none(
+        _dispatch_key_set_intersection(dispatch_keys, _PROPAGATED_EXTRA_DISPATCH_KEYS)
+    )
+
+
+def _extra_dispatch_keys_for_tensor(
+    device: torch.device | str,
+    t: Tensor,
+) -> torch.DispatchKeySet | None:
+    if is_fake_tensor(t):
+        return cast("FakeTensor", t).extra_dispatch_keys
+
+    return None
+
+
+def _common_extra_dispatch_keys(
+    output_device: torch.device | str,
+    flat_args: Sequence[object],
+) -> torch.DispatchKeySet | None:
+    output_device = torch.device(output_device)
+    found_arg = False
+    found_keys = None
+    for arg in flat_args:
+        if not is_fake_tensor(arg) or arg.device != output_device:
+            continue
+        arg_extra_dispatch_keys = _propagated_extra_dispatch_keys(
+            cast("FakeTensor", arg).extra_dispatch_keys
+        )
+        if found_arg and found_keys != arg_extra_dispatch_keys:
+            return None
+        found_arg = True
+        found_keys = arg_extra_dispatch_keys
+
+    return found_keys
 
 
 # Check if device type supports device index
@@ -524,11 +678,10 @@ class FakeTensorConverter:
 
         constant = t if make_constant else None
 
-        # This callback is used by both subclass and inner tensors. Require the
-        # caller to explicitly specify the device in case outer and inner tensors
-        # have different devices.
         def mk_fake_tensor(
-            make_meta_t: Callable[[], object], device: torch.device | str
+            make_meta_t: Callable[[], Tensor],
+            device: torch.device | str,
+            source_desc: MetaTensorDesc[Any] | None = None,
         ) -> FakeTensor:
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
@@ -538,15 +691,31 @@ class FakeTensorConverter:
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
             with no_dispatch():
+                meta_t = make_meta_t()
+                same_device = (
+                    source_desc is not None
+                    and torch.device(device) == source_desc.device
+                )
+                dispatch_keys = (
+                    torch._C.DispatchKeySet.from_raw_repr(source_desc.dispatch_keys)
+                    if same_device and source_desc.dispatch_keys is not None
+                    else None
+                )
+                extra_dispatch_keys = (
+                    torch._C.DispatchKeySet.from_raw_repr(
+                        source_desc.extra_dispatch_keys
+                    )
+                    if same_device and source_desc.extra_dispatch_keys is not None
+                    else None
+                )
                 return FakeTensor(
                     fake_mode,
-                    # pyrefly: ignore [bad-argument-type]
-                    make_meta_t(),
+                    meta_t,
                     # pyrefly: ignore [bad-argument-type]
                     device,
-                    # TODO: callback might be used in recursive contexts, in
-                    # which case using t is wrong!  BUG!
                     constant=constant,
+                    dispatch_keys=dispatch_keys,
+                    extra_dispatch_keys=extra_dispatch_keys,
                 )
 
         out = self.meta_converter(
@@ -555,6 +724,7 @@ class FakeTensorConverter:
             callback=mk_fake_tensor,
             source=source,
             symbolic_context=symbolic_context,
+            callback_accepts_source_desc=True,
             trace=trace,
         )
         if out is NotImplemented:
@@ -685,6 +855,7 @@ class FakeTensorConverter:
         device: torch.device,
         pytype: type[torch.Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
+        extra_dispatch_keys: torch.DispatchKeySet | None = None,
     ) -> FakeTensor:
         if t.device.type != "meta":
             raise AssertionError(
@@ -696,7 +867,12 @@ class FakeTensorConverter:
         if maybe_memo is not None:
             return maybe_memo
         out = FakeTensor(
-            fake_mode, t, device, pytype=pytype, dispatch_keys=dispatch_keys
+            fake_mode,
+            t,
+            device,
+            pytype=pytype,
+            dispatch_keys=dispatch_keys,
+            extra_dispatch_keys=extra_dispatch_keys,
         )
         self.set_tensor_memo(t, out)
         return out
@@ -862,9 +1038,11 @@ class FakeTensor(Tensor):
 
     # FakeTensor doesn't fully emulate the original tensor's Python type
     # and dispatch key set, therefore sometimes we want to track them
-    # separately.
+    # separately.  dispatch_keys stores the full represented key set; extra
+    # dispatch keys stores only keys added to the FakeTensor wrapper.
     pytype: type[Tensor] | None
     dispatch_keys: torch.DispatchKeySet | None
+    extra_dispatch_keys: torch.DispatchKeySet | None
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -954,6 +1132,7 @@ class FakeTensor(Tensor):
         real_tensor: Tensor | None = None,
         pytype: type[Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
+        extra_dispatch_keys: torch.DispatchKeySet | None = None,
         *,
         fake_mode: FakeTensorMode | None = None,
         fake_device: torch.device | str | None = None,
@@ -1023,12 +1202,19 @@ class FakeTensor(Tensor):
                 "'device' (or 'fake_device')"
             )
 
+        extra_dispatch_keys = _extra_dispatch_keys(
+            device,
+            elem,
+            dispatch_keys=dispatch_keys,
+            extra_dispatch_keys=extra_dispatch_keys,
+        )
         self = Tensor._make_subclass(
             cls,
             elem,
             elem.requires_grad if requires_grad is None else requires_grad,
             dispatch_device=True,
             device_for_backend_keys=device,
+            _extra_dispatch_keys=extra_dispatch_keys,
         )
         if not fake_mode._allow_unsafe_data_ptr_access:
             torch._C._set_throw_on_mutable_data_ptr(self)
@@ -1056,6 +1242,7 @@ class FakeTensor(Tensor):
         self.constant = constant
         self.pytype = pytype
         self.dispatch_keys = dispatch_keys
+        self.extra_dispatch_keys = extra_dispatch_keys
         if isinstance(real_tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             raise AssertionError("real_tensor must not be a FakeTensor")
         self.real_tensor = real_tensor
@@ -1350,6 +1537,8 @@ class TensorMetadata:
     is_coalesced: bool | None
     dense_dim: int | None
     sparse_dim: int | None
+    dispatch_keys: int
+    extra_dispatch_keys: int
 
     def _flatten_into(
         self,
@@ -1392,6 +1581,9 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
 
     storage_offset = t.storage_offset()
 
+    dispatch_keys = cast("FakeTensor", t).dispatch_keys if is_fake_tensor(t) else None
+    extra_dispatch_keys = _extra_dispatch_keys_for_tensor(t.device, t)
+
     return TensorMetadata(
         t.dtype,
         t.shape,
@@ -1411,6 +1603,8 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         t.is_coalesced() if t.is_sparse else None,
         t.dense_dim() if _is_sparse_any else None,
         t.sparse_dim() if _is_sparse_any else None,
+        dispatch_keys.raw_repr() if dispatch_keys is not None else 0,
+        (extra_dispatch_keys.raw_repr() if extra_dispatch_keys is not None else 0),
     )
 
 
@@ -2382,7 +2576,21 @@ class FakeTensorMode(TorchDispatchMode):
             with in_kernel_invocation_manager(self), maybe_suppress():
                 empty.set_(storage, storage_offset, shape, stride)
 
-        return FakeTensor(self, empty, metadata.device)
+        return FakeTensor(
+            self,
+            empty,
+            metadata.device,
+            dispatch_keys=(
+                torch._C.DispatchKeySet.from_raw_repr(metadata.dispatch_keys)
+                if metadata.dispatch_keys
+                else None
+            ),
+            extra_dispatch_keys=(
+                torch._C.DispatchKeySet.from_raw_repr(metadata.extra_dispatch_keys)
+                if metadata.extra_dispatch_keys
+                else None
+            ),
+        )
 
     def _output_from_cache_entry(
         self,
@@ -3311,6 +3519,8 @@ class FakeTensorMode(TorchDispatchMode):
         has_scalar_only_inputs = False
         preserve_dispatch_keys = False
         input_dispatch_keys = None
+        preserve_extra_dispatch_keys = False
+        input_extra_dispatch_keys = None
         if (
             (func is aten.alias.default or func is aten.detach.default)
             and len(flat_args) == 1
@@ -3318,6 +3528,8 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             input_dispatch_keys = flat_args[0].dispatch_keys
             preserve_dispatch_keys = input_dispatch_keys is not None
+            input_extra_dispatch_keys = flat_args[0].extra_dispatch_keys
+            preserve_extra_dispatch_keys = input_extra_dispatch_keys is not None
 
         def wrap(e: T) -> T | FakeTensor:
             nonlocal common_device
@@ -3340,6 +3552,8 @@ class FakeTensorMode(TorchDispatchMode):
                 )
                 if preserve_dispatch_keys:
                     e.dispatch_keys = input_dispatch_keys
+                if preserve_extra_dispatch_keys:
+                    e.extra_dispatch_keys = input_extra_dispatch_keys
                 return cast(T, e)
             elif converter is not None:
                 if has_scalar_only_inputs:
@@ -3348,11 +3562,19 @@ class FakeTensorMode(TorchDispatchMode):
                     # We thus directly convert real tensor to fake tensor.
                     out = converter.from_real_tensor(self, e)
                 else:
+                    output_device = device or common_device
                     out = converter.from_meta_and_device(
-                        self, e, device or common_device
+                        self,
+                        e,
+                        output_device,
+                        extra_dispatch_keys=_common_extra_dispatch_keys(
+                            output_device, flat_args
+                        ),
                     )
                 if preserve_dispatch_keys:
                     out.dispatch_keys = input_dispatch_keys
+                if preserve_extra_dispatch_keys:
+                    out.extra_dispatch_keys = input_extra_dispatch_keys
                 return out
             else:
                 # pyrefly: ignore [bad-return]

@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import io
 import itertools
 import pickle
 import sys
@@ -20,7 +21,7 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
-from torch._dynamo.guards import CheckFunctionManager, CompileId
+from torch._dynamo.guards import CheckFunctionManager, CompileId, GuardsStatePickler
 from torch._dynamo.package import CompilePackage
 from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
@@ -502,6 +503,48 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": torch.randn(2, dtype=torch.float64)}, False
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
+
+    def test_unpickle_tensor_preserves_fake_dispatch_keys(self):
+        x = torch.empty(2, dtype=torch.complex64)
+        torch._C._set_conj(x, True)
+        full_dispatch_keys = torch._C._dispatch_keys(x)
+        self.assertTrue(full_dispatch_keys.has(torch._C.DispatchKey.Conjugate))
+
+        fake_x = GuardsStatePickler._unpickle_tensor(
+            torch.empty_like(x, device="meta"),
+            x.device,
+            torch.Tensor,
+            full_dispatch_keys.raw_repr(),
+            None,
+        )
+
+        self.assertIsInstance(fake_x, torch._subclasses.FakeTensor)
+        conj_key = torch._C.DispatchKey.Conjugate
+        self.assertEqual(fake_x.dispatch_keys, full_dispatch_keys)
+        self.assertTrue(torch._C._dispatch_keys(fake_x).has(conj_key))
+        self.assertTrue(fake_x.extra_dispatch_keys.has(conj_key))
+
+        logical_dispatch_keys = torch._C._dispatch_keys(torch._efficientzerotensor(2))
+        fake_mode = torch._subclasses.FakeTensorMode()
+        fake_zero = fake_mode.fake_tensor_converter.from_meta_and_device(
+            fake_mode,
+            torch.empty(2, device="meta"),
+            torch.device("cpu"),
+            dispatch_keys=logical_dispatch_keys,
+        )
+
+        buf = io.BytesIO()
+        pickler = GuardsStatePickler({id(fake_zero): fake_zero}, {}, {}, buf)
+        unpickle_fn, unpickle_args = pickler.reducer_override(fake_zero)
+        restored_fake_zero = unpickle_fn(*unpickle_args)
+
+        self.assertIsInstance(restored_fake_zero, torch._subclasses.FakeTensor)
+        self.assertEqual(restored_fake_zero.dispatch_keys, logical_dispatch_keys)
+        self.assertFalse(
+            torch._C._dispatch_keys(restored_fake_zero).has(
+                torch._C.DispatchKey.ZeroTensor
+            )
+        )
 
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):
