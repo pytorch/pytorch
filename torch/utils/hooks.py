@@ -224,19 +224,20 @@ class BackwardHook:
                 # hook directly
                 if self.input_tensors_index is None:
                     # Only full backward hooks (not pre-hooks) receive grad_input
-                    # here, so only warn when one is actually registered.
+                    # and are the subject of the warning; pre-hooks already ran
+                    # above from grad_output. Skip both when none are registered.
                     if self.user_hooks:
                         warnings.warn("Full backward hook is firing when gradients are computed "
                                       "with respect to module outputs since no inputs require gradients. See "
                                       "https://docs.pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_hook "
                                       "for more details.",
                                       stacklevel=5)
-                    grad_inputs = self._pack_with_none([], [], self.n_inputs)
-                    for user_hook in self.user_hooks:
-                        res = user_hook(self.module, grad_inputs, self.grad_outputs)
-                        if res is not None and not (isinstance(res, tuple) and all(el is None for el in res)):
-                            raise RuntimeError("Backward hook for Modules where no input requires "
-                                               "gradient should always return None or None for all gradients.")
+                        grad_inputs = self._pack_with_none([], [], self.n_inputs)
+                        for user_hook in self.user_hooks:
+                            res = user_hook(self.module, grad_inputs, self.grad_outputs)
+                            if res is not None and not (isinstance(res, tuple) and all(el is None for el in res)):
+                                raise RuntimeError("Backward hook for Modules where no input requires "
+                                                   "gradient should always return None or None for all gradients.")
                     self.grad_outputs = None
 
                 if local_grad_outputs is not None:
