@@ -17,7 +17,7 @@ index 895aeec9d7b..de134691751 100644
 +
 +    @cute.jit
 +    def begin(self, gemm, param, smem_tensor, ctx):
-+        return Float32(param[0])
++        return param.load()
 +
 +
 +class ScalarTupleLoad(EpiOp):
@@ -70,7 +70,7 @@ index 5030cf895fa..bf143521b42 100644
          mLocalReduce: Optional[cute.Tensor] = None
          rounding_mode: cutlass.Constexpr[int] = RoundingMode.RN
          sr_seed: Optional[Int32 | cute.Tensor] = None
-@@ -391,24 +394,31 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -391,24 +394,33 @@ class GemmActMixin(ComposableEpiMixin):
                  tDrRowVecs = epi_loop_tensors.get("mTensorEpilogueRowVecBroadcasts")
                  tDrColVecs = epi_loop_tensors.get("mTensorEpilogueColVecBroadcasts")
                  tRsTileAuxes = epi_loop_tensors.get("mTensorEpilogueTiles")
@@ -87,9 +87,11 @@ index 5030cf895fa..bf143521b42 100644
 -                        epilogue_aux = tDrRowVecs[row_arg_index]
 -                        row_arg_index += 1
 +                    if const_expr(arg_kind == 4):
-+                        # Scalars broadcast through TensorSSA arithmetic directly.
-+                        epilogue_aux_values.append(scalars[scalar_arg_index])
++                        scalar = scalars[scalar_arg_index]
 +                        scalar_arg_index += 1
++                        tRS_rScalar = cute.make_rmem_tensor_like(tRS_rD, scalar.dtype)
++                        tRS_rScalar.fill(scalar[0])
++                        epilogue_aux_values.append(tRS_rScalar.load())
                      else:
 -                        epilogue_aux = tDrColVecs[col_arg_index]
 -                        col_arg_index += 1
