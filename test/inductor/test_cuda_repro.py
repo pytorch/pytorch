@@ -2551,7 +2551,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         eager = fwd(x, targets, W, bias)
         opt = torch.compile(fwd, dynamic=False, fullgraph=True)
         compiled = opt(x, targets, W, bias)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         # bf16 matmul + log_sum_exp leaves some slack; loose tol is fine here,
         # the test is about not crashing.
         self.assertTrue(torch.allclose(eager, compiled, atol=1e-2, rtol=1e-2))
