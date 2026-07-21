@@ -1169,12 +1169,7 @@ test_inductor_torchbench_smoketest_perf() {
   done
 
   # Perform some "warm-start" runs for a few huggingface models.
-  # NB: DistillGPT2 is excluded here because it has a known A100-specific inductor
-  # accuracy divergence (RMSE ~0.19 vs ~0.008 eager) that fails only on sm80; it
-  # still passes and is covered by the inductor_huggingface accuracy job on other
-  # runners. See pytorch/pytorch#187401. A one-off warm-start accuracy miss should
-  # not fail the whole smoke job. Re-add once the sm80 divergence is fixed.
-  for test in AllenaiLongformerBase DistilBertForMaskedLM GoogleFnet YituTechConvBert; do
+  for test in AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
     python benchmarks/dynamo/huggingface.py --accuracy --training --amp --inductor --device cuda --warm-start-latency \
       --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
     python benchmarks/dynamo/check_accuracy.py \
@@ -1991,7 +1986,7 @@ EOF
   pip3 install -r requirements.txt
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-  python -m build --wheel --no-isolation -C--build-option=--bdist-dir="base_bdist_tmp" --outdir "base_dist"
+  python -m build --wheel --no-isolation --outdir "base_dist"
   python -mpip install base_dist/*.whl
   echo "::endgroup::"
 
