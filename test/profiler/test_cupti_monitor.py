@@ -106,6 +106,13 @@ def _isolated(test_fn):
 class TestCuptiRecords(TestCase):
     """Pure monitor + metadata unit tests (no CUDA)."""
 
+    def setUp(self):
+        # CuptiMonitor is a process-wide singleton; drop it so each test builds a fresh one.
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        _cupti_monitor._reset_for_test()
+        self.addCleanup(_cupti_monitor._reset_for_test)
+
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_monitor_normalize_activities(self):
         # A registration request resolves to (kinds, per-kind field selection): a
@@ -131,34 +138,73 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(fields[kernel], frozenset({0, int(Kernel.START)}))
         self.assertEqual(fields[memcpy], all_memcpy)
 
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires the cupti python bindings")
+    def test_configure_and_get_config(self):
+        # configure() sets the process-wide config get_config() reports; it is first-come-
+        # first-serve. Pure config -- no session, only the cupti python bindings (not
+        # libcupti). setUp reset the singleton, so this starts from the defaults: both
+        # cadences off (-1, caller-driven) and the approx clock off.
+        from torch.profiler._cupti import monitor as cupti_monitor
+
+        cfg = cupti_monitor.get_config()
+        self.assertEqual(cfg["buffer_size"], 4 * 1024 * 1024)
+        self.assertEqual(cfg["background_flush_period_s"], -1.0)
+        self.assertEqual(cfg["background_drain_period_s"], -1.0)
+        self.assertFalse(cfg["use_approx_timestamps"])
+        self.assertFalse(cfg["configured"])
+
+        cupti_monitor.configure(
+            buffer_size=2048, background_flush_period_s=0.5, use_approx_timestamps=True
+        )
+        cfg = cupti_monitor.get_config()
+        self.assertEqual(cfg["buffer_size"], 2048)
+        self.assertEqual(cfg["background_flush_period_s"], 0.5)
+        self.assertEqual(
+            cfg["background_drain_period_s"], -1.0
+        )  # independent; still off
+        self.assertTrue(cfg["use_approx_timestamps"])
+        self.assertTrue(cfg["configured"])
+
+        # First-come-first-serve: a second configure() is ignored.
+        cupti_monitor.configure(buffer_size=4096)
+        self.assertEqual(cupti_monitor.get_config()["buffer_size"], 2048)
+
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_monitor_buffer_size_from_env(self):
-        # The per-buffer pool size is user-configurable: an explicit buffer_size
-        # arg wins, otherwise TORCH_CUPTI_MONITOR_BUFFER_SIZE is honored, else the
-        # 4 MiB default. No CUDA -- this only reads the constructor config.
-        import unittest.mock
+    def test_singleton_snapshots_config(self):
+        # CuptiMonitor() is the process-wide singleton: it returns the one instance,
+        # built once from the configure() settings.
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.monitor import CuptiMonitor
 
-        from torch.profiler._cupti.monitor import _DEFAULT_BUFFER_SIZE, CuptiMonitor
+        cupti_monitor.configure(
+            buffer_size=2048,
+            background_flush_period_s=0.5,
+            background_drain_period_s=2.0,
+        )
+        m = CuptiMonitor()
+        self.assertEqual(m.buffer_size, 2048)
+        self.assertEqual(m.background_flush_period_s, 0.5)
+        self.assertEqual(m.background_drain_period_s, 2.0)
+        self.assertIs(CuptiMonitor(), m)
 
-        self.assertEqual(CuptiMonitor().buffer_size, _DEFAULT_BUFFER_SIZE)
-        with unittest.mock.patch.dict(
-            "os.environ", {"TORCH_CUPTI_MONITOR_BUFFER_SIZE": "1048576"}
-        ):
-            self.assertEqual(CuptiMonitor().buffer_size, 1048576)
-            # An explicit arg overrides the env var.
-            self.assertEqual(CuptiMonitor(buffer_size=2048).buffer_size, 2048)
+        # Unconfigured, both cadences default off (caller-driven).
+        cupti_monitor._reset_for_test()
+        m = CuptiMonitor()
+        self.assertEqual(m.background_flush_period_s, -1.0)
+        self.assertEqual(m.background_drain_period_s, -1.0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_monitor_use_approx_timestamps_arg(self):
-        # The approx-clock timestamp callback is a constructor setting (no env var):
-        # off by default, on when use_approx_timestamps=True. No CUDA, but constructing
-        # CuptiMonitor loads libcupti (>= 13.3) via pylibcupti().
+    def test_monitor_use_approx_timestamps_config(self):
+        # use_approx_timestamps is a configure() setting the singleton snapshots: OFF by
+        # default (the per-subscriber callback only times device records correctly when the
+        # monitor is the first CUPTI consumer), opt-in on. Constructing loads libcupti (>= 13.3).
+        from torch.profiler._cupti import monitor as cupti_monitor
         from torch.profiler._cupti.monitor import CuptiMonitor
 
         self.assertFalse(CuptiMonitor()._timestamp_callback_enabled)
-        self.assertTrue(
-            CuptiMonitor(use_approx_timestamps=True)._timestamp_callback_enabled
-        )
+        cupti_monitor._reset_for_test()
+        cupti_monitor.configure(use_approx_timestamps=True)
+        self.assertTrue(CuptiMonitor()._timestamp_callback_enabled)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_monitor_external_correlation_not_started(self):
@@ -217,6 +263,35 @@ class TestCuptiRecords(TestCase):
         m._gc_external_chains()  # ready dropped
         self.assertNotIn(2, m._id_chains)
         self.assertIn(1, m._id_chains)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_drain_polls_pm_consumers(self):
+        # Regression: PM-sampling frames must be pulled on the drain path. flush() and
+        # the background drain loop both funnel through _drain_and_dispatch, so the PM
+        # poll is folded there -- the native self-flush thread never touches the PM ring
+        # (poll()/deliver are GIL work). Pure: a fake consumer, no CUDA/session.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor import CuptiMonitor
+
+        class _FakeHandle:
+            def __init__(self):
+                self.polls = 0
+
+            def poll(self):
+                self.polls += 1
+                return {"start_ns": np.array([100, 200], dtype=np.int64)}
+
+        m = CuptiMonitor()
+        delivered: list = []
+        handle = _FakeHandle()
+        m._pm_consumers[lambda frame: delivered.append(frame)] = handle
+
+        m._drain_and_dispatch()
+
+        self.assertEqual(handle.polls, 1)
+        self.assertEqual(len(delivered), 1)
+        self.assertEqual(list(delivered[0]["start_ns"]), [100, 200])
 
     def test_metadata_store_roundtrip(self):
         # The CollTrace-replacement metadata store: producers put a JSON object keyed
@@ -385,6 +460,129 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(args["func"], "AllReduce")
         self.assertEqual(args["count"], 4096)
 
+    def test_graph_kernel_reassigned_to_logical_lane(self):
+        # A graphed kernel the lane resolver maps to a logical lane is placed on that lane
+        # (tid + args["stream"]), its real CUDA stream is preserved as original_stream, the
+        # lane is named by the resolver, and its ac2g flow arrow follows -- all in the single
+        # merge pass, so no read-trace/reassign/rewrite round trip is needed. A kernel the
+        # resolver leaves on its CUDA stream is untouched (no original_stream) and its lane
+        # keeps the default "stream N" name. Reassignment is driven by the logical_lane /
+        # lane_name columns the observer fills from the lane resolver (supplied here
+        # directly). No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _trace_window_entries
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),  # both replayed on the capture stream
+                "correlation_id": i64(11, 12),
+                "graph_id": i64(1, 1),
+                "graph_node_id": i64(101, 102),
+                "name": np.array(["graphKernelA", "graphKernelB"], dtype=object),
+                "annotation": np.array(
+                    [{"ann_id": "a"}, {"ann_id": "b"}], dtype=object
+                ),
+                # resolver output: A -> lane 8 named "side comms"; B -> its own stream 7 (no move)
+                "logical_lane": i64(8, 7),
+                "lane_name": np.array(["side comms", None], dtype=object),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(1, 1),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            }
+        }
+        metadata, events = _trace_window_entries({"columns": columns}, base_ns=0)
+        kernels = {e["name"]: e for e in events if e.get("cat") == "kernel"}
+
+        # resolved to a logical lane: moved onto lane 8, real CUDA stream preserved
+        a = kernels["graphKernelA"]
+        self.assertEqual(a["tid"], 8)
+        self.assertEqual(a["args"]["stream"], 8)
+        self.assertEqual(a["args"]["original_stream"], 7)
+        self.assertEqual(a["args"]["ann_id"], "a")
+        self.assertEqual(a["args"]["graph node id"], 101)
+
+        # resolver left it on its CUDA stream lane: untouched, no original_stream
+        b = kernels["graphKernelB"]
+        self.assertEqual(b["tid"], 7)
+        self.assertEqual(b["args"]["stream"], 7)
+        self.assertNotIn("original_stream", b["args"])
+
+        # the ac2g flow arrow for the reassigned kernel follows it to lane 8
+        flow_by_id = {
+            e["id"]: e for e in events if e.get("cat") == "ac2g" and e.get("ph") == "f"
+        }
+        self.assertEqual(flow_by_id[11]["tid"], 8)
+        self.assertEqual(flow_by_id[12]["tid"], 7)
+
+        # the reassigned lane is named by the resolver; the default lane keeps "stream N"
+        names = {
+            (e["pid"], e["tid"]): e["args"]["name"]
+            for e in metadata
+            if e.get("ph") == "M" and e.get("name") == "thread_name"
+        }
+        self.assertEqual(names[(0, 8)], "side comms")
+        self.assertEqual(names[(0, 7)].strip(), "stream 7")
+
+    def test_gpu_user_annotation_follows_reassigned_lane(self):
+        # A GPU-side user annotation spanning graphed kernels that the lane resolver moved
+        # onto a logical lane is emitted on that same lane -- not the capture stream -- so it
+        # nests over its kernels. An annotation over non-reassigned (eager) kernels stays on
+        # the kernel's CUDA stream. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _gpu_user_annotation_events
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "external_correlation": {
+                "correlation_id": i64(11, 12),
+                "user_external_id": i64(555, 666),
+            },
+            "kernel": {
+                "correlation_id": i64(11, 12),
+                "device_id": i64(0, 0),
+                "stream_id": i64(7, 9),  # both replayed on their capture streams
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                # first is graphed and moved to lane 8; second is eager (no reassign)
+                "graph_node_id": i64(101, 0),
+                "logical_lane": i64(8, 9),
+            },
+        }
+        trace_window = {
+            "columns": columns,
+            "user_annotations": {555: "all_reduce", 666: "matmul"},
+        }
+        events = _gpu_user_annotation_events(trace_window, base_ns=0)
+        by_name = {e["name"]: e for e in events}
+
+        # reassigned: the annotation follows its kernels onto lane 8
+        self.assertEqual(by_name["all_reduce"]["cat"], "gpu_user_annotation")
+        self.assertEqual(by_name["all_reduce"]["pid"], 0)
+        self.assertEqual(by_name["all_reduce"]["tid"], 8)
+        # not reassigned: stays on the kernel's capture stream
+        self.assertEqual(by_name["matmul"]["tid"], 9)
+
     def test_chrome_counter_events_from_pm(self):
         # PM counters render as chrome "C" (counter) events in a dedicated per-device
         # "GPU N Counters" process row, separate from the GPU kernel work. No CUDA.
@@ -461,6 +659,13 @@ class TestCuptiRecords(TestCase):
 class TestCuptiMonitorCUDA(TestCase):
     """Collection through CuptiMonitor directly (not via torch.profiler.profile)."""
 
+    def setUp(self):
+        # CuptiMonitor is a process-wide singleton; drop it so each test builds a fresh one.
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        _cupti_monitor._reset_for_test()
+        self.addCleanup(_cupti_monitor._reset_for_test)
+
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_fence_enables_sync_transiently(self):
         # flush(sync=True) fences at a SYNCHRONIZATION sync point, enabled only for
@@ -501,6 +706,14 @@ class TestCuptiMonitorCUDA(TestCase):
 
         lock = threading.Lock()
         columns: list = []
+        # Fully caller-driven (both periods < 0): no background self-flush and no
+        # background drain, so the explicit flush(sync=True) below is the sole,
+        # deterministic flush + drain -- nothing races it to consume the decoded columns.
+        from torch.profiler._cupti import monitor as cupti_monitor
+
+        cupti_monitor.configure(
+            background_flush_period_s=-1, background_drain_period_s=-1
+        )
         monitor = CuptiMonitor()
 
         def on_columns(cols):
@@ -538,16 +751,121 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertTrue(any(len(n) > 0 for c in columns for n in c[int(Kernel.NAME)]))
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_worker_loop_self_flush_delivers_without_caller_flush(self):
+        # worker_loop() with a flush period set (self_flush): the native decode thread
+        # drives cuptiActivityFlushAll on its cadence and decodes the completed buffers
+        # itself, so records surface with NO caller flush(). Background drain is off, so
+        # the only Python work is an explicit drain -- flush() is never called.
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.cupti_python import CuptiError
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
+
+        kind = ActivityKind.CONCURRENT_KERNEL
+        lock = threading.Lock()
+        columns: list = []
+        # A real (spread-out) cadence, not a tight spin: the decode thread's first flush is
+        # backdated to fire at worker start -- before these kernels exist -- so the kernels'
+        # buffers are only delivered by the NEXT cadence flush ~period later. Records showing
+        # up therefore proves the periodic self-flush actually fires on schedule.
+        flush_period_s = 5.0
+        cupti_monitor.configure(
+            background_flush_period_s=flush_period_s, background_drain_period_s=-1
+        )
+        monitor = CuptiMonitor()
+
+        def on_columns(cols):
+            if kind in cols:
+                with lock:
+                    columns.append(cols[kind])
+
+        try:
+            obs = monitor.register({kind: {Kernel.START, Kernel.END}}, on_columns)
+        except CuptiError as e:
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        self.addCleanup(monitor.unregister, obs)
+
+        x = torch.randn(128, 128, device="cuda")
+        for _ in range(4):
+            x = torch.relu(x @ x)
+        x.sum().item()
+        torch.cuda.synchronize()
+
+        # Poll past one cadence: the decode thread self-flushes+decodes on its period
+        # (buffers_completed grows with no flush()); drain pulls the decoded columns to the
+        # observer. Deadline comfortably exceeds the period so the cadence flush lands.
+        deadline = time.time() + flush_period_s * 3 + 5.0
+        total = 0
+        while time.time() < deadline:
+            monitor._drain_and_dispatch()
+            with lock:
+                total = sum(len(c[int(Kernel.START)]) for c in columns)
+            if total > 0:
+                break
+            time.sleep(0.1)
+        self.assertGreater(monitor.stats()["buffers_completed"], 0)
+        self.assertGreater(total, 0)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_worker_loop_no_self_flush_waits_for_caller_flush(self):
+        # worker_loop() with no flush period (self_flush off): the decode thread blocks on
+        # get_completed() and never self-flushes, so with a normal buffer nothing is
+        # delivered until the caller drives flush(). Both cadences off (caller-driven).
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.cupti_python import CuptiError
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
+
+        kind = ActivityKind.CONCURRENT_KERNEL
+        lock = threading.Lock()
+        columns: list = []
+        cupti_monitor.configure(
+            background_flush_period_s=-1, background_drain_period_s=-1
+        )
+        monitor = CuptiMonitor()
+
+        def on_columns(cols):
+            if kind in cols:
+                with lock:
+                    columns.append(cols[kind])
+
+        try:
+            obs = monitor.register({kind: {Kernel.START, Kernel.END}}, on_columns)
+        except CuptiError as e:
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        self.addCleanup(monitor.unregister, obs)
+
+        x = torch.randn(128, 128, device="cuda")
+        for _ in range(4):
+            x = torch.relu(x @ x)
+        x.sum().item()
+        torch.cuda.synchronize()
+
+        # No self-flush and no caller flush: the idle decode thread decodes nothing.
+        time.sleep(0.2)
+        monitor._drain_and_dispatch()
+        with lock:
+            before = sum(len(c[int(Kernel.START)]) for c in columns)
+        self.assertEqual(monitor.stats()["buffers_completed"], 0)
+        self.assertEqual(before, 0)
+
+        # The caller-driven flush is what delivers the records.
+        monitor.flush(sync=True)
+        with lock:
+            after = sum(len(c[int(Kernel.START)]) for c in columns)
+        self.assertGreater(monitor.stats()["buffers_completed"], 0)
+        self.assertGreater(after, 0)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_approx_timestamp_callback_engages_under_udr(self):
-        # use_approx_timestamps hands CUPTI a per-subscriber timestamp callback
-        # (CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK) so records ride the profiler's approx
-        # clock. Unlike the global cuptiActivityRegisterTimestampCallback (NOT_COMPATIBLE under
-        # user-defined records), the subscriber attribute coexists with the UDR path. It only
-        # re-times device records when the monitor subscribes before any CUDA context exists
-        # (cuptiSubscribe otherwise latches device correlation on the pre-existing context), so
-        # this runs in an inline-script child that never imports common_cuda (which would init
-        # CUDA at import) and subscribes first. Assert the callback engaged and that device
-        # records land on the approx clock (~1e14-1e15 ticks), not CLOCK_REALTIME ns (~1e18).
+        # use_approx hands CUPTI a per-subscriber timestamp callback so records ride the
+        # profiler's approx clock. Runs in a child that subscribes before any CUDA context
+        # (use_approx is snapshotted at singleton construction). Assert the callback engaged and
+        # device records land on the approx clock (< 1e17), not CLOCK_REALTIME (~1e18).
         script = textwrap.dedent(
             """
             import torch
@@ -558,7 +876,8 @@ class TestCuptiMonitorCUDA(TestCase):
             assert not torch.cuda.is_initialized()
             kind = ActivityKind.CONCURRENT_KERNEL
             seen = []
-            m = mon.CuptiMonitor(use_approx_timestamps=True)
+            mon.configure(use_approx_timestamps=True)
+            m = mon.CuptiMonitor()
             obs = m.register({kind: {Kernel.START, Kernel.END}},
                              lambda cols: seen.append(cols[kind]) if kind in cols else None)
             assert m._timestamp_callback_active, "callback did not engage"
@@ -584,55 +903,151 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertIn("OK", p.stdout)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_approx_timestamp_callback_skipped_with_existing_context(self):
-        # cuptiSubscribe latches device-record correlation against a pre-existing CUDA context,
-        # so the (post-subscribe) per-subscriber callback can't re-time device records. When a
-        # context already exists, the monitor must refuse to engage rather than silently drop
-        # device records; collection still proceeds on the CLOCK_REALTIME pass-through.
+    def test_approx_timestamp_callback_engages_with_existing_context(self):
+        # With a CUDA context already established, use_approx must still re-time DEVICE records
+        # onto the approx clock. Reset the singleton so use_approx (snapshotted at construction)
+        # takes effect, establish a context first, then assert the callback engaged and device
+        # records land on the approx clock (< 1e17), not CLOCK_REALTIME (~1e18).
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti.cupti_python import CuptiError
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.cupti_python import CuptiError, pylibcupti
         from torch.profiler._cupti.monitor import CuptiMonitor
         from torch.profiler._cupti.records import Kernel
 
-        kind = ActivityKind.CONCURRENT_KERNEL
-        want = {kind: {Kernel.START, Kernel.END}}
+        if pylibcupti().get_version() < 130303:
+            self.skipTest(
+                "libcupti cannot re-time device records with an existing context"
+            )
+
+        cupti_monitor._reset_for_test()
+        self.addCleanup(cupti_monitor._reset_for_test)
+
+        # Establish a CUDA context first: this is the pre-existing-context case.
         torch.randn(8, device="cuda").sum().item()
         torch.cuda.synchronize()
         self.assertTrue(torch.cuda.is_initialized())
 
-        lock = threading.Lock()
-        columns: list = []
-        monitor = CuptiMonitor(use_approx_timestamps=True)
+        kind = ActivityKind.CONCURRENT_KERNEL
+        seen: list = []
+        cupti_monitor.configure(use_approx_timestamps=True)
+        m = CuptiMonitor()
 
         def on_columns(cols):
             if kind in cols:
-                with lock:
-                    columns.append(cols[kind])
+                seen.append(cols[kind])
 
         try:
-            obs = monitor.register(want, on_columns)
+            obs = m.register({kind: {Kernel.START, Kernel.END}}, on_columns)
         except CuptiError as e:
-            self.skipTest(f"monitor could not subscribe: {e}")
-        self.addCleanup(monitor.unregister, obs)
-        self.assertFalse(monitor._timestamp_callback_active)
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        self.assertTrue(m._timestamp_callback_active, "callback did not engage")
+        try:
+            x = torch.randn(256, 256, device="cuda")
+            for _ in range(4):
+                x = torch.relu(x @ x)
+            x.sum().item()
+            torch.cuda.synchronize()
+            m.flush(sync=True)
+        finally:
+            m.unregister(obs)
 
-        x = torch.randn(256, 256, device="cuda")
-        for _ in range(4):
-            x = torch.relu(x @ x)
-        x.sum().item()
-        torch.cuda.synchronize()
-        monitor.flush(sync=True)
-        monitor.unregister(obs)
+        starts = [int(v) for c in seen for v in c[int(Kernel.START)]]
+        self.assertTrue(starts, "no kernel records")
+        self.assertLess(
+            max(starts), 1e17, f"device records off the approx clock: {max(starts)}"
+        )
 
-        self.assertGreater(sum(len(c[int(Kernel.START)]) for c in columns), 0)
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_noisy_apis_suppressed_at_collection(self):
+        # disable_noisy_runtime_apis / disable_noisy_driver_apis (run inside activity_enable)
+        # should keep the pure-noise cbids out of the records. Assert 0 records for them while
+        # kernels + other records still flow (so the check is not vacuous).
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.cupti_python import (
+            _noisy_driver_cbids,
+            _noisy_runtime_cbids,
+            CuptiError,
+            pylibcupti,
+        )
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Api, Kernel
+
+        if pylibcupti().get_version() < 130303:
+            self.skipTest("libcupti predates the UDR per-cbid disable fix")
+
+        noisy_runtime = set(_noisy_runtime_cbids())
+        noisy_driver = set(_noisy_driver_cbids())
+        self.assertTrue(
+            noisy_runtime, "no noisy runtime cbids resolved from the cupti enum"
+        )
+
+        runtime_seen: dict[int, int] = {}
+        driver_seen: dict[int, int] = {}
+        kernels = 0
+
+        def cb(cols):
+            nonlocal kernels
+            for kind, seen in (
+                (ActivityKind.RUNTIME, runtime_seen),
+                (ActivityKind.DRIVER, driver_seen),
+            ):
+                col = cols.get(kind)
+                if col and int(Api.CBID.id) in col:
+                    for v in col[int(Api.CBID.id)]:
+                        seen[int(v)] = seen.get(int(v), 0) + 1
+            kk = cols.get(ActivityKind.CONCURRENT_KERNEL)
+            if kk:
+                kernels += len(next(iter(kk.values())))
+
+        cupti_monitor.configure(buffer_size=1 << 20)
+        m = CuptiMonitor()
+        want = {
+            ActivityKind.CONCURRENT_KERNEL: {Kernel.START, Kernel.END},
+            ActivityKind.RUNTIME: {Api.CBID},
+            ActivityKind.DRIVER: {Api.CBID},
+        }
+        try:
+            obs = m.register(want, cb)
+        except CuptiError as e:
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        try:
+            x = torch.randn(256, 256, device="cuda")
+            for _ in range(50):
+                x = torch.relu(
+                    x @ x
+                )  # each op calls cudaGetDevice/GetLastError internally
+            x.sum().item()
+            torch.cuda.synchronize()
+            m.flush(sync=True)
+        finally:
+            m.unregister(obs)
+
+        # Records must actually be flowing, else the assertions below are vacuous.
+        self.assertGreater(kernels, 0, "no kernel records -- monitor not collecting")
+        self.assertGreater(
+            sum(runtime_seen.values()), 0, "no RUNTIME records collected"
+        )
+
+        leaked_rt = {c: n for c, n in runtime_seen.items() if c in noisy_runtime}
+        self.assertEqual(
+            leaked_rt, {}, f"noisy runtime cbids not suppressed: {leaked_rt}"
+        )
+        # DRIVER records only flow on some stacks (e.g. NCCL/driver launches); assert only when
+        # driver records are present so the check stays meaningful rather than vacuous.
+        if driver_seen:
+            leaked_dr = {c: n for c, n in driver_seen.items() if c in noisy_driver}
+            self.assertEqual(
+                leaked_dr, {}, f"noisy driver cbids not suppressed: {leaked_dr}"
+            )
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_singleton_flush_accessible(self):
-        # A user can reach the process-wide monitor singleton through the public
-        # accessors and flush it: instance() constructs/returns it, get_monitor()
-        # hands back that same object, and flush(sync=True) on the singleton
-        # delivers everything collected up to the call.
+        # A user can reach the process-wide monitor singleton through CuptiMonitor()
+        # and flush it: CuptiMonitor() constructs/returns the one instance, and
+        # flush(sync=True) on it delivers everything collected up to the call.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
         from torch.profiler._cupti import monitor as cupti_monitor
@@ -648,9 +1063,9 @@ class TestCuptiMonitorCUDA(TestCase):
                 with lock:
                     columns.append(cols[kernel])
 
-        mon = cupti_monitor.instance()
-        self.assertIs(cupti_monitor.get_monitor(), mon)
-        # Drop the singleton after the observer is torn down so the next instance()
+        mon = cupti_monitor.CuptiMonitor()
+        self.assertIs(cupti_monitor.CuptiMonitor(), mon)
+        # Drop the singleton after the observer is torn down so the next CuptiMonitor()
         # caller gets a fresh monitor (cleanups run LIFO: unregister first).
         self.addCleanup(setattr, cupti_monitor, "_instance", None)
         try:
@@ -667,7 +1082,7 @@ class TestCuptiMonitorCUDA(TestCase):
 
         # Flush via the singleton fetched from the public accessor, not the local
         # handle, to exercise the user-visible path.
-        cupti_monitor.get_monitor().flush(sync=True)
+        cupti_monitor.CuptiMonitor().flush(sync=True)
 
         total = sum(len(c[int(Kernel.START)]) for c in columns)
         self.assertGreater(total, 0)
@@ -758,7 +1173,10 @@ class TestCuptiMonitorCUDA(TestCase):
                     len(next(iter(c.values()))) if c else 0
                 )
 
-        m = CuptiMonitor(buffer_size=1024, flush_period_s=0.02)
+        from torch.profiler._cupti import monitor as cupti_monitor
+
+        cupti_monitor.configure(buffer_size=1024, background_flush_period_s=0.02)
+        m = CuptiMonitor()
         want = {
             ActivityKind.CONCURRENT_KERNEL: {
                 Kernel.START,
@@ -894,6 +1312,17 @@ class TestCuptiMonitorProfiler(TestCase):
     """The monitor driven through ``torch.profiler.profile`` (trace shape, op/kernel
     parity, record_shapes, sync/async export, multithread thread-assignment, ...)."""
 
+    def setUp(self):
+        # CuptiMonitor is a process-wide singleton; drop it so each test builds a fresh one.
+        # The class also hosts CUPTI-free config-validation tests, so the monitor module
+        # (which needs cupti-python) may be unimportable; there is nothing to reset then.
+        if not TEST_CUPTI_PYTHON:
+            return
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        _cupti_monitor._reset_for_test()
+        self.addCleanup(_cupti_monitor._reset_for_test)
+
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     @unittest.skipUnless(
         SM100OrLater, "hardware event sampling requires GB200+ (sm_100)"
@@ -953,7 +1382,7 @@ _cupti_monitor.enable_hes_early()
         y.sum().item()
         torch.cuda.synchronize()
 
-        monitor = _cupti_monitor.instance()
+        monitor = _cupti_monitor.CuptiMonitor()
         monitor.flush(sync=True)
         stats = monitor.stats()
         _gnode, start, _end, _stream = obs.drain()
@@ -986,7 +1415,7 @@ _cupti_monitor.enable_hes_early()
             y.sum().item()
             torch.cuda.synchronize()
 
-            monitor = _cupti_monitor.instance()
+            monitor = _cupti_monitor.CuptiMonitor()
             monitor.flush(sync=True)
             _gnode, start, _end, _stream = obs.drain()
             obs.close()
