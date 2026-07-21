@@ -89,7 +89,6 @@ from ..utils import (
     is_namedtuple_cls,
     is_pybind11_enum_member,
     is_torch_class,
-    is_wrapper_or_member_descriptor,
     istype,
     list_methods,
     namedtuple_fields,
@@ -116,9 +115,12 @@ from .dicts import ConstDictVariable, pydict_check
 from .hashable import HashableTracker
 from .object_protocol import (
     _resolve_descriptor_get,
+    generic_bool,
     generic_repr,
     is_nb_not_implemented,
     mro_lookup,
+    pynumber_as_ssize_t,
+    pynumber_index,
     type_implements_nb_slot,
 )
 from .sets import SetVariable
@@ -1825,170 +1827,60 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
         return super().guard_as_python_constant()
 
-    def _lookup_slot_type_attr(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        *,
-        none_error: str = "'NoneType' object is not callable",
-    ) -> tuple[object, Source | None]:
-        """Walk class MRO for *name*, raising TypeError when slot is blocked (= None)."""
-        type_attr = self.lookup_class_mro_attr(name)
-        if type_attr is None:
-            raise_type_error(tx, none_error)
-
-        source = None
-        if type_attr is not NO_SUCH_SUBOBJ and self.source:
-            source = self.get_source_by_walking_mro(tx, name)
-        return type_attr, source
-
     def bool_impl(
         self,
         tx: "InstructionTranslatorBase",
     ) -> "VariableTracker | None":
         # Mirrors slot_nb_bool:
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/typeobject.c#L9408-L9458
-        none_error = "'NoneType' object is not callable"
-        if sys.version_info >= (3, 14):
-            none_error = (
-                f"'{self.python_type_name()}' cannot be interpreted as a boolean"
-            )
-        type_attr, _ = self._lookup_slot_type_attr(
-            tx, "__bool__", none_error=none_error
-        )
-        if type_attr is NO_SUCH_SUBOBJ:
-            return None
+        res = self._maybe_call_special(tx, "__bool__", [])
+        type_attr = self.lookup_class_mro_attr("__bool__")
+        using_len = False
 
-        result = self.call_method(tx, "__bool__", [], {})
-        if result.python_type() is not bool:
+        if type_attr is None:
             raise_type_error(
                 tx,
-                f"__bool__ should return bool, returned {result.python_type().__name__}",
+                f"'{self.value_type.__name__}' cannot be interpreted as a boolean",
             )
-        return result
+        elif res is None:
+            res = self._maybe_call_special(tx, "__len__", [])
+            using_len = True
+
+        if res is None:
+            raise AssertionError("'res' should not be None")
+
+        if using_len:
+            res = generic_bool(tx, res)
+        elif res.python_type() is bool:  # pybool_check
+            return res
+        else:
+            raise_type_error(
+                tx,
+                f"__bool__ should return bool, returned {res.python_type_name()}",
+            )
 
     def repr_impl(
         self,
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # ref: slot_tp_repr in https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10687-L10698
-        type_attr = self.lookup_class_mro_attr("__repr__")
-        if type_attr is NO_SUCH_SUBOBJ:
-            return super().repr_impl(tx)
-        if type_attr is None:
-            raise_type_error(tx, "'NoneType' object is not callable")
-
-        method = self._maybe_get_baseclass_method("__repr__")
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.repr_impl(tx)
-
         if type(self.value).__repr__ is object.__repr__:
             return VariableTracker.build(tx, repr(self.value))
-
-        if (
-            is_wrapper_or_member_descriptor(type_attr)
-            or torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
-            or is_cython_function(type_attr)
-        ):
-            try:
-                inspect.getattr_static(type(type_attr), "__get__")(
-                    type_attr, self.value, type(self.value)
-                )
-            except (AttributeError, TypeError) as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            else:
-                unimplemented(
-                    gb_type="untraceable user-defined __repr__",
-                    context=f"Could not trace __repr__ override for {type(self.value).__name__}",
-                    explanation="Dynamo could not safely trace this user-defined __repr__ override.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                    skip_frame=True,
-                )
-
-        source = self.source and self.get_source_by_walking_mro(tx, "__repr__")
-        method_var = self.resolve_type_attr(tx, "__repr__", type_attr, source)
-        if not isinstance(method_var, variables.GetAttrVariable):
-            return method_var.call_function(tx, [], {})
-
-        try:
-            inspect.getattr_static(type(type_attr), "__get__")(
-                type_attr, self.value, type(self.value)
-            )
-        except (AttributeError, TypeError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        else:
-            unimplemented(
-                gb_type="untraceable user-defined __repr__",
-                context=f"Could not trace __repr__ override for {type(self.value).__name__}",
-                explanation="Dynamo could not safely trace this user-defined __repr__ override.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-                skip_frame=True,
-            )
+        res = self._maybe_call_special(tx, "__repr__", [])
+        if res:
+            return res
+        return variables.ConstantVariable.create(
+            f"<{self.value_type.__name__} object at f{id(self.value):#x}>"
+        )
 
     def str_impl(
         self,
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
-        type_attr = self.lookup_class_mro_attr("__str__")
-        if type_attr is NO_SUCH_SUBOBJ:
-            return super().str_impl(tx)
-        if type_attr is None:
-            raise_type_error(tx, "'NoneType' object is not callable")
-
-        method = self._maybe_get_baseclass_method("__str__")
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.str_impl(tx)
-
+        # ref: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/typeobject.c#L9475
         if type(self.value).__str__ is object.__str__:
             return generic_repr(tx, self)
-
-        if (
-            is_wrapper_or_member_descriptor(type_attr)
-            or torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
-            or is_cython_function(type_attr)
-        ):
-            try:
-                inspect.getattr_static(type(type_attr), "__get__")(
-                    type_attr, self.value, type(self.value)
-                )
-            except (AttributeError, TypeError) as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            else:
-                unimplemented(
-                    gb_type="untraceable user-defined __str__",
-                    context=f"Could not trace __str__ override for {type(self.value).__name__}",
-                    explanation="Dynamo could not safely trace this user-defined __str__ override.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                    skip_frame=True,
-                )
-
-        source = self.source and self.get_source_by_walking_mro(tx, "__str__")
-        method_var = self.resolve_type_attr(tx, "__str__", type_attr, source)
-        if not isinstance(method_var, variables.GetAttrVariable):
-            return method_var.call_function(tx, [], {})
-
-        try:
-            inspect.getattr_static(type(type_attr), "__get__")(
-                type_attr, self.value, type(self.value)
-            )
-        except (AttributeError, TypeError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        else:
-            unimplemented(
-                gb_type="untraceable user-defined __str__",
-                context=f"Could not trace __str__ override for {type(self.value).__name__}",
-                explanation="Dynamo could not safely trace this user-defined __str__ override.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-                skip_frame=True,
-            )
+        return self.SLOT0(tx, "__str__")
 
     def nb_index_impl(
         self,
@@ -2081,50 +1973,46 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
-        method = self._maybe_get_baseclass_method("__contains__")
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.sq_contains(tx, item)
+        # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9337
+        type_attr = self.lookup_class_mro_attr("__contains__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            raise_type_error(
+                tx,
+                f"'{self.python_type_name()}' object is not iterable",
+            )
+        if type_attr is None:
+            raise_type_error(tx, f"{self.python_type_name()} is not a container")
 
-        if isinstance(method, types.FunctionType):
-            method_var = self.resolve_type_attr(tx, "__contains__", method, self.source)
-            return method_var.call_function(tx, [item], {})
-        return super().sq_contains(tx, item)
+        res = self._maybe_call_special(tx, "__contains__", [item])
+        if res is None:
+            # PySequenceIterSearch
+            PySeqIterSearch = VariableTracker.build(
+                tx, polyfills.impl_CONTAINS_OP_fallback
+            )
+            res = PySeqIterSearch.call_function(tx, [self, item], {})
+        return generic_bool(tx, res)
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        method = self._maybe_get_baseclass_method("__next__")
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.tp_iternext_impl(tx)
-
-        if isinstance(method, types.FunctionType):
-            method_var = self.resolve_type_attr(tx, "__next__", method, self.source)
-            return method_var.call_function(tx, [], {})
-        return super().tp_iternext_impl(tx)
+        # https://github.com/python/cpython/blob/1ad0eef8ce8ec3db548be89c40fa427494e82814/Objects/typeobject.c#L10517
+        return self._vectorcall_method(tx, "__next__", [], {})
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        method, source_fn = self._lookup_slot_type_attr(
-            tx,
-            "__iter__",
-            none_error=f"'{self.python_type_name()}' object is not iterable",
-        )
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.tp_iter_impl(tx)
+        # https://github.com/python/cpython/blob/1ad0eef8ce8ec3db548be89c40fa427494e82814/Objects/typeobject.c#L10496
+        res = self._maybe_call_special(tx, "__iter__", [])
+        type_attr = self.lookup_class_mro_attr("__iter__")
+        has_dunder_getitem = type_attr and type_attr is not NO_SUCH_SUBOBJ
 
-        if isinstance(method, types.FunctionType):
-            method_var = self.resolve_type_attr(tx, "__iter__", method, self.source)
-            return method_var.call_function(tx, [], {})
-        return super().tp_iter_impl(tx)
+        if res:
+            return res
+
+        if type_attr is None or not has_dunder_getitem:
+            raise_type_error(
+                tx,
+                f"'{self.python_type_name()}' object is not iterable",
+            )
+
+        SeqIter = VariableTracker.build(tx, polyfills.builtins.sequence_iterator)
+        return SeqIter.call_function(tx, [self], {})
 
     @staticmethod
     @functools.cache
@@ -2142,7 +2030,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         key: VariableTracker,
     ) -> VariableTracker:
-        # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
+        # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9370
         return self.SLOT1(tx, "__getitem__", key)
 
     def sq_repeat_impl(
@@ -2150,11 +2038,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         count: VariableTracker,
     ) -> VariableTracker:
-        # CPython's slot wrapper for ``__mul__`` on a list/tuple subclass that
-        # doesn't override ``__mul__`` calls the base class's sq_repeat,
-        # producing a plain list/tuple (not the subclass).  Delegate to the
-        # inner _base_vt which has the right sq_repeat_impl.
-        if self._base_vt is not None:
+        method = self._maybe_get_baseclass_method("__mul__")
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
             return self._base_vt.sq_repeat_impl(tx, count)
         return super().sq_repeat_impl(tx, count)
 
@@ -2163,8 +2052,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         count: VariableTracker,
     ) -> VariableTracker:
-        if self._base_vt is not None:
-            return self._base_vt.sq_inplace_repeat_impl(tx, count)
+        method = self._maybe_get_baseclass_method("__imul__")
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            self._base_vt.sq_inplace_repeat_impl(tx, count)
+            return self
         return super().sq_inplace_repeat_impl(tx, count)
 
     def mp_ass_subscript_impl(
@@ -2173,34 +2068,93 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         key: VariableTracker,
         value: VariableTracker | None,
     ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c
-        # value=None signals delete (CPython NULL sentinel).
-        is_delete = value is None
-        attr = "__delitem__" if is_delete else "__setitem__"
-        method, source_fn = self._lookup_slot_type_attr(tx, attr)
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.mp_ass_subscript_impl(tx, key, value)
-        if isinstance(method, types.FunctionType):
-            args = [key] if is_delete else [key, value]
-            variables.UserMethodVariable(
-                method, self, source_fn=source_fn, source=self.source
-            ).call_function(tx, args, {})
-            return variables.ConstantVariable.create(None)
-        return super().mp_ass_subscript_impl(tx, key, value)
+        # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9373
+        if value is None:
+            return self._vectorcall_method(tx, "__delitem__", [key], {})
+        else:
+            return self._vectorcall_method(tx, "__setitem__", [key, value], {})
 
     sq_ass_item_impl = mp_ass_subscript_impl
+
+    def _maybe_lookup_method(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        type_attr = self.lookup_class_mro_attr(name)
+        if type_attr is None or type_attr is NO_SUCH_SUBOBJ:
+            return None
+        source = self.get_source_by_walking_mro(tx, name) if self.source else None
+
+        if isinstance(
+            type_attr, (types.WrapperDescriptorType, types.MethodDescriptorType)
+        ):
+            # C slot wrapper / C method as a dunder: no Python body to trace.
+            if not (
+                self._base_vt is not None
+                and self._base_methods is not None
+                and type_attr in self._base_methods
+            ):
+                unimplemented(
+                    gb_type="C-implemented special method without VariableTracker model",
+                    context=f"name={name}, type={self.python_type_name()}, attr={type_attr}",
+                    explanation=(
+                        f"'{self.python_type_name()}' implements '{name}' in C "
+                        f"and Dynamo has no model for it."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+        if is_cython_function(type_attr):
+            raise AssertionError(
+                f"Cannot trace Cython function {name} on user-defined type {self.python_type_name()}"
+            )
+        elif (
+            torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
+            or is_data_descriptor(type_attr)
+        ):
+            return self.resolve_data_descriptor(tx, name, type_attr, source)
+        else:
+            return self.resolve_type_attr(tx, name, type_attr, source)
+
+    def _lookup_method(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        m = self._maybe_lookup_method(tx, name)
+        if m is None:
+            raise_type_error(
+                tx, f"'{self.python_type_name()}' object has no attribute '{name}'"
+            )
+        return m
+
+    def _vectorcall_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Mirror's CPython variant of vectorcall_method.
+        # NOTE: Dynamo does not IMPLEMENT the vectorcall protocol, but we keep
+        # the name for consistency with CPython's typeobject.c
+        m = self._lookup_method(tx, name)
+        return m.call_function(tx, args, kwargs)
+
+    def _maybe_call_special(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+    ) -> VariableTracker | None:
+        # Mirror's CPython variants of maybe_call_special_no_args and maybe_call_special_one_arg
+        m = self._maybe_lookup_method(tx, name)
+        if m is None:
+            return None
+        return m.call_function(tx, args, {})
 
     def _vectorcall_maybe(
         self,
         tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
-        *,
-        raise_attribute_error: bool,
     ) -> VariableTracker:
         # Mirrors CPython's vectorcall_maybe: lookup `name` on the type's MRO
         # (NOT the instance), bind via the descriptor protocol, and call.
@@ -2212,47 +2166,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # type's __<op>__ is a C-implemented slot wrapper that has no
         # Python override.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2968-L2989
-        method = self._maybe_get_baseclass_method(name)
-        if method is None:
-            if raise_attribute_error:
-                raise_type_error(tx, "'NoneType' object is not callable")
+
+        m = self._maybe_lookup_method(tx, name)
+        if m is None:
             return variables.ConstantVariable.create(NotImplemented)
-        # Delegate to _base_vt for non-overridden base-class methods
-        # (e.g. UserDict, list/tuple subclasses) — mirrors the same
-        # delegation in `call_method`.
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.call_method(tx, name, list(args), {})
-        if isinstance(method, types.WrapperDescriptorType):
-            # C slot wrapper inherited from a builtin base (e.g. int.__neg__ on
-            # an IntEnum member).  It has no Python body; resolving+calling it
-            # would route back through call_method -> nb_<op>_impl -> here and
-            # infinitely recurse.  If self and all args are constants, fold the
-            # op on the values; otherwise there's no traceable body -> graph
-            # break.  (classmethod/staticmethod/plain defs are handled below by
-            # resolve_type_attr via the descriptor protocol.)
-            if self.is_python_constant() and all(a.is_python_constant() for a in args):
-                result = method(
-                    self.as_python_constant(),
-                    *[a.as_python_constant() for a in args],
-                )
-                return VariableTracker.build(tx, result)
-            unimplemented(
-                gb_type="vectorcall_maybe on C method descriptor",
-                context=f"name={name}, type={self.python_type_name()}, method={method}",
-                explanation=(
-                    f"Cannot trace special method '{name}' implemented in C "
-                    f"on user-defined type '{self.python_type_name()}'."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        method_var = self.resolve_type_attr(tx, name, method, self.source)
-        # resolve_type_attr returns a bound callable (self already bound via
-        # the descriptor protocol), so we pass only the remaining args.
-        return method_var.call_function(tx, list(args), {})  # type: ignore[arg-type]
+        return m.call_function(tx, args, {})
 
     def SLOT0(
         self,
@@ -2260,7 +2178,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         dunder: str,
     ) -> VariableTracker:
         # Mirrors CPython's SLOT0 macro (Objects/typeobject.c).
-        return self._vectorcall_maybe(tx, dunder, [], raise_attribute_error=True)
+        return self._vectorcall_method(tx, dunder, [], {})
 
     def SLOT1(
         self,
@@ -2269,7 +2187,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         other: VariableTracker,
     ) -> VariableTracker:
         # Mirrors CPython's SLOT1 macro (Objects/typeobject.c).
-        return self._vectorcall_maybe(tx, dunder, [other], raise_attribute_error=True)
+        return self._vectorcall_method(tx, dunder, [other], {})
 
     def SLOT1BIN(
         self,
@@ -2361,16 +2279,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     rdunder
                 ) != other_._maybe_get_baseclass_method(rdunder)
                 if method_is_overloaded:
-                    r = other_._vectorcall_maybe(
-                        tx, rdunder, [self_], raise_attribute_error=False
-                    )
+                    r = other_._vectorcall_maybe(tx, rdunder, [self_])
                     if not is_nb_not_implemented(r):
                         return r
                     do_other = False
 
-            r = self_._vectorcall_maybe(
-                tx, dunder, [other_], raise_attribute_error=False
-            )
+            r = self_._vectorcall_maybe(tx, dunder, [other_])
             if not is_nb_not_implemented(r) or py_is_type(o_type, s_type):
                 return r
 
@@ -2380,9 +2294,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     f"Expected UserDefinedObjectVariable, got {type(other_)}"
                 )
             if other_._maybe_get_baseclass_method(rdunder):
-                r = other_._vectorcall_maybe(
-                    tx, rdunder, [self_], raise_attribute_error=False
-                )
+                r = other_._vectorcall_maybe(tx, rdunder, [self_])
                 if not is_nb_not_implemented(r):
                     return r
 
@@ -2402,6 +2314,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             nb_slot=PyNumberSlots.NB_MULTIPLY,
             reverse=reverse,
         )
+
+    def nb_matrix_multiply_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__matmul__",
+            "__rmatmul__",
+            nb_slot=PyNumberSlots.NB_MATRIX_MULTIPLY,
+            reverse=reverse,
+        )
+
+    def nb_inplace_matrix_multiply_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__imatmul__", [other], {})
 
     def nb_lshift_impl(
         self,
@@ -2721,19 +2655,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     tx, args[0], variables.DeletedVariable()
                 )
 
-            if torch._dynamo.config.enable_faithful_generator_behavior and isinstance(
-                self.value, types.GeneratorType
-            ):
+            if isinstance(self.value, types.GeneratorType):
                 unimplemented(
                     gb_type="call_method on generator",
                     context=f"object={self.value}, method={name}, args={args}, kwargs={kwargs}",
                     explanation="Detected a method call to a user-defined generator object. "
                     "This is not fully supported.",
-                    hints=[
-                        "Set `torch._dynamo.config.enable_faithful_generator_behavior = False`. Note that this "
-                        "may cause silent incorrectness, since we will eagerly unpack generators instead of lazily "
-                        "evaluating them.",
-                    ],
+                    hints=[*graph_break_hints.SUPPORTABLE],
                 )
 
             # torch.Generator methods like manual_seed(), get_state(), etc.
@@ -2803,32 +2731,29 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
+    def sq_item_impl(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9294
+        return self._vectorcall_method(tx, "__getitem__", [key], {})
+
     def tp_init_impl(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # tp_init slot.  A Python-defined __init__ resolves to a function and is
-        # inlined at the bind site (UserMethodVariable); only a C-inherited
-        # __init__ (object.__init__, list.__init__, ...) binds a method-wrapper
-        # and reaches here.  Mirrors call_method's __init__ handling.
-        method = self._maybe_get_baseclass_method("__init__")
-        if method is object.__init__:
-            return variables.ConstantVariable.create(None)
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.call_method(tx, "__init__", args, kwargs)
-        return super().tp_init_impl(tx, args, kwargs)
+        res = self._vectorcall_method(tx, "__init__", args, kwargs)
+        if not res.is_constant_none():
+            raise_type_error(
+                tx, f"__init__() should return None, got {res.python_type_name()}"
+            )
+        return res
 
     def sq_concat_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L10373-L10374
-        # return self.nb_add_impl(tx, other, reverse=False)
         method = self._maybe_get_baseclass_method("__add__")
         if (
             self._base_vt is not None
@@ -2836,8 +2761,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and method in self._base_methods
         ):
             return self._base_vt.sq_concat_impl(tx, other)
-
-        return self.nb_add_impl(tx, other, reverse=False)
+        return super().sq_concat_impl(tx, other)
 
     def sq_inplace_concat_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
@@ -2849,50 +2773,26 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and self._base_methods is not None
             and method in self._base_methods
         ):
-            return self._base_vt.sq_inplace_concat_impl(tx, other)
-
-        return self.nb_inplace_add_impl(tx, other)
-
-    def len_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        type_attr, source = self._lookup_slot_type_attr(tx, "__len__")
-        if type_attr is not NO_SUCH_SUBOBJ:
-            method_var = self.resolve_type_attr(tx, "__len__", type_attr, source)
-            if not isinstance(
-                method_var,
-                (variables.GetAttrVariable, variables.MethodWrapperVariable),
-            ):
-                return method_var.call_function(tx, [], {})
-
-        unimplemented(
-            gb_type="Cannot trace user-defined __len__",
-            context=f"{self.python_type_name()}.__len__()",
-            explanation=(
-                f"Dynamo cannot trace len() on {self.python_type_name()} because the __len__ "
-                "method is either not traceable (e.g., defined in C or built-in) or returns a "
-                "non-constant value."
-            ),
-            hints=[
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
+            self._base_vt.sq_inplace_concat_impl(tx, other)
+            return self
+        return super().sq_inplace_concat_impl(tx, other)
 
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and self.lookup_class_mro_attr("__len__") in self._base_methods
-        ):
-            return self._base_vt.sq_length(tx)
-        return self.len_impl(tx)
+        # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9266
+        res = self._vectorcall_method(tx, "__len__", [], {})
+        res = pynumber_index(tx, res)
 
-    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and self.lookup_class_mro_attr("__len__") in self._base_methods
-        ):
-            return self._base_vt.mp_length(tx)
-        return self.len_impl(tx)
+        if res.as_python_constant() < 0:
+            raise_observed_exception(
+                ValueError,
+                tx,
+                args=["__len__() should return >= 0"],
+            )
+
+        return pynumber_as_ssize_t(tx, res, OverflowError)
+
+    # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9368
+    mp_length = sq_length
 
     def method_setattr_standard(
         self,
@@ -4917,7 +4817,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
             raise AssertionError("_base_vt must not be None for defaultdict repr")
         return VariableTracker.build(
             tx,
-            f"defaultdict({tracked_repr(tx, self.default_factory)}, "
+            f"{self.python_type_name()}({tracked_repr(tx, self.default_factory)}, "
             f"{tracked_repr(tx, self._base_vt)})",
         )
 
