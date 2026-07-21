@@ -78,6 +78,15 @@ class StructuredTraceTestingFilter(logging.Filter):
     def filter(self, record):
         if "str" in record.metadata:
             return False
+        # torch_version is a global artifact emitted once per process the first
+        # time the trace handler initializes. Its presence (and commit-hash
+        # payload) depends on run context and test ordering, so drop it here to
+        # keep each test's expected inline output deterministic.
+        if (
+            "artifact" in record.metadata
+            and record.metadata["artifact"].get("name") == "torch_version"
+        ):
+            return False
         if self.match_name is not None:
             if "artifact" in record.metadata:
                 if self.match_name != record.metadata["artifact"]["name"]:

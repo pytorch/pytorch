@@ -138,15 +138,28 @@ void CuptiMonitorBuffers::on_complete(
   cv_.notify_one();
 }
 
-std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  cv_.wait(lock, [this] { return !completed_.empty() || shutdown_; });
+std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::
+    pop_completed_locked() {
   if (completed_.empty()) {
-    return std::nullopt; // shutdown
+    return std::nullopt; // timeout or shutdown
   }
   CompletedCuptiBuffer buf = std::move(completed_.front());
   completed_.pop_front();
   return buf;
+}
+
+std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  cv_.wait(lock, [this] { return !completed_.empty() || shutdown_; });
+  return pop_completed_locked();
+}
+
+std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed_for(
+    std::chrono::nanoseconds timeout) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  cv_.wait_for(
+      lock, timeout, [this] { return !completed_.empty() || shutdown_; });
+  return pop_completed_locked();
 }
 
 void CuptiMonitorBuffers::return_buffer(uint8_t* ptr) {
@@ -212,11 +225,17 @@ void CuptiMonitorDecoder::configure(
     uintptr_t subscriber,
     uintptr_t get_next_record_fn,
     uint32_t fence_kind,
-    int fence_end_field) {
+    int fence_end_field,
+    bool self_flush,
+    uint64_t flush_period_ns,
+    uintptr_t flush_fn) {
   subscriber_ = subscriber;
   get_next_record_fn_ = get_next_record_fn;
   fence_kind_ = fence_kind;
   fence_end_field_ = fence_end_field;
+  self_flush_ = self_flush;
+  flush_period_ns_ = flush_period_ns;
+  flush_fn_ = flush_fn;
   max_sync_ns_.store(0);
   buffers_decoded_.store(0);
   valid_bytes_.store(0);
@@ -249,18 +268,52 @@ void CuptiMonitorDecoder::stop() {
 }
 
 void CuptiMonitorDecoder::worker_loop() {
-  // get_completed() blocks until a buffer is ready and returns nullopt only
-  // once the pool is shut down AND drained, so on stop() the worker decodes
-  // every already-completed buffer (incl. the fence's trailing flush) before
-  // exiting.
+  // Single native thread: drives the periodic plain flush (when self_flush_ is
+  // set) AND decodes. cuptiActivityFlushAll(0) is called through the address
+  // Python passed (like the record iterator), so this file needs no libcupti
+  // link. We track the time since the last flush and re-flush
+  // before waiting once the period has elapsed, so the cadence holds no matter
+  // how busy the decode is. The wait is bounded by the period so an idle thread
+  // still re-checks the cadence; without self-flush it blocks until a buffer or
+  // shutdown. nullopt from get_completed*() means timeout OR shutdown --
+  // distinguished by running_. On stop() the pool is shut down and the worker
+  // drains every already-completed buffer before exiting.
+  const bool do_flush = self_flush_;
+  // Floor the cadence: a configured period of 0 ("continuously") would make the
+  // bounded wait below a non-blocking poll, turning this into a busy loop that
+  // pegs a core and hammers cuptiActivityFlushAll with no backoff. 1ms is far
+  // below any useful flush cadence, so this only bites the degenerate 0 case.
+  const auto period = std::max(
+      std::chrono::nanoseconds(flush_period_ns_),
+      std::chrono::nanoseconds(std::chrono::milliseconds(1)));
+  // Backdate so the first iteration flushes immediately (matters for HES, whose
+  // records only surface on a flush).
+  auto last_flush = std::chrono::steady_clock::now() - period;
+  auto& buffers = CuptiMonitorBuffers::get();
   while (true) {
+    if (do_flush) {
+      auto now = std::chrono::steady_clock::now();
+      if (now - last_flush >= period) {
+        // cuptiActivityFlushAll(flag). Called via the address Python passed
+        // (see decode_buffer for the same pattern), so this TU needs no
+        // libcupti link.
+        using FlushAllFn = int (*)(uint32_t);
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        auto flush_all = reinterpret_cast<FlushAllFn>(flush_fn_);
+        if (flush_all != nullptr) {
+          flush_all(0);
+        }
+        last_flush = now;
+      }
+    }
     std::optional<CompletedCuptiBuffer> buf =
-        CuptiMonitorBuffers::get().get_completed();
-    if (!buf.has_value()) {
+        do_flush ? buffers.get_completed_for(period) : buffers.get_completed();
+    if (buf.has_value()) {
+      decode_buffer(*buf);
+      buffers.return_buffer(buf->ptr);
+    } else if (!running_.load()) {
       break; // shut down and drained
     }
-    decode_buffer(*buf);
-    CuptiMonitorBuffers::get().return_buffer(buf->ptr);
   }
 }
 
