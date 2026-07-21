@@ -7,9 +7,12 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-{#- actions/setup-python wants a full X.Y.Z version string; map DESIRED_PYTHON to one. -#}
+{#- actions/setup-python wants a version string; map DESIRED_PYTHON to one. 3.15
+    has no stable X.Y.Z yet, so emit just the minor and let setup-python resolve
+    the latest beta (allow-prereleases is set on the _binary-test-macos job). -#}
 {%- macro setup_python_version(py_ver) -%}
-!{{ py_ver.strip('t') + ('.4' if '3.14' not in py_ver else '.0') }}
+{%- set base = py_ver.strip('t') -%}
+{%- if base == '3.15' -%}!{{ base }}{%- else -%}!{{ base + ('.4' if '3.14' not in py_ver else '.0') }}{%- endif -%}
 {%- endmacro %}
 
 on:
