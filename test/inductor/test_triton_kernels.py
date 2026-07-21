@@ -4566,7 +4566,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             )
             self.assertEqual(len(tensor_accesses.read_writes.writes), 0)
 
-            tkw.register_kernel_access_op(custom_store, [0], kind="write")
+            tkw.register_kernel_access_op(custom_store, write_indexes=[0])
             tensor_accesses = analyze_kernel_access(
                 functions,
                 "main",
@@ -4577,7 +4577,36 @@ class MutationTests(torch._inductor.test_case.TestCase):
             write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
             self.assertListEqual(write_names, ["out_ptr"])
         finally:
-            tkw.unregister_kernel_access_op(custom_store, kind="write")
+            tkw.unregister_kernel_access_op(custom_store)
+
+    def test_kernel_access_op_can_read_and_write(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        functions = {
+            "main": {
+                Intermediate(idx=-1): [
+                    Op("tt.atomic_rmw", None, [Param(idx=0)], Intermediate(idx=-1))
+                ],
+            },
+        }
+
+        analyze_kernel_access.reset()
+        tensor_accesses = analyze_kernel_access(
+            functions,
+            "main",
+            1,
+            ("in_out_ptr",),
+            frozenset({0}),
+        )
+        read_names = [dep.name for dep in tensor_accesses.read_writes.reads]
+        write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+        self.assertListEqual(read_names, ["in_out_ptr"])
+        self.assertListEqual(write_names, ["in_out_ptr"])
 
     @unittest.skipIf(
         not has_triton_experimental_host_tma(),
@@ -4752,8 +4781,10 @@ class MutationTests(torch._inductor.test_case.TestCase):
         }
 
         try:
-            tkw.register_kernel_access_op(custom_store, [0], kind="tma_store")
-            tkw.register_kernel_access_op(custom_load, [0], kind="read")
+            tkw.register_kernel_access_op(
+                custom_store, write_indexes=[0], is_tma_store=True
+            )
+            tkw.register_kernel_access_op(custom_load, read_indexes=[0])
             with (
                 mock.patch.object(
                     tkw,
@@ -4800,8 +4831,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 else:
                     self.assertIn("mul2_kernel_0.run(", code)
         finally:
-            tkw.unregister_kernel_access_op(custom_store, kind="tma_store")
-            tkw.unregister_kernel_access_op(custom_load, kind="read")
+            tkw.unregister_kernel_access_op(custom_store)
+            tkw.unregister_kernel_access_op(custom_load)
 
 
 if HAS_GPU:

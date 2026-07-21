@@ -11,8 +11,8 @@ import threading
 import typing
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, Optional, Protocol, TYPE_CHECKING, Union
-from typing_extensions import assert_never, Never
+from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
+from typing_extensions import Never
 
 import sympy
 
@@ -874,8 +874,13 @@ def get_tma_stores(
                     if Param(idx=i) in tma_stores:
                         result.add(inp)
             else:
-                if op.name in _TMA_STORE_OPS:
-                    result.update(op.args[idx] for idx in _TMA_STORE_OPS[op.name](op))
+                op_info = _KERNEL_ACCESS_OPS.get(op.name)
+                if (
+                    op_info is not None
+                    and op_info.is_tma_store
+                    and op_info.write_indexes is not None
+                ):
+                    result.update(op.args[idx] for idx in op_info.write_indexes(op))
 
     for val in list(result):
         if val in ops:
@@ -911,41 +916,41 @@ class ReadWriteIndexes(Protocol):
     def __call__(self, op: Op) -> list[int]: ...
 
 
-def _first_arg(op: Op) -> list[int]:
+def first_arg(op: Op) -> list[int]:
     """Return the first argument index after checking that it exists."""
     if len(op.args) < 1:
         raise AssertionError(f"{op.name} expected at least 1 arg, got {len(op.args)}")
     return [0]
 
 
-# Name of mutation op to mutated parameter indices
-# List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
-# All the OPs that have MemWrite trait.
+@dataclasses.dataclass(frozen=True)
+class _KernelAccessOpInfo:
+    read_indexes: ReadWriteIndexes | None = None
+    write_indexes: ReadWriteIndexes | None = None
+    is_tma_store: bool = False
+    ignore_if: IgnoreUnknownOp | None = None
+
+
+# List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td.
 # What if Triton exposed this?
-_TMA_STORE_OPS: dict[str, ReadWriteIndexes] = {
-    "tt.experimental_descriptor_store": _first_arg,
-    "tt.descriptor_store": _first_arg,
+_KERNEL_ACCESS_OPS: dict[str, _KernelAccessOpInfo] = {
+    "tt.experimental_descriptor_store": _KernelAccessOpInfo(
+        write_indexes=first_arg, is_tma_store=True
+    ),
+    "tt.descriptor_store": _KernelAccessOpInfo(
+        write_indexes=first_arg, is_tma_store=True
+    ),
+    "tt.store": _KernelAccessOpInfo(write_indexes=first_arg),
+    "tt.atomic_cas": _KernelAccessOpInfo(write_indexes=first_arg),
+    "tt.atomic_rmw": _KernelAccessOpInfo(
+        read_indexes=first_arg, write_indexes=first_arg
+    ),
+    "tt.experimental_tensormap_create": _KernelAccessOpInfo(write_indexes=first_arg),
+    "tt.load": _KernelAccessOpInfo(read_indexes=first_arg),
+    "tt.load_tensor_descriptor": _KernelAccessOpInfo(read_indexes=first_arg),
+    "tt.descriptor_load": _KernelAccessOpInfo(read_indexes=first_arg),
+    "tt.elementwise_inline_asm": _KernelAccessOpInfo(ignore_if=lambda op: op.is_pure),
 }
-
-_WRITE_OPS: dict[str, ReadWriteIndexes] = {
-    "tt.store": _first_arg,
-    "tt.atomic_cas": _first_arg,
-    "tt.atomic_rmw": _first_arg,
-    "tt.experimental_tensormap_create": _first_arg,
-    **_TMA_STORE_OPS,  # TMA stores are write ops
-}
-
-_READ_OPS: dict[str, ReadWriteIndexes] = {
-    "tt.load": _first_arg,
-    "tt.load_tensor_descriptor": _first_arg,
-    "tt.descriptor_load": _first_arg,
-}
-_UNKNOWN_OPS: dict[str, IgnoreUnknownOp] = {
-    "tt.elementwise_inline_asm": lambda op: op.is_pure
-}
-
-
-KernelAccessKind = Literal["read", "write", "tma_store"]
 
 
 def _read_write_indexes(indexes: Sequence[int] | ReadWriteIndexes) -> ReadWriteIndexes:
@@ -962,9 +967,11 @@ def _reset_kernel_access_analysis_caches() -> None:
 
 def register_kernel_access_op(
     name: str,
-    indexes: Sequence[int] | ReadWriteIndexes,
     *,
-    kind: KernelAccessKind,
+    read_indexes: Sequence[int] | ReadWriteIndexes | None = None,
+    write_indexes: Sequence[int] | ReadWriteIndexes | None = None,
+    is_tma_store: bool = False,
+    ignore_if: IgnoreUnknownOp | None = None,
 ) -> None:
     """
     Register a Triton op for kernel read/write analysis.
@@ -972,20 +979,24 @@ def register_kernel_access_op(
     Registration invalidates the memoized TTIR access analysis so callers can
     register custom backend ops after earlier analyses have run.
     """
-    index_fn = _read_write_indexes(indexes)
-    if kind == "read":
-        _READ_OPS[name] = index_fn
-    elif kind == "write":
-        _WRITE_OPS[name] = index_fn
-    elif kind == "tma_store":
-        _TMA_STORE_OPS[name] = index_fn
-        _WRITE_OPS[name] = index_fn
-    else:
-        assert_never(kind)
+    if is_tma_store and write_indexes is None:
+        raise AssertionError(
+            f"{name} is marked as a TMA store but has no write indexes"
+        )
+    _KERNEL_ACCESS_OPS[name] = _KernelAccessOpInfo(
+        read_indexes=(
+            None if read_indexes is None else _read_write_indexes(read_indexes)
+        ),
+        write_indexes=(
+            None if write_indexes is None else _read_write_indexes(write_indexes)
+        ),
+        is_tma_store=is_tma_store,
+        ignore_if=ignore_if,
+    )
     _reset_kernel_access_analysis_caches()
 
 
-def unregister_kernel_access_op(name: str, *, kind: KernelAccessKind) -> None:
+def unregister_kernel_access_op(name: str) -> None:
     """
     Unregister a Triton op from kernel read/write analysis.
 
@@ -993,15 +1004,7 @@ def unregister_kernel_access_op(name: str, *, kind: KernelAccessKind) -> None:
     invalidates the memoized TTIR access analysis for the same reason as
     registration.
     """
-    if kind == "read":
-        _READ_OPS.pop(name, None)
-    elif kind == "write":
-        _WRITE_OPS.pop(name, None)
-    elif kind == "tma_store":
-        _TMA_STORE_OPS.pop(name, None)
-        _WRITE_OPS.pop(name, None)
-    else:
-        assert_never(kind)
+    _KERNEL_ACCESS_OPS.pop(name, None)
     _reset_kernel_access_analysis_caches()
 
 
@@ -1012,16 +1015,14 @@ def register_kernel_access_unknown_op(name: str, ignore: IgnoreUnknownOp) -> Non
     The callback returns True when the op can be ignored, and False when
     analysis should raise rather than risk missing a side effect.
     """
-    _UNKNOWN_OPS[name] = ignore
-    _reset_kernel_access_analysis_caches()
+    register_kernel_access_op(name, ignore_if=ignore)
 
 
 def unregister_kernel_access_unknown_op(name: str) -> None:
     """
     Unregister a Triton op with unknown effects from kernel access analysis.
     """
-    _UNKNOWN_OPS.pop(name, None)
-    _reset_kernel_access_analysis_caches()
+    unregister_kernel_access_op(name)
 
 
 @MemoizeWithCycleCheck
@@ -1055,8 +1056,9 @@ def analyze_kernel_access(
         for op in op_list:
             # If we encounter an operation with effects that cannot be reliably analyzed
             # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
-            if op.name in _UNKNOWN_OPS:
-                if _UNKNOWN_OPS[op.name](op):
+            op_info = _KERNEL_ACCESS_OPS.get(op.name)
+            if op_info is not None and op_info.ignore_if is not None:
+                if op_info.ignore_if(op):
                     continue
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
@@ -1106,10 +1108,12 @@ def analyze_kernel_access(
                     if name in read_set:
                         read_stack.append(arg)
             else:
-                if op.name in _WRITE_OPS:
-                    write_stack.extend(op.args[idx] for idx in _WRITE_OPS[op.name](op))
-                if op.name in _READ_OPS:
-                    read_stack.extend(op.args[idx] for idx in _READ_OPS[op.name](op))
+                if op_info is not None and op_info.write_indexes is not None:
+                    write_stack.extend(
+                        op.args[idx] for idx in op_info.write_indexes(op)
+                    )
+                if op_info is not None and op_info.read_indexes is not None:
+                    read_stack.extend(op.args[idx] for idx in op_info.read_indexes(op))
 
     # For these ops, only the first argument (base pointer) refers to actual
     # memory. The remaining arguments are shape/stride/offset metadata and
