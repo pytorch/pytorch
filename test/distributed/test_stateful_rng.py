@@ -6,17 +6,16 @@ from typing import Any, cast
 
 import torch
 from torch._library.utils import fill_defaults
-from torch.distributed._rng_layout import (
-    _derive_checkpointable_rng_layout,
-    _rng_target_for_layout,
-    _scatter_rng_result_,
-)
 from torch.distributed.checkpoint import CheckpointableTensor
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
 aten = torch.ops.aten
+
+
+def _flatten_chunks(chunks: tuple[tuple[int, ...], ...]) -> list[int]:
+    return [value for chunk in chunks for value in chunk]
 
 
 class _StatefulRNGMode(TorchDispatchMode):
@@ -36,45 +35,24 @@ class _StatefulRNGMode(TorchDispatchMode):
         tensor_arg = filled_args[0]
         if not isinstance(tensor_arg, torch.Tensor):
             return func(*args, **kwargs)
-        if (
-            tensor_arg.is_meta
-            or tensor_arg.device.type != "cuda"
-            or not tensor_arg.is_contiguous()
-        ):
+        if tensor_arg.is_meta or tensor_arg.device.type != "cuda":
             return func(*args, **kwargs)
         if not isinstance(tensor_arg, CheckpointableTensor):
             return func(*args, **kwargs)
         rng_metadata = cast(CheckpointableTensor, tensor_arg)
-        rng_layout = _derive_checkpointable_rng_layout(rng_metadata)
-        rng_target = _rng_target_for_layout(tensor_arg, rng_layout)
 
         _, mean, std = filled_args
-        start_indices: list[int | torch.SymInt] = []
-        block_sizes: list[int | torch.SymInt] = []
-        block_strides: list[int | torch.SymInt] = []
-        block_counts: list[int | torch.SymInt] = []
-        for (
-            start_index,
-            block_size,
-            block_stride,
-            num_blocks,
-        ) in rng_layout.index_blocks:
-            start_indices.append(start_index)
-            block_sizes.append(block_size)
-            block_strides.append(block_stride)
-            block_counts.append(num_blocks)
-        aten._philox_normal_flat_slice_.default(
-            rng_target,
-            rng_layout.logical_numel,
-            start_indices,
-            block_sizes,
-            block_strides,
-            block_counts,
+        aten._philox_normal_shards_.default(
+            tensor_arg,
+            rng_metadata.global_shape,
+            _flatten_chunks(rng_metadata.global_offsets),
+            _flatten_chunks(rng_metadata.local_offsets),
+            _flatten_chunks(rng_metadata.local_sizes),
+            len(rng_metadata.global_offsets),
             mean,
             std,
             generator=filled_kwargs["generator"],
         )
-        _scatter_rng_result_(tensor_arg, rng_target, rng_layout)
         return tensor_arg
 
 
@@ -286,14 +264,14 @@ class TestCheckpointableTensorRNG(TestCase):
         )
         state = generator.get_state().clone()
 
-        with self.assertRaisesRegex(ValueError, "cover the entire tensor"):
+        with self.assertRaisesRegex(RuntimeError, "cover the entire tensor"):
             with _StatefulRNGMode():
                 actual.normal_(generator=generator)
 
         self.assertEqual(generator.get_state(), state)
 
 
-class TestPhiloxFlatSliceOps(TestCase):
+class TestPhiloxNormalShardsOp(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_invalid_calls_do_not_advance_generator(self):
         device = torch.device("cuda")
@@ -306,26 +284,26 @@ class TestPhiloxFlatSliceOps(TestCase):
             self.assertEqual(generator.get_state(), state)
 
         assert_invalid_without_advancing(
-            "block_stride 1 must be at least block_size 2",
-            lambda: torch.ops.aten._philox_normal_flat_slice_(
+            "local shards 0 and 1 must not overlap",
+            lambda: torch.ops.aten._philox_normal_shards_(
                 torch.empty(2, device=device),
-                4,
-                [0],
-                [2],
-                [1],
-                [1],
+                [4],
+                [0, 2],
+                [0, 0],
+                [1, 1],
+                2,
                 generator=generator,
             ),
         )
         assert_invalid_without_advancing(
             "normal expects std >= 0.0",
-            lambda: torch.ops.aten._philox_normal_flat_slice_(
+            lambda: torch.ops.aten._philox_normal_shards_(
                 torch.empty(1, device=device),
-                1,
+                [1],
+                [0],
                 [0],
                 [1],
-                [1],
-                [1],
+                1,
                 0,
                 -1,
                 generator=generator,
