@@ -355,8 +355,17 @@ b2b_gemm_configs = [
         "num_stages": 2,
         "num_warps": 4,
     },
+    # XPU-friendly configs: num_stages=1 with smaller tiles
+    # Triton->SPIR-V backend on XPU benefits from simpler pipeline
+    # (no software pipelining) and reduced register pressure.
+    {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_O": 32, "BLOCK_SIZE_P": 32, "num_stages": 1, "num_warps": 2},
+    {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_O": 16, "BLOCK_SIZE_P": 32, "num_stages": 1, "num_warps": 2},
+    {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_O": 16, "BLOCK_SIZE_P": 64, "num_stages": 1, "num_warps": 4},
+    {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_O": 32, "BLOCK_SIZE_P": 64, "num_stages": 1, "num_warps": 4},
+    {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_O": 16, "BLOCK_SIZE_P": 128, "num_stages": 1, "num_warps": 4},
+    {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 16, "BLOCK_SIZE_O": 16, "BLOCK_SIZE_P": 16, "num_stages": 1, "num_warps": 4},
+    {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_O": 32, "BLOCK_SIZE_P": 64, "num_stages": 1, "num_warps": 4},
 ]
-
 
 def is_b2b_gemm_good_on(
     is_left_assoc: bool,
