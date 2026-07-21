@@ -16,6 +16,9 @@ default_compiler_flags = [
     "-Wno-unused-function",
     "-Wno-unused-parameter",
     "-Wno-error=strict-aliasing",
+    # Deprecated APIs (e.g. c10::checked_convert) must warn, not break the build,
+    # so they can be retired while external/BC callers migrate.
+    "-Wno-error=deprecated-declarations",
     "-Wno-shadow-compatible-local",
     "-Wno-maybe-uninitialized",  # aten is built with gcc as part of HHVM
     "-Wno-unknown-pragmas",
