@@ -4,16 +4,17 @@
 --requirement requirements-build.txt
 
 # Install / Development extra requirements
-build[uv]  # for building sdist and wheel
-expecttest>=0.3.0
-filelock
-fsspec>=0.8.5
-hypothesis
-jinja2
-lintrunner ; platform_machine != "s390x"
-networkx>=2.5.1
-optree>=0.13.0
-psutil
-spin
-sympy>=1.13.3
-wheel
+build[uv]==1.5.0  # for building sdist and wheel
+expecttest==0.3.0
+filelock==3.29.7
+fsspec==2026.6.0
+hypothesis==6.156.6
+jinja2==3.1.6
+lintrunner==0.13.1 ; platform_machine != "s390x"
+networkx==3.4.2 ; python_version < "3.11"
+networkx==3.6.1 ; python_version >= "3.11"
+optree==0.19.1
+psutil==7.2.2
+spin==0.18
+sympy==1.14.0
+wheel==0.47.0

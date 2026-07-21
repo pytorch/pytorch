@@ -1,11 +1,13 @@
 # Build System requirements
-setuptools>=77.0.0,<82  # 77.0 is the first release with PEP 639 license-files support
-cmake>=3.27
-ninja
-numpy
-packaging>=24.2  # required by setuptools>=77 to validate PEP 639 license expressions
-pyyaml
-requests
-six  # dependency chain: NNPACK -> PeachPy -> six
-typing-extensions>=4.15.0
-pip  # not technically needed, but this makes setup.py invocation work
+setuptools==81.0.0  # 77.0 is the first release with PEP 639 license-files support (constraint was >=77.0.0,<82)
+cmake==4.4.0
+ninja==1.13.0
+numpy==2.2.6 ; python_version < "3.11"
+numpy==2.4.6 ; python_version == "3.11"
+numpy==2.5.1 ; python_version >= "3.12"
+packaging==26.2  # required by setuptools>=77 to validate PEP 639 license expressions
+pyyaml==6.0.3
+requests==2.34.2
+six==1.17.0  # dependency chain: NNPACK -> PeachPy -> six
+typing-extensions==4.16.0
+pip==26.1.2  # not technically needed, but this makes setup.py invocation work

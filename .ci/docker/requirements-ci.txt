@@ -15,7 +15,7 @@ build==1.3.0
 #Pinned versions: 1.3.0
 #test that import:
 
-click
+click==8.3.3
 #Description: Command Line Interface Creation Kit
 #Pinned versions:
 #test that import:
@@ -42,8 +42,10 @@ expecttest==0.3.0
 #Pinned versions: 0.3.0
 #test that import:
 
-fbscribelogger==0.1.7
+fbscribelogger==0.1.7 ; python_version < "3.14"
 #Description: write to scribe from authenticated jobs on CI
+#fbscribelogger caps thriftpy2<0.6.0, which has no cp314 wheel; skip on 3.14
+#(no-op on OSS/ROCm CI anyway) to avoid a source build in the compiler-less test image
 #Pinned versions: 0.1.6
 #test that import:
 
@@ -68,7 +70,7 @@ lark==0.12.0
 #Pinned versions: 0.12.0
 #test that import:
 
-librosa>=0.6.2 ; python_version < "3.11" and platform_machine != "s390x"
+librosa==0.11.0 ; python_version < "3.11" and platform_machine != "s390x"
 librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 #Description: A python package for music and audio analysis
 #Pinned versions: >=0.6.2
@@ -179,7 +181,7 @@ protobuf==6.33.5
 #Pinned versions: 6.33.2
 #test that import: test_tensorboard.py, test/onnx/*
 
-psutil
+psutil==7.2.2
 #Description: information on running processes and system utilization
 #Pinned versions:
 #test that import: test_profiler.py, test_openmp.py, test_dataloader.py
@@ -199,7 +201,7 @@ pytest-flakefinder==1.1.0
 #Pinned versions: 1.1.0
 #test that import:
 
-pytest-rerunfailures>=10.3
+pytest-rerunfailures==14.0
 #Description: plugin for rerunning failure tests in pytest
 #Pinned versions:
 #test that import:
@@ -281,7 +283,7 @@ typing-extensions==4.15.0 ; python_version >= "3.14"
 #Pinned versions:
 #test that import:
 
-unittest-xml-reporting<=3.2.0,>=2.0.0
+unittest-xml-reporting==3.2.0
 #Description: saves unit test results to xml
 #Pinned versions:
 #test that import:
@@ -297,7 +299,7 @@ spin==0.17
 #Pinned versions: 0.17
 #test that import:
 
-redis>=4.0.0
+redis==8.0.1
 #Description: redis database
 #test that import: anything that tests OSS caching/mocking (inductor/test_codecache.py, inductor/test_max_autotune.py)
 
@@ -377,10 +379,11 @@ pwlf==2.2.1
 # To build PyTorch itself
 pip==26.0.1
 pyyaml==6.0.3
-pyzstd
+pyzstd==0.16.2 ; python_version < "3.13"
+pyzstd==0.19.1 ; python_version >= "3.13"
 setuptools==78.1.1
 packaging==24.2
-six
+six==1.17.0
 
 scons==4.5.2 ; platform_machine == "aarch64"
 
@@ -407,7 +410,7 @@ cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != 
 #Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. PyTorch CI CUDA builds use CUDA 13, so depend on the matching cuda-bindings major while allowing minor updates within that major.
 #test that import: test_cuda.py
 
-cupti-python>13.0 ; platform_system == "Linux" and (platform_machine == "x86_64" or platform_machine == "aarch64") and python_version < "3.14"
+cupti-python==13.3.0 ; platform_system == "Linux" and (platform_machine == "x86_64" or platform_machine == "aarch64") and python_version < "3.14"
 #Description: required for the experimental CUPTI monitor (torch.profiler._cupti_monitor). >13.0 to match CUDA 13.x toolkits. cupti-python only ships Linux x86_64/aarch64 CPython wheels (no 3.14/free-threaded yet), so guard to those.
 #test that import: test_profiler.py
 
@@ -417,7 +420,7 @@ pyre-extensions==0.0.32
 tabulate==0.9.0
 #Description: These package are needed to build FBGEMM and torchrec on PyTorch CI
 
-tqdm>=4.66.0
+tqdm==4.68.4
 #Description: progress bar library required for dynamo benchmarks
 #test that import: benchmarks/dynamo/*
 
@@ -429,7 +432,7 @@ spin==0.17
 #Pinned versions: 0.17
 #test that import: spincli/test_spin.py
 
-uv
+uv==0.11.29
 #Description: required for running spin commands via uvx
 #Pinned version:
 #test that import:
