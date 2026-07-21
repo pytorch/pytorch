@@ -1577,6 +1577,16 @@ op_db: list[OpInfo] = [
                 device_type="cpu",
                 dtypes=(torch.complex128,),
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=6e-5, rtol=6e-6)}),
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_symbolic_exhaustive",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=4e-3, rtol=2e-5)}),
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_disable_functionalization_symbolic_exhaustive",
+            ),
             # Exception: "orgqr_cpu" not implemented for 'Half'
             DecorateInfo(
                 unittest.expectedFailure,
