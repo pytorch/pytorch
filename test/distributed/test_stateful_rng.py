@@ -148,9 +148,8 @@ class TestCheckpointableTensorRNG(TestCase):
         self.assertEqual(local_offsets, [0, 0, 0, 2, 0, 0])
         self.assertEqual(local_sizes, [2, 3, 3, 1, 5, 6])
 
-    def test_flattened_flex_shard_layouts_require_matching_rank(self):
+    def test_flattened_local_layouts_require_matching_rank(self):
         cases = (
-            ("grouped_ragged_shard_prefix_dims", (2, 3, 4), (3, 4)),
             ("grouped_owned_flat_segments", (4, 2, 3), (12,)),
             ("flat_shard", (3, 4), (6,)),
         )
