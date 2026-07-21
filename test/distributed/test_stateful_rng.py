@@ -13,6 +13,7 @@ from torch.distributed._rng_layout import (
     _scatter_rng_result_,
 )
 from torch.distributed.checkpoint import CheckpointableTensor
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -120,6 +121,25 @@ class TestCheckpointableTensorRNG(TestCase):
                 self.assertEqual(layout.index_blocks, expected_blocks)
                 self.assertTrue(layout.is_direct)
 
+    def test_strided_shard_lowers_to_multiple_index_blocks(self):
+        # _StridedShard(dim=1, split_factor=2) on two ranks gives rank 0
+        # columns [0:2, 4:6], concatenated in that order in the local tensor.
+        tensor = torch.empty((3, 4))
+        self._set_shard_metadata(
+            tensor,
+            (3, 8),
+            ((0, 0), (0, 4)),
+            ((0, 0), (0, 2)),
+            ((3, 2), (3, 2)),
+        )
+
+        layout = _derive_checkpointable_rng_layout(
+            cast(CheckpointableTensor, tensor)
+        )
+
+        self.assertEqual(layout.index_blocks, ((0, 2, 8, 3), (4, 2, 8, 3)))
+        self.assertFalse(layout.is_direct)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_initializers_match_dense(self):
         device = torch.device("cuda")
@@ -170,6 +190,38 @@ class TestCheckpointableTensorRNG(TestCase):
                 self.assertEqual(
                     actual, expected[global_slice].contiguous(), rtol=0, atol=0
                 )
+                self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_strided_shard_matches_dense(self):
+        device = torch.device("cuda")
+        global_shape = (3, 8)
+        placement = _StridedShard(dim=1, split_factor=2)
+
+        torch.manual_seed(123)
+        dense = torch.empty(global_shape, device=device).normal_(0.1, 0.02)
+        expected_shards, _ = placement._split_tensor(dense, 2, with_padding=False)
+        expected_state = torch.cuda.get_rng_state(device)
+
+        global_offsets_by_rank = (
+            ((0, 0), (0, 4)),
+            ((0, 2), (0, 6)),
+        )
+        for rank, global_offsets in enumerate(global_offsets_by_rank):
+            with self.subTest(rank=rank):
+                torch.manual_seed(123)
+                actual = torch.empty((3, 4), device=device)
+                self._set_shard_metadata(
+                    actual,
+                    global_shape,
+                    global_offsets,
+                    ((0, 0), (0, 2)),
+                    ((3, 2), (3, 2)),
+                )
+                with _StatefulRNGMode():
+                    actual.normal_(0.1, 0.02)
+
+                self.assertEqual(actual, expected_shards[rank], rtol=0, atol=0)
                 self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
