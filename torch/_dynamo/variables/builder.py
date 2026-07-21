@@ -141,6 +141,7 @@ from ..source import (
     DynamicScalarSource,
     FloatTensorSource,
     GetItemSource,
+    GlobalSource,
     GradSource,
     is_constant_source,
     is_from_closure_source,
@@ -256,6 +257,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
+from .memory import CUDAMemPoolVariable
 from .misc import (
     AutogradEngineVariable,
     AutogradFunctionContextVariable,
@@ -646,6 +648,17 @@ def bound_builtin_method_descriptor(value: Any) -> Any | None:
 
 class _missing:
     pass
+
+
+def _is_torch_module_attr_source(source: Source) -> bool:
+    if not isinstance(source, ChainedSource):
+        return False
+    base_source = source.get_base()
+    return isinstance(base_source, GlobalSource) and (
+        base_source.global_name == "torch"
+        or base_source.global_name == "__import_torch"
+        or base_source.global_name.startswith("__import_torch_dot")
+    )
 
 
 @dataclasses.dataclass
@@ -1577,6 +1590,17 @@ class VariableBuilder:
             set_example_value(stream_proxy.node, value)
             var = StreamVariable(
                 stream_proxy, value, source=self.source, user_object_index=index
+            )
+            return self.tx.output.side_effects.track_object_existing(value, var)
+        elif isinstance(value, torch.cuda.MemPool):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            index = register_user_object(value, self.source)
+            mempool_proxy = self.tx.output.create_proxy(
+                "call_function", get_external_object_by_index, (index,), {}
+            )
+            set_example_value(mempool_proxy.node, value)
+            var = CUDAMemPoolVariable(
+                mempool_proxy, value, source=self.source, user_object_index=index
             )
             return self.tx.output.side_effects.track_object_existing(value, var)
         elif isinstance(value, (torch._C._SDPAParams)):
@@ -2784,12 +2808,21 @@ class VariableBuilder:
                             "integer into a tensor."
                         )
 
-                    process_automatic_dynamic(
+                    frame_state_entry = process_automatic_dynamic(
                         self.tx,
                         self.source.name,
                         FrameStateSizeEntry.make_scalar(value),
                         is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
                     )
+                    if (
+                        config.automatic_dynamic_shapes
+                        and frame_state_entry.scalar is auto_dynamic
+                        and not self.source.guard_source.is_unspecialized_builtin_nn_module()
+                        and not _is_torch_module_attr_source(self.source)
+                    ):
+                        return self.wrap_symint(
+                            value, frame_state_entry=frame_state_entry
+                        )
                     self.install_guards(
                         functools.partial(
                             GuardBuilder.EQUALS_MATCH, recompile_hint=recompile_hint
@@ -2996,6 +3029,24 @@ class VariableBuilder:
                 explanation="torch.compile does not support sparse Tensors",
                 hints=[*graph_break_hints.SPARSE_TENSOR],
             )
+
+        if (
+            isinstance(value, torch.Tensor)
+            and torch._C._functorch.peek_interpreter_stack() is None
+        ):
+            try:
+                tangent = torch.autograd.forward_ad.unpack_dual(value).tangent
+            except RuntimeError:
+                tangent = None
+            if tangent is not None:
+                unimplemented(
+                    gb_type="Attempted to wrap a dual tensor input",
+                    context="",
+                    explanation="torch.compile does not support input tensors that "
+                    "carry a forward-mode AD tangent; compiled code would silently "
+                    "drop the tangent.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
 
         if (
             safe_has_grad(value)
@@ -3263,6 +3314,7 @@ class VariableBuilder:
         value: int,
         dynamism: DimDynamic | None = None,
         context: SymIntSymbolicContext | None = None,
+        frame_state_entry: FrameStateSizeEntry | None = None,
     ) -> VariableTracker:
         if type(value) is not int:
             raise AssertionError(f"Expected exact int type, got {type(value)}")
@@ -3271,7 +3323,6 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
 
         shape_env = self.tx.output.shape_env
-        frame_state_entry: FrameStateSizeEntry | None = None
         if TracingContext.get().force_unspec_int_unbacked_size_like:
             wrapped_value = shape_env.create_unbacked_symint()
             _constrain_range_for_size(wrapped_value)
@@ -3294,12 +3345,13 @@ class VariableBuilder:
 
             name = self.source.name
 
-            frame_state_entry = process_automatic_dynamic(
-                self.tx,
-                name,
-                FrameStateSizeEntry.make_scalar(value),
-                is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
-            )
+            if frame_state_entry is None:
+                frame_state_entry = process_automatic_dynamic(
+                    self.tx,
+                    name,
+                    FrameStateSizeEntry.make_scalar(value),
+                    is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
+                )
 
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars

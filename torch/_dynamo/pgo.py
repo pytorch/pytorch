@@ -423,13 +423,6 @@ class FrameStateSizeEntry:
         return self
 
 
-# Transmitted between ranks inside LocalState by the compiler collective
-# (all_gather_object deserializes with weights_only=True by default).
-torch.serialization.add_safe_globals(
-    [InferStride, AutoUnset, AutoDynamic, FrameStateSizeEntry]
-)
-
-
 def update_automatic_dynamic(
     tx: InstructionTranslatorBase,
     name: str,
