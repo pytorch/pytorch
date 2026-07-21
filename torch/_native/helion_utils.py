@@ -1,6 +1,6 @@
 import functools
 import logging
-import os as _os
+import os as _os  # aliased to keep `os` out of the module public API
 import sys
 from typing import cast
 
@@ -63,8 +63,9 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
 
 
 def runtime_available() -> bool:
+    # Package presence only, like triton/cutedsl; version gated in register_op_override.
     available, _ = _check_runtime_available()
-    return available and _version_is_sufficient()
+    return available
 
 
 def runtime_version() -> Version | None:
@@ -103,7 +104,11 @@ def register_op_override(
     allow_multiple_override: bool = False,
     unconditional_override: bool = False,
 ) -> None:
-    if not runtime_available() or check_native_jit_disabled():
+    available, _ = _check_runtime_available()
+    if (not available) or check_native_jit_disabled():
+        return
+
+    if not _version_is_sufficient():
         return
 
     _register_op_override_impl(

@@ -408,12 +408,20 @@ class TestNativeDSLOps(TestCase):
         with patch.object(
             helion_utils,
             "_check_runtime_available",
-            return_value=(True, Version("1.0.0")),
+            return_value=(True, Version("1.2.0")),
         ):
-            self.assertFalse(helion_utils.runtime_available())
+            self.assertTrue(helion_utils.runtime_available())
+            self.assertTrue(helion_utils._version_is_sufficient())
 
         helion_utils._check_runtime_available.cache_clear()
         helion_utils._version_is_sufficient.cache_clear()
+        with patch.object(
+            helion_utils,
+            "_check_runtime_available",
+            return_value=(True, Version("1.0.0")),
+        ):
+            self.assertTrue(helion_utils.runtime_available())
+            self.assertFalse(helion_utils._version_is_sufficient())
 
     def test_version_skip_env_var_overrides(self):
         """TORCH_NATIVE_SKIP_VERSION_CHECK=1 allows non-blessed versions."""
