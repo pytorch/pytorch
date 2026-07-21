@@ -23,11 +23,11 @@ while enabling optimizations where safe.
 
 import collections
 import contextlib
+import enum
 import inspect
 import logging
 import textwrap
 import traceback
-import warnings
 import weakref
 from collections.abc import Generator, MutableMapping
 from types import CellType
@@ -49,7 +49,13 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
 from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
-from .utils import is_frozen_dataclass, is_namedtuple_cls, nn_module_new, object_new
+from .utils import (
+    is_frozen_dataclass,
+    is_namedtuple_cls,
+    is_pybind11_enum_member,
+    nn_module_new,
+    object_new,
+)
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
@@ -88,6 +94,13 @@ def _manual_dict_setitem(
 def _manual_list_update(list_from: list[Any], list_to: list[Any]) -> None:
     list.clear(list_to)
     list.extend(list_to, list_from)
+
+
+def _manual_deque_update(deque_from: Any, deque_to: Any) -> None:
+    # Call the deque methods directly, not any overridden subclass methods.
+    # deque_to keeps its (read-only) maxlen, so extend re-applies eviction.
+    collections.deque.clear(deque_to)
+    collections.deque.extend(deque_to, deque_from)
 
 
 class SideEffects:
@@ -213,7 +226,7 @@ class SideEffects:
         """Record an attribute mutation for deferred validation.
 
         Returns True if successfully deferred, False if we cannot read the
-        original value (var_getattr raises NotImplementedError) or the
+        original value (getattro_impl raises NotImplementedError) or the
         original is not a python constant — caller should fall back to
         check_allowed_side_effect.
         """
@@ -231,7 +244,7 @@ class SideEffects:
                 raise AssertionError("output_graph weakref is dead")
             tx = output_graph.current_tx
             try:
-                original_vt = item.var_getattr(tx, name)  # type: ignore[arg-type]
+                original_vt = item.getattro_impl(tx, name)  # type: ignore[arg-type]
             except NotImplementedError:
                 return False
             if not original_vt.is_python_constant():
@@ -450,6 +463,20 @@ class SideEffects:
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
     ) -> None:
+        # `obj.__dict__` ordering is observable (e.g. list(obj.__dict__)). When a
+        # key is re-added after being deleted, CPython appends it at the end
+        # rather than reusing its old slot. store_attr_mutations is an
+        # insertion-ordered dict, so a plain re-store of an existing key would
+        # keep the stale position; drop the deleted entry first so the new value
+        # re-inserts at the end.
+        if not isinstance(value, variables.DeletedVariable):
+            existing = self.store_attr_mutations.get(item, {}).get(name)
+            if isinstance(existing, variables.DeletedVariable):
+                # store_attr always writes both maps together, so the
+                # attr_mutation_kinds entry is guaranteed present here; use del
+                # for both to surface any invariant violation.
+                del self.store_attr_mutations[item][name]
+                del self.attr_mutation_kinds[item][name]
         self.store_attr(item, name, value, AttrMutationKind.INSTANCE_DICT)
 
     def get_attr_mutation_kind(
@@ -558,6 +585,7 @@ class SideEffects:
             str.__getattribute__,
             list.__getattribute__,
             tuple.__getattribute__,
+            collections.deque.__getattribute__,
             BaseException.__getattribute__,
         )
 
@@ -646,11 +674,7 @@ class SideEffects:
         variable_cls: Any,
         options: dict[str, Any],
     ) -> VariableTracker:
-        if user_cls is torch.autograd.function.FunctionCtx:
-            with warnings.catch_warnings(record=True):
-                obj = torch.autograd.Function()
-        else:
-            obj = object_new(user_cls)
+        obj = object_new(user_cls)
         variable = variable_cls(
             obj,
             mutation_type=AttributeMutationNew(cls_source),
@@ -697,6 +721,8 @@ class SideEffects:
                 variable_cls = variables.UserDefinedTupleVariable
         elif issubclass(user_cls, list):
             variable_cls = variables.UserDefinedListVariable
+        elif issubclass(user_cls, collections.deque):
+            variable_cls = variables.UserDefinedDequeVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
@@ -922,6 +948,27 @@ class SideEffects:
                     )
                 init_live_vars.append(cur_tx.post_prune_cell_and_freevars)
             cur_tx = cur_tx.parent
+
+        # Generators tracked for close-on-exit have their close() called in
+        # compile_subgraph after pruning.
+        gen_reachable_new: set[VariableTracker] = set()
+
+        def visit_gen(var: VariableTracker) -> None:
+            if isinstance(var.mutation_type, AttributeMutationNew):
+                gen_reachable_new.add(var)
+
+        # Pass side_effects so the walk follows store_attr_mutations, and share
+        # one cache across all generators to dedup shared subiterators.
+        gen_visit_cache: dict[int, Any] = {}
+        for gen in tx.output.local_generators:
+            gen_tracer = gen.inline_tracer
+            VariableTracker.visit(
+                visit_gen,
+                [gen_tracer.stack, gen_tracer.symbolic_locals],
+                gen_visit_cache,
+                self,
+            )
+
         VariableTracker.visit(
             visit,
             # TODO track from all possible sources.
@@ -947,10 +994,14 @@ class SideEffects:
             k: v for k, v in self.id_to_variable.items() if is_live(v)
         }
         self.store_attr_mutations = {
-            k: v for k, v in self.store_attr_mutations.items() if is_live(k)
+            k: v
+            for k, v in self.store_attr_mutations.items()
+            if is_live(k) or k in gen_reachable_new
         }
         self.attr_mutation_kinds = {
-            k: v for k, v in self.attr_mutation_kinds.items() if is_live(k)
+            k: v
+            for k, v in self.attr_mutation_kinds.items()
+            if is_live(k) or k in gen_reachable_new
         }
 
     def mutation(self, var: VariableTracker) -> None:
@@ -1001,6 +1052,27 @@ class SideEffects:
                 var,
                 (variables.NamedTupleVariable, variables.StructSequenceVariable),
             ) and not self.has_pending_mutation(var):
+                continue
+
+            # Sourceless enum members registered with AttributeMutationNew
+            # don't need __new__-based tempvar reconstruction -- they are
+            # reconstructible as constants.
+            if (
+                var.is_python_constant()
+                and isinstance(var.mutation_type, AttributeMutationNew)
+                and isinstance(var, variables.UserDefinedObjectVariable)
+                and (
+                    isinstance(
+                        var.value,
+                        (
+                            enum.Enum,
+                            torch.DispatchKey,
+                            torch._C._functorch.TransformType,
+                        ),
+                    )
+                    or is_pybind11_enum_member(var.value)
+                )
+            ):
                 continue
 
             if isinstance(var, variables.CellVariable):
@@ -1437,6 +1509,26 @@ class SideEffects:
                 ):
                     continue
 
+                # Sourceless enum members: mutations (like _inverted_ caching)
+                # already happened on the real object during tracing.
+                if (
+                    var.is_python_constant()
+                    and isinstance(var.mutation_type, AttributeMutationNew)
+                    and isinstance(var, variables.UserDefinedObjectVariable)
+                    and (
+                        isinstance(
+                            var.value,
+                            (
+                                enum.Enum,
+                                torch.DispatchKey,
+                                torch._C._functorch.TransformType,
+                            ),
+                        )
+                        or is_pybind11_enum_member(var.value)
+                    )
+                ):
+                    continue
+
                 if (
                     isinstance(
                         var,
@@ -1542,6 +1634,49 @@ class SideEffects:
                     suffixes.append(
                         [
                             *list_update_insts,
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+                    _maybe_log_side_effect(
+                        var._base_vt  # pyrefly: ignore[bad-argument-type]
+                    )
+                elif isinstance(
+                    var,
+                    variables.UserDefinedDequeVariable,
+                ) and self.is_modified(
+                    var._base_vt  # pyrefly: ignore[bad-argument-type]
+                ):
+                    # Update the deque to the updated items. Be careful in
+                    # calling the deque methods and not the overridden methods.
+                    varname_map = {}
+                    for name in _manual_deque_update.__code__.co_varnames:
+                        varname_map[name] = cg.tx.output.new_var()
+
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["deque_to"]
+                            )
+                        ]
+                    )
+
+                    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["deque_from"]
+                            )
+                        ]
+                    )
+
+                    deque_update_insts = bytecode_from_template(
+                        _manual_deque_update, varname_map=varname_map
+                    )
+
+                    suffixes.append(
+                        [
+                            *deque_update_insts,
                             create_instruction("POP_TOP"),
                         ]
                     )
