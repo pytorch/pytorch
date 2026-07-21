@@ -758,22 +758,21 @@ def _gpu_user_annotation_events(
             continue
         corr_l = c["correlation_id"].tolist()
         dev_l = c["device_id"].tolist()
-        str_l = c["stream_id"].tolist()
-        start_l = c["start_ns"].tolist()
-        end_l = c["end_ns"].tolist()
         # Follow graphed ops onto their reassigned logical lane so the spanning annotation
         # lands on the same lane as its kernels (else it stays on the capture stream).
+        stream_arr = c["stream_id"]
         lane_col = c.get("logical_lane")
-        lane_l = lane_col.tolist() if lane_col is not None else None
-        gnid_l = c["graph_node_id"].tolist() if lane_l is not None else None
+        if lane_col is not None:
+            reassign = (c["graph_node_id"] != 0) & (lane_col != stream_arr)
+            stream_arr = np.where(reassign, lane_col, stream_arr)
+        str_l = stream_arr.tolist()
+        start_l = c["start_ns"].tolist()
+        end_l = c["end_ns"].tolist()
         for i in range(len(corr_l)):
             external_id = correlation_to_user_external.get(corr_l[i])
             if external_id is None:
                 continue
-            stream = str_l[i]
-            if lane_l is not None and gnid_l[i] and lane_l[i] != stream:
-                stream = lane_l[i]
-            key = (external_id, dev_l[i], stream)
+            key = (external_id, dev_l[i], str_l[i])
             start_ns = start_l[i]
             end_ns = end_l[i]
             span = span_map.get(key)
