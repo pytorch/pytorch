@@ -157,6 +157,41 @@ class TestComplexTensor(TestCase):
         self.assertEqual(c.imag, torch.tensor([7, 8], dtype=torch.float32))
         self.assertEqual(c, torch.tensor([5 + 7j, 6 + 8j], dtype=torch.complex64))
 
+    def test_out_variants_do_not_redispatch(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        def make_complex(shape):
+            return ComplexTensor(torch.randn(shape), torch.randn(shape))
+
+        vector_a = make_complex((4,))
+        vector_b = make_complex((4,))
+        matrix_a = make_complex((2, 3))
+        matrix_b = make_complex((3, 2))
+        batched_a = make_complex((2, 2, 3))
+        batched_b = make_complex((2, 3, 2))
+
+        cases = (
+            ("add", torch.add, (vector_a, vector_b), {}, (4,)),
+            ("add_alpha", torch.add, (vector_a, vector_b), {"alpha": 2}, (4,)),
+            ("mul", torch.mul, (vector_a, vector_b), {}, (4,)),
+            ("mm", torch.mm, (matrix_a, matrix_b), {}, (2, 2)),
+            ("bmm", torch.bmm, (batched_a, batched_b), {}, (2, 2, 2)),
+            ("dot", torch.dot, (vector_a, vector_b), {}, ()),
+            ("sum", torch.sum, (matrix_a, 1), {}, (2,)),
+            ("cumprod", torch.cumprod, (matrix_a, 1), {}, (2, 3)),
+            ("stack", torch.stack, ([vector_a, vector_b], 0), {}, (2, 4)),
+        )
+
+        for name, op, args, kwargs, out_shape in cases:
+            with self.subTest(name=name):
+                expected = op(*args, **kwargs)
+                out = ComplexTensor(torch.zeros(out_shape), torch.zeros(out_shape))
+                result = op(*args, out=out, **kwargs)
+
+                self.assertIs(result, out)
+                self.assertEqual(out.re, expected.re)
+                self.assertEqual(out.im, expected.im)
+
     def test_mul_inplace_complex(self):
         from torch._subclasses.complex_tensor import ComplexTensor
 

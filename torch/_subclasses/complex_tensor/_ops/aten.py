@@ -20,6 +20,7 @@ from .common import (
     register_simple,
     split_complex_arg,
     split_complex_tensor,
+    write_complex_out,
 )
 
 
@@ -43,15 +44,20 @@ def register_binary_linear(op: OpType) -> Callable[..., Any]:
     def impl(
         lhs: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
     ) -> ComplexTensor:
+        out = kwargs.pop("out", None)
         alpha = kwargs.pop("alpha", None)
         if alpha is not None:
-            return impl_with_alpha(lhs, rhs, *args, alpha=alpha, **kwargs)
+            result = impl_with_alpha(lhs, rhs, *args, alpha=alpha, **kwargs)
+            return write_complex_out(out, result) if out is not None else result
         a_r, a_i = split_complex_arg(lhs)
         b_r, b_i = split_complex_arg(rhs)
         out_dt, (a_r, a_i, b_r, b_i) = promote_tensors(a_r, a_i, b_r, b_i)
         u = op(a_r, b_r, *args, **kwargs)
         v = op(a_i, b_i, *args, **kwargs)
-        return ComplexTensor(u.to(out_dt), v.to(out_dt))
+        result = ComplexTensor(u.to(out_dt), v.to(out_dt))
+        if out is not None:
+            return write_complex_out(out, result)
+        return result
 
     return register_complex(op, impl)
 
@@ -238,6 +244,7 @@ def pow_impl(self: ComplexTensor, exponent: ComplexTensor) -> ComplexTensor:
 
 @register_complex(aten.cumprod)
 def cumprod_impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> ComplexTensor:
+    out = kwargs.pop("out", None)
     dtype = kwargs.pop("dtype", self.dtype)
     kwargs["dtype"] = complex_to_real_dtype(dtype)
 
@@ -245,7 +252,10 @@ def cumprod_impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> ComplexTenso
     sum_phi = torch.cumsum(torch.angle(self), *args, **kwargs)
     u = prod_r * torch.cos(sum_phi)
     v = prod_r * torch.sin(sum_phi)
-    return ComplexTensor(u, v)
+    result = ComplexTensor(u, v)
+    if out is not None:
+        return write_complex_out(out, result)
+    return result
 
 
 # unary funcs,
@@ -790,10 +800,14 @@ def allclose_impl(
 
 @register_complex(aten.stack)
 def stack_impl(self: list[ComplexTensor], *args: Any, **kwargs: Any) -> ComplexTensor:
+    out = kwargs.pop("out", None)
     re_im_tuples = [split_complex_arg(self_i) for self_i in self]
     u = torch.stack([c[0] for c in re_im_tuples], *args, **kwargs)
     v = torch.stack([c[1] for c in re_im_tuples], *args, **kwargs)
-    return ComplexTensor(u, v)
+    result = ComplexTensor(u, v)
+    if out is not None:
+        return write_complex_out(out, result)
+    return result
 
 
 # TODO (hameerabbasi): Not being tested
