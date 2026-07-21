@@ -343,10 +343,14 @@ class _NestedReductionBase:
         B, D, G = 128, 4096, 32
         x = torch.randn(B, D, device=GPU_TYPE)
         weight = torch.randn(D, device=GPU_TYPE)
-        self.check_numeric(
-            lambda x, weight: _rmsnorm_block_scale_swizzle(x, weight, G),
-            (x, weight),
-        )
+
+        def f(x, weight):
+            return _rmsnorm_block_scale_swizzle(x, weight, G)
+
+        ref_payload, ref_scale = f(x, weight)
+        payload, scale = torch.compile(f)(x, weight)
+        self.assertEqual(payload, ref_payload, atol=1e-2, rtol=1e-2)
+        self.assertEqual(scale, ref_scale, atol=1e-6, rtol=1e-6)
         self.check_fusion()
 
     # ---- Edge cases ----
@@ -1994,6 +1998,9 @@ class _InternalsBase:
             num_outputs=2,
             meta_num_load=self.looped_or_persistent(3, 2),
             min_rblock=32,
+            extra_checks=FileCheck().check(
+                "tl.store(out_ptr3 + (4*(x0 // 32) + 16*((x0 % 32))"
+            ),
         )
 
     @skipIfRocm
