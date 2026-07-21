@@ -6277,7 +6277,7 @@ def split_group(
     pg_options: C10DBackend.Options | None = None,
     group_desc: str | None = None,
     backend: str | Backend | None = None,
-) -> ProcessGroup | None:
+) -> ProcessGroup | _NonGroupMember:
     """
     Create a new process group split from the given parent process group.
 
@@ -6317,7 +6317,8 @@ def split_group(
 
     Returns:
         ProcessGroup if the current rank is within one split/subgroup given by split_ranks,
-        or None if the current rank is not part of any split_ranks`.
+        or GroupMember.NON_GROUP_MEMBER if the current rank is not part of any
+        split in ``split_ranks``.
 
     """
     # check inputs
@@ -6430,7 +6431,7 @@ def split_group(
 
     # find my group of ranks and my group local rank in split_ranks
     # for ranks which are not in any split PGs, we just pass in this the first split group
-    # and None will be returned.
+    # and GroupMember.NON_GROUP_MEMBER will be returned.
     my_group = split_ranks[0]
 
     for split_group in split_ranks:
@@ -6460,7 +6461,7 @@ def split_group(
         device_types=device_types_filter,
     )
     if split_pg is None:
-        return None
+        return GroupMember.NON_GROUP_MEMBER
 
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
     split_pg.bound_device_id = device_id  # type: ignore[union-attr]
@@ -6737,7 +6738,7 @@ def _new_group_via_split_group(
         group_desc=group_desc,
         backend=backend,
     )
-    if split_pg is None:
+    if _rank_not_in_group(split_pg):
         raise AssertionError(
             f"Rank {default_pg.rank()} was not included in process group {group_ranks}"
         )
