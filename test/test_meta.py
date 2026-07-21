@@ -2252,7 +2252,44 @@ class TestMetaKernelConv(TestCase):
         self.assertTrue(gi2.is_contiguous(memory_format=torch.channels_last))
         self.assertTrue(gw2.is_contiguous(memory_format=torch.channels_last))
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_convolution_meta_kernel_groups_validation(self):
+        """The meta kernel must reject invalid groups/weight configs the same
+        way as the real backend, instead of returning an output shape.
+        """
+        x = torch.randn(2, 12, 30, device="meta")
+        with self.assertRaisesRegex(
+            RuntimeError, "expected weight to be at least 6 at dimension 0"
+        ):
+            torch.nn.functional.conv1d(x, torch.randn(3, 2, 3, device="meta"), groups=6)
 
+        x = torch.randn(2, 6, 30, device="meta")
+        with self.assertRaisesRegex(
+            RuntimeError, "expected weight to be divisible by 2 at dimension 0"
+        ):
+            torch.nn.functional.conv1d(x, torch.randn(3, 3, 3, device="meta"), groups=2)
+
+        with self.assertRaisesRegex(RuntimeError, "non-positive groups is not supported"):
+            torch.nn.functional.conv1d(x, torch.randn(3, 3, 3, device="meta"), groups=0)
+
+        # weight checks also apply to the transposed path
+        with self.assertRaisesRegex(
+            RuntimeError, "expected weight to be divisible by 2 at dimension 0"
+        ):
+            torch.nn.functional.conv_transpose1d(
+                torch.randn(2, 3, 8, device="meta"),
+                torch.randn(3, 2, 3, device="meta"),
+                groups=2,
+            )
+
+        # mismatched input channels report the detailed message
+        with self.assertRaisesRegex(
+            RuntimeError, "expected input.* to have 2 channels, but got 8 channels"
+        ):
+            torch.nn.functional.conv1d(
+                torch.randn(2, 8, 30, device="meta"),
+                torch.randn(4, 2, 3, device="meta"),
+            )
 
 
 class TestMetaKernelRegistrations(TestCase):

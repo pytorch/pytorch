@@ -2674,6 +2674,19 @@ def calc_conv_nd_return_shape(
         """
         return (ln - 1) * s - 2 * p + d * (k - 1) + op + 1
 
+    # groups/weight checks mirror C++ check_shape_forward (Convolution.cpp)
+    torch._check(groups > 0, lambda: "non-positive groups is not supported")
+    torch._check(
+        weight.shape[0] >= groups,
+        lambda: f"Given groups={groups}, expected weight to be at least {groups} "
+        f"at dimension 0, but got weight of size {list(weight.shape)} instead",
+    )
+    torch._check(
+        weight.shape[0] % groups == 0,
+        lambda: f"Given groups={groups}, expected weight to be divisible by {groups} "
+        f"at dimension 0, but got weight of size [{list(weight.shape)}] instead",
+    )
+
     kernel_size = weight.shape[2:]
     dims = input_tensor.shape[2:]
     if is_transposed:
@@ -2682,7 +2695,10 @@ def calc_conv_nd_return_shape(
         out_channels = weight.shape[0]
         torch._check(
             weight.shape[1] * groups == input_tensor.shape[1],
-            lambda: "Invalid channel dimensions",
+            lambda: f"Given groups={groups}, weight of size {list(weight.shape)}, "
+            f"expected input{list(input_tensor.shape)} to have "
+            f"{weight.shape[1] * groups} channels, but got {input_tensor.shape[1]} "
+            "channels instead",
         )
 
     ret_shape = [input_tensor.shape[0], out_channels]
