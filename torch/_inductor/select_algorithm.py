@@ -17,6 +17,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
@@ -4741,18 +4742,27 @@ class AlgorithmSelectorCache(PersistentCache):
         # skip a choice if it has the same hash as a previously seen choice
         seen_choices: OrderedSet[str] = OrderedSet()
 
-        # Count NVGEMM choices to decide whether subprocess precompile
-        # is worth the IPC overhead (break-even is ~20 NVGEMM choices).
-        _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD = 20
+        # Count NVGEMM choices to decide whether subprocess precompile is worth
+        # the pool-warmup/IPC overhead. Measured break-even is ~8: below ~4
+        # serial wins (~1.4s), from 8 up subprocess wins and the gap grows with
+        # count (e.g. 32 configs: 12.5s vs 22.0s serial). The break-even used to
+        # be ~20 because each worker rebuilt the ~14s kernel manifest; that
+        # overhead is gone now (workers reconstruct the one operator from
+        # metadata), so the threshold drops accordingly.
+        _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD = 8
         nvgemm_count = sum(
             1
             for c in choices
             if NVUniversalGemmCaller is not None
             and isinstance(c, NVUniversalGemmCaller)
         )
+        # Block for pool warmup when there are enough NVGEMM choices to justify
+        # it: the serial fallback (lazy compile at benchmark time) is ~15x
+        # slower, and the non-blocking use_process_pool() check can otherwise
+        # race the pool warmup when little other compilation precedes this point.
         use_nvgemm_subprocess = (
-            async_compile.use_process_pool()
-            and nvgemm_count >= _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD
+            nvgemm_count >= _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD
+            and async_compile.wait_process_pool_ready()
         )
 
         for c in choices:
@@ -4796,21 +4806,34 @@ class AlgorithmSelectorCache(PersistentCache):
                     cuda_ctx = CUDAContextMetadata.from_kernel(
                         c.bmreq.kernel, c.bmreq.input_tensor_meta[0].device
                     )
-                    future = async_compile.nvgemm_precompile(
-                        kernel_name=c.bmreq.kernel.metadata.operator_name,
-                        variant_name=c.bmreq.variant.name,
-                        accumulator_type=c.bmreq.accumulator_type,
-                        input_tensor_meta=c.bmreq.input_tensor_meta,
-                        output_tensor_meta=c.bmreq.output_tensor_meta,
-                        cuda_ctx=cuda_ctx,
-                        scale_type_a=c.bmreq.scale_type_a,
-                        scale_type_b=c.bmreq.scale_type_b,
-                        swizzle_type_a=c.bmreq.swizzle_type_a,
-                        swizzle_type_b=c.bmreq.swizzle_type_b,
-                        has_bias_epilogue=c.bmreq.has_bias_epilogue,
-                        swap_ab=c.bmreq.swap_ab,
-                        metadata=c.bmreq.kernel.metadata,
-                    )
+                    try:
+                        future = async_compile.nvgemm_precompile(
+                            kernel_name=c.bmreq.kernel.metadata.operator_name,
+                            variant_name=c.bmreq.variant.name,
+                            accumulator_type=c.bmreq.accumulator_type,
+                            input_tensor_meta=c.bmreq.input_tensor_meta,
+                            output_tensor_meta=c.bmreq.output_tensor_meta,
+                            cuda_ctx=cuda_ctx,
+                            scale_type_a=c.bmreq.scale_type_a,
+                            scale_type_b=c.bmreq.scale_type_b,
+                            swizzle_type_a=c.bmreq.swizzle_type_a,
+                            swizzle_type_b=c.bmreq.swizzle_type_b,
+                            has_bias_epilogue=c.bmreq.has_bias_epilogue,
+                            swap_ab=c.bmreq.swap_ab,
+                            metadata=c.bmreq.kernel.metadata,
+                        )
+                    except (BrokenProcessPool, RuntimeError) as e:
+                        # A precompile worker crashed and closed the pool. Stop
+                        # using the subprocess pool and compile the remaining
+                        # choices lazily in-process rather than aborting the
+                        # whole compilation with a closed-pool error.
+                        log.warning(
+                            "NVGEMM subprocess precompile pool unusable (%s); "
+                            "falling back to lazy in-process compile",
+                            e,
+                        )
+                        use_nvgemm_subprocess = False
+                        continue
                     log.debug(
                         "Submitted nvgemm subprocess precompile for choice: %s", c
                     )

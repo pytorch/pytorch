@@ -394,6 +394,40 @@ class AsyncCompile:
         return cls._ready_future.done()
 
     @classmethod
+    def wait_process_pool_ready(cls, timeout: float = 120) -> bool:
+        """Block (up to ``timeout`` s) until the process pool is ready, returning
+        whether it's usable.
+
+        Like use_process_pool() but blocking. Use when a backend's serial
+        fallback is far costlier than the warmup wait -- e.g. NVGEMM subprocess
+        precompile, where skipping the pool forces ~15x-slower lazy compilation
+        at benchmark time. (use_process_pool()'s non-blocking readiness check can
+        race pool warmup when little other compilation precedes the decision.)
+        On timeout, degrade gracefully (return False -> serial) rather than hang
+        on a stuck worker.
+        """
+        if get_compile_threads() <= 1 or not _process_pool_allowed():
+            return False
+        if config.triton.proton_profiling:
+            return False
+        if not cls._ready_future:
+            cls._ready_future = cls.process_pool().submit(cls._get_ready)
+        try:
+            cls._ready_future.result(timeout=timeout)
+        except FuturesTimeoutError:
+            log.warning(
+                "Process pool not ready after %ss; falling back to serial", timeout
+            )
+            return False
+        except (BrokenProcessPool, RuntimeError) as e:
+            # A warmup worker died or the pool was closed. The readiness probe
+            # failing must degrade to serial (the documented contract), not
+            # propagate and abort the caller's algorithm selection.
+            log.warning("Process pool unusable (%s); falling back to serial", e)
+            return False
+        return True
+
+    @classmethod
     def wakeup(cls) -> None:
         """
         If using a SubprocPool, signal the sidecar process to start up its
