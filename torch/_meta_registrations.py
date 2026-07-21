@@ -662,103 +662,157 @@ def meta_philox_uniform_(self, key, low=0.0, high=1.0):
     return self
 
 
-def _check_philox_flat_slice_args(
+def _philox_rectangles_do_not_overlap(
+    first_offset,
+    first_size,
+    second_offset,
+    second_size,
+):
+    separated = (math.prod(first_size) == 0) | (math.prod(second_size) == 0)
+    for first_start, first_length, second_start, second_length in zip(
+        first_offset,
+        first_size,
+        second_offset,
+        second_size,
+        strict=True,
+    ):
+        separated = (
+            separated
+            | (first_start >= second_start + second_length)
+            | (second_start >= first_start + first_length)
+        )
+    return separated
+
+
+def _check_philox_shards_args(
     op_name,
     self,
-    total_numel,
-    start_indices,
-    block_sizes,
-    block_strides,
-    num_blocks,
+    global_shape,
+    global_offsets,
+    local_offsets,
+    local_sizes,
+    chunk_count,
 ):
     torch._check(
         self.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64),
         lambda: f"{op_name}: self has unsupported dtype {self.dtype}",
     )
+    ndim = len(global_shape)
     torch._check(
-        total_numel >= 0,
-        lambda: f"{op_name}: total_numel must be non-negative",
+        self.layout == torch.strided,
+        lambda: f"{op_name}: self must be a strided tensor, got {self.layout}",
     )
     torch._check(
-        len(start_indices) == len(block_sizes) == len(block_strides) == len(num_blocks),
-        lambda: f"{op_name}: index block arrays must have the same length",
-    )
-    torch._check(
-        self.numel() <= total_numel,
+        ndim == self.dim(),
         lambda: (
-            f"{op_name}: output numel {self.numel()} exceeds total_numel {total_numel}"
+            f"{op_name}: global_shape and self must have the same number of dimensions"
         ),
     )
     torch._check(
-        total_numel <= torch.iinfo(torch.int32).max,
-        lambda: f"{op_name}: total_numel > INT_MAX is not supported yet",
+        chunk_count >= 0,
+        lambda: f"{op_name}: chunk_count must be non-negative",
+    )
+    if ndim == 0:
+        torch._check(
+            chunk_count <= 1,
+            lambda: f"{op_name}: a scalar tensor can have at most one shard",
+        )
+    expected_metadata_length = chunk_count * ndim
+    torch._check(
+        len(global_offsets) == expected_metadata_length,
+        lambda: (f"{op_name}: global_offsets must contain chunk_count * ndim values"),
+    )
+    torch._check(
+        len(local_offsets) == expected_metadata_length,
+        lambda: (f"{op_name}: local_offsets must contain chunk_count * ndim values"),
+    )
+    torch._check(
+        len(local_sizes) == expected_metadata_length,
+        lambda: (f"{op_name}: local_sizes must contain chunk_count * ndim values"),
     )
 
+    for size in global_shape:
+        torch._check(
+            size >= 0,
+            lambda: f"{op_name}: global_shape must be non-negative",
+        )
+    global_numel = math.prod(global_shape)
+    torch._check(
+        global_numel <= torch.iinfo(torch.int32).max,
+        lambda: f"{op_name}: global_shape has more than INT_MAX elements",
+    )
+
+    global_rectangles = []
+    local_rectangles = []
     mapped_numel = 0
-    for start_index, block_size, block_stride, block_count in zip(
-        start_indices, block_sizes, block_strides, num_blocks
+    for chunk in range(chunk_count):
+        start = chunk * ndim
+        end = start + ndim
+        global_offset = global_offsets[start:end]
+        local_offset = local_offsets[start:end]
+        local_size = local_sizes[start:end]
+
+        for dim, (g_offset, l_offset, size, global_dim, local_dim) in enumerate(
+            zip(
+                global_offset,
+                local_offset,
+                local_size,
+                global_shape,
+                self.shape,
+                strict=True,
+            )
+        ):
+            torch._check(
+                (g_offset >= 0)
+                & (size >= 0)
+                & (size <= global_dim)
+                & (g_offset <= global_dim - size),
+                lambda: (
+                    f"{op_name}: global shard {chunk} dimension {dim} is outside "
+                    "global_shape"
+                ),
+            )
+            torch._check(
+                (l_offset >= 0) & (size <= local_dim) & (l_offset <= local_dim - size),
+                lambda: (
+                    f"{op_name}: local shard {chunk} dimension {dim} is outside "
+                    "self shape"
+                ),
+            )
+
+        global_rectangles.append((global_offset, local_size))
+        local_rectangles.append((local_offset, local_size))
+        chunk_numel = math.prod(local_size)
+        torch._check(
+            chunk_numel <= self.numel() - mapped_numel,
+            lambda: (
+                f"{op_name}: local shard metadata describes more than "
+                "self.numel() elements"
+            ),
+        )
+        mapped_numel += chunk_numel
+
+    for name, rectangles in (
+        ("global", global_rectangles),
+        ("local", local_rectangles),
     ):
-        torch._check(
-            start_index >= 0,
-            lambda: f"{op_name}: start_index must be non-negative",
-        )
-        torch._check(
-            start_index <= total_numel,
-            lambda: (
-                f"{op_name}: start_index {start_index} exceeds total_numel "
-                f"{total_numel}"
-            ),
-        )
-        torch._check(
-            block_size >= 0,
-            lambda: f"{op_name}: block_size must be non-negative",
-        )
-        torch._check(
-            block_count >= 0,
-            lambda: f"{op_name}: num_blocks must be non-negative",
-        )
-        empty_block = (block_size == 0) | (block_count == 0)
-        torch._check(
-            block_size * block_count <= total_numel,
-            lambda: f"{op_name}: block_size * num_blocks exceeds total_numel",
-        )
-        torch._check(
-            empty_block | (block_stride >= block_size),
-            lambda: (
-                f"{op_name}: block_stride {block_stride} must be at least "
-                f"block_size {block_size}"
-            ),
-        )
-        torch._check(
-            empty_block | (block_stride <= total_numel),
-            lambda: (
-                f"{op_name}: block_stride {block_stride} exceeds total_numel "
-                f"{total_numel}"
-            ),
-        )
-        local_numel = block_size * block_count
-        torch._check(
-            local_numel <= self.numel() - mapped_numel,
-            lambda: (
-                f"{op_name}: index blocks describe more than output numel "
-                f"{self.numel()}"
-            ),
-        )
-        end_index = start_index + (block_count - 1) * block_stride + block_size
-        torch._check(
-            empty_block | (end_index <= total_numel),
-            lambda: (
-                f"{op_name}: output blocks end at {end_index}, beyond total_numel "
-                f"{total_numel}"
-            ),
-        )
-        mapped_numel += local_numel
+        for first in range(len(rectangles)):
+            for second in range(first + 1, len(rectangles)):
+                torch._check(
+                    _philox_rectangles_do_not_overlap(
+                        *rectangles[first], *rectangles[second]
+                    ),
+                    lambda: (
+                        f"{op_name}: {name} shards {first} and {second} "
+                        "must not overlap"
+                    ),
+                )
 
     torch._check(
         mapped_numel == self.numel(),
         lambda: (
-            f"{op_name}: index blocks describe {mapped_numel} elements, "
-            f"expected output numel {self.numel()}"
+            f"{op_name}: local shard metadata must cover the entire tensor: "
+            f"described {mapped_numel} of {self.numel()} elements"
         ),
     )
 
@@ -813,23 +867,21 @@ _PHILOX_DISTRIBUTION_NORMAL = 0
 _PHILOX_DISTRIBUTION_UNIFORM = 1
 
 
-def _check_philox_flat_slice_distribution(self, kind, params):
+def _check_philox_shards_distribution(self, kind, params):
     torch._check(
         kind in (_PHILOX_DISTRIBUTION_NORMAL, _PHILOX_DISTRIBUTION_UNIFORM),
-        lambda: (
-            f"_philox_distribution_flat_slice_: unsupported distribution kind {kind}"
-        ),
+        lambda: (f"_philox_distribution_shards_: unsupported distribution kind {kind}"),
     )
     torch._check(
         len(params) == 2,
         lambda: (
-            f"_philox_distribution_flat_slice_: distribution kind {kind} "
+            f"_philox_distribution_shards_: distribution kind {kind} "
             f"expects 2 parameters, got {len(params)}"
         ),
     )
     torch._check(
         all(not isinstance(param, complex) for param in params),
-        lambda: "_philox_distribution_flat_slice_: parameters must be real",
+        lambda: "_philox_distribution_shards_: parameters must be real",
     )
     if kind == _PHILOX_DISTRIBUTION_NORMAL:
         _check_philox_normal_std(params[1])
@@ -837,27 +889,27 @@ def _check_philox_flat_slice_distribution(self, kind, params):
         _check_philox_uniform_bounds(self, params[0], params[1])
 
 
-@register_meta(aten._philox_distribution_flat_slice_.default)
-def meta_philox_distribution_flat_slice_(
+@register_meta(aten._philox_distribution_shards_.default)
+def meta_philox_distribution_shards_(
     self,
-    total_numel,
-    start_indices,
-    block_sizes,
-    block_strides,
-    num_blocks,
+    global_shape,
+    global_offsets,
+    local_offsets,
+    local_sizes,
+    chunk_count,
     kind,
     params,
     generator=None,
 ):
-    _check_philox_flat_slice_distribution(self, kind, params)
-    _check_philox_flat_slice_args(
-        "_philox_distribution_flat_slice_",
+    _check_philox_shards_distribution(self, kind, params)
+    _check_philox_shards_args(
+        "_philox_distribution_shards_",
         self,
-        total_numel,
-        start_indices,
-        block_sizes,
-        block_strides,
-        num_blocks,
+        global_shape,
+        global_offsets,
+        local_offsets,
+        local_sizes,
+        chunk_count,
     )
     return self
 

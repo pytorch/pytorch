@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/AccumulateType.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
@@ -13,15 +14,17 @@
 #include <ATen/OpMathType.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
-#include <c10/core/SymIntArrayRef.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_numerics.h>
+#include <array>
 #include <limits>
 #include <type_traits>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_philox_distribution_flat_slice_native.h>
+#include <ATen/ops/_philox_distribution_shards_native.h>
 #include <ATen/ops/_philox_normal_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #endif
@@ -113,15 +116,300 @@ __device__ __forceinline__ double2 box_muller_double(uint4 r) {
   return {radius * c, radius * s};
 }
 
+// A non-empty logical tensor with at most INT_MAX elements has at most 30
+// dimensions whose size is greater than one. Size-one dimensions are folded
+// into each chunk's base offsets before constructing this calculator.
+constexpr int kMaxDistributionShardDims = 30;
+
+struct DistributionShardOffsetCalculator {
+  C10_HOST_DEVICE std::array<int64_t, 2> get(uint32_t linear_idx) const {
+    std::array<int64_t, 2> offsets{0, 0};
+    for (int dim = 0; dim < dims; ++dim) {
+      const auto divmod = sizes[dim].divmod(linear_idx);
+      linear_idx = divmod.div;
+      offsets[0] += static_cast<int64_t>(divmod.mod) * global_strides[dim];
+      offsets[1] += static_cast<int64_t>(divmod.mod) * local_strides[dim];
+    }
+    return offsets;
+  }
+
+  int dims{0};
+  at::cuda::detail::IntDivider<uint32_t> sizes[kMaxDistributionShardDims];
+  int64_t global_strides[kMaxDistributionShardDims];
+  int64_t local_strides[kMaxDistributionShardDims];
+};
+
+struct DistributionShardLaunch {
+  int64_t numel;
+  int64_t global_base;
+  int64_t local_base;
+  DistributionShardOffsetCalculator offset_calculator;
+};
+
+bool rectangles_overlap(
+    IntArrayRef offsets,
+    IntArrayRef sizes,
+    size_t first,
+    size_t second,
+    size_t ndim) {
+  for (const auto dim : c10::irange(ndim)) {
+    const auto first_offset = offsets[first * ndim + dim];
+    const auto second_offset = offsets[second * ndim + dim];
+    const auto first_size = sizes[first * ndim + dim];
+    const auto second_size = sizes[second * ndim + dim];
+    if (first_offset >= second_offset + second_size ||
+        second_offset >= first_offset + first_size) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void append_shard_dimension(
+    DistributionShardOffsetCalculator& calculator,
+    int64_t size,
+    int64_t global_stride,
+    int64_t local_stride) {
+  if (size <= 1) {
+    return;
+  }
+
+  if (calculator.dims > 0) {
+    const int previous = calculator.dims - 1;
+    const int64_t inner_size = calculator.sizes[previous].divisor;
+    int64_t expected_global_stride;
+    int64_t expected_local_stride;
+    const bool global_stride_overflow = c10::mul_overflows(
+        inner_size,
+        calculator.global_strides[previous],
+        &expected_global_stride);
+    const bool local_stride_overflow = c10::mul_overflows(
+        inner_size, calculator.local_strides[previous], &expected_local_stride);
+    if (!global_stride_overflow && !local_stride_overflow &&
+        global_stride == expected_global_stride &&
+        local_stride == expected_local_stride) {
+      const auto combined_size = static_cast<uint32_t>(inner_size * size);
+      calculator.sizes[previous] =
+          at::cuda::detail::IntDivider<uint32_t>(combined_size);
+      return;
+    }
+  }
+
+  TORCH_CHECK(
+      calculator.dims < kMaxDistributionShardDims,
+      "_philox_distribution_shards_: too many non-trivial shard dimensions");
+  const int index = calculator.dims++;
+  calculator.sizes[index] =
+      at::cuda::detail::IntDivider<uint32_t>(static_cast<uint32_t>(size));
+  calculator.global_strides[index] = global_stride;
+  calculator.local_strides[index] = local_stride;
+}
+
+std::vector<DistributionShardLaunch> validate_and_build_shard_launches(
+    const Tensor& self,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    int64_t& global_numel) {
+  constexpr const char* op_name = "_philox_distribution_shards_";
+  TORCH_CHECK(
+      self.layout() == kStrided,
+      op_name,
+      ": self must be a strided tensor, got ",
+      self.layout());
+  TORCH_CHECK(
+      static_cast<size_t>(self.dim()) == global_shape.size(),
+      op_name,
+      ": global_shape and self must have the same number of dimensions");
+  TORCH_CHECK(chunk_count >= 0, op_name, ": chunk_count must be non-negative");
+
+  const size_t ndim = global_shape.size();
+  if (ndim == 0) {
+    TORCH_CHECK(
+        chunk_count <= 1,
+        op_name,
+        ": a scalar tensor can have at most one shard");
+  } else {
+    TORCH_CHECK(
+        static_cast<uint64_t>(chunk_count) <=
+            std::numeric_limits<size_t>::max() / ndim,
+        op_name,
+        ": shard metadata is too large");
+  }
+  const size_t expected_metadata_size = static_cast<size_t>(chunk_count) * ndim;
+  TORCH_CHECK(
+      global_offsets.size() == expected_metadata_size &&
+          local_offsets.size() == expected_metadata_size &&
+          local_sizes.size() == expected_metadata_size,
+      op_name,
+      ": flattened shard metadata arrays must contain chunk_count * ndim values");
+
+  bool has_zero_global_dim = false;
+  for (const auto dim : c10::irange(ndim)) {
+    TORCH_CHECK(
+        global_shape[dim] >= 0, op_name, ": global_shape must be non-negative");
+    has_zero_global_dim |= global_shape[dim] == 0;
+  }
+  global_numel = has_zero_global_dim ? 0 : 1;
+  if (!has_zero_global_dim) {
+    for (const auto size : global_shape) {
+      TORCH_CHECK(
+          size <= std::numeric_limits<int32_t>::max() / global_numel,
+          op_name,
+          ": global_shape has more than INT_MAX elements");
+      global_numel *= size;
+    }
+  }
+
+  std::vector<int64_t> chunk_numels(static_cast<size_t>(chunk_count));
+  int64_t mapped_numel = 0;
+  for (const auto chunk : c10::irange(static_cast<size_t>(chunk_count))) {
+    bool empty_chunk = false;
+    for (const auto dim : c10::irange(ndim)) {
+      const size_t index = chunk * ndim + dim;
+      const int64_t global_offset = global_offsets[index];
+      const int64_t local_offset = local_offsets[index];
+      const int64_t local_size = local_sizes[index];
+      const int64_t global_size = global_shape[dim];
+      const int64_t tensor_size = self.size(static_cast<int64_t>(dim));
+      TORCH_CHECK(
+          global_offset >= 0 && local_size >= 0 && local_size <= global_size &&
+              global_offset <= global_size - local_size,
+          op_name,
+          ": global shard ",
+          chunk,
+          " dimension ",
+          dim,
+          " is outside global_shape");
+      TORCH_CHECK(
+          local_offset >= 0 && local_size <= tensor_size &&
+              local_offset <= tensor_size - local_size,
+          op_name,
+          ": local shard ",
+          chunk,
+          " dimension ",
+          dim,
+          " is outside self shape");
+      empty_chunk |= local_size == 0;
+    }
+
+    int64_t chunk_numel = empty_chunk ? 0 : 1;
+    if (!empty_chunk) {
+      for (const auto dim : c10::irange(ndim)) {
+        const int64_t size = local_sizes[chunk * ndim + dim];
+        TORCH_INTERNAL_ASSERT(
+            size <= std::numeric_limits<int32_t>::max() / chunk_numel);
+        chunk_numel *= size;
+      }
+    }
+    TORCH_CHECK(
+        chunk_numel <= self.numel() - mapped_numel,
+        op_name,
+        ": local shard metadata describes more than self.numel() elements");
+    mapped_numel += chunk_numel;
+    chunk_numels[chunk] = chunk_numel;
+  }
+  TORCH_CHECK(
+      mapped_numel == self.numel(),
+      op_name,
+      ": local shard metadata must cover the entire tensor: described ",
+      mapped_numel,
+      " of ",
+      self.numel(),
+      " elements");
+
+  for (size_t first = 0; first < static_cast<size_t>(chunk_count); ++first) {
+    if (chunk_numels[first] == 0) {
+      continue;
+    }
+    for (size_t second = first + 1; second < static_cast<size_t>(chunk_count);
+         ++second) {
+      if (chunk_numels[second] == 0) {
+        continue;
+      }
+      TORCH_CHECK(
+          !rectangles_overlap(global_offsets, local_sizes, first, second, ndim),
+          op_name,
+          ": global shards ",
+          first,
+          " and ",
+          second,
+          " must not overlap");
+      TORCH_CHECK(
+          !rectangles_overlap(local_offsets, local_sizes, first, second, ndim),
+          op_name,
+          ": local shards ",
+          first,
+          " and ",
+          second,
+          " must not overlap");
+    }
+  }
+  at::assert_no_internal_overlap(self);
+
+  if (global_numel == 0) {
+    return {};
+  }
+
+  std::vector<int64_t> global_strides(ndim);
+  int64_t stride = 1;
+  for (size_t dim = ndim; dim > 0; --dim) {
+    global_strides[dim - 1] = stride;
+    stride *= global_shape[dim - 1];
+  }
+
+  std::vector<DistributionShardLaunch> launches;
+  launches.reserve(static_cast<size_t>(chunk_count));
+  for (const auto chunk : c10::irange(static_cast<size_t>(chunk_count))) {
+    if (chunk_numels[chunk] == 0) {
+      continue;
+    }
+    DistributionShardLaunch launch{};
+    launch.numel = chunk_numels[chunk];
+    for (const auto dim : c10::irange(ndim)) {
+      const size_t index = chunk * ndim + dim;
+      int64_t global_term;
+      int64_t local_term;
+      TORCH_CHECK(
+          !c10::mul_overflows(
+              global_offsets[index], global_strides[dim], &global_term) &&
+              !c10::add_overflows(
+                  launch.global_base, global_term, &launch.global_base),
+          op_name,
+          ": global shard offset overflow");
+      TORCH_CHECK(
+          !c10::mul_overflows(
+              local_offsets[index],
+              self.stride(static_cast<int64_t>(dim)),
+              &local_term) &&
+              !c10::add_overflows(
+                  launch.local_base, local_term, &launch.local_base),
+          op_name,
+          ": local shard offset overflow");
+    }
+    for (size_t dim = ndim; dim > 0; --dim) {
+      const size_t logical_dim = dim - 1;
+      append_shard_dimension(
+          launch.offset_calculator,
+          local_sizes[chunk * ndim + logical_dim],
+          global_strides[logical_dim],
+          self.stride(static_cast<int64_t>(logical_dim)));
+    }
+    launches.push_back(launch);
+  }
+  return launches;
+}
+
 template <typename scalar_t, typename sample_t, typename param_t>
-__global__ void distribution_flat_slice_kernel(
+__global__ void distribution_shard_kernel(
     scalar_t* __restrict__ output,
     PhiloxCudaState philox_args,
     int64_t local_numel,
-    int64_t total_numel,
-    int64_t start_index,
-    int64_t block_size,
-    int64_t block_stride,
+    int64_t global_base,
+    int64_t local_base,
+    DistributionShardOffsetCalculator offset_calculator,
     int64_t total_grid,
     sample_t sample_func,
     param_t param_func) {
@@ -132,14 +420,8 @@ __global__ void distribution_flat_slice_kernel(
     return;
   }
 
-  const int64_t logical_index = block_size == local_numel
-      ? start_index + local_idx
-      : start_index + (local_idx / block_size) * block_stride +
-          local_idx % block_size;
-  if (logical_index >= total_numel) {
-    return;
-  }
-
+  const auto offsets = offset_calculator.get(static_cast<uint32_t>(local_idx));
+  const int64_t logical_index = global_base + offsets[0];
   const int64_t total_stride = blockDim.x * total_grid;
   const int64_t thread_index = logical_index % total_stride;
   const int64_t thread_iteration_and_lane = logical_index / total_stride;
@@ -155,116 +437,36 @@ __global__ void distribution_flat_slice_kernel(
       offset + thread_iteration * max_generator_offsets_per_curand_call,
       &state);
   auto sample = sample_func(&state);
-  output[local_idx] = param_func((&sample.x)[lane]);
+  output[local_base + offsets[1]] = param_func((&sample.x)[lane]);
 }
 
 template <typename scalar_t, typename sample_t, typename param_t>
-void distribution_flat_slice(
-    const char* op_name,
+void distribution_shards(
     Tensor& self,
-    int64_t total_numel,
-    IntArrayRef start_indices,
-    IntArrayRef block_sizes,
-    IntArrayRef block_strides,
-    IntArrayRef num_blocks,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
     std::optional<Generator> generator,
     const sample_t& sample_func,
     const param_t& param_func) {
-  TORCH_CHECK(
-      self.is_floating_point(),
-      op_name,
-      ": self must be a floating point tensor, got ",
-      self.scalar_type());
-  TORCH_CHECK(total_numel >= 0, op_name, ": total_numel must be non-negative");
-  TORCH_CHECK(
-      start_indices.size() == block_sizes.size() &&
-          start_indices.size() == block_strides.size() &&
-          start_indices.size() == num_blocks.size(),
-      op_name,
-      ": index block arrays must have the same length");
-  TORCH_CHECK(
-      self.numel() <= total_numel,
-      op_name,
-      ": output numel ",
-      self.numel(),
-      " exceeds total_numel ",
-      total_numel);
-  TORCH_CHECK(
-      total_numel <= std::numeric_limits<int32_t>::max(),
-      op_name,
-      ": total_numel > INT_MAX is not supported yet");
-
-  int64_t mapped_numel = 0;
-  for (const auto index : c10::irange(start_indices.size())) {
-    const int64_t start_index = start_indices[index];
-    const int64_t block_size = block_sizes[index];
-    const int64_t block_stride = block_strides[index];
-    const int64_t block_count = num_blocks[index];
-    TORCH_CHECK(
-        start_index >= 0, op_name, ": start_index must be non-negative");
-    TORCH_CHECK(
-        start_index <= total_numel,
-        op_name,
-        ": start_index ",
-        start_index,
-        " exceeds total_numel ",
-        total_numel);
-    TORCH_CHECK(
-        block_size >= 0, op_name, ": block_size must be non-negative");
-    TORCH_CHECK(
-        block_count >= 0, op_name, ": num_blocks must be non-negative");
-    if (block_size == 0 || block_count == 0) {
-      continue;
-    }
-    TORCH_CHECK(
-        block_count <= total_numel / block_size,
-        op_name,
-        ": block_size * num_blocks exceeds total_numel");
-    TORCH_CHECK(
-        block_stride >= block_size,
-        op_name,
-        ": block_stride ",
-        block_stride,
-        " must be at least block_size ",
-        block_size);
-    TORCH_CHECK(
-        block_stride <= total_numel,
-        op_name,
-        ": block_stride ",
-        block_stride,
-        " exceeds total_numel ",
-        total_numel);
-    const int64_t local_numel = block_size * block_count;
-    TORCH_CHECK(
-        local_numel <= self.numel() - mapped_numel,
-        op_name,
-        ": index blocks describe more than output numel ",
-        self.numel());
-    const int64_t end_index =
-        start_index + (block_count - 1) * block_stride + block_size;
-    TORCH_CHECK(
-        end_index <= total_numel,
-        op_name,
-        ": output blocks end at ",
-        end_index,
-        ", beyond total_numel ",
-        total_numel);
-    mapped_numel += local_numel;
-  }
-  TORCH_CHECK(
-      mapped_numel == self.numel(),
-      op_name,
-      ": index blocks describe ",
-      mapped_numel,
-      " elements, expected output numel ",
-      self.numel());
-  if (total_numel == 0) {
+  int64_t global_numel;
+  auto launches = validate_and_build_shard_launches(
+      self,
+      global_shape,
+      global_offsets,
+      local_offsets,
+      local_sizes,
+      chunk_count,
+      global_numel);
+  if (global_numel == 0) {
     return;
   }
 
   constexpr int unroll_factor = elems_per_call<scalar_t>;
   auto [counter_offset, total_grid, block] =
-      calc_execution_policy(total_numel, unroll_factor);
+      calc_execution_policy(global_numel, unroll_factor);
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(
       generator, cuda::detail::getDefaultCUDAGenerator());
   PhiloxCudaState rng_engine_inputs;
@@ -276,37 +478,23 @@ void distribution_flat_slice(
     return;
   }
 
-  auto output = self.contiguous();
-  int64_t local_start = 0;
-  for (const auto index : c10::irange(start_indices.size())) {
-    const int64_t start_index = start_indices[index];
-    const int64_t block_size = block_sizes[index];
-    const int64_t block_stride = block_strides[index];
-    const int64_t local_numel = block_size * num_blocks[index];
-    if (local_numel == 0) {
-      continue;
-    }
+  auto* output = self.mutable_data_ptr<scalar_t>();
+  for (const auto& launch : launches) {
     const uint32_t local_grid =
-        static_cast<uint32_t>((local_numel + block.x - 1) / block.x);
-    distribution_flat_slice_kernel<scalar_t>
+        static_cast<uint32_t>((launch.numel + block.x - 1) / block.x);
+    distribution_shard_kernel<scalar_t>
         <<<local_grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        output.mutable_data_ptr<scalar_t>() + local_start,
-        rng_engine_inputs,
-        local_numel,
-        total_numel,
-        start_index,
-        block_size,
-        block_stride,
-        total_grid.x,
-        sample_func,
-        param_func);
-    local_start += local_numel;
+            output,
+            rng_engine_inputs,
+            launch.numel,
+            launch.global_base,
+            launch.local_base,
+            launch.offset_calculator,
+            total_grid.x,
+            sample_func,
+            param_func);
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-  if (output.data_ptr() != self.data_ptr()) {
-    self.copy_(output);
-  }
 }
 
 void validate_normal_std(double stddev) {
@@ -597,37 +785,35 @@ Tensor& _philox_normal_cuda_(
   return self;
 }
 
-Tensor& _philox_distribution_flat_slice_symint_cuda_(
+Tensor& _philox_distribution_shards_symint_cuda_(
     Tensor& self,
-    c10::SymInt total_numel,
-    c10::SymIntArrayRef start_indices,
-    c10::SymIntArrayRef block_sizes,
-    c10::SymIntArrayRef block_strides,
-    c10::SymIntArrayRef num_blocks,
+    c10::SymIntArrayRef global_shape,
+    c10::SymIntArrayRef global_offsets,
+    c10::SymIntArrayRef local_offsets,
+    c10::SymIntArrayRef local_sizes,
+    int64_t chunk_count,
     int64_t kind,
     ArrayRef<Scalar> params,
     std::optional<Generator> generator) {
-  const int64_t total_numel_int =
-      total_numel.guard_int(__FILE__, __LINE__);
-  const auto start_indices_int = C10_AS_INTARRAYREF_SLOW_ALLOC(start_indices);
-  const auto block_sizes_int = C10_AS_INTARRAYREF_SLOW_ALLOC(block_sizes);
-  const auto block_strides_int = C10_AS_INTARRAYREF_SLOW_ALLOC(block_strides);
-  const auto num_blocks_int = C10_AS_INTARRAYREF_SLOW_ALLOC(num_blocks);
+  const auto global_shape_int = C10_AS_INTARRAYREF_SLOW_ALLOC(global_shape);
+  const auto global_offsets_int = C10_AS_INTARRAYREF_SLOW_ALLOC(global_offsets);
+  const auto local_offsets_int = C10_AS_INTARRAYREF_SLOW_ALLOC(local_offsets);
+  const auto local_sizes_int = C10_AS_INTARRAYREF_SLOW_ALLOC(local_sizes);
   const auto distribution_kind = static_cast<PhiloxDistributionKind>(kind);
   TORCH_CHECK(
       distribution_kind == PhiloxDistributionKind::Normal ||
           distribution_kind == PhiloxDistributionKind::Uniform,
-      "_philox_distribution_flat_slice_: unsupported distribution kind ",
+      "_philox_distribution_shards_: unsupported distribution kind ",
       kind);
   TORCH_CHECK(
       params.size() == 2,
-      "_philox_distribution_flat_slice_: distribution kind ",
+      "_philox_distribution_shards_: distribution kind ",
       kind,
       " expects 2 parameters, got ",
       params.size());
   TORCH_CHECK(
       !params[0].isComplex() && !params[1].isComplex(),
-      "_philox_distribution_flat_slice_: parameters must be real");
+      "_philox_distribution_shards_: parameters must be real");
 
   const double param0 = params[0].toDouble();
   const double param1 = params[1].toDouble();
@@ -638,23 +824,22 @@ Tensor& _philox_distribution_flat_slice_symint_cuda_(
           kHalf,
           kBFloat16,
           self.scalar_type(),
-          "_philox_distribution_flat_slice_",
+          "_philox_distribution_shards_",
           [&] {
             using accscalar_t = at::acc_type<scalar_t, true>;
             auto mu = static_cast<accscalar_t>(param0);
             auto sigma = static_cast<accscalar_t>(param1);
-            auto param_func = [mu, sigma] __device__ (accscalar_t rand) {
+            auto param_func = [mu, sigma] __device__(accscalar_t rand) {
               return static_cast<scalar_t>(
                   at::transformation::normal<accscalar_t>(rand, mu, sigma));
             };
-            distribution_flat_slice<scalar_t>(
-                "_philox_distribution_flat_slice_",
+            distribution_shards<scalar_t>(
                 self,
-                total_numel_int,
-                start_indices_int,
-                block_sizes_int,
-                block_strides_int,
-                num_blocks_int,
+                global_shape_int,
+                global_offsets_int,
+                local_offsets_int,
+                local_sizes_int,
+                chunk_count,
                 generator,
                 CurandNormalSampler<scalar_t>{},
                 param_func);
@@ -665,25 +850,24 @@ Tensor& _philox_distribution_flat_slice_symint_cuda_(
           kHalf,
           kBFloat16,
           self.scalar_type(),
-          "_philox_distribution_flat_slice_",
+          "_philox_distribution_shards_",
           [&] {
             validate_uniform_bounds<scalar_t>(self, param0, param1);
             using opmath_t = at::opmath_type<scalar_t>;
             auto lo = static_cast<scalar_t>(param0);
             auto hi = static_cast<scalar_t>(param1);
             auto range = static_cast<opmath_t>(hi - lo);
-            auto param_func = [range, lo, hi] __device__ (opmath_t rand) {
+            auto param_func = [range, lo, hi] __device__(opmath_t rand) {
               auto value = static_cast<scalar_t>(rand * range + lo);
               return value == hi ? lo : value;
             };
-            distribution_flat_slice<scalar_t>(
-                "_philox_distribution_flat_slice_",
+            distribution_shards<scalar_t>(
                 self,
-                total_numel_int,
-                start_indices_int,
-                block_sizes_int,
-                block_strides_int,
-                num_blocks_int,
+                global_shape_int,
+                global_offsets_int,
+                local_offsets_int,
+                local_sizes_int,
+                chunk_count,
                 generator,
                 CurandUniformSampler<scalar_t>{},
                 param_func);

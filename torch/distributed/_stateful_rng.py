@@ -11,12 +11,6 @@ from torch.distributed._local_tensor import (
     enabled_local_tensor_mode,
     maybe_run_for_local_tensor,
 )
-from torch.distributed._rng_layout import (
-    _derive_checkpointable_rng_layout,
-    _rng_target_for_layout,
-    _RNGIndexBlock,
-    _scatter_rng_result_,
-)
 
 
 if TYPE_CHECKING:
@@ -99,18 +93,50 @@ def _is_supported_stateful_rng_op(
         and not tensor.is_meta
         and tensor.device.type == "cuda"
         and tensor.dtype in _SUPPORTED_DTYPES
-        and tensor.is_contiguous()
+        and tensor.layout == torch.strided
+    )
+
+
+def _flatten_shard_metadata(
+    global_shape: tuple[int | torch.SymInt, ...],
+    global_offsets: tuple[tuple[int | torch.SymInt, ...], ...],
+    local_offsets: tuple[tuple[int | torch.SymInt, ...], ...],
+    local_sizes: tuple[tuple[int | torch.SymInt, ...], ...],
+) -> tuple[
+    int,
+    list[int | torch.SymInt],
+    list[int | torch.SymInt],
+    list[int | torch.SymInt],
+]:
+    rank = len(global_shape)
+    chunk_count = len(global_offsets)
+
+    def flatten(
+        name: str,
+        chunks: tuple[tuple[int | torch.SymInt, ...], ...],
+    ) -> list[int | torch.SymInt]:
+        if len(chunks) != chunk_count:
+            raise ValueError(f"global_offsets and {name} must have the same length")
+        if any(len(chunk) != rank for chunk in chunks):
+            raise ValueError(f"each {name} entry must have {rank} dimensions")
+        return [value for chunk in chunks for value in chunk]
+
+    return (
+        chunk_count,
+        flatten("global_offsets", global_offsets),
+        flatten("local_offsets", local_offsets),
+        flatten("local_sizes", local_sizes),
     )
 
 
 @maybe_run_for_local_tensor
 def _run_stateful_rng_op_rankwise(
     tensor: torch.Tensor,
-    logical_numel: int | torch.SymInt,
-    start_indices: list[int | torch.SymInt],
-    block_sizes: list[int | torch.SymInt],
-    block_strides: list[int | torch.SymInt],
-    block_counts: list[int | torch.SymInt],
+    global_shape: list[int | torch.SymInt],
+    global_offsets: list[int | torch.SymInt],
+    local_offsets: list[int | torch.SymInt],
+    local_sizes: list[int | torch.SymInt],
+    chunk_count: int,
     kind: int,
     generator: torch.Generator | None,
     generator_state: torch.Tensor | None,
@@ -122,13 +148,13 @@ def _run_stateful_rng_op_rankwise(
         # LocalTensor runs every virtual rank in one process. Replay each rank
         # from the same explicit state, leaving one logical draw consumed.
         generator.set_state(generator_state)
-    return aten._philox_distribution_flat_slice_.default(
+    return aten._philox_distribution_shards_.default(
         tensor,
-        logical_numel,
-        start_indices,
-        block_sizes,
-        block_strides,
-        block_counts,
+        global_shape,
+        global_offsets,
+        local_offsets,
+        local_sizes,
+        chunk_count,
         kind,
         params,
         generator=generator,
@@ -139,10 +165,12 @@ def _run_stateful_rng_op(
     op_call: torch._ops.OpOverload,
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None,
-    logical_numel: int | torch.SymInt,
-    index_blocks: tuple[_RNGIndexBlock, ...],
+    global_shape: tuple[int | torch.SymInt, ...],
+    global_offsets: tuple[tuple[int | torch.SymInt, ...], ...],
+    local_offsets: tuple[tuple[int | torch.SymInt, ...], ...],
+    local_sizes: tuple[tuple[int | torch.SymInt, ...], ...],
 ) -> torch.Tensor:
-    """Run an in-place RNG op for selected indices of one logical CUDA draw."""
+    """Run one logical CUDA draw for rectangular local tensor shards."""
     if op_call not in _STATEFUL_RNG_OP_SPECS:
         raise NotImplementedError(f"Unsupported stateful RNG op {op_call}")
     if kwargs is None:
@@ -168,37 +196,36 @@ def _run_stateful_rng_op(
         raise RuntimeError(
             f"{op_call} logical-index replay does not support dtype {tensor.dtype}"
         )
-    if not tensor.is_contiguous():
+    if tensor.layout != torch.strided:
         raise RuntimeError(
-            f"{op_call}: expected a contiguous local tensor, got stride {tensor.stride()}"
+            f"{op_call}: expected a strided local tensor, got layout {tensor.layout}"
         )
 
     # Validate before entering the rankwise helper or reserving generator state.
     kind, validate = _STATEFUL_RNG_OP_SPECS[op_call]
     validate(tensor, op_args)
     params = tuple(op_args)
+    chunk_count, flat_global_offsets, flat_local_offsets, flat_local_sizes = (
+        _flatten_shard_metadata(
+            global_shape,
+            global_offsets,
+            local_offsets,
+            local_sizes,
+        )
+    )
     generator_state = (
         generator.get_state()
         if generator is not None and enabled_local_tensor_mode()
         else None
     )
-    start_indices: list[int | torch.SymInt] = []
-    block_sizes: list[int | torch.SymInt] = []
-    block_strides: list[int | torch.SymInt] = []
-    block_counts: list[int | torch.SymInt] = []
-    for start_index, block_size, block_stride, num_blocks in index_blocks:
-        start_indices.append(start_index)
-        block_sizes.append(block_size)
-        block_strides.append(block_stride)
-        block_counts.append(num_blocks)
     if generator_state is None:
-        aten._philox_distribution_flat_slice_.default(
+        aten._philox_distribution_shards_.default(
             tensor,
-            logical_numel,
-            start_indices,
-            block_sizes,
-            block_strides,
-            block_counts,
+            global_shape,
+            flat_global_offsets,
+            flat_local_offsets,
+            flat_local_sizes,
+            chunk_count,
             kind,
             params,
             generator=generator,
@@ -206,11 +233,11 @@ def _run_stateful_rng_op(
     else:
         _run_stateful_rng_op_rankwise(
             tensor,
-            logical_numel,
-            start_indices,
-            block_sizes,
-            block_strides,
-            block_counts,
+            list(global_shape),
+            flat_global_offsets,
+            flat_local_offsets,
+            flat_local_sizes,
+            chunk_count,
             kind,
             generator,
             generator_state,
@@ -226,18 +253,16 @@ def _run_stateful_rng_op_for_checkpointable_tensor(
     tensor: CheckpointableTensor,
 ) -> torch.Tensor:
     """Run one dense-equivalent RNG draw using checkpoint shard metadata."""
-    layout = _derive_checkpointable_rng_layout(tensor)
     local_tensor = cast(torch.Tensor, tensor)
-    rng_target = _rng_target_for_layout(local_tensor, layout)
     if not args or args[0] is not local_tensor:
         raise AssertionError("Expected the checkpointable tensor as the first argument")
 
-    _run_stateful_rng_op(
+    return _run_stateful_rng_op(
         op_call,
-        (rng_target, *args[1:]),
+        args,
         kwargs,
-        layout.logical_numel,
-        layout.index_blocks,
+        tensor.global_shape,
+        tensor.global_offsets,
+        tensor.local_offsets,
+        tensor.local_sizes,
     )
-    _scatter_rng_result_(local_tensor, rng_target, layout)
-    return local_tensor
