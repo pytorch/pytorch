@@ -307,11 +307,14 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
         )
         return {}
 
-    # SM103 reuses the SM100 generator, but the CUTLASS manifest must keep
-    # the 103a feature arch so unsupported arch-conditional kernels are skipped.
-    gen_arch = "100" if arch == "103" or arch == "107" else arch
-    manifest_arch = "103a" if arch == "103" else gen_arch
-    manifest_arch = "107a" if arch == "107" else gen_arch
+    # SM103 and SM107 reuse the SM100 generator, but the CUTLASS manifest must keep
+    # the 103a or 107a feature arch so unsupported arch-conditional kernels are skipped.
+    if arch in ("103", "107"):
+        gen_arch = "100"
+        manifest_arch = f"{arch}a"
+    else:
+        gen_arch = manifest_arch = arch
+
     instantiation_level: str = config.cutlass.cutlass_instantiation_level
     args = CUTLASSArgs(
         architectures=manifest_arch,
