@@ -14,7 +14,7 @@ import functools
 import logging
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import torch
 
@@ -140,6 +140,10 @@ def _operand_sig(operand: Any) -> tuple | None:
     # sets these) so a dense operand's torch.Tensor.mode method isn't captured.
     d = getattr(operand, "__dict__", {})
     mode, swizzle = d.get("mode"), d.get("swizzle")
+    # mode/swizzle are cutlass.operators enums (ScaleMode/ScaleSwizzleMode) that
+    # are unhashable, so key on their .name to keep the sig usable as a dict key.
+    mode = getattr(mode, "name", mode)
+    swizzle = getattr(swizzle, "name", swizzle)
     return (dtype, tuple(shape), tuple(stride), scale_sig, mode, swizzle)
 
 
@@ -159,7 +163,7 @@ def _partition_sig(args: Any) -> tuple | None:
 # subprocess precompile fast path). One args query returns the whole set of
 # operators compatible with a shape (hundreds); we index all of them, so any
 # later lookup -- another config of that shape, another shape sharing those
-# templates (common across FLUX shapes), or get_kernel_by_name for a chosen
+# templates, or get_kernel_by_name for a chosen
 # kernel -- resolves in O(1) without rebuilding the ~14s manifest. Operator
 # names embed the arch (e.g. "..._sm100_..."), so the name alone is unambiguous
 # within a process. Reusing an operator across different args is safe for the
@@ -220,9 +224,16 @@ def _filter_supported(kernels: Any, args: Any, cc: int) -> list[Any]:
     return out
 
 
-def _manifest_candidates(args: Any, cc: int) -> list[Any]:
+def _manifest_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     """Compatible operators via a full-manifest scan (last-resort fallback)."""
-    return _filter_supported(_get_kernel_cache().values(), args, cc)
+    kernels = _get_kernel_cache().values()
+    if efc_only:
+        kernels = (
+            kernel
+            for kernel in kernels
+            if "EFC" in kernel.metadata.operator_class.__name__
+        )
+    return _filter_supported(kernels, args, cc)
 
 
 def _blockscaled_provider_classes() -> list[Any]:
@@ -253,27 +264,74 @@ def _blockscaled_provider_classes() -> list[Any]:
 
 
 @functools.cache
-def _blockscaled_operators(cc: int) -> tuple:
-    """All block-scaled operators for this arch (~0.3s), cached per process.
-
-    These sub-providers are the only sources of scale-bearing operators, so
-    enumerating them directly gives the complete scaled design space while
-    avoiding the ~14s full-manifest build (dominated by the dense providers the
-    scaled path never uses). Returns () if no provider is available so the caller
-    can fall back to the manifest.
-
-    No concrete target_sm -- matches how the full manifest is built
-    (get_operators() passes none). A concrete arch narrows generation to that
-    arch's variants and drops valid scale-mode configs (36 vs 96 for fp4); the
-    per-kernel arch check is applied later in _filter_supported instead.
-    """
+def _blockscaled_operators() -> tuple:
+    """Generate the architecture-neutral block-scaled operator pool."""
     ops: list[Any] = []
     for cls in _blockscaled_provider_classes():
         ops.extend(cls.generate_operators(lambda md: True, args=None))
     return tuple(ops)
 
 
-def _scaled_candidates(args: Any, cc: int) -> list[Any]:
+def _scaled_operand_type_signature(args: Any) -> tuple:
+    def operand_signature(operand: Any) -> tuple:
+        scale = getattr(operand, "scale", None)
+        return (
+            _operand_dtype_str(operand),
+            _operand_dtype_str(scale),
+            str(getattr(operand, "mode", None)),
+            str(getattr(operand, "swizzle", None)),
+        )
+
+    return (
+        operand_signature(args.A),
+        operand_signature(args.B),
+        _operand_dtype_str(args.out),
+        str(getattr(args, "accumulator_type", None)),
+    )
+
+
+def _scaled_metadata_type_signature(metadata: Any) -> tuple:
+    operands = metadata.operands
+
+    def operand_signature(operand: Any) -> tuple:
+        scale = getattr(operand, "scale", None)
+        return (
+            _operand_dtype_str(operand),
+            _operand_dtype_str(scale),
+            str(getattr(operand, "mode", None)),
+            str(getattr(operand, "swizzle", None)),
+        )
+
+    return (
+        operand_signature(operands.A),
+        operand_signature(operands.B),
+        _operand_dtype_str(operands.out),
+        str(getattr(operands, "accumulator_type", None)),
+    )
+
+
+@functools.cache
+def _blockscaled_manifest(cc: int, type_signature: tuple):
+    """Build a block-scaled manifest for one operand type recipe.
+
+    The provider set is generated without a concrete target to preserve its
+    complete design space. The manifest applies shape and target filtering when
+    candidates are requested.
+    """
+    import cutlass.operators
+
+    manifest = cutlass.operators.Manifest()
+    manifest.add_operators(
+        [
+            op
+            for op in _blockscaled_operators()
+            if _scaled_metadata_type_signature(op.metadata) == type_signature
+        ]
+    )
+    return manifest
+
+
+def _scaled_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     """Compatible operators for a scaled GEMM via direct block-scaled enumeration.
 
     get_operators(args=...) derives operand configs from the args and
@@ -282,12 +340,19 @@ def _scaled_candidates(args: Any, cc: int) -> list[Any]:
     cheaper than the manifest. Falls back to the manifest if the provider is
     unavailable or nothing matches (e.g. a future non-block-scaled scaled dtype).
     """
-    ops = _blockscaled_operators(cc)
-    if ops:
-        out = _filter_supported(ops, args, cc)
+    manifest = _blockscaled_manifest(cc, _scaled_operand_type_signature(args))
+    if manifest.operators:
+        metadata_filter = (
+            (lambda md: "EFC" in md.operator_class.__name__) if efc_only else None
+        )
+        out = manifest.filter_operators(
+            args=args,
+            metadata_filter=metadata_filter,
+            target_sm=f"{cc}a",
+        )
         if out:
             return out
-    return _manifest_candidates(args, cc)
+    return _manifest_candidates(args, cc, efc_only)
 
 
 def partition_compatible_kernels(
@@ -296,7 +361,8 @@ def partition_compatible_kernels(
     classifier: Callable[[Any], int],
     num_buckets: int,
     efc_only: bool = False,
-    candidate_source: str = "args",
+    candidate_source: Literal["args", "scaled", "manifest"] = "manifest",
+    classifier_key: str | None = None,
 ) -> list[list[Any]]:
     """Partition the operators compatible with `args` into N buckets.
 
@@ -311,7 +377,9 @@ def partition_compatible_kernels(
     """
     sig = _partition_sig(args)
     cache_key = (
-        (sig, cc, num_buckets, efc_only, candidate_source) if sig is not None else None
+        (sig, cc, num_buckets, efc_only, candidate_source, classifier_key)
+        if sig is not None and classifier_key is not None
+        else None
     )
     if cache_key is not None:
         cached = _partition_cache.get(cache_key)
@@ -321,9 +389,11 @@ def partition_compatible_kernels(
     if candidate_source == "args":
         candidates = _args_query_candidates(args, cc, efc_only)
     elif candidate_source == "scaled":
-        candidates = _scaled_candidates(args, cc)
+        candidates = _scaled_candidates(args, cc, efc_only)
+    elif candidate_source == "manifest":
+        candidates = _manifest_candidates(args, cc, efc_only)
     else:
-        candidates = _manifest_candidates(args, cc)
+        raise ValueError(f"Unknown NVGEMM candidate source: {candidate_source}")
 
     buckets: list[list[Any]] = [[] for _ in range(num_buckets)]
     for kernel in candidates:
@@ -405,6 +475,7 @@ def clear_cache() -> None:
         _partition_cache.clear()
         _ops_by_name.clear()
         _blockscaled_operators.cache_clear()
+        _blockscaled_manifest.cache_clear()
 
 
 class _NVGEMMCacheWrapper:

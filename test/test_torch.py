@@ -222,6 +222,39 @@ class TestTorchDeviceType(TestCase):
         b = a.view(2, 5)
         self.assertEqual(torch._C._storage_Use_Count(b.untyped_storage()._cdata), prev_cf + 1)
 
+    @onlyNativeDeviceTypes
+    def test_storage_throws_on_data_ptr_access(self, device):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.storage import _throws_on_data_ptr_access
+
+        def raises_on_data_ptr(storage):
+            try:
+                storage.data_ptr()
+            except RuntimeError:
+                return True
+            return False
+
+        # Normal storage: data_ptr() works, so we report False.
+        s = torch.randn(4, device=device).untyped_storage()
+        self.assertFalse(_throws_on_data_ptr_access(s))
+        self.assertFalse(raises_on_data_ptr(s))
+
+        # FakeTensor with unsafe access disallowed: data_ptr() raises.
+        with FakeTensorMode() as mode:
+            mode._allow_unsafe_data_ptr_access = False
+            fs = torch.randn(4, device=device).untyped_storage()
+            self.assertTrue(_throws_on_data_ptr_access(fs))
+            self.assertTrue(raises_on_data_ptr(fs))
+
+        # Storage armed to throw on the immutable data_ptr path.
+        s2 = torch.randn(4, device=device).untyped_storage()
+        torch._C._set_storage_data_ptr_access_error_msg(s2._cdata, "invalid")
+        self.assertTrue(_throws_on_data_ptr_access(s2))
+        self.assertTrue(raises_on_data_ptr(s2))
+        torch._C._clear_storage_data_ptr_access_error_msg(s2._cdata)
+        self.assertFalse(_throws_on_data_ptr_access(s2))
+        self.assertFalse(raises_on_data_ptr(s2))
+
     @xfailIfTorchDynamo
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -862,6 +895,8 @@ class TestTorchDeviceType(TestCase):
             warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
             # ignore all deprecation warnings
             warnings.filterwarnings("ignore", category=DeprecationWarning)
+            # torch.jit.script emits a visible FutureWarning; ignore it too
+            warnings.filterwarnings("ignore", category=FutureWarning)
             scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
             scripted_cpp_warn_fn()
             warning = w[0]
@@ -886,6 +921,8 @@ class TestTorchDeviceType(TestCase):
             warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
             # ignore all deprecation warnings
             warnings.filterwarnings("ignore", category=DeprecationWarning)
+            # torch.jit.script emits a visible FutureWarning; ignore it too
+            warnings.filterwarnings("ignore", category=FutureWarning)
             scripted_warn_fn = torch.jit.script(warn_fn)
             scripted_warn_fn()
             frameinfo = inspect.getframeinfo(inspect.currentframe())
@@ -894,7 +931,7 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(re.search('Warning!', str(warning.message)) is not None)
 
             # Checks the Python features of the warning
-            self.assertEqual(frameinfo.lineno - 10, warning.lineno)
+            self.assertEqual(frameinfo.lineno - 12, warning.lineno)
             self.assertEqual(len(w), 1)
 
     # FIXME: move to test_testing
@@ -2076,6 +2113,7 @@ class TestTorchDeviceType(TestCase):
                           lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
                           lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
                           lambda: torch.any(y),
+                          lambda: torch.combinations(x, r=2),
                           lambda: torch.normal(x, x))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
