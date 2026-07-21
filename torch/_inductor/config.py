@@ -1983,12 +1983,10 @@ class triton:
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
-    # TODO - enable by default
-    coalesce_tiling_analysis: bool = (
-        os.environ.get(
-            "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS", "1" if not is_fbcode() else "0"
-        )
-        == "1"
+    coalesce_tiling_analysis: bool = Config(
+        justknob="pytorch/inductor:coalesce_tiling_analysis",
+        env_name_force="TORCHINDUCTOR_COALESCE_TILING_ANALYSIS",
+        default=True,
     )
 
     # limit tiling dimensions
