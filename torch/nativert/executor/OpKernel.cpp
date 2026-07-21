@@ -12,6 +12,111 @@
 
 namespace torch::nativert {
 
+namespace {
+
+c10::TypePtr unwrapOptionalType(const c10::TypePtr& type) {
+  if (type->kind() == c10::OptionalType::Kind) {
+    return type->cast<c10::OptionalType>()->getElementType();
+  }
+  return type;
+}
+
+c10::IValue tupleConstantToListIValue(
+    const std::vector<c10::IValue>& elements,
+    const c10::TypePtr& elementType,
+    std::string_view argName);
+
+c10::IValue coerceTupleConstantToSchemaType(
+    c10::IValue value,
+    const c10::TypePtr& schemaType,
+    std::string_view argName) {
+  const auto type = unwrapOptionalType(schemaType);
+  if (!value.isTuple() || type->kind() != c10::ListType::Kind) {
+    return value;
+  }
+
+  return tupleConstantToListIValue(
+      value.toTupleRef().elements(),
+      type->expectRef<c10::ListType>().getElementType(),
+      argName);
+}
+
+c10::IValue tupleConstantToListIValue(
+    const std::vector<c10::IValue>& elements,
+    const c10::TypePtr& elementType,
+    std::string_view argName) {
+  switch (elementType->kind()) {
+    case c10::TypeKind::IntType:
+    case c10::TypeKind::SymIntType: {
+      std::vector<int64_t> values;
+      values.reserve(elements.size());
+      for (const auto& element : elements) {
+        TORCH_CHECK(
+            element.isInt(),
+            "Tuple constant for list-typed schema argument ",
+            argName,
+            " expected int elements, but found ",
+            element.tagKind());
+        values.push_back(element.toInt());
+      }
+      return values;
+    }
+    case c10::TypeKind::FloatType: {
+      std::vector<double> values;
+      values.reserve(elements.size());
+      for (const auto& element : elements) {
+        TORCH_CHECK(
+            element.isDouble(),
+            "Tuple constant for list-typed schema argument ",
+            argName,
+            " expected float elements, but found ",
+            element.tagKind());
+        values.push_back(element.toDouble());
+      }
+      return values;
+    }
+    case c10::TypeKind::BoolType: {
+      std::vector<bool> values;
+      values.reserve(elements.size());
+      for (const auto& element : elements) {
+        TORCH_CHECK(
+            element.isBool(),
+            "Tuple constant for list-typed schema argument ",
+            argName,
+            " expected bool elements, but found ",
+            element.tagKind());
+        values.push_back(element.toBool());
+      }
+      return values;
+    }
+    case c10::TypeKind::StringType: {
+      std::vector<std::string> values;
+      values.reserve(elements.size());
+      for (const auto& element : elements) {
+        TORCH_CHECK(
+            element.isString(),
+            "Tuple constant for list-typed schema argument ",
+            argName,
+            " expected string elements, but found ",
+            element.tagKind());
+        values.emplace_back(element.toStringRef());
+      }
+      return values;
+    }
+    default: {
+      c10::List<c10::IValue> list(elementType);
+      list.reserve(elements.size());
+      for (const auto& element : elements) {
+        list.push_back(
+            coerceTupleConstantToSchemaType(element, elementType, argName));
+      }
+      return list;
+    }
+  }
+}
+
+} // namespace
+
 c10::OperatorHandle getOperatorForTarget(
     std::string_view target,
     const Node* node) {
@@ -105,7 +210,8 @@ Arguments prefillStackWithStaticArgs(
     // Check if this is a statically known input to the op.
     const auto attribute = node->tryGetAttribute(argName);
     if (attribute != nullptr) {
-      stackWithStaticArgs.at(idx) = constantToIValue(attribute->value);
+      stackWithStaticArgs.at(idx) = coerceTupleConstantToSchemaType(
+          constantToIValue(attribute->value), schemaArg.type(), argName);
       continue;
     }
 

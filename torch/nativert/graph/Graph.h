@@ -99,6 +99,8 @@ using Constant = std::variant<
     bool,
     std::vector<bool>,
     std::vector<std::string>,
+    // Represents tuple constants.
+    std::vector<c10::IValue>,
     std::vector<std::vector<int64_t>>,
     std::vector<std::vector<double>>,
     std::unique_ptr<Graph>>;

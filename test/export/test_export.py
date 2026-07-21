@@ -10001,6 +10001,40 @@ def forward(self, x):
         ep = export(Simple(), example_inputs)
         self.assertEqual(ep.module()(*example_inputs), Simple()(*example_inputs))
 
+    @testing.expectedFailureCppRuntime
+    @testing.expectedFailureCppRuntimeNonStrict
+    def test_while_loop_mixed_symint_tensor_tuple_operands(self):
+        class Simple(torch.nn.Module):
+            def forward(self, x):
+                i = x.size(0)
+                acc = x.clone()
+
+                def cond_fn(i, acc):
+                    return i > 0
+
+                def body_fn(i, acc):
+                    return i - 1, acc + 1
+
+                _, out = torch._higher_order_ops.while_loop(cond_fn, body_fn, (i, acc))
+                return out
+
+        x = torch.randn(4)
+        dynamic_shapes = {"x": {0: Dim("n", min=2, max=8)}}
+        ep = export(Simple(), (x,), dynamic_shapes=dynamic_shapes)
+        self.assertEqual(ep.module()(x), Simple()(x))
+
+        while_loop_node = next(
+            node
+            for node in ep.graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.higher_order.while_loop
+        )
+        self.assertEqual(type(while_loop_node.args[2]), tuple)
+        self.assertEqual(len(while_loop_node.args[2]), 2)
+        # NativeRT currently cannot materialize one HOP operand value that mixes
+        # SymInt and Tensor elements. The CppRuntime decorators above document
+        # that limitation until symbolicToValue grows a mixed representation.
+
     def test_constrain_size_with_various_cases(self):
         class Module1(torch.nn.Module):
             def forward(self, x, y):
@@ -10721,7 +10755,7 @@ def forward(self, x):
             str(schema),
             """cond(SymBool pred, GraphModule true_fn, GraphModule false_fn, Tensor[2] operands) -> Tensor[1]""",
         )
-        # serdes deserializes tuple as list
+        # serdes preserves the tuple operands
         if need_serdes_test(self._testMethodName):
             self.assertExpectedInline(
                 ep.graph_module.code.strip(),
@@ -10731,7 +10765,7 @@ def forward(self, b_a_buffer, x):
     gt = sym_size_int_1 > 4;  sym_size_int_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, b_a_buffer]);  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b_a_buffer));  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
             )

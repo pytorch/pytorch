@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <torch/nativert/executor/triton/TritonKernelManager.h>
 #include <torch/nativert/kernels/TritonKernel.h>
 
 using namespace ::testing;
@@ -22,4 +23,21 @@ TEST(TritonKernelManagerRegistrationTests, TestRegister) {
   EXPECT_FALSE(TritonKernelManagerRegistry()->Has(at::kCUDA));
   EXPECT_FALSE(TritonKernelManagerRegistry()->Has(at::kHIP));
 #endif // USE_CUDA
+}
+
+TEST(TritonKernelManagerRegistrationTests, ParseTupleGridAttribute) {
+  auto graph = Graph::createGraph();
+  Node* node = graph->insertNode(
+      "torch.ops.higher_order.triton_kernel_wrapper_functional");
+  node->addAttribute(Attribute{
+      "grid",
+      std::vector<c10::IValue>{
+          c10::IValue(2), c10::IValue(3), c10::IValue(4)}});
+
+  LaunchParams params;
+  params.parseCommonAttributes(node);
+
+  EXPECT_EQ(params.grid_dims.x, 2);
+  EXPECT_EQ(params.grid_dims.y, 3);
+  EXPECT_EQ(params.grid_dims.z, 4);
 }
