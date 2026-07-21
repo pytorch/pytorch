@@ -2,13 +2,43 @@
 
 set -ex
 
-# for pip_install function
-source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
-
-ROCM_COMPOSABLE_KERNEL_VERSION="$(cat $(dirname $0)/../ci_commit_pins/rocm-composable-kernel.txt)"
-
 ver() {
     printf "%3d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
+}
+
+write_rocm_env() {
+    local include_therock_sysdeps="${1:-0}"
+
+    cat > /etc/rocm_env.sh << ROCM_ENV
+# ROCm paths
+export ROCM_PATH=/opt/rocm
+export ROCM_HOME=/opt/rocm
+export ROCM_SOURCE_DIR=/opt/rocm
+export ROCM_BIN=/opt/rocm/bin
+export ROCM_CMAKE=/opt/rocm
+export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:\${PATH}
+export LD_LIBRARY_PATH=/opt/rocm/lib:\${LD_LIBRARY_PATH:-}
+# Device library path
+export HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
+export MAGMA_HOME=/opt/rocm/magma
+ROCM_ENV
+
+    if [[ "${include_therock_sysdeps}" == "1" ]]; then
+        cat >> /etc/rocm_env.sh << ROCM_ENV
+# Sysdeps include paths (libdrm headers, etc.)
+export CPLUS_INCLUDE_PATH=/opt/rocm/lib/rocm_sysdeps/include:\${CPLUS_INCLUDE_PATH:-}
+export C_INCLUDE_PATH=/opt/rocm/lib/rocm_sysdeps/include:\${C_INCLUDE_PATH:-}
+# Tarball bundles sysdeps (libdrm, liblzma, etc.); expose their libs and .pc files
+if [ -d /opt/rocm/lib/rocm_sysdeps/lib ]; then
+  export LD_LIBRARY_PATH=/opt/rocm/lib/rocm_sysdeps/lib:\${LD_LIBRARY_PATH}
+  export PKG_CONFIG_PATH=/opt/rocm/lib/rocm_sysdeps/lib/pkgconfig:\${PKG_CONFIG_PATH:-}
+fi
+# Disable MSLK for theRock nightly (not yet supported)
+export USE_MSLK=0
+ROCM_ENV
+    fi
+
+    echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
 }
 
 install_ubuntu() {
@@ -120,31 +150,7 @@ install_ubuntu() {
       echo "=============================================="
 
       # Write environment file (sourced by CI scripts and interactive shells)
-      cat > /etc/rocm_env.sh << ROCM_ENV
-# ROCm paths
-export ROCM_PATH=/opt/rocm
-export ROCM_HOME=/opt/rocm
-export ROCM_SOURCE_DIR=/opt/rocm
-export ROCM_BIN=/opt/rocm/bin
-export ROCM_CMAKE=/opt/rocm
-export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:\${PATH}
-export LD_LIBRARY_PATH=/opt/rocm/lib:\${LD_LIBRARY_PATH:-}
-# Sysdeps include paths (libdrm headers, etc.)
-export CPLUS_INCLUDE_PATH=/opt/rocm/lib/rocm_sysdeps/include:\${CPLUS_INCLUDE_PATH:-}
-export C_INCLUDE_PATH=/opt/rocm/lib/rocm_sysdeps/include:\${C_INCLUDE_PATH:-}
-# Device library path
-export HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
-export MAGMA_HOME=/opt/rocm/magma
-# Tarball bundles sysdeps (libdrm, liblzma, etc.); expose their libs and .pc files
-if [ -d /opt/rocm/lib/rocm_sysdeps/lib ]; then
-  export LD_LIBRARY_PATH=/opt/rocm/lib/rocm_sysdeps/lib:\${LD_LIBRARY_PATH}
-  export PKG_CONFIG_PATH=/opt/rocm/lib/rocm_sysdeps/lib/pkgconfig:\${PKG_CONFIG_PATH:-}
-fi
-# Disable MSLK for theRock nightly (not yet supported)
-export USE_MSLK=0
-ROCM_ENV
-
-      echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
+      write_rocm_env 1
 
       # --- End of theRock nightly tarball installation ---
     else
@@ -245,21 +251,7 @@ EOF
     # alongside PyTorch in .ci/pytorch/build.sh and installed at test time
 
     # Write environment file (sourced by CI scripts and interactive shells)
-    cat > /etc/rocm_env.sh << ROCM_ENV
-# ROCm paths
-export ROCM_PATH=/opt/rocm
-export ROCM_HOME=/opt/rocm
-export ROCM_SOURCE_DIR=/opt/rocm
-export ROCM_BIN=/opt/rocm/bin
-export ROCM_CMAKE=/opt/rocm
-export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:\${PATH}
-export LD_LIBRARY_PATH=/opt/rocm/lib:\${LD_LIBRARY_PATH:-}
-# Device library path
-export HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
-export MAGMA_HOME=/opt/rocm/magma
-ROCM_ENV
-
-    echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
+    write_rocm_env 0
 
     # Cleanup
     apt-get autoclean && apt-get clean
@@ -267,11 +259,57 @@ ROCM_ENV
     fi
 }
 
+install_rhel8() {
+    local version_id
+    version_id=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
+    if [[ "${version_id%%.*}" != "8" ]]; then
+        echo "Unable to install ROCm on RHEL-like version ${version_id}; only version 8 is supported"
+        exit 1
+    fi
+
+    yum update -y
+    yum install -y kmod wget
+
+    echo "[ROCm]" > /etc/yum.repos.d/rocm.repo
+    echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo
+    echo "baseurl=https://repo.radeon.com/rocm/rhel8/${ROCM_VERSION}/main" >> /etc/yum.repos.d/rocm.repo
+    echo "enabled=1" >> /etc/yum.repos.d/rocm.repo
+    echo "gpgcheck=1" >> /etc/yum.repos.d/rocm.repo
+    echo "gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/rocm.repo
+
+    local rocm_packages=(
+        amd-smi-lib
+        rccl
+        rocm-dev
+        rocm-libs
+        rocm-utils
+        rocprofiler-devel
+        roctracer-devel
+    )
+
+    if [[ $(ver $ROCM_VERSION) -lt $(ver 7.2) ]]; then
+        # ROCm < 7.2 needs the OpenCL ICD headers available explicitly on AlmaLinux.
+        rocm_packages+=(ocl-icd-devel)
+    fi
+
+    yum install -y --enablerepo=powertools "${rocm_packages[@]}"
+    # numactl-devel fixes the rocSHMEM install issue by providing numa.h.
+    yum install -y numactl-devel
+
+    write_rocm_env 0
+
+    yum clean all
+    rm -rf /var/cache/yum
+}
+
 # Install Python packages depending on the base OS
 ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
 case "$ID" in
   ubuntu)
     install_ubuntu
+    ;;
+  almalinux|rhel)
+    install_rhel8
     ;;
   *)
     echo "Unable to determine OS..."
