@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/RNN.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
@@ -1753,6 +1754,20 @@ static PyObject* THCPModule_resetCublasLtWorkspaceSize(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THCPModule_cudnnClearDropoutState_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+#if defined(USE_ROCM)
+  // On ROCm, RNNs dispatch to MIOpen, which caches its dropout state buffer in
+  // thread-local storage separate from the cuDNN path.
+  at::native::_miopen_clear_dropout_state();
+#endif
+  at::native::_cudnn_clear_dropout_state();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_rocm_is_backward_pass(
     PyObject* _unused,
     PyObject* noargs) {
@@ -2245,6 +2260,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_resetCublasLtWorkspaceSize",
      THCPModule_resetCublasLtWorkspaceSize,
+     METH_NOARGS,
+     nullptr},
+    {"_cudnn_clear_dropout_state",
+     THCPModule_cudnnClearDropoutState_wrap,
      METH_NOARGS,
      nullptr},
     {"_cuda_isCurrentStreamCapturing",
