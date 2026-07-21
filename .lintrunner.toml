@@ -37,6 +37,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/flake8_linter.py',
     '--',
@@ -410,6 +412,8 @@ include_patterns=['aten/src/ATen/native/native_functions.yaml']
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/nativefunctions_linter.py',
     '--native-functions-yml=aten/src/ATen/native/native_functions.yaml',
@@ -422,6 +426,8 @@ include_patterns=['.github/workflows/**/*.yml']
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/gha_linter.py',
     '--',
@@ -983,6 +989,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/cmake_linter.py',
     '--config=.cmakelintrc',
@@ -1001,6 +1009,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/shellcheck_linter.py',
     '--',
@@ -1119,6 +1129,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/test_has_main_linter.py',
     '--',
@@ -1205,6 +1217,8 @@ include_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/workflow_consistency_linter.py',
     '--',
@@ -1223,6 +1237,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/no_workflows_on_fork.py',
     '--',
@@ -1234,6 +1250,8 @@ code = 'CODESPELL'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/codespell_linter.py',
     '--',
@@ -1269,6 +1287,8 @@ include_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyfmt_linter.py',
     '--',
@@ -1552,6 +1572,8 @@ code = 'PYPROJECT'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyproject_linter.py',
     '--',
@@ -1566,6 +1588,8 @@ code = 'CMAKE_MINIMUM_REQUIRED'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/cmake_minimum_required_linter.py',
     '--',
@@ -1650,6 +1674,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/ruff_linter.py',
     '--config=pyproject.toml',
