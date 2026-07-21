@@ -9,7 +9,6 @@ from typing import Optional
 import torch
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
-from torch.distributed._rng_layout import _RNGIndexBlock
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import _StridedShard, Shard
@@ -29,6 +28,13 @@ __all__ = [
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
+
+_StatefulRNGMetadata = tuple[
+    tuple[IntLikeType, ...],
+    tuple[tuple[IntLikeType, ...], ...],
+    tuple[tuple[IntLikeType, ...], ...],
+    tuple[tuple[IntLikeType, ...], ...],
+]
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
@@ -58,11 +64,11 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
         return False
 
 
-def _try_compute_stateful_rng_layout(
+def _try_compute_stateful_rng_metadata(
     spec: DTensorSpec,
     local_tensor: torch.Tensor,
-) -> tuple[IntLikeType, tuple[_RNGIndexBlock, ...]] | None:
-    """Map a supported DTensor shard to logical row-major RNG indices."""
+) -> _StatefulRNGMetadata | None:
+    """Describe a supported DTensor shard as one logical rectangle."""
     if spec.mesh.ndim != 1 or len(spec.placements) != 1:
         return None
     if spec.tensor_meta is None or not spec.mesh._is_current_rank_part_of_mesh():
@@ -75,9 +81,7 @@ def _try_compute_stateful_rng_layout(
     logical_numel: IntLikeType = 1
     for size in spec.shape:
         logical_numel *= size
-    if statically_known_true(logical_numel == 0):
-        return logical_numel, ()
-    # The legacy dense-launch replay kernel currently uses a 32-bit grid policy.
+    # Dense replay currently uses a 32-bit grid policy.
     if statically_known_true(logical_numel > torch.iinfo(torch.int32).max):
         return None
 
@@ -85,7 +89,6 @@ def _try_compute_stateful_rng_layout(
     if placement.is_replicate():
         local_shape = tuple(spec.shape)
         global_offset = (0,) * spec.ndim
-        shard_dim = None
     elif isinstance(placement, Shard):
         shard_dim = placement.dim
         if shard_dim < 0:
@@ -115,18 +118,14 @@ def _try_compute_stateful_rng_layout(
             f"actual={tuple(local_tensor.shape)}"
         )
 
-    if shard_dim is None:
-        return logical_numel, ((0, logical_numel, logical_numel, 1),)
-
-    start_index: IntLikeType = 0
-    for offset, stride in zip(global_offset, global_stride):
-        start_index += offset * stride
-    block_size = local_shape[shard_dim] * global_stride[shard_dim]
-    block_stride = spec.shape[shard_dim] * global_stride[shard_dim]
-    block_count: IntLikeType = 1
-    for size in local_shape[:shard_dim]:
-        block_count *= size
-    return logical_numel, ((start_index, block_size, block_stride, block_count),)
+    global_shape = tuple(spec.shape)
+    local_offset = (0,) * spec.ndim
+    return (
+        global_shape,
+        (global_offset,),
+        (local_offset,),
+        (local_shape,),
+    )
 
 
 def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:

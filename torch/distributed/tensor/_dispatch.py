@@ -394,12 +394,17 @@ class OpDispatcher:
                         )
                         and _is_supported_stateful_rng_op(op_call, first_local_arg)
                     ):
-                        stateful_rng_layout = random._try_compute_stateful_rng_layout(
+                        stateful_rng_layout = random._try_compute_stateful_rng_metadata(
                             first_arg._spec, first_local_arg
                         )
 
                     if stateful_rng_layout is not None:
-                        logical_numel, index_blocks = stateful_rng_layout
+                        (
+                            global_shape,
+                            global_offsets,
+                            local_offsets,
+                            local_sizes,
+                        ) = stateful_rng_layout
                         stateful_rng_kwargs = dict(op_info.local_kwargs)
                         stateful_rng_kwargs["generator"] = maybe_user_generator
                         with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
@@ -409,8 +414,10 @@ class OpDispatcher:
                                 op_call,
                                 local_tensor_args,
                                 stateful_rng_kwargs,
-                                logical_numel,
-                                index_blocks,
+                                global_shape,
+                                global_offsets,
+                                local_offsets,
+                                local_sizes,
                             )
                     elif (
                         maybe_user_generator is not None
