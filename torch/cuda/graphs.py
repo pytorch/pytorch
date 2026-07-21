@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import gc
 import typing
+import weakref
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import overload, TYPE_CHECKING, TypeAlias, Union
+from typing import overload, TYPE_CHECKING, TypeAlias, TypeGuard, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -25,9 +26,13 @@ except ImportError:
 
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
-    from torch.cuda import _POOL_HANDLE
+    from torch.cuda import _POOL_HANDLE, MemPool
     from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
     from torch.utils.hooks import RemovableHandle
+
+    _GraphPool: TypeAlias = _POOL_HANDLE | MemPool
+else:
+    _GraphPool: TypeAlias = typing.Any
 
 from .._utils import _dummy_type
 
@@ -45,6 +50,19 @@ __all__ = [
 
 _R = TypeVar("_R")
 _P = ParamSpec("_P")
+
+
+def _is_mem_pool(pool: object) -> TypeGuard[MemPool]:
+    mempool_cls = getattr(torch.cuda, "MemPool", None)
+    return mempool_cls is not None and isinstance(pool, mempool_cls)
+
+
+def _get_pool_id(pool: _GraphPool | None) -> _POOL_HANDLE | None:
+    if pool is None:
+        return None
+    if _is_mem_pool(pool):
+        return typing.cast("_POOL_HANDLE", pool.id)
+    return typing.cast("_POOL_HANDLE", pool)
 
 
 if not hasattr(torch._C, "_CudaStreamBase"):
@@ -91,6 +109,52 @@ def _require_cuda_bindings() -> None:
         )
 
 
+class _RetainedCallbacks:
+    r"""Holds destroy callbacks and retained objects for a single capture cycle
+    of a :class:`CUDAGraph`.
+
+    A :class:`CUDAGraph` owns one of these and arms a :func:`weakref.finalize`
+    bound to :meth:`fire`. The holder deliberately does NOT reference the graph,
+    so the finalizer cannot keep the graph alive; :meth:`fire` can still sync the
+    replay streams because they are mirrored onto the holder, not read off the
+    graph. Callbacks and objects live in ``OrderedDict``s keyed by
+    ``RemovableHandle`` id so registrations can be individually removed.
+    """
+
+    def __init__(self) -> None:
+        self.callbacks: OrderedDict[int, Callable[[], None]] = OrderedDict()
+        self.objects: OrderedDict[int, object] = OrderedDict()
+        # Streams the graph was replayed on; drained before firing. A set (not a
+        # single stream) because concurrent replays on multiple streams leave
+        # work in flight on all of them and we cannot know which finishes last.
+        # Stream hashes/compares by value, so same-stream replays dedup to one
+        # entry -- the common case. Only populated when a caller requested sync.
+        self.replay_streams: set[torch.cuda.Stream] = set()
+        self.sync_before_fire: bool = False
+        self._fired: bool = False
+
+    def fire(self) -> None:
+        # Fired at most once (guards the reset()-then-destroy double trigger).
+        if self._fired:
+            return
+        self._fired = True
+        if self.sync_before_fire:
+            # Drain in-flight replays before releasing anything the graph may
+            # reference. Guarded so a sync failure does not skip the callbacks.
+            for stream in self.replay_streams:
+                try:
+                    stream.synchronize()
+                except Exception:
+                    pass
+        for cb in list(self.callbacks.values()):
+            try:
+                cb()
+            except Exception:
+                pass  # match finalizer semantics: swallow, don't abort the rest
+        self.callbacks.clear()
+        self.objects.clear()
+
+
 # Python shim helps Sphinx process docstrings more reliably.
 class CUDAGraph(_CUDAGraph):
     r"""Wrapper around a CUDA graph.
@@ -134,6 +198,11 @@ class CUDAGraph(_CUDAGraph):
     # User hooks fired by capture_end / instantiate (see register_*_hook).
     _capture_end_hooks: dict[int, Callable[[CUDAGraph], None]]
     _post_instantiate_hooks: dict[int, Callable[[CUDAGraph], None]]
+    # Destroy callbacks / retained objects for the current capture cycle, plus
+    # the weakref.finalize armed on this graph that fires the holder on
+    # collection. reset() fires the current holder and re-arms a fresh pair.
+    _retained: _RetainedCallbacks
+    _retained_finalizer: weakref.finalize | None
 
     def __new__(cls, keep_graph: bool = False) -> Self:
         instance = super().__new__(cls, keep_graph)
@@ -144,7 +213,18 @@ class CUDAGraph(_CUDAGraph):
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
         instance._capture_end_hooks = OrderedDict()
         instance._post_instantiate_hooks = OrderedDict()
+        instance._retained_finalizer = None
+        instance._arm_retained()
         return instance
+
+    def _arm_retained(self) -> None:
+        # Install a fresh destroy-callback holder and finalizer. The finalizer is
+        # bound to the holder, NOT to `self`: a finalizer arg referencing the
+        # graph would keep it alive forever and never fire. The holder does not
+        # point back at the graph, so fire() can still sync the last replay
+        # stream off it without pinning the graph.
+        self._retained = _RetainedCallbacks()
+        self._retained_finalizer = weakref.finalize(self, self._retained.fire)
 
     def register_capture_end_hook(
         self, hook: Callable[[CUDAGraph], None]
@@ -176,6 +256,63 @@ class CUDAGraph(_CUDAGraph):
         self._post_instantiate_hooks[handle.id] = hook
         return handle
 
+    def register_destroy_callback(
+        self,
+        cb: Callable[[], None],
+        *,
+        synchronize_before_release: bool = False,
+    ) -> RemovableHandle:
+        r"""Register ``cb()`` to run when this graph is destroyed (finalized) or
+        explicitly :meth:`reset`, just before its CUDA resources are freed.
+        Callbacks fire once per capture cycle, in registration order; exceptions
+        are swallowed so one failure does not abort the rest. ``cb`` must NOT
+        reference this graph: the finalizer that fires it is held by a global
+        registry, so a callback reachable to the graph keeps the graph alive
+        until interpreter exit (it is never collected, hence never fired).
+        Returns a handle whose ``remove()`` deregisters the callback.
+
+        Teardown does not synchronize CUDA, and ``cudaGraphExecDestroy`` frees an
+        in-flight graph only asynchronously, so a callback that frees device
+        memory the graph reads/writes is a use-after-free if a replay is still
+        in flight. Pass ``synchronize_before_release=True`` to synchronize every
+        stream this graph was replayed on before firing. Otherwise callbacks
+        must not free anything the graph references.
+        """
+        from torch.utils.hooks import RemovableHandle
+
+        if synchronize_before_release:
+            self._retained.sync_before_fire = True
+        handle = RemovableHandle(self._retained.callbacks)
+        self._retained.callbacks[handle.id] = cb
+        return handle
+
+    def retain_object(
+        self,
+        obj: object,
+        *,
+        synchronize_before_release: bool = False,
+    ) -> RemovableHandle:
+        r"""Keep ``obj`` alive for this graph's current capture cycle and release
+        it when the graph is destroyed (finalized) or explicitly :meth:`reset`.
+        No callback runs; normal refcounting drops ``obj`` when the retained
+        reference is released. Returns a handle whose ``remove()`` drops the
+        retained reference early. As with :meth:`register_destroy_callback`,
+        ``obj`` must NOT reference this graph, or the graph is kept alive until
+        interpreter exit and ``obj`` is never released.
+
+        ``synchronize_before_release`` has the same meaning and caveats as in
+        :meth:`register_destroy_callback`: set it if releasing ``obj`` frees device
+        memory the graph reads/writes (e.g. ``obj`` is the last reference to a
+        tensor the graph uses) and replays may still be in flight.
+        """
+        from torch.utils.hooks import RemovableHandle
+
+        if synchronize_before_release:
+            self._retained.sync_before_fire = True
+        handle = RemovableHandle(self._retained.objects)
+        self._retained.objects[handle.id] = obj
+        return handle
+
     def _maybe_remap_annotations(self) -> None:
         # Remap recorded kernel annotations to the current exec graph id. No-op
         # unless a capture id was stamped (annotations enabled). Called from
@@ -189,17 +326,25 @@ class CUDAGraph(_CUDAGraph):
 
         remap_to_exec_graph(self)
 
+    def _release_python_resources(self) -> None:
+        # Single source of truth for GC-critical Python resources released by
+        # both reset() and __del__. Destroy callbacks are NOT fired here: on the
+        # destruction path the armed weakref.finalize fires them (after __del__,
+        # before the C++ resources are freed), so user code stays out of
+        # __del__; reset() fires + re-arms the holder itself (see reset()).
+        tracker, self._tracker = self._tracker, None
+        if tracker is not None:
+            tracker.stop()
+
     def __del__(self) -> None:
         try:
-            tracker, self._tracker = self._tracker, None
-            if tracker is not None:
-                tracker.stop()
+            self._release_python_resources()
         except Exception:
             pass  # don't raise under GC
 
     def capture_begin(
         self,
-        pool: _POOL_HANDLE | None = None,
+        pool: _GraphPool | None = None,
         capture_error_mode: str = "global",
         check_input_liveness: bool = False,
     ) -> None:
@@ -211,7 +356,8 @@ class CUDAGraph(_CUDAGraph):
 
         Arguments:
             pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
-                :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory
+                :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) or
+                :class:`~torch.cuda.MemPool` that hints this graph may share memory
                 with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
             capture_error_mode (str, optional): specifies the cudaStreamCaptureMode for the graph capture stream.
                 Can be "global", "thread_local" or "relaxed". During cuda graph capture, some actions, such as cudaMalloc,
@@ -230,7 +376,9 @@ class CUDAGraph(_CUDAGraph):
         if self._tracker is not None:
             self._tracker.stop()
             self._tracker = None
-        super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
+        super().capture_begin(
+            pool=_get_pool_id(pool), capture_error_mode=capture_error_mode
+        )
         if check_input_liveness:
             from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
 
@@ -292,7 +440,12 @@ class CUDAGraph(_CUDAGraph):
     def replay(self) -> None:
         r"""Replay the CUDA work captured by this graph."""
         if self._tracker is not None:
-            self._tracker.check_alive(self.pool())
+            self._tracker.check_alive(self.pools())
+        if self._retained.sync_before_fire:
+            # Record the replay stream on the holder so fire() can drain it
+            # before releasing graph-referenced resources, without the holder
+            # referencing the graph. Only recorded when a caller opted into sync.
+            self._retained.replay_streams.add(torch.cuda.current_stream())
         # With keep_graph=True the exec graph is instantiated on demand here on
         # the first replay; the C++ replay() requires it to already exist. The
         # annotation remap rides on instantiate(), so it is handled by that call.
@@ -302,9 +455,18 @@ class CUDAGraph(_CUDAGraph):
 
     def reset(self) -> None:
         r"""Delete the graph currently held by this instance."""
-        if self._tracker is not None:
-            self._tracker.stop()
-            self._tracker = None
+        self._release_python_resources()
+        # also-fire-on-reset: reset() destroys this capture's CUDA resources and
+        # the graph may be re-captured, so fire the current destroy callbacks and
+        # re-arm a fresh holder + finalizer for the next capture cycle (the old
+        # finalizer is bound to the now-spent holder). detach() cancels it and
+        # drops its reference to the spent holder promptly.
+        self._retained.fire()
+        if self._retained_finalizer is not None:
+            self._retained_finalizer.detach()
+        self._arm_retained()
+        # Reset-only state: scrubbed here because the object is reused after
+        # reset(); on death these ints die with the object.
         self._capture_graph_id = None
         self._remapped_exec_id = None
         super().reset()
@@ -315,7 +477,17 @@ class CUDAGraph(_CUDAGraph):
         This id can optionally be passed to another graph's ``capture_begin``,
         which hints the other graph may share the same memory pool.
         """
-        return super().pool()
+        return torch.cuda._POOL_HANDLE(super().pool())
+
+    def pools(self) -> list[_POOL_HANDLE]:
+        r"""Return opaque tokens for all memory pools retained by this graph."""
+        return [torch.cuda._POOL_HANDLE(pool) for pool in super().pools()]
+
+    def _retain_pool(self, pool: _GraphPool) -> None:
+        pool_id = _get_pool_id(pool)
+        if pool_id is None:
+            raise RuntimeError("CUDAGraph._retain_pool expected a memory pool")
+        return super()._retain_pool(pool_id)
 
     def enable_debug_mode(self) -> None:
         r"""Retain the captured graph (equivalent to ``keep_graph=True``) so it
@@ -542,8 +714,9 @@ class graph:
     Arguments:
         cuda_graph (torch.cuda.CUDAGraph): Graph object used for capture.
         pool (optional): Opaque token (returned by a call to :func:`~torch.cuda.graph_pool_handle()` or
-            :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) hinting this graph's capture
-            may share memory from the specified pool. See :ref:`Graph memory management<graph-memory-management>`.
+            :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) or
+            :class:`~torch.cuda.MemPool` hinting this graph's capture may share memory
+            from the specified pool. See :ref:`Graph memory management<graph-memory-management>`.
         stream (torch.cuda.Stream, optional): If supplied, will be set as the current stream in the context.
             If not supplied, ``graph`` sets its own internal side stream as the current stream in the context.
         capture_error_mode (str, optional): specifies the cudaStreamCaptureMode for the graph capture stream.
@@ -581,7 +754,7 @@ class graph:
     def __init__(
         self,
         cuda_graph: CUDAGraph,
-        pool: _POOL_HANDLE | None = None,
+        pool: _GraphPool | None = None,
         stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
         enable_annotations: bool = False,
@@ -593,7 +766,10 @@ class graph:
         if stream is None and self.__class__.default_capture_stream is None:
             self.__class__.default_capture_stream = torch.cuda.Stream()
 
-        self.pool: tuple[()] | tuple[_POOL_HANDLE] = () if pool is None else (pool,)
+        pool_id = _get_pool_id(pool)
+        self.pool: tuple[()] | tuple[_POOL_HANDLE] = (
+            () if pool_id is None else (pool_id,)
+        )
         self.capture_stream = (
             stream if stream is not None else self.__class__.default_capture_stream
         )
@@ -670,7 +846,8 @@ def make_graphed_callables(
     sample_args: tuple[Tensor, ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: _POOL_HANDLE | None = None,
+    pool: _GraphPool | None = None,
+    capture_error_mode: str = "global",
 ) -> _ModuleOrCallable: ...
 
 
@@ -680,7 +857,8 @@ def make_graphed_callables(
     sample_args: tuple[tuple[Tensor, ...], ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: _POOL_HANDLE | None = None,
+    pool: _GraphPool | None = None,
+    capture_error_mode: str = "global",
 ) -> tuple[_ModuleOrCallable, ...]: ...
 
 
@@ -689,7 +867,8 @@ def make_graphed_callables(
     sample_args: tuple[Tensor, ...] | tuple[tuple[Tensor, ...], ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: _POOL_HANDLE | None = None,
+    pool: _GraphPool | None = None,
+    capture_error_mode: str = "global",
 ) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -721,7 +900,8 @@ def make_graphed_callables(
         allow_unused_input (bool): If False, specifying inputs that were not used when computing outputs
             (and therefore their grad is always zero) is an error. Defaults to False.
         pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
-            :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory
+            :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) or
+            :class:`~torch.cuda.MemPool` that hints this graph may share memory
             with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
 
     .. note::
@@ -815,7 +995,7 @@ def make_graphed_callables(
     fwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
     bwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
 
-    mempool = graph_pool_handle() if pool is None else pool
+    mempool = graph_pool_handle() if pool is None else _get_pool_id(pool)
 
     # Warmup
     # Hopefully prevents cudnn benchmarking and other lazy-initialization cuda work
@@ -857,7 +1037,12 @@ def make_graphed_callables(
     per_callable_static_outputs = []
     per_callable_output_unflatten_spec = []
     for func, args, fwd_graph in zip(callables, _sample_args, fwd_graphs):
-        with torch.cuda.graph(fwd_graph, stream=stream, pool=mempool):
+        with torch.cuda.graph(
+            fwd_graph,
+            stream=stream,
+            pool=mempool,
+            capture_error_mode=capture_error_mode,
+        ):
             func_outputs = func(*args)
 
         flatten_outputs, spec = torch.utils._pytree.tree_flatten(func_outputs)
@@ -881,7 +1066,12 @@ def make_graphed_callables(
         outputs_grad = tuple(o for o in static_outputs if o.requires_grad)
         grad_inputs = None
         if len(outputs_grad) > 0:
-            with torch.cuda.graph(bwd_graph, stream=stream, pool=mempool):
+            with torch.cuda.graph(
+                bwd_graph,
+                stream=stream,
+                pool=mempool,
+                capture_error_mode=capture_error_mode,
+            ):
                 grad_inputs = torch.autograd.grad(
                     outputs=outputs_grad,
                     inputs=tuple(i for i in static_input_surface if i.requires_grad),

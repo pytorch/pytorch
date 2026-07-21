@@ -372,11 +372,15 @@ def is_noncontiguous_supported(device):
 
 def handle_noncontiguous_outputs(input_tlist, output):
     device = None
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import (
+        FakeTensor,
+        is_fake_tensor,
+        maybe_get_fake_device,
+    )
 
     for t in input_tlist:
-        if isinstance(t, FakeTensor):
-            device = t.fake_device
+        if is_fake_tensor(t):
+            device = maybe_get_fake_device(t)
             break
 
     if not is_noncontiguous_supported(device):
@@ -426,7 +430,7 @@ def _broadcast_shapes(*_shapes):
                     continue
             else:
                 # When backed size oblivious is used, we specialize for broadcasting
-                # if its the only way to compile the example input.
+                # if it's the only way to compile the example input.
                 # i.e: s0:1, s1:1 ==>
                 #           assert s0==s1, no specialization on ==1 or !=1.
                 #            The non-broadcast path is picked
@@ -3178,7 +3182,7 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
             shape_[offset_idx] = x
         else:
             # When backed size oblivious is used, we specialize for broadcasting
-            # if its the only way to compile the example input.
+            # if it's the only way to compile the example input.
             # i.e: x:1, requested_length:1 ==>
             #           assert x==requested_length, no specialization on ==1 or !=1.
             #            The non-broadcast path is picked
@@ -4732,7 +4736,19 @@ def diagonal_scatter(
 ) -> TensorLikeType:
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 
-    out = utils.clone_preserve_strides(input)
+    # Mirror at::native::clone_preserve_strides: when the input has internal
+    # memory overlap (e.g. an expand from a scalar with stride 0), we cannot
+    # preserve its strides because copy_to() below would write through aliased
+    # storage and corrupt non-diagonal positions. This arises in the backward
+    # of diagonal_scatter(x, src).sum(), where grad_output is expanded. Fall
+    # back to a plain clone, which materializes a contiguous buffer.
+    if builtins.any(
+        guard_or_false(sz > 1) and guard_or_false(s == 0)
+        for sz, s in zip(input.size(), input.stride())
+    ):
+        out = input.clone()
+    else:
+        out = utils.clone_preserve_strides(input)
     diag = out.diagonal(offset, dim1, dim2)
     # Use sym_or + guard_or_false to handle unbacked symbolic dimensions.
     torch._check(
@@ -5474,9 +5490,7 @@ def arange(
         xend = sym_int(end)
         xstep = sym_int(step)
 
-    # For int64 we truncate arguments to int before calculating length, but
-    # other integral dtypes we don't. Weird... but needed to match ATen shapes.
-    if dtype == torch.int64 or integer_args:
+    if integer_args:
         torch._check_value(xstep != 0, lambda: "step must be nonzero")  # type: ignore[possibly-undefined]
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
@@ -5484,7 +5498,7 @@ def arange(
     else:
         length = math.ceil((end - start) / step)
 
-    if is_integer:
+    if is_integer and integer_args:
         return prims.iota(
             length,
             start=xstart,  # type: ignore[possibly-undefined]
@@ -5493,6 +5507,17 @@ def arange(
             device=device,
             requires_grad=requires_grad,
         )
+
+    if is_integer and not integer_args:
+        index = prims.iota(
+            length,
+            start=0,
+            step=1,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+        return xstart + xstep * index  # type: ignore[possibly-undefined]
 
     index = prims.iota(
         length,
@@ -6588,7 +6613,6 @@ def log_normal(self, mean=1, std=2, generator=None):
     return torch.exp(std * torch.randn_like(self) + mean)
 
 
-# TODO: add support for functionalization aten.normal_functional
 # NOTE: the device and dtype will be ignored when shape is None
 @register_decomposition(aten.normal)
 @out_wrapper()
@@ -6655,6 +6679,22 @@ def normal(
 @register_decomposition(aten.normal_)
 def normal_(self, mean=0, std=1, *, generator=None):
     return normal(mean, std, self.shape, out=self, generator=generator)
+
+
+@register_decomposition(aten.normal_functional)
+def normal_functional(self, mean=0, std=1, *, generator=None):
+    res = normal(
+        mean,
+        std,
+        self.shape,
+        dtype=self.dtype,
+        device=self.device,
+        generator=generator,
+    )
+    if self.stride() == res.stride():
+        return res
+    new_stride = utils.compute_elementwise_output_strides(self)
+    return res.as_strided(self.shape, new_stride)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)

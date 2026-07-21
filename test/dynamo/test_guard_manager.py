@@ -2160,7 +2160,9 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
 
         # Only fail if the leak is larger than 1MB.
         self.assertLessEqual(
-            delta, 1 * 1024 * 1024, f"Memory leaked: {delta / 1024 / 1024:.2f} MB"
+            delta,
+            1 * 1024 * 1024,
+            lambda msg: f"{msg}\nMemory leaked: {delta / 1024 / 1024:.2f} MB",
         )
 
     def test_dict_keys_match(self):
