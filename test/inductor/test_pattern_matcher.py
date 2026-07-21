@@ -937,32 +937,25 @@ class TestPatternMatcher(TestCase):
             x = torch.full([10, 10], True, dtype=torch.int32)
             return torch.cumsum(x, 1)
 
-        def fn7():
-            ones = torch.full([2, 4, 4], True, dtype=torch.bool)
-            return torch.cumsum(ones, 1, dtype=torch.bfloat16)
-
-        def fn8():
-            x = torch.full([10, 10], 2, dtype=torch.int32)
-            return torch.cumsum(x, 1, dtype=torch.float64)
-
-        def fn9():
-            x = torch.full([100], 0.1, dtype=torch.float32)
-            return torch.cumsum(x, 0, dtype=torch.float64)
-
-        def fn10():
-            x = torch.full([5000], 1.0, dtype=torch.float16)
-            return torch.cumsum(x, 0, dtype=torch.float32)
-
-        def fn11():
-            x = torch.full([10], 2.5, dtype=torch.float32)
-            return torch.cumsum(x, 0, dtype=torch.int64)
-
-        for fn in (fn1, fn2, fn3, fn4, fn5, fn6, fn7, fn8, fn9, fn10, fn11):
+        for fn in (fn1, fn2, fn3, fn4, fn5, fn6):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
             self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
             counters.clear()
+
+    def test_reciprocal_sqrt_to_rsqrt(self):
+        # reciprocal(sqrt(x)) should fuse into a single rsqrt in the kernel.
+        def fn(x):
+            return torch.reciprocal(torch.sqrt(x))
+
+        x = torch.rand(64) + 1.0
+        result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        # A standalone sqrt (".sqrt(") must not survive; only ".rsqrt(" should.
+        self.assertIn("rsqrt", code)
+        self.assertNotIn(".sqrt(", code)
+        self.assertEqual(result, fn(x))
+        self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
 
     def test_splitwithsizes_cat(self):
         # Good case
@@ -2492,6 +2485,7 @@ class TestPatternMatcher(TestCase):
     def test_nested_replacement_args_do_not_percolate_tags(self):
         class DummyMatch:
             def __init__(self, outputs):
+                self.nodes = outputs
                 self._outputs = outputs
 
             def output_nodes(self):

@@ -52,6 +52,7 @@ from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
     ObservedAttributeError,
     raise_observed_exception,
+    raise_type_error,
     TorchRuntimeError,
     unimplemented,
     UnknownPropertiesDuringBackwardTrace,
@@ -1868,6 +1869,16 @@ class TensorVariable(VariableTracker):
             return self.call_method(tx, "copy_", [result], {})
         return None
 
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        if value is None:
+            raise_type_error(tx, "Tensor does not support deleting items")
+        return self.method___setitem__(tx, key, value)
+
     def method___setitem__(
         self,
         tx: "InstructionTranslatorBase",
@@ -2462,6 +2473,23 @@ class TensorVariable(VariableTracker):
             tx,
             tx.output.create_proxy(
                 "call_function", operator.mul, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
+    def nb_matrix_multiply_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__matmul__(x)`` calls.
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.matmul, *proxy_args_kwargs([lhs, rhs], {})
             ),
         )
 

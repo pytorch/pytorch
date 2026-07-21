@@ -8258,6 +8258,30 @@ SavedForBackwardsAOTOutput(idx=5)""",
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dual_tensor_input_graph_breaks(self):
+        import torch.autograd.forward_ad as fwAD
+
+        def fn(x):
+            return (x**2).sum()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.tensor([0.1, 0.2, 0.3])
+        v = torch.ones(3)
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, v)
+            expected = fwAD.unpack_dual(fn(dual)).tangent
+            out = torch.compile(fn, backend=cnt)(dual)
+            self.assertEqual(fwAD.unpack_dual(out).tangent, expected)
+        self.assertEqual(cnt.frame_count, 0)
+
+        torch._dynamo.reset()
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, v)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "dual tensor input"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(dual)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     @serialTest()
@@ -9680,6 +9704,32 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             torch.bfloat16,
             "expected scalar type BFloat16 but found Long",
         )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_device_context_matmul_avoids_native_bmm_router_graph_break(self):
+        torch._dynamo.utils.counters.clear()
+
+        @torch.compile(backend="inductor", dynamic=False)
+        def fn(q, k):
+            with torch.device("cuda"):
+                a = torch.reshape(q, [-1, 8, 1, 32])
+                return torch.matmul(a, k)
+
+        q = torch.randn(64, 8 * 32, device="cuda", dtype=torch.float16)
+        k = torch.randn(1, 8, 32, 128, device="cuda", dtype=torch.float16)
+
+        out = fn(q, k)
+        torch.cuda.synchronize()
+        self.assertEqual(out.shape, (64, 8, 1, 128))
+
+        graph_break_reasons = "\n".join(
+            torch._dynamo.utils.counters["graph_break"].keys()
+        )
+        # The native router should not run trace-unsafe eager predicates here.
+        # If it does, the COW probe on the reshaped operand graph-breaks before
+        # it can fold or install a guard.
+        self.assertNotIn("_is_cow_tensor", graph_break_reasons)
+        self.assertNotIn("call_boxed", graph_break_reasons)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")
