@@ -1245,7 +1245,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         Determines whether input weight equalization is appropriate for a given module.
 
         Takes advantage of the ModelReport Observer which records per channel information of input range
-        It then uses the passed in weight info inconjunction to compute the desired ratio
+        It then uses the passed in weight info in conjunction to compute the desired ratio
         Finally, it gives suggestions based on this information for each module of interest
 
         Args:
