@@ -29,6 +29,7 @@
 //
 
 #include <array>
+#include <bit>
 #include <tuple>
 #include <type_traits>
 
@@ -86,14 +87,6 @@ constexpr size_t max_of_sizes(args_t, std::index_sequence<Is...>) {
   return max_size;
 }
 
-constexpr size_t next_power_of_two(size_t value) {
-  size_t result = 1;
-  while (result < value) {
-    result *= 2;
-  }
-  return result;
-}
-
 #ifdef USE_ROCM
 template <int io_sizes>
 constexpr auto elems_per_thread(){
@@ -117,22 +110,17 @@ constexpr auto elems_per_thread(){
 
 // Rubin (SM 10.7) supports 1024 resident threads per SM. Target 128 bytes of
 // input per thread to keep roughly 128 KiB in flight per SM.
-template <typename func_t>
-constexpr auto elems_per_thread_128b() {
-  using traits = function_traits<func_t>;
-  using args_t = typename traits::ArgsTuple;
-  constexpr auto input_size = at::native::sum_of_sizes(
-      args_t{}, std::make_index_sequence<std::tuple_size_v<args_t>>{});
+template <size_t input_size>
+constexpr auto elems_per_thread_128b(size_t output_size) {
   if constexpr (input_size == 0) {
     // note: without inputs, we simply double the number of elements per thread
     // for SM 10.7 as there are half the number of threads per SM compared
     // to previous generations.
-    constexpr int output_size = sizeof(typename traits::result_type);
-    return elems_per_thread<output_size>() * 2;
+    return output_size == 1 ? 32 : 16;
   } else if constexpr (input_size >= 128) {
     return 1;
   } else {
-    constexpr auto rounded_input_size = next_power_of_two(input_size);
+    constexpr auto rounded_input_size = std::bit_ceil(input_size);
     return static_cast<int>(128 / rounded_input_size);
   }
 }
@@ -236,7 +224,9 @@ C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   if constexpr (vec_size == 8 && use_128b_tws) {
 #if __CUDA_ARCH__ / 100 == 10
-    constexpr auto tws_128b = elems_per_thread_128b<func_t>();
+    using output_t = typename function_traits<func_t>::result_type;
+    constexpr auto input_size = calc_io_size<func_t>() - sizeof(output_t);
+    constexpr auto tws_128b = elems_per_thread_128b<input_size>(sizeof(output_t));
     vectorized_elementwise_kernel_impl<vec_size, tws_128b>(N, f, data);
 #else
     CUDA_KERNEL_ASSERT(
@@ -376,7 +366,8 @@ static inline void launch_vectorized_kernel(
   }
 #endif
   int tws = elems_per_thread<io_size>();
-  constexpr auto tws_128b = elems_per_thread_128b<func_t>();
+  constexpr auto input_size = io_size - sizeof(cpp_type);
+  constexpr auto tws_128b = elems_per_thread_128b<input_size>(sizeof(cpp_type));
   if (tws_128b >= 8 && use_sm107_optimizations && vec_size == 8) {
     tws = tws_128b;
   }
