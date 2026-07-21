@@ -2043,13 +2043,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         m, k, n = 128, 64, 128
 
         def epilogue_fn(acc, scale):
-            return (acc.float() * scale).to(torch.float8_e4m3fn)
+            return acc * scale.abs()
 
         def fn(a, b, scale):
             return flex_gemm(
                 torch.mm,
                 (a, b),
-                lambda acc: epilogue_fn(acc, scale),
+                lambda acc: epilogue_fn(acc.float(), scale).to(torch.float8_e4m3fn),
                 kernel_options={"backend": "QUACK", "tuned": tuned},
             )
 
@@ -2069,7 +2069,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
-        scale = torch.tensor([[0.25]], device="cuda", dtype=torch.float32)
+        scale = torch.tensor([[-0.25]], device="cuda", dtype=torch.float32)
         with config_context:
             actual, (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale
@@ -2078,8 +2078,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(actual.dtype, torch.float8_e4m3fn)
         self.assertMatchesLowPrecisionEager(
             actual,
-            epilogue_fn(a @ b, scale),
-            (a.double() @ b.double()) * scale.double(),
+            epilogue_fn((a @ b).float(), scale).to(torch.float8_e4m3fn),
+            epilogue_fn(a.double() @ b.double(), scale.double()),
             a.shape[1],
         )
         FileCheck().check("epilogue_arg_kinds=('scalar',)").run(code)
