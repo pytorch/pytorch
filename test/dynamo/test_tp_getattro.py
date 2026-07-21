@@ -1000,6 +1000,21 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
         self.assertEqual(result, 10)
 
+    def test_custom_getattribute_resolves_dunder_class(self):
+        """Direct obj.__class__ access with a custom __getattribute__
+        must return the correct type (the __class__ shortcut in
+        getattro_impl fires before __getattribute__ dispatch)."""
+
+        class MyObj:
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+        def fn(obj):
+            return obj.__class__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertIs(result, MyObj)
+
     # --- BoundBuiltinMethodVariable slots ---
 
     def test_bound_builtin_method_hash(self):

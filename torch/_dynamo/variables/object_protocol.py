@@ -1911,8 +1911,8 @@ def generic_issubclass(
 # The base VariableTracker.getattro_impl tries object_generic_getattr()
 # first (MRO walk + descriptor protocol), falling back to const_getattr
 # on _UnhandledDescriptorError.  Callers of object_generic_getattr
-# directly must handle _UnhandledDescriptorError at every step (2, 4,
-# and 7), not just for unrecognized descriptor types.
+# directly must handle _UnhandledDescriptorError at steps 2 and 4
+# (unrecognized descriptor types).
 #
 # VTs with custom tp_getattro (TensorVariable, NNModuleVariable,
 # UserDefinedClassVariable, SuperVariable) override getattro_impl.
@@ -2068,7 +2068,16 @@ def object_generic_getattr(
             return getattr_result
 
     # Step 7: Attribute not found.
-    raise_observed_exception(AttributeError, tx)
+    try:
+        py_type = obj.python_type()
+        type_name = py_type.__name__
+    except NotImplementedError:
+        type_name = type(obj).__name__
+    raise_observed_exception(
+        AttributeError,
+        tx,
+        args=[f"'{type_name}' object has no attribute '{name}'"],
+    )
 
 
 def generic_getattr(
