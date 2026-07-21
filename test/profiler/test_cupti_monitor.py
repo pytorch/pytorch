@@ -810,6 +810,361 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(set(ext_meta), {77})
         self.assertEqual(json.loads(ext_meta[77]), {"backend": "x", "extra": 1})
 
+    def test_pftrace_chrome_gpu_slice_parity(self):
+        # The .pftrace and chrome-JSON exports are slice-for-slice equivalent for the GPU
+        # ops both formats represent (kernels, memcpy, memset, and the GPU-side user
+        # annotation). Run the single merge entry point over one synthetic window down both
+        # branches and assert the GPU slices agree as a multiset of
+        # (name, device, lane, ts_ns, dur_ns): chrome builds event dicts, pftrace builds the
+        # native GPU render stages. The pftrace side is compared WITHOUT running (or building)
+        # the native encoder: encode_pftrace is stubbed to capture its args, so this stays
+        # pure host-side / CI-safe. Legitimate format differences excluded from the compare:
+        # chrome also emits CPU ops, ac2g flow (f/s) and metadata (M) events, which the
+        # render-stage view represents differently; timestamps are normalized (chrome ts/dur
+        # are microsecond floats, render is nanosecond ints -- ns == round(us * 1000)). No CUDA.
+        import tempfile
+
+        import numpy as np
+        from cupti.cupti import (  # pyrefly: ignore[missing-import]
+            Runtime_api_trace_cbid,
+        )
+
+        from torch.profiler._cupti.monitor_trace import (
+            _runtime_cbid_name,
+            merge_trace_window_into_chrome_trace,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        # base_ns 0 so chrome ts/dur (us) map to render ns by *1000 with no base offset.
+        base_ns = 0
+        # cbid of cudaLaunchKernel (the eager-launch runtime API), for the launch records
+        # that produce the CPU-launch -> GPU-op arrows down both export paths.
+        launch_cbid = next(
+            e.value
+            for e in Runtime_api_trace_cbid
+            if _runtime_cbid_name(e.value) == "cudaLaunchKernel"
+        )
+        columns = {
+            # eager kernel on stream 7; graphed kernel replayed on stream 7 but reassigned
+            # by the resolver to logical lane 8 (named "side comms").
+            "kernel": {
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),
+                "correlation_id": i64(11, 12),
+                "graph_id": i64(0, 1),
+                "graph_node_id": i64(0, 102),
+                "name": np.array(["eagerKernel", "graphKernel"], dtype=object),
+                "annotation": np.array([None, None], dtype=object),
+                "logical_lane": i64(7, 8),
+                "lane_name": np.array([None, "side comms"], dtype=object),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(32, 32),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            },
+            # memcpy + memset on stream 9, non-overlapping (so the render-stage per-lane
+            # end-clamp is a no-op and durations stay exact for the compare).
+            "gpu_memcpy": {
+                "start_ns": i64(5000),
+                "end_ns": i64(6000),
+                "device_id": i64(0),
+                "context_id": i64(1),
+                "stream_id": i64(9),
+                "correlation_id": i64(21),
+                "graph_id": i64(0),
+                "graph_node_id": i64(0),
+                "annotation": np.array([None], dtype=object),
+                "bytes": i64(4096),
+                "copy_kind": i64(1),
+                "src_kind": i64(1),
+                "dst_kind": i64(3),
+                "flags": i64(0),
+            },
+            "gpu_memset": {
+                "start_ns": i64(7000),
+                "end_ns": i64(8000),
+                "device_id": i64(0),
+                "context_id": i64(1),
+                "stream_id": i64(9),
+                "correlation_id": i64(22),
+                "graph_id": i64(0),
+                "graph_node_id": i64(0),
+                "annotation": np.array([None], dtype=object),
+                "bytes": i64(256),
+                "value": i64(0),
+                "memory_kind": i64(3),
+                "flags": i64(0),
+            },
+            # eager cudaLaunchKernel records on two distinct CPU threads, correlated to the
+            # two kernels (11 -> eager, 12 -> graphed) -> the ac2g / gpu_correlation arrows.
+            "cuda_runtime": {
+                "start_ns": i64(500, 2500),
+                "end_ns": i64(600, 2600),
+                "cbid": i64(launch_cbid, launch_cbid),
+                "process_id": i64(1000, 1000),
+                "thread_id": i64(1, 2),
+                "correlation_id": i64(11, 12),
+            },
+            # only corr 12 (the graphed kernel) maps to a named region -> one GPU annotation.
+            "external_correlation": {
+                "correlation_id": i64(11, 12),
+                "external_id": i64(777, 555),
+                "user_external_id": i64(777, 555),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {555: "all_reduce"}}
+        gpu_cats = {"kernel", "gpu_memcpy", "gpu_memset", "gpu_user_annotation"}
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            cpu = {"baseTimeNanoseconds": base_ns, "traceEvents": []}
+            with open(cpu_path, "wb") as f:
+                f.write(json.dumps(cpu).encode())
+
+            # chrome side: real merge, collect the GPU X events as (name, dev, lane, ts, dur)ns.
+            merge_trace_window_into_chrome_trace(
+                cpu_path, os.path.join(d, "out.json"), window
+            )
+            with open(os.path.join(d, "out.json"), "rb") as f:
+                chrome = json.loads(f.read())
+            chrome_slices = [
+                (
+                    e["name"],
+                    int(e["pid"]),
+                    int(e["tid"]),
+                    round(float(e["ts"]) * 1000),
+                    round(float(e["dur"]) * 1000),
+                )
+                for e in chrome["traceEvents"]
+                if e.get("ph") == "X" and e.get("cat") in gpu_cats
+            ]
+
+            # pftrace side: stub encode_pftrace to capture (name_table, render) and skip the
+            # native encode, then reconstruct the same GPU slices from the render stages.
+            captured: dict = {}
+
+            def _capture(tracks, name_table, group_tuples, render, counters):
+                captured["tracks"] = tracks
+                captured["name_table"] = name_table
+                captured["group_tuples"] = group_tuples
+                captured["render"] = render
+                return b""
+
+            m = torch._C._profiler._cupti_monitor
+            with patch.object(m, "encode_pftrace", _capture, create=True):
+                merge_trace_window_into_chrome_trace(
+                    cpu_path, os.path.join(d, "out.pftrace"), window
+                )
+
+            name_table = captured["name_table"]
+            specs, _gfx, stage_cols, *_ = captured["render"]
+            ts, dur, event_id, gpu, hw_queue_iid, stage, _context, name_iid = stage_cols
+            # specs maps every iid -> name: the stage iids (Kernel/Memcpy/Memset/Annotation)
+            # and the hardware-queue lane iids (labeled "[<padded lane id>] <label>").
+            name_by_iid = {int(iid): name for iid, name, _cat in specs}
+            render_slices = []
+            render_lane_names = {}  # (device, lane_id) -> lane label, id prefix stripped
+            render_op_lane = {}  # correlation (render event_id) -> (device, lane_id)
+            for i in range(len(ts)):
+                niid = int(name_iid[i])
+                # kernels/annotations carry a name_iid into the global table; memcpy/memset
+                # fall back to the stage spec name ("Memcpy"/"Memset").
+                name = name_table[niid - 1] if niid else name_by_iid[int(stage[i])]
+                label = name_by_iid[int(hw_queue_iid[i])]
+                lane_id = int(label[1 : label.index("]")])
+                render_lane_names[(int(gpu[i]), lane_id)] = label[
+                    label.index("]") + 1 :
+                ].strip()
+                eid = int(event_id[i])
+                if eid:
+                    render_op_lane[eid] = (int(gpu[i]), lane_id)
+                # render ts is absolute ns; chrome ts was (start - base) / 1000 us.
+                render_slices.append(
+                    (name, int(gpu[i]), lane_id, int(ts[i]) - base_ns, int(dur[i]))
+                )
+
+            # tracks -> (pid, tid) for the CPU launch (thread) tracks: the arrow's source.
+            track_pid_tid = {
+                t[0]: (int(t[3]), int(t[4])) for t in captured["tracks"] if not t[2]
+            }
+            # A launch group carries a per-slice gpu_corr (== correlation) linking the CPU
+            # launch track_event to its GPU render stage (matched by event_id). Read the
+            # correlation -> CPU (pid, tid) source off those groups.
+            pftrace_arrow_src = {}
+            for g in captured["group_tuples"]:
+                uu, gpu_corr = g[2], g[9]
+                if gpu_corr is None:
+                    continue
+                for u, c in zip(np.asarray(uu).tolist(), np.asarray(gpu_corr).tolist()):
+                    if c:
+                        pftrace_arrow_src[int(c)] = track_pid_tid[int(u)]
+
+        # 2 kernels + memcpy + memset + 1 GPU annotation, identical down both export paths.
+        self.assertEqual(len(chrome_slices), 5)
+        self.assertEqual(sorted(chrome_slices), sorted(render_slices))
+
+        # Lane-name parity: chrome carries the lane name in thread_name metadata; pftrace in
+        # the hw-queue spec label ("[<id>] <name>"). Every lane with GPU slices must agree
+        # after stripping pftrace's id prefix and chrome's trailing space -- so the reassigned
+        # lane 8 is "side comms" and the default lanes are "stream N" in both.
+        gpu_lanes = {(dev, lane) for _n, dev, lane, _t, _d in render_slices}
+        chrome_lane_names = {
+            (int(e["pid"]), int(e["tid"])): str(e["args"]["name"]).strip()
+            for e in chrome["traceEvents"]
+            if e.get("ph") == "M" and e.get("name") == "thread_name"
+        }
+        self.assertEqual(
+            {k: chrome_lane_names[k] for k in gpu_lanes},
+            {k: render_lane_names[k] for k in gpu_lanes},
+        )
+
+        # Arrow (flow) parity: the CPU-launch -> GPU-op link, both endpoints. Chrome emits
+        # ac2g flow events -- ph s on the launching CPU thread (source), ph f on the GPU op's
+        # lane (target), keyed by id == correlation. pftrace carries the same link as
+        # gpu_correlation: the launch track_event's gpu_corr == correlation (source track ->
+        # CPU pid/tid) and the GPU render stage's event_id == correlation (target lane).
+        # Compare, per correlation, ((cpu_pid, cpu_tid), (gpu_device, gpu_lane)) across formats
+        # -- this confirms the arrow connects the same CPU op to the same GPU op in both.
+        flow_src = {
+            int(e["id"]): (int(e["pid"]), int(e["tid"]))
+            for e in chrome["traceEvents"]
+            if e.get("cat") == "ac2g" and e.get("ph") == "s"
+        }
+        flow_tgt = {
+            int(e["id"]): (int(e["pid"]), int(e["tid"]))
+            for e in chrome["traceEvents"]
+            if e.get("cat") == "ac2g" and e.get("ph") == "f"
+        }
+        chrome_arrows = {
+            c: (flow_src[c], flow_tgt[c]) for c in flow_src if c in flow_tgt
+        }
+        pftrace_arrows = {
+            c: (src, render_op_lane[c])
+            for c, src in pftrace_arrow_src.items()
+            if c in render_op_lane
+        }
+        # both launches (corr 11 -> lane 7, 12 -> lane 8) link; not the un-launched memcpy/memset.
+        self.assertEqual(set(chrome_arrows), {11, 12})
+        self.assertEqual(chrome_arrows, pftrace_arrows)
+
+    def test_pftrace_chrome_lane_order_parity(self):
+        # The GPU lane DISPLAY ORDER matches across formats -- both order by numeric lane id.
+        # Chrome orders lanes by tid (numeric); pftrace names its hardware-queue lanes
+        # "[<zero-padded id>] <label>" so that Perfetto's lexicographic sort of those labels
+        # reproduces the numeric id order. Assert the id sequences agree and are strictly
+        # ascending. The window mixes a low-id "stream" lane (7), a higher-id resolver-named
+        # lane (17, "side comms"), and a mid "stream" lane (9): the named high-id lane must NOT
+        # sort ahead of the low-id stream lane (the regression the id prefix fixes), and the
+        # single- vs double-digit pair (7 vs 17) locks the zero-padding -- without it "[17]"
+        # would sort before "[7]". No CUDA.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _HW_QUEUE_IID_BASE,
+            merge_trace_window_into_chrome_trace,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000, 5000),
+                "end_ns": i64(2000, 4000, 6000),
+                "device_id": i64(0, 0, 0),
+                "context_id": i64(1, 1, 1),
+                "stream_id": i64(7, 7, 9),  # graphed k1 replayed on stream 7
+                "correlation_id": i64(11, 12, 13),
+                "graph_id": i64(0, 1, 0),
+                "graph_node_id": i64(0, 202, 0),
+                "name": np.array(["k0", "k1", "k2"], dtype=object),
+                "annotation": np.array([None, None, None], dtype=object),
+                "logical_lane": i64(7, 17, 9),  # k1 reassigned to lane 17
+                "lane_name": np.array([None, "side comms", None], dtype=object),
+                "grid_x": i64(1, 1, 1),
+                "grid_y": i64(1, 1, 1),
+                "grid_z": i64(1, 1, 1),
+                "block_x": i64(1, 1, 1),
+                "block_y": i64(1, 1, 1),
+                "block_z": i64(1, 1, 1),
+                "registers_per_thread": i64(0, 0, 0),
+                "static_shared_memory": i64(0, 0, 0),
+                "dynamic_shared_memory": i64(0, 0, 0),
+                "priority": i64(0, 0, 0),
+                "queued": i64(0, 0, 0),
+                "channel": i64(0, 0, 0),
+                "channel_type": i64(0, 0, 0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+        gpu_cats = {"kernel", "gpu_memcpy", "gpu_memset", "gpu_user_annotation"}
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps({"baseTimeNanoseconds": 0, "traceEvents": []}).encode()
+                )
+
+            merge_trace_window_into_chrome_trace(
+                cpu_path, os.path.join(d, "out.json"), window
+            )
+            with open(os.path.join(d, "out.json"), "rb") as f:
+                chrome = json.loads(f.read())
+            # chrome lane order == distinct GPU lanes sorted by tid ascending.
+            chrome_order = sorted(
+                {
+                    int(e["tid"])
+                    for e in chrome["traceEvents"]
+                    if e.get("ph") == "X" and e.get("cat") in gpu_cats
+                }
+            )
+
+            captured: dict = {}
+
+            def _capture(tracks, name_table, group_tuples, render, counters):
+                captured["render"] = render
+                return b""
+
+            m = torch._C._profiler._cupti_monitor
+            with patch.object(m, "encode_pftrace", _capture, create=True):
+                merge_trace_window_into_chrome_trace(
+                    cpu_path, os.path.join(d, "out.pftrace"), window
+                )
+
+        specs = captured["render"][0]
+        # hw-queue lane specs, sorted lexicographically by label as Perfetto would, then the
+        # lane id parsed back out of each "[<padded id>] ..." prefix.
+        lane_specs = sorted(
+            (name for iid, name, _cat in specs if iid >= _HW_QUEUE_IID_BASE)
+        )
+        pftrace_order = [int(name[1 : name.index("]")]) for name in lane_specs]
+
+        self.assertEqual(chrome_order, [7, 9, 17])
+        self.assertEqual(chrome_order, pftrace_order)
+        self.assertEqual(pftrace_order, sorted(pftrace_order))  # strictly ascending
+        # zero-padding is load-bearing: labels are "[07]"/"[09]"/"[17]", so lexicographic
+        # order == id order (unpadded "[17]" would sort before "[7]").
+        self.assertTrue(
+            all("]" in name and name.startswith("[0") for name in lane_specs[:2])
+        )
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuptiMonitorCUDA(TestCase):
