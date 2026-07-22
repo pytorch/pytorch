@@ -214,9 +214,16 @@ class TestIndexingSimplification(InductorTestCase):
         # Nested modular indexing is correctly simplified
         var_ranges = {i1: 13, i2: 121}
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, var_ranges),
+            ModularIndexing(121 * i1 + i2, 1, 28),
+        )
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        expr = ModularIndexing(ModularIndexing(i2, 1, 29), 7, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {}), expr)
+        expr = ModularIndexing(ModularIndexing(i2, -3, 12), -3, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {}), expr)
         var_ranges = {i2: 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
         # FloorDiv(ModularIndexing(b, d1, m), d2) simplifies to
@@ -225,6 +232,33 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+
+        var_ranges = {i0: 4096, r3: 256}
+        p = r3 + 256 * i0
+        expr = (
+            32768 * FloorDiv(p, 32768)
+            + 4 * FloorDiv(ModularIndexing(p, 1, 32768), 8192)
+            + 16 * ModularIndexing(ModularIndexing(p, 1, 32768), 256, 32)
+            + 512
+            * ModularIndexing(
+                ModularIndexing(ModularIndexing(p, 1, 32768), 1, 8192),
+                4,
+                64,
+            )
+            + ModularIndexing(
+                ModularIndexing(ModularIndexing(p, 1, 32768), 1, 8192),
+                1,
+                4,
+            )
+        )
+        expected = (
+            512 * FloorDiv(r3, 4)
+            + 32768 * FloorDiv(i0, 128)
+            + ModularIndexing(r3, 1, 4)
+            + 16 * ModularIndexing(i0, 1, 32)
+            + 4 * ModularIndexing(i0, 32, 4)
+        )
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
 
     def test_floordiv_modularindexing_simplification(self):
         sizevars = SizeVarAllocator()
