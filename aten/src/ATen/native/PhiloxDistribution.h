@@ -1,15 +1,46 @@
 #pragma once
 
 #include <ATen/MemoryOverlap.h>
+#include <ATen/core/Generator.h>
 #include <ATen/core/TensorBase.h>
+#include <ATen/native/DispatchStub.h>
 #include <c10/util/irange.h>
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
-namespace at::native::detail {
+namespace at {
+
+class Tensor;
+
+namespace native {
+
+// These values cross the dispatcher as integers and must match the
+// _PHILOX_DISTRIBUTION_* constants used by Python callers.
+enum class PhiloxDistributionKind : int64_t {
+  Normal = 0,
+};
+
+using philox_distribution_shards_fn = void (*)(
+    Tensor& self,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    PhiloxDistributionKind distribution,
+    double param0,
+    double param1,
+    std::optional<Generator> generator);
+
+DECLARE_DISPATCH(
+    philox_distribution_shards_fn,
+    philox_distribution_shards_stub)
+
+namespace detail {
 
 struct ValidatedPhiloxShardMetadata {
   int64_t global_numel;
@@ -183,4 +214,6 @@ inline ValidatedPhiloxShardMetadata validate_philox_shard_metadata(
   return {global_numel, std::move(chunk_numels)};
 }
 
-} // namespace at::native::detail
+} // namespace detail
+} // namespace native
+} // namespace at
