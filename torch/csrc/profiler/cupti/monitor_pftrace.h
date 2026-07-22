@@ -183,6 +183,10 @@ struct PftraceGroup {
   // GpuCorrelation.render_stage_submission_event_ids, linking a host launch to
   // its GPU render-stage (event_id == this value). 0 = no link.
   const int64_t* gpu_corr;
+  // nullable: per-slice interned EventCategory iid (index into category_table +
+  // 1), emitted as TrackEvent.category_iids so the viewer can tell cpu_op /
+  // cuda_runtime / cuda_driver / user_annotation slices apart. 0 = no category.
+  const uint64_t* cat_iid;
 };
 
 // GPU counters from the sampled CUpti_ActivityEnvironment records (power /
@@ -209,15 +213,24 @@ struct PftraceGpuCounter {
 };
 
 // tracks -> TrackDescriptor packets; name_table -> one interned EventName table
-// (iid == index + 1). Emits each group's SLICE_BEGINs (with debug_annotations +
-// flow) then SLICE_ENDs. trace_processor reorders by timestamp. gpu_specs +
-// gfx_contexts are interned alongside the name table, and stages -> one
-// GpuRenderStageEvent packet each (the native "GPU Render Stages"
-// hardware-queue lanes; additive to the track_event slices, which keep the
-// flows + args). counters -> counter tracks + their samples.
+// (iid == index + 1); category_table -> one interned EventCategory table (iid
+// == index + 1), referenced per-slice by PftraceGroup::cat_iid. Emits each
+// group's SLICE_BEGINs (with debug_annotations + flow) then SLICE_ENDs.
+// trace_processor reorders by timestamp. gpu_specs + gfx_contexts are interned
+// alongside the name table, and stages -> one GpuRenderStageEvent packet each
+// (the native "GPU Render Stages" hardware-queue lanes; additive to the
+// track_event slices, which keep the flows + args). counters -> counter tracks
+// + their samples.
+//
+// base_ns is the trace's absolute time base (the JSON export's
+// baseTimeNanoseconds): the packet timestamps are already absolute (base_ns +
+// offset), and a ClockSnapshot anchors them to REALTIME at base_ns so the wall-
+// clock base is recoverable -- the native counterpart of baseTimeNanoseconds.
 TORCH_API std::string cuptiMonitorEncodePftrace(
+    int64_t base_ns,
     const std::vector<PftraceTrack>& tracks,
     const std::vector<std::string>& name_table,
+    const std::vector<std::string>& category_table,
     const std::vector<PftraceGroup>& groups,
     const std::vector<PftraceGpuSpec>& gpu_specs,
     const std::vector<PftraceGfxContext>& gfx_contexts,

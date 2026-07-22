@@ -235,38 +235,6 @@ def _runtime_is_launch(name: str) -> bool:
     return _runtime_is_eager_launch(name) or name == "cudaGraphLaunch"
 
 
-_RUNTIME_DROPPED_CBIDS: frozenset[int] | None = None
-_DRIVER_KEPT_CBIDS: frozenset[int] | None = None
-
-
-def runtime_dropped_cbids() -> frozenset[int]:
-    """cbids of RUNTIME APIs the trace drops (names in the blocklist), so the decoder can
-    filter the noise (e.g. cudaGetDevice/GetLastError) out of the window before it is
-    built/merged. CUPTI's own per-cbid activity filter is NOT_COMPATIBLE under
-    user-defined records, so it cannot be done in CUPTI; this is the post-decode
-    equivalent, drop-set-identical to the merge's name blocklist."""
-    global _RUNTIME_DROPPED_CBIDS
-    if _RUNTIME_DROPPED_CBIDS is None:
-        names = _load_cbid_names(Runtime_api_trace_cbid)
-        _RUNTIME_DROPPED_CBIDS = frozenset(
-            cb for cb, n in names.items() if n in _RUNTIME_BLOCKLIST
-        )
-    return _RUNTIME_DROPPED_CBIDS
-
-
-def driver_kept_cbids() -> frozenset[int]:
-    """cbids of DRIVER APIs the trace keeps (names in the registered allowlist); the
-    decoder drops every other driver record (the driver kind is an allowlist, unlike the
-    runtime blocklist). Keep-set-identical to the merge's allowlist."""
-    global _DRIVER_KEPT_CBIDS
-    if _DRIVER_KEPT_CBIDS is None:
-        names = _load_cbid_names(Driver_api_trace_cbid)
-        _DRIVER_KEPT_CBIDS = frozenset(
-            cb for cb, n in names.items() if n in _DRIVER_REGISTERED
-        )
-    return _DRIVER_KEPT_CBIDS
-
-
 def _trace_window_entries(
     trace_window: dict[str, object],
     *,
@@ -1561,7 +1529,10 @@ def _window_to_pftrace(
         jsons=(),
         flow=None,
         gpu_corr=None,
+        cats=None,
     ):
+        # cats: per-slice category strings (or None), interned into category_iids so
+        # the viewer distinguishes cpu_op / cuda_runtime / cuda_driver / user_annotation.
         groups.append(
             {
                 "ts": np.ascontiguousarray(ts, dtype=np.int64),
@@ -1578,6 +1549,7 @@ def _window_to_pftrace(
                 "gpu_corr": None
                 if gpu_corr is None
                 else np.ascontiguousarray(gpu_corr, dtype=np.int64),
+                "cats": cats,
             }
         )
 
@@ -1613,6 +1585,7 @@ def _window_to_pftrace(
     cpu_dur_raw: list = []
     cpu_uuid: list = []
     cpu_names: list = []
+    cpu_cats: list = []
     cpu_args: list = []
     has_args = False
     for e in cpu_data.get("traceEvents", []):
@@ -1635,6 +1608,7 @@ def _window_to_pftrace(
         cpu_dur_raw.append(e.get("dur", 0.0))
         cpu_uuid.append(track_for(e.get("pid"), e.get("tid")))
         cpu_names.append(str(e.get("name", "")))
+        cpu_cats.append(str(e.get("cat", "")))
         # orjson (when present) emits bytes ~5x faster than stdlib json; json_anno takes
         # either. The native side parses the blob, so this avoids a slow per-event dumps.
         cpu_args.append(
@@ -1649,7 +1623,7 @@ def _window_to_pftrace(
             np.asarray(cpu_dur_raw, dtype=np.float64) * 1000.0
         ).astype(np.int64)
         jsons = [json_anno(cpu_args)] if has_args else ()
-        add_group(ts_arr, end_arr, cpu_uuid, cpu_names, jsons=jsons)
+        add_group(ts_arr, end_arr, cpu_uuid, cpu_names, jsons=jsons, cats=cpu_cats)
 
     # corr -> CPU thread, for the runtime/driver thread remap (via the external-corr column).
     cpu_thread_by_correlation_id: dict = {}
@@ -1715,6 +1689,7 @@ def _window_to_pftrace(
             names,
             ints,
             gpu_corr=gpu_corr,
+            cats=[ks] * len(keep),
         )
 
     # --- overhead (own lane), dropping the trailing buffer-request artifact ---
@@ -1814,6 +1789,10 @@ def _window_to_pftrace(
     # argsort over the object-array of names is the dominant assembly cost.
     iid_of: dict = {}
     name_table: list = []
+    # Categories are interned in their own iid space (EventCategory), referenced
+    # per-slice by cat_iid; a "" category maps to 0 (no category emitted).
+    cat_iid_of: dict = {}
+    cat_table: list = []
     group_tuples = []
     for g in groups:
         names = g["names"]
@@ -1825,6 +1804,21 @@ def _window_to_pftrace(
                 j = iid_of[nm] = len(name_table)
                 name_table.append(nm)
             ids.append(j + 1)
+        cats = g["cats"]
+        if cats is None:
+            cat_ids = None
+        else:
+            cids = []
+            for ct in cats:
+                if not ct:
+                    cids.append(0)
+                    continue
+                j = cat_iid_of.get(ct)
+                if j is None:
+                    j = cat_iid_of[ct] = len(cat_table)
+                    cat_table.append(ct)
+                cids.append(j + 1)
+            cat_ids = np.asarray(cids, dtype=np.uint64)
         group_tuples.append(
             (
                 g["ts"],
@@ -1837,6 +1831,7 @@ def _window_to_pftrace(
                 g["jsons"],
                 g["flow"],
                 g["gpu_corr"],
+                cat_ids,
             )
         )
     # GPU-side user annotations (gpu_user_annotation): emit as render stages (an "Annotation"
@@ -1864,7 +1859,7 @@ def _window_to_pftrace(
     )
     # encode_pftrace returns gzip-compressed bytes (compressed in C++), so write as-is.
     out = torch._C._profiler._cupti_monitor.encode_pftrace(
-        tracks, name_table, group_tuples, render, counters
+        base_ns, tracks, name_table, cat_table, group_tuples, render, counters
     )
     with open(output_path, "wb") as f:
         f.write(out)

@@ -127,33 +127,6 @@ void initCuptiMonitorBindings(py::module& m) {
       py::arg("self_flush") = false,
       py::arg("flush_period_ns") = 0,
       py::arg("flush_fn") = 0);
-  // Drop noisy runtime/driver records by cbid in the decoder. filters: {kind:
-  // (keep_mode, [cbids])} -- keep_mode True keeps only those cbids (driver
-  // allowlist), False drops them (runtime blocklist). cbid_field_id is the cbid
-  // field in the record.
-  cupti_monitor.def(
-      "set_cbid_filter",
-      [](int cbid_field_id, const py::dict& filters) {
-        std::unordered_map<
-            uint32_t,
-            std::pair<bool, std::unordered_set<uint32_t>>>
-            converted;
-        converted.reserve(filters.size());
-        for (auto item : filters) {
-          auto kind = item.first.cast<uint32_t>();
-          auto spec = item.second.cast<py::tuple>();
-          bool keep_mode = spec[0].cast<bool>();
-          std::unordered_set<uint32_t> cbids;
-          for (auto c : spec[1].cast<py::iterable>()) {
-            cbids.insert(c.cast<uint32_t>());
-          }
-          converted.emplace(kind, std::make_pair(keep_mode, std::move(cbids)));
-        }
-        CuptiMonitorDecoder::get().set_cbid_filter(
-            cbid_field_id, std::move(converted));
-      },
-      py::arg("cbid_field_id"),
-      py::arg("filters"));
   cupti_monitor.def(
       "start_decoder", []() { CuptiMonitorDecoder::get().start(); });
   cupti_monitor.def(
@@ -286,20 +259,26 @@ void initCuptiMonitorBindings(py::module& m) {
   // Encode the prepared columnar window into a Perfetto-native trace (raw
   // TracePacket stream, uncompressed) via protozero. See monitor_pftrace.h. The
   // Python side (monitor_trace.py) shapes the window and gzips the result.
+  //  - base_ns: absolute time base (baseTimeNanoseconds) -> ClockSnapshot
   //  - tracks: list of (uuid, parent, is_process, pid, tid, name)
   //  - name_table: list of distinct slice names (iid == index + 1)
+  //  - category_table: list of distinct slice categories (iid == index + 1)
   //  - groups: list of per-kind groups, each a tuple
   //      (ts, end, track_uuid, name_iid,
   //       int_annos:  [(key, int64_col, skip_zero), ...],
   //       str_annos:  [(key, idx_int64_col, [str, ...]), ...],
   //       arr_annos:  [(key, [int64_col, ...]), ...],
   //       json_annos: [(int32_offsets_col, blob_bytes), ...],
-  //       flow: int64_col | None)
+  //       flow: int64_col | None,
+  //       gpu_corr: int64_col | None,
+  //       cat_iid: uint64_col | None)
   // All columns are numpy arrays; they are kept alive for the encode.
   cupti_monitor.def(
       "encode_pftrace",
-      [](const py::list& tracks,
+      [](int64_t base_ns,
+         const py::list& tracks,
          const py::list& name_table,
+         const py::list& category_table,
          const py::list& groups,
          const py::object& render,
          const py::object& counters) -> py::bytes {
@@ -368,6 +347,11 @@ void initCuptiMonitorBindings(py::module& m) {
         for (const auto& item : name_table) {
           name_vec.push_back(item.cast<std::string>());
         }
+        std::vector<std::string> cat_vec;
+        cat_vec.reserve(category_table.size());
+        for (const auto& item : category_table) {
+          cat_vec.push_back(item.cast<std::string>());
+        }
 
         std::vector<PftraceGroup> group_vec;
         group_vec.reserve(groups.size());
@@ -411,6 +395,8 @@ void initCuptiMonitorBindings(py::module& m) {
           }
           pg.flow = g[8].is_none() ? nullptr : i64(g[8]);
           pg.gpu_corr = py::len(g) > 9 && !g[9].is_none() ? i64(g[9]) : nullptr;
+          pg.cat_iid =
+              py::len(g) > 10 && !g[10].is_none() ? u64(g[10]) : nullptr;
           group_vec.push_back(std::move(pg));
         }
 
@@ -536,8 +522,10 @@ void initCuptiMonitorBindings(py::module& m) {
         {
           py::gil_scoped_release release;
           out = torch::profiler::impl::cuptiMonitorEncodePftrace(
+              base_ns,
               track_vec,
               name_vec,
+              cat_vec,
               group_vec,
               spec_vec,
               ctx_vec,
@@ -546,8 +534,10 @@ void initCuptiMonitorBindings(py::module& m) {
         }
         return py::bytes(out);
       },
+      py::arg("base_ns"),
       py::arg("tracks"),
       py::arg("name_table"),
+      py::arg("category_table"),
       py::arg("groups"),
       py::arg("render") = py::none(),
       py::arg("counters") = py::none());

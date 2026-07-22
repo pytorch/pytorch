@@ -100,14 +100,35 @@ void emitJsonBlob(pbz::TrackEvent* te, const char* data, size_t len) {
 } // namespace
 
 std::string cuptiMonitorEncodePftrace(
+    int64_t base_ns,
     const std::vector<PftraceTrack>& tracks,
     const std::vector<std::string>& name_table,
+    const std::vector<std::string>& category_table,
     const std::vector<PftraceGroup>& groups,
     const std::vector<PftraceGpuSpec>& gpu_specs,
     const std::vector<PftraceGfxContext>& gfx_contexts,
     const PftraceRenderStages& stages,
     const PftraceGpuCounter& counters) {
   protozero::HeapBuffered<pbz::Trace> trace;
+
+  // Time base: the packet timestamps are absolute (base_ns + offset,
+  // epoch-frame ns, as base_ns is epoch-derived). Emit a ClockSnapshot tying
+  // the default trace clock (BOOTTIME) to REALTIME at base_ns so
+  // trace_processor can recover wall-clock time -- the native counterpart of
+  // the JSON's baseTimeNanoseconds, which likewise anchors its relative
+  // timestamps to an absolute base.
+  {
+    auto* pkt = trace->add_packet();
+    pkt->set_timestamp(static_cast<uint64_t>(base_ns));
+    pkt->set_trusted_packet_sequence_id(1);
+    auto* cs = pkt->set_clock_snapshot();
+    auto* boot = cs->add_clocks();
+    boot->set_clock_id(pbz::BUILTIN_CLOCK_BOOTTIME);
+    boot->set_timestamp(static_cast<uint64_t>(base_ns));
+    auto* real = cs->add_clocks();
+    real->set_clock_id(pbz::BUILTIN_CLOCK_REALTIME);
+    real->set_timestamp(static_cast<uint64_t>(base_ns));
+  }
 
   // Per-gpu InternedGpuCounterDescriptor iid (its own interned-id space). The
   // descriptor is interned (in interned_data) and the samples reference it by
@@ -138,9 +159,9 @@ std::string cuptiMonitorEncodePftrace(
     }
   }
 
-  if (!name_table.empty() || !gpu_specs.empty() || !gfx_contexts.empty() ||
-      !stages.compute_kernels.empty() || !stages.compute_arg_names.empty() ||
-      !gpu_counter_iid.empty()) {
+  if (!name_table.empty() || !category_table.empty() || !gpu_specs.empty() ||
+      !gfx_contexts.empty() || !stages.compute_kernels.empty() ||
+      !stages.compute_arg_names.empty() || !gpu_counter_iid.empty()) {
     auto* pkt = trace->add_packet();
     pkt->set_trusted_packet_sequence_id(1);
     pkt->set_sequence_flags(pbz::TracePacket::SEQ_INCREMENTAL_STATE_CLEARED);
@@ -172,6 +193,15 @@ std::string cuptiMonitorEncodePftrace(
       auto* en = interned->add_event_names();
       en->set_iid(iid++);
       en->set_name(nm);
+    }
+    // EventCategory table (iid == index + 1): TrackEvent.category_iids
+    // references these to tag each CPU slice's kind (cpu_op / cuda_runtime /
+    // ...).
+    uint64_t cat_iid = 1;
+    for (const auto& ct : category_table) {
+      auto* ec = interned->add_event_categories();
+      ec->set_iid(cat_iid++);
+      ec->set_name(ct);
     }
     for (const auto& s : gpu_specs) {
       auto* sp = interned->add_gpu_specifications();
@@ -221,6 +251,9 @@ std::string cuptiMonitorEncodePftrace(
       te->set_type(pbz::TrackEvent::TYPE_SLICE_BEGIN);
       te->set_track_uuid(g.track_uuid[i]);
       te->set_name_iid(g.name_iid[i]);
+      if (g.cat_iid && g.cat_iid[i]) {
+        te->add_category_iids(g.cat_iid[i]);
+      }
       if (g.flow && g.flow[i]) {
         te->add_flow_ids(static_cast<uint64_t>(g.flow[i]));
       }

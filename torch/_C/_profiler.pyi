@@ -286,11 +286,6 @@ class _CuptiMonitorModule:
         flush_fn: int = 0,
     ) -> None: ...
     @staticmethod
-    def set_cbid_filter(
-        cbid_field_id: int,
-        filters: dict[int, tuple[bool, list[int]]],
-    ) -> None: ...
-    @staticmethod
     def start_decoder() -> None: ...
     @staticmethod
     def stop_decoder() -> None: ...
@@ -319,8 +314,10 @@ class _CuptiMonitorModule:
     def metadata_put_external(blob: str, external_id: int = 0) -> None: ...
     @staticmethod
     def encode_pftrace(
+        base_ns: int,
         tracks: list[tuple[int, int, bool, int, int, str]],
         name_table: list[str],
+        category_table: list[str],
         groups: list[tuple],
         render: tuple | None = None,
         counters: tuple | None = None,
