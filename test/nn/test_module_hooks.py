@@ -1482,6 +1482,7 @@ class TestModuleHookNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "where no input requires gradient"):
             mod(inp).sum().backward()
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_pre_hook_no_requires_grad_no_warning(self):
         # A full backward pre-hook only receives grad_output, so firing from the
         # output side when no input requires grad is expected and must not emit
