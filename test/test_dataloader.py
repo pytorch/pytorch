@@ -25,6 +25,7 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyXPU,
 )
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -43,6 +44,7 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_CUDA,
     TEST_NUMPY,
+    TEST_XPU,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
     TestCase,
@@ -102,6 +104,12 @@ TEST_CUDA_IPC = (
     and not IS_JETSON
     #    and not TEST_WITH_ROCM
 )  # https://github.com/pytorch/pytorch/issues/90940
+
+TEST_XPU_IPC = (
+    torch.xpu.is_available()
+    and sys.platform != "darwin"
+    and sys.platform != "win32"
+)
 
 # pin_memory requires an accelerator with a pinned memory allocator.
 # MPS reports as available but does not support pin_memory (see
@@ -364,6 +372,18 @@ class CUDACountingDataset(Dataset):
 
     def __getitem__(self, i):
         return torch.as_tensor(i, device="cuda")
+
+    def __len__(self):
+        return self.n
+
+
+class XPUCountingDataset(Dataset):
+    def __init__(self, n):
+        super().__init__()
+        self.n = n
+
+    def __getitem__(self, i):
+        return torch.as_tensor(i, device="xpu")
 
     def __len__(self):
         return self.n
@@ -1415,7 +1435,7 @@ except RuntimeError as e:
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_XPU_IPC), "CUDA/XPU IPC not available")
     def test_multiple_dataloaders(self):
         for multiprocessing_context in supported_multiprocessing_contexts:
             loader1_it = iter(self._get_data_loader(self.dataset, num_workers=1))
@@ -1906,7 +1926,7 @@ except RuntimeError as e:
         ):
             list(iter(ChainDataset([dataset1, self.dataset])))
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_XPU_IPC), "CUDA/XPU IPC not available")
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
@@ -1925,6 +1945,8 @@ except RuntimeError as e:
                 and not IS_JETSON
             ):
                 ds_cls = CUDACountingDataset
+            elif ctx in ["spawn"] and TEST_XPU and not IS_WINDOWS:
+                ds_cls = XPUCountingDataset
             else:
                 ds_cls = CountingDataset
             self.assertEqual(
@@ -1994,13 +2016,13 @@ except RuntimeError as e:
                 )
 
     @skipIfNoNumpy
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_XPU_IPC), "CUDA/XPU IPC not available")
     def test_multiprocessing_iterdatapipe(self):
         self._test_multiprocessing_iterdatapipe(with_dill=False)
 
     @unittest.expectedFailure
     @skipIfNoNumpy
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_XPU_IPC), "CUDA/XPU IPC not available")
     @skipIfNoDill
     def test_multiprocessing_iterdatapipe_with_dill(self):
         self._test_multiprocessing_iterdatapipe(with_dill=True)
@@ -3160,6 +3182,108 @@ class TestDataLoaderDeviceType(TestCase):
         for batch in loader:
             self.assertTrue(batch[0].is_pinned())
 
+    @onlyXPU
+    def test_xpu_ipc_concurrent_access_stress(self, device):
+        dataset_size = 12
+        tensor_size = 256
+        batch_size = 2
+        num_epochs = 2
+        context = "spawn"
+        expected_batches = ((dataset_size + batch_size - 1) // batch_size) * num_epochs
+
+        xpu_device = torch.device(device)
+        dataset = [
+            torch.randn(
+                tensor_size,
+                tensor_size,
+                device=xpu_device,
+            )
+            for _ in range(dataset_size)
+        ]
+
+        for num_workers in (2, 4):
+            with self.subTest(num_workers=num_workers):
+                loader = DataLoader(
+                    dataset,
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    pin_memory=False,
+                    multiprocessing_context=context,
+                )
+
+                batch_count = 0
+                for _ in range(num_epochs):
+                    iterator = iter(loader)
+                    try:
+                        for batch in iterator:
+                            self.assertEqual(batch.device.type, "xpu")
+                            batch_count += 1
+                    finally:
+                        if hasattr(iterator, "_shutdown_workers"):
+                            iterator._shutdown_workers()
+                        del iterator
+
+                self.assertEqual(batch_count, expected_batches)
+                del loader
+                gc.collect()
+                torch.xpu.synchronize(xpu_device)
+                torch.xpu.empty_cache()
+
+    @onlyXPU
+    def test_xpu_ipc_imported_tensor_flag(self, device):
+        xpu_device = torch.device(device)
+        dataset = [torch.randn(64, device=xpu_device) for _ in range(5)]
+
+        loader = DataLoader(
+            dataset,
+            batch_size=1,
+            num_workers=2,
+            multiprocessing_context="spawn",
+        )
+
+        for batch in loader:
+            self.assertEqual(batch.device.type, "xpu")
+            self.assertTrue(batch.size(0) == 1)
+
+    @onlyXPU
+    def test_xpu_ipc_high_throughput_cleanup(self, device):
+        xpu_device = torch.device(device)
+        dataset = [torch.randn(10, device=xpu_device) for _ in range(100)]
+
+        for context in ["spawn", "forkserver"]:
+            loader = DataLoader(
+                dataset,
+                batch_size=5,
+                num_workers=4,
+                pin_memory=False,
+                multiprocessing_context=context,
+            )
+
+            for _ in range(3):
+                for batch in loader:
+                    self.assertEqual(batch.size(0), 5)
+                    torch.xpu.synchronize(xpu_device)
+
+    @onlyXPU
+    def test_xpu_ipc_device_context_safety(self, device):
+        xpu_device = torch.device(device)
+        dataset = [torch.randn(32, device=xpu_device) for _ in range(10)]
+
+        loader = DataLoader(
+            dataset,
+            batch_size=1,
+            num_workers=2,
+            pin_memory=False,
+            multiprocessing_context="spawn",
+        )
+
+        expected_index = torch.xpu.current_device()
+        for batch in loader:
+            self.assertEqual(batch.device.index, expected_index)
+            self.assertEqual(batch.device.type, "xpu")
+            result = batch * 2.0
+            self.assertEqual(result.device, batch.device)
+
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
     r"""
@@ -3966,7 +4090,7 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertEqual(expected_data, data)
 
 
-instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
+instantiate_device_type_tests(TestDataLoaderDeviceType, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
