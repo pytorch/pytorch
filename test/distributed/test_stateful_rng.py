@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import unittest
+from enum import IntEnum
 from typing import Any, cast
 
 import torch
@@ -11,17 +12,16 @@ from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-aten = torch.ops.aten
-
-# Must match PhiloxDistributionKind in PhiloxDistribution.h.
-_PHILOX_DISTRIBUTION_NORMAL = 0
-
-
-def _flatten_chunks(chunks: tuple[tuple[int, ...], ...]) -> list[int]:
-    return [value for chunk in chunks for value in chunk]
+class _PhiloxDistributionKind(IntEnum):
+    # Must match PhiloxDistributionKind in PhiloxDistribution.h.
+    NORMAL = 0
 
 
 class _StatefulRNGMode(TorchDispatchMode):
+    @staticmethod
+    def _flatten_chunks(chunks: tuple[tuple[int, ...], ...]) -> list[int]:
+        return [value for chunk in chunks for value in chunk]
+
     def __torch_dispatch__(
         self,
         func: torch._ops.OpOverload,
@@ -31,7 +31,7 @@ class _StatefulRNGMode(TorchDispatchMode):
     ) -> Any:
         if kwargs is None:
             kwargs = {}
-        if func is not aten.normal_.default:
+        if func is not torch.ops.aten.normal_.default:
             return func(*args, **kwargs)
 
         filled_args, filled_kwargs = fill_defaults(func._schema, args, kwargs)
@@ -45,14 +45,14 @@ class _StatefulRNGMode(TorchDispatchMode):
         rng_metadata = cast(CheckpointableTensor, tensor_arg)
 
         _, mean, std = filled_args
-        aten._philox_distribution_shards_.default(
+        torch.ops.aten._philox_distribution_shards_.default(
             tensor_arg,
             rng_metadata.global_shape,
-            _flatten_chunks(rng_metadata.global_offsets),
-            _flatten_chunks(rng_metadata.local_offsets),
-            _flatten_chunks(rng_metadata.local_sizes),
+            self._flatten_chunks(rng_metadata.global_offsets),
+            self._flatten_chunks(rng_metadata.local_offsets),
+            self._flatten_chunks(rng_metadata.local_sizes),
             len(rng_metadata.global_offsets),
-            _PHILOX_DISTRIBUTION_NORMAL,
+            _PhiloxDistributionKind.NORMAL,
             (mean, std),
             generator=filled_kwargs["generator"],
         )
@@ -295,7 +295,7 @@ class TestPhiloxDistributionShardsOp(TestCase):
                 [0, 0],
                 [1, 1],
                 2,
-                _PHILOX_DISTRIBUTION_NORMAL,
+                _PhiloxDistributionKind.NORMAL,
                 [0.0, 1.0],
                 generator=generator,
             ),
@@ -309,7 +309,7 @@ class TestPhiloxDistributionShardsOp(TestCase):
                 [0],
                 [1],
                 1,
-                _PHILOX_DISTRIBUTION_NORMAL,
+                _PhiloxDistributionKind.NORMAL,
                 [0.0, -1.0],
                 generator=generator,
             ),
