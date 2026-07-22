@@ -4,10 +4,12 @@
 #include <c10/core/ConstantSymNodeImpl.h>
 #include <c10/core/Storage.h>
 #include <c10/core/SymInt.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/SymNodeImpl.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 
+#include <string>
 #include <vector>
 
 using namespace c10;
@@ -27,6 +29,38 @@ TEST(SymIntTest, ConcreteInts) {
 
 TEST(SymIntTest, CheckRange) {
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
+}
+
+TEST(SymIntTest, SymIntArrayRefErrorDistinguishesHeapAllocatedConcrete) {
+  const std::vector<SymInt> values{
+      SymInt(SymInt::min_representable_int() - 1), SymInt(5)};
+
+  try {
+    (void)c10::asIntArrayRefSlow(values, __FILE__, __LINE__);
+    FAIL() << "Expected asIntArrayRefSlow to reject heap-allocated SymInt";
+  } catch (const c10::Error& e) {
+    const std::string message = e.what_without_backtrace();
+    EXPECT_NE(
+        message.find("heap-allocated concrete SymInt at index 0"),
+        std::string::npos)
+        << message;
+    EXPECT_NE(
+        message.find("cannot represent heap-allocated SymInt values"),
+        std::string::npos)
+        << message;
+    EXPECT_EQ(message.find("Found symbolic SymInt"), std::string::npos)
+        << message;
+    EXPECT_EQ(message.find("symbolic shapes"), std::string::npos) << message;
+  }
+}
+
+TEST(SymIntTest, SymIntArrayRefAcceptsConcreteIntArrayRefBridge) {
+  const std::vector<int64_t> values{2, -1, SymInt::min_representable_int()};
+  const auto sym_values = c10::fromIntArrayRefSlow(values);
+  const auto int_values =
+      c10::asIntArrayRefSlow(sym_values, __FILE__, __LINE__);
+
+  EXPECT_EQ(int_values, at::IntArrayRef(values));
 }
 
 #if !C10_UBSAN_ENABLED
