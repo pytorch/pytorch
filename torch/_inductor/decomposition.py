@@ -129,7 +129,6 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
-    aten.as_strided_scatter,  # need input storage layout intact for Inductor lowering
     aten.silu,  # inductor uses exact eager decomposition
     aten.split.Tensor,  # inductor lowers this directly
     aten.squeeze,  # inductor lowers this directly

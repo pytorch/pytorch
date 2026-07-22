@@ -4288,59 +4288,21 @@ class TestTorchDeviceType(TestCase):
         doubles = torch.randn(2 * sz, dtype=dtype, device=device)
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: out.copy_(input))
+
         x = torch.arange(8, dtype=dtype, device=device).reshape(2, 2, 2)
         x = x.permute(2, 1, 0)
         with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
             x[0].copy_(x[0].t())
+        with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
+            torch.ops.aten.copy.default(x[0], x[0].t())
+
         x = torch.arange(2, dtype=dtype, device=device).reshape(2, 1)
         x.copy_(x.as_strided((2, 1), (1, 0)))
+
         x = torch.arange(6, dtype=dtype, device=device).reshape(3, 2)
         expected = x[0:1].clone().expand_as(x)
         x.copy_(x[0:1].expand_as(x))
         self.assertEqual(x, expected)
-        x = torch.arange(6, dtype=dtype, device=device).reshape(3, 2)
-        expected = x[0:1].clone().expand_as(x)
-        x.copy_(x[0:1])
-        self.assertEqual(x, expected)
-        x = torch.arange(4, dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
-            x.as_strided((2, 2), (1, 2)).copy_(x.as_strided((2, 2), (0, 1)))
-        x = torch.arange(5, dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
-            x[1:].view(2, 2).copy_(x[:2].view(2, 1).expand(2, 2))
-        x = torch.arange(140002, dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
-            x[2::2].copy_(x[:-2:2])
-        x = torch.arange(513 * 128, dtype=dtype, device=device).reshape(513, 128)
-        expected = x.clone()
-        expected[:, :64].copy_(expected[:, 64:])
-        x[:, :64].copy_(x[:, 64:])
-        self.assertEqual(x, expected)
-        x = torch.arange(80001, dtype=dtype, device=device)
-        expected = x.clone()
-        expected.as_strided((40000,), (2,), 0).copy_(expected[1:2])
-        x.as_strided((40000,), (2,), 0).copy_(x[1:2])
-        self.assertEqual(x, expected)
-        n = 16385
-        stride0 = 2 * n + 1
-        x = torch.arange(2 * stride0, dtype=dtype, device=device)
-        expected = x.clone()
-        expected.as_strided((2, n), (stride0, 2), 0).copy_(expected[1:2])
-        x.as_strided((2, n), (stride0, 2), 0).copy_(x[1:2])
-        self.assertEqual(x, expected)
-        x = torch.arange(2 * stride0, dtype=dtype, device=device)
-        expected = x.clone()
-        expected.as_strided((2, n), (stride0, 2), 0).copy_(
-            expected[1:2].expand(2, n)
-        )
-        x.as_strided((2, n), (stride0, 2), 0).copy_(x[1:2].expand(2, n))
-        self.assertEqual(x, expected)
-        base = torch.empty(0, dtype=dtype, device=device)
-        base.as_strided((1, 0), (1, 1)).copy_(base.as_strided((0,), (1,)))
-        if torch.device(device).type == "cpu":
-            base = torch.arange(8, dtype=torch.float16, device=device)
-            with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
-                base.view(torch.float32).copy_(base[:4])
 
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)

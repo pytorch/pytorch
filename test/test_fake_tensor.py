@@ -2026,7 +2026,7 @@ def forward(self, x_1):
             x = torch.empty_strided((8,), (1,))
             y = torch.as_strided(x, (2,), (1,), u0)
             z = torch.as_strided(x, (2,), (1,), u0)
-            copy_out = torch.ops.aten.copy.default(y, y)
+            copy_out = torch.ops.aten.copy.default(y, z)
             with in_kernel_invocation_manager(fake_mode):
                 y.copy_(z)
 

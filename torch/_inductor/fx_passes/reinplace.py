@@ -35,10 +35,6 @@ from torch.fx.passes.reinplace import _is_view_op
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 
-from .copy_overlap import (
-    aliasing_mutation_copy_may_overlap as _aliasing_mutation_copy_may_overlap,
-)
-
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -84,14 +80,6 @@ def graph_call_function(graph: torch.fx.Graph, fn, *args, **kwargs):
         node.meta["unbacked_bindings"] = symbol_to_path
 
     return node
-
-
-def _copy_overlap_error() -> RuntimeError:
-    return RuntimeError(
-        "unsupported operation: some elements of the input tensor and "
-        "the written-to tensor refer to a single memory location. "
-        "Please clone() the tensor before performing the operation."
-    )
 
 
 @dataclass
@@ -226,121 +214,6 @@ def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     )
 
 
-def _scatter_input_aliasing_src(node: torch.fx.Node) -> bool:
-    if len(node.args) < 2:
-        return False
-    inp, src = node.args[:2]
-    if not isinstance(inp, torch.fx.Node) or not isinstance(src, torch.fx.Node):
-        return False
-
-    inp_storage = get_node_storage(inp)
-    src_storage = get_node_storage(src)
-    return inp_storage is not None and src_storage == inp_storage
-
-
-def _scatter_copied_back_to_input_with_aliasing_src(node: torch.fx.Node) -> bool:
-    if not _scatter_input_aliasing_src(node):
-        return False
-    inp = node.args[0]
-    return isinstance(inp, torch.fx.Node) and any(
-        user.target is aten.copy_.default and user.args[0] is inp for user in node.users
-    )
-
-
-def _node_has_internal_overlap(inp: Any) -> bool:
-    if not isinstance(inp, torch.fx.Node):
-        return False
-    try:
-        return torch._debug_has_internal_overlap(inp.meta["val"]) == 1
-    except GuardOnDataDependentSymNode:
-        return True
-
-
-def _fake_view_for_scatter_dst(node: torch.fx.Node) -> torch.Tensor | None:
-    if node.target not in _SCATTER_OP_TO_VIEW or len(node.args) < 1:
-        return None
-    inp = node.args[0]
-    if not isinstance(inp, torch.fx.Node):
-        return None
-    view_target = _SCATTER_OP_TO_VIEW[node.target]
-    fake_args, fake_kwargs = pytree.tree_map(
-        lambda arg: arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg,
-        (node.args[2:], node.kwargs),
-    )
-    fake_mode = detect_fake_mode((inp.meta["val"], fake_args, fake_kwargs))
-    with (
-        fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-        if fake_mode and fake_mode.shape_env
-        else nullcontext()
-    ):
-        return view_target(inp.meta["val"], *fake_args, **fake_kwargs)
-
-
-def _check_aliasing_mutation_overlap(node: torch.fx.Node, src: torch.fx.Node) -> None:
-    dst_val = _fake_view_for_scatter_dst(node)
-    if dst_val is None:
-        raise _copy_overlap_error()
-    src_val = src.meta["val"]
-    if _aliasing_mutation_copy_may_overlap(dst_val, src_val):
-        raise _copy_overlap_error()
-
-
-def _scatter_input_has_internal_overlap(node: torch.fx.Node) -> bool:
-    if len(node.args) < 1:
-        return False
-    return _node_has_internal_overlap(node.args[0])
-
-
-def _scatter_uses_as_strided_view(node: torch.fx.Node) -> bool:
-    _, _, view_ops = node.args
-    view_ops = cast(Sequence[torch.fx.node.Argument], view_ops)
-    return any(
-        target is aten.as_strided.default
-        for view in view_ops
-        if isinstance(target := getattr(view, "target", None), torch._ops.OpOverload)
-    )
-
-
-def _scatter_input_has_nonzero_storage_offset(node: torch.fx.Node) -> bool:
-    if len(node.args) < 1 or not isinstance(node.args[0], torch.fx.Node):
-        return False
-    try:
-        return not statically_known_true(
-            sym_eq(node.args[0].meta["val"].storage_offset(), 0)
-        )
-    except GuardOnDataDependentSymNode:
-        return True
-
-
-def _node_is_graph_input_view(node: torch.fx.Node) -> bool:
-    while isinstance(node, torch.fx.Node):
-        if node.op == "placeholder":
-            return True
-        if node.op != "call_function" or not _is_view_op(node.target):
-            return False
-        base = node.args[0]
-        if not isinstance(base, torch.fx.Node):
-            return False
-        node = base
-    return False
-
-
-def _scatter_input_is_graph_input_view(node: torch.fx.Node) -> bool:
-    if len(node.args) < 1 or not isinstance(node.args[0], torch.fx.Node):
-        return False
-    return _node_is_graph_input_view(node.args[0])
-
-
-def _scatter_needs_functional_preserve_strides(node: torch.fx.Node) -> bool:
-    return _scatter_uses_as_strided_view(node) and (
-        _scatter_input_has_nonzero_storage_offset(node)
-        or (
-            _scatter_input_is_graph_input_view(node)
-            and not _scatter_input_has_internal_overlap(node)
-        )
-    )
-
-
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -351,25 +224,15 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """
     inp, _src, _view_ops = node.args
 
-    # Mutating scatter ops unconditionally realize input and output. Keep public
-    # scatter ops functional when their source aliases the input, since the
-    # computed scatter result is a temporary in eager.
+    # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
-        if (
-            _scatter_input_aliasing_src(node)
-            or _scatter_input_has_internal_overlap(node)
-            or _scatter_needs_functional_preserve_strides(node)
-        ):
-            return False
         return True
 
     if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
         return True
 
     # If the output is copied back into the input, this forces both to be
-    # realized as the output is a user of the input.
-    if _scatter_copied_back_to_input_with_aliasing_src(node):
-        return False
+    # realized as the output is a user of the input
     if inp.op in ("placeholder", "get_attr") and any(  # type: ignore[union-attr]
         user.target is aten.copy_.default and user.args[0] is inp for user in node.users
     ):
@@ -385,14 +248,9 @@ def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
         graph.find_nodes(op="call_function", target=_generalized_scatter),
         graph.find_nodes(op="call_function", target=_inplace_generalized_scatter),
     ):
-        keep_functional_for_public_scatter = (
-            _scatter_input_aliasing_src(node)
-            or _scatter_input_has_internal_overlap(node)
-            or _scatter_needs_functional_preserve_strides(node)
-        )
-        use_mutation = node.target is _inplace_generalized_scatter or (
-            scatter_always_uses_mutation(node)
-            and not keep_functional_for_public_scatter
+        use_mutation = (
+            node.target is _inplace_generalized_scatter
+            or scatter_always_uses_mutation(node)
         )
 
         with graph.inserting_before(node):
@@ -427,24 +285,6 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
 
     node_to_view_base: dict[torch.fx.Node, torch.fx.Node] = {}
     node_to_view_op: dict[torch.fx.Node, list[ViewOp]] = defaultdict(list)
-
-    def from_mutation(node: torch.fx.Node) -> bool:
-        return any(
-            entry[0].startswith("copy") or entry[0] == "setitem"
-            for entry in node.meta.get("source_fn_stack", ())
-            if isinstance(entry, tuple) and entry
-        )
-
-    def from_aliasing_mutation(node: torch.fx.Node, inp: Any, src: Any) -> bool:
-        if (
-            not from_mutation(node)
-            or not isinstance(inp, torch.fx.Node)
-            or not isinstance(src, torch.fx.Node)
-        ):
-            return False
-        inp_storage = get_node_storage(inp)
-        src_storage = get_node_storage(src)
-        return inp_storage is not None and src_storage == inp_storage
 
     def handle_views(node: torch.fx.Node):
         inp = node.args[0]
@@ -487,11 +327,6 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
 
         if not can_fuse():
             with graph.inserting_before(node):
-                aliasing_mutation = from_aliasing_mutation(node, inp, src)
-                if aliasing_mutation:
-                    if not isinstance(src, torch.fx.Node):
-                        raise AssertionError(f"expected FX node src, got {type(src)}")
-                    _check_aliasing_mutation_overlap(node, src)
                 new_node = graph_call_function(
                     graph,
                     _generalized_scatter,
@@ -505,11 +340,6 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
 
         _src_inp, src_src, src_scatter_view_op = src.args  # type: ignore[union-attr]
         with graph.inserting_before(src):  # type: ignore[arg-type]
-            aliasing_mutation = from_aliasing_mutation(node, inp, src)
-            if aliasing_mutation:
-                if not isinstance(src, torch.fx.Node):
-                    raise AssertionError(f"expected FX node src, got {type(src)}")
-                _check_aliasing_mutation_overlap(node, src)
             new_node = graph_call_function(
                 graph,
                 _generalized_scatter,

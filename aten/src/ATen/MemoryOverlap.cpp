@@ -1,6 +1,5 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/TensorBase.h>
-#include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/irange.h>
 #include <optional>
 
@@ -59,50 +58,11 @@ MemOverlapStatus get_overlap_status(const TensorBase& a, const TensorBase& b) {
   return get_overlap_status(a.unsafeGetTensorImpl(), b.unsafeGetTensorImpl());
 }
 
-static bool same_address_mapping(const TensorImpl* a, const TensorImpl* b) {
-  if (a->itemsize() != b->itemsize() || a->sizes() != b->sizes()) {
-    return false;
-  }
-  for (const auto i : c10::irange(a->dim())) {
-    if (a->sizes()[i] > 1 && a->strides()[i] != b->strides()[i]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static bool has_symbolic_sizes_or_strides(const TensorImpl* t) {
-  if (t->sym_storage_offset().is_symbolic()) {
-    return true;
-  }
-  for (const auto& size : t->sym_sizes()) {
-    if (size.is_symbolic()) {
-      return true;
-    }
-  }
-  for (const auto& stride : t->sym_strides()) {
-    if (stride.is_symbolic()) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static std::optional<bool> maybe_guard_bool(const c10::SymBool& value) {
   if (!value.has_hint()) {
     return std::nullopt;
   }
   return TORCH_GUARD_OR_FALSE(value);
-}
-
-static std::optional<bool> same_storage_byte_offset(
-    const TensorImpl* a,
-    const TensorImpl* b) {
-  const auto a_offset =
-      a->sym_storage_offset() * c10::SymInt(static_cast<int64_t>(a->itemsize()));
-  const auto b_offset =
-      b->sym_storage_offset() * c10::SymInt(static_cast<int64_t>(b->itemsize()));
-  return maybe_guard_bool(a_offset.sym_eq(b_offset));
 }
 
 static MemOverlapStatus symbolic_same_start_overlap(
@@ -112,24 +72,27 @@ static MemOverlapStatus symbolic_same_start_overlap(
     return MemOverlapStatus::TooHard;
   }
 
-  const auto a_sizes = a->sym_sizes();
-  const auto b_sizes = b->sym_sizes();
-  const auto sizes_equal = maybe_guard_bool(c10::sym_equals(a_sizes, b_sizes));
-  if (!sizes_equal || !*sizes_equal) {
+  const auto same_start = maybe_guard_bool(
+      a->sym_storage_offset().sym_eq(b->sym_storage_offset()));
+  const auto sizes_equal =
+      maybe_guard_bool(c10::sym_equals(a->sym_sizes(), b->sym_sizes()));
+  if (!same_start || !*same_start || !sizes_equal || !*sizes_equal) {
     return MemOverlapStatus::TooHard;
   }
 
+  bool different_mapping = false;
+  bool expanded_src = false;
   const auto a_strides = a->sym_strides();
   const auto b_strides = b->sym_strides();
-  bool different_mapping = false;
   for (const auto i : c10::irange(a->dim())) {
-    const auto stride_diff =
-        maybe_guard_bool(a_strides[i].sym_ne(b_strides[i]));
-    if (stride_diff && !*stride_diff) {
-      continue;
+    const auto size_zero = maybe_guard_bool(a->sym_size(i).sym_eq(0));
+    if (!size_zero) {
+      return MemOverlapStatus::TooHard;
     }
-
-    const auto size_gt_one = maybe_guard_bool(a_sizes[i].sym_gt(1));
+    if (*size_zero) {
+      return MemOverlapStatus::No;
+    }
+    const auto size_gt_one = maybe_guard_bool(a->sym_size(i).sym_gt(1));
     if (!size_gt_one) {
       return MemOverlapStatus::TooHard;
     }
@@ -137,63 +100,85 @@ static MemOverlapStatus symbolic_same_start_overlap(
       continue;
     }
 
-    if (!stride_diff) {
-      return MemOverlapStatus::TooHard;
-    }
-
-    const auto a_stride_zero = maybe_guard_bool(a_strides[i].sym_eq(0));
-    const auto b_stride_zero = maybe_guard_bool(b_strides[i].sym_eq(0));
+    const auto a_stride_zero =
+        maybe_guard_bool(a_strides[i].sym_eq(0));
+    const auto b_stride_zero =
+        maybe_guard_bool(b_strides[i].sym_eq(0));
     if (!a_stride_zero || !b_stride_zero) {
       return MemOverlapStatus::TooHard;
     }
-    if (*a_stride_zero || *b_stride_zero) {
-      return MemOverlapStatus::Partial;
+    if (*a_stride_zero) {
+      return MemOverlapStatus::TooHard;
     }
-    different_mapping = true;
+    if (*b_stride_zero) {
+      expanded_src = true;
+      continue;
+    }
+
+    const auto stride_diff =
+        maybe_guard_bool(a_strides[i].sym_ne(b_strides[i]));
+    if (!stride_diff) {
+      return MemOverlapStatus::TooHard;
+    }
+    different_mapping |= *stride_diff;
   }
 
+  if (expanded_src && !different_mapping) {
+    return MemOverlapStatus::TooHard;
+  }
   return different_mapping ? MemOverlapStatus::Partial
                            : MemOverlapStatus::Full;
 }
 
-static MemOverlapStatus get_overlap_status_impl(
-    const TensorImpl* a,
-    const TensorImpl* b) {
+MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
   if (a == b) return MemOverlapStatus::Full;
-  if (a == c10::UndefinedTensorImpl::singleton() ||
-      b == c10::UndefinedTensorImpl::singleton()) {
-    return MemOverlapStatus::TooHard;
-  }
   const auto has_symbolic_sizes_strides =
       a->has_symbolic_sizes_strides() || b->has_symbolic_sizes_strides() ||
-      has_symbolic_sizes_or_strides(a) || has_symbolic_sizes_or_strides(b);
-  if (!has_symbolic_sizes_strides && (a->numel() == 0 || b->numel() == 0)) {
-    return MemOverlapStatus::No;
-  }
-  if (a->layout() == kStrided && b->layout() == kStrided) {
+      a->sym_storage_offset().is_symbolic() ||
+      b->sym_storage_offset().is_symbolic();
+  if (has_symbolic_sizes_strides && a->layout() == kStrided &&
+      b->layout() == kStrided) {
     const auto& a_storage = a->unsafe_storage();
     if (a_storage && a_storage.is_alias_of(b->unsafe_storage())) {
-      const auto same_start = same_storage_byte_offset(a, b);
-      if (!same_start) {
-        return MemOverlapStatus::TooHard;
-      }
-      if (*same_start) {
-        if (has_symbolic_sizes_strides) {
-          return symbolic_same_start_overlap(a, b);
-        }
-        // Even when the views are not non-overlapping-and-dense, two aliases that
-        // start at the same address overlap in at least their first element.
-        // When the per-element address mapping differs, this is a partial overlap
-        // and in-place TensorIterator ops cannot safely pick an execution order.
-        if (same_address_mapping(a, b)) {
-          return MemOverlapStatus::Full;
-        }
-        return MemOverlapStatus::Partial;
-      }
+      return symbolic_same_start_overlap(a, b);
     }
   }
   if (has_symbolic_sizes_strides) {
     return MemOverlapStatus::TooHard;
+  }
+  if (a->numel() == 0 || b->numel() == 0) {
+    return MemOverlapStatus::No;
+  }
+  if (a->layout() == kStrided && b->layout() == kStrided &&
+      a->itemsize() == b->itemsize()) {
+    const auto& a_storage = a->unsafe_storage();
+    const auto same_start =
+        a->storage_offset() == b->storage_offset() && a_storage &&
+        a_storage.is_alias_of(b->unsafe_storage());
+    if (same_start && a->sizes() == b->sizes()) {
+      bool different_mapping = false;
+      bool expanded_src = false;
+      for (const auto i : c10::irange(a->dim())) {
+        if (a->sizes()[i] <= 1) {
+          continue;
+        }
+        if (a->strides()[i] == 0) {
+          return MemOverlapStatus::TooHard;
+        }
+        if (b->strides()[i] == 0) {
+          expanded_src = true;
+          continue;
+        }
+        if (a->strides()[i] != b->strides()[i]) {
+          different_mapping = true;
+        }
+      }
+      if (expanded_src && !different_mapping) {
+        return MemOverlapStatus::TooHard;
+      }
+      return different_mapping ? MemOverlapStatus::Partial
+                               : MemOverlapStatus::Full;
+    }
   }
   if (!a->is_non_overlapping_and_dense_or_false() || !b->is_non_overlapping_and_dense_or_false()) {
     return MemOverlapStatus::TooHard;
@@ -205,12 +190,10 @@ static MemOverlapStatus get_overlap_status_impl(
   // which we will miss.
   const auto& a_storage = a->unsafe_storage();
   if (a_storage && a_storage.is_alias_of(b->unsafe_storage())) {
-    const auto a_itemsize = static_cast<int64_t>(a->itemsize());
-    const auto b_itemsize = static_cast<int64_t>(b->itemsize());
-    const auto a_begin = a->storage_offset() * a_itemsize;
-    const auto a_end = a_begin + a->numel() * a_itemsize;
-    const auto b_begin = b->storage_offset() * b_itemsize;
-    const auto b_end = b_begin + b->numel() * b_itemsize;
+    const auto a_begin = static_cast<const char*>(a->data());
+    const auto a_end = a_begin + a->numel() * a->itemsize();
+    const auto b_begin = static_cast<const char*>(b->data());
+    const auto b_end = b_begin + b->numel() * b->itemsize();
 
     if (a_begin == b_begin && a_end == b_end) {
       return (a->strides() == b->strides()) ?
@@ -221,10 +204,6 @@ static MemOverlapStatus get_overlap_status_impl(
     }
   }
   return MemOverlapStatus::No;
-}
-
-MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
-  return get_overlap_status_impl(a, b);
 }
 
 void assert_no_partial_overlap(const TensorBase& a, const TensorBase& b) {

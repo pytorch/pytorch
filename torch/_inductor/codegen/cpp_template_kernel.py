@@ -456,7 +456,7 @@ class CppTemplateKernel(CppKernel):
         else:
             if dst.get_name() != src.get_name():
                 # src is local
-                copy = L._copy_pointwise(dst, src).data.data
+                copy = L.copy(dst, src).data.data
                 with LocalBufferContext(self.args) as scope:
                     scope.add_local_buffer(src)
 
@@ -526,11 +526,7 @@ class CppTemplateKernel(CppKernel):
                         else:
                             scope.add_local_buffer(src[gemm_idx])
                             localize_epilogue_nodes.extend(
-                                [
-                                    L._copy_pointwise(
-                                        dst[gemm_idx], src[gemm_idx]
-                                    ).data.data
-                                ]
+                                [L.copy(dst[gemm_idx], src[gemm_idx]).data.data]
                             )
                             reindexers.append(None)
                             output_names.append(dst[gemm_idx].get_name())
@@ -563,7 +559,7 @@ class CppTemplateKernel(CppKernel):
                 copy_list = []
                 with LocalBufferContext(self.args) as scope:
                     for _src, _dst in zip(src, dst):
-                        copy_list.extend([L._copy_pointwise(_dst, _src).data.data])
+                        copy_list.extend([L.copy(_dst, _src).data.data])
                         scope.add_local_buffer(_src)
                         output_names.append(_dst.get_name())
                         final_offsets.append([sympy.S.Zero] * len(_dst.get_size()))

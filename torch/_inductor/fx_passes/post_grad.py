@@ -21,21 +21,11 @@ from torch._inductor.custom_graph_pass import (
 )
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
-from torch._prims_common import (
-    compute_required_storage_length,
-    is_boolean_dtype,
-    is_expandable_to,
-    is_integer_dtype,
-)
-from torch.fx.experimental.symbolic_shapes import (
-    GuardOnDataDependentSymNode,
-    statically_known_true,
-    sym_eq,
-)
-from torch.fx.passes.reinplace import _is_view_op
+from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config, inductor_prims, ir, pattern_matcher  # noqa: F401
+from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
@@ -69,7 +59,6 @@ from ..utils import (
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
 from ..virtualized import V
-from . import copy_overlap
 from .b2b_gemm import B2B_GEMM_PASS
 from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
@@ -80,13 +69,6 @@ from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
 
-
-_static_int = copy_overlap.static_int
-_tensors_have_disjoint_byte_bands = copy_overlap.tensors_have_disjoint_byte_bands
-_tensors_have_disjoint_byte_residue = copy_overlap.tensors_have_disjoint_byte_residue
-_tensors_have_exact_disjoint_byte_intervals = (
-    copy_overlap.tensors_have_exact_disjoint_byte_intervals
-)
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
@@ -284,10 +266,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
-    GraphTransformObserver(gm, "preserve_as_strided_view_storage").apply_graph_pass(
-        preserve_as_strided_view_storage
-    )
-
     if config._micro_pipeline_tp:
         micro_pipeline_tp_pass(gm.graph)
 
@@ -484,9 +462,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
     GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
         decompose_auto_functionalized
-    )
-    GraphTransformObserver(gm, "reject_dtype_view_copy_aliases").apply_graph_pass(
-        reject_dtype_view_copy_aliases
     )
     GraphTransformObserver(gm, "decompose_scan_to_while_loop").apply_gm_pass(
         decompose_scan_to_while_loop
@@ -1183,25 +1158,6 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
     )
 
 
-def same_strided_storage_meta(node1: torch.fx.Node, node2: torch.fx.Node) -> bool:
-    val1 = node1.meta.get("val")
-    val2 = node2.meta.get("val")
-    if not (
-        isinstance(val1, torch.Tensor)
-        and isinstance(val2, torch.Tensor)
-        and val1.layout == torch.strided
-        and val2.layout == torch.strided
-    ):
-        return False
-    if not torch._C._has_storage(val1) or not torch._C._has_storage(val2):
-        return False
-    return statically_known_true(
-        sym_eq(val1.storage_offset(), val2.storage_offset())
-    ) and statically_known_true(
-        sym_eq(val1.untyped_storage().nbytes(), val2.untyped_storage().nbytes())
-    )
-
-
 noop_registry: dict[Any, Any] = {}
 
 
@@ -1363,14 +1319,6 @@ def remove_noop_ops(graph: torch.fx.Graph):
                     and dst.kwargs.get("pin_memory") is True
                 ):
                     continue
-                if not isinstance(dst, torch.fx.Node):
-                    continue
-                if (
-                    get_node_storage(dst) != get_node_storage(src)
-                    or not same_meta(dst, src)
-                    or not same_strided_storage_meta(dst, src)
-                ):
-                    continue
 
             # Don't introduce new aliasing between inputs and outputs.
             # See fx_passes/README.md for a discussion of why this is
@@ -1428,111 +1376,6 @@ def remove_assert_ops(graph: torch.fx.Graph):
         op="call_function", target=torch.ops.aten._assert_tensor_metadata.default
     ):
         graph.erase_node(node)
-
-
-def _view_base_node(node: torch.fx.Node) -> torch.fx.Node | None:
-    if node.op != "call_function" or not _is_view_op(node.target) or not node.args:
-        return None
-    base = node.args[0]
-    return base if isinstance(base, torch.fx.Node) else None
-
-
-def _required_storage_bytes(
-    size: Sequence[Any], stride: Sequence[Any], storage_offset: Any, element_size: int
-):
-    if pytree.tree_any(
-        lambda arg: isinstance(arg, torch.fx.Node), (size, stride, storage_offset)
-    ):
-        return None
-    # pyrefly: ignore [bad-argument-type]
-    return compute_required_storage_length(size, stride, storage_offset) * element_size
-
-
-def _node_required_storage_bytes(node: torch.fx.Node):
-    val = node.meta.get("val")
-    if not isinstance(val, torch.Tensor):
-        return None
-    return _required_storage_bytes(
-        val.size(), val.stride(), val.storage_offset(), val.element_size()
-    )
-
-
-def _storage_guard_or_false(expr: Any) -> bool:
-    if statically_known_true(expr):
-        return True
-    try:
-        return V.graph.sizevars.guard_or_false(expr)
-    except (AttributeError, GuardOnDataDependentSymNode, TypeError):
-        pass
-    try:
-        return bool(V.graph.sizevars.shape_env.evaluate_expr(expr))
-    except (AttributeError, GuardOnDataDependentSymNode, TypeError):
-        return False
-
-
-def _storage_int_hint(expr: Any) -> int | None:
-    try:
-        return int(expr)
-    except (GuardOnDataDependentSymNode, TypeError, ValueError):
-        return None
-
-
-def _storage_leq(left: Any, right: Any) -> bool:
-    if _storage_guard_or_false(left <= right):
-        return True
-    left_hint = _storage_int_hint(left)
-    right_hint = _storage_int_hint(right)
-    return left_hint is not None and right_hint is not None and left_hint <= right_hint
-
-
-def preserve_as_strided_view_storage(graph: torch.fx.Graph) -> None:
-    for node in list(graph.nodes):
-        if (
-            node.op != "call_function"
-            or node.target is not aten.as_strided.default
-            or len(node.args) < 4
-            or not isinstance(node.args[0], torch.fx.Node)
-            or node.args[3] is None
-        ):
-            continue
-
-        inp = node.args[0]
-        inp_val = inp.meta.get("val")
-        if not isinstance(inp_val, torch.Tensor):
-            continue
-        output_storage_bytes = _required_storage_bytes(
-            node.args[1], node.args[2], node.args[3], inp_val.element_size()
-        )
-        if output_storage_bytes is None:
-            continue
-
-        view_chain = []
-        root = inp
-        while True:
-            base = _view_base_node(root)
-            if base is None:
-                break
-            view_chain.append(root)
-            root = base
-
-        if not view_chain or root.op in ("placeholder", "get_attr"):
-            continue
-        root_val = root.meta.get("val")
-        if not isinstance(root_val, torch.Tensor):
-            continue
-        root_storage_bytes = _node_required_storage_bytes(root)
-        if root_storage_bytes is None or not _storage_leq(
-            output_storage_bytes, root_storage_bytes
-        ):
-            continue
-
-        first_view = view_chain[-1]
-        with graph.inserting_after(root):
-            clone = graph.call_function(inductor_prims.clone_preserve_storage, (root,))
-            clone.meta["val"] = root_val.clone()
-        first_view.update_arg(0, clone)
-
-    graph.lint()
 
 
 def apply_pass_to_subgraphs(pass_fn: Callable[[fx.Graph], None], graph: fx.Graph):
@@ -1697,72 +1540,6 @@ def fix_auto_functionalized_dtype_views(graph: torch.fx.Graph) -> None:
 
         if len(keep) != len(only_clone_these):
             node.meta["only_clone_these_tensors"] = keep
-
-
-def reject_dtype_view_copy_aliases(graph: torch.fx.Graph) -> None:
-    for node in graph.nodes:
-        if (
-            not (
-                (
-                    node.op == "call_function"
-                    and node.target in (aten.copy.default, aten.copy_.default)
-                )
-                or (node.op == "call_method" and node.target == "copy_")
-            )
-            or len(node.args) < 2
-            or not isinstance(node.args[0], torch.fx.Node)
-            or not isinstance(node.args[1], torch.fx.Node)
-        ):
-            continue
-        self, src = node.args[:2]
-        self_storage = get_node_storage(self)
-        src_storage = get_node_storage(src)
-        self_val = self.meta.get("val")
-        src_val = src.meta.get("val")
-        if not isinstance(self_val, torch.Tensor) or not isinstance(
-            src_val, torch.Tensor
-        ):
-            continue
-        if self_val.element_size() == src_val.element_size():
-            continue
-        if self_storage is None or src_storage is None or self_storage != src_storage:
-            continue
-        if statically_known_true(sym_eq(self_val.numel(), 0)) or statically_known_true(
-            sym_eq(src_val.numel(), 0)
-        ):
-            continue
-        self_storage_offset = _static_int(self_val.storage_offset())
-        src_storage_offset = _static_int(src_val.storage_offset())
-        if self_storage_offset is not None and src_storage_offset is not None:
-            self_start = self_storage_offset * self_val.element_size()
-            self_end = (
-                compute_required_storage_length(
-                    self_val.size(), self_val.stride(), self_storage_offset
-                )
-                * self_val.element_size()
-            )
-            src_start = src_storage_offset * src_val.element_size()
-            src_end = (
-                compute_required_storage_length(
-                    src_val.size(), src_val.stride(), src_storage_offset
-                )
-                * src_val.element_size()
-            )
-            if statically_known_true(self_end <= src_start) or statically_known_true(
-                src_end <= self_start
-            ):
-                continue
-        if _tensors_have_disjoint_byte_residue(self_val, src_val):
-            continue
-        if _tensors_have_disjoint_byte_bands(self_val, src_val):
-            continue
-        if _tensors_have_exact_disjoint_byte_intervals(self_val, src_val):
-            continue
-        raise RuntimeError(
-            "unsupported operation: some elements of the input tensor and "
-            "the written-to tensor refer to a single memory location. "
-            "Please clone() the tensor before performing the operation."
-        )
 
 
 def decompose_auto_functionalized(graph):
