@@ -12,6 +12,7 @@ from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
+from torch._inductor import config
 from torch._higher_order_ops.flex_gemm import (
     _SUPPORTED_FLEX_GEMM_OP_NAMES,
     flex_gemm_hop,
@@ -239,7 +240,14 @@ def flex_gemm_config_keys_for_local_reduce(
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
 def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Lower FlexGEMM to the regular subgraph path or the QUACK template."""
-    if kernel_options.get("backend", "TRITON") != "QUACK":
+    backend = kernel_options.get("backend", "TRITON")
+    if backend == "NVGEMM":
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="NVGEMM",
+        ):
+            return process_subgraph_nodes(subgraph.graph_module, list(args))
+    if backend != "QUACK":
         return process_subgraph_nodes(subgraph.graph_module, list(args))
     if gemm_op not in FLEX_GEMM_OP_SPECS:
         raise NotImplementedError(
