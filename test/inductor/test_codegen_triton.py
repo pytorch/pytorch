@@ -17,6 +17,7 @@ from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
+    get_triton_reduction_function,
     TritonKernel,
     TritonKernelOverrides,
     TritonSymbols,
@@ -59,6 +60,47 @@ class TestCodegenTriton(InductorTestCase):
     def tearDown(self):
         self._stack.close()
         super().tearDown()
+
+    def test_strict_signed_zero_reduction_function(self):
+        for reduction_type in ("min", "max"):
+            self.assertEqual(
+                get_triton_reduction_function(reduction_type),
+                f"triton_helpers.{reduction_type}2",
+            )
+            with inductor_config.patch(strict_signed_zero=True):
+                self.assertEqual(
+                    get_triton_reduction_function(reduction_type),
+                    f"triton_helpers.{reduction_type}2_strict",
+                )
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_strict_signed_zero_unrolled_reduction(self):
+        def fn(x):
+            return torch.amin(x, dim=1), torch.amax(x, dim=1)
+
+        x = torch.tensor(
+            [
+                [0.0, -0.0, -0.0, -0.0],
+                [-0.0, 0.0, 0.0, 0.0],
+                [1.0, float("nan"), -1.0, 0.0],
+            ],
+            device=GPU_TYPE,
+        )
+        expected_min, expected_max = fn(x)
+        with inductor_config.patch(strict_signed_zero=True):
+            (actual_min, actual_max), code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x
+            )
+
+        actual_min_bits = actual_min[:2].view(torch.int32)
+        actual_max_bits = actual_max[:2].view(torch.int32)
+        expected_min_bits = expected_min[:2].view(torch.int32)
+        expected_max_bits = expected_max[:2].view(torch.int32)
+        self.assertEqual(actual_min_bits, expected_min_bits)
+        self.assertEqual(actual_max_bits, expected_max_bits)
+        self.assertTrue(torch.isnan(actual_min[2]).item())
+        self.assertTrue(torch.isnan(actual_max[2]).item())
+        self.assertIn("tl.where", " ".join(code))
 
     def test_range_tree_entry_ownership_uses_root_identity(self):
         class AlternateR0Root(IterationRangesRoot):
