@@ -11,9 +11,7 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-      # ciflow/docker builds and pushes the content-addressed image to ECR so a
-      # PR can test its own .ci/docker changes (a maintainer applies the label,
-      # which pushes this tag into the base repo -> full OIDC even for fork SHAs).
+      # ciflow/docker: build + push the content-addressed image to ECR for PR testing
       - ciflow/docker/*
     paths:
       - .ci/docker/**
@@ -22,10 +20,7 @@ on:
 
 env:
   DOCKER_BUILDKIT: 1
-  # Publish on protected-ref pushes (main / release / release-candidate tags ->
-  # Docker Hub) and on ciflow/docker tag pushes (-> ECR pytorch/almalinux-builder,
-  # for content-addressed PR testing). The registry + tag set is chosen per-ref
-  # in binary-docker-build.
+  # Publish to Docker Hub on main/release/v*, to ECR on ciflow/docker (chosen per-ref in binary-docker-build)
   WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/ciflow/docker/')) }}
 
 concurrency:
@@ -35,10 +30,7 @@ concurrency:
 jobs:
   build-docker:
     if: github.repository_owner == 'pytorch'
-    # id-token: write lets the same-repo PR path assume the ECR push role via
-    # OIDC and publish the content-addressed builder image to ECR -- the same
-    # PR-safe mechanism CI's docker-builds uses (PRs get no environment secrets,
-    # so DOCKER_TOKEN is unavailable, but OIDC works).
+    # id-token: write lets the ciflow/docker path assume the ECR push role via OIDC
     permissions:
       id-token: write
       contents: read
@@ -51,13 +43,7 @@ jobs:
       matrix:
         tag: ["cuda12.6", "cuda13.0", "cuda13.2", "rocm7.1", "rocm7.2", "cpu"]
     steps:
-      # TESTING ONLY -- REVERT TO @main BEFORE MERGE.
-      # Local (`./`) composite actions don't resolve on the OSDC/ARC
-      # container-hook runners: the runner resolves the action on the host
-      # (/home/runner/_work) while `container:` steps check out to /__w, so it
-      # errors with "Can't find action.yml". `uses:` can't take an expression,
-      # so to exercise this PR's binary-docker-build change we temporarily pin
-      # the action to this PR branch (a downloadable remote ref).
+      # TESTING ONLY -- REVERT TO @main BEFORE MERGE (pinned to PR branch to test its own action)
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@atalman/cd-docker-content-addressed
         with:

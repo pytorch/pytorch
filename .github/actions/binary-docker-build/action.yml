@@ -25,9 +25,7 @@ runs:
     - name: Checkout PyTorch
       uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
-    # Build on a remote BuildKit builder (OSDC/ARC has no host docker daemon)
-    # and push straight to the registry. The referenced <docker-build-dir>/build.sh
-    # honors REMOTE_BUILDKIT (see .ci/docker/build.sh).
+    # Build on a remote BuildKit builder (OSDC/ARC has no host docker daemon); build.sh honors REMOTE_BUILDKIT
     - name: Set up Docker Buildx (remote, no bootstrap)
       shell: bash
       run: |
@@ -42,10 +40,7 @@ runs:
           --use \
           "${buildkit_addr}"
 
-    # ciflow/docker publishes the content-addressed image to ECR via OIDC -- the
-    # same PR-safe path CI's docker-builds uses. The label pushes this tag into
-    # the base repo, so OIDC works even for fork SHAs. Other refs (main / release
-    # / v* -> Docker Hub) handle their own docker login in the build step.
+    # ciflow/docker publishes to ECR via OIDC (works for fork SHAs too); other refs use Docker Hub
     - name: Login to ECR
       if: startsWith(github.ref, 'refs/tags/ciflow/docker/')
       uses: pytorch/pytorch/.github/actions/ecr-login@main
@@ -73,18 +68,7 @@ runs:
         GIT_COMMIT_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
         CI_FOLDER_SHA=$(git rev-parse HEAD:.ci/docker)
 
-        # Registry + tag set depend on the ref:
-        #  - ciflow/docker tag: publish ONLY the content-addressed image to ECR,
-        #    mirroring the Docker Hub repo layout -- pytorch/<image-name>:
-        #    <variant>-<.ci/docker hash> (e.g. pytorch/manylinux2_28-builder:
-        #    cuda13.0-<hash>, pytorch/almalinux-builder:<variant>-<hash>). The
-        #    image name IS the ECR repo. The ciflow/binaries test run consumes
-        #    it. Auth is via the ecr-login OIDC step above (no docker login
-        #    here). Keeps per-PR images off the public Docker Hub repo and off
-        #    the floating tag -- the same path CI's docker-builds uses.
-        #  - push (main / release / rc tags): publish to Docker Hub as before --
-        #    branch / commit / .ci/docker-hash tags, plus the floating <prefix>
-        #    tag only from main so a release-branch rebuild can't clobber it.
+        # ciflow/docker -> ECR content-addressed tag (<variant>-<.ci/docker hash>); else Docker Hub branch/commit/hash tags (+ floating from main)
         if [[ "${GITHUB_REF:-}" == refs/tags/ciflow/docker/* ]]; then
           PREFIX="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}"
           TAGS=(-t "${PREFIX}-${CI_FOLDER_SHA}")
@@ -99,9 +83,7 @@ runs:
             TAGS+=(-t "${PREFIX}")
           fi
 
-          # WITH_PUSH gates publishing (build.sh pushes when it is true; fork
-          # PRs have no credentials and stay build-only). The PR path logs in via
-          # the ecr-login step; log in to Docker Hub only on the push path.
+          # WITH_PUSH gates publishing; log in to Docker Hub only on the push path (ECR uses the ecr-login step)
           set +x
           if [[ "${WITH_PUSH:-false}" == "true" ]]; then
             echo "${DOCKER_TOKEN}" | docker login docker.io -u "${DOCKER_ID}" --password-stdin
@@ -114,10 +96,7 @@ runs:
           ".ci/docker/${DOCKER_BUILD_DIR}/build.sh" "${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}" "${TAGS[@]}"
         }
 
-        # The autoscaled BuildKit pool may be cold / at capacity at start, where
-        # buildx's ~20s connect (gRPC default) fails before scale-up. Retry
-        # connection failures (not build errors) so a capacity-limited build waits
-        # for a free pod instead of hard-failing -- still within the job timeout.
+        # Retry connection failures (not build errors): the autoscaled BuildKit pool may be cold at start
         attempts="${REMOTE_BUILDKIT_CONNECT_ATTEMPTS:-360}"
         delay="${REMOTE_BUILDKIT_CONNECT_DELAY:-15}"
         for attempt in $(seq 1 "${attempts}"); do
