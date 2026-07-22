@@ -9,6 +9,25 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
   message(FATAL_ERROR "In-source build are not supported")
 endif()
 
+# Cross-compilation is configured by CMAKE_SYSTEM_NAME / CMAKE_SYSTEM_PROCESSOR,
+# which must be set before project() so CMake enters cross-compile mode and
+# reports the target architecture. The general environment-variable forwarding
+# in cmake/EnvVarForwarding.cmake runs after project() and skips variables that
+# are already defined, so project() would otherwise set these to the host values
+# and the target values passed via the environment would be lost. Forward just
+# the toolchain-determining variables here, before project().
+foreach(_cross_var
+    CMAKE_SYSTEM_NAME
+    CMAKE_SYSTEM_PROCESSOR
+    CMAKE_C_COMPILER
+    CMAKE_CXX_COMPILER
+    CMAKE_SYSROOT
+    CMAKE_TOOLCHAIN_FILE)
+  if(DEFINED ENV{${_cross_var}} AND NOT DEFINED ${_cross_var})
+    set(${_cross_var} "$ENV{${_cross_var}}")
+  endif()
+endforeach()
+
 # ---[ Project and semantic versioning.
 # When built via scikit-build-core, these are set automatically.
 # Provide fallbacks for standalone cmake invocations.
