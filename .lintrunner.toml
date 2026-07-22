@@ -1588,6 +1588,8 @@ code = 'LICENSE_FILES'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/license_files_linter.py',
     '--',
