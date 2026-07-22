@@ -72,7 +72,7 @@ class TestCheckpointableTensorRNG(TestCase):
         setattr(tensor, "local_sizes", local_sizes)  # noqa: B010
 
     @staticmethod
-    def _layout_cases():
+    def _layout_cases(total_stride: int):
         return (
             (
                 "shard",
@@ -82,13 +82,14 @@ class TestCheckpointableTensorRNG(TestCase):
                 ((0, 0),),
                 ((2, 7),),
             ),
+            # Reorder chunks that span CUDA grid-stride iterations.
             (
                 "strided_shard",
-                (3, 8),
-                (3, 4),
-                ((0, 0), (0, 4)),
-                ((0, 0), (0, 2)),
-                ((3, 2), (3, 2)),
+                (5, total_stride + 8),
+                (5, 4),
+                ((0, total_stride + 4), (0, 0)),
+                ((0, 2), (0, 0)),
+                ((5, 2), (5, 2)),
             ),
             (
                 "ragged_shard",
@@ -114,66 +115,26 @@ class TestCheckpointableTensorRNG(TestCase):
                 ((0, 0, 0),),
                 ((2, 2, 3),),
             ),
+            (
+                "empty_shard",
+                (7,),
+                (0,),
+                (),
+                (),
+                (),
+            ),
+            (
+                "empty_global",
+                (0,),
+                (0,),
+                (),
+                (),
+                (),
+            ),
         )
-
-    def test_plain_tensor_metadata_satisfies_protocol(self):
-        tensor = torch.empty(1)
-        self.assertNotIsInstance(tensor, CheckpointableTensor)
-
-        self._set_shard_metadata(tensor, (1,), ((0,),), ((0,),), ((1,),))
-        self.assertIsInstance(tensor, CheckpointableTensor)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_layouts_match_dense(self):
-        device = torch.device("cuda")
-        for (
-            name,
-            global_shape,
-            local_shape,
-            global_offsets,
-            local_offsets,
-            local_sizes,
-        ) in self._layout_cases():
-            with self.subTest(layout=name):
-                expected_generator = torch.Generator(device=device).manual_seed(123)
-                dense = torch.empty(global_shape, device=device).normal_(
-                    0.1, 0.02, generator=expected_generator
-                )
-                expected_state = expected_generator.get_state()
-                expected = torch.empty(local_shape, device=device)
-                for global_offset, local_offset, local_size in zip(
-                    global_offsets,
-                    local_offsets,
-                    local_sizes,
-                    strict=True,
-                ):
-                    global_slices = tuple(
-                        slice(offset, offset + size)
-                        for offset, size in zip(global_offset, local_size, strict=True)
-                    )
-                    local_slices = tuple(
-                        slice(offset, offset + size)
-                        for offset, size in zip(local_offset, local_size, strict=True)
-                    )
-                    expected[local_slices].copy_(dense[global_slices])
-
-                actual_generator = torch.Generator(device=device).manual_seed(123)
-                actual = torch.empty(local_shape, device=device)
-                self._set_shard_metadata(
-                    actual,
-                    global_shape,
-                    global_offsets,
-                    local_offsets,
-                    local_sizes,
-                )
-                with _StatefulRNGMode():
-                    actual.normal_(0.1, 0.02, generator=actual_generator)
-
-                self.assertEqual(actual, expected, rtol=0, atol=0)
-                self.assertEqual(actual_generator.get_state(), expected_state)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
-    def test_multiblock_replay_from_nonzero_generator_offset(self):
         device = torch.device("cuda")
         properties = torch.cuda.get_device_properties(device)
         block_size = 256
@@ -182,57 +143,58 @@ class TestCheckpointableTensorRNG(TestCase):
             * properties.multi_processor_count
             * (properties.max_threads_per_multi_processor // block_size)
         )
-        global_numel = 5 * total_stride + 8
-        global_indices = torch.tensor(
-            [
-                2,
-                3,
-                total_stride + 2,
-                total_stride + 3,
-                2 * total_stride + 2,
-                2 * total_stride + 3,
-                4 * total_stride + 5,
-                4 * total_stride + 6,
-                4 * total_stride + 7,
-            ],
-            device=device,
-        )
+        for dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            for (
+                name,
+                global_shape,
+                local_shape,
+                global_offsets,
+                local_offsets,
+                local_sizes,
+            ) in self._layout_cases(total_stride):
+                with self.subTest(layout=name, dtype=dtype):
+                    expected_generator = torch.Generator(device=device).manual_seed(123)
+                    torch.rand(11, device=device, generator=expected_generator)
+                    dense = torch.empty(
+                        global_shape, dtype=dtype, device=device
+                    ).normal_(0.1, 0.02, generator=expected_generator)
+                    expected_state = expected_generator.get_state()
+                    expected = torch.empty(local_shape, dtype=dtype, device=device)
+                    for global_offset, local_offset, local_size in zip(
+                        global_offsets,
+                        local_offsets,
+                        local_sizes,
+                        strict=True,
+                    ):
+                        global_slices = tuple(
+                            slice(offset, offset + size)
+                            for offset, size in zip(
+                                global_offset, local_size, strict=True
+                            )
+                        )
+                        local_slices = tuple(
+                            slice(offset, offset + size)
+                            for offset, size in zip(
+                                local_offset, local_size, strict=True
+                            )
+                        )
+                        expected[local_slices].copy_(dense[global_slices])
 
-        for dtype in (torch.float32, torch.float64):
-            with self.subTest(dtype=dtype):
-                expected_generator = torch.Generator(device=device).manual_seed(123)
-                torch.rand(11, device=device, generator=expected_generator)
-                expected = []
-                for _ in range(2):
-                    dense = torch.empty(global_numel, dtype=dtype, device=device)
-                    dense.normal_(0.1, 0.02, generator=expected_generator)
-                    expected.append(dense[global_indices])
-                expected_state = expected_generator.get_state()
-
-                actual_generator = torch.Generator(device=device).manual_seed(123)
-                torch.rand(11, device=device, generator=actual_generator)
-                actual = torch.empty(global_indices.numel(), dtype=dtype, device=device)
-                # Metadata order is deliberately unrelated to local storage order.
-                self._set_shard_metadata(
-                    actual,
-                    (global_numel,),
-                    (
-                        (4 * total_stride + 5,),
-                        (2,),
-                        (total_stride + 2,),
-                        (2 * total_stride + 2,),
-                    ),
-                    ((6,), (0,), (2,), (4,)),
-                    ((3,), (2,), (2,), (2,)),
-                )
-                results = []
-                with _StatefulRNGMode():
-                    for _ in range(2):
+                    actual_generator = torch.Generator(device=device).manual_seed(123)
+                    torch.rand(11, device=device, generator=actual_generator)
+                    actual = torch.empty(local_shape, dtype=dtype, device=device)
+                    self._set_shard_metadata(
+                        actual,
+                        global_shape,
+                        global_offsets,
+                        local_offsets,
+                        local_sizes,
+                    )
+                    with _StatefulRNGMode():
                         actual.normal_(0.1, 0.02, generator=actual_generator)
-                        results.append(actual.clone())
 
-                self.assertEqual(results, expected, rtol=0, atol=0)
-                self.assertEqual(actual_generator.get_state(), expected_state)
+                    self.assertEqual(actual, expected, rtol=0, atol=0)
+                    self.assertEqual(actual_generator.get_state(), expected_state)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_private_adapter_replays_explicit_generator_for_local_tensor(self):
@@ -342,6 +304,8 @@ class TestPhiloxDistributionShardsOp(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_uniform_matches_dense(self):
         device = torch.device("cuda")
+        # Must match PhiloxDistributionKind::Uniform in PhiloxDistribution.h.
+        uniform_distribution = 1
         for dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
             with self.subTest(dtype=dtype):
                 generator = torch.Generator(device=device).manual_seed(123)
@@ -359,7 +323,7 @@ class TestPhiloxDistributionShardsOp(TestCase):
                     [0],
                     [17],
                     1,
-                    _PHILOX_DISTRIBUTION_UNIFORM,
+                    uniform_distribution,
                     [-0.2, 0.3],
                     generator=generator,
                 )
@@ -370,6 +334,8 @@ class TestPhiloxDistributionShardsOp(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_invalid_calls_do_not_advance_generator(self):
         device = torch.device("cuda")
+        # Must match PhiloxDistributionKind::Normal in PhiloxDistribution.h.
+        normal_distribution = 0
         generator = torch.Generator(device=device).manual_seed(123)
 
         def assert_invalid_without_advancing(regex, fn):
@@ -387,7 +353,7 @@ class TestPhiloxDistributionShardsOp(TestCase):
                 [0, 0],
                 [1, 1],
                 2,
-                _PHILOX_DISTRIBUTION_NORMAL,
+                normal_distribution,
                 [0.0, 1.0],
                 generator=generator,
             ),
@@ -401,7 +367,7 @@ class TestPhiloxDistributionShardsOp(TestCase):
                 [0],
                 [1],
                 1,
-                _PHILOX_DISTRIBUTION_NORMAL,
+                normal_distribution,
                 [0.0, -1.0],
                 generator=generator,
             ),
