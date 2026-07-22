@@ -157,6 +157,7 @@ set_target_properties(torch PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${TORCH_INCLUDE_DIRS}"
     CXX_STANDARD 20
 )
+target_compile_features(torch INTERFACE cxx_std_20)
 if(TORCH_CXX_FLAGS)
   set_property(TARGET torch PROPERTY INTERFACE_COMPILE_OPTIONS "${TORCH_CXX_FLAGS}")
 endif()
