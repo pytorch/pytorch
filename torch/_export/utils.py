@@ -360,6 +360,8 @@ def get_keystr(key_path: KeyPath) -> str:
 
 
 def _export_flat_arg_source_for_guard(idx: int) -> str:
+    # This sentinel is serialized in ExportedProgram._guards_code and resolved
+    # to the corresponding flattened argument only when the program is unlifted.
     return f"\x00export-flat-arg-{idx}\x00"
 
 

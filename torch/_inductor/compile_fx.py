@@ -407,6 +407,34 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
             existing_keys.add(new_target_name)
 
 
+@contextlib.contextmanager
+def _preserve_module_parameters_and_buffers(mod: GraphModule):
+    from torch.export.unflatten import _assign_attr, _AttrKind
+
+    parameters = list(mod.named_parameters(remove_duplicate=False))
+    buffers = list(mod.named_buffers(remove_duplicate=False))
+    non_persistent = OrderedSet(
+        [
+            f"{module_name}.{name}" if module_name else name
+            for module_name, module in mod.named_modules(remove_duplicate=False)
+            for name in module._non_persistent_buffers_set
+        ]
+    )
+    try:
+        yield parameters, buffers
+    finally:
+        for name, parameter in parameters:
+            _assign_attr(parameter, mod, name, attr_kind=_AttrKind.PARAMETER)
+        for name, buffer in buffers:
+            _assign_attr(
+                buffer,
+                mod,
+                name,
+                attr_kind=_AttrKind.BUFFER,
+                persistent=name not in non_persistent,
+            )
+
+
 def _unlift_graph(
     mod: GraphModule,
     gm: GraphModule,
@@ -523,6 +551,47 @@ def _get_subgraph_names(
     yield from fx_subgraph_names
 
 
+def _get_nested_region_inductor_config_patches(
+    gm: GraphModule,
+) -> dict[str, Any] | None:
+    nested_config = getattr(gm, "meta", {}).get("nested_region_config")
+    patches = getattr(nested_config, "inductor_config_patches", None)
+    return patches or None
+
+
+def _patch_nested_region_inductor_config(
+    gm: GraphModule,
+) -> AbstractContextManager[None]:
+    patches = _get_nested_region_inductor_config_patches(gm)
+    if patches is None:
+        return contextlib.nullcontext()
+    return config.patch(patches)
+
+
+def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
+    # Seed each invoke_subgraph subgraph module's meta from the node meta, which
+    # (unlike a GraphModule's meta) survives FX transforms. Re-run at the start of
+    # every pass phase because each is an independent entry point that may see a
+    # freshly-created module (e.g. the partitioned backward graph); setdefault
+    # makes re-entry on an already-seeded module a no-op.
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        nested_config = node.meta.get("custom", {}).get("nested_region_config")
+        if nested_config is None:
+            continue
+        subgraph_node = node.args[0]
+        if (
+            not isinstance(subgraph_node, torch.fx.Node)
+            or subgraph_node.op != "get_attr"
+            or not isinstance(subgraph_node.target, str)
+        ):
+            continue
+        subgraph = getattr(gm, subgraph_node.target, None)
+        if isinstance(subgraph, GraphModule):
+            subgraph.meta.setdefault("nested_region_config", nested_config)
+
+
 def _recursive_pre_grad_passes(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -532,17 +601,19 @@ def _recursive_pre_grad_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
-        if not config.use_pre_grad_passes:
-            return gm
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_pre_grad_passes:
+                return gm
 
-        add_passes = config.add_pre_grad_passes
-        remove_passes = config.remove_pre_grad_passes
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            # as we don't have recursive example inputs, passing empty set here
-            new_subgraph = _recursive_pre_grad_passes(subgraph, ())
-            setattr(gm, subgraph_name, new_subgraph)
-        return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
+            add_passes = config.add_pre_grad_passes
+            remove_passes = config.remove_pre_grad_passes
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                # as we don't have recursive example inputs, passing empty set here
+                new_subgraph = _recursive_pre_grad_passes(subgraph, ())
+                setattr(gm, subgraph_name, new_subgraph)
+            return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
 def _recursive_joint_graph_passes(
@@ -562,29 +633,35 @@ def _recursive_joint_graph_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="joint_graph_pass_time_us",
     ):
-        if not config.use_joint_graph_passes:
-            return gm
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_joint_graph_passes:
+                return gm
 
-        # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
-        # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
-        # invoke_subgraph HOP before calling the partitioner on the outer graph.
-        # AOTAutograd has access to partition_fn, which internally calls the
-        # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
-        # skip_invoke_subgraph.
-        old_subgraph_names = OrderedSet(_get_subgraph_names(gm, skip_invoke_subgraph))
-        for subgraph_name in old_subgraph_names:
-            _run_on_sub_graph_module(subgraph_name)
-
-        out_gm = joint_graph_passes(gm, input_device)
-
-        # Some joint graph passes may create new sub graph module. Run one round
-        # for the newly created graph modules.
-        # We should not skip graphs for invoke_subgraph HOPs for newly
-        # generated subgraphs.
-        for subgraph_name in _get_subgraph_names(out_gm, skip_invoke_subgraph=False):
-            if subgraph_name not in old_subgraph_names:
+            # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
+            # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
+            # invoke_subgraph HOP before calling the partitioner on the outer graph.
+            # AOTAutograd has access to partition_fn, which internally calls the
+            # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
+            # skip_invoke_subgraph.
+            old_subgraph_names = OrderedSet(
+                _get_subgraph_names(gm, skip_invoke_subgraph)
+            )
+            for subgraph_name in old_subgraph_names:
                 _run_on_sub_graph_module(subgraph_name)
-        return out_gm
+
+            out_gm = joint_graph_passes(gm, input_device)
+
+            # Some joint graph passes may create new sub graph module. Run one round
+            # for the newly created graph modules.
+            # We should not skip graphs for invoke_subgraph HOPs for newly
+            # generated subgraphs.
+            for subgraph_name in _get_subgraph_names(
+                out_gm, skip_invoke_subgraph=False
+            ):
+                if subgraph_name not in old_subgraph_names:
+                    _run_on_sub_graph_module(subgraph_name)
+            return out_gm
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
@@ -593,13 +670,15 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         log_pt2_compile_event=True,
         dynamo_compile_column_us="post_grad_pass_time_us",
     ):
-        if not config.use_post_grad_passes:
-            return
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_post_grad_passes:
+                return
 
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            _recursive_post_grad_passes(subgraph, is_inference)
-        post_grad_passes(gm, is_inference)
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                _recursive_post_grad_passes(subgraph, is_inference)
+            post_grad_passes(gm, is_inference)
 
 
 def split_const_gm(
@@ -942,6 +1021,8 @@ def _compile_fx_inner(
         raise AssertionError(
             f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
         )
+
+    _propagate_invoke_subgraph_nested_region_config(gm)
 
     if graph_kwargs.get("cudagraphs") is None:
         graph_kwargs["cudagraphs"] = BoxedBool(config.triton.cudagraphs)
@@ -3139,80 +3220,56 @@ def _compile_fx_main(
             # aot_export_module path doesn't use that cache so run them here.
             if isinstance(model_, GraphModule):
                 model_ = run_pre_grad_passes(model_, example_inputs_)
-            # aot_export_module functionalizes module attrs while tracing; keep
-            # the original Parameter/Buffer objects for AOTI unlift.
-            named_parameters = list(model_.named_parameters(remove_duplicate=False))
-            named_buffers = list(model_.named_buffers(remove_duplicate=False))
-            non_persistent_buffers = OrderedSet(
-                [
-                    f"{module_name}.{buffer_name}" if module_name else buffer_name
-                    for module_name, module in model_.named_modules(
-                        remove_duplicate=False
-                    )
-                    for buffer_name in module._non_persistent_buffers_set
-                ]
-            )
-            from torch.export.unflatten import _assign_attr, _AttrKind
-
-            try:
-                with functorch_config.patch(
+            with (
+                _preserve_module_parameters_and_buffers(model_) as (
+                    named_parameters,
+                    named_buffers,
+                ),
+                functorch_config.patch(
                     unlift_effect_tokens=True,
                     selective_decompose=config.selective_decompose,
-                ):
-                    gm, graph_signature = aot_export_module(
-                        model_,
-                        example_inputs_,
-                        trace_joint=False,
-                        decompositions=decompositions,
+                ),
+            ):
+                gm, graph_signature = aot_export_module(
+                    model_,
+                    example_inputs_,
+                    trace_joint=False,
+                    decompositions=decompositions,
+                )
+                if not isinstance(gm, GraphModule):
+                    raise AssertionError(
+                        f"Expected GraphModule from aot_export_module, got {type(gm)}"
                     )
-                    if not isinstance(gm, GraphModule):
-                        raise AssertionError(
-                            f"Expected GraphModule from aot_export_module, got {type(gm)}"
-                        )
-                    from torch._export.utils import _detect_fake_mode_from_gm
+                from torch._export.utils import _detect_fake_mode_from_gm
 
-                    fake_mode = _detect_fake_mode_from_gm(gm)  # type: ignore[assignment]
-                    # aot_export_module doesn't account for constant tensor attributes
-                    # so we end up having tensors that don't have fake vals attached.
-                    # This can happen when upstream export is non-strict where we
-                    # preserve the original module params/buffers. Once AOTI switches
-                    # to ep.run_decompositions() flow to lower to post-autograd opset
-                    # this will go away.
-                    for node in gm.graph.nodes:
-                        if node.op == "get_attr" and "val" not in node.meta:
-                            target = attrgetter(node.target)(gm)
-                            if isinstance(target, torch.Tensor):
-                                if fake_mode is None:
-                                    raise AssertionError(
-                                        "Expected fake_mode to be set for get_attr tensor node"
-                                    )
-                                node.meta["val"] = fake_mode.from_tensor(
-                                    target, static_shapes=True
+                fake_mode = _detect_fake_mode_from_gm(gm)  # type: ignore[assignment]
+                # aot_export_module doesn't account for constant tensor attributes
+                # so we end up having tensors that don't have fake vals attached.
+                # This can happen when upstream export is non-strict where we
+                # preserve the original module params/buffers. Once AOTI switches
+                # to ep.run_decompositions() flow to lower to post-autograd opset
+                # this will go away.
+                for node in gm.graph.nodes:
+                    if node.op == "get_attr" and "val" not in node.meta:
+                        target = attrgetter(node.target)(gm)
+                        if isinstance(target, torch.Tensor):
+                            if fake_mode is None:
+                                raise AssertionError(
+                                    "Expected fake_mode to be set for get_attr tensor node"
                                 )
-                            elif isinstance(
-                                target, torch.ScriptObject
-                            ) or is_custom_class(type(target)):
-                                node.meta["val"] = (
-                                    torch._library.fake_class_registry.maybe_to_fake_obj(
-                                        fake_mode, target
-                                    )
+                            node.meta["val"] = fake_mode.from_tensor(
+                                target, static_shapes=True
+                            )
+                        elif isinstance(target, torch.ScriptObject) or is_custom_class(
+                            type(target)
+                        ):
+                            node.meta["val"] = (
+                                torch._library.fake_class_registry.maybe_to_fake_obj(
+                                    fake_mode, target
                                 )
-                            elif isinstance(target, FakeScriptObject):
-                                node.meta["val"] = target
-            finally:
-                # aot_export_module can leave FunctionalTensor attrs installed
-                # on the module it traced. Restore the real attrs so callers
-                # can still run the original module after AOTI compilation.
-                for name, param in named_parameters:
-                    _assign_attr(param, model_, name, attr_kind=_AttrKind.PARAMETER)
-                for name, buffer in named_buffers:
-                    _assign_attr(
-                        buffer,
-                        model_,
-                        name,
-                        attr_kind=_AttrKind.BUFFER,
-                        persistent=name not in non_persistent_buffers,
-                    )
+                            )
+                        elif isinstance(target, FakeScriptObject):
+                            node.meta["val"] = target
 
             unlifted_gm = _unlift_graph(
                 model_, gm, graph_signature, named_parameters, named_buffers

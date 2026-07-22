@@ -59,6 +59,7 @@ from torch._export.utils import (
     _bind_signature_to_inputs,
     _collect_param_buffer_metadata,
     _compiling_state_context,
+    _export_flat_arg_source_for_guard,
     _fakify_params_buffers,
     _populate_param_buffer_metadata_to_new_gm,
     _update_gm_meta_if_possible,
@@ -585,8 +586,7 @@ def _preserve_requires_grad_pass(
             break
         fake_arg = flat_fake_args[flat_arg_index]
         flat_arg_index += 1
-        # sig.user_inputs contains ConstantArgument values, not just placeholder
-        # names, so derive tensor input names directly from the specs.
+        # Derive tensor names from specs; sig.user_inputs also has constants.
         if isinstance(spec.arg, TensorArgument):
             user_input_to_arg[spec.arg.name] = fake_arg
 
@@ -837,8 +837,7 @@ def _tracked_fake_source_for_value(value: Any) -> Source | None:
 def _source_key(source: Source | None) -> str | None:
     if source is None:
         return None
-    # Equivalent Source objects can be rebuilt through different export paths
-    # and fail object equality; the rendered source name is stable for matching.
+    # Rebuilt Source objects can differ, but their rendered names are stable.
     return source.name
 
 
@@ -871,22 +870,6 @@ def _source_from_public_input_path(
 ) -> Source | None:
     current_value = root_value
 
-    def maybe_get_child_value(value: Any, key) -> Any:
-        if value is _MISSING:
-            return _MISSING
-        try:
-            return key.get(value)
-        except (AttributeError, IndexError, KeyError, TypeError):
-            return _MISSING
-
-    def key_position_in_mapping(mapping: Any, lookup_key: Any) -> int | None:
-        if not isinstance(mapping, dict):
-            return None
-        for idx, key, _ in enumerate_items_with_dict_position(mapping):
-            if key is lookup_key:
-                return idx
-        return None
-
     if base_source is None:
         if not path or not isinstance(path[0], pytree.MappingKey):
             return None
@@ -900,35 +883,52 @@ def _source_from_public_input_path(
             )
         else:
             source = LocalSource(path[0].key, is_input=True)
-        current_value = maybe_get_child_value(current_value, path[0])
+        current_value = path[0].get(current_value)
         path = path[1:]
     else:
         source = base_source
-
-    def dict_getitem_source(base: Source, key: Any) -> Source | None:
-        if ConstantVariable.is_literal(key):
-            return DictGetItemSource(base, key)
-        # Non-literal dict keys, such as tensor or enum keys, are represented
-        # by their stable key position in Dynamo sources.
-        key_position = key_position_in_mapping(current_value, key)
-        if key_position is None:
-            return None
-        return DictGetItemSource(base, ConstDictKeySource(base, key_position))
 
     for key in path:
         if isinstance(key, pytree.SequenceKey):
             source = GetItemSource(source, key.idx)
         elif isinstance(key, pytree.MappingKey):
-            maybe_source = dict_getitem_source(source, key.key)
-            if maybe_source is None:
-                return None
-            source = maybe_source
+            index = key.key
+            if not ConstantVariable.is_literal(index):
+                if not isinstance(current_value, dict):
+                    return None
+                position = next(
+                    (
+                        idx
+                        for idx, candidate, _ in enumerate_items_with_dict_position(
+                            current_value
+                        )
+                        if candidate is index
+                    ),
+                    None,
+                )
+                if position is None:
+                    return None
+                index = ConstDictKeySource(source, position)
+            source = DictGetItemSource(source, index)
         elif isinstance(key, pytree.GetAttrKey):
             source = AttrSource(source, key.name)
         else:
             return None
-        current_value = maybe_get_child_value(current_value, key)
+        if current_value is not _MISSING:
+            try:
+                current_value = key.get(current_value)
+            except (AttributeError, IndexError, KeyError, TypeError):
+                current_value = _MISSING
     return source
+
+
+def _public_guard_source_name(source: Source, path, flat_index: int) -> str:
+    if source.name.startswith("L['flat_args']") or any(
+        isinstance(key, pytree.MappingKey) and not ConstantVariable.is_literal(key.key)
+        for key in path
+    ):
+        return _export_flat_arg_source_for_guard(flat_index)
+    return source.name
 
 
 def _collect_public_input_source_values(
@@ -976,9 +976,22 @@ def _collect_public_input_source_values(
         )
         if public_source is None:
             return
+        public_name = _public_guard_source_name(
+            public_source, nested_path, len(public_input_sources)
+        )
         public_input_sources.append(source)
         source_to_value[source] = value
-        source_name_to_public_name[source.name] = public_source.name
+        source_name_to_public_name[source.name] = public_name
+
+    def record_value(public_name: str, base_source: Source, value: Any) -> None:
+        for nested_path, leaf in pytree.tree_leaves_with_path(value):
+            record_leaf(
+                public_name=public_name,
+                base_source=base_source,
+                nested_path=nested_path,
+                root_value=value,
+                value=leaf,
+            )
 
     bound_positional = sig.bind_partial(*fake_args).arguments
     positional_names = set(bound_positional)
@@ -986,27 +999,13 @@ def _collect_public_input_source_values(
         param = sig.parameters[name]
         if param.kind is inspect.Parameter.VAR_POSITIONAL:
             for idx, arg in enumerate(value):
-                flat_arg_with_path, _ = pytree.tree_flatten_with_path(arg)
-                for nested_path, leaf in flat_arg_with_path:
-                    record_leaf(
-                        public_name=f"{name}_{idx}",
-                        base_source=GetItemSource(
-                            LocalSource(name, is_input=True), idx
-                        ),
-                        nested_path=nested_path,
-                        root_value=arg,
-                        value=leaf,
-                    )
-        else:
-            flat_arg_with_path, _ = pytree.tree_flatten_with_path(value)
-            for nested_path, leaf in flat_arg_with_path:
-                record_leaf(
-                    public_name=name,
-                    base_source=LocalSource(name, is_input=True),
-                    nested_path=nested_path,
-                    root_value=value,
-                    value=leaf,
+                record_value(
+                    f"{name}_{idx}",
+                    GetItemSource(LocalSource(name, is_input=True), idx),
+                    arg,
                 )
+        else:
+            record_value(name, LocalSource(name, is_input=True), value)
 
     var_keyword_name = next(
         (
@@ -1034,15 +1033,7 @@ def _collect_public_input_source_values(
             )
         else:
             base_source = LocalSource(name, is_input=True)
-        flat_arg_with_path, _ = pytree.tree_flatten_with_path(value)
-        for nested_path, leaf in flat_arg_with_path:
-            record_leaf(
-                public_name=name,
-                base_source=base_source,
-                nested_path=nested_path,
-                root_value=value,
-                value=leaf,
-            )
+        record_value(name, base_source, value)
 
     return public_input_sources, source_to_value, source_name_to_public_name
 
@@ -1066,9 +1057,10 @@ def _collect_public_input_source_values_from_flat_paths(
         )
         if source is None:
             continue
+        public_name = _public_guard_source_name(source, path, len(public_input_sources))
         public_input_sources.append(source)
         source_to_value[source] = value
-        source_name_to_public_name[source.name] = source.name
+        source_name_to_public_name[source.name] = public_name
     return public_input_sources, source_to_value, source_name_to_public_name
 
 
@@ -1185,13 +1177,10 @@ def _symbolic_hop_operand_can_be_removed(
     hop_node: torch.fx.Node, operand_arg_idx: int
 ) -> bool:
     hop_name = getattr(hop_node.target, "_name", None)
-    if hop_name == "cond":
-        return True
-    if hop_name in {"while_loop", "while_loop_stack_output"}:
-        # For while_loop, carried_inputs define output arity. Only additional_inputs
-        # can be pruned without changing loop state semantics.
-        return operand_arg_idx == 3
-    return False
+    return hop_name == "cond" or (
+        hop_name in {"while_loop", "while_loop_stack_output"}
+        and operand_arg_idx == 3  # Only additional_inputs can be pruned.
+    )
 
 
 def _drop_symbolic_hop_operands(
@@ -1202,13 +1191,7 @@ def _drop_symbolic_hop_operands(
     replacement_args: tuple[object, ...],
     base_node: torch.fx.Node,
 ) -> None:
-    """Remove lifted tensor-property SymInts from HOP operand lists.
-
-    HOP subgraphs can receive lifted shape placeholders because Dynamo captures
-    all free symbolic inputs. Public export should instead pass the base tensor
-    and let each subgraph recompute the tensor property from that tensor, keeping
-    HOP operand schemas tensor-only when the symbolic input came from a tensor.
-    """
+    """Replace lifted tensor-property SymInts in HOPs with their base tensor."""
 
     args = list(hop_node.args)
     operand_containers: list[tuple[int, Sequence[object], int]] = []
@@ -1480,19 +1463,6 @@ def _unlift_symbolic_placeholders(
             else:
                 raise AssertionError(f"Unsupported tensor property source: {source}")
 
-            first_non_placeholder = first_non_placeholder_node()
-            with gm.graph.inserting_before(first_non_placeholder):
-                replacement = gm.graph.call_function(target, args)
-                replacement.meta.update(node.meta)
-                for user in (*node.users, *base_node.users):
-                    if user.op == "output":
-                        continue
-                    for key in ("nn_module_stack", "stack_trace", "custom"):
-                        if key not in replacement.meta and key in user.meta:
-                            replacement.meta[key] = user.meta[key]
-                for key in ("nn_module_stack", "stack_trace", "custom"):
-                    if key not in replacement.meta and key in default_node_meta:
-                        replacement.meta[key] = default_node_meta[key]
             for user in list(node.users):
                 if isinstance(user.target, torch._ops.HigherOrderOperator):
                     _drop_symbolic_hop_operands(
@@ -1502,13 +1472,25 @@ def _unlift_symbolic_placeholders(
                         replacement_args=args,
                         base_node=base_node,
                     )
-            node.replace_all_uses_with(replacement)
+            if node.users:
+                first_non_placeholder = first_non_placeholder_node()
+                with gm.graph.inserting_before(first_non_placeholder):
+                    replacement = gm.graph.call_function(target, args)
+                    replacement.meta.update(node.meta)
+                    for user in (*node.users, *base_node.users):
+                        if user.op == "output":
+                            continue
+                        for key in ("nn_module_stack", "stack_trace", "custom"):
+                            if key not in replacement.meta and key in user.meta:
+                                replacement.meta[key] = user.meta[key]
+                    for key in ("nn_module_stack", "stack_trace", "custom"):
+                        if key not in replacement.meta and key in default_node_meta:
+                            replacement.meta[key] = default_node_meta[key]
+                node.replace_all_uses_with(replacement)
         gm.graph.erase_node(node)
         removed_placeholders.add(node.name)
 
-    # Only collapse internal/unsourced duplicate tensor placeholders. Public
-    # inputs with source metadata remain distinct even if their static tensor
-    # metadata matches.
+    # Only collapse internal/unsourced duplicate tensor placeholders.
     for source in public_input_sources:
         base_node_name = source_to_input_name.get(_source_key(source))
         if base_node_name is None:
@@ -1943,10 +1925,8 @@ def _export_to_torch_ir(
                             and not isinstance(f, torch.fx.GraphModule)
                             and not torch._dynamo.config.install_free_tensors
                         ):
-                            # Dynamic export needs bytecode-flattened capture here:
-                            # the transformer capture keeps the public signature
-                            # and does not preserve TensorPropertySource on the
-                            # lifted shape placeholders we unlift after AOT.
+                            # Bytecode capture preserves TensorPropertySource on
+                            # lifted shape placeholders through AOT.
                             dynamo_graph_capture = torch._dynamo.config.patch(
                                 replay_side_effects=False,
                                 assume_static_by_default=True,
@@ -2845,18 +2825,11 @@ def _strict_export(
             )
             gm_torch_level.graph._codegen = torch.fx.graph.CodeGen()
             gm_torch_level.recompile()
-            # Some export graphs only keep lifted SymInt placeholders. In that
-            # case, the active fake mode cannot accept newly tracked public
-            # inputs, and the TensorPropertySource path below recovers the
-            # owning tensor fake from the lifted symbol's ShapeEnv instead.
+            # Shape-only graphs may need to recover their tensor from ShapeEnv.
             if _has_tensor_outside_fake_mode(
                 (public_fake_args, public_fake_kwargs), dynamo_fake_mode
             ) and _fake_mode_can_track_new_fakes(dynamo_fake_mode):
-                # Unused public tensor inputs may not survive as Dynamo
-                # placeholders, so _extract_fake_inputs leaves them as real
-                # tensors. Re-fakify the public signature in the existing fake
-                # mode to preserve the user's dynamic/static shape spec when
-                # those placeholders are reintroduced after AOT pruning.
+                # Re-fakify public inputs pruned from the Dynamo graph.
                 (
                     _,
                     public_fake_args,

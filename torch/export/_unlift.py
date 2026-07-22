@@ -12,8 +12,6 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import enumerate_items_with_dict_position
-from torch._dynamo.variables.constant import ConstantVariable
 from torch._export.non_strict_utils import (
     _enter_enable_graph_inputs_of_type_nn_module,
     _exit_enable_graph_inputs_of_type_nn_module,
@@ -92,13 +90,7 @@ def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> list:
     return flat_args_with_path
 
 
-def _force_ep_signature_match(
-    ep_guards_code: list[str],
-    input_paths,
-    input_context,
-    *,
-    prefer_internal_flat_args: bool = False,
-):
+def _force_ep_signature_match(ep_guards_code: list[str], input_paths):
     # TODO (tmanlaibaatar)
     # This is band-aid solution to export new tracer replacing
     # shape env sources to flat_args. The real fix should be replacing
@@ -108,168 +100,17 @@ def _force_ep_signature_match(
     # lot easier to manipulate after we turn them into strings and only
     # time we use these guards is during retracing or running exported program,
     # so it is probably ok to have "not useful" guards on ep for now.
+    name_mapping = {}
+    for idx, path in enumerate(input_paths):
+        name_mapping[f"L['flat_args'][{idx}]"] = f"L{pytree.keystr(path)}"
+
     new_guards_code = []
     for guard in ep_guards_code:
-        new_guards_code.append(
-            _replace_guard_sources(
-                guard,
-                input_paths,
-                input_context,
-                prefer_internal_flat_args=prefer_internal_flat_args,
-            )
-        )
+        for old_name, new_name in name_mapping.items():
+            guard = guard.replace(old_name, new_name)
+        new_guards_code.append(guard)
 
     return new_guards_code
-
-
-def _valid_python_expr(expr: str) -> bool:
-    try:
-        ast.parse(expr, mode="eval")
-    except (SyntaxError, ValueError):
-        return False
-    return True
-
-
-def _path_source_for_guard(path: pytree.KeyPath) -> str | None:
-    source = "L" + pytree.keystr(path)
-    if _valid_python_expr(source):
-        return source
-    return None
-
-
-def _flat_arg_source_for_guard(idx: int) -> str:
-    return _export_flat_arg_source_for_guard(idx)
-
-
-def _shadow_source_for_guard(path: pytree.KeyPath, idx: int) -> str:
-    if path and isinstance(path[0], pytree.MappingKey) and isinstance(path[0].key, str):
-        source = path[0].key + pytree.keystr(path[1:])
-        if _valid_python_expr(source):
-            return source
-    return f"args[{idx}]"
-
-
-def _maybe_get_child_value(value: Any, key) -> Any:
-    if value is _MISSING:
-        return _MISSING
-    try:
-        return key.get(value)
-    except (AttributeError, IndexError, KeyError, TypeError):
-        return _MISSING
-
-
-def _key_position_in_mapping(mapping: Any, lookup_key: Any) -> int | None:
-    if not isinstance(mapping, dict):
-        return None
-    for idx, key, _ in enumerate_items_with_dict_position(mapping):
-        if key is lookup_key:
-            return idx
-    return None
-
-
-def _path_source_from_example(path: pytree.KeyPath, root_value: Any) -> str | None:
-    current_value = root_value
-    source: str | None = None
-    for key in path:
-        if isinstance(key, pytree.SequenceKey):
-            if source is None:
-                return None
-            source = f"{source}[{key.idx!r}]"
-        elif isinstance(key, pytree.MappingKey):
-            if source is None:
-                if not isinstance(key.key, str):
-                    return None
-                source = f"L[{key.key!r}]"
-            else:
-                if ConstantVariable.is_literal(key.key):
-                    source = source + pytree.keystr((key,))
-                else:
-                    key_position = _key_position_in_mapping(current_value, key.key)
-                    if key_position is None:
-                        return None
-                    source = f"{source}[list(dict.keys({source}))[{key_position}]]"
-        elif isinstance(key, pytree.GetAttrKey):
-            if source is None:
-                return None
-            source = f"{source}.{key.name}"
-        else:
-            return None
-        current_value = _maybe_get_child_value(current_value, key)
-    return source
-
-
-def _guard_source_replacements(
-    input_paths: list[pytree.KeyPath],
-    input_context,
-    *,
-    prefer_internal_flat_args: bool = False,
-) -> list[tuple[str, str]]:
-    replacements = []
-    real_sources = set()
-    for idx, path in enumerate(input_paths):
-        raw_source = "L" + pytree.keystr(path)
-        real_sources.add(raw_source)
-        example_source = _path_source_from_example(path, input_context)
-        if example_source is not None:
-            real_sources.add(example_source)
-
-    for idx, path in enumerate(input_paths):
-        token = _flat_arg_source_for_guard(idx)
-        raw_source = "L" + pytree.keystr(path)
-        if not (prefer_internal_flat_args and raw_source.startswith("L['flat_args']")):
-            replacements.append((raw_source, token))
-        example_source = _path_source_from_example(path, input_context)
-        if (
-            example_source is not None
-            and example_source != raw_source
-            and not (
-                prefer_internal_flat_args
-                and example_source.startswith("L['flat_args']")
-            )
-        ):
-            replacements.append((example_source, token))
-        internal_flat_arg_source = f"L['flat_args'][{idx}]"
-        if prefer_internal_flat_args or internal_flat_arg_source not in real_sources:
-            replacements.append((internal_flat_arg_source, token))
-
-    replacements.sort(key=lambda item: len(item[0]), reverse=True)
-    return replacements
-
-
-def _replace_guard_sources(
-    guard: str,
-    input_paths: list[pytree.KeyPath],
-    input_context,
-    *,
-    prefer_internal_flat_args: bool = False,
-) -> str:
-    for old_name, new_name in _guard_source_replacements(
-        input_paths,
-        input_context,
-        prefer_internal_flat_args=prefer_internal_flat_args,
-    ):
-        guard = guard.replace(old_name, new_name)
-    return guard
-
-
-def _replace_sources(
-    result_str: str,
-    flat_input_paths: list[Any],
-    input_context=None,
-):
-    """
-    Given user specified input paths, maybe fix up the guard string
-    to reflect user path instead of tracer path.
-    """
-    if input_context is not None:
-        return _replace_guard_sources(result_str, flat_input_paths, input_context)
-
-    replace = result_str
-    for idx, path in enumerate(flat_input_paths):
-        path_source = _path_source_for_guard(path)
-        if path_source is not None:
-            replace = replace.replace(f"L['flat_args'][{idx}]", path_source)
-    return replace
 
 
 def _force_gm_signature_match(ep_guards_code: list[str], signature):
@@ -344,17 +185,18 @@ def _convert_guards_code_to_fn(
     for c in guards_code:
         a, s = c, c
         for idx, path in enumerate(paths_of_placeholders):
-            flat_arg_source = _flat_arg_source_for_guard(idx)
-            path_source = _path_source_for_guard(path)
-            shadow_source = _shadow_source_for_guard(path, idx)
-            a = a.replace(flat_arg_source, f"args[{idx}]")
-            s = s.replace(flat_arg_source, shadow_source)
-            if path_source is None:
-                continue
-            # e.g., replace L['z']['k'] with args[2] for Python code (actual)
-            a = a.replace(path_source, f"args[{idx}]")
-            # e.g., replace L['z']['k'] with z['k'] for error message (shadow)
-            s = s.replace(path_source, shadow_source)
+            flat_arg_source = _export_flat_arg_source_for_guard(idx)
+            path_source = "L" + pytree.keystr(path)
+            shadow_source = str(
+                getattr(path[0], "key", f"args[{idx}]")
+            ) + pytree.keystr(path[1:])
+            try:
+                ast.parse(shadow_source, mode="eval")
+            except (SyntaxError, ValueError):
+                shadow_source = f"args[{idx}]"
+            for source in (flat_arg_source, path_source):
+                a = a.replace(source, f"args[{idx}]")
+                s = s.replace(source, shadow_source)
         actual_guards_code.append(a)
         shadow_guards_code.append(s.replace("\n", ""))
 
@@ -766,21 +608,6 @@ def _create_stateful_graph_module(
     return stateful_gm
 
 
-_MISSING = object()
-
-
-def _get_input_context(example_inputs, signature):
-    args, kwargs = example_inputs
-    binded = signature.bind(*args, **kwargs)
-    binded.apply_defaults()
-    return binded.arguments
-
-
-def _get_input_paths_from_context(ctx):
-    flat_example_inputs_with_paths = pytree.tree_leaves_with_path(ctx)
-    return [path for path, _ in flat_example_inputs_with_paths]
-
-
 def _get_input_paths(example_inputs, signature):
     """
     Generate paths of placeholders, needed for generating the guards function.
@@ -789,7 +616,27 @@ def _get_input_paths(example_inputs, signature):
     the signature of the unlifted graph module (not preserved by export).
     """
 
-    return _get_input_paths_from_context(_get_input_context(example_inputs, signature))
+    args, kwargs = example_inputs
+    binded = signature.bind(*args, **kwargs)
+    binded.apply_defaults()
+    ctx = binded.arguments
+    flat_example_inputs_with_paths = pytree.tree_leaves_with_path(ctx)
+    return [path for path, _ in flat_example_inputs_with_paths]
+
+
+def _replace_sources(result_str: str, flat_input_paths: list[Any]):
+    """
+    Given user specified input paths, maybe fix up the guard string
+    to reflect user path instead of tracer path.
+    """
+    name_mapping = {}
+    for idx, path in enumerate(flat_input_paths):
+        name_mapping[f"L['flat_args'][{idx}]"] = f"L{pytree.keystr(path)}"
+
+    replace = result_str
+    for key, val in name_mapping.items():
+        replace = replace.replace(key, val)
+    return replace
 
 
 def _get_input_guards_for_graph(
@@ -843,7 +690,7 @@ def _get_input_guards_for_graph(
     for idx, (placeholder, path) in enumerate(
         zip(placeholders, paths_for_placeholders)
     ):
-        src = _path_source_for_guard(path) or _flat_arg_source_for_guard(idx)
+        src = _export_flat_arg_source_for_guard(idx)
         meta = placeholder.meta["val"]
         # specializations
         if isinstance(meta, int):
@@ -864,9 +711,7 @@ def _get_input_guards_for_graph(
             handle_symint(meta.node.expr, src)
         elif isinstance(meta, torch.Tensor):
             for i, dim in enumerate(meta.shape):
-                src = (
-                    _path_source_for_guard(path) or _flat_arg_source_for_guard(idx)
-                ) + f".size()[{i}]"
+                src = _export_flat_arg_source_for_guard(idx) + f".size()[{i}]"
                 if isinstance(dim, int):
                     # specializations
                     new_guards_code.append(f"{src} == {dim}")
@@ -1020,31 +865,20 @@ def _unlift_exported_program_lifted_states(
     placeholders = graph.find_nodes(op="placeholder")
     if check_guards and placeholders and ep.example_inputs:
         sig = inspect.signature(unlift_gm.forward)
-        input_context = _get_input_context(ep.example_inputs, sig)
-        input_paths = _get_input_paths_from_context(input_context)
-
-        # TODO (tmanlaibaatar)
-        # This is band-aid solution to export new tracer replacing
-        # shape env sources to flat_args. The real fix should be replacing
-        # shape env sources to original user sources but this is quite
-        # involved because you need to carefully construct new sources using
-        # dynamo and replace all instances of it inside shape env. But it is
-        # lot easier to manipulate after we turn them into strings and only
-        # time we use these guards is during retracing or running exported program,
-        # so it is probably ok to have "not useful" guards on ep for now.
+        input_paths = _get_input_paths(
+            ep.example_inputs,
+            sig,
+        )
         guards_code = _get_input_guards_for_graph(
             placeholders, ep.range_constraints, input_paths
         )
 
-        ep_guards_code = _force_ep_signature_match(
-            ep._guards_code,
-            input_paths,
-            input_context,
-            prefer_internal_flat_args=(
-                "dynamo_source_to_public_source_name" not in ep.graph_module.meta
-                and "flat_args" not in input_context
-            ),
-        )
+        ep_guards_code = ep._guards_code
+        if (
+            "dynamo_source_to_public_source_name" not in ep.graph_module.meta
+            and not any("\x00export-flat-arg-" in guard for guard in ep_guards_code)
+        ):
+            ep_guards_code = _force_ep_signature_match(ep_guards_code, input_paths)
         ep_guards_code = _force_gm_signature_match(ep_guards_code, sig)
         guards_code.extend(ep_guards_code)
         unlift_gm._guards_fn = _convert_guards_code_to_fn(guards_code, input_paths)

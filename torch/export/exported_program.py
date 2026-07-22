@@ -1810,6 +1810,11 @@ def _convert_guards_to_code(graph_module):
     source_name_to_public_name = graph_module.meta.get(
         "dynamo_source_to_public_source_name", {}
     )
+    sorted_public_sources = sorted(
+        source_name_to_public_name.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
 
     def internal_flat_arg_source_name(name):
         prefix = "L['flat_args']["
@@ -1825,11 +1830,9 @@ def _convert_guards_to_code(graph_module):
 
     def public_source_name(source):
         name = source.name
-        for old_name, new_name in sorted(
-            source_name_to_public_name.items(),
-            key=lambda item: len(item[0]),
-            reverse=True,
-        ):
+        for old_name, new_name in sorted_public_sources:
+            # Bracket-indexed leaves are complete mapping keys; only property
+            # suffixes added by the guard printer use this prefix match.
             if name == old_name or name.startswith(f"{old_name}."):
                 return f"{new_name}{name[len(old_name) :]}"
         internal_name = internal_flat_arg_source_name(name)

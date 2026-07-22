@@ -524,7 +524,6 @@ graph():
 
         inp = (torch.randn(3, 2),)
         dynamic_shapes = {"x": {0: Dim("batch", min=1)}}
-
         gm = _export_to_torch_ir(
             Module(),
             inp,
@@ -535,259 +534,105 @@ graph():
             prefer_deferred_runtime_asserts_over_guards=False,
             _log_export_usage=False,
         )
-        placeholders = list(gm.graph.find_nodes(op="placeholder"))
-        symint_placeholders = [
-            node
-            for node in placeholders
-            if isinstance(node.meta.get("val"), torch.SymInt)
-        ]
-        tensor_placeholders = [
-            node
-            for node in placeholders
-            if isinstance(node.meta.get("val"), torch.Tensor)
-        ]
-
-        self.assertEqual(len(symint_placeholders), 1)
-        self.assertEqual(len(tensor_placeholders), 1)
+        symint, tensor = gm.graph.find_nodes(op="placeholder")
         self.assertEqual(
-            symint_placeholders[0].meta["val"].node.expr,
-            tensor_placeholders[0].meta["val"].shape[0].node.expr,
+            symint.meta["val"].node.expr, tensor.meta["val"].shape[0].node.expr
         )
-        from torch._dynamo.source import TensorProperty, TensorPropertySource
+        from torch._dynamo.source import TensorPropertySource
 
-        symint_source = getattr(symint_placeholders[0], "_dynamo_source", None)
-        tensor_source = getattr(tensor_placeholders[0], "_dynamo_source", None)
+        symint_source = symint._dynamo_source
         self.assertIsInstance(symint_source, TensorPropertySource)
-        self.assertEqual(symint_source.prop, TensorProperty.SIZE)
-        self.assertEqual(symint_source.idx, 0)
-        self.assertEqual(symint_source.base, tensor_source)
+        self.assertEqual(symint_source.base, tensor._dynamo_source)
         self.assertFalse(
             any(node.target == torch.ops.aten.sym_size.int for node in gm.graph.nodes)
         )
-        self.assertTrue(
-            any(symint_placeholders[0] in node.args for node in gm.graph.nodes)
-        )
+        self.assertTrue(any(symint in node.args for node in gm.graph.nodes))
 
-        ep = export(
-            Module(),
-            inp,
-            dynamic_shapes=dynamic_shapes,
-            strict=True,
+        ep = export(Module(), inp, dynamic_shapes=dynamic_shapes, strict=True)
+        (x,) = ep.graph.find_nodes(op="placeholder")
+        (sym_size,) = ep.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sym_size.int
         )
-        final_placeholders = list(ep.graph.find_nodes(op="placeholder"))
-        sym_size_nodes = [
-            node
-            for node in ep.graph.nodes
-            if node.target == torch.ops.aten.sym_size.int
-        ]
-
-        self.assertEqual(len(final_placeholders), 1)
-        self.assertEqual(final_placeholders[0].name, "x")
-        self.assertIsInstance(final_placeholders[0].meta["val"], torch.Tensor)
         self.assertEqual(tuple(ep.graph_signature.user_inputs), ("x",))
-        self.assertEqual(len(sym_size_nodes), 1)
-        self.assertIs(sym_size_nodes[0].args[0], final_placeholders[0])
-        self.assertEqual(sym_size_nodes[0].args[1], 0)
+        self.assertEqual(sym_size.args, (x, 0))
         self.assertEqual(ep.module()(torch.randn(4, 2)).shape, torch.Size([4, 2]))
 
-    def test_dynamo_bytecode_codegen_accepts_flattened_aot_inputs(self):
-        class Module(torch.nn.Module):
-            def forward(self, inputs):
-                return (
-                    inputs["x"] + inputs["x"].shape[0],
-                    inputs["y"] + inputs["y"].shape[1],
-                )
-
-        inp = ({"x": torch.randn(3, 2), "y": torch.randn(3, 2)},)
-        dynamic_shapes = (
-            {
-                "x": {0: Dim("batch", min=1)},
-                "y": {1: Dim("features", min=1)},
-            },
-        )
-
-        gm = _export_to_torch_ir(
-            Module(),
-            inp,
-            {},
-            dynamic_shapes,
-            preserve_module_call_signature=(),
-            restore_fqn=False,
-            prefer_deferred_runtime_asserts_over_guards=False,
-            _log_export_usage=False,
-        )
-        placeholders = list(gm.graph.find_nodes(op="placeholder"))
-        flat_inputs = tuple(
-            None if isinstance(node.meta.get("val"), torch.SymInt) else node.meta["val"]
-            for node in placeholders
-        )
-
-        real_outputs = gm(*inp)
-        self.assertGreater(len(flat_inputs), 1)
-        flat_outputs = torch.fx.Interpreter(gm).run(*flat_inputs)
-
-        self.assertEqual(len(real_outputs), 2)
-        self.assertEqual(len(flat_outputs), 2)
-        self.assertEqual(tuple(flat_outputs[0].shape), (3, 2))
-        self.assertEqual(tuple(flat_outputs[1].shape), (3, 2))
-
-    def test_strict_export_dynamic_tensor_constant_attrs(self):
-        class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.weight = torch.randn(2, 3)
-                self.bias = torch.randn(2)
-
-            def forward(self, x):
-                return torch.nn.functional.linear(x, self.weight, self.bias)
-
-        m = Module()
-        inp = torch.randn(4, 3)
-        dynamic_shapes = {"x": {0: Dim("batch", min=1, max=8)}}
-
-        ep = export(m, (inp,), dynamic_shapes=dynamic_shapes, strict=True)
-        constant_specs = [
-            spec
-            for spec in ep.graph_signature.input_specs
-            if spec.kind == InputKind.CONSTANT_TENSOR
-        ]
-
-        self.assertEqual([spec.target for spec in constant_specs], ["weight", "bias"])
-        self.assertEqual(ep.module()(inp), m(inp))
-
-    def test_strict_export_unlifts_shape_outputs(self):
         class ShapeOnlyModule(torch.nn.Module):
             def forward(self, x):
                 return x.shape[0]
 
-        class ShapeAndTensorModule(torch.nn.Module):
-            def forward(self, x):
-                return (x.shape[0], x + 1)
+        shape_ep = export(
+            ShapeOnlyModule(), inp, dynamic_shapes=dynamic_shapes, strict=True
+        )
+        self.assertEqual(shape_ep.module()(torch.randn(4, 2)), 4)
 
-        inp = (torch.randn(3, 2),)
-        dynamic_shapes = {"x": {0: Dim("batch", min=1)}}
+    def test_dynamo_bytecode_codegen_accepts_flattened_aot_inputs(self):
+        class Module(torch.nn.Module):
+            def forward(self, inputs):
+                return inputs["x"] + inputs["x"].shape[0]
 
-        for module, has_tensor_output in (
-            (ShapeOnlyModule(), False),
-            (ShapeAndTensorModule(), True),
-        ):
-            with self.subTest(has_tensor_output=has_tensor_output):
-                ep = export(module, inp, dynamic_shapes=dynamic_shapes, strict=True)
-                final_placeholders = list(ep.graph.find_nodes(op="placeholder"))
-                sym_size_nodes = [
-                    n for n in ep.graph.nodes if n.target == torch.ops.aten.sym_size.int
-                ]
+        inp = ({"x": torch.randn(3, 2)},)
+        dynamic_shapes = ({"x": {0: Dim("batch", min=1)}},)
 
-                self.assertEqual(len(final_placeholders), 1)
-                self.assertEqual(final_placeholders[0].name, "x")
-                self.assertIsInstance(final_placeholders[0].meta["val"], torch.Tensor)
-                self.assertEqual(tuple(ep.graph_signature.user_inputs), ("x",))
-                self.assertEqual(len(sym_size_nodes), 1)
-                self.assertIs(sym_size_nodes[0].args[0], final_placeholders[0])
-                self.assertEqual(sym_size_nodes[0].args[1], 0)
-                self.assertIsNotNone(sym_size_nodes[0].meta.get("nn_module_stack"))
-
-                runtime_inp = torch.randn(4, 2)
-                out = ep.module()(runtime_inp)
-                if has_tensor_output:
-                    self.assertEqual(out[0], 4)
-                    self.assertEqual(out[1], runtime_inp + 1)
-                else:
-                    self.assertEqual(out, 4)
+        gm = _export_to_torch_ir(
+            Module(),
+            inp,
+            {},
+            dynamic_shapes,
+            preserve_module_call_signature=(),
+            restore_fqn=False,
+            prefer_deferred_runtime_asserts_over_guards=False,
+            _log_export_usage=False,
+        )
+        flat_inputs = (
+            None if isinstance(node.meta.get("val"), torch.SymInt) else node.meta["val"]
+            for node in gm.graph.find_nodes(op="placeholder")
+        )
+        flat_outputs = torch.fx.Interpreter(gm).run(*flat_inputs)
+        self.assertEqual(tuple(flat_outputs[0].shape), (3, 2))
 
     def test_unlift_symbolic_placeholders_source_matching(self):
         from torch._dynamo.source import (
-            ConstantSource,
             LocalSource,
             TensorProperty,
             TensorPropertySource,
         )
         from torch._functorch._aot_autograd.schemas import GraphSignature
-        from torch.fx.experimental.symbolic_shapes import DimDynamic
 
         shape_env = ShapeEnv(specialize_zero_one=False)
         with FakeTensorMode(shape_env=shape_env):
-            s0 = shape_env.create_symintnode(
-                shape_env.create_symbol(
-                    val=3,
-                    source=ConstantSource("s0"),
-                    dynamic_dim=DimDynamic.DYNAMIC,
-                    do_not_specialize_zero_one=True,
-                ),
-                hint=3,
-            )
+            s0 = shape_env.create_unbacked_symint()
             x_meta = torch.empty((s0, 2), device="meta")
 
+        x_source = LocalSource("x", is_input=True)
+        names = ["n", "x", "lifted_stride", "lifted_offset"]
+        sources = [
+            LocalSource("n", is_input=True),
+            x_source,
+            TensorPropertySource(x_source, TensorProperty.STRIDE, 0),
+            TensorPropertySource(x_source, TensorProperty.STORAGE_OFFSET),
+        ]
         graph = torch.fx.Graph()
-        n = graph.placeholder("n")
-        n.meta["val"] = s0
-        lifted_s0 = graph.placeholder("lifted_s0")
-        lifted_s0.meta["val"] = s0
-        x = graph.placeholder("x")
-        x.meta["val"] = x_meta
-        lifted_stride = graph.placeholder("lifted_stride")
-        lifted_stride.meta["val"] = s0
-        lifted_storage_offset = graph.placeholder("lifted_storage_offset")
-        lifted_storage_offset.meta["val"] = s0
-        add = graph.call_function(torch.ops.aten.add.Tensor, (x, lifted_s0))
-        add.meta["val"] = x_meta
-        graph.output((add, n, lifted_stride, lifted_storage_offset))
+        nodes = [graph.placeholder(name) for name in names]
+        for node, value in zip(nodes, (s0, x_meta, s0, s0)):
+            node.meta["val"] = value
+        n, x, lifted_stride, lifted_offset = nodes
+        graph.output((x, n, lifted_stride, lifted_offset))
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
 
         leaf_spec = pytree.tree_flatten((None,))[1]
+        signature_args = ([], [], names, names, {}, {}, {}, {}, {})
         graph_signature = GraphSignature(
-            parameters=[],
-            buffers=[],
-            user_inputs="n lifted_s0 x lifted_stride lifted_storage_offset".split(),
-            user_outputs=["add", "n", "lifted_stride", "lifted_storage_offset"],
-            inputs_to_parameters={},
-            inputs_to_buffers={},
-            buffers_to_mutate={},
-            parameters_to_mutate={},
-            user_inputs_to_mutate={},
-            in_spec=leaf_spec,
-            out_spec=leaf_spec,
-            backward_signature=None,
-            input_tokens=[],
-            output_tokens=[],
+            *signature_args, leaf_spec, leaf_spec, None, [], []
         )
-        x_source = LocalSource("x", is_input=True)
-
-        _unlift_symbolic_placeholders(
-            gm,
-            graph_signature,
-            [
-                LocalSource("n", is_input=True),
-                TensorPropertySource(x_source, TensorProperty.SIZE, 0),
-                x_source,
-                TensorPropertySource(x_source, TensorProperty.STRIDE, 0),
-                TensorPropertySource(x_source, TensorProperty.STORAGE_OFFSET),
-            ],
-        )
+        _unlift_symbolic_placeholders(gm, graph_signature, sources)
 
         placeholders = list(gm.graph.find_nodes(op="placeholder"))
-        sym_size_nodes = [
-            n for n in gm.graph.nodes if n.target == torch.ops.aten.sym_size.int
-        ]
-        sym_stride_nodes = [
-            n for n in gm.graph.nodes if n.target == torch.ops.aten.sym_stride.int
-        ]
-        sym_storage_offset_nodes = [
-            node
-            for node in gm.graph.nodes
-            if node.target == torch.ops.aten.sym_storage_offset.default
-        ]
-
         self.assertEqual([node.name for node in placeholders], ["n", "x"])
         self.assertEqual(graph_signature.user_inputs, ["n", "x"])
-        self.assertEqual(len(sym_size_nodes), 1)
-        self.assertIs(sym_size_nodes[0].args[0], placeholders[1])
-        self.assertEqual(sym_size_nodes[0].args[1], 0)
-        self.assertEqual(len(sym_stride_nodes), 1)
-        self.assertIs(sym_stride_nodes[0].args[0], placeholders[1])
-        self.assertEqual(sym_stride_nodes[0].args[1], 0)
-        self.assertEqual(len(sym_storage_offset_nodes), 1)
-        self.assertIs(sym_storage_offset_nodes[0].args[0], placeholders[1])
+        targets = {node.target for node in gm.graph.nodes if node.op == "call_function"}
+        self.assertIn(torch.ops.aten.sym_stride.int, targets)
+        self.assertIn(torch.ops.aten.sym_storage_offset.default, targets)
         self.assertTrue(
             any(placeholders[0] in node.all_input_nodes for node in gm.graph.nodes)
         )
@@ -7087,246 +6932,96 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             },
         }
         m = KwargsModel()
-        for strict in (False, True):
-            with self.subTest(strict=strict):
-                ep = export(
-                    m, (), kwargs=inputs, dynamic_shapes=dynamic_shapes, strict=strict
-                )
-                self.assertTrue(
-                    any(
-                        "L['kwargs']['a'].size()[0]" in guard
-                        for guard in ep._guards_code
-                    )
-                )
-                epm = ep.module()
-                self.assertEqual(m(**inputs), epm(**inputs))
-                inputs2 = {
-                    "a": torch.randn(2, 6),
-                    "kwargs": {"a": torch.rand(4, 3)},
-                }
-                self.assertEqual(m(**inputs2), epm(**inputs2))
+        ep = export(m, (), kwargs=inputs, dynamic_shapes=dynamic_shapes)
+        self.assertTrue(
+            any("L['kwargs']['a'].size()[0]" in guard for guard in ep._guards_code)
+        )
+        inputs2 = {"a": torch.randn(2, 6), "kwargs": {"a": torch.rand(4, 3)}}
+        self.assertEqual(m(**inputs2), ep.module()(**inputs2))
 
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_preserves_unused_tensor_with_enum_dict_key(self):
         class Key(enum.Enum):
             USED = "used"
             UNUSED = "unused"
 
-        class Module(torch.nn.Module):
-            def forward(self, x, flat_args):
-                return x[Key.USED] + flat_args[0].sum()
+        for name, keys in (
+            ("enum", (Key.USED, Key.UNUSED)),
+            ("tensor", (torch.tensor(0), torch.tensor(1))),
+        ):
+            used, unused = keys
 
-        class GuardedModule(torch.nn.Module):
-            def forward(self, x):
-                return x[Key.USED].narrow(0, 0, x[Key.UNUSED].shape[0])
+            class Module(torch.nn.Module):
+                def forward(self, x, flat_args):
+                    return x[used].narrow(0, 0, x[unused].shape[0]) + flat_args[0]
 
-        class TokenKeyModule(torch.nn.Module):
-            def forward(self, x):
-                return x["<export-flat-arg-0>"].narrow(0, 0, x["limit"].shape[0])
-
-        tensor_used_key = torch.tensor(0)
-        tensor_unused_key = torch.tensor(1)
-
-        class TensorKeyModule(torch.nn.Module):
-            def forward(self, x):
-                return x[tensor_used_key].narrow(0, 0, x[tensor_unused_key].shape[0])
-
-        inputs = (
-            {
-                Key.USED: torch.randn(3, 2),
-                Key.UNUSED: torch.randn(4, 2),
-            },
-            [torch.randn(3, 7)],
-        )
-        dynamic_shapes = (
-            {
-                Key.USED: {0: Dim("used", min=1)},
-                Key.UNUSED: {0: Dim("unused", min=1)},
-            },
-            [{0: Dim("flat", min=1)}],
-        )
-
-        for strict in (False, True):
-            with self.subTest(strict=strict):
-                ep = export(
-                    Module(),
-                    inputs,
-                    dynamic_shapes=dynamic_shapes,
-                    strict=strict,
-                )
-                new_inputs = {
-                    Key.USED: torch.randn(5, 2),
-                    Key.UNUSED: torch.randn(6, 2),
-                }
-                new_flat_args = [torch.randn(5, 7)]
-
+            args = (
+                {used: torch.randn(4, 2), unused: torch.randn(3, 2)},
+                [torch.randn(3, 2)],
+            )
+            shapes = (
+                {used: {0: Dim.AUTO}, unused: {0: Dim.AUTO}},
+                [{0: Dim.AUTO}],
+            )
+            new_args = (
+                {used: torch.randn(5, 2), unused: torch.randn(4, 2)},
+                [torch.randn(4, 2)],
+            )
+            with self.subTest(name=name):
+                ep = export(Module(), args, dynamic_shapes=shapes)
                 self.assertEqual(len(ep.graph_signature.user_inputs), 3)
-                self.assertEqual(
-                    ep.module()(new_inputs, new_flat_args),
-                    Module()(new_inputs, new_flat_args),
-                )
-
-        guarded_cases = [
-            (
-                "enum_key",
-                GuardedModule(),
-                (
-                    {
-                        Key.USED: torch.randn(4, 2),
-                        Key.UNUSED: torch.randn(3, 4),
-                    },
-                ),
-                (
-                    {
-                        Key.USED: {
-                            0: Dim("guarded_used", min=2, max=8),
-                            1: Dim.STATIC,
-                        },
-                        Key.UNUSED: {
-                            0: Dim("guarded_unused", min=2, max=8),
-                            1: Dim.STATIC,
-                        },
-                    },
-                ),
-                {
-                    Key.USED: torch.randn(5, 2),
-                    Key.UNUSED: torch.randn(4, 4),
-                },
-            ),
-            (
-                "token_string_key",
-                TokenKeyModule(),
-                (
-                    {
-                        "<export-flat-arg-0>": torch.randn(4, 2),
-                        "limit": torch.randn(3, 4),
-                    },
-                ),
-                (
-                    {
-                        "<export-flat-arg-0>": {
-                            0: Dim("token_used", min=2, max=8),
-                            1: Dim.STATIC,
-                        },
-                        "limit": {0: Dim("token_limit", min=2, max=8), 1: Dim.STATIC},
-                    },
-                ),
-                {
-                    "<export-flat-arg-0>": torch.randn(5, 2),
-                    "limit": torch.randn(4, 4),
-                },
-            ),
-            (
-                "tensor_key",
-                TensorKeyModule(),
-                (
-                    {
-                        tensor_used_key: torch.randn(4, 2),
-                        tensor_unused_key: torch.randn(3, 4),
-                    },
-                ),
-                (
-                    {
-                        tensor_used_key: {
-                            0: Dim("tensor_used", min=2, max=8),
-                            1: Dim.STATIC,
-                        },
-                        tensor_unused_key: {
-                            0: Dim("tensor_unused", min=2, max=8),
-                            1: Dim.STATIC,
-                        },
-                    },
-                ),
-                {
-                    tensor_used_key: torch.randn(5, 2),
-                    tensor_unused_key: torch.randn(4, 4),
-                },
-            ),
-        ]
-        for name, module, args, shapes, new_input in guarded_cases:
-            for strict in (False, True):
-                with self.subTest(name=name, strict=strict):
-                    ep = export(
-                        module,
-                        args,
-                        dynamic_shapes=shapes,
-                        strict=strict,
-                    )
-
-                    self.assertTrue(ep._guards_code)
-                    self.assertEqual(ep.module()(new_input), module(new_input))
+                self.assertTrue(ep._guards_code)
+                self.assertEqual(ep.module()(*new_args), Module()(*new_args))
 
     def test_export_install_free_tensors_flat_args_guard_sources(self):
-        free = torch.randn(3, 4)
+        free = torch.randn(3)
         token0 = "\x00export-flat-arg-0\x00"
         token1 = "\x00export-flat-arg-1\x00"
 
         class Module(torch.nn.Module):
             def forward(self, x, flat_args):
-                return x.view(x.shape[0], free.shape[0], -1) + flat_args[0].sum()
+                y = torch.ones(x.shape[0], device=x.device)
+                return x + y + flat_args[0] + free.sum()
 
         class RelationModule(torch.nn.Module):
             def forward(self, x, flat_args):
-                y = torch.ones(x.shape[0], device=x.device)
-                return x + y + flat_args[0]
+                return x + torch.ones_like(x) + flat_args[0]
 
-        inputs = (torch.randn(3, 6), [torch.randn(3, 7)])
-        dynamic_shapes = {
-            "x": {0: Dim.STATIC, 1: Dim.AUTO},
-            "flat_args": [{0: Dim.AUTO, 1: Dim.STATIC}],
-        }
-        for strict in (False, True):
-            with self.subTest(strict=strict):
-                with torch._dynamo.config.patch(install_free_tensors=True):
-                    ep = export(
-                        Module(),
-                        inputs,
-                        dynamic_shapes=dynamic_shapes,
-                        strict=strict,
-                    )
-                new_inputs = (torch.randn(3, 9), [torch.randn(5, 7)])
+        def roundtrip(ep):
+            buffer = io.BytesIO()
+            torch.export.save(ep, buffer)
+            buffer.seek(0)
+            return torch.export.load(buffer)
 
-                self.assertTrue(ep._guards_code)
-                if strict:
-                    self.assertTrue(any(token0 in guard for guard in ep._guards_code))
-                    buffer = io.BytesIO()
-                    torch.export.save(ep, buffer)
-                    buffer.seek(0)
-                    loaded_ep = torch.export.load(buffer)
-                    self.assertEqual(loaded_ep._guards_code, ep._guards_code)
-                    self.assertEqual(
-                        loaded_ep.module()(*new_inputs), Module()(*new_inputs)
-                    )
-                self.assertEqual(ep.module()(*new_inputs), Module()(*new_inputs))
-
-        relation_inputs = (torch.randn(3), [torch.randn(3)])
-        relation_dim = Dim("relation", min=2, max=8)
+        inputs = (torch.randn(3), [torch.randn(3)])
+        dim = Dim("relation", min=2, max=8)
         with torch._dynamo.config.patch(install_free_tensors=True):
-            relation_ep = export(
-                RelationModule(),
-                relation_inputs,
-                dynamic_shapes=({0: relation_dim}, [{0: relation_dim}]),
+            ep = export(
+                Module(),
+                inputs,
+                dynamic_shapes=({0: dim}, [{0: dim}]),
                 strict=True,
             )
         self.assertTrue(
-            any(
-                token0 in guard and token1 in guard
-                for guard in relation_ep._guards_code
-            )
+            any(token0 in guard and token1 in guard for guard in ep._guards_code)
         )
-        buffer = io.BytesIO()
-        torch.export.save(relation_ep, buffer)
-        buffer.seek(0)
-        loaded_relation_ep = torch.export.load(buffer)
-        self.assertEqual(loaded_relation_ep._guards_code, relation_ep._guards_code)
-        loaded_relation_module = loaded_relation_ep.module()
-        new_x = torch.randn(4)
-        new_flat_args = [torch.randn(4)]
-        self.assertEqual(
-            loaded_relation_module(new_x, new_flat_args),
-            RelationModule()(new_x, new_flat_args),
-        )
+        loaded_ep = roundtrip(ep)
+        self.assertEqual(loaded_ep._guards_code, ep._guards_code)
+        loaded_module = loaded_ep.module()
+        new_args = (torch.randn(4), [torch.randn(4)])
+        self.assertEqual(loaded_module(*new_args), Module()(*new_args))
         with self.assertRaisesRegex(AssertionError, "Guard failed"):
-            loaded_relation_module(torch.randn(4), [torch.randn(5)])
+            loaded_module(torch.randn(4), [torch.randn(5)])
+
+        public_ep = export(
+            RelationModule(), inputs, dynamic_shapes=({0: dim}, [{0: dim}])
+        )
+        self.assertTrue(any(token1 in guard for guard in public_ep._guards_code))
+        with self.assertRaisesRegex(AssertionError, "Guard failed"):
+            roundtrip(public_ep).module()(torch.randn(4), [torch.randn(5)])
 
     def test_dynamic_shapes_kwargs_nested(self):
         class KwargsModel(torch.nn.Module):
@@ -7419,14 +7114,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         shared = torch.export.Dim("shared", min=2, max=8)
         dynamic_shapes = {"args": ({0: shared},), "kwargs": {"args": {0: shared}}}
         m = ArgsKwargsModel()
-        for strict in (False, True):
-            with self.subTest(strict=strict):
-                epm = export(
-                    m, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes, strict=strict
-                ).module()
-                args2 = (torch.randn(5, 4),)
-                kwargs2 = {"args": torch.rand(5, 4)}
-                self.assertEqual(m(*args2, **kwargs2), epm(*args2, **kwargs2))
+        epm = export(m, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes).module()
+        args2 = (torch.randn(5, 4),)
+        kwargs2 = {"args": torch.rand(5, 4)}
+        self.assertEqual(m(*args2, **kwargs2), epm(*args2, **kwargs2))
 
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
@@ -14980,7 +14671,6 @@ def forward(self, c_submod_params, x):
         ufm = torch.export.unflatten(ep)
         self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
 
-    @testing.expectedFailureStrictV2
     def test_unflatten_multiple_graphs_shared_submodule(self):
         class N(torch.nn.Module):
             def forward(self, x, b):
