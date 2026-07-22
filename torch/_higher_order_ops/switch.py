@@ -377,11 +377,13 @@ def _merge_output(xs: tuple[torch.Tensor | int | None, ...], mode: FakeTensorMod
         _merge_output as cond_merge_output,
     )
 
+    # Shortcut if a branch produces None outputs; then all branches need to produce None
     if any(x is None for x in xs):
         if not all(x is None for x in xs):
             raise AssertionError(f"expected all leaves to be None, got {xs}")
         return None
 
+    # In case all branches return an int, use an unbacked symbol as the merge result
     if all(type(x) is int for x in xs):
         return _merge_ints_to_symint(list(xs), mode)  # type: ignore[arg-type]
 
