@@ -1335,9 +1335,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def expm1(x):
-        # decompose for a better performance
-        vec_one = f"decltype({x})(1)"
-        return f"{x}.exp() - {vec_one}"
+        return f"{x}.expm1()"
 
     @staticmethod
     def erf(x):
