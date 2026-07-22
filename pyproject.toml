@@ -92,6 +92,57 @@ provider = { path = "tools/metadata", module = "version" }
 # strings) to inject CUDA/ROCm/XPU pip package dependencies into the wheel.
 provider = { path = "tools/metadata", module = "dependencies" }
 
+[tool.scikit-build.sdist]
+# Goal: ship exactly the git-tracked sources, minus repo/CI plumbing. The
+# sdist file walk applies gitignore semantics, and several vendored trees
+# commit files their own .gitignore matches (XNNPACK gen/ microkernels,
+# oneDNN *.cpp via ideep, protobuf *.pb.cc, clog under deps/); PyTorch's own
+# .gitignore (gen, *.pb.h) also hits tracked third-party files. The blanket
+# includes below restore all of them.
+#
+# Mechanics governing both lists: an include match beats every exclude
+# source (this exclude list, gitignore, built-ins). A !-negation inside
+# include is not an exclusion -- it only withdraws include protection, and
+# the file still ships unless an exclude source then catches it (built-ins
+# catch .git and bytecode; .gitignore catches nccl, which is not a submodule
+# but cloned into the tree at build time; the exclude list catches .github).
+# That is why **/.github/** appears twice: the negation unprotects it under
+# third_party/**, the exclude entry actually drops it -- there and at the
+# top level. The exclude list is likewise the only mechanism dropping
+# plumbing (.ci, .claude, .spin) that no include pattern covers.
+#
+# The flatbuffers/ittapi entries drop unneeded language bindings, which
+# also contain symlinks (#157814) that sdist.resolve-symlinks="all" would
+# otherwise dereference into duplicated content.
+include = [
+    "third_party/**",
+    "aten/src/ATen/native/quantized/cpu/qnnpack/deps/**",
+    "!**/.git",
+    "!**/__pycache__/**",
+    "!**/*.pyc",
+    "!third_party/nccl/**",
+    # third_party/build/ is an in-tree CMake build dir (gitignored); un-include
+    # it so a dirty checkout does not leak build output into the sdist. Anchored
+    # like the .gitignore entry, so it does not touch tracked build/ dirs deeper
+    # in vendored trees (e.g. cutlass docs, ideep).
+    "!third_party/build/**",
+    "!**/.github/**",
+    "!third_party/flatbuffers/java/**",
+    "!third_party/flatbuffers/kotlin/**",
+    "!third_party/flatbuffers/docs/source/CONTRIBUTING.md",
+    "!third_party/ittapi/rust/**",
+]
+exclude = [
+    "**/.github/**",
+    ".ci/**",
+    ".claude/**",
+    ".spin/**",
+    "third_party/flatbuffers/java/**",
+    "third_party/flatbuffers/kotlin/**",
+    "third_party/flatbuffers/docs/source/CONTRIBUTING.md",
+    "third_party/ittapi/rust/**",
+]
+
 [tool.scikit-build.install]
 # scikit-build-core auto-strips binaries in Release builds. PyTorch needs to
 # keep symbols (e.g. for torch.utils.cpp_extension, ABI checks in CI).
