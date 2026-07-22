@@ -1472,6 +1472,59 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
 
   set_in_tree_building(sorted_events, false);
 }
+} // namespace
+
+// Clamps a Python event whose recorded end overruns its nearest Python
+// ancestor's end (an orphan whose return was never delivered, e.g. a dropped
+// C_RETURN on a GIL-releasing C-call) back down to the ancestor's end.
+// sorted_events must be start-time ascending so clamps cascade to children.
+void clampOverrunningPythonEvents(
+    std::vector<std::shared_ptr<Result>>& sorted_events) {
+  auto python_tid = [](const std::shared_ptr<Result>& r) {
+    size_t tid = std::numeric_limits<size_t>::max();
+    r->visit_if_base<PyExtraFieldsBase>(
+        [&](const auto& i) { tid = i.python_tid_; });
+    return tid;
+  };
+  for (auto& event : sorted_events) {
+    const auto tag = event->tag();
+    if (tag != EventType::PyCall && tag != EventType::PyCCall) {
+      continue;
+    }
+    std::shared_ptr<Result> ancestor = event->parent_.lock();
+    while (ancestor) {
+      const auto ancestor_tag = ancestor->tag();
+      if (ancestor_tag == EventType::PyCall ||
+          ancestor_tag == EventType::PyCCall) {
+        break;
+      }
+      ancestor = ancestor->parent_.lock();
+    }
+    if (!ancestor) {
+      continue;
+    }
+    // build_tree links by start_tid_, which is unresolved for threads already
+    // running at profiler start, so only clamp within one Python thread.
+    if (python_tid(event) != python_tid(ancestor)) {
+      continue;
+    }
+    // Only clamp genuinely nested events (event starts within the ancestor).
+    const auto ancestor_end_ns = ancestor->endTimeNS();
+    if (event->endTimeNS() > ancestor_end_ns &&
+        ancestor_end_ns >= event->start_time_ns_) {
+      event->visit(c10::overloaded(
+          [ancestor_end_ns](ExtraFields<EventType::PyCall>& i) {
+            i.end_time_ns_ = ancestor_end_ns;
+          },
+          [ancestor_end_ns](ExtraFields<EventType::PyCCall>& i) {
+            i.end_time_ns_ = ancestor_end_ns;
+          },
+          [](auto&) {}));
+    }
+  }
+}
+
+namespace {
 
 /**
  * Adjust r's duration to be the max of its current duration and the sum of all
@@ -1682,6 +1735,7 @@ RecordQueue::getRecords(
     }
   }
 
+  bool have_python_events = false;
   if (python_tracer_) {
     std::vector<std::shared_ptr<torch::profiler::impl::Result>> ev;
     try {
@@ -1723,18 +1777,28 @@ RecordQueue::getRecords(
       }
       out.push_back(i);
     }
+    have_python_events = !ev.empty();
     python_tracer_.reset();
   }
 
-  if (config_.experimental_config.adjust_timestamps) {
+  // Clamp orphaned Python events (and optionally adjust timestamps) before
+  // emitting Kineto events so the fix reaches the recorded durations. Gated to
+  // skip the extra sort + build_tree when there is nothing to fix. The clamped
+  // ends survive the reset, which lets the final build_tree rebuild cleanly.
+  if (have_python_events || config_.experimental_config.adjust_timestamps) {
     std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
       return a->start_time_ns_ < b->start_time_ns_;
     });
     build_tree(out);
-    adjust_timestamps(out);
+    if (have_python_events) {
+      clampOverrunningPythonEvents(out);
+    }
+    if (config_.experimental_config.adjust_timestamps) {
+      adjust_timestamps(out);
+    }
     for (auto& r : out) {
       r->parent_.reset();
-      // Reset these so that second build_tree can happen
+      // Reset these so that the final build_tree can happen
       r->finished_ = false;
       r->children_.clear();
     }

@@ -37,6 +37,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
+#include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/standalone/privateuse1_profiler.h>
 
 #include <GenericTraceActivity.h>
@@ -261,6 +262,149 @@ TEST(ProfilerCollectionTest, DuplicateFlowIdHandledGracefully) {
   }
   EXPECT_TRUE(saw_per_id_warning);
   EXPECT_TRUE(saw_summary_warning);
+}
+
+namespace {
+using torch::profiler::impl::EventType;
+using torch::profiler::impl::ExtraFields;
+using torch::profiler::impl::PyFrameState;
+using torch::profiler::impl::Result;
+
+std::shared_ptr<Result> makePyCall(int64_t start_ns, int64_t end_ns, uint64_t tid) {
+  PyFrameState frame{0, at::StringView("f.py"), at::StringView("fn")};
+  PyFrameState caller{0, at::StringView("caller.py"), at::StringView("caller")};
+  ExtraFields<EventType::PyCall>::args_t args{frame, std::nullopt, std::nullopt};
+  return Result::create(
+      start_ns,
+      tid,
+      torch::profiler::impl::kineto::DeviceAndResource(),
+      ExtraFields<EventType::PyCall>(end_ns, tid, caller, std::move(args)));
+}
+
+std::shared_ptr<Result> makePyCCall(int64_t start_ns, int64_t end_ns, uint64_t tid) {
+  PyFrameState caller{0, at::StringView("caller.py"), at::StringView("caller")};
+  return Result::create(
+      start_ns,
+      tid,
+      torch::profiler::impl::kineto::DeviceAndResource(),
+      ExtraFields<EventType::PyCCall>(
+          end_ns, tid, caller, at::StringView("<built-in method foo>")));
+}
+
+// A cpu_op (RecordFunction) frame, used as a non-Python frame nested between two
+// Python frames (mirrors the autograd engine's evaluate_function frame).
+std::shared_ptr<Result> makeTorchOp(int64_t start_ns, int64_t end_ns, uint64_t tid) {
+  torch::profiler::impl::TorchOpBasicFields basic;
+  basic.name_ = "autograd::engine::evaluate_function";
+  return Result::create(
+      start_ns,
+      tid,
+      torch::profiler::impl::kineto::DeviceAndResource(),
+      ExtraFields<EventType::TorchOp>(
+          std::move(basic),
+          /*correlation_id=*/0,
+          /*end_time_ns=*/end_ns,
+          /*inputs=*/{},
+          /*concrete_inputs=*/{},
+          /*jit_stack=*/{},
+          /*jit_modules=*/{},
+          /*extra_args=*/{},
+          /*extra_meta=*/{},
+          /*kwinputs=*/{},
+          /*device_fallback=*/torch::profiler::impl::FallbackPair{},
+          /*allow_tf32_cublas=*/false,
+          /*perf_event_counters=*/nullptr));
+}
+
+} // namespace
+
+// These tests exercise clampOverrunningPythonEvents directly on hand-built trees
+// (parent_ links wired manually), so they neither depend on nor require exposing
+// the internal build_tree pass.
+
+// A Python C-call whose return event was dropped has its end clamped past its
+// caller. The clamp must bring it back to the caller's end (a callee cannot
+// outlive its caller).
+TEST(ProfilerTreeClampTest, OrphanChildClampedToParentEnd) {
+  const uint64_t tid = 1;
+  auto parent = makePyCall(/*start=*/100, /*end=*/200, tid);
+  auto child = makePyCCall(/*start=*/150, /*end=*/10000, tid);
+  child->parent_ = parent;
+  std::vector<std::shared_ptr<Result>> events{parent, child};
+
+  torch::profiler::impl::clampOverrunningPythonEvents(events);
+
+  EXPECT_EQ(child->endTimeNS(), 200);
+  EXPECT_EQ(parent->endTimeNS(), 200);
+}
+
+// Frames genuinely on the stack when profiling stops are all clamped to the
+// SAME profiler-end, so child end == parent end. The clamp must leave these
+// untouched (they are not orphans).
+TEST(ProfilerTreeClampTest, OnStackAtStopNotClamped) {
+  const uint64_t tid = 1;
+  auto parent = makePyCall(/*start=*/100, /*end=*/10000, tid);
+  auto child = makePyCCall(/*start=*/150, /*end=*/10000, tid);
+  child->parent_ = parent;
+  std::vector<std::shared_ptr<Result>> events{parent, child};
+
+  torch::profiler::impl::clampOverrunningPythonEvents(events);
+
+  EXPECT_EQ(child->endTimeNS(), 10000);
+  EXPECT_EQ(parent->endTimeNS(), 10000);
+}
+
+// The orphan's nearest Python ancestor is separated from it by a non-Python
+// cpu_op frame (as with autograd's evaluate_function between run_backward and
+// apply). The clamp must walk past the cpu_op to the Python ancestor.
+TEST(ProfilerTreeClampTest, OrphanClampedThroughNonPythonParent) {
+  const uint64_t tid = 1;
+  auto py_ancestor = makePyCCall(/*start=*/100, /*end=*/200, tid);
+  auto cpu_op = makeTorchOp(/*start=*/110, /*end=*/190, tid);
+  auto orphan = makePyCall(/*start=*/120, /*end=*/10000, tid);
+  orphan->parent_ = cpu_op;
+  cpu_op->parent_ = py_ancestor;
+  std::vector<std::shared_ptr<Result>> events{py_ancestor, cpu_op, orphan};
+
+  torch::profiler::impl::clampOverrunningPythonEvents(events);
+
+  // orphan's nearest Python ancestor is the PyCCall (end 200), reached by
+  // walking past the cpu_op.
+  EXPECT_EQ(orphan->endTimeNS(), 200);
+  EXPECT_EQ(py_ancestor->endTimeNS(), 200);
+}
+
+// A short event whose Python-ancestor link is stale -- it starts AFTER that
+// ancestor already returned (as seen with a mis-attributed `apply` on an
+// autograd worker) -- is not a duration bug. The `ancestor_end >= event_start`
+// guard must leave it untouched; clamping would wrongly force end < start. The
+// parent link is set directly to model the mis-attribution regardless of how it
+// arose during tree building.
+TEST(ProfilerTreeClampTest, StaleAncestorAttributionNotClamped) {
+  const uint64_t tid = 1;
+  auto ancestor = makePyCCall(/*start=*/100, /*end=*/200, tid);
+  auto child = makePyCall(/*start=*/500, /*end=*/600, tid);
+  child->parent_ = ancestor;
+  std::vector<std::shared_ptr<Result>> events{ancestor, child};
+
+  torch::profiler::impl::clampOverrunningPythonEvents(events);
+
+  EXPECT_EQ(child->endTimeNS(), 600);
+}
+
+// A child whose nearest Python ancestor is on a DIFFERENT Python thread is not a
+// real caller/callee (build_tree can pair unrelated threads when start_tid_ is
+// unresolved). The python_tid guard must leave it untouched even though it is
+// nested and overruns.
+TEST(ProfilerTreeClampTest, DifferentPythonThreadNotClamped) {
+  auto ancestor = makePyCCall(/*start=*/100, /*end=*/5000, /*tid=*/1);
+  auto child = makePyCall(/*start=*/500, /*end=*/10000, /*tid=*/2);
+  child->parent_ = ancestor;
+  std::vector<std::shared_ptr<Result>> events{ancestor, child};
+
+  torch::profiler::impl::clampOverrunningPythonEvents(events);
+
+  EXPECT_EQ(child->endTimeNS(), 10000);
 }
 
 #endif // USE_KINETO

@@ -467,6 +467,12 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   }
 };
 
+// Clamps Python events whose end overruns their nearest Python ancestor (an
+// orphan whose return was never delivered) down to the ancestor's end. Expects a
+// built tree, start-time ascending. TORCH_API only so it can be unit-tested.
+TORCH_API void clampOverrunningPythonEvents(
+    std::vector<std::shared_ptr<Result>>& sorted_events);
+
 struct KinetoObserverContext : public at::ObserverContext {
   struct Event {
     TorchOpBasicFields basic_fields_;
