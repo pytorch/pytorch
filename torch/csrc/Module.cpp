@@ -2604,7 +2604,7 @@ PyObject* initModule() {
   ASSERT_TRUE(FastCudaLauncher_init(module));
 #endif
 #ifdef USE_ROCM
-  ASSERT_TRUE(FlyDSLCWrapper_init(module));
+  ASSERT_TRUE(FlyDSLMMFp16Bf16CWrapper_init(module));
 #endif
 #if defined(USE_XPU) && !defined(_WIN32)
   ASSERT_TRUE(StaticXpuLauncher_init(module));

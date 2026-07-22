@@ -113,11 +113,14 @@ def make_flydsl_inductor_launcher(
         if native_abi_matches:
             from torch import _C
 
-            native_wrapper_type = getattr(_C, "_FlyDSLCWrapper", None)
+            native_wrapper_type = getattr(_C, "_FlyDSLMMFp16Bf16CWrapper", None)
             if native_wrapper_type is not None:
                 native_wrapper = native_wrapper_type(func_ptr, m, n, k, executor)
                 if debug_launcher:
-                    print("[flydsl] launcher=native-c-wrapper", flush=True)
+                    print(
+                        "[flydsl] launcher=native-mm-fp16-bf16-c-wrapper",
+                        flush=True,
+                    )
                 return native_wrapper
 
         # The generated host stub does not call Python. Keeping the GIL avoids

@@ -63,7 +63,9 @@ class TestFlyDSLTemplate(TestCase):
             _func_exe=callback,
         )
         executor = SimpleNamespace(_call_state=state)
-        with mock.patch.object(torch._C, "_FlyDSLCWrapper", None, create=True):
+        with mock.patch.object(
+            torch._C, "_FlyDSLMMFp16Bf16CWrapper", None, create=True
+        ):
             launcher = make_flydsl_inductor_launcher(
                 executor,
                 *tensors,
@@ -112,7 +114,7 @@ class TestFlyDSLTemplate(TestCase):
         native_launcher = object()
         with mock.patch.object(
             torch._C,
-            "_FlyDSLCWrapper",
+            "_FlyDSLMMFp16Bf16CWrapper",
             return_value=native_launcher,
             create=True,
         ) as c_wrapper:
@@ -130,8 +132,8 @@ class TestFlyDSLTemplate(TestCase):
         c_wrapper.assert_called_once_with(func_ptr, 8, 4096, 4096, executor)
 
     @unittest.skipUnless(
-        hasattr(torch._C, "_FlyDSLCWrapper"),
-        "requires _FlyDSLCWrapper",
+        hasattr(torch._C, "_FlyDSLMMFp16Bf16CWrapper"),
+        "requires _FlyDSLMMFp16Bf16CWrapper",
     )
     def test_native_c_wrapper_packs_flydsl_abi(self):
         observed = []
@@ -155,7 +157,9 @@ class TestFlyDSLTemplate(TestCase):
         tensors = [torch.empty(1) for _ in range(3)]
         stream = 0x12345678
         func_ptr = ctypes.cast(callback, ctypes.c_void_p).value
-        launcher = torch._C._FlyDSLCWrapper(func_ptr, 8, 4096, 4096, callback)
+        launcher = torch._C._FlyDSLMMFp16Bf16CWrapper(
+            func_ptr, 8, 4096, 4096, callback
+        )
         launcher(*tensors, stream)
 
         self.assertEqual(
