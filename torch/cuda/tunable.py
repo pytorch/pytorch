@@ -616,36 +616,6 @@ def _parse_cuda_scaled_gemm_fields(tokens: list[str]) -> dict[str, str]:
     return fields
 
 
-def _parse_rocm_scaled_gemm_options(
-    tokens: list[str],
-    dtype_dict: dict[str, torch.dtype],
-    dtypeA: torch.dtype | None,
-    dtypeB: torch.dtype | None,
-    dtypeC: torch.dtype | None,
-) -> _ScaledGemmOptions:
-    if tokens[8] != "rw":
-        raise AssertionError(f"expected 'rw' at index 8, got {tokens[8]!r}")
-
-    if tokens[10] != "bias":
-        raise AssertionError(f"expected 'bias' at index 10, got {tokens[10]!r}")
-
-    if dtypeA is None or not isinstance(dtypeA, torch.dtype):
-        raise TypeError(f"dtype must be a torch.dtype, but got {dtypeA}")
-    if dtypeB is None or not isinstance(dtypeB, torch.dtype):
-        raise TypeError(f"dtype must be a torch.dtype, but got {dtypeB}")
-    if dtypeC is None or not isinstance(dtypeC, torch.dtype):
-        raise TypeError(f"dtype must be a torch.dtype, but got {dtypeC}")
-
-    bias_dtype = (
-        None
-        if tokens[11] == "None"
-        else _get_dtype_from_string(tokens[11], dtype_dict, "bias_dtype")
-    )
-    return _ScaledGemmOptions(
-        dtypeA, dtypeB, dtypeC, tokens[9] == "1", bias_dtype, False
-    )
-
-
 def _parse_cuda_scaled_gemm_options(
     tokens: list[str], dtype_dict: dict[str, torch.dtype]
 ) -> _ScaledGemmOptions:
@@ -682,18 +652,35 @@ def _parse_cuda_scaled_gemm_options(
     )
 
 
-def _parse_scaled_gemm_options(
+def _parse_rocm_scaled_gemm_options(
     tokens: list[str],
     dtype_dict: dict[str, torch.dtype],
     dtypeA: torch.dtype | None,
     dtypeB: torch.dtype | None,
     dtypeC: torch.dtype | None,
 ) -> _ScaledGemmOptions:
-    if torch.version.hip:
-        return _parse_rocm_scaled_gemm_options(
-            tokens, dtype_dict, dtypeA, dtypeB, dtypeC
-        )
-    return _parse_cuda_scaled_gemm_options(tokens, dtype_dict)
+    if tokens[8] != "rw":
+        raise AssertionError(f"expected 'rw' at index 8, got {tokens[8]!r}")
+
+    if tokens[10] != "bias":
+        raise AssertionError(f"expected 'bias' at index 10, got {tokens[10]!r}")
+
+    # Make linter happy
+    if dtypeA is None or not isinstance(dtypeA, torch.dtype):
+        raise TypeError(f"dtype must be a torch.dtype, but got {dtypeA}")
+    if dtypeB is None or not isinstance(dtypeB, torch.dtype):
+        raise TypeError(f"dtype must be a torch.dtype, but got {dtypeB}")
+    if dtypeC is None or not isinstance(dtypeC, torch.dtype):
+        raise TypeError(f"dtype must be a torch.dtype, but got {dtypeC}")
+
+    bias_dtype = (
+        None
+        if tokens[11] == "None"
+        else _get_dtype_from_string(tokens[11], dtype_dict, "bias_dtype")
+    )
+    return _ScaledGemmOptions(
+        dtypeA, dtypeB, dtypeC, tokens[9] == "1", bias_dtype, False
+    )
 
 
 def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
@@ -854,9 +841,14 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
                 f"transA must be False for ScaledGemmTunableOp, got {transA}"
             )
 
-        scaled_gemm_options = _parse_scaled_gemm_options(
-            untuned_gemm_temp, dtype_dict, dtypeA, dtypeB, dtypeC
-        )
+        if torch.version.hip:
+            scaled_gemm_options = _parse_rocm_scaled_gemm_options(
+                untuned_gemm_temp, dtype_dict, dtypeA, dtypeB, dtypeC
+            )
+        else:
+            scaled_gemm_options = _parse_cuda_scaled_gemm_options(
+                untuned_gemm_temp, dtype_dict
+            )
 
         matA, matB = _create_matrices(
             m,
