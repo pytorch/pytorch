@@ -2714,13 +2714,25 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                     if data_partition_factor == 2 and block_m != 256:
                         continue
                     for separate_epilogue_store in (False, True):
-                        yield {
-                            **base_kwargs,
-                            "USE_META_WS": True,
-                            "EPILOGUE_SUBTILE": epilogue_subtile,
-                            "DATA_PARTITION_FACTOR": data_partition_factor,
-                            "SEPARATE_EPILOGUE_STORE": separate_epilogue_store,
-                        }
+                        for two_ctas in (False, True):
+                            # 2-CTA needs a 128-row MMA tile per partition and
+                            # BLOCK_N >= 128.
+                            if two_ctas and (
+                                block_m // data_partition_factor != 128
+                                or block_n < 128
+                            ):
+                                continue
+                            config_kwargs = {
+                                **base_kwargs,
+                                "USE_META_WS": True,
+                                "EPILOGUE_SUBTILE": epilogue_subtile,
+                                "DATA_PARTITION_FACTOR": data_partition_factor,
+                                "SEPARATE_EPILOGUE_STORE": separate_epilogue_store,
+                                "TWO_CTAS": two_ctas,
+                            }
+                            if two_ctas:
+                                config_kwargs["ctas_per_cga"] = (2, 1, 1)
+                            yield config_kwargs
 
     @staticmethod
     def _generate_exhaustive_configs() -> list[BaseConfig]:
