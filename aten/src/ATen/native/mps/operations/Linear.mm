@@ -120,6 +120,20 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     return output;
   }
 
+  // An empty reduction dimension (in_features == 0) makes the matmul term
+  // zero, so the result is just the broadcast bias. Neither the NDArray fast
+  // path nor MPSGraph can take a zero-length dimension (MPSNDArray asserts
+  // and aborts the process).
+  if (input.size(-1) == 0) {
+    if (is_bias_defined) {
+      output.copy_(bias.expand(output.sizes()));
+    } else {
+      output.zero_();
+    }
+    // Squeeze last dim of 1D linear
+    return weight_arg.dim() != 1 ? output : output.squeeze(-1);
+  }
+
   const bool is_complex = input.is_complex() || weight.is_complex() || (is_bias_defined && bias.is_complex());
 
   // No-graph execution causes nonsense if these are non-contiguous.
@@ -131,9 +145,14 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     static const bool decompose_bias = is_apple_family_or_newer(AppleGPUFamily::APPLE_7_PLUS) &&
         !is_apple_family_or_newer(AppleGPUFamily::APPLE_8_PLUS) && is_macos_at_least(MacOSVersion::MACOS_26_0) &&
         !is_macos_at_least(MacOSVersion::MACOS_27_0);
-    const bool add_bias_after = is_bias_defined && decompose_bias;
+    // linear's leading dims are a fake batch (weight is shared), so a >2D input is one 2D GEMM.
+    // Passing it as a batched NDArray instead triggers a 2^16 batch-index wraparound (#189495) and
+    // a small-batch GEMV perf cliff (#189847); flatten to 2D (a free view here) to avoid both.
+    // A multi-dim bias cannot be flattened, so run the bias-free kernel there and add the bias afterwards.
+    const bool needs_flatten = input.dim() > 2;
+    const bool add_bias_after = is_bias_defined && (decompose_bias || (needs_flatten && bias.dim() > 1));
     const Tensor kernel_bias = add_bias_after ? Tensor() : bias;
-    if (needs_nd_workaround(input) && (!kernel_bias.defined() || kernel_bias.dim() <= 1)) {
+    if (needs_flatten) {
       auto input2d = input.flatten(0, -2);
       auto output2d = output.flatten(0, -2);
       _mps_linear_nograph(input2d, weight, kernel_bias, output2d);
@@ -244,8 +263,12 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
 
   Tensor output = at::empty(input_size, grad_output.options());
   TORCH_CHECK(output.is_mps());
-  if (grad_output.numel() == 0) {
-    return output;
+  // output.numel() == 0 covers in_features == 0, where grad_output is
+  // non-empty but the grad-input is empty and the graph cannot take a
+  // zero-length dimension. When grad_output is empty but grad-input is not
+  // (out_features == 0), grad-input is all zeros.
+  if (grad_output.numel() == 0 || output.numel() == 0) {
+    return output.zero_();
   }
 
   MPSStream* stream = getCurrentMPSStream();
@@ -305,6 +328,20 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
     MPSGraphTensor* biasTensor_ = nil;
   };
 
+  // in_features == 0 (empty input) or an empty grad_output: the weight
+  // gradient is empty or zero and the reshape below would be ambiguous for a
+  // 0-element input; the bias gradient is still the sum of grad_output over
+  // the leading dims.
+  if (input.numel() == 0 || grad_output.numel() == 0) {
+    Tensor output = at::zeros({grad_output.size(-1), input.size(-1)}, grad_output.options());
+    Tensor bias = at::zeros({grad_output.size(-1)}, grad_output.options());
+    if (bias_defined && grad_output.numel() != 0) {
+      auto grad_output_2d = grad_output.dim() != 2 ? grad_output.reshape({-1, grad_output.size(-1)}) : grad_output;
+      bias.copy_(grad_output_2d.sum(0));
+    }
+    return std::tuple<Tensor, Tensor>{output, bias};
+  }
+
   auto grad_output_reshaped =
       grad_output.dim() != 2 ? grad_output.reshape({-1, grad_output.size(grad_output.dim() - 1)}) : grad_output;
   auto input_reshaped = input.dim() != 2 ? input.reshape({-1, input.size(input.dim() - 1)}) : input;
@@ -317,11 +354,6 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
   TORCH_CHECK(output.is_mps());
   TORCH_CHECK(bias.is_mps());
 
-  if (grad_output.numel() == 0) {
-    output.zero_();
-    bias.zero_();
-    return std::tuple<Tensor, Tensor>{output, bias};
-  }
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
