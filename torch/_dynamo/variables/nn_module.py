@@ -1417,9 +1417,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         if isinstance(hooks_dict, collections.OrderedDict)
                         else variables.ConstDictVariable
                     )
-                    return hooks_vt_cls(
-                        {}, user_cls=type(hooks_dict), source=hooks_source
-                    )
+                    return hooks_vt_cls({}, source=hooks_source)
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
