@@ -1228,7 +1228,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 out_dtype=torch.bfloat16,
             )
             grouped = result.float().view(m, -1, group)
-            return result, grouped.square().mean(-1)
+            return torch.relu(result), grouped.square().mean(-1)
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         expected = fn(a, b, scale_a, scale_b)

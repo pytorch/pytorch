@@ -432,6 +432,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
             for epilogue_node in (*existing_epilogue_nodes, node_to_fuse)
             for node in epilogue_node.get_nodes()
         ]
+        _, local_reduce_nodes = self._partition_local_reductions(
+            ir_node, all_scheduler_nodes
+        )
         local_reduce = self._grouped_reduce_config(ir_node, node_to_fuse)
         variants = (
             (ir_node.variant,)
@@ -452,16 +455,18 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
         for s_node in all_scheduler_nodes:
             node = s_node.node
-            node_local_reduce = self._grouped_reduce_config(ir_node, s_node)
             if not isinstance(node, ComputedBuffer):
                 log.debug("NVGEMM epilogue fusion: %s is not a ComputedBuffer", node)
                 return False
-            if not isinstance(node.data, Pointwise) and node_local_reduce is None:
+            if (
+                not isinstance(node.data, Pointwise)
+                and s_node not in local_reduce_nodes
+            ):
                 log.debug("NVGEMM epilogue fusion: %s is not a Pointwise op", node)
                 return False
 
             if (
-                node_local_reduce is None
+                s_node not in local_reduce_nodes
                 and not V.graph.sizevars.statically_known_list_equals(
                     node.get_size(), ir_node.get_size()
                 )
@@ -562,7 +567,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             evt_nodes = [
                 node
                 for node in all_epilogue_nodes
-                if self._grouped_reduce_config(ir_node, node) is None
+                if node not in local_reduce_nodes
             ]
             if evt_nodes:
                 trial_reads, trial_writes, _, _ = (
