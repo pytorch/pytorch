@@ -209,38 +209,6 @@ def _driver_requires_flow(name: str) -> bool:
     return name in _DRIVER_FLOW_NAMES
 
 
-_RUNTIME_DROPPED_CBIDS: frozenset[int] | None = None
-_DRIVER_KEPT_CBIDS: frozenset[int] | None = None
-
-
-def runtime_dropped_cbids() -> frozenset[int]:
-    """cbids of RUNTIME APIs the trace drops (names in the blocklist), so the decoder can
-    filter the noise (e.g. cudaGetDevice/GetLastError) out of the window before it is
-    built/merged. CUPTI's own per-cbid activity filter is NOT_COMPATIBLE under
-    user-defined records, so it cannot be done in CUPTI; this is the post-decode
-    equivalent, drop-set-identical to the merge's name blocklist."""
-    global _RUNTIME_DROPPED_CBIDS
-    if _RUNTIME_DROPPED_CBIDS is None:
-        names = _load_cbid_names(Runtime_api_trace_cbid)
-        _RUNTIME_DROPPED_CBIDS = frozenset(
-            cb for cb, n in names.items() if n in _RUNTIME_BLOCKLIST
-        )
-    return _RUNTIME_DROPPED_CBIDS
-
-
-def driver_kept_cbids() -> frozenset[int]:
-    """cbids of DRIVER APIs the trace keeps (names in the registered allowlist); the
-    decoder drops every other driver record (the driver kind is an allowlist, unlike the
-    runtime blocklist). Keep-set-identical to the merge's allowlist."""
-    global _DRIVER_KEPT_CBIDS
-    if _DRIVER_KEPT_CBIDS is None:
-        names = _load_cbid_names(Driver_api_trace_cbid)
-        _DRIVER_KEPT_CBIDS = frozenset(
-            cb for cb, n in names.items() if n in _DRIVER_REGISTERED
-        )
-    return _DRIVER_KEPT_CBIDS
-
-
 def _trace_window_entries(
     trace_window: dict[str, object],
     *,
@@ -315,6 +283,7 @@ def _trace_window_entries(
     trace_events: list[dict[str, object]] = []
     seen_devices: dict[int, int] = {}
     seen_streams: set[tuple[int, int]] = set()
+    lane_names: dict[tuple[int, int], str] = {}
     seen_cpu_processes: dict[int, int] = {}
     seen_cpu_threads: set[tuple[int, int]] = set()
     need_overhead_metadata = False
@@ -447,14 +416,31 @@ def _trace_window_entries(
         ann_l = c["annotation"].tolist()
         meta_col = c.get("metadata")
         meta_l = meta_col.tolist() if meta_col is not None else None
+        # Pluggable lane assignment: a graph lane resolver (if installed) supplies per-op
+        # (logical_lane, lane_name) columns; a graphed op whose logical lane differs from
+        # its CUDA stream is moved onto that lane below. CUPTI reports graph-replay ops on
+        # whatever streams the graph executor placed them on -- often hundreds of distinct
+        # streams -- which scatters one logical replay across a wall of stream lanes and makes
+        # for a very confusing profile (the ops don't overlap or disappear, there are just far
+        # too many lanes). The resolver collapses them onto a few meaningful logical lanes.
+        # Baking the move into this export pass (tid + args["stream"] moved, the op's CUDA
+        # stream kept as original_stream) means consumers need no read/reassign/rewrite round
+        # trip. Absent a resolver, ops render on their CUDA stream lane.
+        lane_col = c.get("logical_lane")
+        lane_name_col = c.get("lane_name")
+        lane_l = lane_col.tolist() if lane_col is not None else None
+        lane_name_l = lane_name_col.tolist() if lane_name_col is not None else None
+        display_tid_l = tid_l
         if (
             gid.any()
             or gnid.any()
-            or any(a is not None for a in ann_l)
+            or any(ann_l)  # any non-empty annotation (None / empty skip)
             or meta_l is not None
+            or lane_l is not None
         ):
             gid_l = gid.tolist()
             gnid_l = gnid.tolist()
+            display_tid_l = list(tid_l)
             for i, ev in enumerate(events):
                 a = ev["args"]
                 if gid_l[i]:
@@ -464,13 +450,23 @@ def _trace_window_entries(
                 _annotation_to_args(a, ann_l[i])
                 if meta_l is not None and meta_l[i] is not None:
                     _annotation_to_args(a, meta_l[i])
+                if gnid_l[i] and lane_l is not None and lane_l[i] != str_l[i]:
+                    lane_id = lane_l[i]
+                    lane = _export_tid(lane_id)
+                    ev["tid"] = lane
+                    a["stream"] = lane_id
+                    a["original_stream"] = str_l[i]
+                    display_tid_l[i] = lane
+                    seen_streams.add((dev_l[i], lane_id))
+                    if lane_name_l is not None and lane_name_l[i] is not None:
+                        lane_names[(dev_l[i], lane_id)] = lane_name_l[i]
         trace_events.extend(events)
         trace_events.extend(
             {
                 "ph": "f",
                 "id": corr_l[i],
                 "pid": dev_l[i],
-                "tid": tid_l[i],
+                "tid": display_tid_l[i],
                 "ts": ts_l[i],
                 "cat": _FLOW_CATEGORY,
                 "name": _FLOW_CATEGORY,
@@ -657,11 +653,10 @@ def _trace_window_entries(
 
     for did, rid in sorted(seen_streams):
         ts_us = 0.0
+        lane_name = lane_names.get((did, rid), f"stream {rid} ")
         metadata_events.extend(
             [
-                _metadata_event(
-                    "thread_name", ts_us, did, rid, "name", f"stream {rid} "
-                ),
+                _metadata_event("thread_name", ts_us, did, rid, "name", lane_name),
                 _metadata_event(
                     "thread_sort_index", ts_us, did, rid, "sort_index", rid
                 ),
@@ -731,7 +726,14 @@ def _gpu_user_annotation_events(
             continue
         corr_l = c["correlation_id"].tolist()
         dev_l = c["device_id"].tolist()
-        str_l = c["stream_id"].tolist()
+        # Follow graphed ops onto their reassigned logical lane so the spanning annotation
+        # lands on the same lane as its kernels (else it stays on the capture stream).
+        stream_arr = c["stream_id"]
+        lane_col = c.get("logical_lane")
+        if lane_col is not None:
+            reassign = (c["graph_node_id"] != 0) & (lane_col != stream_arr)
+            stream_arr = np.where(reassign, lane_col, stream_arr)
+        str_l = stream_arr.tolist()
         start_l = c["start_ns"].tolist()
         end_l = c["end_ns"].tolist()
         for i in range(len(corr_l)):
