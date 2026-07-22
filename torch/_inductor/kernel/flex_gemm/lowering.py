@@ -189,7 +189,7 @@ def flex_gemm_config_keys_for_local_reduce(
     n: int,
     local_reduce_geometries: tuple[Any, ...],
     tuned: bool,
-    explicit_config_key: tuple[tuple[str, Any], ...] | None = None,
+    explicit_config: dict[str, Any] | None = None,
 ) -> tuple[tuple[Any, ...], ...]:
     """Select QuACK config keys after applying grouped-layout config constraints.
 
@@ -197,29 +197,25 @@ def flex_gemm_config_keys_for_local_reduce(
     a runtime local-reduce plan or a plan-less grouped TensorSSA fragment
     reshape in the generated epilogue: swap_ab reorients the accumulator
     fragment and non-divisible tiles split groups across fragments, so either
-    would silently regroup the wrong elements.
+    would silently regroup the wrong elements. Explicit config fields constrain
+    the candidate set; untuned selection fills omitted fields from the normal
+    default, while tuned selection benchmarks the matches.
     """
     from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
         default_gemm_config_key,
+        explicit_gemm_configs_for_device,
         gemm_config_from_key,
         gemm_config_key,
     )
 
-    if explicit_config_key is not None:
-        config = gemm_config_from_key(explicit_config_key)
-        for geometry in local_reduce_geometries:
-            if not validate_flex_gemm_local_reduce_config(
-                config, geometry.group, geometry.axis
-            ):
-                raise NotImplementedError(
-                    "FlexGEMM explicit QUACK config is incompatible with local "
-                    f"reduction group={geometry.group}, axis={geometry.axis}"
-                )
-        return (explicit_config_key,)
-
+    candidate_configs = (
+        candidate_gemm_configs_for_device(device)
+        if explicit_config is None
+        else explicit_gemm_configs_for_device(explicit_config, device)
+    )
     if not tuned:
-        default_key = default_gemm_config_key(device, m, n)
+        default_key = default_gemm_config_key(device, m, n, candidate_configs)
         if all(
             validate_flex_gemm_local_reduce_config(
                 gemm_config_from_key(default_key), geometry.group, geometry.axis
@@ -228,7 +224,6 @@ def flex_gemm_config_keys_for_local_reduce(
         ):
             return (default_key,)
 
-    candidate_configs = candidate_gemm_configs_for_device(device)
     configs = candidate_configs
     for geometry in local_reduce_geometries:
         configs = tuple(
@@ -239,6 +234,11 @@ def flex_gemm_config_keys_for_local_reduce(
             )
         )
         if not configs:
+            if explicit_config is not None:
+                raise NotImplementedError(
+                    "FlexGEMM explicit QUACK config constraints are incompatible "
+                    f"with local reduction group={geometry.group}, axis={geometry.axis}"
+                )
             raise NotImplementedError(
                 flex_gemm_local_reduce_config_error(
                     candidate_configs,
@@ -299,10 +299,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError("FlexGEMM fast_math kernel option must be bool")
     if "config" in kernel_options and not isinstance(explicit_config, dict):
         raise NotImplementedError("FlexGEMM config kernel option must be a dict")
-    if explicit_config is not None and tuned:
-        raise NotImplementedError(
-            "FlexGEMM config and tuned kernel options are mutually exclusive"
-        )
 
     from torch._inductor.kernel.flex_gemm.epilogue import (
         analyze_flex_gemm_epilogue,
@@ -418,20 +414,13 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         epilogue_arg_placeholders,
         fast_math=fast_math,
     )
-    explicit_config_key = None
-    if explicit_config is not None:
-        from torch._inductor.heuristics.template.flex_gemm import (
-            explicit_gemm_config_key,
-        )
-
-        explicit_config_key = explicit_gemm_config_key(explicit_config, layout.device)
     quack_config_keys = flex_gemm_config_keys_for_local_reduce(
         layout.device,
         gemm_args[mat1_index].get_size()[-2],
         gemm_args[mat2_index].get_size()[-1],
         epilogue_analysis.required_geometries,
         tuned,
-        explicit_config_key,
+        explicit_config,
     )
     epilogue_arg_indices = tuple(
         range(
