@@ -612,7 +612,11 @@ class Function(_SingleLevelFunction):
         return (ctx._autograd_function_id,)
 
 
-def _bind_default_args(func, args, kwargs):
+def _bind_default_args(
+    func: Callable[_P, Any],
+    args: _P.args,  # type: ignore[valid-type]
+    kwargs: _P.kwargs,  # type: ignore[valid-type]
+) -> tuple[_P.args, _P.kwargs]:  # type: ignore[valid-type]
     signature = inspect.signature(func)
     bound_args = signature.bind(*args, **({} if kwargs is None else kwargs))
     bound_args.apply_defaults()
