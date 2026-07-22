@@ -98,14 +98,10 @@ except ImportError:
         pass
 
 
-try:
-    from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import HardwareClassification
 
-    _HC_CHOICES = [e.name for e in HardwareClassification]
-except ImportError:
-    # Temporary fallback for CI jobs that run the PR's test/run_test.py against a
-    # previous nightly torch package that doesn't have HardwareClassification yet.
-    _HC_CHOICES = ["GENERIC", "ACCELERATOR", "CPU", "CUDA", "MPS", "XPU"]
+
+_HC_CHOICES = [e.name for e in HardwareClassification]
 
 
 # Make sure to remove REPO_ROOT after import is done
