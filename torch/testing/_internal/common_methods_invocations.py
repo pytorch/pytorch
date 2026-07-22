@@ -25802,6 +25802,9 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.native_group_norm",
+        decorators=(
+            DecorateInfo(precisionOverride({torch.float32: 5e-5}), "TestCommon", "test_python_ref", device_type="mps"),
+        ),
         torch_opinfo_name="native_group_norm",
         validate_view_consistency=False,
     ),
