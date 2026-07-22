@@ -4582,6 +4582,15 @@ class MutationTests(torch._inductor.test_case.TestCase):
         finally:
             tkw.unregister_kernel_access_op(custom_store)
 
+    def test_register_kernel_access_op_rejects_ignore_with_indexes(self):
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+
+        msg = "custom_tma.invalid: ignore_if cannot be combined with read/write indexes"
+        with self.assertRaisesRegex(AssertionError, msg):
+            tkw.register_kernel_access_op(
+                "custom_tma.invalid", write_indexes=[0], ignore_if=lambda op: True
+            )
+
     def test_kernel_access_op_can_read_and_write(self):
         from torch._higher_order_ops.triton_kernel_wrap import (
             analyze_kernel_access,

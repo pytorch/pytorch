@@ -973,6 +973,11 @@ def register_kernel_access_op(
         raise AssertionError(
             f"{name} is marked as a TMA store but has no write indexes"
         )
+    has_indexes = read_indexes is not None or write_indexes is not None
+    if ignore_if is not None and has_indexes:
+        raise AssertionError(
+            f"{name}: ignore_if cannot be combined with read/write indexes"
+        )
     _KERNEL_ACCESS_OPS[name] = _KernelAccessOpInfo(
         read_indexes=(
             None if read_indexes is None else _read_write_indexes(read_indexes)
