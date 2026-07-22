@@ -1084,8 +1084,7 @@ bool run_fake_python_callback(
   return true;
 }
 
-// The active FakeTensorMode and the CppFakeTensorMode Python object that op-impl
-// callbacks are invoked against.
+// get current C++/Python FakeTensorMode to pass to op impl callbacks
 struct ActiveFakeMode {
   std::shared_ptr<c10::FakeTensorMode> mode;
   py::object py_fake_mode;
@@ -1160,6 +1159,8 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
             op,
             stack,
             [&](py::object args, py::dict kwargs) {
+              // exclude python key because op impls directly call
+              // in_kernel_invocation w/ the meta kernel
               c10::impl::ExcludeDispatchKeyGuard guard(
                   c10::DispatchKeySet(c10::DispatchKey::Python) |
                   c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
@@ -1195,6 +1196,8 @@ bool ConcretePyInterpreterVTable::fake_try_fast_op_impls(
       op,
       stack,
       [&](py::object args, py::dict kwargs) {
+        // exclude python key because op impls directly call
+        // in_kernel_invocation w/ the meta kernel
         c10::impl::ExcludeDispatchKeyGuard guard(
             c10::DispatchKeySet(c10::DispatchKey::Python) |
             c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
