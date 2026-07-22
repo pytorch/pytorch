@@ -1428,11 +1428,11 @@ static int is_setup_context_defined(PyObject* cls) {
 }
 
 static PyObject* get_autograd_function_attr(const char* name) {
-  auto module = THPObjectPtr(PyImport_ImportModule("torch.autograd.function"));
-  if (!module) {
+  auto module_ = THPObjectPtr(PyImport_ImportModule("torch.autograd.function"));
+  if (!module_) {
     return nullptr;
   }
-  return PyObject_GetAttrString(module, name);
+  return PyObject_GetAttrString(module_, name);
 }
 
 static int is_function_subclass(PyObject* cls) {
