@@ -1503,6 +1503,53 @@ class TestTransformers(NNTestCase):
             ).eval()
             transformer(x, x)
 
+    @parametrize("num_layers", [0, -1, -8])
+    def test_transformerencoder_decoder_nonpositive_num_layers(self, device, num_layers):
+        # A non-positive num_layers used to build an empty ModuleList and only blow up
+        # later in forward() with "IndexError: index 0 is out of range".
+        d_model, nhead = 8, 2
+        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, device=device)
+        decoder_layer = nn.TransformerDecoderLayer(d_model, nhead, device=device)
+
+        with self.assertRaisesRegex(
+            ValueError, f"num_layers must be a positive integer, but got {num_layers}"
+        ):
+            nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        with self.assertRaisesRegex(
+            ValueError, f"num_layers must be a positive integer, but got {num_layers}"
+        ):
+            nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
+
+        # nn.Transformer builds both stacks internally, so it must reject them too.
+        with self.assertRaisesRegex(ValueError, "num_layers must be a positive integer"):
+            nn.Transformer(
+                d_model=d_model, nhead=nhead, num_encoder_layers=num_layers, device=device
+            )
+
+        with self.assertRaisesRegex(ValueError, "num_layers must be a positive integer"):
+            nn.Transformer(
+                d_model=d_model, nhead=nhead, num_decoder_layers=num_layers, device=device
+            )
+
+    def test_transformerencoder_decoder_single_layer(self, device):
+        # num_layers=1 is the smallest legal stack and must keep working end to end.
+        d_model, nhead, seq_len, batch_size = 8, 2, 3, 2
+        src = torch.randn(seq_len, batch_size, d_model, device=device)
+        tgt = torch.randn(seq_len, batch_size, d_model, device=device)
+
+        encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model, nhead, device=device), num_layers=1
+        ).eval()
+        self.assertEqual(len(encoder.layers), 1)
+        self.assertEqual(encoder(src).shape, src.shape)
+
+        decoder = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(d_model, nhead, device=device), num_layers=1
+        ).eval()
+        self.assertEqual(len(decoder.layers), 1)
+        self.assertEqual(decoder(tgt, encoder(src)).shape, tgt.shape)
+
     def test_train_with_is_causal(self, device):
         # training with is_causal
         S, L, E, H = 1, 2, 2, 1
