@@ -193,7 +193,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
     @staticmethod
     def _grouped_reduce_config(
         gemm_node: Buffer, scheduler_node: BaseSchedulerNode
-    ) -> tuple[str, int, int] | None:
+    ) -> tuple[str, int, int, str] | None:
         nodes = scheduler_node.get_nodes()
         if len(nodes) != 1:
             return None
@@ -205,18 +205,24 @@ class NVUniversalGemmScheduling(BaseScheduling):
             for origin in node.get_origins()
             if hasattr(origin, "target")
         )
+        reduction_targets = {
+            "aten.sum.dim_IntList": "sum",
+            "aten.mean.dim": "mean",
+            "aten.prod.dim_int": "prod",
+            "aten.amax.default": "max",
+            "aten.amin.default": "min",
+        }
+        matched_reductions = origin_targets & reduction_targets.keys()
         allowed_targets = OrderedSet(
-            (
-                "aten.reshape.default",
-                "aten.sum.dim_IntList",
-                "prims.convert_element_type.default",
-            )
-        )
+            ("aten.reshape.default", "prims.convert_element_type.default")
+        ) | OrderedSet(reduction_targets)
         if (
-            "aten.sum.dim_IntList" not in origin_targets
+            len(matched_reductions) != 1
             or not origin_targets.issubset(allowed_targets)
         ):
             return None
+        reduction_type = reduction_targets[next(iter(matched_reductions))]
+        output_name = node.get_name()
         if len(node.data.ranges) != 2 or len(gemm_node.get_size()) != 2:
             return None
         try:
@@ -232,7 +238,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if isinstance(node.data, Reduction):
             reduction = node.data
             if (
-                reduction.reduction_type != "sum"
+                reduction.reduction_type
+                != ("sum" if reduction_type == "mean" else reduction_type)
                 or len(reduction.reduction_ranges) != 1
             ):
                 return None
@@ -268,7 +275,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if range_vars is None:
             return None
         if not range_vars:
-            return node.get_name(), group, axis
+            return output_name, group, axis, reduction_type
         if isinstance(node.data, Reduction):
             if len(reads) != 1:
                 return None
@@ -288,7 +295,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             expected_offsets = OrderedSet(offset * n for offset in range(group))
             if OrderedSet(offsets) != expected_offsets:
                 return None
-        return node.get_name(), group, axis
+        return output_name, group, axis, reduction_type
 
     def _can_fuse_epilogue_impl(
         self,
@@ -567,7 +574,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         epilogue_reads: list[str] = []
         epilogue_writes: list[str] = []
         epilogue_var_renames: dict[str, Any] = {}
-        local_reduce: tuple[str, int, int, str] | None = None
+        local_reduce: tuple[str, int, int, str, str] | None = None
 
         if epilogue_nodes:
             scheduler = V.graph.scheduler

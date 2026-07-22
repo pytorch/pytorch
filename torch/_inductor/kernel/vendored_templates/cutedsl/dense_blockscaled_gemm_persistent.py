@@ -424,6 +424,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         local_reduce_tensor: cute.Tensor = None,
         local_reduce_group: cutlass.Constexpr = 0,
         local_reduce_axis: cutlass.Constexpr = 1,
+        local_reduce_type: cutlass.Constexpr = "sum",
     ):
         """Execute the GEMM operation in steps:
         - Setup static attributes before smem/grid/tma computation
@@ -468,6 +469,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
 
         self.local_reduce_group = local_reduce_group
         self.local_reduce_axis = local_reduce_axis
+        self.local_reduce_type = local_reduce_type
 
         a_tensor = cute.make_tensor(
             a_tensor.iterator, cute.select(a_tensor.layout, [1, 2, 0])
@@ -1579,11 +1581,28 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             grouped = acc_vec.to(self.acc_dtype).reshape(
                                 ((1, group, repeats), 1, 1)
                             )
+                            if cutlass.const_expr(
+                                self.local_reduce_type in ("sum", "mean")
+                            ):
+                                reduce_op = cute.ReductionOp.ADD
+                                init_val = 0.0
+                            elif cutlass.const_expr(self.local_reduce_type == "prod"):
+                                reduce_op = cute.ReductionOp.MUL
+                                init_val = 1.0
+                            elif cutlass.const_expr(self.local_reduce_type == "max"):
+                                reduce_op = cute.ReductionOp.MAX
+                                init_val = -cutlass.Float32.inf
+                            else:
+                                assert self.local_reduce_type == "min"
+                                reduce_op = cute.ReductionOp.MIN
+                                init_val = cutlass.Float32.inf
                             reduced = grouped.reduce(
-                                cute.ReductionOp.ADD,
-                                init_val=0.0,
+                                reduce_op,
+                                init_val=init_val,
                                 reduction_profile=((None, 1, None), 1, 1),
                             )
+                            if cutlass.const_expr(self.local_reduce_type == "mean"):
+                                reduced = reduced / group
                             reduced = reduced.reshape(((1, 1, repeats), 1, 1))
                             reduced = reduced.broadcast_to(grouped.shape)
                             tDrReduce = cute.make_rmem_tensor(
@@ -1641,13 +1660,36 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             ):
                                 rows = group // 2
                                 while rows > 0:
-                                    reduced_flt[i] += cute.arch.shuffle_sync_bfly(
+                                    other = cute.arch.shuffle_sync_bfly(
                                         reduced_flt[i],
                                         offset=cute.crd2idx(
                                             (rows, 0), lane_layout_mn
                                         ),
                                     )
+                                    if cutlass.const_expr(
+                                        self.local_reduce_type in ("sum", "mean")
+                                    ):
+                                        reduced_flt[i] += other
+                                    elif cutlass.const_expr(
+                                        self.local_reduce_type == "prod"
+                                    ):
+                                        reduced_flt[i] *= other
+                                    elif cutlass.const_expr(
+                                        self.local_reduce_type == "max"
+                                    ):
+                                        reduced_flt[i] = cute.arch.fmax(
+                                            reduced_flt[i], other
+                                        )
+                                    else:
+                                        assert self.local_reduce_type == "min"
+                                        reduced_flt[i] = cute.arch.fmin(
+                                            reduced_flt[i], other
+                                        )
                                     rows = rows // 2
+                                if cutlass.const_expr(
+                                    self.local_reduce_type == "mean"
+                                ):
+                                    reduced_flt[i] /= group
                             groups_per_cta = cutlass.const_expr(
                                 self.cta_tile_shape_mnk[0] // group
                             )
