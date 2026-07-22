@@ -1159,7 +1159,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
           c10::CppTypeToScalarType<scalar_t_c>::value,
           add_C);
       (*v).brg.generate();
-      return std::move(v);
+      return v;
     });
     if (get_current() != value) {
 #if defined(ONEDNN_UKERNEL_1)
@@ -1230,7 +1230,7 @@ struct Pack : public KernelCache <PackKey, pack_t> {
       if (could_pack(dt_in)) {
         (*p).generate();
       }
-      return std::move(p);
+      return p;
     });
     if (could_pack(dt_in)) {
       (*pack).execute(in, out);
