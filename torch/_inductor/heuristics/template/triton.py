@@ -2706,6 +2706,13 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             subtiles = [base_subtile]
             if base_subtile < 8 and block_n // 8 >= 32:
                 subtiles.append(8)
+            # 2-CTA needs the TMA epilogue store to participate in the cluster
+            # barrier protocol; without it the cluster deadlocks. Requiring
+            # enable_template_tma_store also means the output was already
+            # validated as TMA-storable during template selection.
+            two_ctas_choices = (
+                (False, True) if config.triton.enable_template_tma_store else (False,)
+            )
             for epilogue_subtile in subtiles:
                 if block_n // epilogue_subtile < 32:
                     continue
@@ -2714,7 +2721,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                     if data_partition_factor == 2 and block_m != 256:
                         continue
                     for separate_epilogue_store in (False, True):
-                        for two_ctas in (False, True):
+                        for two_ctas in two_ctas_choices:
                             # 2-CTA needs a 128-row MMA tile per partition and
                             # BLOCK_N >= 128.
                             if two_ctas and (
