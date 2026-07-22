@@ -4631,6 +4631,55 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(SM120OrLater, "SM100 config required")
+    def test_mm_full_tile_local_reduce_checks_actual_n_warp_layout(self):
+        """Reject a host-approved full-N group when the kernel layout splits N."""
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        m = n = group = 256
+
+        def epilogue_fn(acc):
+            partials = acc.float().view(m, -1, group).sum(-1)
+            return acc.relu(), partials
+
+        config = dataclasses.asdict(
+            GemmConfig(
+                tile_m=128,
+                tile_n=256,
+                pingpong=False,
+                is_dynamic_persistent=True,
+                cluster_m=2,
+                cluster_n=1,
+                device_capacity=10,
+            )
+        )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+        with (
+            mock.patch(
+                "torch._inductor.kernel.flex_gemm.lowering."
+                "validate_flex_gemm_local_reduce_config",
+                return_value=True,
+            ),
+            self.assertRaisesRegex(
+                Exception,
+                "full-N GroupedLocalReduce requires one epilogue N-warp partition",
+            ),
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize(
         "case",
         (
