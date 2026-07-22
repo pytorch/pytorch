@@ -917,7 +917,7 @@ torch.cuda.synchronize()
         with self.assertRaisesRegex(RuntimeError, "integer out of range"):
             avgpool(inp)
 
-    @onlyCPU
+    @onlyNativeDeviceTypes
     def test_lp_pool_noninteger_norm_no_nan(self, device):
         torch.manual_seed(0)
         x = torch.randn(2, 3, 8, device=device)
