@@ -33,7 +33,12 @@ static void check_group_norm_inputs(
     const Tensor& weight,
     const Tensor& bias,
     const T& C,
+    const T& HxW,
     int64_t num_groups) {
+  // We explicitly support N == 0, but if either C or HxW == 0 the results are
+  // non-sensical.
+  TORCH_CHECK(C > 0, "Expected number of channels to be greater than 0, got ", C);
+  TORCH_CHECK(HxW > 0, "Expected HxW to be greater than 0, got ", HxW);
   TORCH_CHECK(
       num_groups > 0,
       "Expected num groups to be greater than 0, got ", num_groups);
@@ -56,7 +61,7 @@ static void check_group_norm_inputs(
       !bias.defined() || (bias.dim() == 1 && at::symint::numel<T>(bias) == C),
       "Expected bias to be a vector of size equal to the number of ",
       "channels in input, but got bias of shape ",
-      weight.sizes(),
+      bias.sizes(),
       " and input of shape ",
       input.sizes());
 }
@@ -80,7 +85,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
 
   // repeated check so expanded weights can call native_group_norm directly but
   // save mean and variance from forward
-  check_group_norm_inputs(X, gamma, beta, C, group);
+  check_group_norm_inputs(X, gamma, beta, C, HxW, group);
   bool mixed_type = is_mixed_type(X, gamma, beta);
   if (mixed_type) {
     check_mixed_data_type(X, gamma, beta);
@@ -90,23 +95,19 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
       X.suggest_memory_format() : at::MemoryFormat::Contiguous};
   auto stat_options{X.options().memory_format(at::MemoryFormat::Contiguous).dtype(param_scalar_type(X, mixed_type))};
 
-  if (!X.numel()) {
-    return std::make_tuple(
-      at::empty_like(X, memory_format),
-      at::zeros({N, group}, stat_options),
-      at::full({N, group}, NAN, stat_options));
-  }
-
-  Tensor X_ = X.contiguous(memory_format);
-  Tensor gamma_ = gamma.defined() ? gamma.contiguous() : gamma;
-  Tensor beta_ = beta.defined() ? beta.contiguous() : beta;
-
-  Tensor Y = at::empty_like(X_);
+  Tensor Y = at::empty_like(X, {}, memory_format);
   Tensor mean = at::empty({N, group}, stat_options);
   Tensor rstd = at::empty({N, group}, stat_options);
 
-  GroupNormKernel(
-      X_.device().type(), X_, gamma_, beta_, N, C, HxW, group, eps, Y, mean, rstd);
+  if (N) {
+    Tensor X_ = X.contiguous(memory_format);
+    Tensor gamma_ = gamma.defined() ? gamma.contiguous() : gamma;
+    Tensor beta_ = beta.defined() ? beta.contiguous() : beta;
+
+    GroupNormKernel(
+        X_.device().type(), X_, gamma_, beta_, N, C, HxW, group, eps, Y, mean, rstd);
+  }
+
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
@@ -138,7 +139,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   auto dparam_options{(gamma.defined() ?
       gamma.options() : X.options()).memory_format(MemoryFormat::Contiguous)};
 
-  if (!X.numel()) {
+  if (!N) {
     return std::make_tuple(
         grad_input_mask[0] ? at::zeros_like(X, {}, memory_format) : Tensor{},
         grad_input_mask[1] ? at::zeros({C}, dparam_options) : Tensor{},
@@ -190,19 +191,17 @@ Tensor group_norm(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = bias_opt.value_or(Tensor());
+  const Tensor& bias = *bias_maybe_owned;
 
   const auto N = input.sym_size(0);
   const auto C = input.sym_size(1);
-  check_group_norm_inputs(input, weight, bias, C, num_groups);
-
   const auto input_shape = input.sym_sizes();
-  const auto HxW =
-      c10::multiply_integers(input_shape.slice(2));
+  const auto HxW = c10::multiply_integers(input_shape.slice(2));
+  check_group_norm_inputs(input, weight, bias, C, HxW, num_groups);
 
-  TORCH_CHECK(!weight.defined() || weight.sym_numel() == C);
-  TORCH_CHECK(!bias.defined() || bias.sym_numel() == C);
   return std::get<0>(
       at::native_group_norm_symint(input, weight, bias, N, C, HxW, num_groups, eps));
 }
@@ -227,19 +226,19 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = *bias_maybe_owned;
 
-  check_group_norm_inputs(input, weight, bias, C, group);
+  check_group_norm_inputs(input, weight, bias, C, HxW, group);
 
   auto memory_format{(input.device().is_cpu() || input.device().is_privateuseone()) ?
       input.suggest_memory_format() : at::MemoryFormat::Contiguous};
   auto stat_options{input.options().memory_format(at::MemoryFormat::Contiguous)};
 
-  if (!input.numel()) {
+  if (!N) {
     return std::make_tuple(
         at::empty_like(input, {}, memory_format),
         // Return in the dtype of input, matching the operations below, unlike the
         // optimized native_group_norm impl above.
-        at::zeros({N, group}, stat_options),
-        at::full({N, group}, NAN, stat_options));
+        at::empty({N, group}, stat_options),
+        at::empty({N, group}, stat_options));
   }
 
   auto input_reshaped = input.view({N, group, C / group * HxW});
