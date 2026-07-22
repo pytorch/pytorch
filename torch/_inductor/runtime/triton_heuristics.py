@@ -350,9 +350,11 @@ def _combo_has_reduction_subkernel(inductor_meta: InductorMeta) -> bool:
     combo_meta = inductor_meta.get("combo_grid_meta")
     if combo_meta is None or "heuristic_0" not in combo_meta:
         return False
-    # No-bench stitched combos use a single fixed config and don't autotune;
-    # don't add scaling candidates for them.
-    if "stitched_num_warps" in combo_meta:
+    # Stitched combos fix the reduction blocks at codegen time: no-bench uses a
+    # single config, compile-time autotune passes the chosen blocks via
+    # default_config and only autotunes launch candidates. Neither runtime-scales
+    # rblock, so don't add scaling candidates for them.
+    if "stitched_num_warps" in combo_meta or "stitched_launch_candidates" in combo_meta:
         return False
     return any(
         combo_meta.get(f"heuristic_{i}") == "reduction"
@@ -4107,7 +4109,19 @@ def _handle_combo_kernel_per_subkernel_blocks(
     # default_config holds BLOCK keys for the grid lambda; backend kwargs
     # (HIP options like waves_per_eu) come from stitched_backend_kwargs.
     stitched_warps = combo_meta.get("stitched_num_warps")
-    if stitched_warps is not None:
+    if "stitched_launch_candidates" in combo_meta or stitched_warps is not None:
+        # Compile-time autotune emits the distinct winner launch configs (kwargs, num_warps,
+        # num_stages) -> combo autotunes kernel-level knobs over them; the chosen block sizes
+        # are passed as args via default_config. No-bench mode has no candidates and bakes its
+        # blocks into the body, so its config carries only backend kwargs (no block args).
+        # Must use the same key-presence check as _combo_has_reduction_subkernel.
+        if "stitched_launch_candidates" in combo_meta:
+            launch_candidates = combo_meta["stitched_launch_candidates"]
+            block_config = combo_meta.get("default_config") or {}
+            return [
+                triton.Config({**block_config, **kwargs}, num_warps=nw, num_stages=ns)
+                for kwargs, nw, ns in launch_candidates
+            ]
         return [
             triton.Config(
                 combo_meta["stitched_backend_kwargs"],
