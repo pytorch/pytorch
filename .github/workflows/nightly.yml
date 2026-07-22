@@ -151,10 +151,6 @@ jobs:
           #   repo-owner: pytorch
           #   branch: main
           #   pin-folder: .ci/docker/ci_commit_pins
-          - repo-name: triton
-            repo-owner: triton-lang
-            branch: main
-            pin-folder: .ci/docker/ci_commit_pins
           - repo-name: vllm
             repo-owner: vllm-project
             branch: main
@@ -179,3 +175,65 @@ jobs:
           pin-folder: ${{ matrix.pin-folder}}
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  update-triton-commit-hash:
+    # Tracks the triton release branch from triton_version.txt and opens a labeled, self-merging pin-bump PR.
+    runs-on: ubuntu-24.04
+    environment: update-commit-hash
+    if: github.repository_owner == 'pytorch' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          token: ${{ secrets.UPDATEBOT_TOKEN }}
+      - name: Update Triton pin and open labeled PR
+        env:
+          UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
+          PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          NEW_BRANCH_NAME: update-triton-commit-hash/${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}
+          PR_TITLE: "[triton hash update] update the pinned triton hash"
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < .ci/docker/triton_version.txt)"
+          release_branch="release/$(echo "${version}" | cut -d. -f1,2).x"
+          pin_file=".ci/docker/ci_commit_pins/triton.txt"
+          old_hash="$(tr -d '[:space:]' < "${pin_file}")"
+          new_hash="$(git ls-remote "https://github.com/triton-lang/triton.git" "refs/heads/${release_branch}" | cut -f1)"
+          if [ -z "${new_hash}" ]; then
+            echo "Could not resolve tip of triton ${release_branch}"
+            exit 1
+          fi
+          echo "triton ${version} (${release_branch}): pinned ${old_hash} -> tip ${new_hash}"
+          if [ "${new_hash}" = "${old_hash}" ]; then
+            echo "Triton pin already up to date; nothing to do"
+            exit 0
+          fi
+
+          existing_branch="$(GH_TOKEN="${UPDATEBOT_TOKEN}" gh pr list --repo "${REPO}" \
+            --author pytorchupdatebot --search "in:title triton hash update" --state open \
+            --json headRefName --jq '.[0].headRefName // empty')"
+          branch="${existing_branch:-${NEW_BRANCH_NAME}}"
+
+          git config user.name "PyTorch UpdateBot"
+          git config user.email "pytorchupdatebot@users.noreply.github.com"
+          printf '%s\n' "${new_hash}" > "${pin_file}"
+          git checkout -B "${branch}"
+          git add "${pin_file}"
+          git commit -m "update triton commit hash"
+          git push --set-upstream origin "${branch}" -f
+
+          if [ -z "${existing_branch}" ]; then
+            GH_TOKEN="${UPDATEBOT_TOKEN}" gh pr create --repo "${REPO}" \
+              --base main --head "${branch}" --title "${PR_TITLE}" \
+              --body "Auto-generated nightly by .github/workflows/nightly.yml. Updates the pinned triton hash to the tip of ${release_branch}." \
+              --label "ciflow/trunk" \
+              --label "ciflow/inductor" \
+              --label "ciflow/inductor-periodic" \
+              --label "ciflow/h100" \
+              --label "ciflow/b200" \
+              --label "ciflow/docker" \
+              --label "topic: not user facing"
+            GH_TOKEN="${PYTORCHBOT_TOKEN}" gh pr review "${branch}" --repo "${REPO}" --approve
+          fi
+          GH_TOKEN="${PYTORCHBOT_TOKEN}" gh pr comment "${branch}" --repo "${REPO}" --body "@pytorchbot merge"
