@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_GPU,
     HAS_GPU_AND_TRITON,
     requires_gpu_with_enough_memory,
 )
@@ -58,6 +57,7 @@ from torch._inductor.runtime.triton_heuristics import (
     cached_autotune,
     CachingAutotuner,
     CachingAutotunerPlugin,
+    check_autotune_cache,
     DEFER,
     make_matmul_triton_config,
     template,
@@ -208,6 +208,101 @@ class TestTritonHeuristics(TestCase):
         cfg = autotuner.configs[0]
         self.assertEqual(cfg.kwargs["XBLOCK"], 128)
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 512)
+
+    @staticmethod
+    def _fake_cuda_device_properties():
+        return DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=80,
+            major=8,
+            regs_per_multiprocessor=65536,
+            max_threads_per_multi_processor=2048,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+
+    @staticmethod
+    def _run_single_dsr_reduction_cached_autotune(configs, fake_cache):
+        def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
+            pass
+
+        class FakeJitFunction:
+            def __init__(self):
+                self.fn = triton_fn
+
+        class CaptureAutotuner:
+            def __init__(
+                self, *args, configs, save_cache_hook, autotune_cache_info, **kwargs
+            ):
+                self.configs = configs
+                self.save_cache_hook = save_cache_hook
+                self.autotune_cache_info = autotune_cache_info
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.AutotuneCache.create",
+            return_value=fake_cache,
+        ) as create:
+            autotuner = cached_autotune(
+                {"x": 4096, "r0_": 4096},
+                configs,
+                triton_meta={
+                    "device": TestTritonHeuristics._fake_cuda_device_properties()
+                },
+                heuristic_type=HeuristicType.REDUCTION,
+                filename="/tmp/kernel.py",
+                inductor_meta={},
+                caching_autotuner_cls=CaptureAutotuner,
+            )(FakeJitFunction())
+
+        return autotuner, create
+
+    def test_cached_autotune_uses_cache_for_single_dsr_reduction_config(self):
+        cfg = triton.Config({"XBLOCK": 1, "R0_BLOCK": 2048}, num_warps=16)
+        fake_cache = MagicMock()
+        fake_cache.read_best.return_value = None
+
+        autotuner, create = self._run_single_dsr_reduction_cached_autotune(
+            [cfg], fake_cache
+        )
+
+        create.assert_called_once()
+        self.assertIs(autotuner.save_cache_hook, fake_cache.save)
+        self.assertEqual(autotuner.autotune_cache_info["autotune_cache_state"], "miss")
+        self.assertEqual(autotuner.autotune_cache_info["num_configs"], 1)
+
+    def test_cached_autotune_loads_single_dsr_reduction_cache_hit(self):
+        original_cfg = triton.Config({"XBLOCK": 1, "R0_BLOCK": 2048}, num_warps=16)
+        dynamic_cfg = triton.Config({"XBLOCK": 1, "R0_BLOCK": 1024}, num_warps=16)
+
+        fake_cache = MagicMock()
+        fake_cache.read_best.return_value = dynamic_cfg
+
+        autotuner, _ = self._run_single_dsr_reduction_cached_autotune(
+            [original_cfg], fake_cache
+        )
+
+        self.assertEqual(autotuner.configs, [dynamic_cfg])
+        self.assertEqual(autotuner.autotune_cache_info["autotune_cache_state"], "hit")
+
+    def test_check_autotune_cache_skips_single_config_without_dsr(self):
+        cfg = triton.Config({"XBLOCK": 1, "R0_BLOCK": 2048}, num_warps=16)
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.AutotuneCache.create"
+        ) as create:
+            configs, autotune_cache, autotune_cache_info = check_autotune_cache(
+                [cfg],
+                "/tmp/kernel.py",
+                {},
+                dynamic_scale_rblock_eligible=False,
+            )
+
+        create.assert_not_called()
+        self.assertEqual(configs, [cfg])
+        self.assertIsNone(autotune_cache)
+        self.assertEqual(autotune_cache_info["autotune_cache_state"], "only 1 config")
 
     def _test_artificial_zgrid(self):
         def forward(primals_1, primals_2, primals_5):
@@ -717,7 +812,7 @@ class TestArgumentCloneAndRestore(TestCase):
         self.assertTrue(torch.allclose(gpu_tensor, gpu_tensor_clone))
         self.assertTrue(
             peak_mem_after <= peak_mem_before + self.MEM_TOLERANCE,
-            f"{peak_mem_before=} v.s. {peak_mem_after=}",
+            lambda msg: f"{msg}\n{peak_mem_before=} v.s. {peak_mem_after=}",
         )
 
         # Avoid OOM in CI
@@ -837,7 +932,7 @@ class TestDumpLaunchTensors(TestCase):
                     self.assertLessEqual(
                         len(indices),
                         max_runs,
-                        f"Kernel {base_name} has more runs ({len(indices)}) than max ({max_runs})",
+                        lambda msg: f"{msg}\nKernel {base_name} has more runs ({len(indices)}) than max ({max_runs})",
                     )
 
                     # Verify the indices are within [0, max_runs)
@@ -845,7 +940,7 @@ class TestDumpLaunchTensors(TestCase):
                         self.assertLess(
                             idx,
                             max_runs,
-                            f"Run index {idx} exceeds max_runs-1 ({max_runs - 1})",
+                            lambda msg: f"{msg}\nRun index {idx} exceeds max_runs-1 ({max_runs - 1})",
                         )
 
         finally:
@@ -1589,5 +1684,5 @@ class TestMakeLaunchersMemory(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if IS_LINUX:
         run_tests()

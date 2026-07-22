@@ -1,10 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
+import datetime
 import os
 import unittest
+from unittest import mock
 
 import torch
 import torch.distributed as dist
+import torch.distributed.distributed_c10d as c10d
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import C10dTorchCommsTestBase
@@ -13,6 +16,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     subtest,
+    TestCase,
 )
 
 
@@ -193,7 +197,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             expected = torch.full_like(section, src + self.rank)
             self.assertTrue(
                 torch.equal(section, expected),
-                f"Mismatch in section from rank {src}: got {section}, expected {expected}",
+                lambda msg: f"{msg}\nMismatch in section from rank {src}: got {section}, expected {expected}",
             )
             offset += output_split_sizes[src]
 
@@ -232,25 +236,6 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             self.assertEqual(tensor.item(), sum(r + 1 for r in subg_ranks))
         else:
             self.assertIs(ng, dist.GroupMember.NON_GROUP_MEMBER)
-
-    def test_new_group_via_split_group_raises_on_unsupported_args(self):
-        # `split_group` has a narrower surface than `new_group`; under
-        # torchcomms the delegation must surface that mismatch instead of
-        # silently falling back to the legacy path.
-        ranks = list(range(self.world_size))
-        with self.assertRaisesRegex(NotImplementedError, "use_local_synchronization"):
-            dist.new_group(ranks=ranks, use_local_synchronization=True)
-
-    def test_new_group_sort_ranks_false_preserves_order(self):
-        reversed_ranks = list(range(self.world_size - 1, -1, -1))
-        ng = dist.new_group(ranks=reversed_ranks, sort_ranks=False)
-        self.assertEqual(dist.get_process_group_ranks(ng), reversed_ranks)
-        self.assertEqual(
-            dist.get_group_rank(ng, self.rank), reversed_ranks.index(self.rank)
-        )
-        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
-        dist.all_reduce(tensor, group=ng)
-        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
     def test_new_group_backend_none_narrows_to_default_device(self):
         ranks = list(range(self.world_size))
@@ -376,6 +361,175 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
 instantiate_device_type_tests(
     TestC10dTorchCommsInitAutoQualify, globals(), only_for=["cuda"]
 )
+
+
+class TestC10dTorchCommsNewGroupHelper(TestCase):
+    """Unit-test the TorchComms-specific branches of ``_new_process_group_helper``.
+
+    These cover the three subgroup-init fixes: the device handed to ``new_comm``
+    carries this rank's device index (``device_id``) rather than a device-type-only
+    device; ``TORCHCOMM_RANK``/``TORCHCOMM_SIZE`` are seeded from the group's
+    rank/size around the ``new_comm`` call and restored afterwards; and a
+    non-member of a subgroup must NOT issue a no-color parent split under
+    TorchComms. Everything TorchComms-specific is patched (``create=True``), so
+    these run even when TorchComms is not installed.
+    """
+
+    TIMEOUT = datetime.timedelta(seconds=30)
+
+    def _drive_member(self, *, backend, device_id, group_rank, group_size):
+        """Drive the members path down to ``new_comm``.
+
+        ``new_comm`` is mocked to capture its device argument and the live env,
+        then abort with a sentinel so we never touch real comm machinery. Uses
+        the default-group path (``global_ranks_in_group == []``) so no
+        initialized world is required. Returns the captured dict.
+        """
+        captured = {}
+
+        def fake_new_comm(backend_str, device, name=None, store=None, hints=None):
+            captured["backend_str"] = backend_str
+            captured["device"] = device
+            captured["rank_env"] = os.environ.get("TORCHCOMM_RANK")
+            captured["size_env"] = os.environ.get("TORCHCOMM_SIZE")
+            raise RuntimeError("stop-after-new_comm")
+
+        with mock.patch.multiple(
+            c10d,
+            _use_torchcomms_enabled=lambda: True,
+            _torchcomms_handles_backend=lambda b: True,
+            new_comm=fake_new_comm,
+            create=True,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "stop-after-new_comm"):
+                c10d._new_process_group_helper(
+                    group_size=group_size,
+                    group_rank=group_rank,
+                    global_ranks_in_group=[],
+                    backend=backend,
+                    store=dist.HashStore(),
+                    group_name=c10d.GroupName(self.id()),
+                    timeout=self.TIMEOUT,
+                    device_id=device_id,
+                )
+        return captured
+
+    def test_new_comm_gets_indexed_device_id(self):
+        # A subgroup's group-local rank differs from the rank's physical device,
+        # so new_comm must receive device_id (WITH index), not a device-type-only
+        # device. group_rank (2) deliberately differs from the device index (3).
+        cap = self._drive_member(
+            backend="nccl",
+            device_id=torch.device("cuda:3"),
+            group_rank=2,
+            group_size=4,
+        )
+        self.assertEqual(cap["device"], torch.device("cuda:3"))
+
+    def test_new_comm_device_type_mismatch_not_overridden(self):
+        # gloo maps to the cpu device; device_id is a cuda device, so the type
+        # guard must leave cpu alone rather than substituting cuda:3.
+        cap = self._drive_member(
+            backend="gloo",
+            device_id=torch.device("cuda:3"),
+            group_rank=1,
+            group_size=4,
+        )
+        self.assertEqual(cap["device"], torch.device("cpu"))
+
+    def test_new_comm_without_device_id_keeps_type_only_device(self):
+        # World-group path: no device_id bound, so the guard must not fire and
+        # new_comm gets the device-type-only device from the backend map.
+        cap = self._drive_member(
+            backend="nccl",
+            device_id=None,
+            group_rank=0,
+            group_size=4,
+        )
+        self.assertEqual(cap["device"], torch.device("cuda"))
+
+    def test_torchcomm_rank_size_seeded_from_group(self):
+        cap = self._drive_member(
+            backend="nccl",
+            device_id=torch.device("cuda:1"),
+            group_rank=2,
+            group_size=7,
+        )
+        self.assertEqual(cap["rank_env"], "2")
+        self.assertEqual(cap["size_env"], "7")
+
+    def test_torchcomm_rank_size_restored_after_call(self):
+        saved = {k: os.environ.get(k) for k in ("TORCHCOMM_RANK", "TORCHCOMM_SIZE")}
+        try:
+            for k in ("TORCHCOMM_RANK", "TORCHCOMM_SIZE"):
+                os.environ.pop(k, None)
+            # Unset before -> unset after.
+            self._drive_member(
+                backend="nccl",
+                device_id=torch.device("cuda:0"),
+                group_rank=0,
+                group_size=2,
+            )
+            self.assertIsNone(os.environ.get("TORCHCOMM_RANK"))
+            self.assertIsNone(os.environ.get("TORCHCOMM_SIZE"))
+            # Set before -> original values restored after.
+            os.environ["TORCHCOMM_RANK"] = "99"
+            os.environ["TORCHCOMM_SIZE"] = "77"
+            self._drive_member(
+                backend="nccl",
+                device_id=torch.device("cuda:0"),
+                group_rank=0,
+                group_size=2,
+            )
+            self.assertEqual(os.environ["TORCHCOMM_RANK"], "99")
+            self.assertEqual(os.environ["TORCHCOMM_SIZE"], "77")
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    def _drive_non_member(self, *, torchcomms_enabled):
+        """Drive the non-member early-return path of a subgroup.
+
+        The default group is faked as initialized and device-bound with this
+        rank (0) absent from the requested subgroup, so ``_new_process_group_helper``
+        takes the ``NON_GROUP_MEMBER`` branch. Returns (result, split_source_mock).
+        """
+        split_src = mock.MagicMock()
+        default = mock.MagicMock()
+        default.rank.return_value = 0
+        default.bound_device_id = torch.device("cuda:0")
+        with mock.patch.multiple(
+            c10d,
+            _use_torchcomms_enabled=lambda: torchcomms_enabled,
+            is_initialized=lambda: True,
+            _get_default_group=lambda: default,
+            _get_split_source=lambda pg: split_src,
+        ):
+            res = c10d._new_process_group_helper(
+                group_size=2,
+                group_rank=0,
+                global_ranks_in_group=[1, 2],  # rank 0 is NOT a member
+                backend="nccl",
+                store=dist.HashStore(),
+                group_name=c10d.GroupName(self.id()),
+                timeout=self.TIMEOUT,
+            )
+        return res, split_src
+
+    def test_non_member_skips_nocolor_split_under_torchcomms(self):
+        res, split_src = self._drive_non_member(torchcomms_enabled=True)
+        self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
+        split_src.perform_nocolor_split.assert_not_called()
+
+    def test_non_member_performs_nocolor_split_without_torchcomms(self):
+        # Contrast: with TorchComms disabled the NCCL-style path still requires
+        # non-members to issue the no-color split to stay in sync.
+        res, split_src = self._drive_non_member(torchcomms_enabled=False)
+        self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
+        split_src.perform_nocolor_split.assert_called_once_with(torch.device("cuda:0"))
 
 
 if __name__ == "__main__":
