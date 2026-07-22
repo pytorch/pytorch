@@ -517,12 +517,13 @@ class intrusive_ptr final {
     rhs.target_ = FromNullType::singleton();
   }
 
-  intrusive_ptr(const intrusive_ptr& rhs) : target_(rhs.target_) {
+  intrusive_ptr(const intrusive_ptr& rhs) noexcept : target_(rhs.target_) {
     retain_();
   }
 
   template <class From, class FromNullType>
-  /* implicit */ intrusive_ptr(const intrusive_ptr<From, FromNullType>& rhs)
+  /* implicit */ intrusive_ptr(
+      const intrusive_ptr<From, FromNullType>& rhs) noexcept
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
@@ -873,7 +874,7 @@ class weak_intrusive_ptr final {
   template <class TTarget2, class NullType2>
   friend class weak_intrusive_ptr;
 
-  void retain_() {
+  void retain_() noexcept {
     if (target_ != NullType::singleton()) {
       uint32_t new_weakcount =
           detail::atomic_weakcount_increment(target_->combined_refcount_);
@@ -918,13 +919,14 @@ class weak_intrusive_ptr final {
     rhs.target_ = FromNullType::singleton();
   }
 
-  weak_intrusive_ptr(const weak_intrusive_ptr& rhs) : target_(rhs.target_) {
+  weak_intrusive_ptr(const weak_intrusive_ptr& rhs) noexcept
+      : target_(rhs.target_) {
     retain_();
   }
 
   template <class From, class FromNullType>
   /* implicit */ weak_intrusive_ptr(
-      const weak_intrusive_ptr<From, FromNullType>& rhs)
+      const weak_intrusive_ptr<From, FromNullType>& rhs) noexcept
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
