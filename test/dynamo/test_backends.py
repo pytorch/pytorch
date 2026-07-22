@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import importlib.machinery
 import importlib.util
 import sys
 import unittest
@@ -256,6 +257,30 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             relax.assert_called_once()
             relay.assert_called_once()
 
+    def test_tvm_dynamic_shapes_error(self, device):
+        def fn(x):
+            return x.view(x.size(0), -1) + 1
+
+        x = torch.randn(2, 3, device=device)
+        compiled = torch.compile(fn, backend="tvm", dynamic=True)
+        # stub tvm imports; the error fires before any tvm API is used.
+        # find_spec() reads __spec__ off modules already in sys.modules, so
+        # the relay stub needs a real ModuleSpec to route to the relay path.
+        relay_stub = MagicMock()
+        relay_stub.__spec__ = importlib.machinery.ModuleSpec("tvm.relay", None)
+        stubs = {
+            "tvm": MagicMock(),
+            "tvm.contrib": MagicMock(),
+            "tvm.relay": relay_stub,
+        }
+        with patch.dict(sys.modules, stubs):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "does not support dynamic shapes",
+            ):
+                compiled(x)
+        torch._dynamo.reset()
+
     @onlyHPU
     def test_intel_gaudi_backend(self, device):
         self._check_backend_works("hpu_backend", device)
@@ -357,6 +382,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         def cleanup_backend():
             backend_registry._COMPILER_FNS.pop(backend_name, None)
             backend_registry._BACKENDS.pop(backend_name, None)
+            backend_registry._BACKEND_TAGS.pop(backend_name, None)
 
         self.addCleanup(cleanup_backend)
 
@@ -393,6 +419,51 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
 
+    def test_aot_autograd_reentrant_bw_compiler(self):
+        # re-entry with an already-wrapped bw_compiler must leave it untouched
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+
+        def my_compiler(gm, example_inputs):
+            return make_boxed_func(gm.forward)
+
+        backend = aot_autograd(fw_compiler=my_compiler)
+
+        torch.compile(lambda x: x.sin() + 1, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+        bw_compiler = backend.kwargs["bw_compiler"]
+        torch.compile(lambda x: x.cos() * 2, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+
+        self.assertIs(backend.kwargs["bw_compiler"], bw_compiler)
+        self.assertFalse(hasattr(bw_compiler, "compiler_fn"))
+
+    def test_aot_autograd_reentrant_serializable_bw_compiler(self):
+        # re-entry must not re-wrap a SerializableAOTDispatchCompiler's compiler_fn
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch._aot_autograd.schemas import (
+            SerializableAOTDispatchCompiler,
+        )
+
+        def my_compiler(gm, example_inputs):
+            return make_boxed_func(gm.forward)
+
+        bw_compiler = SerializableAOTDispatchCompiler(object, my_compiler)
+        backend = aot_autograd(fw_compiler=my_compiler, bw_compiler=bw_compiler)
+
+        torch.compile(lambda x: x.sin() + 1, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+        wrapped_fn = bw_compiler.compiler_fn
+        torch.compile(lambda x: x.cos() * 2, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+
+        self.assertIs(bw_compiler.compiler_fn, wrapped_fn)
+
     def test_lookup_backend(self):
         from torch._dynamo import lookup_backend
 
@@ -422,6 +493,47 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend=my_compiler)
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
+
+    def test_device_and_dtype_from_inputs(self):
+        from torch._dynamo.backends.common import device_from_inputs, dtype_from_inputs
+
+        class NotATensor:
+            device = "not-a-device"
+            dtype = "not-a-dtype"
+
+        tensor = torch.randn(3, dtype=torch.float64)
+        self.assertEqual(device_from_inputs([NotATensor(), tensor]), tensor.device)
+        self.assertEqual(dtype_from_inputs([NotATensor(), tensor]), torch.float64)
+        self.assertEqual(device_from_inputs([NotATensor()]), torch.device("cpu"))
+        self.assertEqual(dtype_from_inputs([NotATensor()]), torch.float32)
+
+    def test_is_registered_backend(self):
+        from torch._dynamo.backends.registry import _is_registered_backend
+
+        self.assertTrue(_is_registered_backend(lookup_backend("eager")))
+        self.assertTrue(
+            _is_registered_backend(torch._TorchCompileInductorWrapper(None, None, None))
+        )
+        self.assertTrue(
+            _is_registered_backend(
+                torch._TorchCompileWrapper("eager", None, None, None)
+            )
+        )
+
+        class FakeBackend:
+            compiler_name = "inductor"
+
+        self.assertFalse(_is_registered_backend(FakeBackend()))
+
+        def my_custom_backend(gm, example_inputs):
+            return gm.forward
+
+        self.assertFalse(_is_registered_backend(my_custom_backend))
+        self.assertFalse(
+            _is_registered_backend(
+                torch._TorchCompileWrapper(my_custom_backend, None, None, None)
+            )
+        )
 
     def test_lookup_backend_suggestion(self):
         from torch._dynamo.backends.registry import lookup_backend
@@ -456,12 +568,15 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
 
             orig_backends = dict(registry._BACKENDS)
             orig_compiler_fns = dict(registry._COMPILER_FNS)
+            orig_backend_tags = dict(registry._BACKEND_TAGS)
 
             def restore_registry():
                 registry._BACKENDS.clear()
                 registry._BACKENDS.update(orig_backends)
                 registry._COMPILER_FNS.clear()
                 registry._COMPILER_FNS.update(orig_compiler_fns)
+                registry._BACKEND_TAGS.clear()
+                registry._BACKEND_TAGS.update(orig_backend_tags)
                 registry._lazy_import.cache_clear()
                 registry._discover_entrypoint_backends.cache_clear()
 
