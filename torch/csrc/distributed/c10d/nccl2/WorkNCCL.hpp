@@ -136,6 +136,7 @@ class WorkNCCLQueue {
   WorkNCCL::WorkStatus garbageCollectLocked();
   std::unordered_map<cudaStream_t, std::queue<c10::intrusive_ptr<WorkNCCL>>>
       stream_work_queues_;
+  std::queue<c10::intrusive_ptr<WorkNCCL>> completed_work_queue_;
   std::mutex work_queues_mutex_;
 };
 

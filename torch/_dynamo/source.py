@@ -389,9 +389,9 @@ class TypeDictSource(ChainedSource):
     @property
     def _name_template(self) -> str:
         # type(ob).__dict__ can return a proxy of the dict. But in the C++
-        # guard accessor, we are use type->tp_dict which is a dict. So,
+        # guard accessor, we use type->tp_dict which is a dict. So,
         # forcefully pass a dict object to ensure that the GuardManager
-        # registers that its working on a dict object.
+        # registers that it's working on a dict object.
         return "dict({0}.__dict__)"
 
 

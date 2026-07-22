@@ -2049,14 +2049,15 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
 
     @requires_gpu_and_triton
     def test_compile_time_autotune_looped_reduction(self):
-        # rnumel far above the persistent threshold -> looped reductions, whose winning
-        # configs carry R0_BLOCK; the combo must expose R0_BLOCK_i as constexpr args.
+        # rnumel above the persistent threshold but below the split-reduction
+        # threshold -> single-pass looped reductions, whose winning configs
+        # carry R0_BLOCK; the combo must expose R0_BLOCK_i as constexpr args.
         def f(a, b):
             return a.sum(-1), b.amax(-1)
 
         inps = [
-            torch.randn(64, 65536, device=GPU_TYPE),
-            torch.randn(64, 32768, device=GPU_TYPE),
+            torch.randn(64, 8192, device=GPU_TYPE),
+            torch.randn(64, 16384, device=GPU_TYPE),
         ]
         counters.clear()
         with fresh_cache():

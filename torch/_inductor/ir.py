@@ -10700,6 +10700,7 @@ class StorageBox(MutableBox):
 class Subgraph(IRNode):
     name: str
     graph_module: torch.fx.GraphModule
+    inductor_config_patches: dict[str, Any] | None = None
     graph: GraphLowering | None = None
 
 
@@ -10795,15 +10796,29 @@ class InvokeSubgraph(ExternKernel):
         # pyrefly: ignore [bad-assignment]
         operands = new_operands
 
+        if subgraph.inductor_config_patches is None:
+            nested_config = current_node.meta.get("custom", {}).get(
+                "nested_region_config"
+            )
+            subgraph.inductor_config_patches = getattr(
+                nested_config, "inductor_config_patches", None
+            )
+
         if subgraph.graph is None:
             # create and lower subgraphs
-            subgraph.graph = V.graph.make_subgraph(
-                gm=subgraph.graph_module,
-                example_inputs=fake_operands,
-                subgraph_name=subgraph.name,
+            ctx = (
+                config.patch(subgraph.inductor_config_patches)
+                if subgraph.inductor_config_patches
+                else nullcontext()
             )
-            with V.set_graph_handler(subgraph.graph):
-                subgraph.graph.run(*fake_operands)
+            with ctx:
+                subgraph.graph = V.graph.make_subgraph(
+                    gm=subgraph.graph_module,
+                    example_inputs=fake_operands,
+                    subgraph_name=subgraph.name,
+                )
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.run(*fake_operands)
 
         outputs = subgraph.graph.graph_outputs
 
@@ -10947,16 +10962,25 @@ class Conditional(ExternKernel):
         def _require_exact_strides(
             graph_outputs: Sequence[IRNode],
             fake_tensors: Sequence[torch.Tensor],
+            branch_fakes: Sequence[torch.Tensor | int | None],
         ) -> list[IRNode]:
             ret = []
-            for output, fake in zip(graph_outputs, fake_tensors):
+            for output, fake, branch_fake in zip(
+                graph_outputs, fake_tensors, branch_fakes
+            ):
                 if isinstance(output, ShapeAsConstantBuffer):
                     ret.append(output)
                 else:
+                    strides = fake.stride()
+                    # merged strides can contain unbacked symbols (from mismatched
+                    # branch output shapes) undefined inside the subgraph
+                    if has_free_unbacked_symbols(strides):
+                        # pyrefly: ignore [missing-attribute]
+                        strides = branch_fake.stride()
                     ret.append(
                         # pyrefly: ignore [bad-argument-type]
                         ExternKernel.require_exact_strides(
-                            TensorBox(output), fake.stride(), allow_padding=False
+                            TensorBox(output), strides, allow_padding=False
                         )
                     )
             # pyrefly: ignore [bad-return]
@@ -10970,13 +10994,20 @@ class Conditional(ExternKernel):
                     example_inputs=fake_operands,
                     subgraph_name=subgraph.name,
                 )
+                branch_out_args = subgraph.graph_module.graph.output_node().args[0]
+                if not isinstance(branch_out_args, Sequence):
+                    raise AssertionError(type(branch_out_args))
+                branch_fakes: list[Any] = [
+                    a.meta["val"] if isinstance(a, Node) else a for a in branch_out_args
+                ]
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
-                    # Force subgraph outputs to have the expected strides from
-                    # FakeTensor metadata. This ensures both branches produce
-                    # outputs with consistent strides.
+                    # Force subgraph outputs to the expected strides from
+                    # FakeTensor metadata. Branches share the merged strides
+                    # unless those carry an unbacked symbol (mismatched inner
+                    # dims), in which case each branch keeps its own strides.
                     subgraph.graph.graph_outputs = _require_exact_strides(
-                        subgraph.graph.graph_outputs, fake_outputs
+                        subgraph.graph.graph_outputs, fake_outputs, branch_fakes
                     )
 
         if true_fn.graph is None:
