@@ -4,34 +4,6 @@ from itertools import product
 import torch._inductor.config as config
 
 
-# Keep in sync with make_gemm_gfx950_param in
-# torch/_inductor/kernel/vendored_templates/flydsl/kernels/gemm_gfx950.py
-_SMEM_CAPACITY_BY_ARCH = {
-    "gfx942": 65536,
-    "gfx950": 163840,
-}
-_DEFAULT_SMEM_CAPACITY = 65536
-
-
-def _smem_capacity() -> int:
-    """Best-effort per-arch LDS capacity, matching the vendored gfx950 kernel.
-
-    Falls back to the conservative gfx942 value so configs that only fit the
-    larger gfx950 LDS are never proposed on an unknown/smaller device.
-    """
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            gcn_arch = (
-                torch.cuda.get_device_properties(0).gcnArchName or ""
-            ).split(":", 1)[0]
-            return _SMEM_CAPACITY_BY_ARCH.get(gcn_arch, _DEFAULT_SMEM_CAPACITY)
-    except Exception:
-        pass
-    return _DEFAULT_SMEM_CAPACITY
-
-
 @dataclass(frozen=True)
 class FlyDSLGemmConfig:
     TILE_M: int = 128
@@ -62,78 +34,117 @@ def _is_valid_gemm_config(gemm_config: dict[str, int | bool]) -> bool:
     mma_n = 16
     mma_k = 32
 
-    if block_m <= 0 or block_n <= 0 or block_k <= 0 or stages <= 0:
-        return False
-    if stages < 2:
-        return False
-    if m_waves <= 0 or n_waves <= 0:
-        return False
-    if group_m < 0:
-        return False
-
-    in_dbytes = 2
-    out_dbytes = 2
-    cshuffle_vec_size = 16 // out_dbytes
-    if use_half_tile_interleaved:
-        half_block_m = block_m // 2
-        half_block_n = block_n // 2
-        if stages != 2:
-            return False
-        if m_waves != 2 or n_waves < 2:
-            return False
-        if half_block_m * 2 != block_m or half_block_n * 2 != block_n:
-            return False
-        mma_m_half_repeat = half_block_m // m_waves // mma_m
-        mma_n_half_repeat = half_block_n // n_waves // mma_n
-        if mma_m_half_repeat * m_waves * mma_m != half_block_m:
-            return False
-        if mma_n_half_repeat * n_waves * mma_n != half_block_n:
-            return False
-        if mma_n_half_repeat != 2:
-            return False
-        if half_block_n % cshuffle_vec_size != 0:
-            return False
-    elif block_n % cshuffle_vec_size != 0:
-        return False
-
-    smem_capacity = _smem_capacity()
-    smem_bytes = stages * (block_m + block_n) * block_k * in_dbytes
-    smem_bytes = max(smem_bytes, block_m * block_n * out_dbytes)
-    if smem_bytes > smem_capacity:
-        return False
-
-    async_load_vec_size = 16 // in_dbytes
-    ldg_x_threads = block_k // async_load_vec_size
-    if ldg_x_threads * async_load_vec_size != block_k:
-        return False
-
-    block_threads = m_waves * n_waves * 64
-    load_elems_per_iter = block_threads * async_load_vec_size
-    if (block_m * block_k) % load_elems_per_iter != 0:
-        return False
-    if (block_n * block_k) % load_elems_per_iter != 0:
-        return False
-    ldg_a_iters = (block_m * block_k) // load_elems_per_iter
-    ldg_b_iters = (block_n * block_k) // load_elems_per_iter
-    if use_half_tile_interleaved:
-        half_ldg_a_iters = ((block_m // 2) * block_k) // load_elems_per_iter
-        half_ldg_b_iters = ((block_n // 2) * block_k) // load_elems_per_iter
-        if half_ldg_a_iters * load_elems_per_iter != (block_m // 2) * block_k:
-            return False
-        if half_ldg_b_iters * load_elems_per_iter != (block_n // 2) * block_k:
-            return False
-    if ldg_a_iters <= 0 or ldg_b_iters <= 0:
-        return False
-    if (stages - 2) * (ldg_a_iters + ldg_b_iters) >= 63:
-        return False
-
-    mma_m_repeat = block_m // m_waves // mma_m
-    mma_n_repeat = block_n // n_waves // mma_n
-    if mma_m_repeat * m_waves * mma_m != block_m:
-        return False
-    if mma_n_repeat * n_waves * mma_n != block_n:
-        return False
-    if block_k % mma_k != 0:
+    try:
+        GFX950_DMA_BYTES = 16
+        GFX950_WAVE_SIZE = 64
+        if block_m <= 0 or block_n <= 0 or block_k <= 0 or stages <= 0:
+            raise ValueError("block_m, block_n, block_k, and stages must be positive")
+        if (mma_m, mma_n, mma_k) != (16, 16, 32):
+            raise ValueError("the gfx950 layout kernel currently requires mma=16x16x32")
+        if stages < 2:
+            raise ValueError("stages must be at least 2 for the staged LDS pipeline")
+        if m_waves <= 0 or n_waves <= 0:
+            raise ValueError("m_waves, and n_waves must be positive")
+        if group_m < 0:
+            raise ValueError("group_m must be non-negative")
+        in_dbytes = out_dbytes = 2  # for hgemm
+        cshuffle_vec_size = 16 // in_dbytes
+        if use_half_tile_interleaved:
+            half_block_m = block_m // 2
+            half_block_n = block_n // 2
+            assert stages == 2
+            assert m_waves == 2 and n_waves >= 2
+            assert half_block_m * 2 == block_m
+            assert half_block_n * 2 == block_n
+            mma_m_half_repeat = half_block_m // m_waves // mma_m
+            mma_n_half_repeat = half_block_n // n_waves // mma_n
+            assert mma_m_half_repeat * m_waves * mma_m == half_block_m
+            assert mma_n_half_repeat * n_waves * mma_n == half_block_n
+            assert half_block_n % cshuffle_vec_size == 0
+        else:
+            assert block_n % cshuffle_vec_size == 0
+        smem_bytes = stages * (block_m + block_n) * block_k * in_dbytes
+        smem_bytes = max(smem_bytes, block_m * block_n * in_dbytes)
+        smem_capacity = 163840
+        if smem_bytes > smem_capacity:
+            raise ValueError(
+                "staged LDS buffers exceed the device shared-memory capacity: "
+                f"stages={stages}, block_m={block_m}, block_n={block_n}, "
+                f"block_k={block_k}, smem_bytes={smem_bytes}, "
+                f"capacity={smem_capacity} for arch={"gfx950"}"
+            )
+        async_load_vec_size = GFX950_DMA_BYTES // in_dbytes
+        ldg_x_threads = block_k // async_load_vec_size
+        if ldg_x_threads * async_load_vec_size != block_k:
+            raise ValueError(
+                "block_k must be divisible by the async load vector size: "
+                f"block_k={block_k}, async_load_vec_size={async_load_vec_size}, "
+                f"covered_k={ldg_x_threads * async_load_vec_size}"
+            )
+        block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
+        ldg_a_iters = (block_m * block_k) // (block_threads * async_load_vec_size)
+        ldg_b_iters = (block_n * block_k) // (block_threads * async_load_vec_size)
+        if use_half_tile_interleaved:
+            half_ldg_a_iters = ((block_m // 2) * block_k) // (
+                block_threads * async_load_vec_size
+            )
+            half_ldg_b_iters = ((block_n // 2) * block_k) // (
+                block_threads * async_load_vec_size
+            )
+            if (
+                half_ldg_a_iters * block_threads * async_load_vec_size
+                != (block_m // 2) * block_k
+            ):
+                raise ValueError(
+                    "Half-tile A async load tile must be exactly covered by whole-thread vector loads: "
+                    f"half_block_m={block_m // 2}, block_k={block_k}, "
+                    f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}, "
+                    f"half_ldg_a_iters={half_ldg_a_iters}"
+                )
+            if (
+                half_ldg_b_iters * block_threads * async_load_vec_size
+                != (block_n // 2) * block_k
+            ):
+                raise ValueError(
+                    "Half-tile B async load tile must be exactly covered by whole-thread vector loads: "
+                    f"half_block_n={block_n // 2}, block_k={block_k}, "
+                    f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}, "
+                    f"half_ldg_b_iters={half_ldg_b_iters}"
+                )
+        if ldg_a_iters * block_threads * async_load_vec_size != block_m * block_k:
+            raise ValueError(
+                "A async load tile must be exactly covered by whole-thread vector loads: "
+                f"block_m={block_m}, block_k={block_k}, "
+                f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}, "
+                f"ldg_a_iters={ldg_a_iters}, "
+                f"covered={ldg_a_iters * block_threads * async_load_vec_size}, "
+                f"required={block_m * block_k}"
+            )
+        if ldg_b_iters * block_threads * async_load_vec_size != block_n * block_k:
+            raise ValueError(
+                "B async load tile must be exactly covered by whole-thread vector loads: "
+                f"block_n={block_n}, block_k={block_k}, "
+                f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}, "
+                f"ldg_b_iters={ldg_b_iters}, "
+                f"covered={ldg_b_iters * block_threads * async_load_vec_size}, "
+                f"required={block_n * block_k}"
+            )
+        assert (stages - 2) * (ldg_a_iters + ldg_b_iters) < 63
+        mma_m_repeat = block_m // m_waves // mma_m
+        mma_n_repeat = block_n // n_waves // mma_n
+        if mma_m_repeat * m_waves * mma_m != block_m:
+            raise ValueError(
+                "block_m must be divisible by m_waves * mma_m: "
+                f"block_m={block_m}, m_waves={m_waves}, mma_m={mma_m}, "
+                f"mma_m_repeat={mma_m_repeat}, covered_m={mma_m_repeat * m_waves * mma_m}"
+            )
+        if mma_n_repeat * n_waves * mma_n != block_n:
+            raise ValueError(
+                "block_n must be divisible by n_waves * mma_n: "
+                f"block_n={block_n}, n_waves={n_waves}, mma_n={mma_n}, "
+                f"mma_n_repeat={mma_n_repeat}, covered_n={mma_n_repeat * n_waves * mma_n}"
+            )
+    except Exception:
         return False
     return True
 
