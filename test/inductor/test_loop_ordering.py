@@ -260,6 +260,7 @@ class ImplDetailTest(MockSchedulerTest):
 
             self.assertTrue(backend.can_fuse(snode1, snode2))
             self.assertEqual(select_tiling.call_count, 4)
+
     def test_template_producer_loop_state_rollback(self):
         layout = ir.FixedLayout(
             torch.device(GPU_TYPE), torch.float32, [sympy.Integer(8)], [1]
@@ -280,6 +281,7 @@ class ImplDetailTest(MockSchedulerTest):
 
         self.assertIsNone(template_node._body)
         self.assertIs(computed_node._body, original_body)
+
     def test_reorder_modular_indexing(self):
         """
         There was a bug that we wrongly map i0 to the dimension with size 49
