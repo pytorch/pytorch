@@ -202,12 +202,17 @@ def has_triton() -> bool:
     if triton_disable_device_detection:
         return False
 
-    from torch._dynamo.device_interface import get_registered_device_interfaces
+    from torch._dynamo.device_interface import (
+        get_registered_device_interfaces,
+        TritonUnavailableError,
+    )
 
     # A device supports Triton if it is available, reports Triton capability, and
     # its Triton backend is actually built. Capability is gated first so that
-    # raise_if_triton_unavailable() only surfaces missing-backend RuntimeErrors
-    # (and not, e.g., CUDA's GPUTooOldForTriton for sub-capable devices).
+    # raise_if_triton_unavailable() only surfaces missing-backend errors (and
+    # not, e.g., CUDA's GPUTooOldForTriton for sub-capable devices). We catch the
+    # specific TritonUnavailableError rather than RuntimeError so unexpected
+    # errors are not silently swallowed.
     for name, device_interface in get_registered_device_interfaces():
         if ":" in name:
             continue
@@ -217,7 +222,7 @@ def has_triton() -> bool:
             continue
         try:
             device_interface.raise_if_triton_unavailable()
-        except RuntimeError:
+        except TritonUnavailableError:
             continue
         return True
     return False

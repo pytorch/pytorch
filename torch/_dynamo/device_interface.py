@@ -37,6 +37,18 @@ caching_worker_device_properties: dict[str, Any] = {}
 caching_worker_current_devices: dict[str, int] = {}
 
 
+class TritonUnavailableError(RuntimeError):
+    """
+    Raised by DeviceInterface.raise_if_triton_unavailable to signal that a
+    device cannot run Triton (e.g. no Triton backend was built for it).
+
+    Subclasses RuntimeError so existing callers that catch RuntimeError keep
+    working, while callers that only want to react to Triton unavailability -
+    such as has_triton() - can catch this specific type instead of swallowing
+    every RuntimeError, which would hide unrelated bugs.
+    """
+
+
 class DeviceInterface:
     """
     This is a simple device runtime interface for Inductor. It enables custom
@@ -160,15 +172,17 @@ class DeviceInterface:
     @classmethod
     def raise_if_triton_unavailable(cls, device: torch.types.Device = None) -> None:
         """
-        Raises a `RuntimeError` with the appropriate human-readable instructions
-        to resolve the issue if Triton is not available for the given device, or
-        the default device if `device` is `None`.
+        Raises a `TritonUnavailableError` with the appropriate human-readable
+        instructions to resolve the issue if Triton is not available for the
+        given device, or the default device if `device` is `None`.
 
         The caller should ensure the presence of the 'triton' package before
         calling this method.
         """
         if not cls.is_triton_capable():
-            raise RuntimeError("This device is not capable of supporting Triton")
+            raise TritonUnavailableError(
+                "This device is not capable of supporting Triton"
+            )
 
 
 class DeviceGuard:
@@ -288,9 +302,9 @@ class CudaInterface(DeviceInterface):
 
         if torch.version.hip is not None:
             if "amd" not in triton.backends.backends:
-                raise RuntimeError("triton not built with the 'amd' backend")
+                raise TritonUnavailableError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'nvidia' backend")
+            raise TritonUnavailableError("triton not built with the 'nvidia' backend")
 
 
 get_mtia_stream: Callable[[int], int] | None
@@ -375,7 +389,7 @@ class MtiaInterface(DeviceInterface):
         import triton.backends
 
         if "mtia" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'mtia' backend")
+            raise TritonUnavailableError("triton not built with the 'mtia' backend")
 
 
 get_xpu_stream: Callable[[int], int] | None
@@ -462,7 +476,7 @@ class XpuInterface(DeviceInterface):
         import triton.backends
 
         if "intel" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'intel' backend")
+            raise TritonUnavailableError("triton not built with the 'intel' backend")
 
 
 @dataclass
@@ -526,7 +540,7 @@ class CpuInterface(DeviceInterface):
         import triton.backends
 
         if "cpu" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'cpu' backend")
+            raise TritonUnavailableError("triton not built with the 'cpu' backend")
 
 
 class MpsInterface(DeviceInterface):
