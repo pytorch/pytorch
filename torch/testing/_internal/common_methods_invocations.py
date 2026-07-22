@@ -105,6 +105,7 @@ from torch.testing._internal.opinfo.core import (  # noqa: F401
     ForeachFuncInfo,
     gradcheck_wrapper_hermitian_input,
     gradcheck_wrapper_ctc_loss,
+    gradcheck_wrapper_native_norms,
     gradcheck_wrapper_triangular_input,
     gradcheck_wrapper_triangular_input_real_positive_diagonal,
     gradcheck_wrapper_masked_operation,
@@ -4748,6 +4749,16 @@ def error_inputs_group_norm(opinfo, device, **kwargs):
     err_msg2 = "Expected number of channels in input to be divisible by num_groups, but got input of shape"
     s2 = SampleInput(make_arg((2, 7, 4)), args=(2,))
     yield ErrorInput(s2, error_regex=err_msg2)
+
+    # check that channels are non-zero
+    err_msg3 = "Expected number of channels to be greater than 0, got "
+    s3 = SampleInput(make_arg((1, 0, 2)), args=(1,))
+    yield ErrorInput(s3, error_regex=err_msg3)
+
+    # check that HxW is non-zero
+    err_msg4 = "Expected HxW to be greater than 0, got "
+    s4 = SampleInput(make_arg((1, 2, 0)), args=(1,))
+    yield ErrorInput(s4, error_regex=err_msg4)
 
 def error_inputs_native_layer_norm(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
@@ -11537,11 +11548,11 @@ def reference_rms_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weig
 
 
 def reference_native_group_norm(input: npt.NDArray, weight: npt.NDArray | None, bias: npt.NDArray | None, N: int, C: int, HxW: int, group: int, eps: float) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
-    if math.prod(input.shape) == 0:
+    if N == 0:
         return (
             np.empty_like(input),
-            np.full((input.shape[0], group), np.nan, dtype=input.dtype),
-            np.full((input.shape[0], group), np.nan, dtype=input.dtype),
+            np.empty((N, group), dtype=input.dtype),
+            np.empty((N, group), dtype=input.dtype),
         )
 
     input_view = input.reshape((N, group, C // group * HxW))
@@ -15323,18 +15334,13 @@ op_db: list[OpInfo] = [
         "native_group_norm",
         aten_name="native_group_norm",
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        gradcheck_wrapper=gradcheck_wrapper_native_norms,
         ref=reference_native_group_norm,
         reference_inputs_func=reference_inputs_native_group_norm,
         sample_inputs_func=sample_inputs_native_group_norm,
         skips=(
-            # native_group_norm expects contiguous inputs
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cuda"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
             # likely due to dispatching through infinitely_differentiable_native_group_norm_backward
             DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_grad_match", device_type="mps", dtypes=(torch.float32,)),
-            # native_group_norm expects contiguous inputs on CUDA
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides", device_type="cuda"),
         ),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -15342,11 +15348,13 @@ op_db: list[OpInfo] = [
     ),
     OpInfo('native_layer_norm',
            aten_name='native_layer_norm',
+           gradcheck_wrapper=gradcheck_wrapper_native_norms,
            ref=reference_native_layer_norm,
            dtypes=floating_types_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            supports_out=False,
            assert_jit_shape_analysis=True,
+           supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_native_layer_norm,
            error_inputs_func=error_inputs_native_layer_norm,
@@ -15365,6 +15373,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('native_batch_norm',
            aten_name='native_batch_norm',
+           gradcheck_wrapper=gradcheck_wrapper_native_norms,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            supports_forward_ad=True,
@@ -15389,12 +15398,11 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
                # AssertionError: The values for attribute 'shape' do not match: torch.Size([5, 5, 5]) != torch.Size([5, 5, 6]).
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
-                            "TestCompositeCompliance", "test_forward_ad"),
            )
            ),
     OpInfo('_native_batch_norm_legit',
            aten_name='_native_batch_norm_legit',
+           gradcheck_wrapper=gradcheck_wrapper_native_norms,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            supports_forward_ad=True,
@@ -15415,8 +15423,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # https://github.com/pytorch/pytorch/issues/85960
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
-                            "TestCompositeCompliance", "test_forward_ad"),
                # FIXME: AssertionError: The values for attribute 'shape' do not match
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
@@ -16078,12 +16084,6 @@ op_db: list[OpInfo] = [
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=5e-05, rtol=3e-03)}),
-                   "TestDecomp",
-                   "test_comprehensive",
-                   device_type="cpu"
-               ),
            ],
            sample_inputs_func=sample_inputs_group_norm,
            reference_inputs_func=reference_inputs_group_norm,
@@ -25796,13 +25796,8 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.native_group_norm",
-        skips=(
-            # The torch implementation does not return a view, while the reference does
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_torch_fallback"),
-        ),
         torch_opinfo_name="native_group_norm",
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",

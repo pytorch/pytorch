@@ -19,6 +19,7 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -49,8 +50,6 @@ void GroupNormKernelImplInternal(
   T* Y_data = Y.data_ptr<T>();
   PT* mean_data = mean.data_ptr<PT>();
   PT* rstd_data = rstd.data_ptr<PT>();
-  const bool gamma_null = (gamma_data == nullptr);
-  const bool beta_null = beta_data == nullptr;
   const int64_t inner_size = D * HxW;
 
   using opmath_t = at::opmath_type<T>;
@@ -60,7 +59,7 @@ void GroupNormKernelImplInternal(
       const T* X_ptr = X_data + i * inner_size;
       auto [mean_val, rstd_val] = RowwiseMoments(X_ptr, inner_size);
       rstd_val = opmath_t(1) / std::sqrt(std::max(rstd_val, opmath_t(0)) + eps);
-      if (gamma_null && beta_null) {
+      if (!gamma_data && !beta_data) {
         T* Y_ptr = Y_data + i * inner_size;
         for (const auto j : c10::irange(inner_size)) {
           Y_ptr[j] = (X_ptr[j] - mean_val) * rstd_val;
@@ -69,8 +68,8 @@ void GroupNormKernelImplInternal(
         const int64_t g = i % G;
         for (const auto j : c10::irange(D)) {
           const int64_t c = g * D + j;
-          const opmath_t scale = rstd_val * (gamma_null ? opmath_t(1) : opmath_t(gamma_data[c]));
-          const opmath_t bias = -scale * mean_val + (beta_null ? opmath_t(0) : opmath_t(beta_data[c]));
+          const opmath_t scale = rstd_val * (gamma_data ? opmath_t(gamma_data[c]) : opmath_t(1));
+          const opmath_t bias = -scale * mean_val + (beta_data ? opmath_t(beta_data[c]) : opmath_t(0));
           X_ptr = X_data + (i * D + j) * HxW;
           T* Y_ptr = Y_data + (i * D + j) * HxW;
           for (const auto k : c10::irange(HxW)) {
@@ -306,10 +305,7 @@ void GroupNormKernelImplChannelsLastInternal(
   PT* rstd_data = rstd.data_ptr<PT>();
 
   using opmath_t = at::opmath_type<T>;
-
   const opmath_t s = opmath_t(1) / static_cast<opmath_t>(D * HxW);
-  const bool gamma_null = (gamma_data == nullptr);
-  const bool beta_null = beta_data == nullptr;
 
   // NB: About algorithm chosen:
   //
@@ -362,8 +358,8 @@ void GroupNormKernelImplChannelsLastInternal(
         opmath_t* bias_ptr = scale_ptr + D;
         for (const auto d : c10::irange(D)) {
           const int64_t c = g * D + d;
-          scale_ptr[d] = rstd_val * (gamma_null ? opmath_t(1) : opmath_t(gamma_data[c]));
-          bias_ptr[d] = -scale_ptr[d] * mean_val + (beta_null ? opmath_t(0) : opmath_t(beta_data[c]));
+          scale_ptr[d] = rstd_val * (gamma_data ? opmath_t(gamma_data[c]) : opmath_t(1));
+          bias_ptr[d] = -scale_ptr[d] * mean_val + (beta_data ? opmath_t(beta_data[c]) : opmath_t(0));
         }
 
         // step-3: apply scale and bias
@@ -381,8 +377,8 @@ void GroupNormKernelImplChannelsLastInternal(
     //
     // temp buffer holding x and x2
     int num_threads = at::get_num_threads();
-    Tensor buffer = at::empty({num_threads, N, 2 * C},
-      X.options().dtype(c10::CppTypeToScalarType<opmath_t>::value)).zero_();
+    Tensor buffer = at::zeros({num_threads, N, 2 * C},
+      X.options().dtype(c10::CppTypeToScalarType<opmath_t>::value));
     opmath_t* buffer_data = buffer.data_ptr<opmath_t>();
     Tensor tmp_buffer = at::empty({N, 2 * G},
       X.options().dtype(c10::CppTypeToScalarType<opmath_t>::value));
@@ -455,8 +451,8 @@ void GroupNormKernelImplChannelsLastInternal(
 
         for (const auto d : c10::irange(D)) {
           const int64_t c = g * D + d;
-          scale_ptr[c] = rstd_val * (gamma_null ? opmath_t(1) : opmath_t(gamma_data[c]));
-          bias_ptr[c] = -scale_ptr[c] * mean_val + (beta_null ? opmath_t(0) : opmath_t(beta_data[c]));
+          scale_ptr[c] = rstd_val * (gamma_data ? opmath_t(gamma_data[c]) : opmath_t(1));
+          bias_ptr[c] = -scale_ptr[c] * mean_val + (beta_data ? opmath_t(beta_data[c]) : opmath_t(0));
         }
       }
     }
@@ -613,9 +609,9 @@ CalcDsDb(
     vec::Vectorized<opmath_t> ds_vec(0);
     vec::Vectorized<opmath_t> db_vec(0);
     for (int64_t j = 0; j < d; j += K) {
-      const vec::Vectorized<PT> gamma_vec = (gamma_ptr == nullptr)
-          ? vec::Vectorized<PT>(1)
-          : vec::Vectorized<PT>::loadu(gamma_ptr + j);
+      const vec::Vectorized<PT> gamma_vec = gamma_ptr
+          ? vec::Vectorized<PT>::loadu(gamma_ptr + j)
+          : vec::Vectorized<PT>(1);
       ds_vec = ds_vec + vec::Vectorized<PT>::loadu(ds_ptr + j) * gamma_vec;
       db_vec = db_vec + vec::Vectorized<PT>::loadu(db_ptr + j) * gamma_vec;
     }
@@ -638,7 +634,7 @@ CalcDsDb(
   fVec ds_acc(0);
   fVec db_acc(0);
   for (int64_t j = 0; j < d; j += K) {
-    const Vec gamma_vec = (gamma_ptr == nullptr) ? Vec(1) : Vec::loadu(gamma_ptr + j);
+    const Vec gamma_vec = gamma_ptr ? Vec::loadu(gamma_ptr + j) : Vec(1);
     auto [gamma_vec0, gamma_vec1] = convert_to_float<PT>(gamma_vec);
     ds_acc += fVec::loadu(ds_ptr + j) * gamma_vec0;
     ds_acc += fVec::loadu(ds_ptr + j + fVec::size()) * gamma_vec1;
@@ -666,24 +662,21 @@ void GroupNormInputBackward(
   const int64_t G = group;
   const int64_t D = C / G;
   const opmath_t s = opmath_t(1) / static_cast<opmath_t>(D * HxW);
-  const bool gamma_null = (gamma == nullptr);
   at::parallel_for(0, N * G, 1, [=](int64_t start, int64_t end) {
     constexpr int64_t K = vec::Vectorized<PT>::size();
     const int64_t d = D / K * K;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<opmath_t, at::vec::Vectorized<opmath_t>::size()> ds_arr;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<opmath_t, at::vec::Vectorized<opmath_t>::size()> db_arr;
+    std::array<opmath_t, at::vec::Vectorized<opmath_t>::size()> ds_arr{};
+    std::array<opmath_t, at::vec::Vectorized<opmath_t>::size()> db_arr{};
     for (const auto i : c10::irange(start, end)) {
       const int64_t g = i % G;
       const opmath_t* ds_ptr = ds + i * D;
       const opmath_t* db_ptr = db + i * D;
-      const PT* gamma_ptr = gamma_null ? nullptr : (gamma + g * D);
+      const PT* gamma_ptr = gamma ? (gamma + g * D) : nullptr;
       CalcDsDb(ds_ptr, db_ptr, gamma_ptr, d, K, ds_arr.data(), db_arr.data());
       opmath_t ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), opmath_t(0));
       opmath_t db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), opmath_t(0));
       for (const auto j : c10::irange(d, D)) {
-        const opmath_t gamma_v = gamma_null ? opmath_t(1) : opmath_t(gamma[g * D + j]);
+        const opmath_t gamma_v = gamma ? opmath_t(gamma[g * D + j]) : opmath_t(1);
         ds_val += ds_ptr[j] * gamma_v;
         db_val += db_ptr[j] * gamma_v;
       }
@@ -696,7 +689,7 @@ void GroupNormInputBackward(
         const T* dY_ptr = dY + (i * D + j) * HxW;
         const T* X_ptr = X + (i * D + j) * HxW;
         T* dX_ptr = dX + (i * D + j) * HxW;
-        const opmath_t c1 = opmath_t(rstd[i]) * (gamma_null ? opmath_t(1) : opmath_t(gamma[c]));
+        const opmath_t c1 = opmath_t(rstd[i]) * (gamma ? opmath_t(gamma[c]) : opmath_t(1));
         for (const auto k : c10::irange(HxW)) {
           dX_ptr[k] = c1 * opmath_t(dY_ptr[k]) + c2 * opmath_t(X_ptr[k]) + c3;
         }
@@ -910,7 +903,7 @@ void GroupNormBackwardKernelImplInternal(
   opmath_t* db_data = db.data_ptr<opmath_t>();
   ComputeInternalGradients<T, opmath_t>(N, C, HxW, dY_data, X_data, ds_data, db_data);
 
-  if (dX_data != nullptr) {
+  if (dX_data) {
     GroupNormInputBackward<T, PT, opmath_t>(
         N,
         C,
@@ -925,11 +918,11 @@ void GroupNormBackwardKernelImplInternal(
         db_data,
         dX_data);
   }
-  if (dgamma_data != nullptr) {
+  if (dgamma_data) {
     GammaBackward(
         N, C, group, mean_data, rstd_data, ds_data, db_data, dgamma_data);
   }
-  if (dbeta_data != nullptr) {
+  if (dbeta_data) {
     BetaBackward(N, C, db_data, dbeta_data);
   }
 }
@@ -1059,13 +1052,11 @@ ApplyInputGradientsChannelsLastColMov(
   int64_t HxW,
   int64_t C,
   int64_t D) {
-  const bool gamma_null = (gamma == nullptr);
   int64_t d = 0;
   auto K = vec::Vectorized<T>::size();
   for (; d < D / K * K; d += K) {
     auto c1 = vec::Vectorized<T>(*rstd) *
-        (gamma_null ? vec::Vectorized<T>(1)
-                    : vec::Vectorized<T>::loadu(gamma + d));
+        (gamma ? vec::Vectorized<T>::loadu(gamma + d) : vec::Vectorized<T>(1));
     for (const auto m : c10::irange(HxW)) {
       const T* X_ptr = X_data + m * C;
       const T* dY_ptr = dY_data + m * C;
@@ -1079,8 +1070,7 @@ ApplyInputGradientsChannelsLastColMov(
   }
   if (D - d > 0) {
     auto c1 = vec::Vectorized<T>(*rstd) *
-        (gamma_null ? vec::Vectorized<T>(1)
-                    : vec::Vectorized<T>::loadu(gamma + d, D - d));
+        (gamma ? vec::Vectorized<T>::loadu(gamma + d, D - d) : vec::Vectorized<T>(1));
     for (const auto m : c10::irange(HxW)) {
       const T* X_ptr = X_data + m * C;
       const T* dY_ptr = dY_data + m * C;
@@ -1109,12 +1099,10 @@ ApplyInputGradientsChannelsLastColMov(
     int64_t D) {
   using Vec = vec::Vectorized<T>;
   using fVec = vec::Vectorized<opmath_t>;
-  const bool gamma_null = (gamma == nullptr);
   auto K = Vec::size();
   int64_t d = 0;
   for (; d < D / K * K; d += K) {
-    auto [c1_0, c1_1] = gamma_null ? std::tuple<fVec, fVec>(fVec(1), fVec(1))
-                                      : load_util(gamma + d, K);
+    auto [c1_0, c1_1] = gamma ? load_util(gamma + d, K) : std::make_tuple(fVec(1), fVec(1));
     c1_0 = c1_0 * fVec(opmath_t(*rstd));
     c1_1 = c1_1 * fVec(opmath_t(*rstd));
     for (const auto m : c10::irange(HxW)) {
@@ -1132,8 +1120,7 @@ ApplyInputGradientsChannelsLastColMov(
     }
   }
   if (D - d > 0) {
-    auto [c1_0, c1_1] = gamma_null ? std::tuple<fVec, fVec>(fVec(1), fVec(1))
-                                      : load_util(gamma + d, D - d);
+    auto [c1_0, c1_1] = gamma ? load_util(gamma + d, D - d) : std::make_tuple(fVec(1), fVec(1));
     c1_0 = c1_0 * fVec(opmath_t(*rstd));
     c1_1 = c1_1 * fVec(opmath_t(*rstd));
     for (const auto m : c10::irange(HxW)) {
@@ -1164,12 +1151,11 @@ ApplyInputGradientsChannelsLastRowMov(
   int64_t HxW,
   int64_t C,
   int64_t D) {
-  const bool gamma_null = (gamma == nullptr);
   int64_t d = 0;
   auto K = vec::Vectorized<T>::size();
   for (; d < D / K * K; d += K) {
     auto c1 = vec::Vectorized<T>(*rstd) *
-      (gamma_null ? vec::Vectorized<T>(1) : vec::Vectorized<T>::loadu(gamma + d));
+      (gamma ? vec::Vectorized<T>::loadu(gamma + d) : vec::Vectorized<T>(1));
     auto dy_vec = vec::Vectorized<T>::loadu(dY_data + d);
     auto x_vec = vec::Vectorized<T>::loadu(X_data + d);
     auto dx_vec = c1 * dy_vec +
@@ -1178,7 +1164,7 @@ ApplyInputGradientsChannelsLastRowMov(
   }
   if (D - d > 0) {
     auto c1 = vec::Vectorized<T>(*rstd) *
-      (gamma_null ? vec::Vectorized<T>(1) : vec::Vectorized<T>::loadu(gamma + d, D - d));
+      (gamma ? vec::Vectorized<T>::loadu(gamma + d, D - d) : vec::Vectorized<T>(1));
     auto dy_vec = vec::Vectorized<T>::loadu(dY_data + d, D - d);
     auto x_vec = vec::Vectorized<T>::loadu(X_data + d, D - d);
     auto dx_vec = c1 * dy_vec +
@@ -1202,12 +1188,10 @@ ApplyInputGradientsChannelsLastRowMov(
     int64_t D) {
   using Vec = vec::Vectorized<T>;
   using fVec = vec::Vectorized<opmath_t>;
-  const bool gamma_null = (gamma == nullptr);
   auto K = Vec::size();
   int64_t d = 0;
   for (; d < D / K * K; d += K) {
-    auto [c1_0, c1_1] = gamma_null ? std::tuple<fVec, fVec>(fVec(1), fVec(1))
-                                      : load_util(gamma + d, K);
+    auto [c1_0, c1_1] = gamma ? load_util(gamma + d, K) : std::make_tuple(fVec(1), fVec(1));
     c1_0 = c1_0 * fVec(opmath_t(*rstd));
     c1_1 = c1_1 * fVec(opmath_t(*rstd));
     Vec dy_vec = Vec::loadu(dY_data + d);
@@ -1219,8 +1203,7 @@ ApplyInputGradientsChannelsLastRowMov(
     convert_from_float<T>(dx_vec0, dx_vec1).store(dX_data + d);
   }
   if (D - d > 0) {
-    auto [c1_0, c1_1] = gamma_null ? std::tuple<fVec, fVec>(fVec(1), fVec(1))
-                                      : load_util(gamma + d, D - d);
+    auto [c1_0, c1_1] = gamma ? load_util(gamma + d, D - d) : std::make_tuple(fVec(1), fVec(1));
     c1_0 = c1_0 * fVec(opmath_t(*rstd));
     c1_1 = c1_1 * fVec(opmath_t(*rstd));
     Vec dy_vec = Vec::loadu(dY_data + d, D - d);
@@ -1234,8 +1217,8 @@ ApplyInputGradientsChannelsLastRowMov(
 }
 
 template <typename T, typename PT, typename opmath_t>
-inline typename std::
-    enable_if<std::is_same_v<T, opmath_t>, std::tuple<opmath_t, opmath_t>>::type
+inline std::
+    enable_if_t<std::is_same_v<T, opmath_t>, std::tuple<opmath_t, opmath_t>>
     CalcInternalGradientsChannelsLast(
     const T* X_data,
     const T* dY_data,
@@ -1246,7 +1229,6 @@ inline typename std::
     int64_t C,
     int64_t D) {
   using Vec = vec::Vectorized<T>;
-  const bool gamma_null = (gamma_ptr == nullptr);
   constexpr int64_t K = Vec::size();
   const int64_t inner_size = D / K * K;
   int64_t d = 0;
@@ -1263,10 +1245,11 @@ inline typename std::
     }
     acc0_vec.store(ds_ptr + d);
     acc1_vec.store(db_ptr + d);
+    Vec gamma_vec{gamma_ptr ? Vec::loadu(gamma_ptr + d) : Vec(1)};
     ds_gamma += vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; },
-      acc0_vec * (gamma_null ? Vec(1) : Vec::loadu(gamma_ptr + d)));
+      acc0_vec * gamma_vec);
     db_gamma += vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; },
-      acc1_vec * (gamma_null ? Vec(1) : Vec::loadu(gamma_ptr + d)));
+      acc1_vec * gamma_vec);
   }
   if (D - d > 0) {
     Vec acc0_vec{0}, acc1_vec{0};
@@ -1280,17 +1263,18 @@ inline typename std::
     }
     acc0_vec.store(ds_ptr + d, D - d);
     acc1_vec.store(db_ptr + d, D - d);
+    Vec gamma_vec{gamma_ptr ? Vec::loadu(gamma_ptr + d, D - d) : Vec(1)};
     ds_gamma += vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; },
-      acc0_vec * (gamma_null ? Vec(1) : Vec::loadu(gamma_ptr + d, D - d)));
+      acc0_vec * gamma_vec);
     db_gamma += vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; },
-      acc1_vec * (gamma_null ? Vec(1) : Vec::loadu(gamma_ptr + d, D - d)));
+      acc1_vec * gamma_vec);
   }
-  return std::tuple<opmath_t, opmath_t>(ds_gamma, db_gamma);
+  return std::make_tuple(ds_gamma, db_gamma);
 }
 
 template <typename T, typename PT, typename opmath_t>
-inline typename std::
-    enable_if<!std::is_same_v<T, opmath_t>, std::tuple<opmath_t, opmath_t>>::type
+inline std::
+    enable_if_t<!std::is_same_v<T, opmath_t>, std::tuple<opmath_t, opmath_t>>
     CalcInternalGradientsChannelsLast(
         const T* X_data,
         const T* dY_data,
@@ -1302,7 +1286,6 @@ inline typename std::
         int64_t D) {
   using Vec = vec::Vectorized<T>;
   using fVec = vec::Vectorized<opmath_t>;
-  const bool gamma_null = (gamma_ptr == nullptr);
   constexpr int64_t K = Vec::size();
   const int64_t inner_size = D / K * K;
   float ds_gamma{0}, db_gamma{0};
@@ -1325,8 +1308,8 @@ inline typename std::
     acc0_vec1.store(ds_ptr + d + fVec::size());
     acc1_vec0.store(db_ptr + d);
     acc1_vec1.store(db_ptr + d + fVec::size());
-    auto [gamma_vec0, gamma_vec1] = gamma_null ?
-      std::tuple<fVec, fVec>(fVec(1), fVec(1)) : load_util(gamma_ptr + d, K);
+    auto [gamma_vec0, gamma_vec1] = gamma_ptr ?
+      load_util(gamma_ptr + d, K) : std::make_tuple(fVec(1), fVec(1));
     ds_gamma += vec::vec_reduce_all(
         [](fVec& x, fVec& y) { return x + y; }, acc0_vec0 * gamma_vec0);
     ds_gamma += vec::vec_reduce_all(
@@ -1346,12 +1329,12 @@ inline typename std::
     }
     ds_ptr[d] = acc0;
     db_ptr[d] = acc1;
-    opmath_t gamma_val = gamma_null ? opmath_t(1) : opmath_t(gamma_ptr[d]);
+    opmath_t gamma_val = gamma_ptr ? opmath_t(gamma_ptr[d]) : opmath_t(1);
     ds_gamma += acc0 * gamma_val;
     db_gamma += acc1 * gamma_val;
   }
 
-  return std::tuple<opmath_t, opmath_t>(ds_gamma, db_gamma);
+  return std::make_tuple(ds_gamma, db_gamma);
 }
 
 template <typename T, typename PT>
@@ -1383,7 +1366,6 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
   T* dX_data = dX.defined() ? dX.data_ptr<T>() : nullptr;
   PT* dgamma_data = dgamma.defined() ? dgamma.data_ptr<PT>() : nullptr;
   PT* dbeta_data = dbeta.defined() ? dbeta.data_ptr<PT>() : nullptr;
-  const bool gamma_null = (gamma_data == nullptr);
   using opmath_t = at::opmath_type<T>;
   Tensor ds = at::empty({N, C}, X.options().dtype(c10::CppTypeToScalarType<opmath_t>::value));
   Tensor db = at::empty({N, C}, X.options().dtype(c10::CppTypeToScalarType<opmath_t>::value));
@@ -1412,7 +1394,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
         opmath_t* db_ptr = db_data + i * D;
         const T* X_ptr = X_data + n * HxW * C + g * D;
         const T* dY_ptr = dY_data + n * HxW * C + g * D;
-        const PT* gamma_ptr = gamma_null ? gamma_data : (gamma_data + g * D);
+        const PT* gamma_ptr = gamma_data ? (gamma_data + g * D) : nullptr;
         auto [ds_gamma, db_gamma] = CalcInternalGradientsChannelsLast<T, PT, opmath_t>(
           X_ptr,
           dY_ptr,
@@ -1440,8 +1422,8 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
   } else {
     // impl-2: parallel on N * HxW.
     int num_threads = at::get_num_threads();
-    Tensor buffer = at::empty({num_threads, N, 2 * C},
-      X.options().dtype(c10::CppTypeToScalarType<opmath_t>::value)).zero_();
+    Tensor buffer = at::zeros({num_threads, N, 2 * C},
+      X.options().dtype(c10::CppTypeToScalarType<opmath_t>::value));
     opmath_t* buffer_data = buffer.data_ptr<opmath_t>();
 
     Tensor tmp_buffer = at::empty({N, 2 * G},
@@ -1474,13 +1456,12 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
           opmath_t ds_val{0}, db_val{0};
           for (const auto t : c10::irange(num_threads)) {
             opmath_t* buffer_ptr = buffer_data + t * N * 2 * C + n * 2 * C;
-            opmath_t gamma_val = gamma_null ? opmath_t(1) : opmath_t(gamma_data[g * D + d]);
+            opmath_t gamma_val = gamma_data ? opmath_t(gamma_data[g * D + d]) : opmath_t(1);
             ds_gamma += buffer_ptr[g * D + d] * gamma_val;
             db_gamma += buffer_ptr[g * D + d + C] * gamma_val;
             ds_val += buffer_ptr[g * D + d];
             db_val += buffer_ptr[g * D + d + C];
-
-            }
+          }
           ds_data[n * C + g * D + d] = ds_val;
           db_data[n * C + g * D + d] = db_val;
         }
@@ -1490,7 +1471,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
     }
 
     // Step 3. Compute dx.
-    if (dX_data != nullptr) {
+    if (dX_data) {
       at::parallel_for(0, N * HxW, 1, [&](int64_t begin, int64_t end) {
         int64_t n{0}, m{0};
         data_index_init(begin, n, N, m, HxW);
@@ -1501,7 +1482,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
             T* dX_ptr = dX_data + i * C + g * D;
             const PT* mean_ptr = mean_data + n * G + g;
             const PT* rstd_ptr = rstd_data + n * G + g;
-            const PT* gamma_ptr = gamma_null ? gamma_data : (gamma_data + g * D);
+            const PT* gamma_ptr = gamma_data ? (gamma_data + g * D) : nullptr;
             opmath_t ds_val = tmp_buffer_data[n * 2 * G + 2 * g];
             opmath_t db_val = tmp_buffer_data[n * 2 * G + 2 * g + 1];
 
@@ -1515,15 +1496,14 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
         }
       });
     }
-
   }
 
   // Finally compute dgamma and dbeta.
-  if (dgamma_data != nullptr) {
+  if (dgamma_data) {
     GammaBackward(
         N, C, group, mean_data, rstd_data, ds_data, db_data, dgamma_data);
   }
-  if (dbeta_data != nullptr) {
+  if (dbeta_data) {
     BetaBackward(N, C, db_data, dbeta_data);
   }
 }
