@@ -46,6 +46,7 @@ jobs:
         BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
         RUNNER: ${{ inputs.runner }}
         PYTORCH_ROCM_ARCH: ${{ contains(inputs.build_environment, 'rocm') && 'gfx950' || '' }}
+        FORCE_CUDA: ${{ contains(inputs.build_environment, 'rocm') && '1' || '0' }}
     steps:
       - name: Install system dependencies
         run: |
