@@ -17,6 +17,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_COMBINE_KEY_SUFFIX,
     local_reduce_compressed_shape,
     LOCAL_REDUCE_FINALIZE_KEY_SUFFIX,
+    LOCAL_REDUCE_FRAGMENT_WIDTH,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_SWAP_AB_ERROR,
     validate_local_reduce_feed_main_capability,
@@ -234,6 +235,19 @@ class FlexGemmRuntimeLocalReducePlan:
         return self.geometry.axis
 
 
+def swap_local_reduce_plan(
+    plan: FlexGemmRuntimeLocalReducePlan | None,
+) -> FlexGemmRuntimeLocalReducePlan | None:
+    """Transpose a physical local-reduction plan with the swapped GEMM output."""
+    if plan is None:
+        return None
+    return dataclasses.replace(
+        plan,
+        geometry=FlexGemmLocalReduceGeometry(plan.group, 1 - plan.axis),
+        out=None if plan.out is None else plan.out.mT,
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class FlexGemmRuntimeMainOutputPlan:
     """Describe the logical main-output transform selected by lowering."""
@@ -272,10 +286,16 @@ def validate_runtime_local_reduce(
     effective_C: torch.Tensor | None,
     alpha: float,
     beta: float,
+    *,
+    swap_ab: bool = False,
 ) -> None:
     """Validate local-reduce runtime tensor shapes and unsupported consumers."""
     if plan is None:
         return
+    if swap_ab and (
+        plan.group <= LOCAL_REDUCE_FRAGMENT_WIDTH or plan.callbacks is None
+    ):
+        raise NotImplementedError(LOCAL_REDUCE_SWAP_AB_ERROR)
     validate_local_reduce_runtime_dense_mm(a.ndim)
     validate_local_reduce_selected_dim_divisible(expected_shape, plan.group, plan.axis)
     validate_local_reduce_no_c_alpha_beta(effective_C, alpha, beta)
@@ -283,7 +303,10 @@ def validate_runtime_local_reduce(
     if local_reduce_out is None:
         return
     check_matrix("local_reduce_out", local_reduce_out)
-    check_matrix_row_major_layout("local_reduce_out", local_reduce_out)
+    if swap_ab:
+        check_matrix_row_major_layout("local_reduce_out.mT", local_reduce_out.mT)
+    else:
+        check_matrix_row_major_layout("local_reduce_out", local_reduce_out)
     expected_local_reduce_shape = local_reduce_compressed_shape(
         expected_shape, plan.group, plan.axis
     )
@@ -393,8 +416,8 @@ def dispatch_gemm_act(
             )
         quack_a, quack_b = quack_b, quack_a
         quack_out = out.mT
-        if local_reduce is not None:
-            raise NotImplementedError(LOCAL_REDUCE_SWAP_AB_ERROR)
+        local_reduce = swap_local_reduce_plan(local_reduce)
+        quack_local_reduce_out = None if local_reduce is None else local_reduce.out
         quack_aux_outs = tuple(aux_out.mT for aux_out in aux_outs)
         quack_c = None if C is None else C.mT
         row_args, col_args = col_args, row_args
@@ -530,6 +553,16 @@ def gemm_epilogue(
     aux_outs = output_plan.aux_outs
     local_reduce = output_plan.local_reduce
     main_transform = output_plan.main.transform
+    from torch._inductor.heuristics.template.flex_gemm import (
+        candidate_gemm_configs_for_device,
+        gemm_config_from_key,
+    )
+
+    config = (
+        gemm_config_from_key(config_key)
+        if config_key is not None
+        else candidate_gemm_configs_for_device(a.device)[0]
+    )
     if main_transform is not None:
         device_capacity = (
             device_capacity_override
@@ -579,6 +612,7 @@ def gemm_epilogue(
         effective_C,
         alpha,
         beta,
+        swap_ab=config.swap_ab,
     )
     if a.ndim == 3 and epilogue_args:
         raise NotImplementedError("FlexGEMM batched args are not supported yet")
@@ -619,10 +653,6 @@ def gemm_epilogue(
         if out is None
         else out
     )
-    from torch._inductor.heuristics.template.flex_gemm import (
-        candidate_gemm_configs_for_device,
-        gemm_config_from_key,
-    )
     from torch._vendor.quack.cache import cache_dir_override
 
     stream_context = (
@@ -646,11 +676,7 @@ def gemm_epilogue(
             scalar_args,
             alpha,
             beta,
-            config=(
-                gemm_config_from_key(config_key)
-                if config_key is not None
-                else candidate_gemm_configs_for_device(a.device)[0]
-            ),
+            config=config,
             device_capacity_override=device_capacity_override,
         )
     return out

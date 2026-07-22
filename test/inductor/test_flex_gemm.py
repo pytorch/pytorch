@@ -1315,6 +1315,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_swap_ab_rejects_local_reduce_aux(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmLocalReduceCallbacks,
             FlexGemmLocalReduceGeometry,
         )
         from torch._inductor.kernel.flex_gemm.runtime import (
@@ -1331,7 +1332,9 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         )
         swap_key, _ = self.swapAndNonSwapConfigKeys(a.device)
 
-        with self.assertRaisesRegex(NotImplementedError, "do not support swap_ab"):
+        with self.assertRaisesRegex(
+            NotImplementedError, "swap_ab local reductions require groups larger"
+        ):
             gemm_epilogue(
                 a,
                 b,
@@ -1341,6 +1344,28 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
                 local_reduce=FlexGemmRuntimeLocalReducePlan(
                     FlexGemmLocalReduceGeometry(group, 1),
                     out=local_reduce_out,
+                ),
+                config_key=swap_key,
+            )
+
+        local_reduce_out = torch.empty_strided(
+            (m // group, n), (1, m // group), device="cuda", dtype=torch.float32
+        )
+        with self.assertRaisesRegex(
+            NotImplementedError, "swap_ab local reductions require groups larger"
+        ):
+            gemm_epilogue(
+                a,
+                b,
+                self.relu_epilogue,
+                "test_flex_gemm_swap_ab_small_physical_local_reduce_rejects",
+                out_dtype=torch.float32,
+                local_reduce=FlexGemmRuntimeLocalReducePlan(
+                    FlexGemmLocalReduceGeometry(group, 0),
+                    out=local_reduce_out,
+                    callbacks=FlexGemmLocalReduceCallbacks(
+                        physical_group_sum_combine, physical_group_sum_finalize
+                    ),
                 ),
                 config_key=swap_key,
             )
@@ -4635,6 +4660,63 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIn(f"('tile_n', {tile_n})", code)
         self.assertIn(f"('cluster_m', {cluster_m})", code)
         self.assertIn(f"('cluster_n', {cluster_n})", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        (
+            ("local_m_g64", 0, 64, 256, 512, True),
+            ("local_m_g128_nonpersistent", 0, 128, 256, 512, False),
+            ("local_n_g64", 1, 64, 512, 256, True),
+            ("local_n_g128_nonpersistent", 1, 128, 512, 256, False),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_tuple_aux_local_reduce_supports_swap_ab(self, case):
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        _, axis, group, m, n, dynamic = case
+
+        def epilogue_fn(acc):
+            if axis == 1:
+                partial = acc.float().view(m, -1, group).mean(-1)
+            else:
+                partial = acc.float().view(-1, group, n).mean(1)
+            return acc.relu(), partial
+
+        config = dataclasses.asdict(
+            GemmConfig(
+                tile_m=256,
+                tile_n=256,
+                pingpong=False,
+                is_dynamic_persistent=dynamic,
+                cluster_m=2,
+                cluster_n=1,
+                swap_ab=True,
+                device_capacity=10,
+            )
+        )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
+        self.assertIn("('swap_ab', True)", code)
+        self.assertIn(f"FlexGemmLocalReduceGeometry(group={group}, axis={axis})", code)
+        self.assertIn("FlexGemmLocalReduceCallbacks(", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

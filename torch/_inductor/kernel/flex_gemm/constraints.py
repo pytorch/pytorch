@@ -67,7 +67,8 @@ LOCAL_REDUCE_C_ALPHA_BETA_ERROR = (
     "FlexGEMM local reductions cannot be combined with C/alpha/beta yet"
 )
 LOCAL_REDUCE_SWAP_AB_ERROR = (
-    "FlexGEMM local reductions do not support swap_ab configs yet"
+    "FlexGEMM swap_ab local reductions require groups larger than one fragment "
+    "and physical callbacks"
 )
 LOCAL_REDUCE_AUX_TENSORSSA_ERROR = (
     "FlexGEMM local-reduce aux output must be produced by a grouped TensorSSA reduction"
@@ -317,8 +318,15 @@ def validate_local_reduce_no_c_alpha_beta(
         raise NotImplementedError(LOCAL_REDUCE_C_ALPHA_BETA_ERROR)
 
 
-def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -> bool:
+def validate_flex_gemm_local_reduce_config(
+    config: Any, group: int, axis: int, *, allow_swap_ab: bool = False
+) -> bool:
     """Return whether a QuACK config has a validated grouped-reduction layout.
+
+    Swap-ab transposes the physical accumulator, so the logical reduction axis
+    is reversed before checking tile ownership. Small TensorSSA reductions do
+    not carry the generated callbacks needed after that reorientation; physical
+    groups larger than one fragment do and can therefore use swapped configs.
 
     This matches ``GemmConfig`` fields against layout families covered by forced
     kernel tests; tile divisibility alone is not sufficient. Axis-1 groups within
@@ -327,26 +335,24 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
 
     Axis-0 groups and larger axis-1 groups use ``GroupedLocalReduce``'s physical
     callback path, which combines epilogue fragments inside one CTA and directly
-    stores one value per
-    ``(row, group)``; it has no explicit two-CTA ownership or cluster-reduction
-    protocol. The validated two-CTA families therefore support only strict
-    subgroups of the selected tile. A full-tile group produces incorrect values
-    because CTA-local state is finalized as though it had one complete owner.
+    stores one value per ``(row, group)``; it has no explicit two-CTA ownership or
+    cluster-reduction protocol. The validated two-CTA families therefore support
+    only strict subgroups of the selected tile. A full-tile group produces
+    incorrect values because CTA-local state is finalized as though it had one
+    complete owner.
 
     Full-tile support needs either a one-CTA fallback or a real two-CTA contract:
     CTA-rank-aware row ownership, proof that one CTA has the complete N reduction
     (or DSM exchange of partials), cluster synchronization, and exactly one final
     store for each logical output group.
     """
-    match axis:
-        case 0:
-            tile = config.tile_m
-        case 1:
-            tile = config.tile_n
-        case _:
-            return False
-    if group <= 0 or config.swap_ab:
+    if axis not in (0, 1) or group <= 0:
         return False
+    if config.swap_ab:
+        if not allow_swap_ab or group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+            return False
+        axis = 1 - axis
+    tile = config.tile_m if axis == 0 else config.tile_n
     if config.tile_n % LOCAL_REDUCE_FRAGMENT_WIDTH != 0 or tile % group != 0:
         return False
 
@@ -458,10 +464,15 @@ class FlexGemmLocalReduceGeometry:
 
     group: int
     axis: int
+    swapped: bool = False
 
     def __post_init__(self) -> None:
         """Reject geometry outside the GEMM tile's M/N grouping model."""
         validate_local_reduce_group_axis(self.group, self.axis)
+
+    @property
+    def tensorssa_axis(self) -> int:
+        return 1 - self.axis if self.swapped else self.axis
 
     @property
     def reduce_dims(self) -> tuple[int, ...]:
@@ -489,7 +500,7 @@ class FlexGemmLocalReduceGeometry:
     def tensorssa_shape(self, source: Any) -> str:
         fragment_group_size = self.fragment_group_size_expr(source)
         repeats = self.fragment_repeat_expr(source)
-        if self.axis == 1:
+        if self.tensorssa_axis == 1:
             return f"((1, {fragment_group_size}, {repeats}), 1, 1)"
         return f"(({fragment_group_size}, 1, {repeats}), 1, 1)"
 
@@ -498,13 +509,13 @@ class FlexGemmLocalReduceGeometry:
 
     @property
     def reduction_profile(self) -> str:
-        if self.axis == 1:
+        if self.tensorssa_axis == 1:
             return "((None, 1, None), 1, 1)"
         return "((1, None, None), 1, 1)"
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return local_reduce_needs_physical_callbacks(self.axis, self.group)
+        return local_reduce_needs_physical_callbacks(self.tensorssa_axis, self.group)
 
 
 @dataclasses.dataclass(frozen=True)

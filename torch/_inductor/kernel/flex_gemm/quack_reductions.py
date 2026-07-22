@@ -683,7 +683,7 @@ def lower_tensorssa_reduce(
         local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
             desc.combine_expr, finalize_expr
         )
-        if layout.axis == 0:
+        if layout.tensorssa_axis == 0:
             local_reduce_store_sources[node] = source
             return source
     reduced = _generate_like(
