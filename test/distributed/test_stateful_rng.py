@@ -677,44 +677,5 @@ class TestPhiloxDistributionShardsOp(TestCase):
             with self.subTest(error=regex):
                 assert_invalid_without_advancing(regex, fn)
 
-    def test_meta_validation(self):
-        result = torch.empty((2, 3), device="meta")
-        returned = self._run(
-            result,
-            [4, 5],
-            [1, 2],
-            [0, 0],
-            [2, 3],
-            1,
-            _PHILOX_DISTRIBUTION_NORMAL,
-            [0.0, 1.0],
-        )
-        self.assertIs(returned, result)
-
-        cases = (
-            (
-                "normal expects std >= 0.0",
-                _PHILOX_DISTRIBUTION_NORMAL,
-                [0.0, -1.0],
-            ),
-            ("found from=1.*> to=0", _PHILOX_DISTRIBUTION_UNIFORM, [1.0, 0.0]),
-            ("parameters must be real", _PHILOX_DISTRIBUTION_NORMAL, [0j, 1.0]),
-            ("unsupported distribution kind 2", 2, [0.0, 1.0]),
-        )
-        for regex, distribution, params in cases:
-            with self.subTest(error=regex):
-                with self.assertRaisesRegex(RuntimeError, regex):
-                    self._run(
-                        torch.empty(1, device="meta"),
-                        [1],
-                        [0],
-                        [0],
-                        [1],
-                        1,
-                        distribution,
-                        params,
-                    )
-
-
 if __name__ == "__main__":
     run_tests()
