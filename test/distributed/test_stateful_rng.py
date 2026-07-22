@@ -13,7 +13,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 aten = torch.ops.aten
 
-# Must match PhiloxDistributionKind in PhiloxDistribution.cu.
+# Must match PhiloxDistributionKind in PhiloxDistribution.h.
 _PHILOX_DISTRIBUTION_NORMAL = 0
 
 
