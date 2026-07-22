@@ -138,6 +138,14 @@ class DSLController:
         return registry.get_dsl_version(self._dsl_name)
 
     @property
+    def backend(self) -> str:
+        """Chosen lowering backend for DSLs that have one (e.g. helion)."""
+        chosen = getattr(_get_dsl_module(self._dsl_name), "_chosen_backend", None)
+        if chosen is None:
+            raise AttributeError(f"{self._dsl_name} DSL has no configurable backend")
+        return chosen()
+
+    @property
     def enabled(self) -> bool:
         """Check if DSL is currently enabled."""
         filter_state = _get_filter_state()
