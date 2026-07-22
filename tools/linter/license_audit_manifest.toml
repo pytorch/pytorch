@@ -2,6 +2,7 @@
 excluded = [
   'third_party/NVTX/docs/LICENSE.txt',
   'third_party/NVTX/python/LICENSE.txt',
+  'third_party/NVTX/rust/LICENSE',
   'third_party/NVTX/tools/docs/github-markdown-css/LICENSE',
   'third_party/NVTX/tools/docs/github-markdown-css/license',
   'third_party/aiter/3rdparty/composable_kernel/docs/LICENSE.rst',

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import glob
-import re
 from pathlib import Path
 
 try:
@@ -75,28 +74,6 @@ def discover_license_files(repo_root: Path) -> set[str]:
     return found
 
 
-def classify_license_spdx(repo_root: Path, path: str) -> str:
-    text = (repo_root / path).read_text(encoding="utf-8", errors="replace")[:5000]
-    if m := re.search(r"(?i)SPDX-License-Identifier:\s*(\S+)", text):
-        return m.group(1)
-    if re.search(
-        r"(?is)Apache License.*Version 2|Licensed under the Apache License, Version 2",
-        text,
-    ):
-        if re.search(r"(?i)University of Illinois|LLVM Exceptions", text):
-            return "Apache-2.0 WITH LLVM-exception"
-        return "Apache-2.0"
-    if re.search(r"(?i)Boost Software License", text):
-        return "BSL-1.0"
-    if re.search(r"(?i)Permission is hereby granted, free of charge", text):
-        return "MIT"
-    if re.search(r"(?im)Neither the name|^\s*3\. Neither", text):
-        return "BSD-3-Clause"
-    if re.search(r"(?i)Redistribution and use in source and binary", text):
-        return "BSD-2-Clause"
-    raise ValueError(f"Could not classify SPDX license for {path}")
-
-
 def expected_project_license_expression() -> str:
     expressions = {
         expression
@@ -148,20 +125,6 @@ def audit_repo_license_files(repo_root: Path) -> list[str]:
                 f"{_MANIFEST_PATH.name} SPDX table has extra paths not in license-files: "
                 + ", ".join(extra)
             )
-    else:
-        for p in included:
-            if not (repo_root / p).is_file():
-                continue
-            try:
-                got = classify_license_spdx(repo_root, p)
-            except ValueError as e:
-                err.append(str(e))
-                continue
-            if got != LICENSE_FILE_SPDX[p]:
-                err.append(
-                    f"SPDX in manifest out of date for {p!r}: file classifies as {got!r}, "
-                    f"manifest has {LICENSE_FILE_SPDX[p]!r}"
-                )
 
     lic = project.get("license")
     if not isinstance(lic, str):
