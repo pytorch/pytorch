@@ -3131,6 +3131,57 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
+    def test_mm_grouped_n_main_output_supports_clustered_m_configs(self):
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        m, k, n, group = 256, 64, 128, 2
+        tile_m = 256
+
+        def epilogue(acc):
+            lanes = acc.float().view(m, n, group)
+            return (torch.nn.functional.silu(lanes[..., 0]) * lanes[..., 1]).to(
+                acc.dtype
+            )
+
+        config = dataclasses.asdict(
+            GemmConfig(
+                tile_m=tile_m,
+                tile_n=256,
+                pingpong=False,
+                cluster_m=2,
+                cluster_n=1,
+                device_capacity=10,
+            )
+        )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, group * n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue(a @ b),
+            epilogue(a.double() @ b.double()),
+            k,
+        )
+        FileCheck().check("FlexGemmGroupedMainOutputTransform(group=2").check(
+            f"('tile_m', {tile_m})"
+        ).check("('cluster_m', 2)").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
     def test_grouped_n_main_output_filters_unsafe_configs(self):
         from torch._inductor.heuristics.template.flex_gemm import (
             candidate_gemm_configs_for_device,
@@ -3165,14 +3216,21 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertTrue(configs)
         self.assertTrue(
             all(
-                config.tile_n <= 128 and config.cluster_m == 1 and config.cluster_n == 1
+                config.tile_n <= 128
+                and config.cluster_n == 1
+                and (
+                    config.cluster_m == 1
+                    or (config.tile_m == 256 and config.cluster_m == 2)
+                )
                 for config in configs
             )
         )
         unsafe_config = next(
             config
             for config in candidates
-            if config.tile_n > 128 or config.cluster_m > 1 or config.cluster_n > 1
+            if config.tile_n > 128
+            or config.cluster_n > 1
+            or (config.cluster_m > 1 and config.tile_m != 256)
         )
         with self.assertRaisesRegex(
             NotImplementedError, "incompatible with grouped main output"
@@ -4398,7 +4456,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         (
             ("local_n_g32_tile64", 1, 32, 128, 64, 2, 2),
             ("local_n_g16_tile160", 1, 16, 128, 160, 2, 2),
+            ("local_n_g32_tile192", 1, 32, 128, 192, 2, 1),
             ("local_n_g32_tile224", 1, 32, 256, 224, 2, 2),
+            ("local_n_g32_tile256", 1, 32, 128, 256, 2, 2),
+            ("local_n_g64_tile_m128", 1, 64, 128, 256, 2, 1),
+            ("local_n_g128_tile_m128", 1, 128, 128, 256, 2, 1),
             ("local_m_g128_tile160", 0, 128, 128, 160, 1, 1),
             ("local_m_g64_tile_m256", 0, 64, 256, 256, 2, 1),
             ("local_m_g128_tile_m256", 0, 128, 256, 256, 2, 1),

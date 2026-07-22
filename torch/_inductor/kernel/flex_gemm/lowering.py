@@ -204,12 +204,18 @@ def flex_gemm_config_keys(
     reshape in the generated epilogue: swap_ab reorients the accumulator
     fragment and non-divisible tiles split groups across fragments. Contracted
     main stores additionally require tile_n not to oversubscribe physical N and
-    a single-CTA cluster until QuACK predicates those layouts correctly.
+    a single CTA along N until QuACK predicates those layouts correctly.
     """
 
     def fits_main_output(config) -> bool:
-        single_cta_cluster = config.cluster_m == 1 and config.cluster_n == 1
-        return single_cta_cluster and statically_known(config.tile_n <= n)
+        supported_cluster = config.cluster_m == 1 or (
+            config.tile_m == 256 and config.cluster_m == 2
+        )
+        return (
+            supported_cluster
+            and config.cluster_n == 1
+            and statically_known(config.tile_n <= n)
+        )
 
     if main_transform is not None:
         main_transform.validate_quack(torch.cuda.get_device_capability(device)[0])
