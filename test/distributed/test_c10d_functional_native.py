@@ -876,6 +876,13 @@ class ProcessGroupArgTest(TestCase):
         out = torch.ops._c10d_functional.all_reduce(x, "sum", self.pg)
         torch.ops._c10d_functional.wait_tensor(out)
 
+    def test_all_reduce_avg_backward(self) -> None:
+        x = torch.rand(2, 2, requires_grad=True)
+        out = funcol.all_reduce(x, "avg", self.pg)
+        out = funcol.wait_tensor(out)
+        out.sum().backward()
+        self.assertIsNotNone(x.grad)
+
     def test_all_reduce_(self) -> None:
         x = torch.rand(2, 2)
         out = torch.ops._c10d_functional.all_reduce_(x, "sum", self.pg)
