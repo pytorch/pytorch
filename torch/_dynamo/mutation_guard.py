@@ -13,7 +13,6 @@ to runtime changes in module state and structure.
 """
 
 import functools
-import inspect
 import weakref
 from collections.abc import MutableMapping
 from typing import Any
@@ -117,10 +116,8 @@ def is_dynamic_nn_module(obj: Any, is_export: bool) -> bool:
         # A monkey patched `.forward` indicates something wacky is going on
         # Similarly a nn module also subclassed as a dict is unusual.
         return True
-    try:
-        return inspect.getattr_static(obj, "torchdynamo_force_dynamic")
-    except AttributeError:
-        pass
+    if hasattr(obj, "torchdynamo_force_dynamic"):
+        return obj.torchdynamo_force_dynamic
     if isinstance(obj, torch.nn.Module) and (
         not is_export or config.install_free_tensors
     ):
