@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 import dataclasses
-from collections.abc import Callable
+import math
+from collections.abc import Callable, Mapping
+from functools import partial
 from typing import Any, cast
 
 import torch
@@ -71,6 +73,179 @@ def mark_flex_gemm_body_gemm_node(
 FLEX_GEMM_BODY_GRAPH_PASSES: tuple[
     Callable[[torch.fx.GraphModule, torch._ops.OpOverload], None], ...
 ] = (mark_flex_gemm_body_gemm_node,)
+
+
+def flex_gemm_fast_math_sigmoid(x: torch.Tensor) -> torch.Tensor:
+    """Use the tanh sigmoid identity selected by QUACK fast math."""
+    return torch.tanh(x * 0.5) * 0.5 + 0.5
+
+
+def flex_gemm_fast_math_silu(x: torch.Tensor) -> torch.Tensor:
+    """Use the tanh SiLU identity selected by QUACK fast math."""
+    half = x * 0.5
+    return half * torch.tanh(half) + half
+
+
+def flex_gemm_fast_math_gelu(
+    x: torch.Tensor,
+    approximate: str = "none",
+    *,
+    fallback: Callable[..., Any],
+) -> torch.Tensor:
+    """Approximate exact GELU with the standard tanh formulation."""
+    if approximate != "none":
+        return fallback(x, approximate)
+    return 0.5 * x * (1.0 + torch.tanh(0.7978845608028654 * (x + 0.044715 * x * x * x)))
+
+
+FLEX_GEMM_FAST_MATH_DECOMPOSITIONS: dict[torch._ops.OpOverload, Callable[..., Any]] = {
+    torch.ops.aten.sigmoid.default: flex_gemm_fast_math_sigmoid,
+    torch.ops.aten.silu.default: flex_gemm_fast_math_silu,
+}
+
+
+def flex_gemm_body_decomposition_table(
+    kernel_options: dict[str, Any],
+    decomposition_table: Mapping[torch._ops.OpOverload, Callable[..., Any]],
+) -> dict[torch._ops.OpOverload, Callable[..., Any]] | None:
+    """Override composite body decompositions enabled by QUACK fast math."""
+    if (
+        kernel_options.get("backend") != "QUACK"
+        or kernel_options.get("fast_math") is not True
+    ):
+        return None
+    merged_decompositions = dict(decomposition_table)
+    merged_decompositions.update(FLEX_GEMM_FAST_MATH_DECOMPOSITIONS)
+    gelu = torch.ops.aten.gelu.default
+    if gelu in merged_decompositions:
+        merged_decompositions[gelu] = partial(
+            flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
+        )
+    return merged_decompositions
+
+
+def normalize_mx_scale_rounding(rounding: str | None) -> str:
+    """Resolve the MX scale-rounding recipe."""
+    if rounding is None:
+        return "rceil"
+    if rounding not in ("floor", "rceil"):
+        raise ValueError(
+            f"mx_e8m0_scale rounding must be 'floor', 'rceil', or None, got {rounding!r}"
+        )
+    return rounding
+
+
+def normalize_nvfp4_scale_rounding(rounding: str | None) -> str:
+    """Resolve the NVFP4 scale-rounding recipe."""
+    if rounding is None:
+        return "nearest"
+    if rounding != "nearest":
+        raise ValueError(
+            f"nvfp4_e4m3_scale rounding must be 'nearest' or None, got {rounding!r}"
+        )
+    return rounding
+
+
+def validate_mx_scale_max_value(max_value: float) -> None:
+    """Require a finite positive quantized-type maximum."""
+    if (
+        not isinstance(max_value, float)
+        or not math.isfinite(max_value)
+        or max_value <= 0
+    ):
+        raise ValueError(
+            f"mx_e8m0_scale max_value must be a finite positive float, got {max_value!r}"
+        )
+
+
+@torch.library.custom_op("flex_gemm::mx_e8m0_scale", mutates_args=())
+def mx_e8m0_scale(
+    amax: torch.Tensor,
+    max_value: float = 448.0,
+    rounding: str | None = None,
+) -> torch.Tensor:
+    """Encode an MX scale from an absolute max as biased E8M0.
+
+    Args:
+        amax: Absolute block maxima to encode.
+        max_value: Maximum magnitude of the quantized element type.
+        rounding: Scale calculation recipe: ``"rceil"`` (the default) or
+            ``"floor"``.
+
+    Returns:
+        E8M0 scale values with the same shape and strides as ``amax``.
+    """
+    validate_mx_scale_max_value(max_value)
+    rounding = normalize_mx_scale_rounding(rounding)
+    mbits_f32 = 23
+    f32_exp_bias = 127
+    e8m0_exp_bias = 127
+    max_abs = amax.to(torch.float32)
+    if rounding == "floor":
+        max_power = math.floor(math.log2(max_value))
+        max_abs_int32 = max_abs.view(torch.int32)
+        extracted_pow2 = (
+            (torch.bitwise_right_shift(max_abs_int32, mbits_f32)) & 0xFF
+        ) - f32_exp_bias
+        scale_e8m0_unbiased = extracted_pow2 - max_power
+        scale_e8m0_unbiased = torch.clamp(
+            scale_e8m0_unbiased, min=-e8m0_exp_bias, max=e8m0_exp_bias + 1
+        )
+        scale_e8m0_biased = (scale_e8m0_unbiased + e8m0_exp_bias).to(torch.uint8)
+        scale_e8m0_biased = torch.where(
+            torch.isnan(max_abs),
+            torch.full_like(scale_e8m0_biased, 255),
+            scale_e8m0_biased,
+        )
+    else:
+        target_amax_int32 = (max_abs / max_value).view(torch.int32)
+        scale_e8m0_biased = (
+            torch.bitwise_right_shift(target_amax_int32, mbits_f32) & 0xFF
+        ) + ((target_amax_int32 & 0x7FFFFF) != 0).to(torch.int32)
+        scale_e8m0_biased = torch.clamp(scale_e8m0_biased, min=0, max=255).to(
+            torch.uint8
+        )
+    return scale_e8m0_biased.view(torch.float8_e8m0fnu)
+
+
+@mx_e8m0_scale.register_fake
+def _(
+    amax: torch.Tensor,
+    max_value: float = 448.0,
+    rounding: str | None = None,
+) -> torch.Tensor:
+    validate_mx_scale_max_value(max_value)
+    normalize_mx_scale_rounding(rounding)
+    return torch.empty_strided(
+        tuple(amax.shape),
+        tuple(amax.stride()),
+        device=amax.device,
+        dtype=torch.float8_e8m0fnu,
+    )
+
+
+@torch.library.custom_op("flex_gemm::nvfp4_e4m3_scale", mutates_args=())
+def nvfp4_e4m3_scale(amax: torch.Tensor, rounding: str | None = None) -> torch.Tensor:
+    """Encode an NVFP4 per-block E4M3 scale using nearest rounding."""
+    normalize_nvfp4_scale_rounding(rounding)
+    scale = amax.to(torch.float32) / 6.0
+    scale = torch.clamp(
+        scale,
+        min=torch.finfo(torch.float8_e4m3fn).tiny,
+        max=torch.finfo(torch.float8_e4m3fn).max,
+    )
+    return scale.to(torch.float8_e4m3fn)
+
+
+@nvfp4_e4m3_scale.register_fake
+def _(amax: torch.Tensor, rounding: str | None = None) -> torch.Tensor:
+    normalize_nvfp4_scale_rounding(rounding)
+    return torch.empty_strided(
+        tuple(amax.shape),
+        tuple(amax.stride()),
+        device=amax.device,
+        dtype=torch.float8_e4m3fn,
+    )
 
 
 def apply_flex_gemm_body_graph_passes(
@@ -213,7 +388,12 @@ def flex_gemm_proxy_torch_dispatch_mode(
         def tracing_body_fn(*flat_body_args):
             return body_fn(*flat_body_args)
 
-        body_graph = reenter_make_fx(tracing_body_fn)(*flat_args)
+        body_graph = reenter_make_fx(
+            tracing_body_fn,
+            subgraph_decomp_table=flex_gemm_body_decomposition_table(
+                kernel_options, proxy_mode.decomposition_table
+            ),
+        )(*flat_args)
         apply_flex_gemm_body_graph_passes(body_graph, gemm_op)
         _, body_graph_name = unique_graph_id(proxy_mode, prefix="flex_gemm_body_graph")
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)

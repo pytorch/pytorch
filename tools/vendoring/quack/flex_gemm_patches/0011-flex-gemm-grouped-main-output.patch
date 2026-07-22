@@ -1,0 +1,156 @@
+diff --git a/gemm_act.py b/gemm_act.py
+index 8fb1d67..327fa63 100644
+--- a/gemm_act.py
++++ b/gemm_act.py
+@@ -491,0 +492,85 @@ class GemmActSm120(GemmActMixin, GemmSm120):
++def _grouped_n_contract_epi_tile(epi_tile, group):
++    if isinstance(epi_tile[1], cute.Layout):
++        return (epi_tile[0], cute.recast_layout(group, 1, epi_tile[1]))
++    return (epi_tile[0], epi_tile[1] // group)
++
++
++def _grouped_n_contract_epi_tile_fn(gemm, epi_tile):
++    return _grouped_n_contract_epi_tile(epi_tile, 2)
++
++
++def _grouped_n_contract4_epi_tile_fn(gemm, epi_tile):
++    return _grouped_n_contract_epi_tile(epi_tile, 4)
++
++
++class GemmGroupedNContractMixin(GemmActMixin):
++    grouped_n_contract_group = 2
++    _epi_ops = (
++        Scalar("alpha"),
++        Scalar("beta"),
++        Scalar("sr_seed", dtype=Int32),
++        RowVecLoad("mRowVecBroadcast"),
++        ColVecLoad("mColVecBroadcast"),
++        TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract_epi_tile_fn),
++    )
++
++    def epi_to_underlying_arguments(
++        self, args: GemmActMixin.EpilogueArguments, *, loc=None, ip=None
++    ):
++        params = super().epi_to_underlying_arguments(args, loc=loc, ip=ip)
++        self.cta_tile_shape_aux_out_mn = (
++            self.cta_tile_shape_mnk[0],
++            self.cta_tile_shape_mnk[1] // self.grouped_n_contract_group,
++        )
++        return params
++
++    @cute.jit
++    def epi_convert_aux_out(
++        self, tRS_rAuxOut, sr_seed, tidx, tile_coord_mnkl, num_prev_subtiles, epi_idx
++    ):
++        result = GemmActMixin.epi_convert_aux_out(
++            self,
++            tRS_rAuxOut,
++            sr_seed,
++            tidx,
++            tile_coord_mnkl,
++            num_prev_subtiles,
++            epi_idx,
++        )
++        if const_expr(
++            self.grouped_n_contract_group == 2
++            and self.arch in (90, 120)
++            and self.aux_out_dtype.width == 16
++        ):
++            permute_gated_Cregs_b16(result)
++        return result
++
++
++class GemmGroupedNContractSm80(GemmGroupedNContractMixin, GemmSm80):
++    pass
++
++
++class GemmGroupedNContractSm90(GemmGroupedNContractMixin, GemmSm90):
++    pass
++
++
++class GemmGroupedNContractSm100(GemmGroupedNContractMixin, GemmSm100):
++    pass
++
++
++class GemmGroupedNContractSm120(GemmGroupedNContractMixin, GemmSm120):
++    pass
++
++
++class GemmGroupedNContract4Sm100(GemmGroupedNContractMixin, GemmSm100):
++    grouped_n_contract_group = 4
++    _epi_ops = (
++        Scalar("alpha"),
++        Scalar("beta"),
++        Scalar("sr_seed", dtype=Int32),
++        RowVecLoad("mRowVecBroadcast"),
++        ColVecLoad("mColVecBroadcast"),
++        TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract4_epi_tile_fn),
++    )
++
++
+@@ -664,0 +750 @@ def _compile_gemm_act(
++    main_output_transform_group,
+@@ -688,0 +775,7 @@ def _compile_gemm_act(
++        "grouped_n_contract": {
++            8: GemmGroupedNContractSm80,
++            9: GemmGroupedNContractSm90,
++            10: GemmGroupedNContractSm100,
++            11: GemmGroupedNContractSm100,
++            12: GemmGroupedNContractSm120,
++        },
+@@ -690,0 +784,11 @@ def _compile_gemm_act(
++    if gemm_cls_name == "grouped_n_contract" and main_output_transform_group != 2:
++        if device_capacity[0] != 10:
++            raise NotImplementedError(
++                "grouped_n_contract groups larger than 2 are currently validated "
++                "only on SM100"
++            )
++        GemmCls = {4: GemmGroupedNContract4Sm100}.get(main_output_transform_group)
++        if GemmCls is None:
++            raise NotImplementedError(
++                f"unsupported grouped_n_contract group={main_output_transform_group}"
++            )
+@@ -706 +810,5 @@ def _compile_gemm_act(
+-    pa_n = cute.sym_int() if gemm_cls_name == "gated" else n
++    pa_n = (
++        cute.sym_int()
++        if gemm_cls_name in ("gated", "grouped_n_contract")
++        else n
++    )
+@@ -720 +828,3 @@ def _compile_gemm_act(
+-        pa_leading_dim = 1 if gemm_cls_name == "gated" else pa_leading
++        pa_leading_dim = (
++            1 if gemm_cls_name in ("gated", "grouped_n_contract") else pa_leading
++        )
+@@ -900,0 +1011 @@ def gemm_act(
++    main_output_transform_group: int | None = None,
+@@ -950,0 +1062,16 @@ def gemm_act(
++    if main_output_transform_group is not None:
++        if main_output_transform_group not in (2, 4):
++            raise NotImplementedError(
++                f"unsupported grouped_n_contract group={main_output_transform_group}"
++            )
++        if main_output_transform_group == 4 and concat_layout and "B" in concat_layout:
++            raise NotImplementedError(
++                "grouped_n_contract group 4 does not yet support chunked B layout"
++            )
++        if tensor_epilogue_fn is None and tensor_epilogue_key is None:
++            raise RuntimeError("grouped_n_contract requires a generated tensor epilogue")
++        if tensor_epilogue_returns_aux or tensor_epilogue_returns_local_reduce:
++            raise NotImplementedError(
++                "grouped_n_contract does not compose with auxiliary outputs"
++            )
++        gemm_cls_name = "grouped_n_contract"
+@@ -1034,0 +1162,10 @@ def gemm_act(
++    if main_output_transform_group is not None:
++        if device_capacity[0] == 12:
++            raise NotImplementedError(
++                "grouped_n_contract is not yet supported on SM120"
++            )
++        if main_output_transform_group > 2 and device_capacity[0] != 10:
++            raise NotImplementedError(
++                "grouped_n_contract groups larger than 2 are currently validated "
++                "only on SM100"
++            )
+@@ -1158,0 +1296 @@ def gemm_act(
++        0 if main_output_transform_group is None else main_output_transform_group,
