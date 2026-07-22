@@ -7265,6 +7265,106 @@ def forward(self, primals_1, tangents_1):
         # so the producer op does not appear in the backward graph.
         self.assertNotIn("topk", bw_graph["gm"].code)
 
+    def _assert_dropout_fw_bw_mask_consistency(self, memory_budget):
+        """Partitioner-forced recompute must not redraw dropout randomness in
+        the backward (#190717): the gradient must match the mask the forward
+        applied, derived here from the compiled forward's own output.
+        """
+        # The tests sharing this helper differ only in config, so recompile
+        torch._dynamo.reset()
+        w = torch.arange(1.0, 26.0).view(5, 5)
+
+        def f(x):
+            return F.dropout(x @ w, 0.5, True)
+
+        with torch._functorch.config.patch(activation_memory_budget=memory_budget):
+            compiled = torch.compile(f)
+            torch.manual_seed(42)
+            x = torch.ones(2, 5, requires_grad=True)
+            out = compiled(x)
+            out.sum().backward()
+        # x @ w is strictly positive, so the forward output reveals the mask
+        # actually applied; the dropout scale at p=0.5 is 2.
+        mask = (out.detach() != 0).float()
+        self.assertEqual(x.grad, 2.0 * mask @ w.t())
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_rng_budget_zero_dropout_mask_consistency(self):
+        self._assert_dropout_fw_bw_mask_consistency(memory_budget=0.0)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_rng_budget_one_dropout_mask_consistency(self):
+        self._assert_dropout_fw_bw_mask_consistency(memory_budget=1.0)
+
+    def _assert_rng_mlp_eager_parity(self, memory_budget):
+        """With fallback_random, compiled fw+bw must exactly match eager even
+        when the memory budget forces recompute of everything else (#190717).
+        """
+        # The tests sharing this helper differ only in config, so recompile
+        torch._dynamo.reset()
+
+        def f(x, w1, w2):
+            h = F.relu(x @ w1)
+            h = F.dropout(h, 0.5, True)
+            h = h * torch.randn_like(h)
+            h = F.relu(h @ w2)
+            return F.dropout(h, 0.3, True)
+
+        def run(fn, seed):
+            torch.manual_seed(seed)
+            args = [
+                torch.rand(64, 64, dtype=torch.float64, requires_grad=True)
+                for _ in range(3)
+            ]
+            out = fn(*args)
+            out.sum().backward()
+            return out, args
+
+        fallback = torch._inductor.config.patch(fallback_random=True)
+        budget = torch._functorch.config.patch(activation_memory_budget=memory_budget)
+        with fallback, budget:
+            compiled = torch.compile(f)
+            # Warm up first so compilation cannot perturb the measured rng
+            run(compiled, seed=99999)
+            eager_out, eager_args = run(f, seed=42)
+            compiled_out, compiled_args = run(compiled, seed=42)
+        self.assertEqual(compiled_out, eager_out)
+        for eager_arg, compiled_arg in zip(eager_args, compiled_args):
+            self.assertEqual(compiled_arg.grad, eager_arg.grad)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_rng_budget_zero_eager_parity(self):
+        self._assert_rng_mlp_eager_parity(memory_budget=0.0)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_rng_budget_knapsack_eager_parity(self):
+        # A small fractional budget takes the knapsack path instead of the
+        # budget == 0 shortcut.
+        self._assert_rng_mlp_eager_parity(memory_budget=0.005)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @torch._functorch.config.patch(activation_memory_budget=0.0)
+    def test_min_cut_partitioner_rng_budget_zero_backward_only_rng(self):
+        """Backward-only rng ops are not forward nodes and must not be forced
+        into the saved values (that would make an invalid node an fw output).
+        """
+
+        class NoisyGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return g * torch.rand_like(g)
+
+        def f(x):
+            return NoisyGrad.apply(x * 2.0).sum()
+
+        x = torch.randn(8, 8, requires_grad=True)
+        torch.compile(f)(x).backward()
+        self.assertEqual(x.grad.shape, x.shape)
+
     def test_disable_functionalization_ignores_effect_token_metadata(self):
         def fn(args):
             (x,) = args
