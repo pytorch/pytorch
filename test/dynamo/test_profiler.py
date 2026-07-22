@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import gc
 import threading
 import unittest
 from unittest.mock import patch
@@ -67,7 +68,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         # Check for the main dynamo event (follows pattern from test_dynamo_timed_profiling_backend_compile)
         self.assertTrue(
             any("(dynamo_timed)" in name for name in event_names),
-            f"Expected dynamo_timed events in profiler: {event_names}",
+            lambda msg: f"{msg}\nExpected dynamo_timed events in profiler: {event_names}",
         )
 
     def test_profiler_with_stack_skips_compile_python_tracing(self):
@@ -88,15 +89,15 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         event_names = [e.name for e in prof.events()]
         self.assertTrue(
             any("Torch-Compiled Region" in name for name in event_names),
-            f"Expected compiled-region event in profiler: {event_names}",
+            lambda msg: f"{msg}\nExpected compiled-region event in profiler: {event_names}",
         )
         self.assertFalse(
             any("torch/_dynamo/symbolic_convert.py" in name for name in event_names),
-            f"Profiler captured compiler Python frames: {event_names}",
+            lambda msg: f"{msg}\nProfiler captured compiler Python frames: {event_names}",
         )
         self.assertFalse(
             any("torch/_dynamo/trace_rules.py" in name for name in event_names),
-            f"Profiler captured compiler Python frames: {event_names}",
+            lambda msg: f"{msg}\nProfiler captured compiler Python frames: {event_names}",
         )
 
     def test_profiler_with_stack_skips_compile_fx_backward_python_tracing(self):
@@ -137,15 +138,16 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(inner_compile_calls), 1)
         self.assertTrue(inner_compile_calls[0]["is_backward"])
         self.assertTrue(
-            any("compile_fx_backward" in name for name in compile_fx_events)
+            any("compile_fx_backward" in name for name in compile_fx_events),
+            lambda msg: f"{msg}\nExpected compile_fx_backward event: {event_names}",
         )
         self.assertTrue(
             all("compile_fx_backward" in name for name in compile_fx_events),
-            f"Profiler captured compiler Python frames: {event_names}",
+            lambda msg: f"{msg}\nProfiler captured compiler Python frames: {event_names}",
         )
         self.assertFalse(
             any("inner_compile" in name for name in event_names),
-            f"Profiler captured compiler Python frames: {event_names}",
+            lambda msg: f"{msg}\nProfiler captured compiler Python frames: {event_names}",
         )
 
     @unittest.skipIf(
@@ -158,8 +160,11 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def suppressed_profile_all_threads_marker():
             return 1
 
-        def visible_profile_all_threads_marker():
+        def suppressed_nested_profile_all_threads_marker():
             return 2
+
+        def visible_profile_all_threads_marker():
+            return 3
 
         with torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU],
@@ -171,6 +176,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             with _disable_profiler_python_tracing():
                 with _disable_profiler_python_tracing():
                     suppressed_profile_all_threads_marker()
+                suppressed_nested_profile_all_threads_marker()
             visible_profile_all_threads_marker()
 
         event_names = [e.name for e in prof.events()]
@@ -178,12 +184,159 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             any(
                 "suppressed_profile_all_threads_marker" in name for name in event_names
             ),
-            f"Profiler captured compiler Python frames: {event_names}",
+            lambda msg: f"{msg}\nProfiler captured compiler Python frames: {event_names}",
+        )
+        self.assertFalse(
+            any(
+                "suppressed_nested_profile_all_threads_marker" in name
+                for name in event_names
+            ),
+            lambda msg: f"{msg}\nProfiler resumed inside a nested guard: {event_names}",
         )
         self.assertTrue(
             any("visible_profile_all_threads_marker" in name for name in event_names),
-            f"Profiler did not resume Python tracing: {event_names}",
+            lambda msg: f"{msg}\nProfiler did not resume Python tracing: {event_names}",
         )
+
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "profile_all_threads fails in debug builds, see https://github.com/pytorch/pytorch/pull/150059",
+    )
+    def test_disable_profiler_python_tracing_is_thread_local(self):
+        from torch._dynamo.convert_frame import _disable_profiler_python_tracing
+
+        def suppressed_main_thread_marker():
+            return 1
+
+        def visible_worker_thread_marker():
+            return 2
+
+        def visible_main_thread_marker():
+            return 3
+
+        worker_ready = threading.Event()
+        run_worker_marker = threading.Event()
+        worker_marker_done = threading.Event()
+        finish_worker = threading.Event()
+
+        def worker():
+            worker_ready.set()
+            run_worker_marker.wait()
+            visible_worker_thread_marker()
+            worker_marker_done.set()
+            finish_worker.wait()
+
+        worker_thread = threading.Thread(target=worker)
+        worker_thread.start()
+        self.assertTrue(worker_ready.wait(timeout=10))
+
+        try:
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU],
+                with_stack=True,
+                experimental_config=torch._C._profiler._ExperimentalConfig(
+                    profile_all_threads=True
+                ),
+            ) as prof:
+                with _disable_profiler_python_tracing():
+                    suppressed_main_thread_marker()
+                    run_worker_marker.set()
+                    self.assertTrue(worker_marker_done.wait(timeout=10))
+                visible_main_thread_marker()
+        finally:
+            finish_worker.set()
+            worker_thread.join(timeout=10)
+
+        event_names = [e.name for e in prof.events()]
+        self.assertFalse(
+            any("suppressed_main_thread_marker" in name for name in event_names),
+            lambda msg: f"{msg}\nProfiler captured paused-thread frames: {event_names}",
+        )
+        self.assertTrue(
+            any("visible_worker_thread_marker" in name for name in event_names),
+            lambda msg: f"{msg}\nProfiler paused an unrelated thread: {event_names}",
+        )
+        self.assertTrue(
+            any("visible_main_thread_marker" in name for name in event_names),
+            lambda msg: f"{msg}\nProfiler did not resume the paused thread: {event_names}",
+        )
+
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "profile_all_threads fails in debug builds, see https://github.com/pytorch/pytorch/pull/150059",
+    )
+    def test_disable_profiler_python_tracing_during_teardown(self):
+        from torch._dynamo.convert_frame import _disable_profiler_python_tracing
+
+        worker_ready = threading.Event()
+        start_toggling = threading.Event()
+        first_toggle_done = threading.Event()
+        stop_toggling = threading.Event()
+
+        def worker():
+            worker_ready.set()
+            start_toggling.wait()
+            while not stop_toggling.is_set():
+                with _disable_profiler_python_tracing():
+                    first_toggle_done.set()
+
+        worker_thread = threading.Thread(target=worker)
+        worker_thread.start()
+        self.assertTrue(worker_ready.wait(timeout=10))
+
+        try:
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU],
+                with_stack=True,
+                experimental_config=torch._C._profiler._ExperimentalConfig(
+                    profile_all_threads=True
+                ),
+            ):
+                start_toggling.set()
+                self.assertTrue(first_toggle_done.wait(timeout=10))
+        finally:
+            stop_toggling.set()
+            worker_thread.join(timeout=10)
+
+        self.assertFalse(worker_thread.is_alive())
+
+        def visible_next_session_marker():
+            return 1
+
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            with_stack=True,
+        ) as prof:
+            visible_next_session_marker()
+
+        event_names = [e.name for e in prof.events()]
+        self.assertTrue(
+            any("visible_next_session_marker" in name for name in event_names),
+            lambda msg: f"{msg}\nNext profiler session was not usable: {event_names}",
+        )
+
+    def test_disable_profiler_python_tracing_preserves_gc_events(self):
+        from torch._dynamo.convert_frame import _disable_profiler_python_tracing
+
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU],
+                with_stack=True,
+                experimental_config=torch._C._profiler._ExperimentalConfig(
+                    record_python_gc_info=True
+                ),
+            ) as prof:
+                with _disable_profiler_python_tracing():
+                    pass
+                gc.collect()
+        finally:
+            if gc_was_enabled:
+                gc.enable()
+
+        event_names = [e.name for e in prof.events()]
+        self.assertIn("Python GC", event_names)
 
     def test_record_functions_thread_local(self):
         """Verify record_functions dict is thread-local (no cross-thread contamination)"""
@@ -206,7 +359,9 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         # Each thread should only see its own entry (length 1)
         for thread_id, length in results.items():
             self.assertEqual(
-                length, 1, f"Thread {thread_id} saw {length} entries instead of 1"
+                length,
+                1,
+                lambda msg: f"{msg}\nThread {thread_id} saw {length} entries instead of 1",
             )
 
     def test_chromium_event_timed_scoped_reset_preserves_outer_event(self):
@@ -376,6 +531,26 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
                 "Expected one lookup profiler event for one opt_fn run",
             )
 
+    def test_profiler_guardless_cache_hit_skips_guard_lookup(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn((2, 2))
+        opt_fn = torch.compile(
+            fn,
+            backend="eager",
+            options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe},
+        )
+        opt_fn(x)
+
+        with torch.profiler.profile() as prof:
+            self.assertEqual(opt_fn(x), fn(x))
+
+        events = [
+            event for event in prof.events() if "TorchDynamo Cache Lookup" in event.name
+        ]
+        self.assertEqual(events, [])
+
     def test_profiler_cache_lookup_profiler_step(self):
         def fn(x, y, z):
             return torch.add(torch.sub(x, y), z)
@@ -480,15 +655,15 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     _record_function_enter_new = torch.ops.profiler._record_function_enter_new('my_net1', None)
-    a = l_x_.sin();  l_x_ = None
+    sin = l_x_.sin();  l_x_ = None
     _record_function_exit__record_function = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new);  _record_function_enter_new = _record_function_exit__record_function = None
     _record_function_enter_new_1 = torch.ops.profiler._record_function_enter_new('my_cos', None)
-    b = a.cos();  a = None
+    cos = sin.cos();  sin = None
     _record_function_exit__record_function_1 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_1);  _record_function_enter_new_1 = _record_function_exit__record_function_1 = None
     _record_function_enter_new_2 = torch.ops.profiler._record_function_enter_new('my_net2', None)
-    c = b + 2;  b = None
+    add = cos + 2;  cos = None
     _record_function_exit__record_function_2 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_2);  _record_function_enter_new_2 = _record_function_exit__record_function_2 = None
-    return (c,)""",
+    return (add,)""",
         )
         self.assertExpectedInline(
             backend.fw_graphs[0].code.strip(),
@@ -557,8 +732,8 @@ def forward(self, arg0_1):
 def forward(self, L_args_0_ : torch.Tensor):
     l_args_0_ = L_args_0_
     _record_function_enter_new = torch.ops.profiler._record_function_enter_new('my_net', None)
-    a = l_args_0_.sin();  l_args_0_ = None
-    add = a + 2;  a = None
+    sin = l_args_0_.sin();  l_args_0_ = None
+    add = sin + 2;  sin = None
     _record_function_exit__record_function = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new);  _record_function_enter_new = _record_function_exit__record_function = None
     return (add,)""",
         )

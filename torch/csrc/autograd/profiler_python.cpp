@@ -375,8 +375,8 @@ void ValueCache::store<CallType::PyCall>(
   if (C10_UNLIKELY(locations.find(key) == locations.end())) {
     locations[key] = {
         key.line_number_,
-        at::StringView(key.filename_),
-        at::StringView(key.name_)};
+        at::StringView(std::string(key.filename_)),
+        at::StringView(std::string(key.name_))};
   }
 }
 
@@ -666,6 +666,7 @@ struct ThreadLocalResults {
 
   int active_frames_{0};
   int remaining_start_frames_{0};
+  size_t python_tracing_pause_depth_{0};
 
   // Guards against teardown racing with in-flight callbacks.
   // pyProfileFn acquires this on entry and releases on exit.
@@ -702,6 +703,8 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   void register_gc_callback() override;
   void stop() override;
   void restart() override;
+  void pause_current_thread() override;
+  void resume_current_thread() override;
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<c10::time_t(c10::approx_time_t)> time_converter,
       std::vector<python_tracer::CompressedEvent>& enters,
@@ -1213,6 +1216,22 @@ void PythonTracer::restart() {
 #endif
 }
 
+void PythonTracer::pause_current_thread() {
+  pybind11::gil_scoped_acquire gil;
+  auto* local_results = findThreadLocalResults(PyThreadState_Get());
+  if (local_results) {
+    ++local_results->python_tracing_pause_depth_;
+  }
+}
+
+void PythonTracer::resume_current_thread() {
+  pybind11::gil_scoped_acquire gil;
+  auto* local_results = findThreadLocalResults(PyThreadState_Get());
+  if (local_results && local_results->python_tracing_pause_depth_ > 0) {
+    --local_results->python_tracing_pause_depth_;
+  }
+}
+
 // NOLINTNEXTLINE(bugprone-exception-escape)
 PythonTracer::~PythonTracer() {
   if (active_) {
@@ -1588,6 +1607,9 @@ int PythonTracer::pyProfileFn(
   // return and C++ exception paths (e.g. from pybind11 in ValueCache::store).
   auto release_sem =
       c10::make_scope_exit([&]() { local_results->profile_sem.release(); });
+  if (local_results->python_tracing_pause_depth_ > 0) {
+    return 0;
+  }
   switch (what) {
     case PyTrace_CALL:
       local_results->active_tracer_->recordPyCall(*local_results, frame, false);

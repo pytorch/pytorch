@@ -87,7 +87,6 @@ foreach_map_copy = foreach_map_wrapper(aten.copy)
 # More general functions
 foreach_map_add_fn = foreach_map_wrapper(add_op)
 foreach_map_add_inplace = foreach_map_wrapper(add_inplace_op)
-foreach_map_recipaddmul = foreach_map_wrapper(addrecip_op)
 foreach_map_addcmul = foreach_map_wrapper(addcmul_op)
 foreach_map_recipaddmul = foreach_map_wrapper(recipaddmul_op)
 

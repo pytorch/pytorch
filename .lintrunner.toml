@@ -37,6 +37,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/flake8_linter.py',
     '--',
@@ -134,6 +136,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyrefly_linter.py',
     '--config=pyrefly.toml',
@@ -196,6 +200,7 @@ exclude_patterns = [
     'aten/src/ATen/Parallel*.h',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
+    'c10/xpu/XPUMacros.h',
     'c10/benchmark/intrusive_ptr_benchmark.cpp',
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
@@ -219,6 +224,51 @@ exclude_patterns = [
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
     'torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h',
+    # TODO: Temporary suppression to be removed soon
+    # See https://github.com/pytorch/pytorch/issue/178341
+    # Pre-existing violations surfaced when --all-files linting got re-enabled for
+    # clang-tidy
+    'aten/src/ATen/core/IListRef.h',
+    'aten/src/ATen/dlpack.h',
+    'aten/src/ATen/native/mkldnn/xpu/detail/Deconv.cpp',
+    'c10/core/AllocatorConfig.cpp',
+    'c10/core/AutogradState.cpp',
+    'c10/core/CachingDeviceAllocator.h',
+    'c10/core/Device.cpp',
+    'c10/core/DeviceCapability.h',
+    'c10/core/impl/DeviceGuardImplInterface.h',
+    'c10/core/impl/InlineDeviceGuard.h',
+    'c10/core/impl/InlineStreamGuard.h',
+    'c10/core/impl/SizesAndStrides.h',
+    'c10/core/Scalar.h',
+    'c10/core/ScalarType.h',
+    'c10/core/Stream.h',
+    'c10/core/SymInt.h',
+    'c10/core/SymIntArrayRef.h',
+    'c10/cuda/CUDACachingAllocator.cpp',
+    'c10/cuda/CUDACachingAllocator.h',
+    'c10/cuda/CUDAEvent.h',
+    'c10/cuda/PeerToPeerAccess.cpp',
+    'c10/mobile/CPUProfilingAllocator.cpp',
+    'c10/util/accumulate.h',
+    'c10/util/ApproximateClock.cpp',
+    'c10/util/BFloat16-math.h',
+    'c10/util/generic_math.h',
+    'c10/util/IntrusiveList.h',
+    'c10/util/irange.h',
+    'c10/util/llvmMathExtras.h',
+    'c10/util/MathConstants.h',
+    'c10/util/NetworkFlow.cpp',
+    'c10/util/order_preserving_flat_hash_map.h',
+    'c10/util/overflows.h',
+    'c10/util/safe_numerics.h',
+    'c10/util/signal_handler.cpp',
+    'c10/util/StringUtil.cpp',
+    'c10/util/typeid.h',
+    'torch/csrc/dynamo/guards.cpp',
+    'torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp',
+    'torch/headeronly/util/bit_cast.h',
+    'torch/headeronly/util/complex.h',
 ]
 init_command = [
     'python3',
@@ -362,6 +412,8 @@ include_patterns=['aten/src/ATen/native/native_functions.yaml']
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/nativefunctions_linter.py',
     '--native-functions-yml=aten/src/ATen/native/native_functions.yaml',
@@ -374,6 +426,8 @@ include_patterns=['.github/workflows/**/*.yml']
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/gha_linter.py',
     '--',
@@ -672,6 +726,31 @@ command = [
 ]
 
 [[linter]]
+code = 'ISINSTANCE_FAKE_TENSOR'
+include_patterns = ['torch/**/*.py']
+exclude_patterns = [
+    '**/fb/**',
+    'torch/testing/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=isinstance\([^)]*\bFakeTensor\b',
+    '--line-allowlist-pattern=noqa: ISINSTANCE_FAKE_TENSOR',
+    '--linter-name=ISINSTANCE_FAKE_TENSOR',
+    '--error-name=isinstance(x, FakeTensor)',
+    """--error-description=\
+        Do not use isinstance(x, FakeTensor) because it only matches \
+        Python FakeTensors and misses C++ FakeTensors. \
+        Use is_fake_tensor(x) for a leaf fake check. \
+        If you must match only a Python FakeTensor instance, keep isinstance \
+        and add a `# noqa: ISINSTANCE_FAKE_TENSOR` comment to the line.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'PYBIND11_SPECIALIZATION'
 include_patterns = [
     '**/*.cpp',
@@ -789,6 +868,7 @@ exclude_patterns = [
     'aten/src/ATen/test/**',
     'c10/cuda/CUDAFunctions.h',
     'c10/cuda/CUDACachingAllocator.cpp',
+    'c10/cuda/CUDAMallocAsyncAllocator.cpp',
     '**/fb/**',
 ]
 command = [
@@ -909,6 +989,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/cmake_linter.py',
     '--config=.cmakelintrc',
@@ -927,6 +1009,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/shellcheck_linter.py',
     '--',
@@ -1045,6 +1129,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/test_has_main_linter.py',
     '--',
@@ -1131,6 +1217,8 @@ include_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/workflow_consistency_linter.py',
     '--',
@@ -1149,6 +1237,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/no_workflows_on_fork.py',
     '--',
@@ -1160,6 +1250,8 @@ code = 'CODESPELL'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/codespell_linter.py',
     '--',
@@ -1195,6 +1287,8 @@ include_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyfmt_linter.py',
     '--',
@@ -1478,6 +1572,8 @@ code = 'PYPROJECT'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyproject_linter.py',
     '--',
@@ -1492,6 +1588,8 @@ code = 'CMAKE_MINIMUM_REQUIRED'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/cmake_minimum_required_linter.py',
     '--',
@@ -1576,6 +1674,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/ruff_linter.py',
     '--config=pyproject.toml',
@@ -1890,4 +1990,16 @@ command = [
     'tools/linter/adapters/generated_shims_version_linter.py',
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'UNSPECIFIED_BACKEND'
+include_patterns = [
+    'test/dynamo/**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/unspecified_backend_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
 ]
