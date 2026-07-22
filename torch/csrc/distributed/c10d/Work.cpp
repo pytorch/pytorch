@@ -1,6 +1,5 @@
 #include <ATen/ThreadLocalState.h>
 #include <distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/cuda/StreamBlock.hpp>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
@@ -171,70 +170,6 @@ void Work::finish(std::exception_ptr exception) {
   }
   lock.unlock();
   cv_.notify_all();
-  retireFlightRecorderTrace();
-}
-
-void Work::setFlightRecorderTrace(
-    std::optional<size_t> id,
-    std::optional<size_t> reset_epoch,
-    std::function<void()> completion_callback) {
-  bool retire = false;
-  std::function<void()> callback;
-  {
-    std::lock_guard<std::mutex> lock(flightRecorderTraceInfo_->mutex);
-    flightRecorderTraceInfo_->id = id;
-    flightRecorderTraceInfo_->reset_epoch = reset_epoch;
-    flightRecorderTraceInfo_->completion_callback =
-        std::move(completion_callback);
-    retire = flightRecorderTraceInfo_->completion_observed &&
-        !flightRecorderTraceInfo_->retired && id.has_value();
-    flightRecorderTraceInfo_->retired = retire;
-    if (retire) {
-      callback = flightRecorderTraceInfo_->completion_callback;
-    }
-  }
-  if (retire) {
-    if (callback) {
-      callback();
-    }
-    FlightRecorder<c10::Event>::get()->retire_id(
-        id, reset_epoch, /*compute_duration=*/false);
-  }
-}
-
-void Work::retireFlightRecorderTrace() {
-  std::optional<size_t> id;
-  std::optional<size_t> reset_epoch;
-  std::function<void()> callback;
-  {
-    std::lock_guard<std::mutex> lock(flightRecorderTraceInfo_->mutex);
-    flightRecorderTraceInfo_->completion_observed = true;
-    if (flightRecorderTraceInfo_->retired ||
-        !flightRecorderTraceInfo_->id.has_value()) {
-      return;
-    }
-    id = flightRecorderTraceInfo_->id;
-    reset_epoch = flightRecorderTraceInfo_->reset_epoch;
-    callback = flightRecorderTraceInfo_->completion_callback;
-    flightRecorderTraceInfo_->retired = true;
-  }
-  if (callback) {
-    callback();
-  }
-  FlightRecorder<c10::Event>::get()->retire_id(
-      id, reset_epoch, /*compute_duration=*/false);
-}
-
-std::string Work::getFlightRecorderTraceback() const {
-  std::optional<size_t> id;
-  std::optional<size_t> reset_epoch;
-  {
-    std::lock_guard<std::mutex> lock(flightRecorderTraceInfo_->mutex);
-    id = flightRecorderTraceInfo_->id;
-    reset_epoch = flightRecorderTraceInfo_->reset_epoch;
-  }
-  auto entry = FlightRecorder<c10::Event>::get()->getEntry(id, reset_epoch);
-  return entry ? entry->getTraceback() : "";
 }
 
 void Work::finishAndThrow(std::exception_ptr exception) {
@@ -245,11 +180,8 @@ void Work::finishAndThrow(std::exception_ptr exception) {
     recordFunctionEndCallback_();
     recordFunctionEndCallback_ = nullptr;
   }
-  auto exception_to_throw = exception_;
-  lock.unlock();
-  retireFlightRecorderTrace();
-  if (exception_to_throw) {
-    std::rethrow_exception(exception_to_throw);
+  if (exception_) {
+    std::rethrow_exception(exception_);
   }
 }
 

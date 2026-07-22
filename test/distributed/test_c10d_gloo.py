@@ -10,6 +10,7 @@ import pickle
 import random
 import sys
 import tempfile
+import time
 import unittest
 from datetime import timedelta
 from functools import reduce
@@ -3247,6 +3248,17 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
         )
         return c10d.distributed_c10d._get_default_group()
 
+    def _wait_for_fr_retirement(self):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            entries = json.loads(torch._C._distributed_c10d._dump_fr_trace_json())[
+                "entries"
+            ]
+            if entries and all(entry["retired"] for entry in entries):
+                return
+            time.sleep(0.05)
+        self.fail(f"Flight Recorder entries were not retired: {entries}")
+
     def _verify_trace(self, t, is_json):
         ver = t["version"]
         self.assertEqual(ver, "2.10")
@@ -3290,6 +3302,7 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
         for _ in range(2):
             f = pg.allreduce(a)
             f.wait()
+        self._wait_for_fr_retirement()
         t = json.loads(
             torch._C._distributed_c10d._dump_fr_trace_json(includeCollectives=True)
         )
@@ -3303,6 +3316,7 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
         for _ in range(2):
             f = pg.allreduce(a)
             f.wait()
+        self._wait_for_fr_retirement()
         t = pickle.loads(
             torch._C._distributed_c10d._dump_fr_trace(includeCollectives=True)
         )
@@ -3328,6 +3342,7 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
             pg.reduce_scatter(xs, ys).wait()
             f = pg.allreduce(a)
             f.wait()
+        self._wait_for_fr_retirement()
         t = pickle.loads(torch._C._distributed_c10d._dump_fr_trace())
         t = t["entries"]
         self.assertEqual(len(t), 10)

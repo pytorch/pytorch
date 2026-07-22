@@ -667,6 +667,77 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_gather_into_tensor(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        device = torch.device(f"cuda:{self.rank:d}")
+        torch.cuda.set_device(device)
+        world_size = self.world_size
+
+        # Each rank contributes a distinct block; the flat output on the
+        # destination rank is the concatenation of every rank's block.
+        elems = 3
+        for dst in range(world_size):
+            tensor = torch.arange(elems, device=device).float() + self.rank * elems
+            if self.rank == dst:
+                gather_tensor = torch.empty(world_size * elems, device=device)
+            else:
+                gather_tensor = None
+
+            dist.gather_into_tensor(tensor, gather_tensor, dst=dst)
+
+            if self.rank == dst:
+                expected = torch.arange(world_size * elems, device=device).float()
+                self.assertEqual(gather_tensor, expected)
+            else:
+                self.assertIsNone(gather_tensor)
+
+        # Stack form: output shaped [world_size, *tensor.shape].
+        tensor = torch.ones(2, 2, device=device) * self.rank
+        gather_tensor = (
+            torch.empty(world_size, 2, 2, device=device) if self.rank == 0 else None
+        )
+        dist.gather_into_tensor(tensor, gather_tensor, dst=0)
+        if self.rank == 0:
+            expected = torch.stack(
+                [torch.ones(2, 2, device=device) * r for r in range(world_size)]
+            )
+            self.assertEqual(gather_tensor, expected)
+
+        # Async variant returns a work handle that can be waited on.
+        tensor = torch.arange(elems, device=device).float() + self.rank * elems
+        gather_tensor = (
+            torch.empty(world_size * elems, device=device) if self.rank == 0 else None
+        )
+        work = dist.gather_into_tensor(tensor, gather_tensor, dst=0, async_op=True)
+        work.wait()
+        if self.rank == 0:
+            expected = torch.arange(world_size * elems, device=device).float()
+            self.assertEqual(gather_tensor, expected)
+
+        # Negative path: the destination rank validates the output tensor
+        # locally (before any NCCL op is issued), so only the root needs to
+        # participate -- a wrong-sized or wrong-dtype output must raise.
+        if self.rank == 0:
+            good_input = torch.arange(elems, device=device).float()
+            with self.assertRaises((ValueError, RuntimeError)):
+                bad_size = torch.empty(world_size * elems + 1, device=device)
+                dist.gather_into_tensor(good_input, bad_size, dst=0)
+            with self.assertRaises((ValueError, RuntimeError)):
+                bad_dtype = torch.empty(world_size * elems, device=device).double()
+                dist.gather_into_tensor(good_input, bad_dtype, dst=0)
+        dist.barrier()
+
+        # NOTE: on NVIDIA (NCCL >= 2.28.3) this exercises the native ncclGather
+        # path; on ROCm (RCCL, which lacks ncclGather) it exercises the < 2.28.3
+        # send/recv fallback, so both code paths are covered across CI.
+
+        c10d.destroy_process_group()
+
     def _helper_test_extra_cuda_context_by_nvml(self):
         """
         A helper for `test_extra_cuda_context`, if pynvml is available.
@@ -5681,6 +5752,18 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         pg = c10d.distributed_c10d._get_default_group()
         return pg
 
+    def _wait_for_fr_retirement(self, pg):
+        pg._wait_for_pending_works()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            entries = json.loads(torch._C._distributed_c10d._dump_nccl_trace_json())[
+                "entries"
+            ]
+            if entries and all(entry["retired"] for entry in entries):
+                return
+            time.sleep(0.05)
+        self.fail(f"Flight Recorder entries were not retired: {entries}")
+
     def tearDown(self):
         os.environ.pop("TORCH_NCCL_DEBUG_INFO_TEMP_FILE", None)
         os.environ.pop("TORCH_NCCL_DEBUG_INFO_PIPE_FILE", None)
@@ -5805,7 +5888,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
         t = json.loads(
             torch._C._distributed_c10d._dump_nccl_trace_json(
                 includeCollectives=include_collectives
@@ -5828,7 +5911,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
         t = pickle.loads(
             torch._C._distributed_c10d._dump_nccl_trace(
                 includeCollectives=include_collectives
@@ -5854,13 +5937,13 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
         torch._C._distributed_c10d._reset_fr_recording_nccl()
         for _ in range(4):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), 4)
         dist.destroy_process_group()
@@ -5923,7 +6006,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         t = t["entries"]
         self.assertEqual(len(t), 10)
@@ -5953,6 +6036,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
+        self._wait_for_fr_retirement(pg)
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         t = t["entries"]
         self.assertEqual(len(t), 2)
@@ -5977,7 +6061,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         torch.cuda.synchronize(device=device)
 
         # wait for all works to be retired
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         t = t["entries"]
         self.assertEqual(len(t), 10)
@@ -6111,7 +6195,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_batched_send_recv(self, op_sizes_per_coalesce):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        self._create_process_group_nccl()
+        pg = self._create_process_group_nccl()
 
         num_coalesced_ops = 20
         ops_per_coalesce = len(op_sizes_per_coalesce)
@@ -6128,6 +6212,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             dist.batch_isend_irecv(ops).pop().wait()
 
         torch.cuda.synchronize(device=self.local_device)
+        self._wait_for_fr_retirement(pg)
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), num_coalesced_ops * ops_per_coalesce)
@@ -6181,7 +6266,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        self._create_process_group_nccl()
+        pg = self._create_process_group_nccl()
 
         compiled_fn = torch.compile(_pattern)
 
@@ -6211,6 +6296,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     )
 
         torch.cuda.synchronize()
+        self._wait_for_fr_retirement(pg)
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertTrue(len(t["entries"]) > 0)
@@ -6611,7 +6697,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     dist.send(tensor, 0)
 
         torch.cuda.synchronize(device=self.local_device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), num_repeats * (ops_per_repeat))
@@ -6648,7 +6734,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         )
         torch.cuda.synchronize(device=self.rank)
         self.assertEqual(output_tensor, expected_tensor)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), 1)
@@ -6681,7 +6767,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
 
         torch.cuda.synchronize(device=self.rank)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
 
@@ -6727,7 +6813,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
 
         # Verify buffer is full with 10 entries
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -6741,7 +6827,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
 
         # Verify we get exactly 10 new entries, not 20
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -6783,7 +6869,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
 
         # Reset the flight recorder
         torch._C._distributed_c10d._reset_fr_recording_nccl()
@@ -6793,7 +6879,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
 
         # Verify we only get the 3 new entries, not 10
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -6830,7 +6916,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
 
         # Reset at this point (reset happens at index 5)
         torch._C._distributed_c10d._reset_fr_recording_nccl()
@@ -6841,7 +6927,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
 
         # Should get exactly 8 entries, properly ordered
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -6881,7 +6967,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
 
         # First reset
         torch._C._distributed_c10d._reset_fr_recording_nccl()
@@ -6891,7 +6977,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
 
         # Second reset
         torch._C._distributed_c10d._reset_fr_recording_nccl()
@@ -6901,7 +6987,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        pg._wait_for_pending_works()
+        self._wait_for_fr_retirement(pg)
 
         # Should only see the last 4 entries
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())

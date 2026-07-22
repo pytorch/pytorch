@@ -34,6 +34,7 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/torch.h>
 #include <optional>
@@ -426,7 +427,7 @@ static std::
 }
 
 void reset_nccl_trace() {
-  reset_fr_trace();
+  resetFlightRecorder();
 }
 
 std::string dump_nccl_trace(
@@ -439,13 +440,13 @@ std::string dump_nccl_trace(
     printNcclCommProxyTrace("Received dump signal " + ncclUniqueIDStr, dump);
   }
 #endif // defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
-  return dump_fr_trace(
+  return dumpFlightRecorder(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
 
 std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
   auto ncclDumpMap = getNCCLCommDumpMap();
-  return dump_fr_trace_json(ncclDumpMap, includeCollectives, onlyActive);
+  return dumpFlightRecorderJson(ncclDumpMap, includeCollectives, onlyActive);
 }
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
@@ -607,7 +608,6 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       timingEnabled_(w.timingEnabled_),
       distDebugLevel_(w.distDebugLevel_) {
   exception_ = w.exception_;
-  flightRecorderTraceInfo_ = w.flightRecorderTraceInfo_;
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
@@ -742,8 +742,9 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 
 // Print the traceback of the collective at call time
 std::string ProcessGroupNCCL::WorkNCCL::getTraceback() const {
-  auto future = std::async(
-      std::launch::async, [this]() { return getFlightRecorderTraceback(); });
+  auto future = std::async(std::launch::async, [this]() {
+    return FlightRecorderHook::getFlightRecorderTraceback(futureWorkResult_);
+  });
   auto status = future.wait_for(std::chrono::seconds(8));
   if (status == std::future_status::ready) {
     return future.get();
@@ -932,7 +933,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // environment variables from config file, which can race with getenv from
   // other threads and cause segfaults.
   const auto ncclVersion = getNcclVersion();
-  record_fr_accelerator_version(ncclVersion);
+  recordFlightRecorderAcceleratorVersion(ncclVersion);
   this->setGroupUid(options_->group_name);
   this->setUsePgForSymmMemRendezvous(options_->use_pg_for_symm_mem_rendezvous);
   this->localDeviceCount_ = static_cast<int>(at::cuda::getNumGPUs());
@@ -2483,7 +2484,6 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
         pg_->pgStatus_->lastCompletedWorkName = opTypeToString(work.opType_);
         pg_->pgStatus_->lastCompletedNumelIn = work.numelIn_;
         pg_->pgStatus_->lastCompletedNumelOut = work.numelOut_;
-        work.retireFlightRecorderTrace();
         if (pg_->onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
@@ -5591,6 +5591,96 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       OpType::GATHER,
       opts.asyncOp,
       "nccl:gather");
+}
+
+c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_into_tensor(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    const GatherOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::gather_into_tensor: " + msg);
+  };
+
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  check_gpu_single_tensor(inputTensor);
+
+  const bool isRoot = getRank() == opts.rootRank;
+  if (isRoot) {
+    check_gpu_single_tensor(outputTensor);
+    if (inputTensor.dtype() != outputTensor.dtype()) {
+      invalidArgument("output tensor must have the same type as input tensor");
+    }
+    if (inputTensor.numel() * size_ != outputTensor.numel()) {
+      invalidArgument(
+          "output tensor size must be equal to world_size times input tensor size");
+    }
+  }
+
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
+      std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
+      inputTensor, // inputTensors
+      outputTensor, // outputTensors
+      opts.rootRank, // root rank
+      "gather_into_tensor", // collective name
+      inputTensor.numel(), // inNelems
+      inputTensor.numel() * this->getSize(), // outNelems
+      inputTensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSize
+      globalRankStart_, // globalRankStart_
+      globalRankStride_, // globalRankStride_
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
+
+  return collective(
+      inputTensor,
+      outputTensor,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        const auto root = static_cast<int>(opts.rootRank);
+        const auto count = input.numel();
+#if defined(NCCL_VERSION_CODE) && (NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3))
+        // ncclGather (added in NCCL 2.28.3) writes each rank's contribution
+        // directly into the flat output buffer on the root, so no per-rank
+        // copy is needed.
+        void* recvbuff = isRoot ? output.data_ptr() : nullptr;
+        return ncclGather(
+            input.data_ptr(),
+            recvbuff,
+            count,
+            getNcclDataType(input.scalar_type()),
+            root,
+            comm,
+            stream.stream());
+#else
+        // Fallback for NCCL < 2.28.3 (e.g. RCCL, which lacks ncclGather):
+        // reuse the shared send/recv gather helper, pointing its per-rank
+        // outputs at contiguous slices of the flat output buffer so there is
+        // still no extra copy. The helper's group-end check is
+        // non-blocking-communicator aware. Flatten the input so the helper's
+        // root self-copy (outputs[root].copy_(input)) is a flat-to-flat copy
+        // and does not try to broadcast a multi-dim input onto a 1-D slice.
+        auto flatInput = input.view(-1);
+        std::vector<at::Tensor> outputViews;
+        if (isRoot) {
+          auto flat = output.view(-1);
+          outputViews.reserve(size_);
+          for (const auto r : c10::irange(size_)) {
+            outputViews.push_back(flat.narrow(0, r * count, count));
+          }
+        }
+        torch::cuda::nccl::gather(flatInput, outputViews, comm, stream, root);
+        return ncclSuccess;
+#endif
+      },
+      OpType::GATHER,
+      opts.asyncOp,
+      "nccl:gather_into_tensor");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(

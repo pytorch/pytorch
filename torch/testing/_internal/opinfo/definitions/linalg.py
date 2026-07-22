@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoCusolver,
     skipCUDAIfNoMagmaAndNoLinalgsolver,
     skipCUDAIfRocm,
+    skipXPU,
     tol,
     toleranceOverride,
 )
@@ -1250,6 +1251,8 @@ op_db: list[OpInfo] = [
         # autogen .out exists but is not exercised here (mirrors linalg.matrix_exp).
         supports_out=False,
         decorators=[
+            # torch-xpu-ops/issues/4169
+            skipXPU,
             skipCUDAIfNoMagmaAndNoLinalgsolver,
             skipCPUIfNoLapack,
             with_tf32_off,
@@ -1786,6 +1789,9 @@ op_db: list[OpInfo] = [
         aten_name="linalg_multi_dot",
         dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfXPU=floating_and_complex_types_and(
+            torch.half, torch.bfloat16, torch.int8, torch.uint8
+        ),
         supports_inplace_autograd=False,
         # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
         check_batched_grad=False,
@@ -1950,6 +1956,8 @@ op_db: list[OpInfo] = [
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_polar,
         decorators=[
+            # torch-xpu-ops/issues/4162
+            skipXPU,
             skipCUDAIfNoCusolver,
             skipCPUIfNoLapack,
             # On CUDA the cuSOLVER QDWH override is the path under test; without

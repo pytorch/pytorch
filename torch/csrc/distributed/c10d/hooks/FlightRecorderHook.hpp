@@ -14,23 +14,23 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
-#include <unordered_map>
 
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 
 namespace c10d {
 
-class TORCH_API FlightRecorderHook
-    : public std::enable_shared_from_this<FlightRecorderHook> {
+class TORCH_API FlightRecorderHook {
  public:
-  // Returns the process group's automatically installed hook, or attaches a
-  // caller-owned hook when automatic recording is disabled.
+  // Returns a handle for the process group's automatically installed hook, or
+  // attaches one when automatic recording is disabled.
   static std::shared_ptr<FlightRecorderHook> attach(
       c10::intrusive_ptr<ProcessGroup> pg);
 
   static bool isEnabled();
+
+  static std::string getFlightRecorderTraceback(
+      const c10::intrusive_ptr<c10::ivalue::Future>& future);
 
   ~FlightRecorderHook();
 
@@ -45,35 +45,12 @@ class TORCH_API FlightRecorderHook
  private:
   friend class ProcessGroup;
 
-  explicit FlightRecorderHook(
-      ProcessGroup* pg,
-      c10::intrusive_ptr<ProcessGroup> pg_keepalive = nullptr);
-  static std::shared_ptr<FlightRecorderHook> attachOwned(ProcessGroup* pg);
+  explicit FlightRecorderHook(c10::intrusive_ptr<ProcessGroup> pg);
 
-  void onPre(const PreHookArgs& args);
-  void onPost(const PostHookArgs& args);
-  std::string backendName(const PreHookArgs& args) const;
+  static void install(ProcessGroup* pg);
+  static bool isInstalled(ProcessGroup* pg);
 
-  ProcessGroup* pg_;
-  c10::intrusive_ptr<ProcessGroup> pg_keepalive_;
-  int64_t hook_id_;
-  size_t pg_id_;
-  std::shared_ptr<ProcessGroupStatus> pg_status_;
-  std::chrono::milliseconds timeout_{kBackendDefaultTimeout};
-
-  // Sequencing and the op_id -> trace-entry correlation map. The mutex guards
-  // against concurrent collectives from multiple threads (the hooks fire on
-  // the issuing thread).
-  std::mutex mutex_;
-  size_t collective_seq_{0};
-  size_t p2p_seq_{0};
-  struct InflightTrace {
-    FlightRecorder<c10::Event>::TraceIdentifier id;
-    int64_t sequence;
-    std::string name;
-    bool track_completion;
-  };
-  std::unordered_map<int64_t, InflightTrace> inflight_;
+  c10::intrusive_ptr<ProcessGroup> pg_;
 };
 
 } // namespace c10d

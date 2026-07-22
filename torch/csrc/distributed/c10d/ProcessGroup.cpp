@@ -115,12 +115,7 @@ ProcessGroup::ProcessGroup(
 ProcessGroup::ProcessGroup(int rank, int size)
     : rank_(rank), size_(size), backendType_(BackendType::UNDEFINED) {}
 
-ProcessGroup::~ProcessGroup() {
-  if (flight_recorder_hook_) {
-    flight_recorder_hook_->remove();
-  }
-  flight_recorder_hook_.reset();
-}
+ProcessGroup::~ProcessGroup() = default;
 
 void ProcessGroup::init() {
   C10_LOG_API_USAGE_ONCE(
@@ -148,9 +143,8 @@ void ProcessGroup::setGroupDesc(const std::string& name) {
   for (auto& kv : deviceTypeToBackend_) {
     kv.second->setGroupDesc(name);
   }
-  if (!flight_recorder_hook_ && !deviceTypeToBackend_.empty() &&
-      FlightRecorderHook::isEnabled()) {
-    flight_recorder_hook_ = FlightRecorderHook::attachOwned(this);
+  if (!deviceTypeToBackend_.empty() && FlightRecorderHook::isEnabled()) {
+    FlightRecorderHook::install(this);
   }
 }
 
@@ -161,10 +155,6 @@ void ProcessGroup::enableCollectivesTiming() {
 }
 
 void ProcessGroup::release_resources() {
-  if (flight_recorder_hook_) {
-    flight_recorder_hook_->remove();
-  }
-  flight_recorder_hook_.reset();
   store_.reset();
   deviceTypeToBackend_.clear();
   backendTypeToBackend_.clear();

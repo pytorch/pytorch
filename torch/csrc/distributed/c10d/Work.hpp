@@ -2,11 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <chrono>
-#include <functional>
-#include <memory>
 #include <mutex>
-#include <optional>
-#include <string>
 #include <vector>
 
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
@@ -139,13 +135,6 @@ class TORCH_API Work : public torch::CustomClassHolder {
 
   OpType retrieveOpType() const;
 
-  void setFlightRecorderTrace(
-      std::optional<size_t> id,
-      std::optional<size_t> reset_epoch,
-      std::function<void()> completion_callback);
-  void retireFlightRecorderTrace();
-  std::string getFlightRecorderTraceback() const;
-
   static c10::intrusive_ptr<Work> create_from_future(
       const c10::intrusive_ptr<c10::ivalue::Future>& /*future*/);
 
@@ -172,17 +161,6 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // When profiling, the callback to record end of operation event. This
   // callback needs to be called when collective operation is complete.
   std::function<void()> recordFunctionEndCallback_;
-
-  struct FlightRecorderTraceInfo {
-    std::mutex mutex;
-    std::optional<size_t> id;
-    std::optional<size_t> reset_epoch;
-    std::function<void()> completion_callback;
-    bool completion_observed{false};
-    bool retired{false};
-  };
-  std::shared_ptr<FlightRecorderTraceInfo> flightRecorderTraceInfo_ =
-      std::make_shared<FlightRecorderTraceInfo>();
 };
 
 struct TORCH_API WorkInfo {

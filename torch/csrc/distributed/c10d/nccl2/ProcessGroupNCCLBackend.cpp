@@ -39,9 +39,7 @@ std::vector<uint64_t> toVecUint64(const std::vector<int64_t>& vec) {
 class CompletedWork : public ::c10d::Work {
  public:
   explicit CompletedWork(std::vector<at::Tensor> outputs = {})
-      : outputs_(std::move(outputs)) {
-    finish();
-  }
+      : outputs_(std::move(outputs)) {}
   bool isCompleted() override {
     return true;
   }
@@ -84,7 +82,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       options_c10d_(options ? std::move(options) : Options::create()) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
-  ::c10d::record_fr_accelerator_version(getNcclVersion());
+  ::c10d::recordFlightRecorderAcceleratorVersion(getNcclVersion());
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(

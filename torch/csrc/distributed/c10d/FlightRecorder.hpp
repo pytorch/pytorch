@@ -241,6 +241,10 @@ struct FlightRecorder {
 
   std::vector<Entry> dump_entries();
 
+  size_t maxEntries() const {
+    return max_entries_;
+  }
+
   // Returns the index in entries_ for the given id and reset_epoch.
   // Caller must hold mutex_lock before calling this method.
   size_t getIdxFromId(size_t id, size_t reset_epoch) const;
@@ -332,18 +336,18 @@ TORCH_API std::string dump_fr_trace_json(
 using FlightRecorderDumpMap = std::
     unordered_map<std::string, std::unordered_map<std::string, std::string>>;
 
-TORCH_API void reset_fr_trace();
+TORCH_API void resetFlightRecorder();
 
-TORCH_API void record_fr_accelerator_version(
+TORCH_API void recordFlightRecorderAcceleratorVersion(
     const std::string& comm_lib_version);
 
-TORCH_API std::string dump_fr_trace(
+TORCH_API std::string dumpFlightRecorder(
     const FlightRecorderDumpMap& extraDumpMap,
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive);
 
-TORCH_API std::string dump_fr_trace_json(
+TORCH_API std::string dumpFlightRecorderJson(
     const FlightRecorderDumpMap& extraDumpMap,
     bool includeCollectives,
     bool onlyActive);

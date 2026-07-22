@@ -102,16 +102,17 @@ float getDurationFromEvent<c10::Event>(
 // avoid linking errors.
 template struct FlightRecorder<c10::Event>;
 
-void reset_fr_trace() {
+void resetFlightRecorder() {
   FlightRecorder<c10::Event>::get()->reset_all();
 }
 
-void record_fr_accelerator_version(const std::string& comm_lib_version) {
+void recordFlightRecorderAcceleratorVersion(
+    const std::string& comm_lib_version) {
   FlightRecorder<c10::Event>::get()->record_accelerator_version(
       comm_lib_version);
 }
 
-std::string dump_fr_trace(
+std::string dumpFlightRecorder(
     const FlightRecorderDumpMap& extraDumpMap,
     bool includeCollectives,
     bool includeStackTraces,
@@ -124,14 +125,14 @@ std::string dump_fr_trace(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive) {
-  return dump_fr_trace(
+  return dumpFlightRecorder(
       FlightRecorderDumpMap{},
       includeCollectives,
       includeStackTraces,
       onlyActive);
 }
 
-std::string dump_fr_trace_json(
+std::string dumpFlightRecorderJson(
     const FlightRecorderDumpMap& extraDumpMap,
     bool includeCollectives,
     bool onlyActive) {
@@ -140,7 +141,7 @@ std::string dump_fr_trace_json(
 }
 
 std::string dump_fr_trace_json(bool includeCollectives, bool onlyActive) {
-  return dump_fr_trace_json(
+  return dumpFlightRecorderJson(
       FlightRecorderDumpMap{}, includeCollectives, onlyActive);
 }
 } // namespace c10d
