@@ -115,6 +115,10 @@
 #include <torch/csrc/profiler/kineto_client_interface.h>
 #include <sstream>
 
+#ifdef USE_ROCM
+#include <torch/csrc/inductor/static_launcher/flydsl.h>
+#endif
+
 #ifdef USE_CUDA
 #include <ATen/ROCmFABackend.h>
 #include <ATen/cuda/CUDABlas.h>
@@ -2598,6 +2602,9 @@ PyObject* initModule() {
 #if defined(USE_CUDA)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
   ASSERT_TRUE(FastCudaLauncher_init(module));
+#endif
+#ifdef USE_ROCM
+  ASSERT_TRUE(FlyDSLCWrapper_init(module));
 #endif
 #if defined(USE_XPU) && !defined(_WIN32)
   ASSERT_TRUE(StaticXpuLauncher_init(module));
