@@ -13,7 +13,11 @@ from torch.testing._internal.common_device_type import (
     tol,
     toleranceOverride,
 )
-from torch.testing._internal.common_dtype import all_types_and, floating_types
+from torch.testing._internal.common_dtype import (
+    all_types_and,
+    floating_types,
+    floating_types_and,
+)
 from torch.testing._internal.common_utils import TEST_SCIPY, torch_to_numpy_dtype_dict
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
@@ -415,6 +419,7 @@ op_db: list[OpInfo] = [
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.j0 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
@@ -479,6 +484,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         ref=scipy.special.y0 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
         domain=(0, None),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -509,6 +515,7 @@ op_db: list[OpInfo] = [
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.y1 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
         domain=(0, None),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -711,6 +718,7 @@ op_db: list[OpInfo] = [
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.i0 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
@@ -745,6 +753,7 @@ op_db: list[OpInfo] = [
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.k0 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
         domain=(0, None),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -763,6 +772,7 @@ op_db: list[OpInfo] = [
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.k1 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
         domain=(0, None),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
