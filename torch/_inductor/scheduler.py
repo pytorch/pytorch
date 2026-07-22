@@ -7196,6 +7196,19 @@ class Scheduler:
         node2: BaseSchedulerNode,
         peak_allowed_increase: int,
     ) -> tuple[bool, FusionMemoryUpdate | None]:
+        if not config.fusion_memory_timeline_full_correctness:
+            if node1 not in ctx.tracked_nodes or node2 not in ctx.tracked_nodes:
+                return False, None
+            step1 = ctx.node_to_idx[node1]
+            step2 = ctx.node_to_idx[node2]
+            peak_start = ctx.peak_start
+            peak_end = ctx.peak_end
+            if peak_start is None or peak_end is None:
+                return False, None
+            region_start = min(step1, step2)
+            region_end = max(step1, step2)
+            if region_end < peak_start or region_start > peak_end:
+                return False, None
         cache_key = (ctx.version, id(node1), id(node2))
         if cache_key not in ctx.decision_cache:
             ctx.decision_cache[cache_key] = self._fusion_memory_update(
