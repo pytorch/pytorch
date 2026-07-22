@@ -1,6 +1,5 @@
 # Owner(s): ["module: dsl-native-ops"]
 
-import contextlib
 import importlib.util
 import os
 import subprocess
@@ -440,44 +439,31 @@ class TestNativeDSLOps(TestCase):
             check_native_version_skip.cache_clear()
 
             utils = (triton_utils, cutedsl_utils, helion_utils)
+            op_name = f"test_version_skip_{uuid.uuid4().hex[:8]}.Tensor"
 
-            # Clear module-specific caches for the imported modules
             for module in utils:
+                # Clear cached lookups so the patched runtime takes effect.
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
                     if hasattr(attr, "cache_clear"):
                         attr.cache_clear()
 
-            with contextlib.ExitStack() as stack:
-                for module in utils:
-                    stack.enter_context(
-                        patch.object(
-                            module,
-                            "_check_runtime_available",
-                            return_value=(True, fake_version),
-                        )
-                    )
-                mocks = [
-                    stack.enter_context(
-                        patch.object(module, "_register_op_override_impl")
-                    )
-                    for module in utils
-                ]
-
-                # Use unique operation names to avoid conflicts
-                op_name = f"test_version_skip_{uuid.uuid4().hex[:8]}.Tensor"
-                for module in utils:
+                with (
+                    patch.object(
+                        module,
+                        "_check_runtime_available",
+                        return_value=(True, fake_version),
+                    ),
+                    patch.object(module, "_register_op_override_impl") as mock,
+                ):
                     module.register_op_override(
                         "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
                     )
-
-                # Verify all implementation functions were called
-                counts = [m.call_count for m in mocks]
-                self.assertEqual(
-                    sum(counts),
-                    len(utils),
-                    f"Expected {len(utils)} calls with skip flag set, got {counts}",
-                )
+                    self.assertEqual(
+                        mock.call_count,
+                        1,
+                        f"{module.__name__}: impl not called under skip flag",
+                    )
 
     @parametrize("env_value, expected", [(None, False), ("1", True)])
     def test_check_native_version_skip_environment_variable(self, env_value, expected):
