@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 aten = torch.ops.aten
 
+# Must match PhiloxDistributionKind in PhiloxDistribution.cu.
 _PHILOX_DISTRIBUTION_NORMAL = 0
 _PHILOX_DISTRIBUTION_UNIFORM = 1
 
