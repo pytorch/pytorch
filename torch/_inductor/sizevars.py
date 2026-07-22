@@ -405,6 +405,16 @@ class SizeVarAllocator:
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
 
+            if isinstance(base, ModularIndexing):
+                inner_base, inner_divisor, inner_modulus = base.args
+                period = divisor * modulus
+                # Target use cases have constant indices; avoid symbolic compile-time analysis.
+                if all(
+                    isinstance(value, sympy.Integer) and value > 0
+                    for value in (inner_modulus, divisor, modulus)
+                ) and self.statically_known_multiple_of(inner_modulus, period):
+                    return ModularIndexing(inner_base, inner_divisor * divisor, modulus)
+
             can_remove_mod = statically_known(base >= 0) and statically_known(
                 base < modulus * divisor
             )
