@@ -769,6 +769,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
         torch::schema(schema), tag_vec, torch::_RegisterOrVerify::REGISTER);
   });
 }
+<<<<<<< HEAD
 
 AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
     TorchLibraryHandle self,
@@ -852,3 +853,5 @@ AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace() {
       get_torch_exception_what_without_backtrace()
           .c_str();
 }
+=======
+>>>>>>> upstream/release/2.12

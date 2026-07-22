@@ -94,7 +94,11 @@ jobs:
           name: ${{ inputs.build_environment }}
           s3-bucket: gha-artifacts
 
+<<<<<<< HEAD
       - uses: pytorch/test-infra/.github/actions/setup-uv@release/2.13
+=======
+      - uses: pytorch/test-infra/.github/actions/setup-uv@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           python-version: "3.12"
           activate-environment: "true"
@@ -235,7 +239,11 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results to OSS benchmark database for the dashboard
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           benchmark-results-dir: vllm-project/vllm/benchmarks/results
           benchmark-name: 'PyTorch x vLLM benchmark'

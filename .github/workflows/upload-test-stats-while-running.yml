@@ -16,7 +16,11 @@ jobs:
     runs-on: linux.2xlarge
     steps:
       - name: Setup Linux
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/setup-linux@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           submodules: false
 

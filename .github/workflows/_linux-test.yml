@@ -136,7 +136,11 @@ jobs:
       contents: read
     steps:
       - name: Setup SSH (Click me for login details)
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.12
+>>>>>>> upstream/release/2.12
         if: ${{ !contains(matrix.runner, 'b200') && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -146,7 +150,11 @@ jobs:
 
       - name: Setup Linux
         id: setup-linux
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/setup-linux@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           python-version: ${{ inputs.python-version }}
           compiler: ${{ inputs.compiler }}
@@ -173,7 +181,11 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.12
+>>>>>>> upstream/release/2.12
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image-name: ${{ inputs.docker-image }}
@@ -189,7 +201,11 @@ jobs:
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.12
+>>>>>>> upstream/release/2.12
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -201,7 +217,11 @@ jobs:
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         id: install-nvidia-driver
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/setup-nvidia@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           driver-version: '580.82.07'
         if: ${{ !contains(matrix.runner, 'b200') }}
@@ -538,7 +558,11 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.12
+>>>>>>> upstream/release/2.12
         if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.check-tpu.outputs.has_tpu != 'true'
         with:
           benchmark-results-dir: test/test-reports
@@ -596,7 +620,11 @@ jobs:
           workflow_attempt: ${{github.run_attempt}}
 
       - name: Teardown Linux
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.12
+>>>>>>> upstream/release/2.12
         if: always() && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false'
 
       - name: Cleanup docker
@@ -626,7 +654,11 @@ jobs:
     steps:
       - name: Setup Linux
         id: setup-linux
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/setup-linux@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           use-arc: true
           python-version: ${{ inputs.python-version }}
@@ -646,7 +678,11 @@ jobs:
           role-duration-seconds: 18000
 
       - name: Download build artifacts
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/download-build-artifacts@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
@@ -654,9 +690,13 @@ jobs:
 
       - name: Download TD artifacts
         continue-on-error: true
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/download-td-artifacts@release/2.13
         with:
           use-gha: ${{ steps.aws-creds.outcome != 'success' || inputs.use-gha }}
+=======
+        uses: pytorch/pytorch/.github/actions/download-td-artifacts@release/2.12
+>>>>>>> upstream/release/2.12
 
       - name: Download Windows torch wheel for cross-compilation
         if: matrix.win_torch_wheel_artifact != ''
@@ -714,7 +754,11 @@ jobs:
         # checks for labels and re-enabled test issues. It does not actually do
         # any filtering.  All filtering is done in the build step.
         id: keep-going
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/filter-test-configs@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/filter-test-configs@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
@@ -810,7 +854,11 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload pytest cache if tests failed
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/pytest-cache-upload@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/pytest-cache-upload@release/2.12
+>>>>>>> upstream/release/2.12
         continue-on-error: true
         if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure' && steps.aws-creds-benchmark.outcome == 'success'
         with:
@@ -822,7 +870,11 @@ jobs:
 
       - name: Upload the benchmark results
         if: steps.aws-creds-benchmark.outcome == 'success'
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false
@@ -836,7 +888,11 @@ jobs:
           cat test/**/*_toprint.log || true
 
       - name: Upload test artifacts
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/upload-test-artifacts@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/upload-test-artifacts@release/2.12
+>>>>>>> upstream/release/2.12
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}

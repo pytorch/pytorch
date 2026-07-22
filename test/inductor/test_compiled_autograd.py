@@ -1141,6 +1141,14 @@ main()
                 if inst.opname == "LOAD_GLOBAL"
                 and isinstance(inst.argval, str)
                 and inst.argval.startswith("__compiled_fn")
+<<<<<<< HEAD
+=======
+            )
+            call_graph_idx = next(
+                i
+                for i, inst in enumerate(insts)
+                if i > load_graph_idx and inst.opname == call_op
+>>>>>>> upstream/release/2.12
             )
             call_graph_idx = next(
                 i

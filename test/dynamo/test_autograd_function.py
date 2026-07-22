@@ -2276,6 +2276,7 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(x_ref.grad, x_c.grad)
 
+<<<<<<< HEAD
     def test_aliased_intermediate_captured_by_side_effect(self):
         # An intermediate that aliases an input is captured via side effect
         # and used by the outer graph. filter_aliased_intermediates drops it
@@ -2747,6 +2748,8 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+=======
+>>>>>>> upstream/release/2.12
 
 class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
     """Tests for autograd.Function compatibility with torch.func transforms.

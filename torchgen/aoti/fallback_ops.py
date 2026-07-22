@@ -66,9 +66,13 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten._int_mm.out": {},
     "aten._pdist_backward.default": {},
     "aten._pdist_forward.default": {},
+<<<<<<< HEAD
     "aten._scaled_dot_product_attention_math_for_mps.default": {
         "v2": {"new_args": ["enable_gqa"], "since": "TORCH_VERSION_2_13_0"}
     },
+=======
+    "aten._scaled_dot_product_attention_math_for_mps.default": {"v2": ["enable_gqa"]},
+>>>>>>> upstream/release/2.12
     "aten._scaled_dot_product_cudnn_attention_backward.default": {},
     "aten._scaled_dot_product_cudnn_attention.default": {},
     "aten._scaled_dot_product_efficient_attention_backward.default": {},

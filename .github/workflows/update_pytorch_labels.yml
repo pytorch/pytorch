@@ -17,7 +17,11 @@ jobs:
       contents: read
     steps:
       - name: Checkout PyTorch
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           fetch-depth: 1
           submodules: false

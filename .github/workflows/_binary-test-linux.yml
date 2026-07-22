@@ -115,10 +115,61 @@ jobs:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+<<<<<<< HEAD
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 1
+=======
+            echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
+            echo "GPU_ARCH_VERSION=${{ env.GPU_ARCH_VERSION }}"
+            echo "GPU_ARCH_TYPE=${{ env.GPU_ARCH_TYPE }}"
+            echo "DOCKER_IMAGE=${{ env.DOCKER_IMAGE }}"
+            echo "SKIP_ALL_TESTS=${{ env.SKIP_ALL_TESTS }}"
+            echo "LIBTORCH_CONFIG=${{ env.LIBTORCH_CONFIG }}"
+            echo "LIBTORCH_VARIANT=${{ env.LIBTORCH_VARIANT }}"
+            echo "DESIRED_PYTHON=${{ env.DESIRED_PYTHON }}"
+
+            echo "ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}"
+            echo "AWS_DEFAULT_REGION=${{ env.AWS_DEFAULT_REGION }}"
+            echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
+            echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"
+            echo "PR_NUMBER=${{ env.PR_NUMBER }}"
+            echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+            echo "SHA1=${{ env.SHA1 }}"
+          } >> "${GITHUB_ENV} }}"
+
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.12
+        continue-on-error: true
+        with:
+          github-secret: ${{ secrets.github-token }}
+
+        # Setup the environment
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+        with:
+          no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' || inputs.build_environment == 'linux-s390x-binary-manywheel' }}
+
+      - name: Setup Linux
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
+
+      - name: Login to ECR
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: ./.github/actions/ecr-login
+
+      - name: Chown workspace
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: ./.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
+
+      - name: Checkout PyTorch to pytorch dir
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+>>>>>>> upstream/release/2.12
           submodules: recursive
           show-progress: false
 
@@ -154,6 +205,7 @@ jobs:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"
 
+<<<<<<< HEAD
       # Container-directive path: test runs directly inside the container.
       - name: Populate binary env
         if: inputs.use_container_directive
@@ -163,6 +215,42 @@ jobs:
       - name: Test PyTorch binary
         if: inputs.use_container_directive
         shell: bash
+=======
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        id: install-nvidia-driver
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@release/2.12
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+
+      - name: configure aws credentials
+        id: aws_creds
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' && startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.12
+        with:
+          docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
+          docker-image-name: ${{ inputs.DOCKER_IMAGE }}
+          custom-tag-prefix: ${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
+          docker-build-dir: .ci/docker
+          working-directory: pytorch
+
+      - name: Pull Docker image
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.12
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+
+      - name: Test Pytorch binary
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+>>>>>>> upstream/release/2.12
         env:
           OUTPUT_SCRIPT: /run.sh
         run: |
@@ -172,6 +260,7 @@ jobs:
           source "${BINARY_ENV_FILE}"
           bash -x /run.sh
 
+<<<<<<< HEAD
       # Bare-runner path: spawn the test container manually.
       - name: Test PyTorch binary (docker run)
         if: ${{ !inputs.use_container_directive }}
@@ -208,6 +297,11 @@ jobs:
             bash .ci/pytorch/binary_linux_test.sh
           "
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+=======
+      - name: Teardown Linux
+        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.12
+>>>>>>> upstream/release/2.12
 
       - name: Cleanup docker
         if: ${{ always() && !inputs.use_container_directive }}

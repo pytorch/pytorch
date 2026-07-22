@@ -48,6 +48,7 @@ aoti_torch_xpu_mm_dtype_out: TORCH_VERSION_2_11_0
 torch_dtype_float4_e2m1fn_x2: TORCH_VERSION_2_11_0
 torch_dtype_float8_e8m0fnu: TORCH_VERSION_2_11_0
 torch_from_blob: TORCH_VERSION_2_11_0
+<<<<<<< HEAD
 aoti_torch_cpu__grouped_mm: TORCH_VERSION_2_12_0
 aoti_torch_cpu_rand_like: TORCH_VERSION_2_12_0
 aoti_torch_cpu_rand_like_generator: TORCH_VERSION_2_12_0
@@ -81,6 +82,10 @@ aoti_torch_xpu_randint_like: TORCH_VERSION_2_12_0
 aoti_torch_xpu_randint_like_low_dtype: TORCH_VERSION_2_12_0
 aoti_torch_xpu_randn_like: TORCH_VERSION_2_12_0
 aoti_torch_xpu_randn_like_generator: TORCH_VERSION_2_12_0
+=======
+aoti_torch_dtype_float4_e2m1fn_x2: TORCH_VERSION_2_12_0
+aoti_torch_dtype_float8_e8m0fnu: TORCH_VERSION_2_12_0
+>>>>>>> upstream/release/2.12
 torch_library_def_with_tags: TORCH_VERSION_2_12_0
 torch_tag_core: TORCH_VERSION_2_12_0
 torch_tag_cudagraph_unsafe: TORCH_VERSION_2_12_0
@@ -100,6 +105,7 @@ torch_tag_pointwise: TORCH_VERSION_2_12_0
 torch_tag_pt2_compliant_tag: TORCH_VERSION_2_12_0
 torch_tag_reduction: TORCH_VERSION_2_12_0
 torch_tag_view_copy: TORCH_VERSION_2_12_0
+<<<<<<< HEAD
 aoti_torch_cpu_grid_sampler_3d: TORCH_VERSION_2_13_0
 aoti_torch_cpu_grid_sampler_3d_backward: TORCH_VERSION_2_13_0
 aoti_torch_cuda_grid_sampler_3d: TORCH_VERSION_2_13_0
@@ -116,3 +122,5 @@ torch_library_set_python_module: TORCH_VERSION_2_13_0
 torch_new_generator_handle: TORCH_VERSION_2_13_0
 torch_new_stable_ivalue: TORCH_VERSION_2_13_0
 torch_stream_native_handle: TORCH_VERSION_2_13_0
+=======
+>>>>>>> upstream/release/2.12

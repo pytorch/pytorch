@@ -23,7 +23,10 @@ from test_cuda import (  # noqa: F401
     TestCuda,
     TestCudaAllocator,
     TestMemPool,
+<<<<<<< HEAD
     TestResizeStorageWithAddr,
+=======
+>>>>>>> upstream/release/2.12
 )
 
 import torch

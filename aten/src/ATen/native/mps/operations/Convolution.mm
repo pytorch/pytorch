@@ -158,6 +158,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   const bool is_macos_15_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
 
   const bool is3DConv = input_t.dim() == 5;
+<<<<<<< HEAD
   const auto memory_format = input_t.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
   const bool is_cl_input =
       is_macos_15_plus && (is3DConv ? is_packed_channels_last_3d(input_t) : memory_format == kChannelsLast);
@@ -165,6 +166,14 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   const bool use_dhwio = is3DConv && is_cl_input && conv3d_dhwio_is_beneficial(weight_t.sizes());
   // Allocate output in the user-requested layout regardless of fast-path gate.
   const bool is_channels_last = mps_conv_use_channels_last(input_t, weight_t);
+=======
+  // Use exact-match: a channel-slice of a channels-last tensor has CL-like
+  // strides but is not NHWC-packed, so the raw-buffer NHWC path would misread
+  // it. See https://github.com/pytorch/pytorch/issues/180984
+  const auto memory_format = input_t.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
+  const auto input_suggested_layout = memory_format == kChannelsLast && is_macos_15_plus ? kChannelsLast : kContiguous;
+  const bool is_channels_last = mps_conv_use_channels_last(input_t, weight_t) && !is3DConv;
+>>>>>>> upstream/release/2.12
   const bool bias_defined = bias_opt ? bias_opt->defined() : false;
 
   TORCH_CHECK(isFloatingType(input_t.scalar_type()), "Convolution is supported only for Floating types");

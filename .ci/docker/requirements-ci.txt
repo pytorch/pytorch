@@ -15,13 +15,17 @@ build==1.3.0
 #Pinned versions: 1.3.0
 #test that import:
 
+<<<<<<< HEAD
 click==8.3.3
+=======
+click==8.3.1
+>>>>>>> upstream/release/2.12
 #Description: Command Line Interface Creation Kit
-#Pinned versions:
+#Pinned versions: 8.3.1
 #test that import:
 
 coremltools==5.0b5 ; python_version < "3.12"
-coremltools==8.3 ; python_version == "3.12"
+coremltools==8.3.0 ; python_version == "3.12"
 #Description: Apple framework for ML integration
 #Pinned versions: 5.0b5
 #test that import:
@@ -70,7 +74,11 @@ lark==0.12.0
 #Pinned versions: 0.12.0
 #test that import:
 
+<<<<<<< HEAD
 librosa==0.11.0 ; python_version < "3.11" and platform_machine != "s390x"
+=======
+librosa==0.10.2 ; python_version < "3.11" and platform_machine != "s390x"
+>>>>>>> upstream/release/2.12
 librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 #Description: A python package for music and audio analysis
 #Pinned versions: >=0.6.2
@@ -107,7 +115,8 @@ mypy==1.16.0 ; platform_system == "Linux"
 #Pinned versions: 1.16.0
 #test that import: test_typing.py, test_type_hints.py
 
-networkx==2.8.8
+networkx==2.8.8 ; python_version < "3.13"
+networkx==3.0.0 ; python_version >= "3.13"
 #Description: creation, manipulation, and study of
 #the structure, dynamics, and functions of complex networks
 #Pinned versions: 2.8.8
@@ -119,8 +128,14 @@ ninja==1.13.0
 #Pinned versions: 1.13.0
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
+<<<<<<< HEAD
 numba==0.57.1 ; python_version == "3.10" and platform_machine != "s390x"
 numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x"
+=======
+numba==0.61.2 ; python_version < "3.14" and platform_machine != "s390x"
+numba==0.64.0 ; python_version >= "3.14" and platform_machine != "s390x"
+
+>>>>>>> upstream/release/2.12
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.55.2, 0.60.0
 #test that import: test_numba_integration.py
@@ -138,13 +153,10 @@ numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==1.23.2; python_version == "3.10"
-numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
-numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
+numpy==2.1.2 ; python_version < "3.14"
 numpy==2.3.4; python_version >= "3.14"
 
-pandas==2.0.3; python_version < "3.12"
-pandas==2.2.3; python_version >= "3.12" and python_version < "3.14"
+pandas==2.2.3; python_version < "3.14"
 pandas==2.3.3; python_version >= "3.14"
 
 #onnxruntime
@@ -152,9 +164,9 @@ pandas==2.3.3; python_version >= "3.14"
 #Pinned versions: 1.9.0
 #test that import:
 
-opt-einsum==3.3
+opt-einsum==3.3.0
 #Description: Python library to optimize tensor contraction order, used in einsum
-#Pinned versions: 3.3
+#Pinned versions: 3.3.0
 #test that import: test_linalg.py
 
 optree==0.13.0 ; python_version < "3.14"
@@ -183,7 +195,7 @@ protobuf==6.33.5
 
 psutil==7.2.2
 #Description: information on running processes and system utilization
-#Pinned versions:
+#Pinned versions: 7.2.2
 #test that import: test_profiler.py, test_openmp.py, test_dataloader.py
 
 pytest==7.3.2
@@ -203,7 +215,7 @@ pytest-flakefinder==1.1.0
 
 pytest-rerunfailures==14.0
 #Description: plugin for rerunning failure tests in pytest
-#Pinned versions:
+#Pinned versions: 14.0
 #test that import:
 
 pytest-subtests==0.13.1
@@ -246,7 +258,8 @@ pygments==2.20.0
 #Pinned versions: 14.1.0
 #test that import:
 
-scikit-image==0.22.0
+scikit-image==0.22.0 ; python_version < "3.13"
+scikit-image==0.26.0 ; python_version >= "3.13"
 #Description: image processing routines
 #Pinned versions: 0.22.0
 #test that import: test_nn.py
@@ -256,9 +269,9 @@ scikit-image==0.22.0
 #Pinned versions: 0.20.3
 #test that import:
 
-scipy==1.10.1 ; python_version <= "3.11"
-scipy==1.14.1 ; python_version > "3.11" and python_version < "3.14"
+scipy==1.14.1 ; python_version < "3.14"
 scipy==1.16.2 ; python_version >= "3.14"
+
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.10.1
@@ -272,8 +285,7 @@ scipy==1.16.2 ; python_version >= "3.14"
 #test that import:
 
 # needed by torchgen utils
-typing-extensions==4.12.2 ; python_version < "3.14"
-typing-extensions==4.15.0 ; python_version >= "3.14"
+typing-extensions==4.15.0
 #Description: type hints for python
 #Pinned versions:
 #test that import:
@@ -288,10 +300,9 @@ unittest-xml-reporting==3.2.0
 #Pinned versions:
 #test that import:
 
-#lintrunner is supported on aarch64-linux only from 0.12.4 version
-lintrunner==0.12.11
+lintrunner==0.13.0
 #Description: all about linters!
-#Pinned versions: 0.12.11
+#Pinned versions: 0.13.0
 #test that import:
 
 spin==0.17
@@ -299,7 +310,11 @@ spin==0.17
 #Pinned versions: 0.17
 #test that import:
 
+<<<<<<< HEAD
 redis==8.0.1
+=======
+redis==7.4.0
+>>>>>>> upstream/release/2.12
 #Description: redis database
 #test that import: anything that tests OSS caching/mocking (inductor/test_codecache.py, inductor/test_max_autotune.py)
 
@@ -323,14 +338,14 @@ z3-solver==4.15.1.0 ; platform_machine != "s390x"
 #Pinned versions:
 #test that import:
 
-tensorboard==2.13.0 ; python_version < "3.13"
-tensorboard==2.18.0 ; python_version >= "3.13"
+tensorboard==2.18.0
 #Description: Also included in .ci/docker/requirements-docs.txt
 #Pinned versions:
 #test that import: test_tensorboard
 
 pywavelets==1.4.1 ; python_version < "3.12"
-pywavelets==1.7.0 ; python_version >= "3.12"
+pywavelets==1.7.0 ; python_version >= "3.12" and python_version < "3.14"
+pywavelets==1.9.0 ; python_version >= "3.14"
 #Description: This is a requirement of scikit-image, we need to pin
 # it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
 #Pinned versions: 1.4.1
@@ -379,10 +394,17 @@ pwlf==2.2.1
 # To build PyTorch itself
 pip==26.0.1
 pyyaml==6.0.3
+<<<<<<< HEAD
 pyzstd==0.16.2 ; python_version < "3.13"
 pyzstd==0.19.1 ; python_version >= "3.13"
 setuptools==78.1.1
 packaging==24.2
+=======
+pyzstd==0.16.2 ; python_version < "3.14"
+pyzstd==0.18.0 ; python_version >= "3.14"
+setuptools==79.0.1
+packaging==25.0
+>>>>>>> upstream/release/2.12
 six==1.17.0
 
 scons==4.5.2 ; platform_machine == "aarch64"
@@ -406,8 +428,13 @@ tlparse==0.4.0
 filelock==3.20.3
 #Description: required for inductor testing
 
+<<<<<<< HEAD
 cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin"
 #Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. PyTorch CI CUDA builds use CUDA 13, so depend on the matching cuda-bindings major while allowing minor updates within that major.
+=======
+cuda-bindings==12.9.6 ; platform_machine != "s390x" and platform_system != "Darwin"
+#Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. Note "Any fix in the latest bindings would be backported to the prior major version" means that only the newest version of cuda-bindings will get fixes. Depending on the latest version of 12.x is okay because all 12.y versions will be supported via "CUDA minor version compatibility". Pytorch builds against 13.z versions of cuda toolkit work with 12.x versions of cuda-bindings as well because newer drivers work with old toolkits.
+>>>>>>> upstream/release/2.12
 #test that import: test_cuda.py
 
 cupti-python==13.3.0 ; platform_system == "Linux" and (platform_machine == "x86_64" or platform_machine == "aarch64") and python_version < "3.14"
@@ -420,7 +447,11 @@ pyre-extensions==0.0.32
 tabulate==0.9.0
 #Description: These package are needed to build FBGEMM and torchrec on PyTorch CI
 
+<<<<<<< HEAD
 tqdm==4.68.4
+=======
+tqdm==4.67.3
+>>>>>>> upstream/release/2.12
 #Description: progress bar library required for dynamo benchmarks
 #test that import: benchmarks/dynamo/*
 

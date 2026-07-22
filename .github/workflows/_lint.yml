@@ -29,7 +29,11 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout PyTorch
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           fetch-depth: 0
           submodules: true
@@ -37,7 +41,11 @@ jobs:
           checkout-mode: treeless
 
       - name: Setup uv
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/setup-uv@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/setup-uv@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           python-version: "3.12"
           activate-environment: true

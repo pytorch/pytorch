@@ -25,7 +25,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout pytorch
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           submodules: true
           fetch-depth: 0
@@ -52,7 +56,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout pytorch
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           submodules: true
           fetch-depth: 0

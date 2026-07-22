@@ -54,7 +54,11 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
 )
+<<<<<<< HEAD
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+=======
+from torch.testing._internal.inductor_utils import HAS_GPU
+>>>>>>> upstream/release/2.12
 from torch.utils._import_utils import import_dill
 
 

@@ -72,7 +72,11 @@ jobs:
           echo "Outputs of download-docker-builds-artifacts job: ${DOWNLOAD_OUTPUTS_JSON}"
 
       - name: Checkout PyTorch
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           no-sudo: true
           submodules: 'false'
@@ -90,7 +94,11 @@ jobs:
             echo "ghcr_image=${ghcr_image}" >> "$GITHUB_OUTPUT"
 
       - name: Pull docker image
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           docker-image: ${{ steps.ghcr-io-tag.outputs.ghcr_image }}
 

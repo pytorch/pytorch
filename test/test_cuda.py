@@ -915,7 +915,7 @@ print(t.is_pinned())
             gcn_arch = str(
                 torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
             )
-            if "gfx94" in gcn_arch or "gfx95" in gcn_arch:
+            if gcn_arch in ["gfx942", "gfx950", "gfx1250"]:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -2761,8 +2761,12 @@ torch.cuda.synchronize()
             # Compare the states generated outside and inside the graph
             self.assertEqual(random_values, graphed_random_values)
 
+<<<<<<< HEAD
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180232")
     @xfailCUDAIfSM89OrLaterOnWindows
+=======
+    @skipIfRocmVersionLessThan((7, 14))
+>>>>>>> upstream/release/2.12
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -4765,6 +4769,7 @@ print(f"{{r1}}, {{r2}}")
     @unittest.skipIf(
         IS_WINDOWS, "test relies on fork; Windows multiprocessing uses spawn"
     )
+    @unittest.skipIf(sys.version_info >= (3, 14), "test fails on Python 3.14+")
     def test_is_pinned_no_context(self):
         test_script = """\
 import torch
@@ -5076,9 +5081,12 @@ class TestCudaAllocator(TestCase):
         md = torch.cuda.memory._snapshot()["allocator_settings"]
         self.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
 
+<<<<<<< HEAD
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179745"
     )
+=======
+>>>>>>> upstream/release/2.12
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
@@ -5421,6 +5429,9 @@ class TestCudaAllocator(TestCase):
             pass
         finally:
             torch.cuda.memory._record_memory_history(None)
+            # This test requires to run gc.collec() to fix other memory tests
+            torch.cuda.synchronize()
+            gc.collect()
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
@@ -7833,9 +7844,12 @@ class TestMemPool(TestCase):
         )
 
     @unittest.skipIf(
+<<<<<<< HEAD
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/177000"
     )
     @unittest.skipIf(
+=======
+>>>>>>> upstream/release/2.12
         not EXPANDABLE_SEGMENTS,
         "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
     )
@@ -7871,12 +7885,16 @@ class TestMemPool(TestCase):
             num_expandable_segments, 1, "Expected to have 1 expandable segment only"
         )
 
+<<<<<<< HEAD
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/153460",
     )
+=======
+>>>>>>> upstream/release/2.12
     @serialTest()
     def test_mempool_ctx_multithread(self):
+        torch._C._cuda_clearCublasWorkspaces()
         torch.cuda.empty_cache()
         segments = torch.cuda.memory._snapshot()["segments"]
         self.assertEqual(len(segments), 0, "Expected empty pool in the beginning")
@@ -9621,9 +9639,13 @@ class TestCompileKernel(TestCase):
 
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
-            max_smem = (
-                65536 if get_device_properties().gcnArchName != "gfx950" else 160 * 1024
-            )
+            gcn_arch = get_device_properties().gcnArchName.split(":", 1)[0]
+            if gcn_arch == "gfx1250":
+                max_smem = 320 * 1024
+            elif gcn_arch == "gfx950":
+                max_smem = 160 * 1024
+            else:
+                max_smem = 65536
         else:
             max_smem = get_device_properties().shared_memory_per_block_optin
         excessive_shared_mem = max_smem * 2

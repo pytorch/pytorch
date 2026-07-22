@@ -439,8 +439,32 @@ inline bool xpu_conv_use_channels_last(const at::Tensor& input, const at::Tensor
 }
 
 inline bool mps_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+<<<<<<< HEAD
   return _conv_use_channels_last_impl(
       input, weight, input.is_mps() && weight.is_mps(), /*exact_match=*/true);
+=======
+
+  // check layout only for mps tensor.
+  if (!input.is_mps() || !weight.is_mps()) {
+    return false;
+  }
+  if (!input.defined() || input.is_sparse()) {
+    // suggest channels_first
+    return false;
+  }
+
+  // Use exact-match so a tensor whose strides merely *look* like channels-last
+  // (e.g. a channel-slice of a channels-last tensor) is not misclassified --
+  // MPS reads raw buffers assuming packed NHWC, which would be incorrect for
+  // such views. exact_match also correctly excludes degenerate 1x1 weights
+  // whose NCHW-contiguous strides happen to also satisfy is_contiguous(CL).
+  // See https://github.com/pytorch/pytorch/issues/180984
+  auto is_channel_last = [](const at::Tensor& t) {
+    auto fmt = t.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
+    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
+  };
+  return is_channel_last(input) || is_channel_last(weight);
+>>>>>>> upstream/release/2.12
 }
 
 } // namespace at::native

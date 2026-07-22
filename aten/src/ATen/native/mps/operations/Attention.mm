@@ -215,7 +215,10 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
   uint maxSeqLength = k_.size(2);
   uint N = k_.size(2);
   uint B = q_.size(0) * q_.size(1);
+<<<<<<< HEAD
   uint gqa_factor = q_.size(1) / k_.size(1);
+=======
+>>>>>>> upstream/release/2.12
   uint q_batch_stride = q_.stride(0);
   uint q_head_stride = q_.stride(1);
   uint q_seq_stride = q_.stride(2);
@@ -266,8 +269,13 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
         mtl_setArgs<9>(
             computeEncoder, mask, std::array<uint32_t, 4>{kv_seq_stride, q_seq_stride, head_stride, batch_stride});
       }
+<<<<<<< HEAD
       mtl_setArgs<11>(computeEncoder,
                       std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_head});
+=======
+      mtl_setArgs<11>(
+          computeEncoder, has_mask, std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_head});
+>>>>>>> upstream/release/2.12
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
     }
   });
@@ -365,8 +373,13 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
         mtl_setArgs<11>(
             computeEncoder, mask, std::array<uint32_t, 4>{kv_seq_stride, q_seq_stride, head_stride, batch_stride});
       }
+<<<<<<< HEAD
       mtl_setArgs<13>(computeEncoder,
                       std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_heads});
+=======
+      mtl_setArgs<13>(
+          computeEncoder, has_mask, std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_heads});
+>>>>>>> upstream/release/2.12
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
       // 2nd pass
       [computeEncoder setComputePipelineState:sdpa_vector_pass2PSO];
@@ -786,10 +799,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   Tensor q_contig = can_use_kernel_strides(q_) ? q_ : q_.contiguous();
   Tensor k_contig = can_use_kernel_strides(k_) ? k_ : k_.contiguous();
   Tensor v_contig = can_use_kernel_strides(v_) ? v_ : v_.contiguous();
+<<<<<<< HEAD
 
   if (supports_prefill) {
     return sdpa_prefill_mps(q_contig, k_contig, v_contig, mask_, is_causal, scale, query, unsqueezed);
   }
+=======
+>>>>>>> upstream/release/2.12
 
   // for short sequences, differentiate based on key sequence length
   if ((k_.size(2) >= 1024) || (k_.size(1) < q_.size(1) && k_.size(2) >= 4096)) {

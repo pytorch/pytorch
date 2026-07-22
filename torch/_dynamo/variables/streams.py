@@ -279,11 +279,18 @@ class SymbolicStreamState:
             # entry at runtime so cudagraph capture uses the capture stream
             # instead of this stale trace-time stream.
             index = register_user_object(stream, source)
+<<<<<<< HEAD
             if index != CURRENT_STREAM_INDEX:
                 raise AssertionError(
                     f"Current stream must be registered at index {CURRENT_STREAM_INDEX}, "
                     f"got {index}"
                 )
+=======
+            assert index == CURRENT_STREAM_INDEX, (
+                f"Current stream must be registered at index {CURRENT_STREAM_INDEX}, "
+                f"got {index}"
+            )
+>>>>>>> upstream/release/2.12
             stream_var = LazyVariableTracker.create(stream, source=source)
             # Set user_object_index as an instance attribute so accessing it
             # does NOT trigger LazyVariableTracker realization.
@@ -590,6 +597,7 @@ class CudaStreamVariable(StreamVariable):
     _device_handle_attr = "cuda_stream"
 
 
+<<<<<<< HEAD
 class XpuStreamVariable(StreamVariable):
     """Represents torch.xpu.Stream, preserving device-specific type and attributes."""
 
@@ -605,6 +613,24 @@ _stream_fn_to_variable_cls: dict[object, type[StreamVariable]] = {
 
 def _get_stream_variable_cls(stream_fn: object) -> type[StreamVariable] | None:
     return _stream_fn_to_variable_cls.get(stream_fn)
+=======
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        from . import ConstantVariable
+
+        if name == "cuda_stream":
+            from ..guards import GuardBuilder, install_guard
+
+            if self.source:
+                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+
+            if hasattr(self.value, "cuda_stream"):
+                return ConstantVariable.create(self.value.cuda_stream)
+
+            if hasattr(self.value, "native_handle"):
+                return ConstantVariable.create(self.value.native_handle)
+
+        return super().var_getattr(tx, name)
+>>>>>>> upstream/release/2.12
 
 
 class EventVariable(VariableTracker):

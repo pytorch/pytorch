@@ -310,7 +310,7 @@ class PublicTorchCompilerTests(TestCase):
 
 
 class FullgraphTests(TestCase):
-    def test_fullgraph_errors_on_frame_skip_with_dispatch_mode(self):
+    def test_fullgraph_warns_on_frame_skip_with_dispatch_mode(self):
         from torch.utils._python_dispatch import TorchDispatchMode
 
         class SkipMode(TorchDispatchMode):
@@ -322,18 +322,26 @@ class FullgraphTests(TestCase):
 
         x = torch.randn(5)
         with SkipMode():
+<<<<<<< HEAD
             with self.assertRaisesRegex(
                 RuntimeError, "non-infra torch dispatch mode present"
             ):
+=======
+            with self.assertWarnsRegex(UserWarning, "found no compiled frames"):
+>>>>>>> upstream/release/2.12
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
 
-    def test_fullgraph_errors_on_frame_skip_dynamo_disabled(self):
+    def test_fullgraph_warns_on_frame_skip_dynamo_disabled(self):
         def fn(x):
             return x + 1
 
         x = torch.randn(5)
         with torch._dynamo.config.patch(disable=True):
+<<<<<<< HEAD
             with self.assertRaisesRegex(RuntimeError, "Dynamo tracing is disabled"):
+=======
+            with self.assertWarnsRegex(UserWarning, "found no compiled frames"):
+>>>>>>> upstream/release/2.12
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
 
     def test_fullgraph_empty_graph_no_error(self):

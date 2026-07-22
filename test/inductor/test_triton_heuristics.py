@@ -50,10 +50,14 @@ from torch._inductor.runtime.hints import (
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
+<<<<<<< HEAD
     _enforce_reduction_config_block_minimums,
     _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
+=======
+    _num_warps,
+>>>>>>> upstream/release/2.12
     autotune_hints_to_configs,
     cached_autotune,
     CachingAutotuner,
@@ -1093,6 +1097,7 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
         self.assertGreaterEqual(y * z, 131070)
 
 
+<<<<<<< HEAD
 class TestFastLauncherDeviceSupport(TestCase):
     @staticmethod
     def _make_autotuner(device_type):
@@ -1419,6 +1424,8 @@ class TestCheckLauncherCallArgs(TestCase):
         # Should not raise, even with many args.
         autotuner._check_launcher_call_args(raw_launcher, (1, 2, 3, 4, 5))
 
+=======
+>>>>>>> upstream/release/2.12
 
 class TestWarpSizeUnification(TestCase):
     """Tests for the unified warp_size threading through config helpers."""
@@ -1427,7 +1434,19 @@ class TestWarpSizeUnification(TestCase):
         none_props = DeviceProperties(
             type="cuda", index=0, multi_processor_count=80, cc=80, warp_size=None
         )
+<<<<<<< HEAD
         self.assertEqual(none_props.warp_size_or_default, 32)
+=======
+        with self.assertRaisesRegex(
+            RuntimeError, "cuda device properties must report warp_size"
+        ):
+            none_props.warp_size_or_default
+
+        cpu_props = DeviceProperties(
+            type="cpu", index=0, multi_processor_count=80, cc=80, warp_size=None
+        )
+        self.assertEqual(cpu_props.warp_size_or_default, 32)
+>>>>>>> upstream/release/2.12
 
         w32 = DeviceProperties(
             type="cuda", index=0, multi_processor_count=80, cc=80, warp_size=32
@@ -1485,6 +1504,10 @@ class TestWarpSizeUnification(TestCase):
         self.assertEqual(cfg64.kwargs["XBLOCK"], 2 * cfg32.kwargs["XBLOCK"])
 
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> upstream/release/2.12
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
         run_tests()

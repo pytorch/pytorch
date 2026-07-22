@@ -4575,6 +4575,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/115859")
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+<<<<<<< HEAD
+=======
+    @runOnRocmArch(MI300_ARCH)
+>>>>>>> upstream/release/2.12
     @parametrize(
         "custom_group_name",
         [True, False],
@@ -5043,6 +5047,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 set(),
                 f"GPU kernel {ev['name']} missing NCCL metadata: {missing}",
             )
+
+
+instantiate_parametrized_tests(CommTest)
 
 
 instantiate_parametrized_tests(CommTest)

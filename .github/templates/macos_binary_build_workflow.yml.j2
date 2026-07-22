@@ -64,10 +64,17 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ first.pytorch_extra_install_requirements }}
       {%- endif %}
     steps:
+<<<<<<< HEAD
       # BINARY_ENV_FILE needs ${RUNNER_TEMP} so it has to be populated in-step
       # rather than at the workflow env level.
       - name: Populate runner env
         shell: bash
+=======
+      !{{ set_runner_specific_vars() }}
+      !{{ setup_python(config.get("python_version", "3.10")) }}
+      !{{ common.checkout(deep_clone=False, checkout_pr_head=False) }}
+      - name: Populate binary env
+>>>>>>> upstream/release/2.12
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch

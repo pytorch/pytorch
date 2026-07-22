@@ -4,7 +4,10 @@
 
 import contextlib
 import copy
+<<<<<<< HEAD
 import io
+=======
+>>>>>>> upstream/release/2.12
 import re
 from functools import partial
 from unittest.mock import patch

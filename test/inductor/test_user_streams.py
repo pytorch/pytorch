@@ -15,7 +15,11 @@ import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.metrics
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
+<<<<<<< HEAD
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
+=======
+from torch._inductor import config as inductor_config
+>>>>>>> upstream/release/2.12
 from torch._inductor.codegen.wrapper import (
     EnterCudaStreamContextLine,
     EnterDeviceContextManagerWithStreamInfoLine,
@@ -38,7 +42,10 @@ from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     TEST_WITH_ROCM,
+<<<<<<< HEAD
     xfailIfNoAcceleratorTriton,
+=======
+>>>>>>> upstream/release/2.12
 )
 
 
@@ -1397,8 +1404,13 @@ with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
     stream1 = get_external_object_by_index(1)
+<<<<<<< HEAD
     with stream1:
         arg0_1 = copy_if_misaligned(arg0_1)
+=======
+    with torch.cuda.stream(stream1):
+        arg0_1 = copy_misaligned(arg0_1)
+>>>>>>> upstream/release/2.12
         buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
         raw_stream = get_raw_stream(0)
         triton_kernel.run(arg0_1, buf0, 1024, stream=raw_stream)
@@ -2150,7 +2162,10 @@ class TestStreamIdentity(InductorTestCase):
         self.assertNotIn("torch.cuda.Stream(device=", code)
 
 
+<<<<<<< HEAD
 @xfailIfNoAcceleratorTriton
+=======
+>>>>>>> upstream/release/2.12
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
 class TestPDLWithMultiStream(InductorTestCase):
     """Tests that PDL (Programmatic Dependent Launch) composes safely with
@@ -2186,7 +2201,11 @@ class TestPDLWithMultiStream(InductorTestCase):
         result, (wrapper_code,) = run_and_get_code(compiled_fn, x)
         self.assertEqual(result, expected)
 
+<<<<<<< HEAD
         self.assertGreaterEqual(_count_generated_stream_contexts(wrapper_code), 1)
+=======
+        self.assertIn("torch.cuda.stream", wrapper_code)
+>>>>>>> upstream/release/2.12
         self.assertIn("synchronize_stream", wrapper_code)
 
         triton_code = run_and_get_triton_code(torch.compile(fn), x)
@@ -2415,7 +2434,11 @@ class TestPDLWithMultiStream(InductorTestCase):
         compiled_fn = torch.compile(fn)
         result, (code,) = run_and_get_code(compiled_fn, x, w)
         # Wrapper must have stream context and event sync
+<<<<<<< HEAD
         self.assertGreaterEqual(_count_generated_stream_contexts(code), 1)
+=======
+        self.assertIn("torch.cuda.stream", code)
+>>>>>>> upstream/release/2.12
         self.assertIn("wait_event", code)
         # The relu+add pointwise kernel should have PDL
         (
@@ -2483,7 +2506,10 @@ class TestPDLWithMultiStream(InductorTestCase):
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
 @torch._inductor.config.patch({"triton.cudagraphs": True})
+<<<<<<< HEAD
 @xfailIfNoAcceleratorTriton
+=======
+>>>>>>> upstream/release/2.12
 class TestStreamCudagraphInteraction(InductorTestCase):
     """Tests for user streams under cudagraph capture (reduce-overhead mode)."""
 
@@ -2546,6 +2572,7 @@ class TestStreamCudagraphInteraction(InductorTestCase):
             result = compiled_fn(x, y)
         self.assertEqual(result, expected)
 
+<<<<<<< HEAD
     def test_wait_stream_fork_join_with_cudagraphs(self):
         """wait_stream fork-join pattern must work under cudagraph capture.
 
@@ -2597,6 +2624,8 @@ class TestStreamCudagraphInteraction(InductorTestCase):
             result = compiled_fn(x, y)
         self.assertTrue(torch.allclose(result, expected, atol=1e-5, rtol=1e-5))
 
+=======
+>>>>>>> upstream/release/2.12
 
 instantiate_parametrized_tests(TestStreamUtils)
 instantiate_parametrized_tests(TestWrapperCodegenStreams)

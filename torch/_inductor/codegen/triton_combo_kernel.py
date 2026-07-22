@@ -25,7 +25,11 @@ from ..runtime.triton_heuristics import (
 )
 from ..scheduler import BaseSchedulerNode
 from ..stream_utils import get_raw_stream_name
+<<<<<<< HEAD
 from ..utils import DeferredLineBase, Placeholder, triton_version_uses_attrs_dict
+=======
+from ..utils import Placeholder, triton_version_uses_attrs_dict
+>>>>>>> upstream/release/2.12
 from ..virtualized import V
 from .common import (
     ArgName,

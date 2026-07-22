@@ -1174,6 +1174,7 @@ class _TorchDynamoContext:
                             cur_exn.__cause__.with_traceback(None)
                             cur_exn = cur_exn.__cause__
 
+<<<<<<< HEAD
                         raise e.with_traceback(
                             None
                         ) from e.__cause__  # User compiler error
@@ -1205,6 +1206,24 @@ class _TorchDynamoContext:
                         if prior_error_on_nested_compile is not None:
                             set_fullgraph_error_on_nested_compile(
                                 prior_error_on_nested_compile
+=======
+                    raise e.with_traceback(None) from e.__cause__  # User compiler error
+                except ShortenTraceback as e:
+                    # Failures in the backend likely don't have useful
+                    # data in the TorchDynamo frames, so we strip them out.
+                    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+                finally:
+                    # Restore the dynamic layer stack depth if necessary.
+                    set_eval_frame(None)
+                    if fullgraph_count_enabled and call_succeeded:
+                        count = set_fullgraph_compiled_frame_count(-1)
+                        if count == 0:
+                            torch._dynamo.utils.warn_once(
+                                "torch.compile with fullgraph=True found no compiled frames. "
+                                "The frame was likely skipped (e.g., a non-infra torch dispatch "
+                                "mode was active, dynamo was disabled, or the frame was skipped. "
+                                "This may become an error in the future."
+>>>>>>> upstream/release/2.12
                             )
                         torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                             saved_dynamic_layer_stack_depth

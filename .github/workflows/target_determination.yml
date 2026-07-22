@@ -9,7 +9,11 @@ jobs:
     name: get-label-type
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
+<<<<<<< HEAD
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.13
+=======
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.12
+>>>>>>> upstream/release/2.12
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -23,7 +27,11 @@ jobs:
     needs: get-label-type
     steps:
       - name: Setup Linux
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/setup-linux@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           submodules: false
 

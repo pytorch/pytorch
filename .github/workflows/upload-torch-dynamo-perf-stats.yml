@@ -32,7 +32,11 @@ jobs:
     name: Upload dynamo performance stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
     steps:
       - name: Checkout PyTorch
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           submodules: false
           fetch-depth: 1

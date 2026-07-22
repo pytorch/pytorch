@@ -18,7 +18,11 @@ jobs:
     environment: ${{ (github.event_name == 'schedule') && 'mergebot' || '' }}
     steps:
       - name: Update viable/strict
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/update-viablestrict@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/update-viablestrict@release/2.12
+>>>>>>> upstream/release/2.12
         id: update_viablestrict
         with:
           repository: pytorch/pytorch

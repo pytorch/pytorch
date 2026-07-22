@@ -38,7 +38,11 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
+<<<<<<< HEAD
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.13
+=======
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.12
+>>>>>>> upstream/release/2.12
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -53,7 +57,11 @@ jobs:
       matrix: ${{ steps.generate-matrix.outputs.matrix }}
     steps:
       - name: Checkout PyTorch
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           fetch-depth: 1
           submodules: 'false'
@@ -83,14 +91,22 @@ jobs:
       CUDNN_VERSION: ${{ matrix.cudnn_version }}
     steps:
       - name: Setup SSH (Click me for login details)
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Linux
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/setup-linux@release/2.13
         with:
           submodules: 'false'
+=======
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
+>>>>>>> upstream/release/2.12
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
@@ -165,13 +181,21 @@ jobs:
           fi
 
       - name: Teardown Linux
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.12
+>>>>>>> upstream/release/2.12
         if: always()
 
   validate:
     needs: build
     if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
+<<<<<<< HEAD
     uses: pytorch/test-infra/.github/workflows/validate-docker-images.yml@release/2.13
+=======
+    uses: pytorch/test-infra/.github/workflows/validate-docker-images.yml@release/2.12
+>>>>>>> upstream/release/2.12
     with:
       channel: nightly
       ref: main

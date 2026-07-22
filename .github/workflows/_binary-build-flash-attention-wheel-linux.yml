@@ -23,7 +23,11 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
+<<<<<<< HEAD
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.13
+=======
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.12
+>>>>>>> upstream/release/2.12
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -83,18 +87,30 @@ jobs:
       TORCH_VERSION: "2.10.0"
     steps:
       - name: Setup SSH (Click me for login details)
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           fail-silently: false
 
       - name: Setup Linux
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/setup-linux@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           submodules: true
 
       - name: Pull Docker image
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
@@ -135,5 +151,9 @@ jobs:
           path: ${{ runner.temp }}/artifacts/*.whl
 
       - name: Teardown Linux
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.12
+>>>>>>> upstream/release/2.12
         if: always()

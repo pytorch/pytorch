@@ -78,7 +78,11 @@ jobs:
           git config --global core.fsmonitor false
 
       - name: Setup SSH (Click me for login details)
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -94,7 +98,11 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           no-sudo: true
           submodules: false

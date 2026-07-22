@@ -105,11 +105,19 @@ jobs:
           done
 
       - name: Clean up disk space before running MacOS workflow
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/check-disk-space@release/2.13
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/check-disk-space@release/2.12
+
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+>>>>>>> upstream/release/2.12
 
       - name: Get workflow job id
         id: get-job-id
@@ -119,7 +127,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/setup-python@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/setup-python@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           python-version: ${{ inputs.python-version }}
           pip-requirements-file: .ci/docker/requirements-ci.txt
@@ -256,7 +268,11 @@ jobs:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Upload the benchmark results
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false
@@ -286,4 +302,8 @@ jobs:
       - name: Clean up disk space
         if: always()
         continue-on-error: true
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/check-disk-space@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/check-disk-space@release/2.12
+>>>>>>> upstream/release/2.12

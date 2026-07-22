@@ -993,8 +993,12 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
+<<<<<<< HEAD
       check_head_dim_size_mem_efficient,
       check_data_ptr_alignment_mem_efficient
+=======
+      check_head_dim_size_mem_efficient
+>>>>>>> upstream/release/2.12
   );
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
@@ -1004,6 +1008,12 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 
   if (has_for_nested_inputs(params)) {
     constexpr auto nested_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+<<<<<<< HEAD
+=======
+#ifndef USE_ROCM  // ME and FA share the backend on ROCM and thus support training
+        check_requires_grad_and_nested,
+#endif
+>>>>>>> upstream/release/2.12
         check_batch_size_nested,
         check_for_seq_len_0_nested_tensor);
     for (auto& constraint : nested_constraints) {

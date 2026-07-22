@@ -51,11 +51,20 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     // non-empty tensor
     if (self.device().is_cpu()) {
       // for cuda, rely on device assert thrown by scatter
+<<<<<<< HEAD
       auto [self_min, self_max] = at::aminmax(self);
       TORCH_CHECK(self_min.item<int64_t>() >= 0, "Class values must be non-negative.");
       if (num_classes == -1) {
           num_classes = self_max.item<int64_t>() + 1;
       } else {
+=======
+      TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
+    }
+    if (num_classes == -1) {
+        num_classes = self.max().item().toLong() + 1;
+    } else {
+        if (self.device().is_cpu()) {
+>>>>>>> upstream/release/2.12
           // rely on device asserts from scatter to avoid sync here
           TORCH_CHECK(num_classes > self_max.item<int64_t>(), "Class values must be smaller than num_classes.");
       }

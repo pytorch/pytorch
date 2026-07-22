@@ -1,4 +1,5 @@
 # Build System requirements
+<<<<<<< HEAD
 setuptools==81.0.0  # 77.0 is the first release with PEP 639 license-files support (constraint was >=77.0.0,<82)
 cmake==4.4.0
 ninja==1.13.0
@@ -11,3 +12,19 @@ requests==2.34.2
 six==1.17.0  # dependency chain: NNPACK -> PeachPy -> six
 typing-extensions==4.16.0
 pip==26.1.2  # not technically needed, but this makes setup.py invocation work
+=======
+# Build requirements pinned to match rocm/pytorch release/2.11:
+# https://github.com/ROCm/pytorch/blob/83524a4c7d748e5de89a7a93cd72dab4bd1fa42d/requirements-build.txt
+setuptools==79.0.1
+cmake==4.0.0
+ninja==1.11.1.4
+numpy==2.0.2 ; python_version == "3.9"
+numpy==2.1.2 ; python_version > "3.9" and python_version < "3.14"
+numpy==2.4.3 ; python_version >= "3.14"
+packaging==25.0
+pyyaml==6.0.3
+requests==2.32.5
+six==1.17.0  # dependency chain: NNPACK -> PeachPy -> six
+typing_extensions==4.15.0
+pip==26.0.1  # not technically needed, but this makes setup.py invocation work
+>>>>>>> upstream/release/2.12

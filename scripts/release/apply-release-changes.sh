@@ -44,6 +44,10 @@ echo "XLA Changes"
 sed -i -e s#--quiet#-b\ r"${RELEASE_VERSION}"# .ci/pytorch/common_utils.sh
 sed -i -e s#.*#r"${RELEASE_VERSION}"# .github/ci_commit_pins/xla.txt
 
+# Strip +PTX from CUDA arch lists in release builds
+echo "Stripping +PTX from CUDA arch lists"
+sed -i 's/+PTX//' .ci/manywheel/build_cuda.sh
+
 # Regenerate templates
 export RELEASE_VERSION_TAG=${RELEASE_VERSION}
 ./.github/regenerate.sh
@@ -57,5 +61,10 @@ sed -i -e s#unstable-jobs.json#"unstable-jobs.json?versionId=${UNSTABLE_VER}"# .
 sed -i -e s#disabled-jobs.json#"disabled-jobs.json?versionId=${DISABLED_VER}"# .github/scripts/filter_test_configs.py
 sed -i -e s#disabled-tests-condensed.json#"disabled-tests-condensed.json?versionId=${DISABLED_TESTS_VER}"# tools/stats/import_test_stats.py
 # Optional
+<<<<<<< HEAD
 # git commit -m "[RELEASE-ONLY CHANGES] Branch Cut for Release ${RELEASE_VERSION}"
 # git push origin "release/${RELEASE_VERSION}"
+=======
+git commit -m "[RELEASE-ONLY CHANGES] Branch Cut for Release ${RELEASE_VERSION}"
+git push origin "release/${RELEASE_VERSION}"
+>>>>>>> upstream/release/2.12

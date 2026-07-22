@@ -208,6 +208,7 @@ if(USE_FLASH_ATTENTION)
         if(ENV{USE_ROCM_CK_SDPA} EQUAL 1)
           caffe2_update_option(USE_ROCM_CK_SDPA ON)
         endif()
+<<<<<<< HEAD
     elseif(NOT WIN32)
       caffe2_update_option(USE_ROCM_CK_SDPA ON)
     endif()
@@ -224,6 +225,29 @@ if(USE_FLASH_ATTENTION)
       endforeach()
       if(NOT _have_ck_sdpa_arch)
         message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
+=======
+    else()
+      caffe2_update_option(USE_ROCM_CK_SDPA ON)
+    endif()
+    # CK SDPA only supports gfx942/gfx950. Compute the intersection of the
+    # requested PYTORCH_ROCM_ARCH with the supported archs and build the
+    # ck_sdpa target for that subset only. This keeps CK SDPA working when
+    # PYTORCH_ROCM_ARCH mixes supported and unsupported archs: e.g.
+    # "gfx942;gfx1010" builds CK SDPA for gfx942 and skips gfx1010. If none of
+    # the supported archs are requested, disable the target entirely so it does
+    # not end up with an empty arch list and error out.
+    if(USE_ROCM_CK_SDPA)
+      set(CK_SDPA_ARCHS "")
+      foreach(ARCH ${PYTORCH_ROCM_ARCH})
+        if("${ARCH}" STREQUAL "gfx942" OR "${ARCH}" STREQUAL "gfx950")
+          list(APPEND CK_SDPA_ARCHS "${ARCH}")
+        endif()
+      endforeach()
+      if(CK_SDPA_ARCHS)
+        message(STATUS "USE_ROCM_CK_SDPA enabled for supported archs: ${CK_SDPA_ARCHS} (from PYTORCH_ROCM_ARCH: ${PYTORCH_ROCM_ARCH})")
+      else()
+        message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no supported arch (gfx942/gfx950)")
+>>>>>>> upstream/release/2.12
         caffe2_update_option(USE_ROCM_CK_SDPA OFF)
       endif()
     endif()
@@ -308,6 +332,7 @@ if(USE_FLASH_ATTENTION)
          "native/transformers/hip/flash_attn/ck/*.hip"
          "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
 
+<<<<<<< HEAD
     set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES LANGUAGE HIP)
 
     # Only build for MI3xx series architectures as building for all targets takes too long
@@ -324,6 +349,35 @@ if(USE_FLASH_ATTENTION)
     set_target_properties(ck_sdpa PROPERTIES
       POSITION_INDEPENDENT_CODE ON
       HIP_ARCHITECTURES "${_ck_sdpa_hip_arches}")
+=======
+    set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+
+    # hip_add_library() inherits the global HIP_CLANG_FLAGS, which carry an
+    # --offload-arch=<arch> entry for every arch in PYTORCH_ROCM_ARCH (see
+    # cmake/Dependencies.cmake), including archs CK SDPA does not support. Strip
+    # those inherited offload-arch flags for this target and re-add only the
+    # supported archs (CK_SDPA_ARCHS), so ck_sdpa compiles for gfx942/gfx950
+    # only, regardless of what else PYTORCH_ROCM_ARCH requests. Restore the
+    # flags afterwards so other HIP targets keep building for the full arch list.
+    set(_ck_sdpa_saved_hip_clang_flags "${HIP_CLANG_FLAGS}")
+    set(_ck_sdpa_hip_clang_flags "")
+    foreach(_flag ${HIP_CLANG_FLAGS})
+      if(NOT "${_flag}" MATCHES "^--offload-arch=")
+        list(APPEND _ck_sdpa_hip_clang_flags "${_flag}")
+      endif()
+    endforeach()
+    foreach(_arch ${CK_SDPA_ARCHS})
+      list(APPEND _ck_sdpa_hip_clang_flags "--offload-arch=${_arch}")
+    endforeach()
+    set(HIP_CLANG_FLAGS "${_ck_sdpa_hip_clang_flags}")
+
+    hip_add_library(ck_sdpa STATIC
+                    ${ck_sdpa_sources_hip}
+                    HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${CK_SDPA_EXTRA_HIPCC_FLAGS})
+
+    set(HIP_CLANG_FLAGS "${_ck_sdpa_saved_hip_clang_flags}")
+    set_target_properties(ck_sdpa PROPERTIES POSITION_INDEPENDENT_CODE ON)
+>>>>>>> upstream/release/2.12
     target_compile_definitions(ck_sdpa PUBLIC ${CK_SDPA_EXTRA_HIPCC_OPTIONS})
     target_compile_definitions(ck_sdpa PRIVATE AITER_EMBEDDED_HSA_HEADER="aiter_embedded_hsa.h")
     target_include_directories(ck_sdpa PUBLIC
@@ -661,11 +715,38 @@ if(USE_ROCM)
     ${native_quantized_hip_hip}
     ${native_transformers_hip_hip} ${native_transformers_src_hip_hip}
   )
+  file(GLOB native_hip_bgemm CONFIGURE_DEPENDS "native/hip/bgemm_kernels/*.hip")
+  file(GLOB native_hip_ck CONFIGURE_DEPENDS "native/hip/ck*.hip")
   if(NOT USE_ROCM_CK_GEMM)
+<<<<<<< HEAD
     file(GLOB native_hip_bgemm CONFIGURE_DEPENDS "native/hip/bgemm_kernels/*.hip")
     file(GLOB native_hip_ck CONFIGURE_DEPENDS "native/hip/ck*.hip")
+=======
+>>>>>>> upstream/release/2.12
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
+  else()
+    # composable_kernel has no gfx1250 support yet, so its CK GEMM kernels fail to
+    # compile for that arch. Build CK GEMM as a separate library with gfx1250
+    # filtered out of HIP_ARCHITECTURES so every other requested arch still gets
+    # CK GEMM. Remove this filtering once the CK submodule supports gfx1250.
+    exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
+      ${native_hip_bgemm} ${native_hip_ck})
+    set(_ck_gemm_hip_arches ${PYTORCH_ROCM_ARCH})
+    list(REMOVE_ITEM _ck_gemm_hip_arches "gfx1250")
+    set_source_files_properties(${native_hip_bgemm} ${native_hip_ck} PROPERTIES LANGUAGE HIP)
+    add_library(ck_gemm STATIC ${native_hip_bgemm} ${native_hip_ck})
+    set_target_properties(ck_gemm PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      HIP_ARCHITECTURES "${_ck_gemm_hip_arches}")
+    target_compile_options(ck_gemm PRIVATE ${HIP_CXX_FLAGS})
+    target_include_directories(ck_gemm PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/hip
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include
+      ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
+    # Ensure torch_cpu (and its codegen) is built before ck_gemm to avoid race conditions
+    add_dependencies(ck_gemm torch_cpu)
   endif()
 
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)

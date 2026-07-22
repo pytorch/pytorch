@@ -412,6 +412,7 @@ class TestPublicBindings(TestCase):
 
         errors = []
         for mod, exc in failures:
+<<<<<<< HEAD
             # Prefixes for modules whose top-level imports pull in optional
             # runtime deps (cutlass, cuda-python, triton) that aren't
             # available in CPU-only CI. Registrations are no-ops when the
@@ -428,6 +429,11 @@ class TestPublicBindings(TestCase):
                 or mod.startswith(cuda_dep_prefixes)
             ):
                 if self._is_mod_public(mod):
+=======
+            if mod in private_allowlist:
+                # make sure mod is actually private
+                if not any(t.startswith("_") for t in mod.split(".")):
+>>>>>>> upstream/release/2.12
                     raise AssertionError(
                         f"Expected private module name to include '_' segments: {mod}"
                     )

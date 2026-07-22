@@ -74,6 +74,10 @@ def define_targets(rules):
             exported_headers = {
                 h: h for h in native.glob(["**/*.h"], exclude = ["version.h"])
             } | {
+<<<<<<< HEAD
+=======
+                "version.h": ":version_h",
+>>>>>>> upstream/release/2.12
                 "core/enum_tag.h": ":enum_tag_h",
             },
             visibility = ["PUBLIC"],

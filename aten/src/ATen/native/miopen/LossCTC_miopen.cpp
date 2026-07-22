@@ -216,7 +216,11 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
       handle,
       probs_desc,
       grads_desc,
+<<<<<<< HEAD
       targets_t.const_data_ptr<int>(),
+=======
+      targets_t.data_ptr<int>(),
+>>>>>>> upstream/release/2.12
       target_lengths.data(),
       input_lengths.data(),
       MIOPEN_CTC_LOSS_ALGO_DETERMINISTIC,
@@ -229,7 +233,11 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
       handle,
       probs_desc,
       log_probs_t.data_ptr(),
+<<<<<<< HEAD
       targets_t.const_data_ptr<int>(),
+=======
+      targets_t.data_ptr<int>(),
+>>>>>>> upstream/release/2.12
       target_lengths.data(),
       input_lengths.data(),
       costs.data_ptr(),

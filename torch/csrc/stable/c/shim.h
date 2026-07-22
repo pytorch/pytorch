@@ -220,6 +220,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
     const char* schema,
     const int32_t* tags,
     int32_t num_tags);
+<<<<<<< HEAD
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
 /**
@@ -286,6 +287,11 @@ AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
+=======
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+>>>>>>> upstream/release/2.12
 #ifdef __cplusplus
 } // extern "C"
 #endif

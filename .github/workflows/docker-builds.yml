@@ -30,6 +30,19 @@ permissions:
   contents: read
 
 jobs:
+<<<<<<< HEAD
+=======
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.12
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+>>>>>>> upstream/release/2.12
   docker-build:
     if: github.repository_owner == 'pytorch'
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
@@ -91,6 +104,7 @@ jobs:
       image: ghcr.io/actions/actions-runner:latest
     steps:
       - name: Setup Linux
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/setup-linux@release/2.13
         with:
           use-arc: true
@@ -99,12 +113,27 @@ jobs:
 
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
+
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
+      - name: Build docker image
+        id: build-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           aws-role-to-assume: arn:aws:iam::308535385114:role/arc
 
+<<<<<<< HEAD
       - name: Login to GHCR
         if: github.event_name == 'push' && github.ref_type == 'branch'
         uses: docker/login-action@v3
+=======
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           registry: ghcr.io
           username: pytorch
@@ -166,3 +195,39 @@ jobs:
           name: docker-builds-artifacts-${{ matrix.docker-image-name }}
           retention-days: 14
           path: ./docker-builds-output-${{ matrix.docker-image-name }}.txt
+<<<<<<< HEAD
+=======
+
+      - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
+        name: Push to https://ghcr.io/
+        id: push-to-ghcr-io
+        if: ${{ github.event_name == 'push' }}
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+        with:
+          shell: bash
+          timeout_minutes: 60
+          max_attempts: 5
+          retry_wait_seconds: 90
+          command: |
+            ghcr_image="ghcr.io/pytorch/ci-image"
+            tag=${ECR_DOCKER_IMAGE##*:}
+            # Push docker image to the ghcr.io
+            echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
+            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${tag}"
+            docker push "${ghcr_image}:${tag}"
+            # Also push a tag without the hash for easier reference
+            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${{ matrix.docker-image-name }}"
+            docker push "${ghcr_image}:${{ matrix.docker-image-name }}"
+
+      - name: Chown workspace
+        uses: ./.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ contains(matrix.runner, 'arm64') && 'arm64v8' || 'tool' }}/alpine
+        if: always()
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.12
+        if: always()
+>>>>>>> upstream/release/2.12

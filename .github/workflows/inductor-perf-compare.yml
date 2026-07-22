@@ -19,7 +19,11 @@ jobs:
   get-default-label-prefix:
     if: github.repository_owner == 'pytorch'
     name: get-default-label-prefix
+<<<<<<< HEAD
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.13
+=======
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.12
+>>>>>>> upstream/release/2.12
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}

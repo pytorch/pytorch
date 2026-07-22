@@ -489,7 +489,10 @@ ROCM_UNARY_NUMERICAL_XFAILS = {
         "tanh": {fp32},
     },
     "inductor_numerics": {
+<<<<<<< HEAD
         "log10": {fp16, fp32},
+=======
+>>>>>>> upstream/release/2.12
         "sigmoid": {fp32},
     },
 }

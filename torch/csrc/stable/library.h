@@ -109,6 +109,7 @@ class StableLibrary final {
       tag_ints.push_back(
           torch::stable::detail::to<int32_t>(torch::stable::detail::from(t)));
     }
+<<<<<<< HEAD
     STABLE_TORCH_ERROR_CODE_CHECK(torch_library_def_with_tags(
         lib_, schema, tag_ints.data(), static_cast<int32_t>(tag_ints.size())));
     return *this;
@@ -125,6 +126,13 @@ class StableLibrary final {
     return *this;
   }
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+=======
+    torch_library_def_with_tags(
+        lib_, schema, tag_ints.data(), static_cast<int32_t>(tag_ints.size()));
+    return *this;
+  }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+>>>>>>> upstream/release/2.12
 };
 
 class StableTorchLibraryInit final {

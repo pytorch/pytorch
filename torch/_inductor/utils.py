@@ -3199,12 +3199,21 @@ def get_max_numwarps() -> int:
         props = DeviceProperties.create(device)
         warp_size = props.warp_size_or_default
         max_threads_per_block = props.max_threads_per_block
+<<<<<<< HEAD
         assert max_threads_per_block is not None
     else:
         # Defaults
         warp_size = 32
         max_threads_per_block = 1024
     return max_threads_per_block // warp_size
+=======
+        if max_threads_per_block is None:
+            raise AssertionError("expected max_threads_per_block to be set")
+        return max_threads_per_block // warp_size
+
+    log.debug("CUDA is not available; defaulting max num warps to 32")
+    return 32
+>>>>>>> upstream/release/2.12
 
 
 def is_welford_reduction(reduction_type: str) -> bool:

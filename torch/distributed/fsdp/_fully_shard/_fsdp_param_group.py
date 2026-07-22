@@ -710,9 +710,12 @@ class FSDPParamGroup:
                 self._partial_reduce_output,
                 self._all_reduce_hook,
                 self.force_sum_reduction_for_comms,
+<<<<<<< HEAD
             )
             self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                 self._post_reduce_event
+=======
+>>>>>>> upstream/release/2.12
             )
             self.comm_ctx.reduce_scatter_states.append(
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)

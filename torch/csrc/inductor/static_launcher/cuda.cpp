@@ -119,7 +119,11 @@ std::vector<char> readKernelImage(const std::string& filePath) {
 }
 #endif
 
+<<<<<<< HEAD
 std::pair<CUmodule, CUfunction> loadKernel(
+=======
+CUfunction loadKernel(
+>>>>>>> upstream/release/2.12
     std::string filePath,
     const std::string& funcName,
     uint32_t sharedMemBytes,

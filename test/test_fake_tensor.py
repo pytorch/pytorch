@@ -149,6 +149,7 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+<<<<<<< HEAD
     def test_sparse_spdiags(self):
         with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
             out = torch.sparse.spdiags(torch.randn(2, 3), torch.tensor([0, -1]), (2, 3))
@@ -306,6 +307,11 @@ class FakeTensorTest(TestCase):
     def test_custom_op_fallback(self):
         from torch.library import _scoped_library, impl
 
+=======
+    def test_custom_op_fallback(self):
+        from torch.library import _scoped_library, impl
+
+>>>>>>> upstream/release/2.12
         with _scoped_library("my_test_op", "DEF") as test_lib:
             test_lib.define("foo(Tensor self) -> Tensor")
 
@@ -321,6 +327,7 @@ class FakeTensorTest(TestCase):
                     x = mode.from_tensor(x)
                     torch.ops.my_test_op.foo(x)
 
+<<<<<<< HEAD
     def test_custom_op_fake_impl_with_parameter_subclass(self):
         class ParameterSubclass(torch.nn.Parameter):
             pass
@@ -416,6 +423,8 @@ class FakeTensorTest(TestCase):
         tt_param = torch.nn.Parameter(TwoTensor(torch.randn(4, 4), torch.randn(4, 4)))
         self.assertTrue(_check_for_subclass_arg(tt_param))
 
+=======
+>>>>>>> upstream/release/2.12
     def test_parameter_instantiation(self):
         with FakeTensorMode():
             x = torch.rand([4])

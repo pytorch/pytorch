@@ -85,7 +85,11 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - name: Checkout PyTorch
+<<<<<<< HEAD
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.13
+=======
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           no-sudo: true
 
@@ -104,12 +108,20 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
       - name: Pull docker image
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -327,7 +339,11 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results
+<<<<<<< HEAD
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.13
+=======
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.12
+>>>>>>> upstream/release/2.12
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false

@@ -55,7 +55,10 @@ from ..runtime.hints import (
     AutotuneHint,
     DeviceProperties,
     get_warp_size,
+<<<<<<< HEAD
     native_matmul_persistent_rblock,
+=======
+>>>>>>> upstream/release/2.12
     ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,

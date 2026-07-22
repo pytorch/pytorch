@@ -195,6 +195,13 @@ def autotune_hints_to_configs(
     configs: list[Config] = []
     for hint in hints:
         if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
+            if device_props.warp_size is None:
+                log.debug(
+                    "Skipping %s autotune hint because device %s does not report warp_size",
+                    AutotuneHint.ONE_ELEMENT_PER_THREAD,
+                    device_props.type,
+                )
+                continue
             if len(size_hints) == 1:
                 xyz_options = ((block_size // 4, None, None),)
             elif len(size_hints) == 2:
@@ -711,6 +718,7 @@ class CachingAutotuner(KernelInterface):
             and bool(device_prop.major)
             and (device_prop.major >= 8 or torch.version.hip)
             and device_prop.regs_per_multiprocessor is not None
+<<<<<<< HEAD
         )
 
     def _iter_rblock_scale_candidates(self):
@@ -824,6 +832,28 @@ class CachingAutotuner(KernelInterface):
         for new_config in self._iter_rblock_scale_candidates():
             self.compile_results.append(self._precompile_config(new_config))  # noqa: B909
         self._make_launchers()
+=======
+            and device_prop.warp_size is not None
+        ):
+            assert device_prop.regs_per_multiprocessor
+            assert device_prop.max_threads_per_multi_processor
+            assert device_prop.multi_processor_count
+            seen_config_hashes: OrderedSet[Hashable] | None = None
+            warp_size = device_prop.warp_size
+            for result in self.compile_results:
+                triton_config = result.config
+                compiled_binary = result.kernel
+                assert len(self.size_hints) >= 2
+                xblock = triton_config.kwargs.get("XBLOCK", 1)
+                reduction_kwargs = [
+                    kwarg for kwarg in triton_config.kwargs if kwarg.startswith("R")
+                ]
+                rblocks = [triton_config.kwargs[kwarg] for kwarg in reduction_kwargs]
+                total_block = (self.size_hints["x"] + xblock - 1) // xblock
+                nreg = getattr(compiled_binary, "n_regs", None)
+                if nreg is None:
+                    continue
+>>>>>>> upstream/release/2.12
 
     def compile_by_disabling_pipelining(self, config):
         self._ensure_kernel_loaded()
@@ -840,6 +870,7 @@ class CachingAutotuner(KernelInterface):
     ) -> tuple[LauncherType, None] | tuple[None, Exception]:
         """Create a launcher from a compile result.
 
+<<<<<<< HEAD
         Caller must hold a DeviceGuard for the target device.
         Returns (launcher, None) on success, or (None, exception) on failure.
         """
@@ -852,6 +883,78 @@ class CachingAutotuner(KernelInterface):
             IntelGPUError,
         ) as e:
             return None, e
+=======
+                nreg_per_warp = nreg * warp_size
+                nreg_per_block = nreg_per_warp * triton_config.num_warps
+
+                # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processor / (warp_size * num_warps)'
+                # The formula below is a tighter upper bound since we have the assumption that
+                #   nreg > device_prop.regs_per_multiprocessor // device_prop.max_threads_per_multi_processor
+                # due to the if condition above and:
+                #   regs_per_multiprocessor / nreg_per_block
+                #   = regs_per_multiprocessor / (nreg * warp_size * num_warps)
+                #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * warp_size * num_warps)
+                #   = max_threads_per_multi_processor / (warp_size * num_warps)
+                # Using a tighter upper bound can reveal more optimization opportunities.
+                max_blocks_per_sm = max(
+                    device_prop.regs_per_multiprocessor // nreg_per_block, 1
+                )
+
+                if total_block <= max_blocks_per_sm * device_prop.multi_processor_count:
+                    # no need to improve occupancy
+                    continue
+                new_config = copy.deepcopy(triton_config)
+
+                # Reduce the largest Rn_BLOCK by a factor of 2.
+                largest_rkwarg: str = max(
+                    reduction_kwargs, key=triton_config.kwargs.__getitem__
+                )
+                new_config.kwargs[largest_rkwarg] //= 2
+
+                if seen_config_hashes is None:
+                    seen_config_hashes = OrderedSet(
+                        [
+                            triton_config_to_hashable(x.config)
+                            for x in self.compile_results
+                        ]
+                    )
+                new_config_hash = triton_config_to_hashable(new_config)
+                if new_config_hash in seen_config_hashes:
+                    continue
+                seen_config_hashes.add(new_config_hash)
+                log.debug(
+                    "Dynamically scale down %s from TritonConfig(%s) and get a new TritonConfig(%s)",
+                    largest_rkwarg,
+                    triton_config,
+                    new_config,
+                )
+                if self.fn.fn is None:
+                    """
+                    We are in the parent process, while this program was compiled in a worker
+                    and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
+                    containing the real fn yet.
+                    """
+                    assert hasattr(self, "_reload_kernel")
+                    assert callable(self._reload_kernel)
+                    self.fn = self._reload_kernel().fn
+                self.compile_results.append(self._precompile_config(new_config))  # noqa: B909
+
+            self._make_launchers()
+>>>>>>> upstream/release/2.12
+
+    def compile_by_disabling_pipelining(self, config):
+        # self.fn.fn is dropped by prepare_for_pickle() after the initial
+        # compile; reload it so triton.compile can access the source.
+        if self.fn.fn is None:
+            assert callable(self._reload_kernel)
+            self.fn = self._reload_kernel().fn
+        cfg = copy.deepcopy(config)
+        cfg.num_stages = 1
+        if "NUM_STAGES" in cfg.kwargs:
+            cfg.kwargs["NUM_STAGES"] = 1
+        result = self._precompile_config(cfg)
+        self.compile_results = [result]
+        return result.make_launcher()
 
     def _make_launchers(self):
         if len(self.launchers) == len(self.compile_results):
@@ -865,9 +968,22 @@ class CachingAutotuner(KernelInterface):
         # DeviceGuard ensures each launcher's binary loads onto the right device.
         with DeviceGuard(device_interface, self.triton_meta["device"]):
             for result in self.compile_results:
+<<<<<<< HEAD
                 launcher, exc = self._make_launcher(result)
                 if launcher is not None:
                     launchers.append(launcher)
+=======
+                try:
+                    launchers.append(result.make_launcher())
+
+                except (
+                    OutOfResources,
+                    PTXASError,
+                    torch.cuda.OutOfMemoryError,
+                    IntelGPUError,
+                ) as e:
+                    exc = e
+>>>>>>> upstream/release/2.12
             if len(launchers) == 0:
                 result = self.compile_results[-1]
                 config = result.config
@@ -885,6 +1001,7 @@ class CachingAutotuner(KernelInterface):
                 )
         self.launchers = launchers
 
+<<<<<<< HEAD
     def _prune_compile_results_to_launcher(self, launcher: LauncherType) -> None:
         if not self.compile_results:
             return
@@ -921,6 +1038,8 @@ class CachingAutotuner(KernelInterface):
             assert callable(self._reload_kernel)
             self.fn = self._reload_kernel().fn
 
+=======
+>>>>>>> upstream/release/2.12
     def prepare_for_pickle(self) -> tuple[Any, ...]:
         """Drop stuff from triton.JITFunction that does not pickle.
         This must be called after precompile so that these things are no longer needed.
@@ -940,13 +1059,19 @@ class CachingAutotuner(KernelInterface):
         self.fn.used_global_vals = None
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
+<<<<<<< HEAD
         self._cached_launcher = None
+=======
+>>>>>>> upstream/release/2.12
         self.benchmark_failure_reasons = {}
         self.fn._hash_lock = None
         return old_values
 
     def restore_after_unpickle(self, old_values: tuple[Any, ...] | None) -> None:
+<<<<<<< HEAD
         self._cached_launcher = None
+=======
+>>>>>>> upstream/release/2.12
         if old_values:
             (
                 self.fn.fn,
@@ -3171,6 +3296,7 @@ def check_max_block(cfg: dict[str, int]):
             )
 
 
+<<<<<<< HEAD
 def _check_native_matmul_block_numel(
     kwargs: dict[str, int], r0_block: int | None = None
 ) -> None:
@@ -3269,6 +3395,8 @@ def _enforce_reduction_config_block_minimums(
     return configs
 
 
+=======
+>>>>>>> upstream/release/2.12
 def _num_warps(
     num_warps,
     max_num_warps=8,
@@ -3281,6 +3409,10 @@ def _num_warps(
     # and RDNA, so use half the number of warps to keep total thread count
     # comparable. RDNA (wave32) follows the NVIDIA path.
     if warp_size == 64:
+<<<<<<< HEAD
+=======
+
+>>>>>>> upstream/release/2.12
         max_num_warps = (max_num_warps + 1) // 2
         min_num_warps = (min_num_warps + 1) // 2
     # persistent reduction is register intensive
