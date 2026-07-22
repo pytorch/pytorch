@@ -648,7 +648,7 @@ REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
               [out] the LU decomposition
   * `infos` - [out] error codes, positive values indicate singular matrices
 
-  For further details, please see the MAGMA documentation for magma_dgetrf_gpu.
+  For further details, please see the MAGMA documentation for magma_dgetrf_nopiv_gpu.
 */
 template <typename scalar_t>
 static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& infos) {
@@ -687,7 +687,7 @@ static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& info
               [out] the LU decomposition
   * `infos` - [out] error codes, positive values indicate singular matrices
 
-  For further details, please see the MAGMA documentation for magma_dgetrf_batched.
+  For further details, please see the MAGMA documentation for magma_dgetrf_nopiv_batched.
 */
 template <typename scalar_t>
 static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& infos) {
