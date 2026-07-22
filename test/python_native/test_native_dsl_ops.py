@@ -1,5 +1,6 @@
 # Owner(s): ["module: dsl-native-ops"]
 
+import contextlib
 import importlib.util
 import os
 import subprocess
@@ -438,59 +439,44 @@ class TestNativeDSLOps(TestCase):
             # Clear all relevant caches to ensure clean state
             check_native_version_skip.cache_clear()
 
+            utils = (triton_utils, cutedsl_utils, helion_utils)
+
             # Clear module-specific caches for the imported modules
-            for module in [triton_utils, cutedsl_utils, helion_utils]:
+            for module in utils:
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
                     if hasattr(attr, "cache_clear"):
                         attr.cache_clear()
 
-            with (
-                patch.object(
-                    triton_utils,
-                    "_check_runtime_available",
-                    return_value=(True, fake_version),
-                ),
-                patch.object(
-                    cutedsl_utils,
-                    "_check_runtime_available",
-                    return_value=(True, fake_version),
-                ),
-                patch.object(
-                    helion_utils,
-                    "_check_runtime_available",
-                    return_value=(True, fake_version),
-                ),
-                patch.object(triton_utils, "_register_op_override_impl") as triton_mock,
-                patch.object(cutedsl_utils, "_register_op_override_impl") as cute_mock,
-                patch.object(helion_utils, "_register_op_override_impl") as helion_mock,
-            ):
+            with contextlib.ExitStack() as stack:
+                for module in utils:
+                    stack.enter_context(
+                        patch.object(
+                            module,
+                            "_check_runtime_available",
+                            return_value=(True, fake_version),
+                        )
+                    )
+                mocks = [
+                    stack.enter_context(
+                        patch.object(module, "_register_op_override_impl")
+                    )
+                    for module in utils
+                ]
+
                 # Use unique operation names to avoid conflicts
                 op_name = f"test_version_skip_{uuid.uuid4().hex[:8]}.Tensor"
-
-                # Call the register functions
-                triton_utils.register_op_override(
-                    "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
-                )
-                cutedsl_utils.register_op_override(
-                    "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
-                )
-                helion_utils.register_op_override(
-                    "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
-                )
+                for module in utils:
+                    module.register_op_override(
+                        "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
+                    )
 
                 # Verify all implementation functions were called
-                details = (
-                    f"triton: {triton_mock.call_count}, "
-                    f"cutedsl: {cute_mock.call_count}, "
-                    f"helion: {helion_mock.call_count}"
-                )
+                counts = [m.call_count for m in mocks]
                 self.assertEqual(
-                    triton_mock.call_count
-                    + cute_mock.call_count
-                    + helion_mock.call_count,
-                    3,
-                    lambda msg: f"{msg}\nExpected 3 calls but got {details}",
+                    sum(counts),
+                    len(utils),
+                    f"Expected {len(utils)} calls with skip flag set, got {counts}",
                 )
 
     @parametrize("env_value, expected", [(None, False), ("1", True)])
