@@ -43,9 +43,8 @@ jobs:
       matrix:
         tag: ["cuda12.6", "cuda13.0", "cuda13.2", "rocm7.1", "rocm7.2", "cpu"]
     steps:
-      # TESTING ONLY -- REVERT TO @main BEFORE MERGE (pinned to PR branch to test its own action)
       - name: Build docker image
-        uses: pytorch/pytorch/.github/actions/binary-docker-build@atalman/cd-docker-content-addressed
+        uses: pytorch/pytorch/.github/actions/binary-docker-build@main
         with:
           docker-image-name: almalinux-builder
           custom-tag-prefix: ${{ matrix.tag }}
