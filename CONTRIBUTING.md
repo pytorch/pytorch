@@ -90,6 +90,20 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
   Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
   would be sufficient to make change visible in `torch` package.
 
+  Alternatively, scikit-build-core's editable install can rebuild the project
+  automatically on the first `import torch` in a process. This is off by default
+  (a plain editable install does not rebuild on import); opt in at install time
+  by setting the `SKBUILD_EDITABLE_REBUILD` environment variable:
+  ```bash
+  SKBUILD_EDITABLE_REBUILD=true spin develop
+  ```
+  (equivalently, via config-settings with a raw pip install:
+  `python -m pip install -e . -v --no-build-isolation -C editable.rebuild=true`).
+  With this enabled, editing a source file and re-importing `torch` runs
+  `cmake --build & --install` before the import proceeds, so changes are picked
+  up without an explicit reinstall. Set `SKBUILD_EDITABLE_VERBOSE=1` to see the
+  build output, or `=0` to silence it.
+
 
   To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
   uninstall torch` multiple times. You'll know `torch` is fully
@@ -280,11 +294,7 @@ dependencies as well as the nightly binaries into the repo directory.
 
 ## AI-Assisted Development
 
-PyTorch is a project developed and reviewed by humans.
-PyTorch encourages the use of AI in its development, however, PyTorch is a large and technically complex project and it is easy for current LLMs,
-if not properly guided, to produce seemingly correct PRs or issues with major flaws. Because of this, to ensure the health
-of the project, we must limit how contributors, especially those new to the project,
-submit PRs and open issues.
+Please see PyTorch's detailed [AI Policy here](AI_POLICY.md).
 
 All the details on how to contribute (with or without AI assistance) are in the [Ultimate Guide to PyTorch Contributions](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions).
 A couple reminders here though:

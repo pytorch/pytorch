@@ -373,33 +373,50 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         When side_effects is provided, also walks attributes stored in
         store_attr_mutations (e.g. dataclass fields set during tracing
         that aren't in the VT's __dict__).
+
+        Implemented with an explicit worklist rather than recursion so that
+        deeply chained structures (e.g. the ~N-node buffer built by
+        itertools.tee over a long iterable) do not overflow the Python stack.
+        Children are pushed in reverse so they are popped in their original
+        order, matching the pre-order DFS the previous recursive version
+        produced (callers rely on the visitation order, e.g. for graph output
+        ordering).
         """
         if cache is None:
             cache = {}
 
-        idx = id(value)
-        if idx in cache:
-            return
-        # save `value` to keep it alive and ensure id() isn't reused
-        cache[idx] = value
+        worklist = [value]
+        while worklist:
+            cur = worklist.pop()
+            idx = id(cur)
+            if idx in cache:
+                continue
+            # save `cur` to keep it alive and ensure id() isn't reused
+            cache[idx] = cur
 
-        if isinstance(value, VariableTracker):
-            value = value.unwrap()
-            fn(value)
-            value = value.unwrap()  # calling fn() might have realized it
-            nonvars = value._nonvar_fields
-            for key, subvalue in value.__dict__.items():
-                if key not in nonvars:
-                    cls.visit(fn, subvalue, cache, side_effects)
-            if side_effects is not None and value in side_effects.store_attr_mutations:
-                for attr_vt in side_effects.store_attr_mutations[value].values():
-                    cls.visit(fn, attr_vt, cache, side_effects)
-        elif istype(value, (list, tuple)):
-            for subvalue in value:
-                cls.visit(fn, subvalue, cache, side_effects)
-        elif istype(value, (dict, collections.OrderedDict)):
-            for subvalue in value.values():
-                cls.visit(fn, subvalue, cache, side_effects)
+            children: list[Any]
+            if isinstance(cur, VariableTracker):
+                cur = cur.unwrap()
+                fn(cur)
+                cur = cur.unwrap()  # calling fn() might have realized it
+                nonvars = cur._nonvar_fields
+                children = [
+                    subvalue
+                    for key, subvalue in cur.__dict__.items()
+                    if key not in nonvars
+                ]
+                if (
+                    side_effects is not None
+                    and cur in side_effects.store_attr_mutations
+                ):
+                    children.extend(side_effects.store_attr_mutations[cur].values())
+            elif istype(cur, (list, tuple)):
+                children = list(cur)
+            elif istype(cur, (dict, collections.OrderedDict)):
+                children = list(cur.values())
+            else:
+                continue
+            worklist.extend(reversed(children))
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
@@ -441,6 +458,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             raise NotImplementedError(f"{self} has no type") from None
 
     def python_type_name(self) -> str:
+        """
+        Return the type name for the Python type this VariableTracker represents.
+
+        Mirrors CPython's tp_name slot (PyTypeObject.tp_name). In Python 3.10+,
+        type.__name__ matches CPython's tp_name exactly (e.g., "list", "NoneType").
+
+        Note: There are no external callers outside torch._dynamo that rely on this.
+        Internal uses should prefer this over hardcoded type name strings.
+        """
         try:
             return self.python_type().__name__
         except NotImplementedError:
@@ -1035,6 +1061,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             if name == "__rmul__":
                 return slot_wrapper_mul(tx, self, args[0], reverse=True)
             return slot_wrapper_imul(tx, self, args[0])
+        elif name in ("__matmul__", "__rmatmul__", "__imatmul__"):
+            if kwargs or len(args) != 1:
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[f"expected 1 argument, got {len(args)}"],
+                )
+
+            if name == "__matmul__":
+                return self.nb_matrix_multiply_impl(tx, args[0])
+            if name == "__rmatmul__":
+                return self.nb_matrix_multiply_impl(tx, args[0], reverse=True)
+            return self.nb_inplace_matrix_multiply_impl(tx, args[0])
         elif name == "__lshift__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
             #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
@@ -1102,15 +1141,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_hash
 
             return generic_hash(tx, self)
-        elif name == "__add__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
-            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
-            return self.nb_add_impl(tx, args[0])
-        elif name == "__radd__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
-            return self.nb_add_impl(tx, args[0], reverse=True)
-        elif name == "__iadd__":
-            return self.nb_inplace_add_impl(tx, args[0])
+        elif name in ("__add__", "__radd__", "__iadd__"):
+            if kwargs or len(args) != 1:
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[f"expected 1 argument, got {len(args)}"],
+                )
+            from .object_protocol import slot_wrapper_add, slot_wrapper_iadd
+
+            if name == "__add__":
+                return slot_wrapper_add(tx, self, args[0])
+            if name == "__radd__":
+                return slot_wrapper_add(tx, self, args[0], reverse=True)
+            return slot_wrapper_iadd(tx, self, args[0])
         elif name == "__sub__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
             #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
@@ -1751,6 +1795,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_multiply slot. Default: graph-breaks."""
         return self._nb_slot_not_implemented("nb_inplace_multiply_impl", other)
+
+    def nb_matrix_multiply_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_matrix_multiply slot. Default: graph-breaks.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rmatmul__`` instead of ``__matmul__``).
+        """
+        return self._nb_slot_not_implemented(
+            "nb_matrix_multiply_impl", other, reverse=reverse
+        )
+
+    def nb_inplace_matrix_multiply_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_matrix_multiply slot. Default: graph-breaks."""
+        return self._nb_slot_not_implemented("nb_inplace_matrix_multiply_impl", other)
 
     def sq_repeat_impl(
         self,
