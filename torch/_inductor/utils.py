@@ -51,7 +51,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.analysis.device_info import datasheet_dram_bw, datasheet_tops
+from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -2986,10 +2986,7 @@ def get_backend_num_stages() -> int:
 
 
 @functools.cache
-def get_device_tflops(
-    dtype: torch.dtype,
-    device: torch.device | None = None,
-) -> float:
+def get_device_tflops(dtype: torch.dtype) -> float:
     """
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
@@ -2997,25 +2994,15 @@ def get_device_tflops(
     is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
     if torch.xpu.is_available():
         is_tf32 = torch.backends.mkldnn.allow_tf32
-
-    ds_tops = datasheet_tops(
-        dtype,
-        is_tf32,
-        device=device,
-    )
+    ds_tops = datasheet_tops(dtype, is_tf32=is_tf32)
     if ds_tops is not None:
         return ds_tops
 
-    if device is not None and device.type != "cuda":
-        log.warning(
-            "get_device_tflops: no Triton fallback available for non-CUDA device %s, "
-            "returning 0.0.",
-            device,
-        )
-        return 0.0
-
     if not torch.cuda.is_available():
-        log.warning("get_device_tflops: CUDA is not available, returning 0.0.")
+        log.warning(
+            "get_device_tflops: no Triton fallback available for non-CUDA devices. "
+            "Returning 0.0; roofline estimates will use memory bandwidth only."
+        )
         return 0.0
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
@@ -3053,22 +3040,16 @@ def get_device_tflops(
 
 
 @functools.cache
-def get_gpu_dram_gbps(device: torch.device | None = None) -> float:
-    ds_bw = datasheet_dram_bw(device=device)
+def get_gpu_dram_gbps() -> float:
+    """
+    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
+    then fall back to the inaccurate triton estimation.
+    """
+    from .analysis.device_info import datasheet_dram_bw_gbs
+
+    ds_bw = datasheet_dram_bw_gbs()
     if ds_bw is not None:
         return ds_bw
-
-    if device is not None and device.type != "cuda":
-        log.warning(
-            "get_gpu_dram_gbps: no Triton fallback available for non-CUDA device %s, "
-            "returning 0.0.",
-            device,
-        )
-        return 0.0
-
-    if not torch.cuda.is_available():
-        log.warning("get_gpu_dram_gbps: CUDA is not available, returning 0.0.")
-        return 0.0
 
     from triton.testing import get_dram_gbps
 
@@ -4839,18 +4820,30 @@ def _infer_scale_swizzle_impl(
 
     # NVFP4: BlockWise1x16 with float8_e4m3fn scales
     if mat_dtype == torch.float4_e2m1fn_x2 and scale_dtype == torch.float8_e4m3fn:
-        expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
-            ceildiv(K_multiplier * mat_size[1], 16), 4
-        )
-        expected_numel_b = _round_up(mat_size[1], 128) * _round_up(
-            ceildiv(K_multiplier * mat_size[0], 16), 4
-        )
-        if eq_fn(scale_numel, expected_numel_a) or eq_fn(scale_numel, expected_numel_b):
-            return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
+        if torch.xpu._is_compiled():
+            # XPU: no swizzle
+            expected_numel_a = ceildiv(mat_size[0], 16) * K_multiplier * mat_size[1]
+            expected_numel_b = ceildiv(K_multiplier * mat_size[1], 16) * mat_size[0]
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.NO_SWIZZLE
+        else:
+            # NVIDIA: uses swizzled 32x4x4 layout
+            expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
+                ceildiv(K_multiplier * mat_size[1], 16), 4
+            )
+            expected_numel_b = _round_up(mat_size[1], 128) * _round_up(
+                ceildiv(K_multiplier * mat_size[0], 16), 4
+            )
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
 
     # MXFP8: BlockWise1x32 with float8_e8m0fnu scales
     if scale_dtype == torch.float8_e8m0fnu:
-        if not torch.version.hip:
+        if not torch.version.hip and not torch.xpu._is_compiled():
             # NVIDIA: uses swizzled 32x4x4 layout
             expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
                 ceildiv(K_multiplier * mat_size[1], 32), 4
@@ -4863,7 +4856,7 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
-            # AMD: no swizzle
+            # AMD/XPU: no swizzle
             expected_numel_a = ceildiv(mat_size[0], 32) * K_multiplier * mat_size[1]
             expected_numel_b = ceildiv(K_multiplier * mat_size[1], 32) * mat_size[0]
             if eq_fn(scale_numel, expected_numel_a) or eq_fn(
