@@ -1,5 +1,6 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/util/CallOnce.h>
+#include <c10/util/env.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
@@ -25,27 +26,28 @@ using namespace c10::CachingDeviceAllocator;
 
 namespace {
 
+enum class PtracerAnyState {
+  Unsupported,
+  DisabledByEnv,
+  Enabled,
+  EnableFailed,
+};
+
 struct PtracerAnyStatus {
-  bool supported;
-  bool enabled;
+  PtracerAnyState state;
   int error_code;
 };
 
 bool allowPtracerAnyForIpcImport() {
-  const char* env = std::getenv("PYTORCH_XPU_IPC_ENABLE_PTRACER_ANY");
-  if (!env) {
-    return false;
-  }
-  return std::strcmp(env, "1") == 0 || std::strcmp(env, "true") == 0 ||
-      std::strcmp(env, "TRUE") == 0;
+  return c10::utils::check_env("PYTORCH_XPU_IPC_ENABLE_PTRACER_ANY") == true;
 }
 
 PtracerAnyStatus tryEnablePtracerAnyForIpcImport() {
 #if defined(__linux__) && defined(PR_SET_PTRACER_ANY)
-  if (!allowPtracerAnyForIpcImport()) {
+  const bool ptracer_opt_in = allowPtracerAnyForIpcImport();
+  if (!ptracer_opt_in) {
     return {
-        true,
-        false,
+        PtracerAnyState::DisabledByEnv,
         0,
     };
   }
@@ -63,14 +65,13 @@ PtracerAnyStatus tryEnablePtracerAnyForIpcImport() {
   });
 
   return {
-      true,
-      ptracer_enabled,
+      ptracer_enabled ? PtracerAnyState::Enabled
+                      : PtracerAnyState::EnableFailed,
       ptracer_error,
   };
 #else
   return {
-      false,
-      false,
+      PtracerAnyState::Unsupported,
       0,
   };
 #endif
@@ -1917,8 +1918,7 @@ struct IpcMemoryCache {
       open_handle();
     } catch (const std::exception& first_error) {
       const auto ptracer_status = tryEnablePtracerAnyForIpcImport();
-      const bool ptracer_opt_in = allowPtracerAnyForIpcImport();
-      if (ptracer_status.enabled) {
+      if (ptracer_status.state == PtracerAnyState::Enabled) {
         try {
           open_handle();
         } catch (const std::exception& second_error) {
@@ -1929,7 +1929,8 @@ struct IpcMemoryCache {
         }
       }
 
-      if (ptracer_status.supported && ptracer_status.error_code != 0) {
+      if (ptracer_status.state == PtracerAnyState::EnableFailed &&
+          ptracer_status.error_code != 0) {
         TORCH_CHECK(
             false,
             "XPU IPC open failed: ",
@@ -1939,14 +1940,14 @@ struct IpcMemoryCache {
             ")");
       }
 
-          if (ptracer_status.supported && !ptracer_opt_in) {
-            TORCH_CHECK(
+      if (ptracer_status.state == PtracerAnyState::DisabledByEnv) {
+        TORCH_CHECK(
             false,
             "XPU IPC open failed: ",
             first_error.what(),
             ". Retry with PR_SET_PTRACER_ANY is disabled by default. "
             "To opt in, set PYTORCH_XPU_IPC_ENABLE_PTRACER_ANY=1.");
-          }
+      }
 
       TORCH_CHECK(false, "XPU IPC open failed: ", first_error.what());
     }
