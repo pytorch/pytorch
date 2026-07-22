@@ -197,9 +197,14 @@ class TestCKBackend(TestCase):
                 return out
 
         model = MyModel().cuda()
-        a = torch.randn(M, K, **tensor_options)
-        b = torch.randn(K, N, **tensor_options)
-        c = torch.randn(N, N // 2, **tensor_options)
+        # Non-negative inputs: the num_gemms=2 case chains a second GEMM that
+        # contracts over K=2048 in bf16. Signed inputs cause cancellation and
+        # near-zero outputs whose relative error against eager's separately
+        # rounded bf16 result explodes; rand() keeps outputs well-conditioned so
+        # the default assert_close tolerance stays meaningful.
+        a = torch.rand(M, K, **tensor_options)
+        b = torch.rand(K, N, **tensor_options)
+        c = torch.rand(N, N // 2, **tensor_options)
         expected = model(a, b, c)
 
         if "rocm" not in dir(config):
