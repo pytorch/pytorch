@@ -1092,7 +1092,7 @@ def _current_user_saved_tensors_hooks():
     # checkpoints resolve to the user's hooks, not each other's.
     hooks = torch._C._autograd._top_saved_tensors_default_hooks(False)
     while hooks is not None and getattr(hooks[0], "_checkpoint_internal", False):
-        hooks = hooks[0]._user_hooks
+        hooks = hooks[0]._user_hooks  # pyrefly: ignore[missing-attribute]
     return hooks
 
 
@@ -1103,11 +1103,11 @@ class _checkpoint_internal_hook(torch.autograd.graph.saved_tensors_hooks):
     # persistent attribute would give the graph a strong ref to user hooks,
     # leaking uncollectably whenever those hooks reach back to the graph.
     def __enter__(self):
-        self.pack_hook._user_hooks = _current_user_saved_tensors_hooks()
+        self.pack_hook._user_hooks = _current_user_saved_tensors_hooks()  # pyrefly: ignore[missing-attribute]
         return super().__enter__()
 
     def __exit__(self, *args):
-        del self.pack_hook._user_hooks
+        del self.pack_hook._user_hooks  # pyrefly: ignore[missing-attribute]
         return super().__exit__(*args)
 
 
