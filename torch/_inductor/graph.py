@@ -1684,7 +1684,15 @@ class GraphLowering(torch.fx.Interpreter):
             if target in self.seen_subgraphs:
                 return self.seen_subgraphs[target]
 
-            out = ir.Subgraph(name=target, graph_module=value)
+            nested_config = getattr(value, "meta", {}).get("nested_region_config")
+            inductor_config_patches = getattr(
+                nested_config, "inductor_config_patches", None
+            )
+            out = ir.Subgraph(
+                name=target,
+                graph_module=value,
+                inductor_config_patches=inductor_config_patches,
+            )
             self.seen_subgraphs[target] = out
             return out
 
@@ -3141,11 +3149,21 @@ class GraphLowering(torch.fx.Interpreter):
     save_output_code: Callable[[str], None] | None = None
 
     def compile_to_module(self) -> CompiledModule:
-        with dynamo_timed(
-            "GraphLowering.compile_to_module",
-            phase_name="code_gen",
-            log_pt2_compile_event=True,
-            dynamo_compile_column_us="inductor_code_gen_cumulative_compile_time_us",
+        # Synthetic autotune inputs cannot reproduce tensors containing data_ptr()
+        # values, and opaque kernels may dereference those values as addresses.
+        autotune_context = (
+            config.patch("triton.autotune_at_compile_time", False)
+            if self.data_ptr_keepalive_buffers
+            else contextlib.nullcontext()
+        )
+        with (
+            autotune_context,
+            dynamo_timed(
+                "GraphLowering.compile_to_module",
+                phase_name="code_gen",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="inductor_code_gen_cumulative_compile_time_us",
+            ),
         ):
             return self._compile_to_module()
 

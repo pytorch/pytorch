@@ -257,6 +257,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
     @skipIfWindows(msg="AOTI/Cpp_Wrapper have not enabled on Windows")
     @requires_gpu
+    @inductor_config.patch("triton.autotune_at_compile_time", True)
     @parametrize("cpp_wrapper", [False, True])
     def test_data_ptr_packing(self, cpp_wrapper):
         if cpp_wrapper and GPU_TYPE == "xpu":
@@ -354,6 +355,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             self.assertNotEqual(packed_ptrs[2].item(), 0)
             code = "\n".join(codes)
+            self.assertNotIn("Compile-time auto-tuning block:", code)
             if not cpp_wrapper:
                 self.assertNotIn("copy_if_misaligned", code)
                 self.assertNotIn("assert_alignment(arg0_1", code)
@@ -418,8 +420,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
                             add_kernel[grid](xy, z, 4, n_elements)
                         return z, xy
 
-                    expected, _ = f_stream(x, y)
-                    side_stream.synchronize()
+                    expected = x + y + (x + y)
                     compiled_stream = torch.compile(f_stream, fullgraph=True)
                     (actual, _), stream_codes = run_and_get_code(compiled_stream, x, y)
                     side_stream.synchronize()
@@ -450,6 +451,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 torch.accelerator.synchronize()
                 self.assertEqual(actual, x + y + (2 * x + y))
             elif GPU_TYPE == "cuda":
+                self.assertIn("runTritonKernelWithAutotune(", code)
                 sync_fn = (
                     "hipDeviceSynchronize" if torch.version.hip else "cuCtxSynchronize"
                 )
