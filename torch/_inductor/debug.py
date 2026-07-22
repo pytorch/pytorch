@@ -355,7 +355,6 @@ _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 _pre_grad_graph_id: int | None = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 _inductor_kernel_stack_trace: dict[str, list[str]] = {}
-_kernel_information_jsons: dict[str, dict[str, Any]] = {}
 _inductor_kernel_provenance_debug_handle: int = 0
 
 
@@ -367,10 +366,6 @@ class _KernelExternInfo:
 
 
 _inductor_kernel_extern_info: dict[str, _KernelExternInfo] = {}
-
-
-def get_kernel_information_jsons() -> dict[str, dict[str, Any]]:
-    return _kernel_information_jsons
 
 
 def alias_kernel_provenance(original_kernel_name: str, alias_kernel_name: str) -> None:
@@ -423,9 +418,6 @@ def reset_provenance_globals() -> Iterator[None]:
     _inductor_triton_kernel_to_post_grad_node_info = {}
     _inductor_pre_grad_node_stack_trace = {}
     _inductor_kernel_stack_trace = {}
-    # Kernel timeline information is populated from compile_fx_inner while this
-    # context is active.  It must outlive the reset scope so the profiler can
-    # consume it during export_chrome_trace, which then clears it.
     _inductor_kernel_provenance_debug_handle = 0
     _inductor_kernel_extern_info = {}
 
