@@ -2016,10 +2016,12 @@ class CommonTemplate:
 
     @unittest.skipIf(TEST_WITH_ASAN, "inf to int cast is UB under sanitizers")
     def test_index_propagation_to_dtype_inf(self):
-        def fn(x):
-            return torch.sum(torch.log(x), dtype=torch.int32).float()
+        def fn():
+            x = torch.full((2,), 0.0)
+            y = torch.log(x)
+            return torch.sum(y, dtype=torch.int32).float()
 
-        self.common(fn, (torch.zeros(2),))
+        self.common(fn, ())
 
     def test_index_propagation_floordiv(self):
         def repeat_interleave(x, n):

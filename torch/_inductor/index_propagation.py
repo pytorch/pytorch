@@ -21,7 +21,6 @@ printers.
 """
 
 import itertools
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, overload, TypeAlias
@@ -109,13 +108,6 @@ class SymPyOps:
         src_dtype: torch.dtype | None = None,
         use_compute_types: bool = False,
     ) -> TypedExpr:
-        if (
-            is_integer_dtype(dtype)
-            and _is_constant(value.expr)
-            and not math.isfinite(float(value.expr))
-        ):
-            # int(inf/nan) raises; leave the cast to codegen's C++ semantics
-            return NotImplemented
         return TypedExpr(value.expr, dtype)
 
     @staticmethod
@@ -305,7 +297,10 @@ class IndexPropagation(DefaultHandler):
 
         new_args = [unwrap(a) for a in args]
         new_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
-        new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
+        try:
+            new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
+        except Exception:
+            return self.fallback(name, args, kwargs)
         is_valid_expr = new_expr is not NotImplemented and (
             # Inductor doesn't expect floating point in sympy expressions, but
             # allow floating point constants to be propagated
