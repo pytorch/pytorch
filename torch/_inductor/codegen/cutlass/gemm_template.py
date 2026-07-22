@@ -782,7 +782,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
         """
-        Swap operands X and W (aka operans A and B) of the GEMM operation. This
+        Swap operands X and W (aka operands A and B) of the GEMM operation. This
         requires transposing the operands, which is done by swapping the strides.
         Note that we don't change the apparent external layout, just the operand layout.
         this is intentional.
