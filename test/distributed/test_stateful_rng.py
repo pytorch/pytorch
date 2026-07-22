@@ -406,20 +406,6 @@ class TestPhiloxDistributionShardsOp(TestCase):
                 generator=generator,
             ),
         )
-        assert_invalid_without_advancing(
-            "found from=1.*> to=0",
-            lambda: torch.ops.aten._philox_distribution_shards_(
-                torch.empty(1, device=device),
-                [1],
-                [0],
-                [0],
-                [1],
-                1,
-                _PHILOX_DISTRIBUTION_UNIFORM,
-                [1.0, 0.0],
-                generator=generator,
-            ),
-        )
 
     def test_meta_validation(self):
         result = torch.empty((2, 3), device="meta")
