@@ -1533,6 +1533,25 @@ void ProcessGroupNCCL::abort() {
   heartbeatMonitor_->stop();
 }
 
+// Revoke all communicators on this rank. Unlike abort(), revoke is
+// non-terminal: it cancels in-flight NCCL operations but leaves the
+// communicators (and this ProcessGroup) usable, enabling fault recovery
+// without peer-side teardown errors. Idempotent via revoked_.
+// revoked_ is PG-level, not per-comm like NCCLComm::aborted_, because
+// revoke is a group-level op and the comms stay usable after it. A failed
+// ncclCommRevoke mid-fan-out leaves the flag set and skips retry -- acceptable
+// since it is a lightweight local call unlikely to fail; per-comm tracking
+// could be added later.
+void ProcessGroupNCCL::revoke(int revokeFlags) {
+  if (revoked_.exchange(true)) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (auto& it : devNCCLCommMap_) {
+    it.second->revoke(revokeFlags);
+  }
+}
+
 // Difference between `abort()` and `shutdown()`:
 // 1. `abort()` will signal communicators to terminate all NCCL kernels
 // immediately.

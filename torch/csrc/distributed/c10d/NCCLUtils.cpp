@@ -428,6 +428,20 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
   }
 }
 
+void NCCLComm::revoke(int revokeFlags) {
+#ifdef NCCL_HAS_COMM_REVOKE
+  LockType lock(mutex_);
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  // Non-terminal: unlike abort(), we do not set aborted_, null ncclComm_, or
+  // poison ncclAsyncErr_. The communicator stays usable after revoke.
+  C10D_NCCL_CHECK(::ncclCommRevoke(comm, revokeFlags), std::nullopt);
+#else
+  (void)revokeFlags;
+  TORCH_CHECK(false, "revoke() requires NCCL 2.28.7 or later");
+#endif
+}
+
 bool NCCLComm::isInitialized() const {
   LockType lock(mutex_);
   return initialized_;

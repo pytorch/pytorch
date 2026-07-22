@@ -283,6 +283,7 @@ inconsistent 'UUID' assignment across ranks, and to prevent races during initial
 .. autofunction:: torch.distributed.distributed_c10d.is_xccl_available
 .. autofunction:: torch.distributed.distributed_c10d.batch_isend_irecv
 .. autofunction:: torch.distributed.distributed_c10d.destroy_process_group
+.. autofunction:: torch.distributed.distributed_c10d.revoke_process_group
 .. autofunction:: torch.distributed.distributed_c10d.is_backend_available
 .. autofunction:: torch.distributed.distributed_c10d.irecv
 .. autofunction:: torch.distributed.distributed_c10d.is_gloo_available
