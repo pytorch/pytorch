@@ -14,6 +14,7 @@
 import shlex
 import subprocess
 import sys
+import warnings
 
 
 PIP_INSTALL = [sys.executable, "-m", "pip", "install", "-v", "--no-build-isolation"]
@@ -51,12 +52,10 @@ def main() -> int:
     notice = DEPRECATION_NOTICE.format(command=command)
     replacement = FORWARDS.get(command)
     if replacement is None:
-        print(f"error: {notice}", file=sys.stderr)
-        return 1
-    print(f"WARNING: {notice}", file=sys.stderr)
+        raise SystemExit(f"error: {notice}")
+    warnings.warn(notice, DeprecationWarning)
     if len(sys.argv) > 2:
-        ignored = shlex.join(sys.argv[2:])
-        print(f"WARNING: ignoring extra arguments: {ignored}", file=sys.stderr)
+        warnings.warn(f"ignoring extra arguments: {shlex.join(sys.argv[2:])}")
     print(f"Forwarding to `{shlex.join(replacement)}`.", file=sys.stderr)
     return subprocess.run(replacement).returncode
 
