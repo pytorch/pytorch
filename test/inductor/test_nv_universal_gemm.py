@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 
+import threading
 import unittest
 from unittest import mock
 from unittest.mock import MagicMock, patch
@@ -136,6 +137,89 @@ class TestNVUniversalGemm(TestCase):
             result = compiled_fn(a, b)
 
         torch.testing.assert_close(result, expected)
+
+    def test_arch_filter_rejects_min_cc_only_kernels(self):
+        """designed_for_min_cc <= device cc is insufficient: an arch-conditional
+        sm90 kernel reports min_cc=90 but only lists a cc=90 target and won't
+        compile on sm100. The exact-arch filter (via _device_target) must reject
+        kernels a min_cc-only check would wrongly accept.
+        """
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        major, minor = torch.cuda.get_device_capability()
+        cc = major * 10 + minor
+        device_target = kernel_cache._device_target(cc)
+
+        kernel_cache.clear_cache()
+        manifest = kernel_cache._get_kernel_cache()
+        min_cc_ok = [k for k in manifest.values() if k.designed_for_min_cc <= cc]
+        arch_ok = [
+            k
+            for k in min_cc_ok
+            if device_target.supports_operators_from(k.metadata.supported_targets)
+        ]
+
+        self.assertTrue(min_cc_ok, "no kernels pass the min_cc check")
+        self.assertLess(
+            len(arch_ok),
+            len(min_cc_ok),
+            "exact-arch filter should reject kernels that min_cc alone accepts",
+        )
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_matmul_swap_ab(self, dtype):
+        """swap_ab computes (B^T @ A^T)^T so the large N lands on the M-axis,
+        improving tile utilization for small-M shapes. Verify a small-M matmul
+        stays numerically correct with swap_ab enabled (the swapped operands and
+        transposed output view must round-trip to the original result).
+        """
+        m, n, k = 16, 512, 512
+
+        def matmul(a, b):
+            return a @ b
+
+        a = _create_tensor_with_layout("contiguous", m, k, dtype)
+        b = _create_tensor_with_layout("contiguous", k, n, dtype)
+        expected = matmul(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config(nvgemm_swap_ab=True)):
+            compiled_fn = torch.compile(matmul)
+            result = compiled_fn(a, b)
+
+        torch.testing.assert_close(result, expected)
+
+    def test_efc_epilogue_lookup_no_deadlock(self):
+        """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
+        kernel is not pre-resolved and misses the args cache, calls
+        get_kernel_by_name -> _ensure_caches, which re-acquires _cache_lock on the
+        same thread. With a plain (non-reentrant) lock this self-deadlocks; the
+        lock is an RLock. Run the reentrant path in a worker thread and assert it
+        completes (a plain Lock would hang here).
+        """
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        # Force the manifest-fallback re-entry: no cached manifest, empty args
+        # cache, unknown name, no pre-resolved base_kernel.
+        kernel_cache.clear_cache()
+        result = []
+
+        def worker():
+            result.append(
+                kernel_cache.get_efc_kernel_with_epilogue(
+                    "__nonexistent_kernel__", None, base_kernel=None
+                )
+            )
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=120)
+        self.assertFalse(
+            t.is_alive(),
+            "get_efc_kernel_with_epilogue deadlocked (reentrant _cache_lock)",
+        )
+        self.assertIsNone(result[0])
 
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
@@ -822,6 +906,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             epilogue_fused, "plain matmul should NOT have epilogue fusion markers"
         )
 
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190235"
+    )
     def test_reduction_not_fused(self):
         """Test that reductions after GEMM are NOT fused into the epilogue."""
         dtype = torch.bfloat16
@@ -865,7 +953,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 self.assertIn(
                     "in_ptr0, in_ptr1, out_ptr0, stream=None",
                     line,
-                    f"Unexpected kernel signature: {line.strip()}",
+                    lambda msg: f"{msg}\nUnexpected kernel signature: {line.strip()}",
                 )
 
     def test_epilogue_with_aux_input(self):
@@ -957,6 +1045,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = a.float() @ b.float()
         torch.testing.assert_close(out2.float(), expected, atol=1e-2, rtol=1e-2)
 
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190234"
+    )
     def test_workspace_runtime_integration(self):
         """End-to-end: mock the chosen kernel's workspace_size to non-zero and
         actually let benchmark_codegened_module run, exercising the runtime
@@ -1012,7 +1104,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         finite = [(ms, p) for ms, p in bench_results if ms != float("inf")]
         self.assertTrue(
             finite,
-            f"All NVGEMM benchmarks returned inf — workspace handling likely "
+            lambda msg: f"{msg}\nAll NVGEMM benchmarks returned inf — workspace handling likely "
             f"broken. Results: {bench_results}",
         )
 

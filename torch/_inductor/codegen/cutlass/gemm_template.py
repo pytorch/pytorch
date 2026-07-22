@@ -10,6 +10,7 @@ from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codegen.cutlass.cache import maybe_fetch_ops
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
@@ -781,7 +782,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
         """
-        Swap operands X and W (aka operans A and B) of the GEMM operation. This
+        Swap operands X and W (aka operands A and B) of the GEMM operation. This
         requires transposing the operands, which is done by swapping the strides.
         Note that we don't change the apparent external layout, just the operand layout.
         this is intentional.
@@ -1051,6 +1052,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         if self.cache_key in self.filtered_ops_cache:
             log.debug("Using cached ops for %s", self.cache_key)
             return self.filtered_ops_cache[self.cache_key]
+
+        counters["inductor"]["cutlass_filtered_ops_cache_miss"] += 1
 
         with dynamo_timed("CUTLASSGemmTemplate.maybe_fetch_ops"):
             maybe_ops = maybe_fetch_ops(self.device_type)
