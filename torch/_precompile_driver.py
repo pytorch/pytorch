@@ -54,6 +54,17 @@ if TYPE_CHECKING:
     USER_INPUT_DEVICES: list[str | None] = []
     USER_INPUT_BOUNDS: list[dict[int, tuple[int | None, int | None]] | None] = []
 
+    # Dynamo-tracer calling-convention metadata, emitted (only for tracer="dynamo") by
+    # torch._precompile._build_dynamo_metadata_section ahead of the driver. BACKEND_ID is
+    # the global name the transformed bytecode calls the compiled subgraph by (None when
+    # the trace produced no subgraph); IMPORT_SOURCES maps each import alias the bytecode
+    # references to its module name; _DYNAMO_CODE is base64(marshal(transformed bytecode));
+    # _DYNAMO_STATE is base64(pickle({used_globals, closure, argdefs, kwdefaults})).
+    BACKEND_ID: str | None = None
+    IMPORT_SOURCES: dict[str, str] = {}
+    _DYNAMO_CODE: str = ""
+    _DYNAMO_STATE: str = ""
+
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
 
@@ -366,3 +377,59 @@ def _inductor_forward(*args):
             else:
                 p.grad.add_(g)
     return _pytree.tree_unflatten(out, _pytree.treespec_loads(OUT_SPEC))
+
+
+def _rebuild_cell(value):
+    # Rebuild a closure cell holding ``value``: Python exposes no public cell
+    # constructor, so close over ``value`` in a throwaway function and steal its cell.
+    # Mirrors torch._dynamo.aot_compile.AOTCompilePickler._unpickle_cell; used to
+    # restore the transformed bytecode's free variables from their captured contents.
+    def _inner():
+        return value
+
+    if _inner.__closure__ is None:
+        raise AssertionError("closure must not be None")
+    return _inner.__closure__[0]
+
+
+def _build_dynamo_forward():
+    """Reconstruct the Dynamo-transformed function (tracer="dynamo") from the inlined
+    bytecode + state, and return it as the runnable ``forward``.
+
+    Unlike the make_fx drivers, the transformed bytecode IS the calling convention: it
+    extracts the runtime model's params/buffers itself (so structural drift surfaces as
+    the model is read, invariant 2), calls the compiled subgraph, and reassembles fn's
+    output. This driver only rehydrates that bytecode (marshalled into _DYNAMO_CODE) and
+    wires the names it references: module aliases from IMPORT_SOURCES, plain globals from
+    _DYNAMO_STATE's used_globals, and BACKEND_ID -> the compiled subgraph. The returned
+    function takes the same args fn took (the model(s) in their positions plus the
+    runtime inputs). Nothing reads an external cache: the subgraph's kernels JIT-compile
+    from the inlined source on first call (the cache, when present, only primes them)."""
+    import base64
+    import importlib
+    import marshal
+    import pickle
+    import types
+
+    code = marshal.loads(base64.b64decode(_DYNAMO_CODE))
+    state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
+    f_globals: dict[str, object] = {
+        alias: importlib.import_module(name) for alias, name in IMPORT_SOURCES.items()
+    }
+    f_globals.update(state["used_globals"])
+    if BACKEND_ID is not None:
+
+        def _compiled_subgraph(*args):
+            # The transformed bytecode calls the subgraph UNBOXED (one positional arg per
+            # graph input, reconstructed from its source); ``call`` takes the flat list
+            # (boxed). Bridge unboxed -> boxed here so the emitted subgraph is exactly the
+            # shared inductor/eager ``call`` the make_fx path already emits.
+            return call(list(args))
+
+        f_globals[BACKEND_ID] = _compiled_subgraph
+    closure = state["closure"]
+    cells = tuple(_rebuild_cell(v) for v in closure) if closure else None
+    fn = types.FunctionType(code, f_globals, closure=cells, argdefs=state["argdefs"])
+    if state["kwdefaults"]:
+        fn.__kwdefaults__ = state["kwdefaults"]
+    return fn

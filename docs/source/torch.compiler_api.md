@@ -88,8 +88,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        ``"eager"`` keeps the captured ATen graph (layout-flexible, no kernels; shapes
        are still specialized to the example).
    :param tracer: capture front-end. ``"make_fx"`` (default) is a non-strict make_fx
-       trace and the only tracer implemented today; ``"dynamo"`` is planned and raises
-       ``NotImplementedError`` for now.
+       trace. ``"dynamo"`` analyzes the Python (bytecode) rather than tracing one path and
+       inlines the transformed bytecode Dynamo produces into ``python_code``, lowering the
+       compiled subgraph through the same ``backend`` choices; it is scoped to inference
+       forward computations today (a training step or other graph-breaking ``fn``, and
+       ``mark_unbacked`` dynamic shapes, are not supported with it yet and raise).
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
        decomposition function) forwarded to ``make_fx``; defaults to ``None``.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
