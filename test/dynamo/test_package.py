@@ -429,8 +429,8 @@ def add(x, y):
         arg1 = torch.randn(3, 2, device=device)
         arg2 = torch.randn(5, 2, device=device)
         expected = [fn(arg1), fn2(arg2)]
-        compiled_fn1 = torch.compile(fn)
-        compiled_fn2 = torch.compile(fn2)
+        compiled_fn1 = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn2 = torch.compile(fn2)  # noqa: UNSPECIFIED_BACKEND
         result = [compiled_fn1(arg1), compiled_fn2(arg2)]
         self.assertEqual(expected, result)
         DynamoCache.clear()
@@ -438,12 +438,56 @@ def add(x, y):
 
         self._save_and_reload(expected_backends=2, expected_dynamo=2)
 
-        compiled_fn1 = torch.compile(fn)
-        compiled_fn2 = torch.compile(fn2)
+        compiled_fn1 = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn2 = torch.compile(fn2)  # noqa: UNSPECIFIED_BACKEND
         with torch.compiler.set_stance("fail_on_recompile"):
             result1 = compiled_fn1(arg1)
             result2 = compiled_fn2(arg2)
             self.assertEqual(expected, [result1, result2])
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+
+    def test_import_source_unpickle_without_trace(self):
+        # Deserializing an ImportSource happens at torch.compile() time with no
+        # active TracingContext (e.g. precompile warm-load). Reconstructing the
+        # source must not install a guard (which would require a tracing
+        # context), so the round-trip must not raise.
+        import pickle
+
+        from torch._dynamo.source import ImportSource
+
+        source = ImportSource("torch")
+        reloaded = pickle.loads(pickle.dumps(source))
+        self.assertEqual(reloaded, source)
+
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_automatic_dynamo_import_source_guard(self, device):
+        # Warm-loading a guard state whose serialized sources include an
+        # ImportSource must not raise. `pytree.tree_is_leaf` routes through
+        # `get_pytree_SUPPORTED_NODES_source`, which builds an
+        # `ImportSource("torch")` that ends up in the serialized guard state.
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        def fn(x):
+            if torch.utils._pytree.tree_is_leaf(x):
+                return torch.nn.functional.relu(x) + x.sin()
+            return x
+
+        arg = torch.randn(3, 2, device=device)
+        expected = fn(arg)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(compiled_fn(arg), expected)
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
+
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        with torch.compiler.set_stance("fail_on_recompile"):
+            result = compiled_fn(arg)
+            self.assertEqual(result, expected)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
@@ -459,7 +503,7 @@ def add(x, y):
 
         arg1 = torch.randn(3, 2, device=device)
         arg2 = torch.randn(5, 2, device=device)
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         expected1 = compiled_fn(arg1)
 
         # Should cause a recompile
@@ -468,7 +512,7 @@ def add(x, y):
 
         self._save_and_reload(expected_backends=2, expected_dynamo=1)
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         with torch.compiler.set_stance("fail_on_recompile"):
             result1 = compiled_fn(arg1)
             result2 = compiled_fn(arg2)
@@ -544,14 +588,14 @@ def add(x, y):
         arg1 = torch.randn(3, 2, device=device, requires_grad=True)
         arg2 = arg1.clone().detach_().requires_grad_(True)
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         expected1 = compiled_fn(arg1)
         expected1.sum().backward()
         total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
 
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         # Run it again, no recompile needed
         with torch.compiler.set_stance("fail_on_recompile"):
             expected2 = compiled_fn(arg2)
@@ -574,7 +618,7 @@ def add(x, y):
 
         arg1 = torch.randn(3, 2, device=device, requires_grad=True)
         arg2 = arg1.clone().detach_().requires_grad_(True)
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         expected1 = compiled_fn(arg1)
         expected1.sum().backward()
         total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
@@ -597,7 +641,7 @@ def add(x, y):
 
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         # Run it again. There will be a recompile because one of the backends is deleted, but it should
         # still work.
         expected2 = compiled_fn(arg2)
@@ -621,13 +665,13 @@ def add(x, y):
             return None
 
         args = (torch.randn(3, 2, device=device), mod)
-        compiled_fn = torch.compile(foo)
+        compiled_fn = torch.compile(foo)  # noqa: UNSPECIFIED_BACKEND
         compiled_fn(*args)
         total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
 
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
-        compiled_fn = torch.compile(foo)
+        compiled_fn = torch.compile(foo)  # noqa: UNSPECIFIED_BACKEND
         # Run it again, no recompile needed
         with torch.compiler.set_stance("fail_on_recompile"):
             compiled_fn(*args)
@@ -651,7 +695,7 @@ def add(x, y):
             return torch.cat(set_of_x, dim=0)
 
         args = ([torch.randn(3, 2, device=device) for _ in range(3)],)
-        compiled_fn = torch.compile(foo)
+        compiled_fn = torch.compile(foo)  # noqa: UNSPECIFIED_BACKEND
         compiled_fn(*args)
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
@@ -770,7 +814,7 @@ def add(x, y):
         x = torch.rand(10, device=device)
         model = TestPackage._tempNetForQualName()
         model.forward(x)
-        compiled_fn = torch.compile(
+        compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
             model.forward,
             options=dict(guard_filter_fn=torch.compiler.skip_guard_on_globals_unsafe),
         )

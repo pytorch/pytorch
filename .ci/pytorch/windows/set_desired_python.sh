@@ -53,14 +53,21 @@ case "$PYTHON_BASE" in
     3.12) PYTHON_FULL="3.12.10" ;;
     3.13) PYTHON_FULL="3.13.14" ;;
     3.14) PYTHON_FULL="3.14.6" ;;
+    # 3.15 is still pre-release; python.org ships only beta installers so far.
+    3.15) PYTHON_FULL="3.15.0b3" ;;
     *)
         echo "No patch pin for Python ${PYTHON_BASE}; add one to set_desired_python.sh" >&2
         exit 1
         ;;
 esac
 echo "Resolved ${DESIRED_PYTHON} to ${PYTHON_FULL}"
+# python.org keeps prerelease installers (aN/bN/rcN) under the final release
+# directory, e.g. /ftp/python/3.15.0/python-3.15.0b3-amd64.exe, so strip any
+# prerelease suffix to get the download directory. Released versions such as
+# 3.14.6 are unchanged.
+PYTHON_DL_DIR="${PYTHON_FULL%%[a-z]*}"
 # shellcheck disable=SC2034  # consumed below in the install loop
-PYTHON_INSTALLER_URL="https://www.python.org/ftp/python/${PYTHON_FULL}/python-${PYTHON_FULL}-amd64.exe"
+PYTHON_INSTALLER_URL="https://www.python.org/ftp/python/${PYTHON_DL_DIR}/python-${PYTHON_FULL}-amd64.exe"
 
 INSTALLER="$WIN_CI_DIR/python-amd64.exe"
 INSTALLER_W="$(cygpath -w "$INSTALLER")"
