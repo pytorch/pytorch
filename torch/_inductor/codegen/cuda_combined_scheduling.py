@@ -213,18 +213,10 @@ class CUDACombinedScheduling(BaseScheduling):
     def _benchmark_nvgemm_module(self, module) -> tuple[float, str]:
         from torch._dynamo.utils import preserve_rng_state
         from torch._inductor.runtime.benchmarking import benchmarker
-        from torch._inductor.utils import (
-            clone_preserve_strides,
-            get_interface_for_device,
-        )
+        from torch._inductor.utils import get_interface_for_device
         from torch._inductor.virtualized import V
 
         device_interface = get_interface_for_device(V.graph.device_type)
-
-        def clone_args(args: list[Any]) -> list[Any]:
-            return [
-                clone_preserve_strides(a) if torch.is_tensor(a) else a for a in args
-            ]
 
         with (
             preserve_rng_state(),
@@ -234,7 +226,7 @@ class CUDACombinedScheduling(BaseScheduling):
             call = module.call
 
             try:
-                call(clone_args(args))
+                call(args)
             except Exception as e:
                 log.debug(
                     "Exception (%s) in compiling NVGEMM fused kernel",
@@ -245,7 +237,7 @@ class CUDACombinedScheduling(BaseScheduling):
             device = V.graph.get_current_device_or_throw()
             try:
                 ms = benchmarker.benchmark(
-                    lambda: call(clone_args(args)),
+                    lambda: call(args),
                     device=device,
                 )
             except Exception as e:
