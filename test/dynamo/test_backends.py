@@ -419,6 +419,51 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
 
+    def test_aot_autograd_reentrant_bw_compiler(self):
+        # re-entry with an already-wrapped bw_compiler must leave it untouched
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+
+        def my_compiler(gm, example_inputs):
+            return make_boxed_func(gm.forward)
+
+        backend = aot_autograd(fw_compiler=my_compiler)
+
+        torch.compile(lambda x: x.sin() + 1, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+        bw_compiler = backend.kwargs["bw_compiler"]
+        torch.compile(lambda x: x.cos() * 2, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+
+        self.assertIs(backend.kwargs["bw_compiler"], bw_compiler)
+        self.assertFalse(hasattr(bw_compiler, "compiler_fn"))
+
+    def test_aot_autograd_reentrant_serializable_bw_compiler(self):
+        # re-entry must not re-wrap a SerializableAOTDispatchCompiler's compiler_fn
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch._aot_autograd.schemas import (
+            SerializableAOTDispatchCompiler,
+        )
+
+        def my_compiler(gm, example_inputs):
+            return make_boxed_func(gm.forward)
+
+        bw_compiler = SerializableAOTDispatchCompiler(object, my_compiler)
+        backend = aot_autograd(fw_compiler=my_compiler, bw_compiler=bw_compiler)
+
+        torch.compile(lambda x: x.sin() + 1, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+        wrapped_fn = bw_compiler.compiler_fn
+        torch.compile(lambda x: x.cos() * 2, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+
+        self.assertIs(bw_compiler.compiler_fn, wrapped_fn)
+
     def test_lookup_backend(self):
         from torch._dynamo import lookup_backend
 
@@ -448,6 +493,47 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend=my_compiler)
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
+
+    def test_device_and_dtype_from_inputs(self):
+        from torch._dynamo.backends.common import device_from_inputs, dtype_from_inputs
+
+        class NotATensor:
+            device = "not-a-device"
+            dtype = "not-a-dtype"
+
+        tensor = torch.randn(3, dtype=torch.float64)
+        self.assertEqual(device_from_inputs([NotATensor(), tensor]), tensor.device)
+        self.assertEqual(dtype_from_inputs([NotATensor(), tensor]), torch.float64)
+        self.assertEqual(device_from_inputs([NotATensor()]), torch.device("cpu"))
+        self.assertEqual(dtype_from_inputs([NotATensor()]), torch.float32)
+
+    def test_is_registered_backend(self):
+        from torch._dynamo.backends.registry import _is_registered_backend
+
+        self.assertTrue(_is_registered_backend(lookup_backend("eager")))
+        self.assertTrue(
+            _is_registered_backend(torch._TorchCompileInductorWrapper(None, None, None))
+        )
+        self.assertTrue(
+            _is_registered_backend(
+                torch._TorchCompileWrapper("eager", None, None, None)
+            )
+        )
+
+        class FakeBackend:
+            compiler_name = "inductor"
+
+        self.assertFalse(_is_registered_backend(FakeBackend()))
+
+        def my_custom_backend(gm, example_inputs):
+            return gm.forward
+
+        self.assertFalse(_is_registered_backend(my_custom_backend))
+        self.assertFalse(
+            _is_registered_backend(
+                torch._TorchCompileWrapper(my_custom_backend, None, None, None)
+            )
+        )
 
     def test_lookup_backend_suggestion(self):
         from torch._dynamo.backends.registry import lookup_backend

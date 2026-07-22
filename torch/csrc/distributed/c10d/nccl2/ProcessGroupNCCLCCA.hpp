@@ -36,6 +36,7 @@ class NcclCachingAllocatorHook {
   // Seed registeredMemMap_ with segments that existed before the hook was
   // attached, so a comm registered later still sees them.
   void registerMemPreHook();
+  bool shouldTrackSegment(const c10::MempoolId_t& mempool_id) const;
 
   struct MemInfo {
     size_t len;
@@ -45,6 +46,7 @@ class NcclCachingAllocatorHook {
   std::mutex mutex_;
   std::unordered_map<void*, MemInfo> registeredMemMap_;
   std::set<ProcessGroupNCCL*> registeredComms_;
+  bool register_default_pool_segments_;
 };
 
 } // namespace c10d::nccl2
