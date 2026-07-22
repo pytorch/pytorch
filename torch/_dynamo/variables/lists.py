@@ -712,6 +712,9 @@ class RangeVariable(BaseListVariable):
             raise_observed_exception(OverflowError, tx)
         return VariableTracker.build(tx, length)
 
+    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.sq_length(tx)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if "range" in codegen.tx.f_globals:
             raise AssertionError("'range' must not be shadowed in f_globals")
