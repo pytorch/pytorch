@@ -287,7 +287,7 @@ def evaluate_platform_supports_cublaslt_fp8_grouped_gemm():
         TEST_CUDA
         and SM100OrLater
         and not SM120OrLater
-        and _get_torch_cuda_version() >= (13, 2)
+        and _get_torch_cuda_version() >= (13, 3)
     )
 
 def evaluate_platform_supports_fp8_sparse():

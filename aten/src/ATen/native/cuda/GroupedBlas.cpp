@@ -714,7 +714,7 @@ static Tensor scaled_grouped_mm_cublaslt(
     int batchCount,
     ScalingType scaling_a,
     ScalingType scaling_b) {
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
   check_cublaslt_grouped_scale_recipe(mat_a, scale_a, scaling_a, batchCount, /*is_a*/ true, "scale_a");
   check_cublaslt_grouped_scale_recipe(mat_b, scale_b, scaling_b, batchCount, /*is_a*/ false, "scale_b");
 
@@ -760,8 +760,8 @@ static Tensor scaled_grouped_mm_cublaslt(
       scales);
   return out;
 #else
-  TORCH_CHECK(false, "cublasLt scaled grouped GEMM requires CUDA >= 13.2 and is not supported on ROCm. Current build does not meet these requirements.");
-#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  TORCH_CHECK(false, "cublasLt scaled grouped GEMM requires CUDA >= 13.3 and is not supported on ROCm. Current build does not meet these requirements.");
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 }
 
 Tensor
@@ -818,7 +818,7 @@ _scaled_grouped_mm_cuda(
       (scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu),
       "For FP8 tensorwise, groupwise, and rowwise, both scales must both be float32 tensors. For MXFP8, scales must both be float8_e8m0fnu tensors.");
 
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
   const int64_t batchCount64 = (a_is_2d || b_is_2d)
       ? offs->size(0) : mat_a.size(0);
 
@@ -975,7 +975,7 @@ _scaled_grouped_mm_cuda_v2(
   auto scale_recipe_a_enum = convert_int_to_enum<ScalingType>(scale_recipe_a);
   auto scale_recipe_b_enum = convert_int_to_enum<ScalingType>(scale_recipe_b);
 
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
   const int64_t batchCount64 = (a_is_2d || b_is_2d)
       ? offs->size(0) : mat_a.size(0);
   if (scale_a.size() == 1 &&

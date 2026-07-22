@@ -81,7 +81,7 @@ f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
-cublaslt_grouped_mm_skip_msg = "cuBLASLt grouped GEMM requires SM 10.x or 11.0 with CUDA 13.2+"
+cublaslt_grouped_mm_skip_msg = "cuBLASLt grouped GEMM requires SM 10.x or 11.0 with CUDA 13.3+"
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -2636,8 +2636,6 @@ class TestFP8Matmul(TestCase):
 
 
     def scaled_grouped_gemm_cublaslt_helper(self, op, a_dtype, b_dtype, scale_mode):
-        """Build FP8 inputs and scales for testing the cuBLASLt
-        grouped GEMM path via TORCH_GROUPED_MM_PREFER_CUBLASLT=1."""
         device = "cuda"
         ngroups = 5
         # FP8 is 1 byte, so 16-byte alignment requires dims/offsets to be multiples of 16
