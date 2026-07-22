@@ -981,7 +981,7 @@ class TestPrecompile(TestCase):
             lambda model, xx: model(xx), m, x, tracer="dynamo"
         )
         _, mf_cache = torch.compiler.precompile(lambda model, xx: model(xx), m, x)
-        with self.assertRaises(PrecompileError):
+        with self.assertRaisesRegex(PrecompileError, "tracer"):
             torch.compiler.precompile.load(dyn_code, mf_cache)
 
     @parametrize(
@@ -1015,7 +1015,7 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
         mark_dynamic(x, 0)
-        with self.assertRaises(PrecompileError):
+        with self.assertRaisesRegex(PrecompileError, "mark_dynamic"):
             torch.compiler.precompile(
                 lambda model, xx: model(xx), m, x, tracer="dynamo"
             )
@@ -1046,7 +1046,7 @@ class TestPrecompile(TestCase):
         NT = collections.namedtuple("NT", ["a", "b"])
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
-        with self.assertRaises(PrecompileError):
+        with self.assertRaisesRegex(PrecompileError, "unmarshallable"):
             torch.compiler.precompile(
                 lambda model, xx: NT(model(xx), model(xx) + 1), m, x, tracer="dynamo"
             )
@@ -1065,6 +1065,62 @@ class TestPrecompile(TestCase):
             lambda model, xx: xx, m, x, tracer="dynamo", backend="eager"
         )
         self.assertEqual(torch.compiler.precompile.load(code, cache)(m, x), x)
+
+    def test_tracer_dynamo_decompositions_rejected(self):
+        # decompositions is only honored by the make_fx tracer (threaded into make_fx); the
+        # dynamo tracer captures via Dynamo and cannot apply it, so passing it must reject
+        # loudly rather than silently drop the table (which would compute the un-decomposed op).
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        decomps = {torch.ops.aten.relu.default: (lambda t: (t > 0) * t)}
+        with self.assertRaisesRegex(PrecompileError, "decompositions"):
+            torch.compiler.precompile(
+                lambda model, xx: model(xx),
+                m,
+                x,
+                tracer="dynamo",
+                decompositions=decomps,
+            )
+
+    def test_tracer_dynamo_version_locked_clean_error(self):
+        # The dynamo artifact inlines marshalled CPython bytecode, which is Python-version
+        # specific; a corrupt/foreign-version blob must surface a clean PrecompileError naming
+        # the version lock-in (from _build_dynamo_forward), not a raw marshal/pickle error. Exec
+        # the (corrupted) self-contained code directly -- load()'s code_hash check would fire
+        # first and mask the rehydrate path.
+        import base64 as _b64
+        import re as _re
+
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        code, _cache = torch.compiler.precompile(
+            lambda model, xx: model(xx), m, x, tracer="dynamo"
+        )
+        bad = _b64.b64encode(b"not a marshalled code object").decode("ascii")
+        corrupted = _re.sub(
+            r"_DYNAMO_CODE = '[^']*'", f"_DYNAMO_CODE = {bad!r}", code, count=1
+        )
+        self.assertNotEqual(corrupted, code)
+        ns = {"__name__": "_v"}
+        with self.assertRaisesRegex(PrecompileError, "Python version"):
+            exec(compile(corrupted, "<v>", "exec"), ns)
+
+    def test_reject_nonliftable_get_attrs(self):
+        # The eager dynamo backend inlines the subgraph against an empty _GraphSelf(), so a
+        # get_attr to a non-tensor / non-GraphModule value (a symint, torchbind object, or bare
+        # module) must be rejected at capture rather than raise a raw AttributeError at runtime.
+        # Unit-test the guard directly on a hand-built graph (Dynamo rarely emits such a node in
+        # the canonical model(x) path, so an integration trigger would be fragile).
+        from torch._precompile import _reject_nonliftable_get_attrs
+
+        g = torch.fx.Graph()
+        node = g.get_attr("scalar_const")
+        g.output((node,))
+        root = torch.nn.Module()
+        root.scalar_const = 5
+        gm = torch.fx.GraphModule(root, g)
+        with self.assertRaisesRegex(PrecompileError, "not a liftable graph input"):
+            _reject_nonliftable_get_attrs(gm)
 
     def test_tracer_invalid_raises(self):
         a, b = torch.randn(4, 4), torch.randn(4, 4)

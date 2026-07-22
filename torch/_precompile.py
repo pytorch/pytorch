@@ -238,6 +238,10 @@ it.
 # silently miscompute -- pass inputs and a model matching the example, as the contract
 # requires. Because Dynamo bakes the trace-time environment (e.g. the current accelerator
 # stream) into the bytecode, the artifact is environment-specialized like the make_fx one.
+# Unlike the make_fx tracer's rendered source, this artifact inlines MARSHALLED CPython
+# bytecode plus a PICKLED state blob, so it is LOCKED to the producing Python version:
+# loading it under a different CPython (3.10-3.14) fails with a clean PrecompileError (see
+# _build_dynamo_forward). Regenerate per Python version, or use make_fx for portable source.
 # A tensor closed over by fn (a global or captured local, including one nested in a
 # container or an nn.Module) is rejected (invariant 1) here too -- Dynamo surfaces it as a
 # used-global / closure content rather than a graph get_attr constant, so the check scans
@@ -645,6 +649,29 @@ def _assert_no_control_flow_subgraphs(gm: torch.fx.GraphModule) -> None:
             "precompile cannot lower a captured control-flow subgraph (e.g. from "
             f"torch.cond / torch.while_loop); not supported yet. Offending get_attr "
             f"targets: {offending}."
+        )
+
+
+def _reject_nonliftable_get_attrs(gm: torch.fx.GraphModule) -> None:
+    """Reject a captured dynamo subgraph get_attr whose target is neither a Tensor nor a
+    GraphModule (a symbolic size, a torchbind script object, or a bare nn.Module). The
+    eager backend inlines gm.code against an EMPTY _GraphSelf(), so such a get_attr would
+    resolve to nothing and raise a raw AttributeError at runtime; reject it at capture
+    with a concrete reason instead. Tensor and GraphModule get_attrs are already handled
+    by _check_no_constant_tensors / _assert_no_control_flow_subgraphs.
+    """
+    offending = [
+        (target, type(attr).__name__)
+        for target, attr in _resolved_get_attrs(gm)
+        if not isinstance(attr, (torch.Tensor, torch.fx.GraphModule))
+    ]
+    if offending:
+        raise PrecompileError(
+            "precompile tracer='dynamo' captured a subgraph get_attr that is not a "
+            "liftable graph input (e.g. a symbolic size, a torchbind script object, or a "
+            "bare nn.Module); the eager backend inlines the subgraph and cannot resolve "
+            f"it. Offending (target, type): {offending}. Pass such state as an explicit "
+            "argument, or use tracer='make_fx'."
         )
 
 
@@ -1882,6 +1909,12 @@ class PrecompiledModule:
             raise
 
     def _compile_dynamo(self, args: tuple[object, ...]) -> None:
+        if self._decompositions is not None:
+            raise PrecompileError(
+                "precompile: a decompositions table is only honored by tracer='make_fx' "
+                "(it is threaded into the make_fx trace); tracer='dynamo' captures via "
+                "Dynamo and cannot apply it. Drop decompositions, or use tracer='make_fx'."
+            )
         # The dynamo tracer inlines the transformed bytecode; the subgraph is realized by
         # the SAME backends as the make_fx tracer. Dynamic shapes are not wired through
         # this path yet: reject mark_unbacked (NotImplementedError) and the marks the
@@ -1902,8 +1935,11 @@ class PrecompiledModule:
 
         if self._backend == "eager":
             # eager: keep the captured subgraph and run it as-is (no inductor lowering).
-            # gm is None when fn had no tensor op -- the bytecode is the whole artifact,
-            # so there is nothing to inline either way.
+            # gm is None when fn had no tensor op -- the bytecode is the whole artifact.
+            # The eager emit inlines the subgraph against an empty _GraphSelf(), so reject
+            # any get_attr that is not a liftable graph input (symint / torchbind / module).
+            if capture.gm is not None:
+                _reject_nonliftable_get_attrs(capture.gm)
             self._gm = capture.gm
             return
 
@@ -2142,7 +2178,10 @@ class _PrecompileApi:
           ``tracer="make_fx"``, and ``mark_unbacked`` dynamic shapes are not supported
           with it yet. Dynamo's runtime guards are not embedded; the same specialization
           contract (and, on the inductor backend, the baked ``assert_size_stride``)
-          applies. See the ``tracer`` note in Note [precompile programming model].
+          applies. See the ``tracer`` note in Note [precompile programming model]. The
+          dynamo artifact inlines marshalled bytecode plus a pickled state blob, so it is
+          locked to the producing Python version (unlike the portable ``make_fx`` source);
+          load it under the same CPython.
 
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its

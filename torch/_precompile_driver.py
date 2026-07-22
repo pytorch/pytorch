@@ -409,10 +409,27 @@ def _build_dynamo_forward():
     import importlib
     import marshal
     import pickle
+    import sys
     import types
 
-    code = marshal.loads(base64.b64decode(_DYNAMO_CODE))
-    state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
+    try:
+        code = marshal.loads(base64.b64decode(_DYNAMO_CODE))
+        state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
+    except Exception as e:
+        # The inlined bytecode is marshalled CPython bytecode, specific to the Python
+        # version that produced it; loading it under a different CPython (or a corrupt
+        # blob) fails here. Surface a clean PrecompileError naming the version lock-in
+        # rather than a raw marshal / pickle error.
+        from torch._precompile import PrecompileError as _PrecompileError
+
+        raise _PrecompileError(
+            "precompile: could not rehydrate the tracer='dynamo' artifact's inlined "
+            "bytecode/state. It embeds marshalled CPython bytecode, which is specific to "
+            "the Python version that produced it; loading it under a different Python "
+            f"(this is {sys.version_info.major}.{sys.version_info.minor}) fails. "
+            "Regenerate the artifact under this Python version, or use tracer='make_fx' "
+            f"(portable source). Underlying: {type(e).__name__}: {e}"
+        ) from e
     f_globals: dict[str, object] = {
         alias: importlib.import_module(name) for alias, name in IMPORT_SOURCES.items()
     }
