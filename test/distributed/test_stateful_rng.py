@@ -1,21 +1,33 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+from __future__ import annotations
+
+import contextlib
 import unittest
 from typing import Any, cast
 
 import torch
 from torch._library.utils import fill_defaults
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed._local_tensor import LocalIntNode, LocalTensor, LocalTensorMode
+from torch.distributed._stateful_rng import (
+    _is_supported_stateful_rng_op,
+    _PHILOX_DISTRIBUTION_NORMAL,
+    _PHILOX_DISTRIBUTION_UNIFORM,
+    _run_stateful_rng_op,
+    _run_stateful_rng_op_for_checkpointable_tensor,
+)
 from torch.distributed.checkpoint import CheckpointableTensor
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-class _StatefulRNGMode(TorchDispatchMode):
-    @staticmethod
-    def _flatten_chunks(chunks: tuple[tuple[int, ...], ...]) -> list[int]:
-        return [value for chunk in chunks for value in chunk]
+aten = torch.ops.aten
 
+
+class _StatefulRNGMode(TorchDispatchMode):
     def __torch_dispatch__(
         self,
         func: torch._ops.OpOverload,
@@ -25,10 +37,10 @@ class _StatefulRNGMode(TorchDispatchMode):
     ) -> Any:
         if kwargs is None:
             kwargs = {}
-        if func is not torch.ops.aten.normal_.default:
+        if func not in (aten.normal_.default, aten.uniform_.default):
             return func(*args, **kwargs)
 
-        filled_args, filled_kwargs = fill_defaults(func._schema, args, kwargs)
+        filled_args, _ = fill_defaults(func._schema, args, kwargs)
         tensor_arg = filled_args[0]
         if not isinstance(tensor_arg, torch.Tensor):
             return func(*args, **kwargs)
@@ -37,22 +49,12 @@ class _StatefulRNGMode(TorchDispatchMode):
         if not isinstance(tensor_arg, CheckpointableTensor):
             return func(*args, **kwargs)
         rng_metadata = cast(CheckpointableTensor, tensor_arg)
-
-        _, mean, std = filled_args
-        # Must match PhiloxDistributionKind::Normal in PhiloxDistribution.h.
-        normal_distribution = 0
-        torch.ops.aten._philox_distribution_shards_.default(
-            tensor_arg,
-            rng_metadata.global_shape,
-            self._flatten_chunks(rng_metadata.global_offsets),
-            self._flatten_chunks(rng_metadata.local_offsets),
-            self._flatten_chunks(rng_metadata.local_sizes),
-            len(rng_metadata.global_offsets),
-            normal_distribution,
-            (mean, std),
-            generator=filled_kwargs["generator"],
+        return _run_stateful_rng_op_for_checkpointable_tensor(
+            func,
+            args,
+            kwargs,
+            rng_metadata,
         )
-        return tensor_arg
 
 
 class TestCheckpointableTensorRNG(TestCase):
@@ -194,6 +196,109 @@ class TestCheckpointableTensorRNG(TestCase):
                     self.assertEqual(actual, expected, rtol=0, atol=0)
                     self.assertEqual(actual_generator.get_state(), expected_state)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_private_adapter_replays_explicit_generator_for_local_tensor(self):
+        device = torch.device("cuda")
+        expected_generator = torch.Generator(device=device).manual_seed(123)
+        expected = torch.empty(7, device=device).uniform_(
+            -0.2, 0.3, generator=expected_generator
+        )
+        expected_state = expected_generator.get_state()
+
+        actual_generator = torch.Generator(device=device).manual_seed(123)
+        local_tensor = LocalTensor(
+            {
+                0: torch.empty(3, device=device),
+                1: torch.empty(3, device=device),
+            }
+        )
+        with LocalTensorMode(local_tensor._ranks):
+            self.assertTrue(
+                _is_supported_stateful_rng_op(aten.uniform_.default, local_tensor)
+            )
+            returned = _run_stateful_rng_op(
+                aten.uniform_.default,
+                (local_tensor, -0.2, 0.3),
+                {"generator": actual_generator},
+                (7,),
+                ((2,),),
+                ((0,),),
+                ((3,),),
+            )
+
+        self.assertIs(returned, local_tensor)
+        for local_result in local_tensor._local_tensors.values():
+            self.assertEqual(local_result, expected[2:5], rtol=0, atol=0)
+        self.assertEqual(actual_generator.get_state(), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_private_adapter_default_generator_with_rank_local_layout(self):
+        device = torch.device("cuda")
+        torch.manual_seed(123)
+        expected = torch.empty(7, device=device).uniform_(-0.2, 0.3)
+        expected_state = torch.cuda.get_rng_state(device)
+
+        torch.manual_seed(123)
+        local_tensor = LocalTensor(
+            {
+                0: torch.empty(3, device=device),
+                1: torch.empty(3, device=device),
+            }
+        )
+        rank_local_start = torch.SymInt(LocalIntNode({0: 0, 1: 4}))
+        with LocalTensorMode(local_tensor._ranks):
+            returned = _run_stateful_rng_op(
+                aten.uniform_.default,
+                (local_tensor, -0.2, 0.3),
+                {},
+                (7,),
+                ((rank_local_start,),),
+                ((0,),),
+                ((3,),),
+            )
+
+        self.assertIs(returned, local_tensor)
+        self.assertEqual(local_tensor._local_tensors[0], expected[:3], rtol=0, atol=0)
+        self.assertEqual(local_tensor._local_tensors[1], expected[4:], rtol=0, atol=0)
+        self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_empty_local_tensor_matches_dense_increment(self):
+        device = torch.device("cuda")
+        for global_numel in (0, 7):
+            with self.subTest(global_numel=global_numel):
+                torch.manual_seed(123)
+                torch.empty(global_numel, device=device).normal_()
+                expected_state = torch.cuda.get_rng_state(device)
+
+                torch.manual_seed(123)
+                actual = torch.empty(0, device=device)
+                self._set_shard_metadata(actual, (global_numel,), (), (), ())
+                with _StatefulRNGMode():
+                    actual.normal_()
+
+                self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_invalid_metadata_does_not_advance_generator(self):
+        device = torch.device("cuda")
+        generator = torch.Generator(device=device).manual_seed(123)
+        actual = torch.empty(3, device=device)
+        self._set_shard_metadata(
+            actual,
+            (7,),
+            ((2,),),
+            ((0,),),
+            ((2,),),
+        )
+        state = generator.get_state().clone()
+
+        with self.assertRaisesRegex(RuntimeError, "cover the entire tensor"):
+            with _StatefulRNGMode():
+                actual.normal_(generator=generator)
+
+        self.assertEqual(generator.get_state(), state)
+
 
 class TestPhiloxDistributionShardsOp(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
@@ -267,6 +372,93 @@ class TestPhiloxDistributionShardsOp(TestCase):
                 generator=generator,
             ),
         )
+
+    def test_meta_validation(self):
+        result = torch.empty((2, 3), device="meta")
+        returned = aten._philox_distribution_shards_(
+            result,
+            [4, 5],
+            [1, 2],
+            [0, 0],
+            [2, 3],
+            1,
+            _PHILOX_DISTRIBUTION_NORMAL,
+            [0.0, 1.0],
+        )
+        self.assertIs(returned, result)
+
+        cases = (
+            (
+                "normal expects std >= 0.0",
+                torch.float32,
+                _PHILOX_DISTRIBUTION_NORMAL,
+                [0.0, -1.0],
+            ),
+            (
+                "found from=1.*> to=0",
+                torch.float32,
+                _PHILOX_DISTRIBUTION_UNIFORM,
+                [1.0, 0.0],
+            ),
+            (
+                "unsupported distribution kind 2",
+                torch.float32,
+                2,
+                [0.0, 1.0],
+            ),
+            (
+                "unsupported dtype",
+                torch.float8_e4m3fn,
+                _PHILOX_DISTRIBUTION_UNIFORM,
+                [0.0, 1.0],
+            ),
+        )
+        for regex, dtype, distribution, params in cases:
+            with self.subTest(error=regex):
+                with self.assertRaisesRegex(RuntimeError, regex):
+                    aten._philox_distribution_shards_(
+                        torch.empty(1, device="meta", dtype=dtype),
+                        [1],
+                        [0],
+                        [0],
+                        [1],
+                        1,
+                        distribution,
+                        params,
+                    )
+
+    def test_symbolic_metadata_meta_and_fake(self):
+        self.assertIn(
+            "SymInt[] global_shape",
+            str(aten._philox_distribution_shards_.default._schema),
+        )
+
+        for device in ("meta", "cuda"):
+            with self.subTest(device=device):
+                shape_env = ShapeEnv()
+                global_size = shape_env.create_unbacked_symint()
+                local_size = shape_env.create_unbacked_symint()
+                context = (
+                    FakeTensorMode(shape_env=shape_env)
+                    if device == "cuda"
+                    else contextlib.nullcontext()
+                )
+                with context:
+                    result = torch.empty(local_size, device=device)
+                    returned = aten._philox_distribution_shards_(
+                        result,
+                        [global_size],
+                        [0],
+                        [0],
+                        [local_size],
+                        1,
+                        _PHILOX_DISTRIBUTION_UNIFORM,
+                        [0.0, 1.0],
+                    )
+
+                self.assertIs(returned, result)
+                self.assertIsNone(global_size.node.maybe_as_int())
+                self.assertIsNone(local_size.node.maybe_as_int())
 
 
 if __name__ == "__main__":
