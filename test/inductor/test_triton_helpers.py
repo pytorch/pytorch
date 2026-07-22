@@ -15,8 +15,10 @@ import torch
 from torch._inductor.runtime.triton_helpers import (
     exclusive_scan_decoupled_lookback_64,
     max2,
+    max2_strict,
     maximum,
     min2,
+    min2_strict,
     minimum,
     rand4x,
     randn4x,
@@ -138,12 +140,17 @@ if HAS_GPU:
         min_ptr,
         max_ptr,
         BLOCK_SIZE: tl.constexpr,
+        STRICT: tl.constexpr,
     ):
         row = tl.program_id(0)
         offsets = row * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
         x = tl.load(x_ptr + offsets)
-        tl.store(min_ptr + row, min2(x, 0))
-        tl.store(max_ptr + row, max2(x, 0))
+        if STRICT:
+            tl.store(min_ptr + row, min2_strict(x, 0))
+            tl.store(max_ptr + row, max2_strict(x, 0))
+        else:
+            tl.store(min_ptr + row, min2(x, 0))
+            tl.store(max_ptr + row, max2(x, 0))
 
 
 class ExclusiveScanDecoupledLookback64Test(TestCase):
@@ -430,6 +437,7 @@ class MinimumMaximumTest(TestCase):
             actual_min,
             actual_max,
             BLOCK_SIZE=x.shape[1],
+            STRICT=False,
         )
 
         self.assertEqual(actual_min, torch.amin(x, dim=1))
@@ -452,12 +460,36 @@ class MinimumMaximumTest(TestCase):
             actual_min,
             actual_max,
             BLOCK_SIZE=x.shape[1],
+            STRICT=True,
         )
 
         expected_min = torch.amin(x, dim=1)
         expected_max = torch.amax(x, dim=1)
         self.assertEqual(actual_min.view(torch.int32), expected_min.view(torch.int32))
         self.assertEqual(actual_max.view(torch.int32), expected_max.view(torch.int32))
+
+    def test_reduction_relaxed_signed_zero(self, device: str) -> None:
+        x = torch.tensor(
+            [
+                [-0.0, 0.0, 0.0, 0.0],
+                [0.0, -0.0, -0.0, -0.0],
+            ],
+            device=device,
+        )
+        actual_min = torch.empty(x.shape[0], device=device)
+        actual_max = torch.empty(x.shape[0], device=device)
+        test_kernel_minmax_reduction[(x.shape[0],)](
+            x,
+            actual_min,
+            actual_max,
+            BLOCK_SIZE=x.shape[1],
+            STRICT=False,
+        )
+
+        actual_min_bits = actual_min.view(torch.int32)
+        actual_max_bits = actual_max.view(torch.int32)
+        self.assertEqual(actual_min_bits, torch.full_like(actual_min_bits, -(1 << 31)))
+        self.assertEqual(actual_max_bits, torch.zeros_like(actual_max_bits))
 
 
 if HAS_GPU:
