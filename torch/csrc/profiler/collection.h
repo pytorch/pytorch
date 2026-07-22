@@ -106,6 +106,21 @@ using op_input_t = std::variant<
     c10::IValue,
     std::nullopt_t>;
 
+// Parsed op-argument metadata (shapes, dtypes, concrete inputs). Shared by the
+// KinetoEvent constructor and the Kineto metadata producers.
+struct OpArgData {
+  bool hasData;
+  std::vector<shape> shapes;
+  std::vector<std::string> dtypes;
+  std::vector<c10::IValue> concreteInputs;
+  std::vector<std::vector<int64_t>> shapesForKinetoEvent;
+  std::vector<shape> strides;
+};
+
+TORCH_API OpArgData parseArgData(
+    const std::vector<op_input_t>& input_shapes,
+    const std::vector<op_input_t>& concreteInputs);
+
 // ============================================================================
 // == ExtraFields =============================================================
 // ============================================================================

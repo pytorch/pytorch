@@ -463,6 +463,48 @@ class TestOnlineSoftmax(TestCase):
         opt_f = torch.compile(f)
         torch.testing.assert_close(f(x, y), opt_f(x, y), atol=1e-3, rtol=1e-3)
 
+    @parametrize("dtype", [torch.bfloat16, torch.float32])
+    def test_nan_propagation(self, dtype):
+        """
+        The softmax-internal max uses fmax (non-NaN-propagating) for
+        performance, but NaN must still propagate to the final output
+        because the original input flows through exp(x - xmax).
+        Place NaN at the beginning, middle, and end of separate rows.
+
+        This is Triton-only because fmax is only implemented in the
+        Triton persistent reduction path.
+        """
+        if not HAS_TRITON:
+            self.skipTest("requires triton")
+
+        M, N = 4, 1024
+        x = torch.randn(M, N, device=GPU_TYPE, dtype=dtype)
+
+        x[0, 0] = float("nan")
+        x[1, N // 2] = float("nan")
+        x[2, N - 1] = float("nan")
+        # row 3 has no NaN
+
+        ref = torch.softmax(x, dim=-1)
+        act, (code,) = run_and_get_code(torch.compile(torch.softmax), x, dim=-1)
+
+        self.assertIn("fmax2", code)
+
+        # Rows with NaN input must produce all-NaN output
+        for row in range(3):
+            self.assertTrue(
+                ref[row].isnan().all(),
+                f"eager row {row} should be all NaN",
+            )
+            self.assertTrue(
+                act[row].isnan().all(),
+                f"compiled row {row} should be all NaN",
+            )
+
+        # Row without NaN must match exactly
+        self.assertFalse(act[3].isnan().any())
+        torch.testing.assert_close(ref[3], act[3])
+
 
 instantiate_parametrized_tests(TestOnlineSoftmax)
 

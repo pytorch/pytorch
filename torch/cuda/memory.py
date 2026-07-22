@@ -601,6 +601,15 @@ def max_memory_reserved(device: "Device" = None) -> int:
     .. note::
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
+
+    .. note::
+        Under ``PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync``, the peak is
+        computed by summing the high-water marks of the default mempool and the
+        device graph-memory pool (CUDA graph captures reserve backing in the
+        latter). Because those two high-water marks need not occur at the same
+        instant, the reported peak is a conservative *upper bound* on the true
+        simultaneous peak. The current value
+        (:func:`~torch.cuda.memory_reserved`) is exact.
     """
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
@@ -1163,6 +1172,21 @@ def _dump_snapshot(filename="dump_snapshot.pickle", augment_with_fx_traces=False
 
     with open(filename, "wb") as f:
         pickle.dump(s, f)
+
+
+def _memory_metadata_supported() -> bool:
+    """
+    Return whether the active CUDA allocator backend records memory metadata.
+
+    Only the native caching allocator supports :func:`_set_memory_metadata`.
+    With other backends (e.g. ``cudaMallocAsync`` or a pluggable allocator),
+    :func:`_set_memory_metadata` is a no-op and :func:`_get_memory_metadata`
+    always returns the empty string. Callers doing best-effort labeling can
+    check this before setting metadata to avoid the one-time warning emitted on
+    unsupported backends.
+    """
+    # pyrefly: ignore [missing-attribute]
+    return torch._C._cuda_memoryMetadataSupported()
 
 
 def _set_memory_metadata(metadata: str):
