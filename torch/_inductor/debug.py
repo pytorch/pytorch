@@ -33,7 +33,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_leaves, tree_map
 
 from . import config, ir
 from .ir import ExternKernel
@@ -359,6 +359,16 @@ _kernel_information_jsons: dict[str, dict[str, Any]] = {}
 _inductor_kernel_provenance_debug_handle: int = 0
 
 
+@dataclasses.dataclass
+class _KernelExternInfo:
+    is_extern: bool = False
+    semantic_key: str | None = None
+    shapes: dict[str, Any] | None = None
+
+
+_inductor_kernel_extern_info: dict[str, _KernelExternInfo] = {}
+
+
 def get_kernel_information_jsons() -> dict[str, dict[str, Any]]:
     return _kernel_information_jsons
 
@@ -390,6 +400,7 @@ def reset_provenance_globals() -> Iterator[None]:
     global _inductor_pre_grad_node_stack_trace
     global _inductor_kernel_stack_trace
     global _inductor_kernel_provenance_debug_handle
+    global _inductor_kernel_extern_info
 
     # Store original values
     original_pre_grad_graph_id = _pre_grad_graph_id
@@ -404,6 +415,7 @@ def reset_provenance_globals() -> Iterator[None]:
     original_inductor_kernel_provenance_debug_handle = (
         _inductor_kernel_provenance_debug_handle
     )
+    original_inductor_kernel_extern_info = dict(_inductor_kernel_extern_info)
 
     # Reset to default values
     _pre_grad_graph_id = -1
@@ -415,6 +427,7 @@ def reset_provenance_globals() -> Iterator[None]:
     # context is active.  It must outlive the reset scope so the profiler can
     # consume it during export_chrome_trace, which then clears it.
     _inductor_kernel_provenance_debug_handle = 0
+    _inductor_kernel_extern_info = {}
 
     try:
         yield
@@ -432,6 +445,7 @@ def reset_provenance_globals() -> Iterator[None]:
         _inductor_kernel_provenance_debug_handle = (
             original_inductor_kernel_provenance_debug_handle
         )
+        _inductor_kernel_extern_info = original_inductor_kernel_extern_info
 
 
 class DebugContext:
@@ -946,7 +960,9 @@ def create_mapping_pre_post_grad_nodes(
     }
 
     if not isinstance(post_to_pre_grad_nodes_json, dict):
-        log.error("Provenance tacking error: post_to_pre_grad_nodes_json is not a dict")
+        log.error(
+            "Provenance tracking error: post_to_pre_grad_nodes_json is not a dict"
+        )
         return empty_return
 
     if not isinstance(pre_grad_graph_id, int):
@@ -962,12 +978,12 @@ def create_mapping_pre_post_grad_nodes(
         def check_format(node: dict[str, Any]) -> bool:
             if not isinstance(node, dict):
                 log.error(
-                    "Provenance tacking error: node provenance in post_to_pre_grad_nodes_json is not a dict"
+                    "Provenance tracking error: node provenance in post_to_pre_grad_nodes_json is not a dict"
                 )
                 return False
             if "graph_id" not in node or "name" not in node or "from_node" not in node:
                 log.error(
-                    "Provenance tacking error: node provenance in post_to_pre_grad_nodes_json has wrong format"
+                    "Provenance tracking error: node provenance in post_to_pre_grad_nodes_json has wrong format"
                 )
                 return False
             return True
@@ -975,7 +991,7 @@ def create_mapping_pre_post_grad_nodes(
         for outer_key, node_array in post_to_pre_grad_nodes_json.items():
             if not isinstance(node_array, list):
                 log.error(
-                    "Provenance tacking error: post_to_pre_grad_nodes_json value is not a list"
+                    "Provenance tracking error: post_to_pre_grad_nodes_json value is not a list"
                 )
                 return empty_return
             for node in node_array:
@@ -1043,7 +1059,7 @@ def create_node_mapping_kernel_to_post_grad(
 
     if not isinstance(triton_kernel_to_post_grad_json, dict):
         log.error(
-            "Provenance tacking error: triton_kernel_to_post_grad_json is not a dict"
+            "Provenance tracking error: triton_kernel_to_post_grad_json is not a dict"
         )
         return empty_return
 
@@ -1053,7 +1069,7 @@ def create_node_mapping_kernel_to_post_grad(
         for outer_key, node_array in triton_kernel_to_post_grad_json.items():
             if not isinstance(node_array, list):
                 log.error(
-                    "Provenance tacking error: triton_kernel_to_post_grad_json value is not a list"
+                    "Provenance tracking error: triton_kernel_to_post_grad_json value is not a list"
                 )
                 return empty_return
             for curr_node in node_array:
@@ -1126,12 +1142,35 @@ def dump_inductor_provenance_info() -> dict[str, Any]:
         return {}
 
 
-def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
-    """Create kernel information JSON"""
+def _serialize_provenance_shape(size: Sequence[Any]) -> list[int | str]:
+    shape: list[int | str] = []
+    for dim in size:
+        if ir._is_static(dim):
+            shape.append(int(dim))
+        else:
+            shape.append(str(dim))
+    return shape
+
+
+def _get_tensor_metadata(node: ir.IRNode) -> tuple[list[int | str], str] | None:
+    if not node.has_tensor_output():
+        return None
+
+    size = node.maybe_get_size()
+    dtype = node.maybe_get_dtype()
+    if size is None or dtype is None:
+        return None
+
+    return _serialize_provenance_shape(size), str(dtype)
+
+
+def create_kernel_information_json() -> dict[str, dict[str, Any]]:
+    """Create kernel information JSON with extended metadata for cross-hardware comparison."""
     try:
         global _inductor_post_to_pre_grad_nodes
         global _inductor_kernel_stack_trace
         global _inductor_triton_kernel_to_post_grad_node_info
+        global _inductor_kernel_extern_info
 
         post_to_pre = _inductor_post_to_pre_grad_nodes.get("postToPre", {})
         all_kernels = OrderedSet(_inductor_kernel_stack_trace.keys()) | OrderedSet(
@@ -1139,20 +1178,40 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
         )
 
         result = {}
-        for kernel_name in all_kernels:
+        for kernel_key in all_kernels:
             post_grad_nodes = _inductor_triton_kernel_to_post_grad_node_info.get(
-                kernel_name, []
+                kernel_key, []
             )
 
             pre_grad_nodes: OrderedSet[str] = OrderedSet()
             for post_node in post_grad_nodes:
                 pre_grad_nodes.update(post_to_pre.get(post_node, []))
 
-            result[kernel_name] = {
-                "stack_traces": _inductor_kernel_stack_trace.get(kernel_name, []),
+            stack_traces = _inductor_kernel_stack_trace.get(kernel_key, [])
+            pre_grad_list = list(pre_grad_nodes)
+
+            # extern_semantic_key precedence:
+            # 1. Explicit annotation (e.g., FP8 bridge) — highest priority
+            # 2. Single-element pre_grad_nodes for externs — derived identity
+            # 3. None
+            info = _inductor_kernel_extern_info.get(kernel_key)
+            if info is not None and info.semantic_key is not None:
+                extern_semantic_key = info.semantic_key
+            elif info is not None and info.is_extern and len(pre_grad_list) == 1:
+                extern_semantic_key = pre_grad_list[0]
+            else:
+                extern_semantic_key = None
+
+            result[kernel_key] = {
+                "stack_traces": stack_traces,
                 "post_grad_nodes": post_grad_nodes,
-                "pre_grad_nodes": list(pre_grad_nodes),
+                "pre_grad_nodes": pre_grad_list,
+                "extern_semantic_key": extern_semantic_key,
             }
+
+            # Merge shape metadata if available (extern ops only)
+            if info is not None and info.shapes:
+                result[kernel_key].update(info.shapes)
 
         return result
     except Exception as e:
@@ -1165,6 +1224,7 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
                 "stack_trace": traceback.format_exc(),
             },
         )
+        log.warning("create_kernel_information_json: exception: %s", e)
         return {}
 
 
@@ -1188,6 +1248,7 @@ def set_kernel_post_grad_provenance_tracing(
         global _inductor_triton_kernel_to_post_grad_node_info
         global _inductor_kernel_stack_trace
         global _inductor_kernel_provenance_debug_handle
+        global _inductor_kernel_extern_info
 
         _inductor_kernel_provenance_debug_handle += 1
         stack_traces: list[str] = []
@@ -1197,6 +1258,10 @@ def set_kernel_post_grad_provenance_tracing(
                 raise AssertionError(
                     f"expected ExternKernel, got {type(node_schedule)}"
                 )
+            extern_info = _inductor_kernel_extern_info.setdefault(
+                kernel_name, _KernelExternInfo()
+            )
+            extern_info.is_extern = True
             curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
                 kernel_name, []
             )
@@ -1213,6 +1278,47 @@ def set_kernel_post_grad_provenance_tracing(
                     for origin in node_schedule.origins
                     if origin.name not in curr_node_info
                 )
+            # Extract extern_semantic_key if stamped by a transform pass (e.g., FP8)
+            if node_schedule.origin_node and "extern_semantic_key" in getattr(
+                node_schedule.origin_node, "meta", {}
+            ):
+                extern_info.semantic_key = node_schedule.origin_node.meta[
+                    "extern_semantic_key"
+                ]
+            else:
+                for origin in node_schedule.origins:
+                    if "extern_semantic_key" in getattr(origin, "meta", {}):
+                        extern_info.semantic_key = origin.meta["extern_semantic_key"]
+                        break
+            # Extract input/output shapes and dtypes for extern ops
+            try:
+                input_shapes: list[list[int | str]] = []
+                input_dtypes: list[str] = []
+                for inp in tree_leaves(node_schedule.inputs):
+                    if isinstance(inp, ir.IRNode):
+                        metadata = _get_tensor_metadata(inp)
+                        if metadata is None:
+                            continue
+                        shape, dtype = metadata
+                        input_shapes.append(shape)
+                        input_dtypes.append(dtype)
+
+                shape_metadata: dict[str, Any] = {
+                    "input_shapes": input_shapes,
+                    "input_dtypes": input_dtypes,
+                }
+                output_metadata = _get_tensor_metadata(node_schedule)
+                if output_metadata is not None:
+                    output_shape, output_dtype = output_metadata
+                    shape_metadata.update(
+                        {
+                            "output_shape": output_shape,
+                            "output_dtype": output_dtype,
+                        }
+                    )
+                extern_info.shapes = shape_metadata
+            except Exception as e:
+                log.debug("Shape extraction failed for %s: %s", kernel_name, e)
             stack_traces = list(node_schedule.get_stack_traces())
         else:
             if not isinstance(node_schedule, list):

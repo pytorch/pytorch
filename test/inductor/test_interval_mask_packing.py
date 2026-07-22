@@ -32,6 +32,14 @@ class TestIntervalMaskPacking(InductorTestCase):
                 return kv_idx + lane in (q_idx, q_idx + 2)
             case "block_equality":
                 return q_idx // 16 == (kv_idx + lane) // 16
+            case "row_bounded_causal":
+                return q_idx >= kv_idx + lane and q_idx < 100
+            case "not_causal":
+                return not q_idx >= kv_idx + lane
+            case "ne_diagonal":
+                return kv_idx + lane != q_idx
+            case "lane_uniform_eq":
+                return q_idx == 16
             case _:
                 raise AssertionError(case_name)
 
@@ -67,6 +75,10 @@ class TestIntervalMaskPacking(InductorTestCase):
             "sliding_window",
             "disjoint_or",
             "block_equality",
+            "row_bounded_causal",
+            "not_causal",
+            "ne_diagonal",
+            "lane_uniform_eq",
             "batch_dependent",
         ],
     )
@@ -126,6 +138,19 @@ class TestIntervalMaskPacking(InductorTestCase):
                 )
             case "batch_dependent":
                 output = graph.call_function(torch.ops.aten.ge.Tensor, (b, kv_idx))
+            case "row_bounded_causal":
+                row_bound = graph.call_function(torch.ops.aten.lt.Scalar, (q_idx, 100))
+                output = graph.call_function(
+                    torch.ops.aten.bitwise_and.Tensor, (causal, row_bound)
+                )
+            case "not_causal":
+                output = graph.call_function(
+                    torch.ops.aten.logical_not.default, (causal,)
+                )
+            case "ne_diagonal":
+                output = graph.call_function(torch.ops.aten.ne.Tensor, (kv_idx, q_idx))
+            case "lane_uniform_eq":
+                output = graph.call_function(torch.ops.aten.eq.Scalar, (q_idx, 16))
             case _:
                 raise AssertionError(case_name)
         graph.output(output)
@@ -346,6 +371,37 @@ class TestIntervalMaskPacking(InductorTestCase):
         self.assertIn("min(", intervals[0].render_upper())
         self.assertIn("q_idx[0]", intervals[0].render_upper())
         self.assertIn("cutlass.Int32(1)", intervals[0].render_upper())
+
+    def test_packed_mask_interval_selector_padding_mask(self):
+        """Regression for attention-gym #208: BERT-style padding masks must pack.
+
+        (q_idx < seq_lens[b]) & (kv_idx < seq_lens[b]) mixes a lane-affine kv bound
+        with a lane-uniform q bound; the lane-uniform conjunct used to reject the
+        whole mask into the per-lane fallback path.
+        """
+        graph = torch.fx.Graph()
+        b = graph.placeholder("b")
+        graph.placeholder("h")
+        q_idx = graph.placeholder("q_idx")
+        kv_idx = graph.placeholder("kv_idx")
+        seq_lens = graph.placeholder("seq_lens")
+        self._set_node_dtype(seq_lens, torch.int64, (8,))
+        length = graph.call_function(torch.ops.aten.index.Tensor, (seq_lens, [b]))
+        self._set_node_dtype(length, torch.int64)
+        q_ok = graph.call_function(torch.ops.aten.lt.Tensor, (q_idx, length))
+        kv_ok = graph.call_function(torch.ops.aten.lt.Tensor, (kv_idx, length))
+        graph.output(
+            graph.call_function(torch.ops.aten.bitwise_and.Tensor, (q_ok, kv_ok))
+        )
+
+        with V.set_graph_handler(MockGraphHandler()):
+            intervals = select_packed_mask_intervals(torch.fx.GraphModule({}, graph))
+
+        self.assertIsNotNone(intervals)
+        self.assertEqual(len(intervals), 1)
+        self.assertIn("min(", intervals[0].render_upper())
+        self.assertIn("aux_tensors[0]", intervals[0].render_upper())
+        self.assertIn("cutlass.Int32(32)", intervals[0].render_upper())
 
 
 if __name__ == "__main__":
