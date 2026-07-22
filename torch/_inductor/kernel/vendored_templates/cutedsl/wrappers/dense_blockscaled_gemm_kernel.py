@@ -220,7 +220,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             args, "compile_time_tensor"
         )
         local_reduce_out = getattr(args, "local_reduce_out", None)
-        if local_reduce_out is not None:
+        local_reduce_feeds_main = getattr(args, "local_reduce_feeds_main", False)
+        if local_reduce_out is not None or local_reduce_feeds_main:
             return self.cute_compile(
                 self.impl,
                 args.A.tensor,
@@ -238,11 +239,16 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 *epilogue_outputs,
                 output_count,
                 primary_output,
-                local_reduce_out.compile_time_tensor,
+                (
+                    local_reduce_out.compile_time_tensor
+                    if local_reduce_out is not None
+                    else None
+                ),
                 getattr(args, "local_reduce_group"),
                 getattr(args, "local_reduce_axis"),
                 getattr(args, "local_reduce_type"),
                 getattr(args, "local_reduce_source"),
+                local_reduce_feeds_main,
                 target_sm=target_sm,
             )
         return self.cute_compile(
@@ -289,7 +295,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         epilogue_outputs, _, _ = _epilogue_outputs(args, "runtime_tensor")
 
         local_reduce_out = getattr(args, "local_reduce_out", None)
-        if local_reduce_out is not None:
+        local_reduce_feeds_main = getattr(args, "local_reduce_feeds_main", False)
+        if local_reduce_out is not None or local_reduce_feeds_main:
             self.cute_run(  # pyrefly: ignore[missing-attribute]
                 compiled_gemm,
                 args.A.tensor,
@@ -301,7 +308,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 alpha,
                 *epilogue_tensors,
                 *epilogue_outputs,
-                local_reduce_out.runtime_tensor,
+                local_reduce_out.runtime_tensor if local_reduce_out is not None else None,
             )
             return
 
@@ -329,7 +336,9 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         from cutlass.operators.arguments import ScaledOperand
 
         local_reduce_out = getattr(args, "local_reduce_out", None)
-        if local_reduce_out is not None:
+        if local_reduce_out is not None or getattr(
+            args, "local_reduce_feeds_main", False
+        ):
             group = getattr(args, "local_reduce_group")
             axis = getattr(args, "local_reduce_axis")
             m, n = args.out.shape[-2:]
@@ -345,18 +354,19 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                     "Grouped reduction requires a supported M- or N-axis group "
                     "that divides the selected dimension."
                 )
-            expected_shape = (m, n // group) if axis == 1 else (m // group, n)
-            if local_reduce_out.shape != expected_shape:
-                return Status.fail(
-                    "Grouped reduction output shape must be "
-                    f"{expected_shape}; got {local_reduce_out.shape}."
-                )
-            if local_reduce_out.dtype is not cutlass.Float32 or tuple(
-                local_reduce_out.stride
-            ) != (expected_shape[1], 1):
-                return Status.fail(
-                    "Grouped reduction output must be contiguous Float32."
-                )
+            if local_reduce_out is not None:
+                expected_shape = (m, n // group) if axis == 1 else (m // group, n)
+                if local_reduce_out.shape != expected_shape:
+                    return Status.fail(
+                        "Grouped reduction output shape must be "
+                        f"{expected_shape}; got {local_reduce_out.shape}."
+                    )
+                if local_reduce_out.dtype is not cutlass.Float32 or tuple(
+                    local_reduce_out.stride
+                ) != (expected_shape[1], 1):
+                    return Status.fail(
+                        "Grouped reduction output must be contiguous Float32."
+                    )
 
         m, n = args.out.shape[-2:]
         k = args.A.shape[-1]

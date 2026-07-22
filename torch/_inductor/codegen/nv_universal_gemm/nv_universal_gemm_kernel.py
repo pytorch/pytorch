@@ -406,14 +406,16 @@ def _create_gemm_arguments(
     local_reduce_axis: int = 1,
     local_reduce_type: str = "sum",
     local_reduce_source: str = "identity",
+    local_reduce_feeds_main: bool = False,
 ):
     import cutlass.operators
 
-    if local_reduce_out is not None and variant_name != "SCALED_GEMM":
+    has_local_reduce = local_reduce_out is not None or local_reduce_feeds_main
+    if has_local_reduce and variant_name != "SCALED_GEMM":
         raise NotImplementedError(
             "NVGEMM local reductions currently require scaled GEMM"
         )
-    if local_reduce_out is not None and (
+    if has_local_reduce and (
         local_reduce_axis not in (0, 1) or local_reduce_group <= 1
     ):
         raise NotImplementedError(
@@ -421,15 +423,18 @@ def _create_gemm_arguments(
         )
 
     def with_local_reduce(args):
-        if local_reduce_out is None:
+        if not has_local_reduce:
             return args
         from cutlass.operators.utils.tensor import TensorWrapper
 
-        args.local_reduce_out = TensorWrapper(local_reduce_out)
+        args.local_reduce_out = (
+            TensorWrapper(local_reduce_out) if local_reduce_out is not None else None
+        )
         args.local_reduce_group = local_reduce_group
         args.local_reduce_axis = local_reduce_axis
         args.local_reduce_type = local_reduce_type
         args.local_reduce_source = local_reduce_source
+        args.local_reduce_feeds_main = local_reduce_feeds_main
         return args
 
     if epilogue is not None and variant_name == "GROUPED_GEMM":
@@ -1070,7 +1075,7 @@ class NVUniversalGemmKernel(Kernel):
         epilogue_reads: list[str] | None = None,
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
-        local_reduce: tuple[str, int, int, str, str, str] | None = None,
+        local_reduce: tuple[str | None, int, int, str, str, str] | None = None,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
     ) -> None:
@@ -1256,7 +1261,12 @@ class NVUniversalGemmKernel(Kernel):
                     reduce_source,
                     _,
                 ) = self.local_reduce
-                reduce_ptr = f"out_ptr{output_buffers.index(reduce_name)}"
+                feed_main = reduce_name is None
+                reduce_ptr = (
+                    "None"
+                    if feed_main
+                    else f"out_ptr{output_buffers.index(reduce_name)}"
+                )
                 run_variant_kwargs = (
                     "_VARIANT_KWARGS | {"
                     f"'local_reduce_out': {reduce_ptr}, "
@@ -1264,9 +1274,11 @@ class NVUniversalGemmKernel(Kernel):
                     f"'local_reduce_axis': {reduce_axis}, "
                     f"'local_reduce_type': {reduce_type!r}, "
                     f"'local_reduce_source': {reduce_source!r}"
+                    f", 'local_reduce_feeds_main': {feed_main!r}"
                     "}"
                 )
-                aux_tensors_expr = f"({reduce_ptr},)"
+                if not feed_main:
+                    aux_tensors_expr = f"({reduce_ptr},)"
 
             code.writeline("_nvgemm_run(")
             with code.indent():
@@ -1330,7 +1342,7 @@ class NVUniversalGemmKernel(Kernel):
                 else self.output_node.get_name()
             )
             ordered = [primary_output]
-            if self.local_reduce is not None:
+            if self.local_reduce is not None and self.local_reduce[0] is not None:
                 ordered.append(self.local_reduce[0])
             return ordered
         d_buf = (self.epilogue_var_renames or {}).get("D")
@@ -1340,7 +1352,11 @@ class NVUniversalGemmKernel(Kernel):
         for w in self.epilogue_writes:
             if w != d_buf and w not in ordered:
                 ordered.append(w)
-        if self.local_reduce is not None and self.local_reduce[0] not in ordered:
+        if (
+            self.local_reduce is not None
+            and self.local_reduce[0] is not None
+            and self.local_reduce[0] not in ordered
+        ):
             ordered.append(self.local_reduce[0])
         return ordered
 
