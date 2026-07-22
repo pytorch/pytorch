@@ -2234,6 +2234,24 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         self.assertEqual(fn(inp), inp + 7)
         self.assertEqual(cnts.frame_count, 3)
 
+    def test_saved_tensor_descriptor_graph_break(self):
+        # Regression test: _saved_* getset descriptors on autograd Nodes
+        # must graph-break rather than calling __get__ during tracing,
+        # which would trigger checkpoint recomputation hooks as a
+        # tracing-time side effect.
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(gf):
+            return gf._saved_result.sum()
+
+        x = torch.randn(3, requires_grad=True)
+        y = x.exp()
+        result = fn(y.grad_fn)
+        self.assertEqual(result, y.sum())
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
         # test export with error_on_graph_break(False) still errors
 
     def test_error_on_graph_break_export(self):
