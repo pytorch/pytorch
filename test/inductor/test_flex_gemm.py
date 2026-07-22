@@ -488,8 +488,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                     swap_ab_alignment=8,
                 )
 
-    def test_multi_cta_local_reduce_rejects_full_tile_group(self):
-        """Reject full-tile groups until GroupedLocalReduce owns two-CTA stores."""
+    def test_multi_cta_local_reduce_full_tile_follows_n_warp_topology(self):
+        """Allow full-N groups only when one epilogue warp partition owns N."""
         from torch._inductor.kernel.flex_gemm.constraints import (
             max_flex_gemm_local_reduce_group_for_configs,
             validate_flex_gemm_local_reduce_config,
@@ -512,12 +512,23 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 device_capacity=10,
             ),
         )
-        for config in configs:
-            self.assertTrue(validate_flex_gemm_local_reduce_config(config, 128, 1))
-            self.assertFalse(
-                validate_flex_gemm_local_reduce_config(config, config.tile_n, 1)
+        split_n_warp, single_n_warp = configs
+        self.assertTrue(validate_flex_gemm_local_reduce_config(split_n_warp, 128, 1))
+        self.assertFalse(
+            validate_flex_gemm_local_reduce_config(split_n_warp, split_n_warp.tile_n, 1)
+        )
+        self.assertTrue(validate_flex_gemm_local_reduce_config(single_n_warp, 128, 1))
+        self.assertTrue(
+            validate_flex_gemm_local_reduce_config(
+                single_n_warp, single_n_warp.tile_n, 1
             )
-        self.assertEqual(max_flex_gemm_local_reduce_group_for_configs(configs, 1), 256)
+        )
+        self.assertFalse(
+            validate_flex_gemm_local_reduce_config(
+                single_n_warp, single_n_warp.tile_m, 0
+            )
+        )
+        self.assertEqual(max_flex_gemm_local_reduce_group_for_configs(configs, 1), 512)
 
     def test_expanded_local_reduce_configs_are_sm100_only(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
@@ -5604,6 +5615,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("fragment_group_tuned", 128, 32, True),
             ("multi_chunk_large_group", 256, 128, False),
             ("tile_n_group", 256, 256, False),
+            ("wide_m_tile_n_group", 512, 512, False),
         ),
         name_fn=lambda case: case[0],
     )
@@ -5670,8 +5682,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_coda_rmsnorm_rewrite_rejects_group_above_config_limit(self):
-        m, k, n, p = 64, 32, 512, 48
-        group = 512
+        m, k, n, p = 64, 32, 1024, 48
+        group = 1024
         eps = 1e-5
 
         def fn(a, b1, gamma, b2):
@@ -5705,7 +5717,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         with self.assertRaisesRegex(
             Exception,
-            "requested group=512, max supported group=256 for axis=1",
+            "requested group=1024, max supported group=512 for axis=1",
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b1, gamma, b2)
 
@@ -6801,6 +6813,8 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             ("local_n_g32_tile256", 1, 32, 128, 256, 2, 2),
             ("local_n_g64_tile_m128", 1, 64, 128, 256, 2, 1),
             ("local_n_g128_tile_m128", 1, 128, 128, 256, 2, 1),
+            ("local_n_full_tile256_tile_m256", 1, 256, 256, 256, 2, 1),
+            ("local_n_full_tile512_tile_m256", 1, 512, 256, 512, 2, 1),
             ("local_m_g128_tile160", 0, 128, 128, 160, 1, 1),
             ("local_m_g64_tile_m256", 0, 64, 256, 256, 2, 1),
             ("local_m_g128_tile_m256", 0, 128, 256, 256, 2, 1),
