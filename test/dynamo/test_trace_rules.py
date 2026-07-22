@@ -74,7 +74,6 @@ ignored_c_binding_in_graph_function_names = {
     "torch.resize_as_",
     "torch.resize_as_sparse_",
     "torch._C._data_address",
-    "torch._C._is_cow_tensor",
     "torch._lazy_clone",
     "torch._test_parallel_materialize",
     "torch._C._storage_address",
@@ -345,7 +344,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             else:
                 self.assertTrue(
                     isinstance(mod, types.ModuleType),
-                    f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
+                    lambda msg: f"{msg}\n{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
                     "is not a python module, please check and correct it.",
                 )
 
@@ -484,6 +483,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         code = """
 import torch
 import torch._dynamo.trace_rules as trace_rules
+from torch._dynamo.variables import PolyfilledFunctionVariable
 
 if trace_rules._is_dtensor_loaded():
     raise AssertionError("DTensor was loaded before building the initial rule map")
@@ -492,6 +492,13 @@ trace_rules.clear_lru_cache()
 before = trace_rules.get_torch_obj_rule_map()
 if trace_rules._is_dtensor_loaded():
     raise AssertionError("building the initial rule map imported DTensor")
+polyfilled_rules = {
+    obj: rule
+    for obj, rule in before.items()
+    if rule is PolyfilledFunctionVariable
+}
+if not polyfilled_rules:
+    raise AssertionError("initial rule map did not preserve dynamic polyfill rules")
 
 from torch.distributed.tensor import DTensor
 
@@ -500,6 +507,15 @@ if DTensor.from_local in before:
     raise AssertionError("initial rule map unexpectedly included DTensor.from_local")
 if DTensor.from_local not in after:
     raise AssertionError("rule map did not add DTensor.from_local after DTensor import")
+missing_polyfills = {
+    obj: rule
+    for obj, rule in polyfilled_rules.items()
+    if after.get(obj) is not rule
+}
+if missing_polyfills:
+    raise AssertionError(
+        f"rule map lost {len(missing_polyfills)} polyfill rules after DTensor import"
+    )
 """
         result = subprocess.run(
             [sys.executable, "-c", code],
@@ -560,7 +576,7 @@ if DTensor.from_local not in after:
             self.assertFalse(
                 fn_name in torch_non_c_binding_in_graph_functions,
                 (
-                    f"torch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
+                    lambda msg: f"{msg}\ntorch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
                     "We expected all functions in `torch_non_c_binding_in_graph_functions` to be safe to cache.\n"
                     "Functions with special handlers may not be safe to cache, since they can close over global state.\n"
                     "If your handler/function is safe to cache, please add it to the list of safe handlers above.\n"

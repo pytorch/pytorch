@@ -84,8 +84,11 @@ _OPTIONAL_IMPORT_TIME_DENY_LIST = {
     "_pytest",
     "einops",
     "optree",
+    "tabulate",
+    "torch_xla",
     "torchrec",
     "triton",
+    "tvm",
 }
 
 _IMPORT_TIME_CALL_DENY_LIST = {

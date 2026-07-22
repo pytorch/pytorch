@@ -55,6 +55,15 @@ class TestImportLinter(unittest.TestCase):
         self.assertEqual(messages[0].name, "Disallowed import-time import")
         self.assertEqual(messages[0].line, 2)
 
+    def test_disallows_other_optional_imports_at_import_time(self) -> None:
+        for module_name in ("tabulate", "torch_xla", "tvm"):
+            with self.subTest(module_name=module_name):
+                messages = self.check_contents(f"import {module_name}")
+
+                self.assertEqual(len(messages), 1)
+                self.assertEqual(messages[0].name, "Disallowed import-time import")
+                self.assertEqual(messages[0].line, 1)
+
     def test_disallows_class_body_optional_import(self) -> None:
         messages = self.check_contents(
             """

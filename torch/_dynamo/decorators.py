@@ -9,12 +9,12 @@ import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, overload, TYPE_CHECKING, TypeVar
+from typing import Any, overload, Protocol, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
 from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
@@ -31,13 +31,16 @@ from .eval_frame import (
     innermost_fn,
     RunOnlyContext,
     skip_code,
+    StanceStr,
 )
 from .external_utils import (
     get_nonrecursive_disable_wrapper,
     wrap_dunder_call_ctx_manager,
 )
 from .utils import (
+    _get_cudagraph_override,
     _get_error_on_graph_break,
+    _set_cudagraph_override,
     _set_error_on_graph_break,
     allow_lru_cache_wrapper_trace_without_warning,
     is_function,
@@ -153,7 +156,7 @@ class set_stance(_DecoratorContextManager):
 
     def __init__(
         self,
-        stance: str = "default",
+        stance: StanceStr = "default",
         *,
         skip_guard_eval_unsafe: bool = False,
         force_backend: str | Callable[..., Any] | None = None,
@@ -961,6 +964,7 @@ def substitute_in_graph(
         from torch._dynamo.trace_rules import (
             _polyfilled_function_ids,
             get_torch_obj_rule_map,
+            register_torch_obj_rule,
         )
         from torch._dynamo.variables import PolyfilledFunctionVariable
         from torch._dynamo.variables.builder import VariableBuilder
@@ -1017,7 +1021,8 @@ def substitute_in_graph(
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
         _polyfilled_function_ids.add(id(original_fn))
         _polyfilled_function_ids.add(id(wrapped))
-        rule_map[original_fn] = rule_map[wrapped] = PolyfilledFunctionVariable
+        register_torch_obj_rule(original_fn, PolyfilledFunctionVariable)
+        register_torch_obj_rule(wrapped, PolyfilledFunctionVariable)
         polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = wrapped  # type: ignore[assignment]
 
         wrapped.__torch_dynamo_original__ = original_fn  # type: ignore[attr-defined]
@@ -1046,11 +1051,11 @@ def _apply_func_to_inner_tensors_of_same_dim(
             case torch.Tensor() as inner:
                 if inner.dim() == t.dim():
                     func(inner, *args, **kwargs)
-            case OpaqueBase():
+            case CustomClassBase():
                 pass
             case unexpected:
                 raise AssertionError(
-                    f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                 )
 
 
@@ -1487,10 +1492,25 @@ def _allow_in_graph_einops() -> None:
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 
 
+class _ConfigPatchProtocol(Protocol):
+    """The config.patch() context manager object wrapped by DynamoConfigPatchProxy."""
+
+    changes: dict[str, Any]
+
+    def __enter__(self) -> None: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+
+
 # Proxy class for torch._dynamo.config patching - so dynamo can identify context managers/decorators
 # created by patch_dynamo_config, compared to ones created by a raw torch._dynamo.config.patch.
 class DynamoConfigPatchProxy:
-    def __init__(self, config_patch: Any) -> None:
+    def __init__(self, config_patch: _ConfigPatchProtocol) -> None:
         self.config_patch = config_patch
 
     @property
@@ -1680,11 +1700,19 @@ class CudagraphOverrideContextManager:
     def __init__(self, fwd: bool | None = None, bwd: bool | None = None) -> None:
         self.fwd = fwd
         self.bwd = bwd
+        self.prev_cudagraph_override: list[tuple[bool | None, bool | None] | None] = []
 
     __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self) -> None:
-        pass
+        # Set the override at runtime so it follows the dynamic call stack.
+        # Dynamo handles the lexical `with` symbolically and does not run this
+        # __enter__ at trace time; it runs when the generated/resumed bytecode
+        # re-enters the context, before invoking callees that are compiled as
+        # separate frames. OutputGraph seeds its annotation from this value via
+        # _get_cudagraph_override. Mirrors ErrorOnGraphBreakDecoratorContextManager.
+        self.prev_cudagraph_override.append(_get_cudagraph_override())
+        _set_cudagraph_override((self.fwd, self.bwd))
 
     def __exit__(
         self,
@@ -1692,7 +1720,7 @@ class CudagraphOverrideContextManager:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        pass
+        _set_cudagraph_override(self.prev_cudagraph_override.pop())
 
 
 def override_cudagraphs(

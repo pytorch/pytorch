@@ -12,7 +12,6 @@
 #endif // C10_MOBILE
 
 #include <atomic>
-#include <latch>
 #include <utility>
 
 #ifdef _OPENMP
@@ -153,11 +152,16 @@ void invoke_parallel(
   std::tie(num_tasks, chunk_size) =
       internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
 
-  std::atomic_flag err_flag;
-  std::exception_ptr eptr;
-  std::latch latch(num_tasks);
+  struct {
+    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+    std::exception_ptr eptr;
+    std::mutex mutex;
+    std::atomic_size_t remaining{0};
+    std::condition_variable cv;
+  } state;
 
-  auto task = [&, f, begin, end, chunk_size](size_t task_id) {
+  auto task = [f, &state, begin, end, chunk_size]
+      (size_t task_id) {
     int64_t local_start = static_cast<int64_t>(begin + task_id * chunk_size);
     if (local_start < end) {
       int64_t local_end = std::min(end, static_cast<int64_t>(chunk_size + local_start));
@@ -165,19 +169,30 @@ void invoke_parallel(
         ParallelRegionGuard guard(static_cast<int>(task_id));
         f(local_start, local_end);
       } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
+        if (!state.err_flag.test_and_set()) {
+          state.eptr = std::current_exception();
         }
       }
     }
-    latch.count_down();
+    {
+      std::unique_lock<std::mutex> lk(state.mutex);
+      if (--state.remaining == 0) {
+        state.cv.notify_one();
+      }
+    }
   };
+  state.remaining = num_tasks;
   _run_with_pool(std::move(task), num_tasks);
 
   // Wait for all tasks to finish.
-  latch.wait();
-  if (eptr) {
-    std::rethrow_exception(eptr);
+  {
+    std::unique_lock<std::mutex> lk(state.mutex);
+    if (state.remaining != 0) {
+      state.cv.wait(lk);
+    }
+  }
+  if (state.eptr) {
+    std::rethrow_exception(state.eptr);
   }
 }
 
