@@ -33,6 +33,7 @@ from .constraints import (
     LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
     statically_known,
+    statically_known_multiple,
     statically_known_shape_equal,
     validate_flex_gemm_local_reduce_config,
 )
@@ -212,6 +213,7 @@ def flex_gemm_config_keys(
     tuned: bool,
     main_transform: FlexGemmGroupedMainOutputTransform | None = None,
     explicit_config: dict[str, Any] | None = None,
+    swap_ab_alignment: int = 1,
 ) -> tuple[tuple[Any, ...], ...]:
     """Select QuACK config keys after applying grouped-layout config constraints.
 
@@ -255,6 +257,16 @@ def flex_gemm_config_keys(
         if explicit_config is None
         else explicit_gemm_configs_for_device(explicit_config, device)
     )
+    candidate_configs = tuple(
+        config
+        for config in candidate_configs
+        if not config.swap_ab or statically_known_multiple(n, swap_ab_alignment)
+    )
+    if not candidate_configs:
+        raise NotImplementedError(
+            "FlexGEMM explicit QUACK swap_ab constraints require output N "
+            f"divisible by {swap_ab_alignment}"
+        )
     allow_local_reduce_swap_ab = explicit_config_swaps_ab(explicit_config)
     if not tuned:
         default_key = default_gemm_config_key(device, m, n, candidate_configs)
@@ -459,6 +471,15 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         ir.convert_shape_to_inductor(output_meta.stride()),
     )
     explicit_swap_ab = explicit_config_swaps_ab(explicit_config)
+    swap_ab_alignment = max(
+        16 // dtype.itemsize
+        for dtype in (
+            output_meta.dtype,
+            *(arg.get_dtype() for arg in gemm_args),
+            *(arg.get_dtype() for arg in epilogue_args),
+            *(aux_meta.dtype for aux_meta in aux_metas),
+        )
+    )
     gemm_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args
     ]
@@ -512,6 +533,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         tuned,
         main_transform,
         explicit_config,
+        swap_ab_alignment=swap_ab_alignment,
     )
     epilogue_arg_indices = tuple(
         range(

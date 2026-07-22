@@ -433,6 +433,60 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 explicit_config=swap_config,
             )
 
+    def test_swap_ab_alignment_filters_tuned_and_explicit_configs(self):
+        from torch._inductor.heuristics.template.flex_gemm import gemm_config_key
+        from torch._inductor.kernel.flex_gemm.lowering import flex_gemm_config_keys
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        non_swap = GemmConfig(
+            tile_m=128,
+            tile_n=256,
+            pingpong=False,
+            cluster_m=1,
+            device_capacity=10,
+        )
+        swap = dataclasses.replace(non_swap, swap_ab=True)
+        device = torch.device("cuda")
+        with (
+            mock.patch("torch.cuda.get_device_capability", return_value=(10, 0)),
+            mock.patch(
+                "torch._vendor.quack.gemm_config.get_all_configs",
+                return_value=[non_swap, swap],
+            ),
+        ):
+            self.assertEqual(
+                flex_gemm_config_keys(
+                    device,
+                    128,
+                    129,
+                    (),
+                    tuned=True,
+                    swap_ab_alignment=8,
+                ),
+                (gemm_config_key(non_swap),),
+            )
+            self.assertEqual(
+                flex_gemm_config_keys(
+                    device,
+                    128,
+                    136,
+                    (),
+                    tuned=True,
+                    swap_ab_alignment=8,
+                ),
+                (gemm_config_key(non_swap), gemm_config_key(swap)),
+            )
+            with self.assertRaisesRegex(NotImplementedError, "divisible by 8"):
+                flex_gemm_config_keys(
+                    device,
+                    128,
+                    129,
+                    (),
+                    tuned=True,
+                    explicit_config={"swap_ab": True},
+                    swap_ab_alignment=8,
+                )
+
     def test_multi_cta_local_reduce_rejects_full_tile_group(self):
         """Reject full-tile groups until GroupedLocalReduce owns two-CTA stores."""
         from torch._inductor.kernel.flex_gemm.constraints import (
@@ -4717,6 +4771,43 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIn("('swap_ab', True)", code)
         self.assertIn(f"FlexGemmLocalReduceGeometry(group={group}, axis={axis})", code)
         self.assertIn("FlexGemmLocalReduceCallbacks(", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_tuple_aux_local_reduce_swap_ab_rejects_unaligned_n(self):
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        m, n, k, group = 256, 293, 64, 64
+
+        def epilogue_fn(acc):
+            grouped = acc.float().view(-1, group, n)
+            return acc.relu(), grouped.sum(1)
+
+        config = dataclasses.asdict(
+            GemmConfig(
+                tile_m=256,
+                tile_n=256,
+                pingpong=False,
+                cluster_m=2,
+                cluster_n=1,
+                swap_ab=True,
+                device_capacity=10,
+            )
+        )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex(Exception, "output N divisible by 8"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
