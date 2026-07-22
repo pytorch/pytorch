@@ -104,21 +104,85 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
-GPU_TYPES = ["cuda", "mps", "xpu", "mtia"]
 T = TypeVar("T")
 
 
-# defines here before import torch._dynamo is for avoiding circular import
-# when get_gpu_type is imported from dynamo
+# _gpu_types()/get_gpu_type()/GPU_TYPES are defined before the torch._dynamo
+# import below to avoid a circular import when they are pulled in from dynamo;
+# hence the lazy imports of the device-interface registry inside the bodies.
+def _gpu_types() -> list[str]:
+    """GPU-class device types, derived from the registered DeviceInterfaces.
+
+    This is intentionally not a hardcoded list: any backend (including
+    out-of-tree ones such as NPU) that registers a DeviceInterface whose
+    is_gpu() returns True is picked up automatically. Indexed aliases such as
+    "cuda:0" are skipped so only base device types are returned.
+    """
+    from torch._dynamo.device_interface import get_registered_device_interfaces
+
+    gpu_types = []
+    for name, device_interface in get_registered_device_interfaces():
+        if ":" in name:
+            continue
+        try:
+            if device_interface.is_gpu():
+                gpu_types.append(name)
+        except NotImplementedError:
+            continue
+    return gpu_types
+
+
+class _GpuTypes:
+    """Live, registry-derived view of the GPU-class device types.
+
+    Behaves like the old GPU_TYPES list for iteration and membership, but
+    reflects backends that register their DeviceInterface late (e.g. NPU),
+    instead of freezing a hardcoded list at import time.
+    """
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(_gpu_types())
+
+    def __contains__(self, item: object) -> bool:
+        return item in _gpu_types()
+
+    def __len__(self) -> int:
+        return len(_gpu_types())
+
+    def __getitem__(self, index: Any) -> Any:
+        return _gpu_types()[index]
+
+    def __repr__(self) -> str:
+        return repr(_gpu_types())
+
+
+GPU_TYPES = _GpuTypes()
+
+
 @functools.cache
 def get_gpu_type() -> str:
-    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
-    if not len(avail_gpus) <= 1:
-        raise AssertionError(
-            f"Expected at most 1 available GPU type, got {len(avail_gpus)}: {avail_gpus}"
-        )
-    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
-    return gpu_type
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    avail_gpus = []
+    for gpu_type in _gpu_types():
+        try:
+            if get_interface_for_device(gpu_type).is_available():
+                avail_gpus.append(gpu_type)
+        except NotImplementedError:
+            continue
+
+    if not avail_gpus:
+        return "cuda"
+    if len(avail_gpus) == 1:
+        return avail_gpus[0]
+
+    # More than one GPU type is available (e.g. cuda + an out-of-tree backend).
+    # Disambiguate via the process-wide current accelerator rather than
+    # asserting there can only be one.
+    acc = torch.accelerator.current_accelerator()
+    if acc is not None and acc.type in avail_gpus:
+        return acc.type
+    return avail_gpus[0]
 
 
 from torch._dynamo.device_interface import get_interface_for_device
@@ -3516,7 +3580,13 @@ def is_triton_fp8_dtype_supported(
 
 
 def device_need_guard(device: str) -> bool:
-    return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
+    if not is_gpu(device):
+        return False
+    # A GPU-class device still only needs stream guards if it exposes streams;
+    # e.g. MPS is a GPU but does not, so it must be excluded here.
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    return get_interface_for_device(device).exposes_streams()
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:

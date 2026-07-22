@@ -5,6 +5,7 @@ import importlib.util
 import os
 import sys
 import tempfile
+import types
 import unittest
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -13,8 +14,11 @@ from unittest import mock
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
+from torch._dynamo import device_interface as di
+from torch._dynamo.device_interface import DeviceInterface
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
+from torch._inductor import utils as inductor_utils
 from torch._inductor.compile_fx import _get_subgraph_names
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
@@ -24,7 +28,11 @@ from torch._inductor.fx_utils import (
     get_fake,
 )
 from torch._inductor.utils import (
+    _gpu_types,
+    device_need_guard,
     get_device_tflops,
+    get_gpu_type,
+    is_gpu,
     load_template,
     python_subprocess_env,
     sympy_str,
@@ -42,6 +50,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
+from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
 
 
@@ -1144,6 +1153,150 @@ class TestFakeTensorUpdater(TestCase):
 
         self.assertEqual(tuple(neg_replacement.meta["val"].shape), (4, 5))
         self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+
+class _GpuWithStream(DeviceInterface):
+    class Stream:  # overrides the base sentinel Stream -> exposes_streams() True
+        pass
+
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+
+class _GpuNoStream(DeviceInterface):
+    # deliberately does NOT define Stream: inherits the base sentinel (mps-like)
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+
+class _GpuUnavailable(DeviceInterface):
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
+    def is_available() -> bool:
+        return False
+
+
+class _NonGpu(DeviceInterface):
+    # is_gpu() NOT overridden: inherits the base default of False
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+
+class TestDeviceClassification(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._registered = []
+        get_gpu_type.cache_clear()
+
+    def tearDown(self):
+        for name in self._registered:
+            di.device_interfaces.pop(name, None)
+        get_gpu_type.cache_clear()
+        super().tearDown()
+
+    def _register(self, name, iface):
+        di.register_interface_for_device(name, iface)
+        self._registered.append(name)
+
+    # ---- is_gpu() default on the base class ----
+    def test_base_is_gpu_defaults_false(self):
+        self.assertFalse(DeviceInterface.is_gpu())
+        self.assertFalse(_NonGpu.is_gpu())
+        self.assertTrue(_GpuWithStream.is_gpu())
+
+    # ---- exposes_streams(): sentinel comparison, NOT None ----
+    def test_exposes_streams_true_when_stream_overridden(self):
+        self.assertTrue(_GpuWithStream.exposes_streams())
+
+    def test_exposes_streams_false_via_base_sentinel_not_none(self):
+        # _GpuNoStream.Stream IS the base sentinel (same object, not None).
+        # exposes_streams() must compare against the sentinel, not None;
+        # otherwise this card would be wrongly reported as stream-capable.
+        self.assertIs(_GpuNoStream.Stream, DeviceInterface.Stream)
+        self.assertIsNotNone(_GpuNoStream.Stream)
+        self.assertFalse(_GpuNoStream.exposes_streams())
+
+    # ---- is_gpu(device) ----
+    def test_is_gpu_none_returns_false(self):
+        self.assertFalse(is_gpu(None))
+
+    def test_is_gpu_unregistered_returns_false(self):
+        self.assertFalse(is_gpu("definitely_not_a_device"))
+
+    def test_is_gpu_registered(self):
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakecpu", _NonGpu)
+        self.assertTrue(is_gpu("fakegpu"))
+        self.assertFalse(is_gpu("fakecpu"))
+
+    # ---- device_need_guard(device) ----
+    def test_device_need_guard(self):
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakemps", _GpuNoStream)
+        self._register("fakecpu", _NonGpu)
+        self.assertTrue(device_need_guard("fakegpu"))
+        self.assertFalse(device_need_guard("fakemps"))  # gpu but no stream
+        self.assertFalse(device_need_guard("fakecpu"))
+        self.assertFalse(device_need_guard("definitely_not_a_device"))
+
+    # ---- _gpu_types() ----
+    def test_gpu_types_filters_indexed_and_non_gpu(self):
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakegpu:0", _GpuWithStream)
+        self._register("fakecpu", _NonGpu)
+        result = _gpu_types()
+        self.assertIn("fakegpu", result)
+        self.assertNotIn("fakegpu:0", result)
+        self.assertNotIn("fakecpu", result)
+
+    # ---- get_gpu_type() ----
+    def test_get_gpu_type_single_available(self):
+        self._register("fakegpu", _GpuWithStream)
+        with mock.patch.object(
+            inductor_utils, "_gpu_types", return_value=["fakegpu"]
+        ):
+            get_gpu_type.cache_clear()
+            self.assertEqual(get_gpu_type(), "fakegpu")
+
+    def test_get_gpu_type_none_available_falls_back_to_cuda(self):
+        self._register("fakegpu", _GpuUnavailable)
+        with (
+            mock.patch.object(
+                inductor_utils, "_gpu_types", return_value=["fakegpu"]
+            ),
+            mock.patch("torch.accelerator.current_accelerator", return_value=None),
+        ):
+            get_gpu_type.cache_clear()
+            self.assertEqual(get_gpu_type(), "cuda")
+
+    def test_get_gpu_type_multiple_disambiguates_without_assert(self):
+        # Old code asserted len(avail) <= 1; this test would crash there.
+        # New code uses current_accelerator() to disambiguate instead.
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakegpu2", _GpuWithStream)
+        acc = types.SimpleNamespace(type="fakegpu2")
+        with (
+            mock.patch.object(
+                inductor_utils, "_gpu_types", return_value=["fakegpu", "fakegpu2"]
+            ),
+            mock.patch("torch.accelerator.current_accelerator", return_value=acc),
+        ):
+            get_gpu_type.cache_clear()
+            self.assertEqual(get_gpu_type(), "fakegpu2")
 
 
 if __name__ == "__main__":
