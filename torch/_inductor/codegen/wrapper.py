@@ -4548,14 +4548,24 @@ class PythonWrapperCodegen(CodeGen):
 
         try:
             self.push_codegened_graph(subgraph.graph)
-            self.writeline(f"{self.comment} subgraph: {subgraph.name}")
-            _codegen_subgraph_prefix()
-            parent_graph = V.graph
-            with V.set_graph_handler(subgraph.graph):
-                subgraph.graph.codegen_subgraph(
-                    parent_graph=parent_graph,
-                )
-            _codegen_subgraph_suffix()
+            # Only ir.Subgraph (invoke_subgraph regions) carries nested config
+            # patches; other subgraph adapters (e.g. the CodegenGraph used for
+            # decompose_k) have none.
+            inductor_config_patches = getattr(subgraph, "inductor_config_patches", None)
+            ctx = (
+                config.patch(inductor_config_patches)
+                if inductor_config_patches
+                else contextlib.nullcontext()
+            )
+            with ctx:
+                self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+                _codegen_subgraph_prefix()
+                parent_graph = V.graph
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.codegen_subgraph(
+                        parent_graph=parent_graph,
+                    )
+                _codegen_subgraph_suffix()
         finally:
             self.pop_codegened_graph()
 
@@ -4647,11 +4657,23 @@ class PythonWrapperCodegen(CodeGen):
         if subgraph.graph.name not in self.already_codegened_subgraphs:
             # If it is already codegened, the parent wrapper already has
             # subgraph fn by name subgraph.graph.name
-            with V.set_graph_handler(subgraph.graph):
-                # do not graph partition for subgraph
-                with config.patch("graph_partition", False):
-                    # Call the codegen of subgraph recursively
-                    subgraph_code, _ = subgraph.graph.codegen()
+            # Only ir.Subgraph (invoke_subgraph regions) carries nested config
+            # patches; other subgraph adapters (e.g. the CodegenGraph used for
+            # decompose_k) have none.
+            inductor_config_patches = getattr(subgraph, "inductor_config_patches", None)
+            ctx = (
+                config.patch(inductor_config_patches)
+                if inductor_config_patches
+                else contextlib.nullcontext()
+            )
+            # do not graph partition inside subgraph bodies
+            with (
+                ctx,
+                config.patch("graph_partition", False),
+                V.set_graph_handler(subgraph.graph),
+            ):
+                # Call the codegen of subgraph recursively
+                subgraph_code, _ = subgraph.graph.codegen()
             subgraph_name = subgraph.graph.name
             self.already_codegened_subgraphs.add(subgraph_name)
             self.define_subgraph_launcher_fn(subgraph_name, subgraph_code)
