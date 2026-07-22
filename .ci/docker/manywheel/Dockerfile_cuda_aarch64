@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM quay.io/pypa/manylinux_2_28_aarch64 as base
 
 # Cuda ARM build needs gcc 13
@@ -89,6 +90,21 @@ RUN python3.9 -m pip install scons==4.7.0
 RUN ln -sf /opt/python/cp39-cp39/bin/scons /usr/local/bin
 COPY ./common/install_acl.sh install_acl.sh
 RUN bash ./install_acl.sh && rm install_acl.sh
+
+# Build and install llvm-bolt and lld from source
+FROM base as llvm
+ARG LLVM_VERSION=21.1.8
+ADD --unpack=true https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz /llvm
+RUN cmake -S /llvm/llvm-project-${LLVM_VERSION}.src/llvm -B /llvm/build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLVM_TARGETS_TO_BUILD=AArch64 \
+    -DLLVM_ENABLE_PROJECTS="bolt;lld" \
+    -DCMAKE_INSTALL_PREFIX=/llvm/install \
+    -DLLVM_INCLUDE_BENCHMARKS=OFF \
+    -DLLVM_INCLUDE_EXAMPLES=OFF \
+    -DLLVM_INCLUDE_TESTS=OFF \
+    && cmake --build /llvm/build --target install --parallel
+
 FROM base as final
 
 FROM final as cuda_final
@@ -101,6 +117,7 @@ COPY --from=cuda     /usr/local/cupti-headers-13.3         /usr/local/cupti-head
 COPY --from=nvpl /opt/nvpl/lib/  /usr/local/lib/
 COPY --from=nvpl /opt/nvpl/include/  /usr/local/include/
 COPY --from=arm_compute /acl /acl
+COPY --from=llvm /llvm/install/ /usr/local/
 RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
 ENV LD_LIBRARY_PATH=/acl/build/:$LD_LIBRARY_PATH
