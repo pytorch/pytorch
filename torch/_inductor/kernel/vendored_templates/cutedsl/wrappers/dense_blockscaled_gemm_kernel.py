@@ -129,6 +129,13 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         if alpha is None:
             alpha = _ones_alpha()
 
+        epilogue_op = lambda v: v
+        if getattr(args, "epilogue", None) is not None:
+            epilogue_op = args.epilogue.epilogue_fn
+            if isinstance(epilogue_op, str):
+                scope = {}
+                exec(epilogue_op, {}, scope)
+                epilogue_op = next(value for value in scope.values() if callable(value))
         return self.cute_compile(
             self.impl,
             args.A.tensor,
@@ -138,7 +145,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             args.out.tensor,
             max_active_clusters,
             stream,
-            lambda v: v,
+            epilogue_op,
             alpha,
             target_sm=target_sm,
         )
@@ -364,8 +371,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                     accumulator_type=cutlass.Float32,
                 )
 
-    @staticmethod
-    def _valid_metadata(metadata: OperatorMetadata) -> bool:
+    @classmethod
+    def _valid_metadata(cls, metadata: OperatorMetadata) -> bool:
         scale_vec = metadata.operands.A.mode
 
         if len(scale_vec) > 1:
@@ -403,7 +410,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         if use_2cta and cm % 2 != 0:
             return False
 
-        if metadata.epilogue is not None:
+        if metadata.epilogue is not None and "EFC" not in cls.__name__:
             return False
 
         return True
@@ -442,7 +449,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 design = Sm100DesignMetadata(**dict(zip(param_names, values)))
 
                 operator_name = (
-                    "inductor_vendored.DenseBlockScaledGemmKernel_sm100_"
+                    f"inductor_vendored.{cls.__name__}_sm100_"
                     "{layout}_A{A}_B{B}_out{out}_SFA{SFA}_SFB{SFB}_"
                     "acc{acc}_scale{scale_mode}_swizzle{scale_swizzle}_"
                     "{num_cta}cta_cluster{cluster}_tile{tile}"
@@ -487,8 +494,18 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         return operator_list
 
 
+class VendoredDenseBlockScaledGemmEFC(VendoredDenseBlockScaledGemmKernel):
+    """Block-scaled provider variant using the kernel's unary epilogue hook."""
+
+    supported_args_type = GemmArguments
+    designed_for_min_cc = 100
+
+
 # Only register if kernel implementation is available
 if BlockScaledGemmKernelImpl is not None:
     cutlass.operators.providers.cutedsl.CuTeDSLProvider.register(
         VendoredDenseBlockScaledGemmKernel
+    )
+    cutlass.operators.providers.cutedsl.CuTeDSLProvider.register(
+        VendoredDenseBlockScaledGemmEFC
     )
