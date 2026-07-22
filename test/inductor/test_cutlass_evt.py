@@ -661,9 +661,7 @@ def fn(accum, bias):
             )[2]
 
         if not _cuda_evt_arch_supported():
-            self.skipTest(
-                f"CUTLASS EVT does not support arch {cutlass_arch(GPU_TYPE)}"
-            )
+            self.skipTest(f"CUTLASS EVT does not support arch {cutlass_arch(GPU_TYPE)}")
 
         code = render_code()
         if IS_SM90:
