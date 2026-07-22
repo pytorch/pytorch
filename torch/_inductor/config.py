@@ -2912,11 +2912,11 @@ class trace:
         os.environ.get("TORCH_COMPILE_DEBUG_EXTEND", "0") == "1"
     )
 
-    # Maximum raw trace size to process in profiler timeline post-processing.
-    # Check this before loading the JSON so the limit can prevent an OOM.
+    # Maximum number of trace events to process in profiler timeline post-processing.
+    # If the trace exceeds this limit, provenance tracking will be skipped to avoid OOM.
     # Set to 0 to disable this protection.
-    provenance_tracking_max_trace_size: int = int(
-        os.environ.get("TORCH_COMPILE_DEBUG_MAX_TRACE_SIZE", str(256 * 1024 * 1024))
+    provenance_tracking_max_events: int = int(
+        os.environ.get("TORCH_COMPILE_DEBUG_MAX_EVENTS", "500000")
     )
 
     # Save mapping info from inductor generated kernel to post_grad/pre_grad fx nodes

@@ -354,18 +354,6 @@ def _export_inductor_trace(
         raw_path = ""
 
     try:
-        max_size = config.trace.provenance_tracking_max_trace_size
-        trace_size = os.path.getsize(raw_path)
-        if max_size > 0 and trace_size > max_size:
-            log.warning(
-                "Skipping Inductor provenance: trace is %d bytes (limit: %d). "
-                "Set TORCH_COMPILE_DEBUG_MAX_TRACE_SIZE=0 to disable the limit.",
-                trace_size,
-                max_size,
-            )
-            install_raw_trace()
-            return
-
         graph_provenance = _registered_graph_provenance()
         if not graph_provenance:
             install_raw_trace()
@@ -386,6 +374,20 @@ def _export_inductor_trace(
 
         with open(raw_path) as f:
             trace = json.load(f)
+
+        num_events = len(trace.get("traceEvents", []))
+        max_events = config.trace.provenance_tracking_max_events
+        if max_events > 0 and num_events > max_events:
+            log.warning(
+                "Skipping Inductor provenance: trace has %d events "
+                "(exceeds limit of %d). Set TORCH_COMPILE_DEBUG_MAX_EVENTS=0 "
+                "to disable this protection or increase the limit.",
+                num_events,
+                max_events,
+            )
+            install_raw_trace()
+            return
+
         _add_inductor_kernel_stacks(trace, graph_provenance)
 
         processed_fd, processed_path = tempfile.mkstemp(
