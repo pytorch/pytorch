@@ -12,6 +12,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/native/ScaledBlasUtils.h>
+#include <ATen/native/cuda/ScaledBlasDeviceUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
@@ -65,7 +66,12 @@ using at::blas::SwizzleType;
 namespace scaled_blas = at::native::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
-using scaled_blas::scaled_mm_allowed_device;
+#ifdef USE_ROCM
+using scaled_blas::rocm_scaled_mm_arch_allowed;
+#else
+using scaled_blas::cuda_scaled_mm_arch_allowed;
+using scaled_blas::CudaScaledMmArch;
+#endif
 
 namespace at::native {
 
@@ -372,7 +378,11 @@ _scaled_gemm(
       scaling_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
   // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
-  if (scaled_mm_allowed_device(true, false)) {
+#ifdef USE_ROCM
+  if (rocm_scaled_mm_arch_allowed()) {
+#else
+  if (cuda_scaled_mm_arch_allowed({CudaScaledMmArch::Sm90})) {
+#endif
     TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
   }
 // ROCM enables the TunableOp path only
@@ -471,7 +481,11 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           bool use_fast_accum,
           Tensor& out) {
   // Check sizes
-  bool allowed_device = scaled_mm_allowed_device();
+#ifdef USE_ROCM
+  bool allowed_device = rocm_scaled_mm_arch_allowed();
+#else
+  bool allowed_device = cuda_scaled_mm_arch_allowed();
+#endif
   TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
@@ -1309,7 +1323,11 @@ TORCH_IMPL_FUNC(_scaled_mm_cuda_v2_out)(
           IntArrayRef contraction_dim,
           bool use_fast_accum,
           const Tensor& out) {
-  bool allowed_device = scaled_mm_allowed_device();
+#ifdef USE_ROCM
+  bool allowed_device = rocm_scaled_mm_arch_allowed();
+#else
+  bool allowed_device = cuda_scaled_mm_arch_allowed();
+#endif
   TORCH_CHECK_NOT_IMPLEMENTED(allowed_device,
       "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
 
