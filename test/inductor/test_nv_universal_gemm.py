@@ -479,6 +479,71 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected, equal_nan=True)
 
+    def test_scaled_gemm_grouped_n_reduce_provider(self):
+        from cutlass import Float32
+        from cutlass.operators import ScaleMode, ScaleSwizzleMode
+
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _scaled_candidates,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_arguments,
+        )
+
+        m, n, k = 128, 128, 512
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(
+            0, 256, (n, packed_k), device="cuda", dtype=torch.uint8
+        ).view(torch.float4_e2m1fn_x2)
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(
+            _round_up(m, 128) * padded_k_blocks, device="cuda"
+        ).to(torch.float8_e4m3fn)
+        scale_b = torch.rand(
+            _round_up(n, 128) * padded_k_blocks, device="cuda"
+        ).to(torch.float8_e4m3fn)
+        out = torch.empty((m, n), device="cuda", dtype=torch.bfloat16)
+        group = 32
+        reduce_out = torch.empty(
+            (m, n // group), device="cuda", dtype=torch.float32
+        )
+        mode = ScaleMode.Blockwise1x16
+        swizzle = ScaleSwizzleMode.Swizzle32x4x4
+        args = _create_gemm_arguments(
+            "SCALED_GEMM",
+            (a, b, scale_a, scale_b),
+            out,
+            Float32,
+            scale_mode_a=mode,
+            swizzle_mode_a=swizzle,
+            scale_mode_b=mode,
+            swizzle_mode_b=swizzle,
+            local_reduce_out=reduce_out,
+            local_reduce_group=group,
+            local_reduce_axis=1,
+        )
+        kernel = next(
+            candidate
+            for candidate in _scaled_candidates(args, 100, efc_only=True)
+            if candidate.metadata.design.tile_shape[1] == n
+        )
+        artifact = kernel.compile(args)
+        kernel.run(
+            args,
+            artifact,
+            stream=torch.cuda.current_stream(),
+            assume_supported_args=True,
+        )
+        torch.cuda.synchronize()
+        self.assertEqual(
+            reduce_out,
+            out.float().view(m, -1, group).sum(-1),
+        )
+
     @parametrize("out_dtype", (torch.float32, torch.bfloat16))
     @parametrize(
         "layout_a",
@@ -972,6 +1037,47 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         )
         torch.testing.assert_close(result, fn(a, b, scale_a, scale_b), equal_nan=True)
         self.assertTrue(epilogue_fused, "multiply was NOT fused into scaled epilogue")
+
+    @parametrize("axis", (0, 1))
+    def test_scaled_mm_grouped_reduce_fusion(self, axis):
+        m, n, k = 128, 128, 512
+        packed_k = k // 2
+        group = 4 if axis == 0 else 32
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(
+            0, 256, (n, packed_k), device="cuda", dtype=torch.uint8
+        ).view(torch.float4_e2m1fn_x2)
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(
+            _round_up(m, 128) * padded_k_blocks, device="cuda"
+        ).to(torch.float8_e4m3fn)
+        scale_b = torch.rand(
+            _round_up(n, 128) * padded_k_blocks, device="cuda"
+        ).to(torch.float8_e4m3fn)
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            reduced = (
+                result.float().view(-1, group, n).sum(1)
+                if axis == 0
+                else result.float().view(m, -1, group).sum(-1)
+            )
+            return result, reduced
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        expected = fn(a, b, scale_a, scale_b)
+        self.assertEqual(result[0], expected[0])
+        self.assertEqual(result[1], expected[1])
+        self.assertIn("'local_reduce_out'", code)
 
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one
