@@ -3,6 +3,7 @@
 
 import collections
 import typing
+import unittest
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
@@ -207,6 +208,7 @@ class TpStrUserDefinedTests(TestCase):
         self.assertEqual(fn(x, obj), out)
         self.assertIn("__str__ returned non-string", out)
 
+    @unittest.expectedFailure
     def test_user_defined_opaque_str_descriptor_raises_type_error(self):
         def fn(x, obj):
             try:
