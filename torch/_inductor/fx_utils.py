@@ -854,7 +854,11 @@ def is_node_realized(node: torch.fx.Node) -> bool:
             #     getitem_1 = foo[1]
             # where we need to check if foo is a fallback kernel
             return is_buffer(node.args[0])  # type: ignore[arg-type]
-        return node.op in ("placeholder", "output") or node.target in fallbacks
+        return (
+            node.op in ("placeholder", "output")
+            or node.target in fallbacks
+            or node.target is torch.ops.higher_order.invoke_subgraph
+        )
 
     if is_buffer(node):
         return True
