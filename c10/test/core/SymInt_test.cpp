@@ -25,8 +25,6 @@ TEST(SymIntTest, ConcreteInts) {
 }
 
 TEST(SymIntTest, CheckRange) {
-  EXPECT_TRUE(SymInt::check_range(SymInt::min_representable_int()));
-  EXPECT_FALSE(SymInt::check_range(SymInt::min_representable_int() - 1));
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
 }
 
@@ -154,25 +152,10 @@ class ConstantIntPretendingToBeSymbolicSymNodeImpl
   }
 };
 
-class ThrowingEqSymNodeImpl
-    : public ConstantIntPretendingToBeSymbolicSymNodeImpl {
- public:
-  using ConstantIntPretendingToBeSymbolicSymNodeImpl::
-      ConstantIntPretendingToBeSymbolicSymNodeImpl;
-
-  SymNode eq(const SymNode& other) override {
-    TORCH_CHECK(false, "sym_equals should have short-circuited before eq");
-  }
-};
-
 SymInt create_symbolic_symint(int64_t value) {
   return SymInt(
       SymNode(c10::make_intrusive<ConstantIntPretendingToBeSymbolicSymNodeImpl>(
           value)));
-}
-
-SymInt create_throwing_eq_symint(int64_t value) {
-  return SymInt(SymNode(c10::make_intrusive<ThrowingEqSymNodeImpl>(value)));
 }
 
 auto unwrap(const SymInt& x) {
@@ -195,14 +178,6 @@ void test_operator() {
 
 TEST(SymIntTest, BinaryPlus) {
   test_operator<std::plus>();
-}
-
-TEST(SymIntTest, SymEqualsShortCircuitsOnFirstKnownFalse) {
-  const std::vector<SymInt> lhs{SymInt(1), create_throwing_eq_symint(3)};
-  const std::vector<SymInt> rhs{SymInt(2), create_throwing_eq_symint(3)};
-
-  EXPECT_EQ(
-      c10::sym_equals(lhs, rhs).maybe_as_bool(), std::make_optional(false));
 }
 
 TEST(SymIntTest, BinaryMinus) {

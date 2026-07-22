@@ -300,11 +300,9 @@ class Library:
             tags = (tags,)
 
         name = schema.split("(")[0]
-        name_without_namespace = name.rsplit("::", 1)[-1]
-        packet_name = name_without_namespace.split(".")[0]
-        cached_namespace = torch.ops.__dict__.get(self.ns)
-        has_preexisting_packet = (
-            cached_namespace is not None and packet_name in cached_namespace.__dict__
+        packet_name = name.split(".")[0] if "." in name else name
+        has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(
+            getattr(torch.ops, self.ns), packet_name
         )
 
         if torch.Tag.out in tags:
@@ -313,8 +311,10 @@ class Library:
             _validate_inplace_schema(schema)
 
         result = self.m.define(schema, alias_analysis, tuple(tags))
-        result_ns = result.split("::", 1)[0] if "::" in result else self.ns
-        qualname = result_ns + "::" + name_without_namespace
+        name = schema.split("(")[0]
+        # C++ accepts a name prefixed with the matching namespace ("ns::foo");
+        # don't double-prepend the namespace in that case.
+        qualname = name if "::" in name else f"{self.ns}::{name}"
 
         # If the OpOverloadPacket exists already, then this means we're adding a
         # new OpOverload for it. Refresh the packet to include the new OpOverload.
@@ -621,7 +621,6 @@ def _clear_torch_ops_cache(op_defs):
     # and another library owns an alive overload.
     # That's OK - the next time torch.ops.ns.foo gets called, it'll be
     # recomputed to point at the right collection of overloads.
-    cleared_packets = set()
     for qualname in op_defs:
         splits = qualname.split("::")
         if len(splits) != 2:
@@ -631,17 +630,14 @@ def _clear_torch_ops_cache(op_defs):
             continue
         ns, name_with_overload = splits
         name = name_with_overload.split(".")[0]
-        if (ns, name) in cleared_packets:
+        if not hasattr(torch.ops, ns):
             continue
-        cleared_packets.add((ns, name))
-        # Use __dict__ to check the instance dict directly, avoiding
+        namespace = getattr(torch.ops, ns)
+        # Use vars() to check the instance dict directly, avoiding
         # __getattr__ which calls into C++ via _jit_get_operation.
         # During interpreter shutdown the C++ runtime may already be
         # torn down, causing UnicodeDecodeError or segfaults.
-        namespace = torch.ops.__dict__.get(ns)
-        if namespace is None:
-            continue
-        if name not in namespace.__dict__:
+        if name not in vars(namespace):
             continue
         delattr(namespace, name)
         if name in namespace._dir:

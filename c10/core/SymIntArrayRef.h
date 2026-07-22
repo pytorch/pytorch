@@ -7,46 +7,20 @@
 #include <c10/util/irange.h>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <optional>
+#include <string>
 
 namespace c10 {
 using SymIntArrayRef = ArrayRef<SymInt>;
 
-inline bool symIntArrayRefElementIsHeapAllocated(
+C10_NOINLINE inline std::string formatSymIntArrayRefToIntArrayRefError(
     c10::SymIntArrayRef ar,
-    size_t index) {
-#ifdef C10_MOBILE
-  return false;
-#else
-  // SymIntArrayRef can be a view over IntArrayRef storage through
-  // fromIntArrayRefSlow. In that case the bytes use SymInt's inline
-  // representation, but no SymInt objects are alive, so validation must inspect
-  // the shared one-word representation instead of calling SymInt methods.
-  static_assert(sizeof(SymInt) == sizeof(int64_t));
-  int64_t raw_data = 0;
-  std::memcpy(
-      &raw_data,
-      reinterpret_cast<const char*>(ar.data()) + index * sizeof(raw_data),
-      sizeof(raw_data));
-  // The top-two-bit tag is 2 for the 10... range reserved for heap-allocated
-  // SymInt data. Keep the branch on that shifted tag rather than a signed range
-  // comparison so Valgrind does not see unrelated payload bits as branch
-  // inputs.
-  const auto raw_bits = static_cast<uint64_t>(raw_data);
-  constexpr uint64_t heap_allocated_tag = 2;
-  return (raw_bits >> 62) == heap_allocated_tag;
-#endif
-}
-
-[[noreturn]] C10_NOINLINE inline void reportSymIntArrayRefToIntArrayRefError(
-    c10::SymIntArrayRef ar,
-    size_t problem_index,
+    const c10::SymInt& problem,
     const char* file,
     int64_t line) {
-  const bool is_symbolic = ar[problem_index].is_symbolic();
-  TORCH_CHECK(
-      false,
+  const auto problem_index = static_cast<size_t>(&problem - ar.data());
+  const bool is_symbolic = problem.is_symbolic();
+  return c10::str(
       file,
       ":",
       line,
@@ -56,7 +30,7 @@ inline bool symIntArrayRefElementIsHeapAllocated(
       " at index ",
       problem_index,
       ": ",
-      ar[problem_index],
+      problem,
       " in SymIntArrayRef ",
       ar,
       is_symbolic
@@ -87,8 +61,8 @@ inline at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
 
 inline std::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
     c10::SymIntArrayRef ar) {
-  for (const auto i : c10::irange(ar.size())) {
-    if (symIntArrayRefElementIsHeapAllocated(ar, i)) {
+  for (const c10::SymInt& sci : ar) {
+    if (sci.is_heap_allocated()) {
       return std::nullopt;
     }
   }
@@ -100,10 +74,10 @@ inline at::IntArrayRef asIntArrayRefSlow(
     c10::SymIntArrayRef ar,
     const char* file,
     int64_t line) {
-  for (const auto i : c10::irange(ar.size())) {
-    if (C10_UNLIKELY(symIntArrayRefElementIsHeapAllocated(ar, i))) {
-      reportSymIntArrayRefToIntArrayRefError(ar, i, file, line);
-    }
+  for (const c10::SymInt& sci : ar) {
+    TORCH_CHECK(
+        !sci.is_heap_allocated(),
+        formatSymIntArrayRefToIntArrayRefError(ar, sci, file, line));
   }
   return asIntArrayRefUnchecked(ar);
 }
@@ -151,16 +125,9 @@ inline c10::SymBool sym_equals(SymIntArrayRef LHS, SymIntArrayRef RHS) {
   if (LHS.size() != RHS.size()) {
     return c10::SymBool(false);
   }
-  if (LHS.empty()) {
-    return c10::SymBool(true);
-  }
 
-  c10::SymBool result = sym_eq(LHS[0], RHS[0]);
-  std::optional<bool> result_bool = result.maybe_as_bool();
-  if (result_bool.has_value() && !*result_bool) {
-    return result;
-  }
-  for (size_t i = 1; i < RHS.size(); ++i) {
+  c10::SymBool result(true);
+  for (size_t i = 0; i < RHS.size(); ++i) {
     c10::SymBool equals = sym_eq(LHS[i], RHS[i]);
     std::optional<bool> equals_bool = equals.maybe_as_bool();
 
