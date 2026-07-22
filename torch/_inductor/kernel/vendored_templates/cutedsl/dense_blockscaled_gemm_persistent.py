@@ -420,7 +420,16 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         max_active_clusters: cutlass.Constexpr,
         stream: cuda.CUstream,
         epilogue_op: cutlass.Constexpr = lambda x: x,
+        epilogue_input_dtype: cutlass.Constexpr = cutlass.Float32,
         alpha_tensor: cute.Tensor = None,
+        epilogue_tensor0: cute.Tensor = None,
+        epilogue_tensor1: cute.Tensor = None,
+        epilogue_tensor2: cute.Tensor = None,
+        epilogue_tensor3: cute.Tensor = None,
+        epilogue_tensor_kind0: cutlass.Constexpr = 0,
+        epilogue_tensor_kind1: cutlass.Constexpr = 0,
+        epilogue_tensor_kind2: cutlass.Constexpr = 0,
+        epilogue_tensor_kind3: cutlass.Constexpr = 0,
         local_reduce_tensor: cute.Tensor = None,
         local_reduce_group: cutlass.Constexpr = 0,
         local_reduce_axis: cutlass.Constexpr = 1,
@@ -480,6 +489,20 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         c_tensor = cute.make_tensor(
             c_tensor.iterator, cute.select(c_tensor.layout, [1, 2, 0])
         )
+        def epilogue_tensor_to_mnl(tensor: cute.Tensor) -> cute.Tensor:
+            tensor = add_batch_mode(tensor)
+            return cute.make_tensor(
+                tensor.iterator, cute.select(tensor.layout, [1, 2, 0])
+            )
+
+        if cutlass.const_expr(epilogue_tensor0 is not None):
+            epilogue_tensor0 = epilogue_tensor_to_mnl(epilogue_tensor0)
+        if cutlass.const_expr(epilogue_tensor1 is not None):
+            epilogue_tensor1 = epilogue_tensor_to_mnl(epilogue_tensor1)
+        if cutlass.const_expr(epilogue_tensor2 is not None):
+            epilogue_tensor2 = epilogue_tensor_to_mnl(epilogue_tensor2)
+        if cutlass.const_expr(epilogue_tensor3 is not None):
+            epilogue_tensor3 = epilogue_tensor_to_mnl(epilogue_tensor3)
 
         # Setup static attributes before smem/grid/tma computation
         self.a_dtype: Type[cutlass.Numeric] = a_tensor.element_type
@@ -713,7 +736,16 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             self.epi_tile,
             self.tile_sched_params,
             epilogue_op,
+            epilogue_input_dtype,
             alpha_tensor,
+            epilogue_tensor0,
+            epilogue_tensor1,
+            epilogue_tensor2,
+            epilogue_tensor3,
+            epilogue_tensor_kind0,
+            epilogue_tensor_kind1,
+            epilogue_tensor_kind2,
+            epilogue_tensor_kind3,
             local_reduce_tensor,
         ).launch(
             grid=grid,
@@ -750,7 +782,16 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         epi_tile: cute.Tile,
         tile_sched_params: utils.PersistentTileSchedulerParams,
         epilogue_op: cutlass.Constexpr,
+        epilogue_input_dtype: cutlass.Constexpr,
         alpha_tensor: cute.Tensor,
+        epilogue_tensor0: cute.Tensor,
+        epilogue_tensor1: cute.Tensor,
+        epilogue_tensor2: cute.Tensor,
+        epilogue_tensor3: cute.Tensor,
+        epilogue_tensor_kind0: cutlass.Constexpr,
+        epilogue_tensor_kind1: cutlass.Constexpr,
+        epilogue_tensor_kind2: cutlass.Constexpr,
+        epilogue_tensor_kind3: cutlass.Constexpr,
         local_reduce_tensor: cute.Tensor,
     ):
         """
@@ -1555,10 +1596,15 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     # alpha_tensor is None) rather than device control flow.
                     if cutlass.const_expr(alpha_tensor is not None):
                         acc_vec = acc_vec * alpha_tensor[0].to(self.acc_dtype)
-                    acc_vec = epilogue_op(acc_vec.to(self.c_dtype)).to(self.c_dtype)
-
-                    if cutlass.const_expr(local_reduce_tensor is not None):
-                        group = cutlass.const_expr(self.local_reduce_group)
+                    has_epilogue_tensors = cutlass.const_expr(
+                        epilogue_tensor0 is not None
+                        or epilogue_tensor1 is not None
+                        or epilogue_tensor2 is not None
+                        or epilogue_tensor3 is not None
+                    )
+                    if cutlass.const_expr(
+                        has_epilogue_tensors or local_reduce_tensor is not None
+                    ):
                         tDcC = partition_for_epilogue(
                             cute.make_identity_tensor(self.cta_tile_shape_mnk[:2]),
                             epi_tile=epi_tile,
@@ -1568,6 +1614,60 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         )
                         tDcC = tDcC[(None, None, None, 0, real_subtile_idx)]
                         coord_flt = cute.filter_zeros(tDcC)
+
+                    epilogue_values = []
+                    if cutlass.const_expr(has_epilogue_tensors):
+                        output_m = cute.size(mC_mnl, mode=[0])
+                        output_n = cute.size(mC_mnl, mode=[1])
+                        for tensor, kind in (
+                            (epilogue_tensor0, epilogue_tensor_kind0),
+                            (epilogue_tensor1, epilogue_tensor_kind1),
+                            (epilogue_tensor2, epilogue_tensor_kind2),
+                            (epilogue_tensor3, epilogue_tensor_kind3),
+                        ):
+                            if cutlass.const_expr(tensor is not None):
+                                fragment = cute.make_rmem_tensor_like(
+                                    acc_vec, tensor.element_type
+                                )
+                                for i in cutlass.range(
+                                    cute.size(fragment), unroll_full=True
+                                ):
+                                    row_idx = coord_flt[i][0]
+                                    col_idx = coord_flt[i][1]
+                                    global_m = (
+                                        mma_tile_coord_mnl[0]
+                                        * self.cta_tile_shape_mnk[0]
+                                        + row_idx
+                                    )
+                                    global_n = (
+                                        mma_tile_coord_mnl[1]
+                                        * self.cta_tile_shape_mnk[1]
+                                        + col_idx
+                                    )
+                                    tensor_m = (
+                                        0
+                                        if cutlass.const_expr(kind == 2)
+                                        else global_m
+                                    )
+                                    tensor_n = (
+                                        0
+                                        if cutlass.const_expr(kind == 3)
+                                        else global_n
+                                    )
+                                    fragment[i] = tensor[0, 0, 0]
+                                    if global_m < output_m and global_n < output_n:
+                                        fragment[i] = tensor[
+                                            tensor_m,
+                                            tensor_n,
+                                            mma_tile_coord_mnl[2],
+                                        ]
+                                epilogue_values.append(fragment.load())
+                    acc_vec = epilogue_op(
+                        acc_vec.to(epilogue_input_dtype), *tuple(epilogue_values)
+                    ).to(self.c_dtype)
+
+                    if cutlass.const_expr(local_reduce_tensor is not None):
+                        group = cutlass.const_expr(self.local_reduce_group)
                         mReduce = local_reduce_tensor[
                             mma_tile_coord_mnl[2], None, None
                         ]
