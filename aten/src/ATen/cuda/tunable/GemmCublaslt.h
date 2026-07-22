@@ -126,10 +126,126 @@ at::cuda::blas::GEMMAndBiasActivationEpilogue CublasltActivation(
   return params->activation;
 }
 
+// Shared cuBLASLt problem surface consumed by the templated Callable/TunableOp
+// helpers via static (duck-typed) dispatch. Holds the descriptors, preference,
+// workspace, and resolved data types common to every problem variant. Accessors
+// are non-virtual: helpers always operate on the concrete derived type, so
+// derived classes hide (rather than override) the defaults below where the two
+// variants diverge (D layout aliasing and heuristic descriptor selection).
+class CublasltGemmProblemBase {
+ public:
+  CublasltGemmProblemBase(
+      cublasComputeType_t compute_type,
+      cudaDataType_t scale_type,
+      cudaDataType_t a_type,
+      cudaDataType_t b_type,
+      cudaDataType_t c_type,
+      cudaDataType_t d_type)
+      : compute_desc_(compute_type, scale_type),
+        compute_type_(compute_type),
+        scale_type_(scale_type),
+        a_type_(a_type),
+        b_type_(b_type),
+        c_type_(c_type),
+        d_type_(d_type) {}
+
+  cublasComputeType_t compute_type() const {
+    return compute_type_;
+  }
+
+  cudaDataType_t scale_type() const {
+    return scale_type_;
+  }
+
+  cudaDataType_t a_type() const {
+    return a_type_;
+  }
+
+  cudaDataType_t b_type() const {
+    return b_type_;
+  }
+
+  cudaDataType_t c_type() const {
+    return c_type_;
+  }
+
+  cudaDataType_t d_type() const {
+    return d_type_;
+  }
+
+  cublasLtMatmulDesc_t compute_desc() const {
+    return compute_desc_.descriptor();
+  }
+
+  cublasLtMatrixLayout_t adesc() const {
+    return adesc_->descriptor();
+  }
+
+  cublasLtMatrixLayout_t bdesc() const {
+    return bdesc_->descriptor();
+  }
+
+  cublasLtMatrixLayout_t cdesc() const {
+    return cdesc_->descriptor();
+  }
+
+  // Default: D aliases C. Variants with a distinct D layout hide this.
+  cublasLtMatrixLayout_t ddesc() const {
+    return cdesc();
+  }
+
+  // Defaults: heuristic descriptors are the real ones. Variants that feed
+  // cuBLASLt a different shape for heuristic queries hide these.
+  cublasLtMatrixLayout_t heuristic_bdesc() const {
+    return bdesc();
+  }
+
+  cublasLtMatrixLayout_t heuristic_cdesc() const {
+    return cdesc();
+  }
+
+  cublasLtMatmulPreference_t preference() const {
+    return preference_.descriptor();
+  }
+
+  void* alpha_ptr() const {
+    return alpha_ptr_;
+  }
+
+  void* beta_ptr() const {
+    return beta_ptr_;
+  }
+
+  void* workspace() const {
+    return workspace_.ptr;
+  }
+
+  size_t workspace_size() const {
+    return workspace_.size;
+  }
+
+ protected:
+  at::cuda::blas::detail::CuBlasLtMatmulDescriptor compute_desc_;
+  at::cuda::blas::detail::CuBlasLtMatmulPreference preference_;
+  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> adesc_;
+  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> bdesc_;
+  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> cdesc_;
+  at::cuda::blas::detail::CublasLtWorkspace workspace_;
+  cublasComputeType_t compute_type_;
+  cudaDataType_t scale_type_;
+  cudaDataType_t a_type_;
+  cudaDataType_t b_type_;
+  cudaDataType_t c_type_;
+  cudaDataType_t d_type_;
+  void* alpha_ptr_ = nullptr;
+  void* beta_ptr_ = nullptr;
+};
+
 template <typename T, typename C_Dtype = T>
-class CublasltStandardGemmProblem {
+class CublasltStandardGemmProblem : public CublasltGemmProblemBase {
  public:
   CublasltStandardGemmProblem(
+      at::cuda::blas::detail::CublasLtTypeInfo<T, C_Dtype> type_info,
       char transa,
       char transb,
       int64_t m,
@@ -150,7 +266,13 @@ class CublasltStandardGemmProblem {
       const void* bias,
       at::cuda::blas::GEMMAndBiasActivationEpilogue activation,
       bool set_epilogue_attribute)
-      : type_info_(at::cuda::blas::detail::getCublasLtTypeInfo<T, C_Dtype>()),
+      : CublasltGemmProblemBase(
+            type_info.compute_type,
+            type_info.scale_type,
+            type_info.ab_type,
+            type_info.ab_type,
+            type_info.c_type,
+            type_info.c_type),
         m_(m),
         n_(n),
         k_(k),
@@ -168,57 +290,12 @@ class CublasltStandardGemmProblem {
         beta_(beta),
         opa_(at::cuda::blas::detail::cublasOpFromChar(transa)),
         opb_(at::cuda::blas::detail::cublasOpFromChar(transb)),
-        compute_desc_(type_info_.compute_type, type_info_.scale_type),
         bias_(bias),
         activation_(activation),
         set_epilogue_attribute_(set_epilogue_attribute) {
     at::cuda::blas::detail::cublasAdjustLdLevel3(
         transa, transb, m_, n_, k_, &lda_, &ldb_, &ldc_);
     initialize();
-  }
-
-  cublasComputeType_t compute_type() const {
-    return type_info_.compute_type;
-  }
-
-  cudaDataType_t scale_type() const {
-    return type_info_.scale_type;
-  }
-
-  cudaDataType_t a_type() const {
-    return type_info_.ab_type;
-  }
-
-  cudaDataType_t b_type() const {
-    return type_info_.ab_type;
-  }
-
-  cudaDataType_t c_type() const {
-    return type_info_.c_type;
-  }
-
-  cudaDataType_t d_type() const {
-    return type_info_.c_type;
-  }
-
-  cublasLtMatmulDesc_t compute_desc() const {
-    return compute_desc_.descriptor();
-  }
-
-  cublasLtMatrixLayout_t adesc() const {
-    return adesc_->descriptor();
-  }
-
-  cublasLtMatrixLayout_t bdesc() const {
-    return bdesc_->descriptor();
-  }
-
-  cublasLtMatrixLayout_t cdesc() const {
-    return cdesc_->descriptor();
-  }
-
-  cublasLtMatrixLayout_t ddesc() const {
-    return cdesc();
   }
 
   cublasLtMatrixLayout_t heuristic_bdesc() const {
@@ -231,18 +308,6 @@ class CublasltStandardGemmProblem {
 
   cublasLtMatrixLayout_t heuristic_ddesc() const {
     return heuristic_cdesc();
-  }
-
-  cublasLtMatmulPreference_t preference() const {
-    return preference_.descriptor();
-  }
-
-  void* alpha_ptr() const {
-    return alpha_ptr_;
-  }
-
-  void* beta_ptr() const {
-    return beta_ptr_;
   }
 
   const T* a() const {
@@ -261,20 +326,12 @@ class CublasltStandardGemmProblem {
     return c_;
   }
 
-  void* workspace() const {
-    return workspace_.ptr;
-  }
-
-  size_t workspace_size() const {
-    return workspace_.size;
-  }
-
  private:
   void initialize() {
     alpha_ptr_ = &alpha_;
     beta_ptr_ = &beta_;
     if constexpr (std::is_same_v<T, at::Half>) {
-      if (type_info_.compute_type == CUBLAS_COMPUTE_16F) {
+      if (compute_type_ == CUBLAS_COMPUTE_16F) {
         halpha_ = alpha_;
         hbeta_ = beta_;
         alpha_ptr_ = &halpha_;
@@ -332,11 +389,11 @@ class CublasltStandardGemmProblem {
     }
 
     adesc_ = std::make_unique<at::cuda::blas::detail::CuBlasLtMatrixLayout>(
-        type_info_.ab_type, m_, k_, lda_, opa_ != CUBLAS_OP_N);
+        a_type_, m_, k_, lda_, opa_ != CUBLAS_OP_N);
     bdesc_ = std::make_unique<at::cuda::blas::detail::CuBlasLtMatrixLayout>(
-        type_info_.ab_type, k_, n_, ldb_, opb_ != CUBLAS_OP_N);
+        b_type_, k_, n_, ldb_, opb_ != CUBLAS_OP_N);
     cdesc_ = std::make_unique<at::cuda::blas::detail::CuBlasLtMatrixLayout>(
-        type_info_.c_type, m_, n_, ldc_);
+        c_type_, m_, n_, ldc_);
 
     if (batch_count_ > 1) {
       int batch_as_int = static_cast<int>(batch_count_);
@@ -377,10 +434,10 @@ class CublasltStandardGemmProblem {
       const auto fake_ldc = ldc_ == 1 ? 2 : ldc_;
       fake_bdesc_ =
           std::make_unique<at::cuda::blas::detail::CuBlasLtMatrixLayout>(
-              type_info_.ab_type, k_, 2, fake_ldb, opb_ == CUBLAS_OP_T);
+              b_type_, k_, 2, fake_ldb, opb_ == CUBLAS_OP_T);
       fake_cdesc_ =
           std::make_unique<at::cuda::blas::detail::CuBlasLtMatrixLayout>(
-              type_info_.c_type, m_, 2, fake_ldc);
+              c_type_, m_, 2, fake_ldc);
       if (batch_count_ > 1) {
         int batch_as_int = static_cast<int>(batch_count_);
         fake_bdesc_->setAttribute(
@@ -395,7 +452,6 @@ class CublasltStandardGemmProblem {
     }
   }
 
-  at::cuda::blas::detail::CublasLtTypeInfo<T, C_Dtype> type_info_;
   int64_t m_;
   int64_t n_;
   int64_t k_;
@@ -413,29 +469,22 @@ class CublasltStandardGemmProblem {
   at::opmath_type<T> beta_;
   at::Half halpha_;
   at::Half hbeta_;
-  void* alpha_ptr_ = nullptr;
-  void* beta_ptr_ = nullptr;
   uint32_t reduction_mask_ = std::numeric_limits<uint32_t>::max();
   cublasOperation_t opa_;
   cublasOperation_t opb_;
-  at::cuda::blas::detail::CuBlasLtMatmulDescriptor compute_desc_;
-  at::cuda::blas::detail::CuBlasLtMatmulPreference preference_;
   const void* bias_ = nullptr;
   at::cuda::blas::GEMMAndBiasActivationEpilogue activation_;
   bool set_epilogue_attribute_;
   cublasLtEpilogue_t epilogue_ = CUBLASLT_EPILOGUE_DEFAULT;
-  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> adesc_;
-  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> bdesc_;
-  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> cdesc_;
   std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> fake_bdesc_;
   std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> fake_cdesc_;
-  at::cuda::blas::detail::CublasLtWorkspace workspace_;
   bool lie_to_cublaslt_ = false;
 };
 
 template <typename T, typename ParamsT>
 auto MakeCublasltStandardGemmProblem(const ParamsT* params) {
   return CublasltStandardGemmProblem<T>(
+      at::cuda::blas::detail::getCublasLtTypeInfo<T>(),
       params->transa,
       params->transb,
       params->m,
@@ -462,6 +511,7 @@ template <typename T, typename C_Dtype>
 auto MakeCublasltStandardGemmProblem(
     const GemmStridedBatchedParams<T, C_Dtype>* params) {
   return CublasltStandardGemmProblem<T, C_Dtype>(
+      at::cuda::blas::detail::getCublasLtTypeInfo<T, C_Dtype>(),
       params->transa,
       params->transb,
       params->m,
@@ -487,84 +537,27 @@ auto MakeCublasltStandardGemmProblem(
 }
 
 template <typename CT>
-class CublasltScaledGemmProblem {
+class CublasltScaledGemmProblem : public CublasltGemmProblemBase {
  public:
   explicit CublasltScaledGemmProblem(const ScaledGemmParams<CT>* params)
-      : params_(params),
-        a_type_(ScalarTypeToCudaDataType(params->a_dtype)),
-        b_type_(ScalarTypeToCudaDataType(params->b_dtype)),
-        c_type_(ScalarTypeToCudaDataType(params->bias_dtype)),
-        d_type_(ScalarTypeToCudaDataType(params->c_dtype)),
-        compute_desc_(compute_type_, scale_type_) {
+      : CublasltGemmProblemBase(
+            CUBLAS_COMPUTE_32F,
+            CUDA_R_32F,
+            ScalarTypeToCudaDataType(params->a_dtype),
+            ScalarTypeToCudaDataType(params->b_dtype),
+            ScalarTypeToCudaDataType(params->bias_dtype),
+            ScalarTypeToCudaDataType(params->c_dtype)),
+        params_(params) {
     initialize();
   }
 
-  cublasComputeType_t compute_type() const {
-    return compute_type_;
-  }
-
-  cudaDataType_t scale_type() const {
-    return scale_type_;
-  }
-
-  cudaDataType_t a_type() const {
-    return a_type_;
-  }
-
-  cudaDataType_t b_type() const {
-    return b_type_;
-  }
-
-  cudaDataType_t c_type() const {
-    return c_type_;
-  }
-
-  cudaDataType_t d_type() const {
-    return d_type_;
-  }
-
-  cublasLtMatmulDesc_t compute_desc() const {
-    return compute_desc_.descriptor();
-  }
-
-  cublasLtMatrixLayout_t adesc() const {
-    return adesc_->descriptor();
-  }
-
-  cublasLtMatrixLayout_t bdesc() const {
-    return bdesc_->descriptor();
-  }
-
-  cublasLtMatrixLayout_t cdesc() const {
-    return cdesc_->descriptor();
-  }
-
+  // Scaled GEMM has a distinct D layout, so it does not alias C.
   cublasLtMatrixLayout_t ddesc() const {
     return ddesc_->descriptor();
   }
 
-  cublasLtMatrixLayout_t heuristic_bdesc() const {
-    return bdesc();
-  }
-
-  cublasLtMatrixLayout_t heuristic_cdesc() const {
-    return cdesc();
-  }
-
   cublasLtMatrixLayout_t heuristic_ddesc() const {
     return ddesc();
-  }
-
-  cublasLtMatmulPreference_t preference() const {
-    return preference_.descriptor();
-  }
-
-  void* alpha_ptr() const {
-    return alpha_ptr_;
-  }
-
-  void* beta_ptr() const {
-    return beta_ptr_;
   }
 
   const void* a() const {
@@ -584,14 +577,6 @@ class CublasltScaledGemmProblem {
 
   void* d() const {
     return params_->c;
-  }
-
-  void* workspace() const {
-    return workspace_.ptr;
-  }
-
-  size_t workspace_size() const {
-    return workspace_.size;
   }
 
  private:
@@ -678,23 +663,9 @@ class CublasltScaledGemmProblem {
   }
 
   const ScaledGemmParams<CT>* params_;
-  cudaDataType_t a_type_;
-  cudaDataType_t b_type_;
-  cudaDataType_t c_type_;
-  cudaDataType_t d_type_;
-  cublasComputeType_t compute_type_ = CUBLAS_COMPUTE_32F;
-  cudaDataType_t scale_type_ = CUDA_R_32F;
-  at::cuda::blas::detail::CuBlasLtMatmulDescriptor compute_desc_;
-  at::cuda::blas::detail::CuBlasLtMatmulPreference preference_;
-  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> adesc_;
-  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> bdesc_;
-  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> cdesc_;
   std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> ddesc_;
-  at::cuda::blas::detail::CublasLtWorkspace workspace_;
   float alpha_val_ = 1.0f;
   float beta_val_ = 0.0f;
-  void* alpha_ptr_ = nullptr;
-  void* beta_ptr_ = nullptr;
 };
 
 struct CublasltAlgoConfig {
