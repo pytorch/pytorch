@@ -150,7 +150,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
 #ifdef USE_CUDA
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
-        !c10::overflows<size_t>(size_bytes_i),
+        !c10::overflows<size_t>(size_bytes_i, /*strict_unsigned=*/true),
         "Requested storage size (",
         size_bytes_i,
         ") cannot be represented as a size_t");
@@ -202,7 +202,7 @@ static PyObject* THPStorage_resize_with_addr_(PyObject* self, PyObject* args) {
     }
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
-        !c10::overflows<size_t>(size_bytes_i),
+        !c10::overflows<size_t>(size_bytes_i, /*strict_unsigned=*/true),
         "Requested storage size (",
         size_bytes_i,
         ") cannot be represented as a size_t");
