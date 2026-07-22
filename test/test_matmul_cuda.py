@@ -23,6 +23,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     _get_torch_cuda_version,
     blas_library_context,
+    prefer_cublaslt_grouped_gemm,
     IS_SM90,
     PLATFORM_SUPPORTS_BF16,
     SM80OrLater,
@@ -99,16 +100,6 @@ def rocm_group_gemm_ck_env(value):
             os.environ.pop(var, None)
         else:
             os.environ[var] = old
-
-
-@contextlib.contextmanager
-def prefer_cublaslt_grouped_gemm():
-    old = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
-    try:
-        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = True
-        yield
-    finally:
-        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = old
 
 
 @contextlib.contextmanager

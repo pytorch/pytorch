@@ -774,6 +774,7 @@ class ScalingType(Enum):
     BlockWise1x32 = 3
     BlockWise1x128 = 4
     BlockWise128x128 = 5
+    GroupWise = 6
 
 __all__ += ["ScalingType"]
 

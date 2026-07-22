@@ -22,6 +22,7 @@ from torch.nn.functional import (
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     _get_torch_cuda_version,
+    PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -31,6 +32,7 @@ from torch.testing._internal.common_cuda import (
     SM89OrLater,
     SM90OrLater,
     with_tf32_off,
+    prefer_cublaslt_grouped_gemm,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -79,6 +81,7 @@ f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
+cublaslt_grouped_mm_skip_msg = "cuBLASLt grouped GEMM requires SM 10.x or 11.0 with CUDA 13.2+"
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -2630,6 +2633,302 @@ class TestFP8Matmul(TestCase):
                 outlist.append(out[:, start:offs_cpu[i]])
                 start = offs_cpu[i]
                 self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
+
+
+    def scaled_grouped_gemm_cublaslt_helper(self, op, a_dtype, b_dtype, scale_mode):
+        """Build FP8 inputs and scales for testing the cuBLASLt
+        grouped GEMM path via TORCH_GROUPED_MM_PREFER_CUBLASLT=1."""
+        device = "cuda"
+        ngroups = 5
+        # FP8 is 1 byte, so 16-byte alignment requires dims/offsets to be multiples of 16
+
+        if op == "2d/2d":
+            m, n, k_total = 16, 16, 64
+            offs = torch.tensor([0, 16, 32, 32, k_total], device=device, dtype=torch.int32)
+            A = torch.randn(m, k_total, device=device).to(a_dtype)
+            B_T = torch.randn(n, k_total, device=device).to(b_dtype)
+        elif op == "2d/3d":
+            n, k = 16, 32
+            m_total = 80
+            offs = torch.tensor([0, 16, 32, 32, m_total], device=device, dtype=torch.int32)
+            A = torch.randn(m_total, k, device=device).to(a_dtype)
+            B_T = torch.randn(ngroups, n, k, device=device).to(b_dtype)
+        elif op == "3d/2d":
+            m, k = 16, 32
+            n_total = 80
+            offs = torch.tensor([0, 16, 32, 32, n_total], device=device, dtype=torch.int32)
+            A = torch.randn(ngroups, m, k, device=device).to(a_dtype)
+            B_T = torch.randn(n_total, k, device=device).to(b_dtype)
+        elif op == "3d/3d":
+            m, n, k = 16, 16, 32
+            offs = None
+            A = torch.randn(ngroups, m, k, device=device).to(a_dtype)
+            B_T = torch.randn(ngroups, n, k, device=device).to(b_dtype)
+
+        scale_shape = (1,) if scale_mode == "tensorwise" else (ngroups,)
+        scale_a = torch.rand(scale_shape, device=device, dtype=torch.float32) + 0.5
+        scale_b = torch.rand(scale_shape, device=device, dtype=torch.float32) + 0.5
+        return A, B_T, scale_a, scale_b, offs
+
+    def cublaslt_grouped_gemm_ref(self, A, B_T, scale_a, scale_b, offs, out_dtype, fast_accum):
+        def cublaslt_grouped_gemm_slices():
+            a_is_2d = A.dim() == 2
+            b_is_2d = B_T.dim() == 2
+            off_vals = [0] + offs.tolist() if offs is not None else None
+            for g in range(ngroups):
+                if a_is_2d and b_is_2d:
+                    start, end = off_vals[g], off_vals[g + 1]
+                    yield g, A[:, start:end], B_T[:, start:end].t(), start, end
+                elif a_is_2d and not b_is_2d:
+                    start, end = off_vals[g], off_vals[g + 1]
+                    yield g, A[start:end, :], B_T[g].t(), start, end
+                elif not a_is_2d and b_is_2d:
+                    start, end = off_vals[g], off_vals[g + 1]
+                    yield g, A[g], B_T[start:end, :].t(), start, end
+                else:
+                    yield g, A[g], B_T[g].t(), None, None
+
+        def cublaslt_grouped_gemm_scale(scale, g, start, end, x_g, offset):
+            if scale.numel() == 1:
+                return scale, offset
+            if scale.dim() == 1 and scale.numel() == ngroups:
+                return scale[g:g + 1], offset
+            if scale.dim() >= 2:
+                return (scale[g] if scale.shape[0] == ngroups else scale[start:end]), offset
+
+            rows, cols = x_g.shape
+            size = 32 * ceil_div(rows, 128) * 16 * ceil_div(ceil_div(cols, 32), 4)
+            return scale[offset:offset + size], offset + size
+
+        ngroups = A.shape[0] if offs is None else offs.shape[0]
+        ref_parts = []
+        sa_offset, sb_offset = 0, 0
+        for g, a_g, b_g, start, end in cublaslt_grouped_gemm_slices():
+            sa_g, sa_offset = cublaslt_grouped_gemm_scale(
+                scale_a, g, start, end, a_g, sa_offset
+            )
+            sb_g, sb_offset = cublaslt_grouped_gemm_scale(
+                scale_b, g, start, end, b_g.t(), sb_offset
+            )
+            ref_parts.append(
+                torch._scaled_mm(
+                    a_g,
+                    b_g,
+                    scale_a=sa_g,
+                    scale_b=sb_g,
+                    out_dtype=out_dtype,
+                    use_fast_accum=fast_accum,
+                )
+            )
+        if A.dim() == 2 and B_T.dim() != 2:
+            return torch.cat(ref_parts, dim=0)
+        if A.dim() != 2 and B_T.dim() == 2:
+            return torch.cat(ref_parts, dim=1)
+        return torch.stack(ref_parts, dim=0)
+
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
+        cublaslt_grouped_mm_skip_msg
+    )
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    @parametrize(
+        "dtypes",
+        [
+            (torch.float8_e4m3fn, torch.float8_e4m3fn),
+            (torch.float8_e4m3fn, torch.float8_e5m2),
+            (torch.float8_e5m2, torch.float8_e4m3fn)
+        ]
+    )
+    @parametrize("out_dtype", [torch.bfloat16, torch.float16, torch.float32])
+    @parametrize("scale_mode", ["tensorwise", "groupwise"])
+    @parametrize("fast_accum", [False, True])
+    def test_scaled_grouped_gemm_cublaslt(self, op, dtypes, out_dtype, scale_mode, fast_accum):
+        a_dtype, b_dtype = dtypes
+        A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_helper(
+            op, a_dtype, b_dtype, scale_mode
+        )
+
+        with prefer_cublaslt_grouped_gemm():
+            C = torch._scaled_grouped_mm(
+                A,
+                B_T.transpose(-2, -1),
+                scale_a,
+                scale_b,
+                offs=offs,
+                use_fast_accum=fast_accum,
+                out_dtype=out_dtype
+            )
+
+        C_ref = self.cublaslt_grouped_gemm_ref(A, B_T, scale_a, scale_b, offs, out_dtype, fast_accum)
+        self.assertEqual(C, C_ref, atol=1e-2, rtol=1e-2)
+
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
+        cublaslt_grouped_mm_skip_msg
+    )
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    @parametrize(
+        "dtypes",
+        [
+            (torch.float8_e4m3fn, torch.float8_e4m3fn),
+            (torch.float8_e4m3fn, torch.float8_e5m2),
+            (torch.float8_e5m2, torch.float8_e4m3fn)
+        ]
+    )
+    @parametrize("out_dtype", [torch.bfloat16, torch.float16, torch.float32])
+    @parametrize("scale_mode", ["tensorwise", "groupwise"])
+    @parametrize("fast_accum", [False, True])
+    @parametrize("mode", ["default", "reduce-overhead"])
+    def test_scaled_grouped_gemm_cublaslt_compiled(self, op, dtypes, out_dtype, scale_mode, fast_accum, mode):
+        a_dtype, b_dtype = dtypes
+        torch._dynamo.reset()  # each shape combination needs fresh compilation state
+        A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_helper(
+            op, a_dtype, b_dtype, scale_mode
+        )
+
+        with prefer_cublaslt_grouped_gemm():
+            f_ref = torch._scaled_grouped_mm
+            f = torch.compile(f_ref, fullgraph=True, mode=mode)
+
+            C_ref = f_ref(
+                A,
+                B_T.transpose(-2, -1),
+                scale_a,
+                scale_b,
+                offs=offs,
+                use_fast_accum=fast_accum,
+                out_dtype=out_dtype
+            )
+            C = f(A, B_T.transpose(-2, -1), scale_a, scale_b, offs=offs, use_fast_accum=fast_accum, out_dtype=out_dtype)
+            self.assertEqual(C, C_ref)
+
+    def scaled_grouped_gemm_cublaslt_mxfp8_helper(self, op):
+        device = "cuda"
+        ngroups = 4
+        block_size = 32
+
+        if op == "2d/2d":
+            m, n, k_g = 128, 128, 128
+            k_total = k_g * ngroups
+            offs = torch.tensor(
+                [k_g * (i + 1) for i in range(ngroups)],
+                device=device, dtype=torch.int32,
+            )
+            A_bf16 = torch.randn(m, k_total, device=device, dtype=torch.bfloat16) * 0.1
+            B_bf16 = torch.randn(n, k_total, device=device, dtype=torch.bfloat16) * 0.01
+            a_groups = [A_bf16[:, g * k_g:(g + 1) * k_g] for g in range(ngroups)]
+            b_groups = [B_bf16[:, g * k_g:(g + 1) * k_g] for g in range(ngroups)]
+            a_cat, b_cat = 1, 1
+        elif op == "2d/3d":
+            n, k = 128, 128
+            m_per_group = 128
+            m_total = m_per_group * ngroups
+            offs = torch.tensor(
+                [m_per_group * (i + 1) for i in range(ngroups)],
+                device=device, dtype=torch.int32,
+            )
+            A_bf16 = torch.randn(m_total, k, device=device, dtype=torch.bfloat16) * 0.1
+            B_bf16 = torch.randn(ngroups, n, k, device=device, dtype=torch.bfloat16) * 0.01
+            a_groups = [A_bf16[g * m_per_group:(g + 1) * m_per_group] for g in range(ngroups)]
+            b_groups = [B_bf16[g] for g in range(ngroups)]
+            a_cat, b_cat = 0, None
+        elif op == "3d/2d":
+            m, k = 128, 128
+            n_per_group = 128
+            n_total = n_per_group * ngroups
+            offs = torch.tensor(
+                [n_per_group * (i + 1) for i in range(ngroups)],
+                device=device, dtype=torch.int32,
+            )
+            A_bf16 = torch.randn(ngroups, m, k, device=device, dtype=torch.bfloat16) * 0.1
+            B_bf16 = torch.randn(n_total, k, device=device, dtype=torch.bfloat16) * 0.01
+            a_groups = [A_bf16[g] for g in range(ngroups)]
+            b_groups = [B_bf16[g * n_per_group:(g + 1) * n_per_group] for g in range(ngroups)]
+            a_cat, b_cat = None, 0
+        elif op == "3d/3d":
+            m, n, k = 128, 128, 128
+            offs = None
+            A_bf16 = torch.randn(ngroups, m, k, device=device, dtype=torch.bfloat16) * 0.1
+            B_bf16 = torch.randn(ngroups, n, k, device=device, dtype=torch.bfloat16) * 0.01
+            a_groups = [A_bf16[g] for g in range(ngroups)]
+            b_groups = [B_bf16[g] for g in range(ngroups)]
+            a_cat, b_cat = None, None
+
+        a_scales, a_fp8 = zip(*(to_mxfp(t.contiguous(), format="mxfp8") for t in a_groups))
+        b_scales, b_fp8 = zip(*(to_mxfp(t.contiguous(), format="mxfp8") for t in b_groups))
+        a_blocked_scales = [to_blocked(scale) for scale in a_scales]
+        b_blocked_scales = [to_blocked(scale) for scale in b_scales]
+
+        A = (torch.stack(a_fp8, dim=0) if a_cat is None else torch.cat(a_fp8, dim=a_cat)).contiguous()
+        B_T = (torch.stack(b_fp8, dim=0) if b_cat is None else torch.cat(b_fp8, dim=b_cat)).contiguous()
+        scale_a = torch.stack(a_blocked_scales, dim=0) if a_cat is None else torch.cat(a_blocked_scales)
+        scale_b = torch.stack(b_blocked_scales, dim=0) if b_cat is None else torch.cat(b_blocked_scales)
+        if a_cat == 0:
+            scale_a = scale_a.reshape(-1, k // block_size)
+        if b_cat == 0:
+            scale_b = scale_b.reshape(-1, k // block_size)
+        return A, B_T, scale_a, scale_b, offs
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
+        cublaslt_grouped_mm_skip_msg
+    )
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    @parametrize("out_dtype", [torch.bfloat16, torch.float16, torch.float32])
+    @parametrize("fast_accum", [False, True])
+    def test_scaled_grouped_gemm_cublaslt_mxfp8(self, op, out_dtype, fast_accum):
+        A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_mxfp8_helper(op)
+
+        with prefer_cublaslt_grouped_gemm():
+            C = torch._scaled_grouped_mm(
+                A,
+                B_T.transpose(-2, -1),
+                scale_a,
+                scale_b,
+                offs=offs,
+                use_fast_accum=fast_accum,
+                out_dtype=out_dtype,
+            )
+
+        C_ref = self.cublaslt_grouped_gemm_ref(A, B_T, scale_a, scale_b, offs, out_dtype, fast_accum)
+        self.assertEqual(C, C_ref, atol=1e-2, rtol=1e-2)
+
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
+        cublaslt_grouped_mm_skip_msg
+    )
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    @parametrize("fast_accum", [False, True])
+    @parametrize("mode", ["default", "reduce-overhead"])
+    def test_scaled_grouped_gemm_cublaslt_mxfp8_compiled(self, op, fast_accum, mode):
+        out_dtype = torch.bfloat16
+        A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_mxfp8_helper(op)
+
+        torch._dynamo.reset()
+        with prefer_cublaslt_grouped_gemm():
+            f_ref = torch._scaled_grouped_mm
+            f = torch.compile(f_ref, fullgraph=True, mode=mode)
+
+            C_ref = f_ref(
+                A, B_T.transpose(-2, -1), scale_a, scale_b,
+                offs=offs, use_fast_accum=fast_accum, out_dtype=out_dtype,
+            )
+            C = f(
+                A, B_T.transpose(-2, -1), scale_a, scale_b,
+                offs=offs, use_fast_accum=fast_accum, out_dtype=out_dtype,
+            )
+            self.assertEqual(C, C_ref)
 
 
     @onlyAccelerator
