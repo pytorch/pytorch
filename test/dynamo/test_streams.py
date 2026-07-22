@@ -218,7 +218,7 @@ class <lambda>(torch.nn.Module):
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2), torch.Stream(device="cuda"))
         expected = fn(*inp)
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         actual = fn_opt(*inp)
         self.assertEqual(expected, actual)
 
@@ -231,7 +231,7 @@ class <lambda>(torch.nn.Module):
             return y, s
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2))
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         _, s0 = fn_opt(*inp)
         _, s1 = fn_opt(*inp)
         # Streams will be different values for each invocation
@@ -249,7 +249,7 @@ class <lambda>(torch.nn.Module):
 
         s_inp = torch.Stream(device="cuda")
         inp = (torch.ones(2, 2) + 1, s_inp)
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         _, s0 = fn_opt(*inp)
         _, s1 = fn_opt(*inp)
         self.assertEqual(s_inp, s0)
@@ -648,6 +648,7 @@ class GraphModule(torch.nn.Module):
             torch.ones(2, 2, device="cuda:0", requires_grad=True) + 1,
             torch.ones(2, 2, device="cuda:0", requires_grad=True),
         )
+        torch.cuda.synchronize()
         expected = fn(*inp)
         (
             actual,
@@ -655,6 +656,7 @@ class GraphModule(torch.nn.Module):
             fw_graphs,
             bw_graphs,
         ) = extract_graph(fn, *inp)
+        torch.cuda.synchronize()
         self.assertEqual(len(fw_graphs), 1)
         self.assertEqual(expected, actual)
         self.assertExpectedInline(
@@ -663,12 +665,13 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[2, 2]", primals_2: "f32[2, 2]"):
         # Annotation: {'stream': 2}
-        mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_1, 2);  primals_1 = None
+        mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_1, 2)
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2)
 
         # Annotation: {'stream': 1}
-        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2);  primals_2 = None
-        return (add, add_1, mul, add, add_1)
+        mul_1: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_1, 2);  primals_1 = None
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_1, primals_2);  primals_2 = None
+        return (add, add_1, mul, add, mul_1, add_1)
 """,
         )
 
@@ -677,7 +680,7 @@ class GraphModule(torch.nn.Module):
             print_graph(bw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, mul: "f32[2, 2]", add: "f32[2, 2]", add_1: "f32[2, 2]", tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]"):
+    def forward(self, mul: "f32[2, 2]", add: "f32[2, 2]", mul_1: "f32[2, 2]", add_1: "f32[2, 2]", tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]"):
         # Annotation: {'stream': 1} Backward of forward node:
         mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_2, 2)
 
@@ -689,7 +692,7 @@ class GraphModule(torch.nn.Module):
 
         # No stacktrace found for following nodes
         subgraph_record_event_default = self.subgraph_record_event_default
-        control_deps = torch.ops.higher_order.control_deps((mul, add, mul_3, add_2), subgraph_record_event_default, add, mul_3, add_2);  add = mul_3 = add_2 = subgraph_record_event_default = None
+        control_deps = torch.ops.higher_order.control_deps((mul, add, mul_3, add_2), subgraph_record_event_default, add, mul_3, add_2);  mul = add = mul_3 = add_2 = subgraph_record_event_default = None
 
         # Backward of forward node:
         getitem_2: "f32[2, 2]" = control_deps[3]
@@ -700,7 +703,7 @@ class GraphModule(torch.nn.Module):
 
         # No stacktrace found for following nodes
         subgraph_wait_event_default = self.subgraph_wait_event_default
-        control_deps_1 = torch.ops.higher_order.control_deps((control_deps, mul, add_1, mul_2, getitem, getitem_1, getitem_2), subgraph_wait_event_default, add_1, mul_2, getitem_1, getitem_2);  control_deps = mul = add_1 = mul_2 = getitem = getitem_1 = getitem_2 = subgraph_wait_event_default = None
+        control_deps_1 = torch.ops.higher_order.control_deps((control_deps, mul_1, add_1, mul_2, getitem, getitem_1, getitem_2), subgraph_wait_event_default, add_1, mul_2, getitem_1, getitem_2);  control_deps = mul_1 = add_1 = mul_2 = getitem = getitem_1 = getitem_2 = subgraph_wait_event_default = None
 
         # Backward of forward node:
         getitem_6: "f32[2, 2]" = control_deps_1[4]
@@ -1635,8 +1638,8 @@ class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[2, 2]", primals_2: "f32[2, 2]"):
         # Annotation: {'stream': 2}
         mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_1, 2)
-        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2);  primals_2 = None
-        return (add, primals_1, mul)
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2);  mul = primals_2 = None
+        return (add, primals_1)
 """,
         )
         # Run backward and check that the epilogue copy uses stream 0 (s1)
@@ -1649,15 +1652,18 @@ class GraphModule(torch.nn.Module):
             print_graph(bw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[2, 2]", mul: "f32[2, 2]", tangents_1: "f32[2, 2]"):
+    def forward(self, primals_1: "f32[2, 2]", tangents_1: "f32[2, 2]"):
         # Annotation: {'stream': 2} Backward of forward node:
         mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2)
 
         # Annotation: {'stream': 2} Backward of forward node:
         clone: "f32[2, 2]" = torch.ops.aten.clone.default(tangents_1);  tangents_1 = None
 
+        # Annotation: {'stream': 1} Backward of forward node:
+        mul_1: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_1, 2)
+
         # Annotation: {'stream': 1} No stacktrace found for following nodes
-        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(primals_1, mul);  primals_1 = mul = copy_ = None
+        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(primals_1, mul_1);  primals_1 = mul_1 = copy_ = None
         return (mul_2, clone)
 """,
         )
@@ -1666,7 +1672,7 @@ class GraphModule(torch.nn.Module):
     def test_inductor_lowering(self):
         with patch("torch._inductor.config.implicit_fallbacks", False):
 
-            @torch.compile()
+            @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
                 e = torch.Event()
                 x += x + 1
@@ -1973,7 +1979,7 @@ class <lambda>(torch.nn.Module):
     def test_event_synchronize_inductor_lowering(self):
         with patch("torch._inductor.config.implicit_fallbacks", False):
 
-            @torch.compile()
+            @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
                 e = torch.Event()
                 x = x + 1
@@ -2197,7 +2203,7 @@ class <lambda>(torch.nn.Module):
 
         inp = torch.ones(2, 2, device="cuda")
         eager_result = f(inp)
-        compiled_result = torch.compile(f)(inp)
+        compiled_result = torch.compile(f)(inp)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(eager_result, compiled_result)
 
     @requires_cuda
@@ -2217,7 +2223,7 @@ class <lambda>(torch.nn.Module):
 
             return torch.cat(a_cpu_list)
 
-        f_compiled = torch.compile(f)
+        f_compiled = torch.compile(f)  # noqa: UNSPECIFIED_BACKEND
         inputs = [
             torch.rand(100, dtype=torch.float16, device="cuda") for _ in range(10)
         ]
@@ -2235,7 +2241,7 @@ class <lambda>(torch.nn.Module):
             e.wait()
             return y + 1
 
-        f_compiled = torch.compile(f)
+        f_compiled = torch.compile(f)  # noqa: UNSPECIFIED_BACKEND
         x = torch.randn(10, device="cuda")
         eager_result = f(x)
         compiled_result = f_compiled(x)

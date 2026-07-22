@@ -1541,7 +1541,8 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 #endif
 }
 
-// cuSOLVER Xgeev (requires cuSOLVER >= 11.7.2, i.e. CUDA 12.8+; requires ROCm >= 7.14 for hipsolver)
+// cuSOLVER Xgeev (requires cuSOLVER >= 11.7.2, i.e. CUDA 12.8+)
+// hipSOLVER Xgeev (requires ROCm >= 7.14)
 #if (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || (defined(USE_ROCM) && ROCM_VERSION >= 71400)
 
 template <typename scalar_t>

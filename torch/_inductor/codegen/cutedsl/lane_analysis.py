@@ -13,7 +13,7 @@ from ...virtualized import V
 class LaneExprInfo:
     """How an index expression changes across vectorized lanes.
 
-    A lane is one element of =a vectorized CuteDSL computation. For a 32-lane
+    A lane is one element of a vectorized CuteDSL computation. For a 32-lane
     mask/load, lane 0 is the first element in the group and lane 31 is the last.
 
     Attributes:

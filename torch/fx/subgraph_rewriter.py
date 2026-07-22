@@ -39,29 +39,37 @@ _SAFE_META_PROPAGATION_BUILTINS = {
 _SAFE_META_PROPAGATION_TORCH_FUNCTIONS = {
     torch.abs,
     torch.add,
+    torch.cat,
     torch.div,
     torch.exp,
     torch.matmul,
     torch.mul,
     torch.neg,
     torch.relu,
+    torch.reshape,
     torch.sigmoid,
+    torch.stack,
     torch.sub,
     torch.tanh,
     torch.true_divide,
 }
+# Keep equivalent tensor-method spellings aligned when extending the safe
+# torch-function allowlist above.
 _SAFE_META_PROPAGATION_METHODS = {
     "abs",
+    "add",
     "div",
     "exp",
     "matmul",
     "mul",
     "neg",
     "relu",
+    "reshape",
     "sigmoid",
     "sub",
     "tanh",
     "true_divide",
+    "view",
 }
 _SAFE_META_SCALAR_TYPES = (
     bool,
@@ -75,6 +83,9 @@ _SAFE_META_SCALAR_TYPES = (
     torch.dtype,
     torch.layout,
     torch.memory_format,
+    torch.SymBool,
+    torch.SymFloat,
+    torch.SymInt,
 )
 _MISSING = object()
 
@@ -162,7 +173,7 @@ def _is_torch_return_type(value: Any) -> bool:
 
 def _is_safe_tensor_meta_value(value: Any) -> bool:
     value_type = type(value)
-    if value_type is torch.Tensor:
+    if value_type in (torch.Tensor, torch.nn.Parameter):
         return True
     if not (
         value_type.__module__ == "torch._subclasses.fake_tensor"
@@ -219,34 +230,101 @@ def _fake_tensor_meta_helpers() -> tuple[type[Any], type[Any], Callable[..., Any
     return FakeTensor, FakeTensorMode, snapshot_fake
 
 
-def _copy_meta_val(value: Any, fake_mode: "FakeTensorMode | None" = None) -> Any:
+@cache
+def _fake_tensor_propagation_exceptions() -> tuple[type[Exception], ...]:
+    from torch._subclasses.fake_tensor import (
+        DataDependentOutputException,
+        DynamicOutputShapeException,
+        UnsupportedFakeTensorException,
+        UnsupportedOperatorException,
+    )
+
+    return (
+        DataDependentOutputException,
+        DynamicOutputShapeException,
+        UnsupportedFakeTensorException,
+        UnsupportedOperatorException,
+    )
+
+
+def _copy_meta_val(
+    value: Any,
+    fake_mode: "FakeTensorMode | None" = None,
+    memo: dict[int, Any] | None = None,
+) -> Any:
+    if memo is None:
+        memo = {}
     value_type = type(value)
-    if value_type is torch.Tensor:
+    value_id = id(value)
+    if value_id in memo:
+        return memo[value_id]
+    if value_type in (torch.Tensor, torch.nn.Parameter):
         _, FakeTensorMode, snapshot_fake = _fake_tensor_meta_helpers()
         if fake_mode is None:
             fake_mode = FakeTensorMode(allow_fallback_kernels=False)
         with fake_mode:
-            return snapshot_fake(fake_mode.from_tensor(value, static_shapes=True))
+            result = snapshot_fake(fake_mode.from_tensor(value, static_shapes=True))
+        memo[value_id] = result
+        return result
     if _is_safe_tensor_meta_value(value):
         _, _, snapshot_fake = _fake_tensor_meta_helpers()
-        return snapshot_fake(value)
-    if value_type is list:
-        return [_copy_meta_val(v, fake_mode) for v in value]
+        result = snapshot_fake(value)
+        memo[value_id] = result
+        return result
+    if value_type in (list, immutable_list):
+        values: list[Any] = []
+        if value_type is list:
+            memo[value_id] = values
+        values.extend(_copy_meta_val(v, fake_mode, memo) for v in value)
+        result = immutable_list(values) if value_type is immutable_list else values
+        memo[value_id] = result
+        return result
     if value_type is not torch.Size and (
         value_type is tuple or _is_torch_return_type(value)
     ):
         if _is_torch_return_type(value):
-            return type(value)(*(_copy_meta_val(v, fake_mode) for v in value))
-        return tuple(_copy_meta_val(v, fake_mode) for v in value)
-    if value_type is dict:
-        return {k: _copy_meta_val(v, fake_mode) for k, v in value.items()}
+            result = type(value)(*(_copy_meta_val(v, fake_mode, memo) for v in value))
+        else:
+            result = tuple(_copy_meta_val(v, fake_mode, memo) for v in value)
+        memo[value_id] = result
+        return result
+    if value_type in (dict, immutable_dict):
+        values_dict: dict[Any, Any] = {}
+        if value_type is dict:
+            memo[value_id] = values_dict
+        for key, item in value.items():
+            values_dict[_copy_meta_val(key, fake_mode, memo)] = _copy_meta_val(
+                item, fake_mode, memo
+            )
+        result = (
+            immutable_dict(values_dict) if value_type is immutable_dict else values_dict
+        )
+        memo[value_id] = result
+        return result
     return value
+
+
+def _try_copy_meta_val(
+    value: Any,
+    fake_mode: "FakeTensorMode | None",
+    memo: dict[int, Any] | None = None,
+) -> Any:
+    copy_memo = {} if memo is None else memo.copy()
+    try:
+        result = _copy_meta_val(value, fake_mode, copy_memo)
+    except _fake_tensor_propagation_exceptions():
+        return _MISSING
+    if memo is not None:
+        memo.update(copy_memo)
+    return result
 
 
 def _detect_fake_mode_from_values(values: list[Any]) -> "FakeTensorMode | None":
     try:
         fake_mode = detect_fake_mode(values)
     except AssertionError:
+        # Inputs from multiple fake modes cannot be interpreted together.
+        # Returning None makes propagation copy inputs but skip operator execution.
         return None
     if fake_mode is None and any(_contains_tensor(value) for value in values):
         _, FakeTensorMode, _ = _fake_tensor_meta_helpers()
@@ -311,6 +389,7 @@ def _propagate_replacement_meta(
     fake_mode = _detect_fake_mode_from_values(source_values)
 
     env: dict[Node, Any] = {}
+    source_copy_memo: dict[int, Any] = {}
 
     def load_arg(arg_node: Node) -> Any:
         if arg_node not in env:
@@ -325,7 +404,12 @@ def _propagate_replacement_meta(
         if isinstance(copied_node, Node):
             meta_val = _meta_val_if_safe(copied_node)
             if meta_val is not _MISSING:
-                env[node] = _copy_meta_val(meta_val, fake_mode)
+                copied_meta_val = _try_copy_meta_val(
+                    meta_val, fake_mode, source_copy_memo
+                )
+                if copied_meta_val is _MISSING:
+                    continue
+                env[node] = copied_meta_val
                 continue
             if copied_node.meta.get("val") is not None:
                 continue
@@ -334,22 +418,37 @@ def _propagate_replacement_meta(
             attr_value = _get_replacement_attr(replacement_module, node.target)
             if attr_value is _MISSING or not _is_safe_meta_value(attr_value):
                 continue
-            env[node] = _copy_meta_val(attr_value, fake_mode)
+            copied_attr_value = _try_copy_meta_val(
+                attr_value, fake_mode, source_copy_memo
+            )
+            if copied_attr_value is _MISSING:
+                continue
+            env[node] = copied_attr_value
             if (
                 isinstance(copied_node, Node)
                 and copied_node in replacement_node_set
                 and copied_node.meta.get("val") is None
             ):
-                copied_node.meta["val"] = _copy_meta_val(env[node], fake_mode)
+                recorded_attr_value = _try_copy_meta_val(env[node], fake_mode)
+                if recorded_attr_value is not _MISSING:
+                    copied_node.meta["val"] = recorded_attr_value
             continue
 
         if node.op == "placeholder":
             if isinstance(copied_node, Node):
                 meta_val = _meta_val_if_safe(copied_node)
                 if meta_val is not _MISSING:
-                    env[node] = _copy_meta_val(meta_val, fake_mode)
+                    copied_meta_val = _try_copy_meta_val(
+                        meta_val, fake_mode, source_copy_memo
+                    )
+                    if copied_meta_val is not _MISSING:
+                        env[node] = copied_meta_val
             elif _is_safe_meta_value(copied_node):
-                env[node] = _copy_meta_val(copied_node, fake_mode)
+                copied_meta_val = _try_copy_meta_val(
+                    copied_node, fake_mode, source_copy_memo
+                )
+                if copied_meta_val is not _MISSING:
+                    env[node] = copied_meta_val
             continue
 
         if node.op not in ("call_function", "call_method"):
@@ -359,13 +458,21 @@ def _propagate_replacement_meta(
             continue
 
         if fake_mode is None:
+            # Never execute operators without a detected or freshly created mode.
+            # None also covers metadata containing incompatible fake modes.
             continue
 
         try:
             args = map_arg(node.args, load_arg)
             kwargs = map_arg(node.kwargs, load_arg)
-            if not _is_safe_meta_value((args, kwargs)):
-                continue
+        except KeyError:
+            # A predecessor could not be propagated, so its dependents cannot run.
+            continue
+        if not _is_safe_meta_value((args, kwargs)):
+            continue
+
+        fake_tensor_exceptions = _fake_tensor_propagation_exceptions()
+        try:
             if node.op == "call_function":
                 if not _is_safe_meta_propagation_target(node.target):
                     continue
@@ -381,16 +488,21 @@ def _propagate_replacement_meta(
                     continue
                 with fake_mode:
                     result = getattr(args[0], node.target)(*args[1:], **kwargs)
-            if not _is_safe_meta_value(result):
-                continue
-            env[node] = _copy_meta_val(result, fake_mode)
-        except (AssertionError, IndexError, KeyError, RuntimeError, TypeError):
-            # Metadata propagation is best effort; if a safe op still cannot run
-            # on the available metadata, leave this node and its dependents unset.
+        except fake_tensor_exceptions:
+            # Some valid operators cannot produce metadata without concrete data
+            # or a supported fake implementation. Leave their dependents unset.
             continue
+        if not _is_safe_meta_value(result):
+            continue
+        copied_result = _try_copy_meta_val(result, fake_mode)
+        if copied_result is _MISSING:
+            continue
+        env[node] = copied_result
 
         if copied_node.meta.get("val") is None:
-            copied_node.meta["val"] = _copy_meta_val(env[node], fake_mode)
+            recorded_result = _try_copy_meta_val(env[node], fake_mode)
+            if recorded_result is not _MISSING:
+                copied_node.meta["val"] = recorded_result
 
 
 @compatibility(is_backward_compatible=True)
