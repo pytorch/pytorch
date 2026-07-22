@@ -310,15 +310,25 @@ def validate_local_reduce_no_c_alpha_beta(
 
 
 def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -> bool:
-    """Return whether a QuACK config can keep grouped reductions inside one CTA.
+    """Return whether a QuACK config has a validated grouped-reduction layout.
 
-    This host gate covers tile and cluster fields available on ``GemmConfig``.
-    SM100 two-CTA configs with tile_m=128 and tile_n in {128, 160, 224}
-    expose only 16 contiguous N values per epilogue fragment; other accepted
-    configs expose the full 32-wide fragment.
-    Lane/warp ownership is derived later from QuACK's tiled-copy layout, where
-    ``GroupedLocalReduce`` asserts the remaining lane-count, divisibility, and
-    stride invariants. Forced-config tests cover the accepted SM100 extremes.
+    This matches ``GemmConfig`` fields against layout families covered by forced
+    kernel tests; tile divisibility alone is not sufficient. Axis-1 groups within
+    one 32-value epilogue fragment need no cross-fragment combine. Some SM100
+    two-CTA layouts expose only 16 contiguous N values, reducing that local limit.
+
+    Axis-0 groups and larger axis-1 groups use ``GroupedLocalReduce``'s physical
+    callback path, which combines epilogue fragments inside one CTA and directly
+    stores one value per
+    ``(row, group)``; it has no explicit two-CTA ownership or cluster-reduction
+    protocol. The validated two-CTA families therefore support only strict
+    subgroups of the selected tile. A full-tile group produces incorrect values
+    because CTA-local state is finalized as though it had one complete owner.
+
+    Full-tile support needs either a one-CTA fallback or a real two-CTA contract:
+    CTA-rank-aware row ownership, proof that one CTA has the complete N reduction
+    (or DSM exchange of partials), cluster synchronization, and exactly one final
+    store for each logical output group.
     """
     match axis:
         case 0:
@@ -329,37 +339,32 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
             return False
     if group <= 0 or config.swap_ab:
         return False
-    if config.tile_n % LOCAL_REDUCE_FRAGMENT_WIDTH != 0:
+    if config.tile_n % LOCAL_REDUCE_FRAGMENT_WIDTH != 0 or tile % group != 0:
         return False
-    if tile % group != 0:
-        return False
+
     fragment_width = LOCAL_REDUCE_FRAGMENT_WIDTH
-    if (
+    has_half_n_fragment = (
         axis == 1
         and config.tile_m == 128
         and config.tile_n in (128, 160, 224)
         and config.cluster_m > 1
-    ):
+    )
+    if has_half_n_fragment:
         fragment_width //= 2
-    match group:
-        case _ if group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
-            return fragment_width % group == 0 and group < tile
-        case _:
-            return (
-                group % LOCAL_REDUCE_FRAGMENT_WIDTH == 0
-                and group <= tile
-                and config.cluster_n == 1
-                and (
-                    (config.tile_m == 128 and config.cluster_m == 1)
-                    or (config.tile_m == 256 and config.cluster_m == 2)
-                    or (
-                        axis == 1
-                        and config.tile_m == 128
-                        and config.tile_n == 256
-                        and config.cluster_m == 2
-                    )
-                )
-            )
+    if group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+        return fragment_width % group == 0 and group < tile
+
+    if group % LOCAL_REDUCE_FRAGMENT_WIDTH != 0 or config.cluster_n != 1:
+        return False
+
+    is_single_cta_layout = config.tile_m == 128 and config.cluster_m == 1
+    is_validated_two_cta_layout = (config.tile_m == 256 and config.cluster_m == 2) or (
+        axis == 1
+        and config.tile_m == 128
+        and config.tile_n == 256
+        and config.cluster_m == 2
+    )
+    return is_single_cta_layout or (is_validated_two_cta_layout and group < tile)
 
 
 def flex_gemm_local_reduce_candidate_groups(config: Any, axis: int) -> tuple[int, ...]:
