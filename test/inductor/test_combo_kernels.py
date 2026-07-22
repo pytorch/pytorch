@@ -3006,6 +3006,81 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(ctx.tracked_nodes, {fused, c})
         self.assertEqual(ctx.last_use_steps, {1: 0, 3: 4})
 
+    def test_fusion_memory_update_modes(self):
+        from torch._inductor.scheduler import FusionMemoryContext, Scheduler
+
+        a, b, peak, far = (_PeakMemFakeNode(n) for n in ("a", "b", "peak", "far"))
+        ctx = FusionMemoryContext(
+            nodes=[a, b, peak, far],
+            tracked_nodes={a, b, peak, far},
+            graph_outputs=set(),
+            node_to_idx={a: 0, b: 1, peak: 2, far: 3},
+            baseline_peak=100,
+            baseline_live_before=[0, 10, 20, 100, 90],
+            baseline_live_after=[10, 20, 100, 90],
+        )
+        ctx.refresh_peak_range()
+        scheduler = object.__new__(Scheduler)
+        fast_update = object()
+        with (
+            torch._inductor.config.patch(
+                fusion_memory_timeline_peak_allowed_increase_mb=0,
+                fusion_memory_timeline_full_correctness=False,
+            ),
+            patch.object(
+                scheduler,
+                "_fusion_memory_update",
+                return_value=(False, fast_update),
+            ) as update_mock,
+        ):
+            self.assertEqual(
+                scheduler._check_fusion_memory(ctx, a, b),
+                (False, None),
+            )
+            update_mock.assert_not_called()
+            self.assertEqual(
+                scheduler._check_fusion_memory(ctx, a, far),
+                (False, fast_update),
+            )
+            update_mock.assert_called_once_with(ctx, a, far, 0)
+            fused = _PeakMemFakeNode("fused")
+            self.assertEqual(
+                scheduler._check_fusion_memory(ctx, fused, b),
+                (False, None),
+            )
+            update_mock.assert_called_once_with(ctx, a, far, 0)
+
+            ctx.decision_cache.clear()
+            update_mock.return_value = (True, None)
+            self.assertEqual(
+                scheduler._check_fusion_memory(ctx, a, far),
+                (True, None),
+            )
+            self.assertEqual(
+                scheduler._check_fusion_memory(None, a, far),
+                (False, None),
+            )
+
+        ctx.decision_cache.clear()
+        exact_update = object()
+        with (
+            torch._inductor.config.patch(
+                fusion_memory_timeline_peak_allowed_increase_mb=0,
+                fusion_memory_timeline_full_correctness=True,
+            ),
+            patch.object(
+                scheduler,
+                "_fusion_memory_update",
+                return_value=(False, exact_update),
+            ) as update_mock,
+        ):
+            self.assertEqual(
+                scheduler._check_fusion_memory(ctx, a, b),
+                (False, exact_update),
+            )
+            update_mock.assert_called_once_with(ctx, a, b, 0)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
