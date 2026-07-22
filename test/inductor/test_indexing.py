@@ -214,9 +214,16 @@ class TestIndexingSimplification(InductorTestCase):
         # Nested modular indexing is correctly simplified
         var_ranges = {i1: 13, i2: 121}
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, var_ranges),
+            ModularIndexing(121 * i1 + i2, 1, 28),
+        )
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        expr = ModularIndexing(ModularIndexing(i2, 1, 29), 7, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {}), expr)
+        expr = ModularIndexing(ModularIndexing(i2, -3, 12), -3, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {}), expr)
         var_ranges = {i2: 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
         # FloorDiv(ModularIndexing(b, d1, m), d2) simplifies to
@@ -225,6 +232,33 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+
+        var_ranges = {i0: 4096, r3: 256}
+        p = r3 + 256 * i0
+        expr = (
+            32768 * FloorDiv(p, 32768)
+            + 4 * FloorDiv(ModularIndexing(p, 1, 32768), 8192)
+            + 16 * ModularIndexing(ModularIndexing(p, 1, 32768), 256, 32)
+            + 512
+            * ModularIndexing(
+                ModularIndexing(ModularIndexing(p, 1, 32768), 1, 8192),
+                4,
+                64,
+            )
+            + ModularIndexing(
+                ModularIndexing(ModularIndexing(p, 1, 32768), 1, 8192),
+                1,
+                4,
+            )
+        )
+        expected = (
+            512 * FloorDiv(r3, 4)
+            + 32768 * FloorDiv(i0, 128)
+            + ModularIndexing(r3, 1, 4)
+            + 16 * ModularIndexing(i0, 1, 32)
+            + 4 * ModularIndexing(i0, 32, 4)
+        )
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
 
     def test_floordiv_modularindexing_simplification(self):
         sizevars = SizeVarAllocator()
@@ -501,6 +535,23 @@ class TestIndexingSimplification(InductorTestCase):
         out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, sentinel)
         out_compiled.sum().backward()
 
+    @unittest.skipUnless(HAS_CPU, "requires CPU")
+    def test_bool_minimum_maximum_index_propagation(self):
+        def foo(x):
+            thresh = torch.nn.functional.threshold(x, 6.08522335982976, -0.05932757)
+            eq = torch.eq(thresh, x)
+            empty = torch.empty_like(eq)
+            return torch.minimum(empty, empty), torch.maximum(empty, empty)
+
+        x = torch.randn([32], dtype=torch.float64)
+        compiled_foo = torch.compile(foo, backend="inductor")
+        with torch.no_grad():
+            out_min, out_max = compiled_foo(x)
+        self.assertEqual(out_min.dtype, torch.bool)
+        self.assertEqual(out_max.dtype, torch.bool)
+        self.assertEqual(out_min.shape, x.shape)
+        self.assertEqual(out_max.shape, x.shape)
+
 
 class ExprPrinterTests(InductorTestCase):
     def test_print_pow(self):
@@ -725,8 +776,9 @@ instantiate_parametrized_tests(ExprPrinterTests)
 
 
 class TestIndexConstOverflowInt32(InductorTestCase):
-    """Tests for
-    ``SIMDKernelFeatures.any_index_expr_const_overflows_int32``."""
+    """Tests for the constant-offset check in
+    ``SIMDKernelFeatures.any_index_expr_overflows_int32`` (index evaluated at
+    the origin)."""
 
     def make_feats(self, indices):
         # Bypass __init__ (needs V.graph) and shadow scheduler_nodes().
@@ -739,7 +791,7 @@ class TestIndexConstOverflowInt32(InductorTestCase):
         return feats
 
     def check(self, indices):
-        return self.make_feats(indices).any_index_expr_const_overflows_int32()
+        return self.make_feats(indices).any_index_expr_overflows_int32()
 
     def test_production_constant_detected(self):
         x0, x1 = sympy.symbols("x0 x1", integer=True)
@@ -771,6 +823,55 @@ class TestIndexConstOverflowInt32(InductorTestCase):
         good = sympy.Integer(42) + x0
         bad = sympy.Integer(-(2**31) - 1) + x0
         self.assertTrue(self.check([good, bad]))
+
+
+class TestIndexExprUpperBounds(InductorTestCase):
+    """Tests for the variable-scaled bound check in
+    ``SIMDKernelFeatures.any_index_expr_overflows_int32``, which bounds the
+    addressing expression over each loop variable's iteration range (catching
+    fused `V * x0` terms while letting a stride on a size-1 dim drop out)."""
+
+    def make_feats(self, deps):
+        node = types.SimpleNamespace(
+            read_writes=types.SimpleNamespace(reads=deps, writes=[])
+        )
+        feats = SIMDKernelFeatures.__new__(SIMDKernelFeatures)
+        feats.scheduler_nodes = lambda: [node]
+        return feats
+
+    def dep(self, index, var_names, sizes):
+        return MemoryDep("buf", index, tuple(var_names), tuple(sizes))
+
+    def check(self, deps):
+        return self.make_feats(deps).any_index_expr_overflows_int32()
+
+    def test_chunked_cross_buffer_overflow_caught(self):
+        # `V * x0 + i`: per-chunk stride V over the fused numel overflows int32
+        # even though no single buffer's storage does.
+        x0, i = sympy.symbols("x0 i", integer=True)
+        dep = self.dep(410_000_000 * x0 + i, [x0, i], [16384, 128])
+        self.assertTrue(self.check([dep]))
+
+    def test_in_range_index_not_flagged(self):
+        # stride 16 over numel 4M stays within int32.
+        x0 = sympy.Symbol("x0", integer=True)
+        dep = self.dep(16 * x0, [x0], [4_000_000])
+        self.assertFalse(self.check([dep]))
+
+    def test_stride_on_size_one_dim_drops_out(self):
+        # Layout shape=(1, 1M), stride=(1M, 1): the large stride multiplies a
+        # size-1 dim and must not force int64 (the Option A false positive).
+        d0, d1 = sympy.symbols("d0 d1", integer=True)
+        dep = self.dep(1_000_000 * d0 + d1, [d0, d1], [1, 1_000_000])
+        self.assertFalse(self.check([dep]))
+
+    def test_symbolic_size_skipped(self):
+        # Dynamic dims are covered by the storage-size check; the precise bound
+        # skips them rather than flagging or crashing on a symbolic size.
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        d0 = sympy.Symbol("d0", integer=True)
+        dep = self.dep(1_000_000_000_000 * d0, [d0], [s0])
+        self.assertFalse(self.check([dep]))
 
 
 class TestEvaluateMinMax(InductorTestCase):
