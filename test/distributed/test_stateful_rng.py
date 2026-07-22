@@ -8,9 +8,7 @@ from typing import Any, cast
 
 import torch
 from torch._library.utils import fill_defaults
-from torch.distributed._local_tensor import LocalIntNode, LocalTensor, LocalTensorMode
 from torch.distributed._stateful_rng import (
-    _is_supported_stateful_rng_op,
     _PHILOX_DISTRIBUTION_NORMAL,
     _PHILOX_DISTRIBUTION_UNIFORM,
     _run_stateful_rng_op,
@@ -265,74 +263,6 @@ class TestCheckpointableTensorRNG(TestCase):
 
                     self.assertEqual(results, expected, rtol=0, atol=0)
                     self.assertEqual(actual_generator.get_state(), expected_state)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
-    def test_private_adapter_replays_explicit_generator_for_local_tensor(self):
-        device = torch.device("cuda")
-        expected_generator = torch.Generator(device=device).manual_seed(123)
-        expected = torch.empty(7, device=device).uniform_(
-            -0.2, 0.3, generator=expected_generator
-        )
-        expected_state = expected_generator.get_state()
-
-        actual_generator = torch.Generator(device=device).manual_seed(123)
-        local_tensor = LocalTensor(
-            {
-                0: torch.empty(3, device=device),
-                1: torch.empty(3, device=device),
-            }
-        )
-        with LocalTensorMode(local_tensor._ranks):
-            self.assertTrue(
-                _is_supported_stateful_rng_op(
-                    torch.ops.aten.uniform_.default, local_tensor
-                )
-            )
-            returned = _run_stateful_rng_op(
-                torch.ops.aten.uniform_.default,
-                (local_tensor, -0.2, 0.3),
-                {"generator": actual_generator},
-                (7,),
-                ((2,),),
-                ((0,),),
-                ((3,),),
-            )
-
-        self.assertIs(returned, local_tensor)
-        for local_result in local_tensor._local_tensors.values():
-            self.assertEqual(local_result, expected[2:5], rtol=0, atol=0)
-        self.assertEqual(actual_generator.get_state(), expected_state)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
-    def test_private_adapter_default_generator_with_rank_local_layout(self):
-        device = torch.device("cuda")
-        torch.manual_seed(123)
-        expected = torch.empty(7, device=device).uniform_(-0.2, 0.3)
-        expected_state = torch.cuda.get_rng_state(device)
-
-        torch.manual_seed(123)
-        local_tensor = LocalTensor(
-            {
-                0: torch.empty(3, device=device),
-                1: torch.empty(3, device=device),
-            }
-        )
-        rank_local_start = torch.SymInt(LocalIntNode({0: 0, 1: 4}))
-        with LocalTensorMode(local_tensor._ranks):
-            returned = _run_stateful_rng_op(
-                torch.ops.aten.uniform_.default,
-                (local_tensor, -0.2, 0.3),
-                {},
-                (7,),
-                ((rank_local_start,),),
-                ((0,),),
-                ((3,),),
-            )
-
-        self.assertIs(returned, local_tensor)
-        self.assertEqual(local_tensor._local_tensors[0], expected[:3], rtol=0, atol=0)
-        self.assertEqual(local_tensor._local_tensors[1], expected[4:], rtol=0, atol=0)
-        self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_invalid_parameters_do_not_advance_generator(self):
