@@ -46,7 +46,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 
 from tools.dynamo.gb_id_mapping import (
-    extract_unimplemented_call_info,
+    extract_unimplemented_calls,
     load_registry,
     next_gb_id,
 )
@@ -111,17 +111,17 @@ def _collect_registry_inputs(
         except SyntaxError:
             continue
 
-        for node in ast.walk(tree):
+        nodes = list(ast.walk(tree))
+        for node in nodes:
             if isinstance(node, ast.Raise) and _is_forbidden_raise(node):
                 if not _is_noqa_suppressed(source_lines, node.lineno):
                     forbidden_raises.append((py_file, node.lineno, node.col_offset + 1))
 
-            call = extract_unimplemented_call_info(source, node, dynamo_dir)
-            if call is not None:
-                gb_type = call["gb_type"]
-                if gb_type not in gb_type_calls:
-                    gb_type_calls[gb_type] = []
-                gb_type_calls[gb_type].append((call, py_file))
+        for call in extract_unimplemented_calls(source, nodes, dynamo_dir):
+            gb_type = call["gb_type"]
+            if gb_type not in gb_type_calls:
+                gb_type_calls[gb_type] = []
+            gb_type_calls[gb_type].append((call, py_file))
 
     return forbidden_raises, gb_type_calls
 
