@@ -1038,8 +1038,23 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.testing.assert_close(result, fn(a, b, scale_a, scale_b), equal_nan=True)
         self.assertTrue(epilogue_fused, "multiply was NOT fused into scaled epilogue")
 
-    @parametrize("axis", (0, 1))
-    def test_scaled_mm_grouped_reduce_fusion(self, axis):
+    @parametrize(
+        "case",
+        (
+            (0, "sum"),
+            (0, "mean"),
+            (0, "prod"),
+            (0, "amax"),
+            (0, "amin"),
+            (1, "sum"),
+            (1, "prod"),
+            (1, "amax"),
+            (1, "amin"),
+        ),
+        name_fn=lambda case: f"axis_{case[0]}_{case[1]}",
+    )
+    def test_scaled_mm_grouped_reduce_fusion(self, case):
+        axis, reduction = case
         m, n, k = 128, 128, 512
         packed_k = k // 2
         group = 4 if axis == 0 else 32
@@ -1066,11 +1081,22 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 scale_b=scale_b,
                 out_dtype=torch.bfloat16,
             )
-            reduced = (
-                result.float().view(-1, group, n).sum(1)
+            grouped = (
+                result.float().view(-1, group, n)
                 if axis == 0
-                else result.float().view(m, -1, group).sum(-1)
+                else result.float().view(m, -1, group)
             )
+            dim = 1 if axis == 0 else -1
+            if reduction == "sum":
+                reduced = grouped.sum(dim)
+            elif reduction == "mean":
+                reduced = grouped.mean(dim)
+            elif reduction == "prod":
+                reduced = grouped.prod(dim)
+            elif reduction == "amax":
+                reduced = grouped.amax(dim)
+            else:
+                reduced = grouped.amin(dim)
             return result, reduced
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)

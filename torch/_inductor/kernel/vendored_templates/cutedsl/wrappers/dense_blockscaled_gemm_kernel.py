@@ -152,6 +152,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 local_reduce_out.compile_time_tensor,
                 getattr(args, "local_reduce_group"),
                 getattr(args, "local_reduce_axis"),
+                getattr(args, "local_reduce_type"),
                 target_sm=target_sm,
             )
         return self.cute_compile(

@@ -404,6 +404,7 @@ def _create_gemm_arguments(
     local_reduce_out: Any | None = None,
     local_reduce_group: int = 0,
     local_reduce_axis: int = 1,
+    local_reduce_type: str = "sum",
 ):
     import cutlass.operators
 
@@ -426,6 +427,7 @@ def _create_gemm_arguments(
         args.local_reduce_out = TensorWrapper(local_reduce_out)
         args.local_reduce_group = local_reduce_group
         args.local_reduce_axis = local_reduce_axis
+        args.local_reduce_type = local_reduce_type
         return args
 
     if epilogue is not None and variant_name == "GROUPED_GEMM":
@@ -532,13 +534,14 @@ def _create_gemm_cache_key(
     *,
     has_epilogue: bool = False,
     aux_tensors: tuple = (),
+    epilogue_specialization: tuple = (),
 ):
     cache_key = tuple(s for t in input_tensors for s in _tensor_sig(t))
     cache_key = (*cache_key, *_tensor_sig(out))
 
     if has_epilogue:
         aux_sig = tuple(_tensor_sig(t) for t in aux_tensors)
-        return (*cache_key, "epilogue", aux_sig)
+        return (*cache_key, "epilogue", aux_sig, epilogue_specialization)
     return cache_key
 
 
@@ -722,11 +725,17 @@ def _nvgemm_run(
 
     from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 
+    epilogue_specialization = tuple(
+        (key, variant_kwargs[key])
+        for key in ("local_reduce_type",)
+        if variant_kwargs is not None and key in variant_kwargs
+    )
     cache_key = _create_gemm_cache_key(
         input_tensors,
         out,
         has_epilogue=has_epilogue,
         aux_tensors=aux_tensors,
+        epilogue_specialization=epilogue_specialization,
     )
     dev_idx = input_tensors[0].device.index or 0
     mem_key = (cache_key, dev_idx)
@@ -1059,7 +1068,7 @@ class NVUniversalGemmKernel(Kernel):
         epilogue_reads: list[str] | None = None,
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
-        local_reduce: tuple[str, int, int, str] | None = None,
+        local_reduce: tuple[str, int, int, str, str] | None = None,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
     ) -> None:
@@ -1237,13 +1246,16 @@ class NVUniversalGemmKernel(Kernel):
 
             run_variant_kwargs = "_VARIANT_KWARGS"
             if self.local_reduce is not None:
-                reduce_name, reduce_group, reduce_axis, _ = self.local_reduce
+                reduce_name, reduce_group, reduce_axis, reduce_type, _ = (
+                    self.local_reduce
+                )
                 reduce_ptr = f"out_ptr{output_buffers.index(reduce_name)}"
                 run_variant_kwargs = (
                     "_VARIANT_KWARGS | {"
                     f"'local_reduce_out': {reduce_ptr}, "
                     f"'local_reduce_group': {reduce_group}, "
-                    f"'local_reduce_axis': {reduce_axis}"
+                    f"'local_reduce_axis': {reduce_axis}, "
+                    f"'local_reduce_type': {reduce_type!r}"
                     "}"
                 )
                 aux_tensors_expr = f"({reduce_ptr},)"
@@ -1305,7 +1317,7 @@ class NVUniversalGemmKernel(Kernel):
         """
         if not self.epilogue_writes:
             primary_output = (
-                self.local_reduce[3]
+                self.local_reduce[4]
                 if self.local_reduce is not None
                 else self.output_node.get_name()
             )
@@ -1363,7 +1375,7 @@ class NVUniversalGemmKernel(Kernel):
         wrapper = V.graph.wrapper_code
 
         if self.local_reduce is not None:
-            primary_name = self.local_reduce[3]
+            primary_name = self.local_reduce[4]
             V.graph.removed_buffers.discard(primary_name)
             primary_output = V.graph.get_buffer(primary_name)
             wrapper.codegen_allocation(primary_output or self.output_node)
