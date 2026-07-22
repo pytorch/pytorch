@@ -1749,6 +1749,21 @@ class TestMPS(TestCaseMPS):
         loss = (z - target).pow(2).sum()
         loss.backward()
 
+    @parametrize("shape", [(65537, 17, 32), (2, 65537, 17, 32), (257, 256, 2, 32), (3, 1, 32)])
+    @parametrize("bias_shape", [None, (64,), (1, 64)])
+    def test_linear_large_batch(self, shape, bias_shape):
+        # Regression test for https://github.com/pytorch/pytorch/issues/189495
+        # The fused matmul+bias kernel truncates the innermost batch-dim index to
+        # 16 bits, corrupting outputs when size(-3) > 65536. Any >2D input now
+        # flattens to a single 2D GEMM, so the shapes cover the wraparound cases,
+        # a total-batch-count case, and a seq=1 decode case (#189847); the
+        # multi-dim bias exercises the decomposed bias-add path.
+        x_cpu = torch.randn(shape, device='cpu')
+        w_cpu = torch.randn(64, 32, device='cpu')
+        b_cpu = torch.randn(bias_shape, device='cpu') if bias_shape is not None else None
+        b_mps = b_cpu.to('mps') if b_cpu is not None else None
+        self.assertEqual(F.linear(x_cpu, w_cpu, b_cpu), F.linear(x_cpu.to('mps'), w_cpu.to('mps'), b_mps))
+
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
         mps_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="mps", bias=bias)
@@ -2479,6 +2494,29 @@ class TestMPS(TestCaseMPS):
         mps_w, mps_b = grads("mps")
         self.assertEqual(mps_w.cpu(), cpu_w)
         self.assertEqual(mps_b.cpu(), cpu_b)
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/190054:
+    # fp32 gamma/beta with an fp16/bf16 input was reinterpreted at the input
+    # dtype in forward, and backward aborted in the MPSGraph verifier.
+    def test_layer_norm_mixed_dtype_affine(self):
+        for in_dtype in (torch.float16, torch.bfloat16):
+            with self.subTest(dtype=in_dtype):
+                x_cpu = torch.randn(4, 8, dtype=in_dtype, requires_grad=True)
+                w_cpu = torch.randn(8, dtype=torch.float32, requires_grad=True)
+                b_cpu = torch.randn(8, dtype=torch.float32, requires_grad=True)
+                out_cpu = torch.nn.functional.layer_norm(x_cpu, (8,), w_cpu, b_cpu)
+                out_cpu.backward(torch.ones_like(out_cpu))
+
+                x = x_cpu.detach().clone().to('mps').requires_grad_()
+                w = w_cpu.detach().clone().to('mps').requires_grad_()
+                b = b_cpu.detach().clone().to('mps').requires_grad_()
+                out = torch.nn.functional.layer_norm(x, (8,), w, b)
+                out.backward(torch.ones_like(out))
+
+                self.assertEqual(out.cpu(), out_cpu, atol=2e-2, rtol=2e-2)
+                self.assertEqual(x.grad.cpu(), x_cpu.grad, atol=2e-2, rtol=2e-2)
+                self.assertEqual(w.grad.cpu(), w_cpu.grad, atol=2e-2, rtol=2e-2)
+                self.assertEqual(b.grad.cpu(), b_cpu.grad, atol=2e-2, rtol=2e-2)
 
     def test_norm(self):
         a = torch.arange(9, dtype=torch.float, device="mps") - 4
@@ -10125,6 +10163,71 @@ class TestMPS(TestCaseMPS):
         x = torch.tensor([0, 65535], dtype=torch.uint16, device="mps")
         y = x / 64
         self.assertEqual(y, torch.tensor([0., 1023.9844], device="mps"))
+
+    # https://github.com/pytorch/pytorch/issues/170370
+    def test_embeddingbag_first_offset_forced_to_zero(self):
+        # The user's offsets[0] value is ignored for the first bag; output
+        # equals the call with offsets[0]=0.
+        torch.manual_seed(0)
+        weight = torch.randn(10, 3)
+        emb_a = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum").to("mps")
+        emb_b = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum").to("mps")
+        indices = torch.tensor([1, 2, 3], device="mps")
+        r_a = emb_a(indices, torch.tensor([0], device="mps"))
+        r_b = emb_b(indices, torch.tensor([5], device="mps"))
+        self.assertEqual(r_a, r_b)
+
+    def test_embeddingbag_offsets_out_of_range_kernel_error(self):
+        # offsets[-1] > num_indices is reported asynchronously via the kernel
+        # error buffer; the error surfaces at the next host sync.
+        emb = torch.nn.EmbeddingBag(10, 3, mode="sum").to("mps")
+        with self.assertRaisesRegex(RuntimeError, "Invalid offsets"):
+            out = emb(torch.tensor([1, 2], device="mps"),
+                      torch.tensor([0, 10], device="mps"))
+            out.cpu()  # force sync to surface the deferred kernel error
+
+    def test_embeddingbag_valid_offsets_match_cpu(self):
+        torch.manual_seed(0)
+        weight = torch.randn(10, 3)
+        emb_mps = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum").to("mps")
+        emb_cpu = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum")
+        r_mps = emb_mps(torch.tensor([1, 2, 3], device="mps"), torch.tensor([0], device="mps"))
+        r_cpu = emb_cpu(torch.tensor([1, 2, 3]), torch.tensor([0]))
+        self.assertEqual(r_mps.cpu(), r_cpu)
+
+    # https://github.com/pytorch/pytorch/issues/149325
+    # Generic nonzero correctness (baseline, empty, dtypes, N-D) is covered by
+    # the nonzero OpInfo; only the large-tensor paths are MPS-specific and can't
+    # be reached through OpInfo, so they live here.
+    # ~11 GiB unified memory needed: the input bool tensor is ~2.2 GiB and the
+    # int32 prefix-sum temporary buffer is ~8 GiB (numel * 4 bytes).
+    @serialTest()
+    @largeTensorTest("11GB", device="mps")
+    def test_nonzero_multichunk_above_int32(self):
+        # (1<<31)+1024 elements: above INT_MAX, and above the 2^31 per-dispatch
+        # chunk size, so it exercises the multi-chunk count/scatter path and the
+        # 64-bit scatter index variant. Must match CPU on a sparse pattern.
+        n = (1 << 31) + 1024
+        x = torch.zeros(n, dtype=torch.bool, device="mps")
+        positions = torch.tensor([0, 7, 1023, (1 << 30), (1 << 31) - 1, n - 1], device="mps")
+        x[positions] = True
+        out = x.nonzero().squeeze(-1)
+        self.assertEqual(out, positions.sort().values.to(torch.int64))
+
+    # ~22 GiB unified memory needed (input bool ~4 GiB + int32 prefix ~16 GiB);
+    # skips on machines/CI without enough memory.
+    @serialTest()
+    @largeTensorTest("22GB", device="mps")
+    def test_nonzero_above_uint32(self):
+        # More than 2^32 elements: the flat index and the count/scatter dispatch
+        # both exceed Metal's 32-bit thread_position_in_grid, so this exercises
+        # the chunked dispatch with a set position beyond 2^32.
+        n = (1 << 32) + 1024
+        x = torch.zeros(n, dtype=torch.bool, device="mps")
+        positions = torch.tensor([0, (1 << 31), (1 << 32) - 1, n - 1], device="mps")
+        x[positions] = True
+        out = x.nonzero().squeeze(-1)
+        self.assertEqual(out, positions.sort().values.to(torch.int64))
 
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
