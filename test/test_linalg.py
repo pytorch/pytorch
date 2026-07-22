@@ -42,7 +42,8 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
 from torch.testing._internal.common_cuda import CDNA2OrLater, CDNA5OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
-    _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context
+    _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context
+from torch.testing._internal.common_quantized import _bfloat16_to_float4_e2m1fn_x2, ceil_div, to_blocked
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -56,6 +57,7 @@ from torch.testing._internal.common_utils import (
 )
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
+mx_msg = "MX gemm is only supported on CUDA capability 10.0+ and gfx950/gfx1250"
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -10431,6 +10433,61 @@ class TestLinalgCudaOnly(TestCase):
             else:
                 count = 6
             self.assertEqual((total_num_results - ref_num_results), count)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_msg)
+    def test_scaled_gemm_blockwise_tunableop(self, device):
+        # Exercise the block-scaled scaled GEMM recipes (MXFP8 and NVFP4)
+        # through TunableOp. Both recipes dispatch to _scaled_gemm, which
+        # routes to the ScaledGemm TunableOp when tuning is enabled.
+        m, n, k = 128, 64, 128
+
+        def mxfp8_gemm():
+            block = 32
+            matA = torch.ones((m, k), dtype=torch.bfloat16, device=device).to(e4m3_type)
+            matB = torch.ones((n, k), dtype=torch.bfloat16, device=device).to(e4m3_type)
+            scaleA = to_blocked(torch.ones((m, ceil_div(k, block)), dtype=torch.float8_e8m0fnu, device=device))
+            scaleB = to_blocked(torch.ones((n, ceil_div(k, block)), dtype=torch.float8_e8m0fnu, device=device))
+            torch.nn.functional.scaled_mm(
+                matA, matB.t(),
+                scale_a=scaleA, scale_recipe_a=torch.nn.functional.ScalingType.BlockWise1x32,
+                scale_b=scaleB, scale_recipe_b=torch.nn.functional.ScalingType.BlockWise1x32,
+                swizzle_a=torch.nn.functional.SwizzleType.SWIZZLE_32_4_4,
+                swizzle_b=torch.nn.functional.SwizzleType.SWIZZLE_32_4_4,
+                output_dtype=torch.bfloat16,
+            )
+
+        def nvfp4_gemm():
+            block = 16
+            # fp4 packs two elements per byte, so the k dimension is halved on-device.
+            matA = _bfloat16_to_float4_e2m1fn_x2(torch.ones((m, k), dtype=torch.bfloat16, device=device))
+            matB = _bfloat16_to_float4_e2m1fn_x2(torch.ones((n, k), dtype=torch.bfloat16, device=device))
+            scaleA = to_blocked(torch.ones((m, ceil_div(k, block)), dtype=e4m3_type, device=device))
+            scaleB = to_blocked(torch.ones((n, ceil_div(k, block)), dtype=e4m3_type, device=device))
+            global_scale = torch.ones((), dtype=torch.float32, device=device)
+            swizzle = [torch.nn.functional.SwizzleType.SWIZZLE_32_4_4, torch.nn.functional.SwizzleType.NO_SWIZZLE]
+            recipe = [torch.nn.functional.ScalingType.BlockWise1x16, torch.nn.functional.ScalingType.TensorWise]
+            torch.nn.functional.scaled_mm(
+                matA, matB.t(),
+                scale_a=[scaleA, global_scale], scale_recipe_a=recipe,
+                scale_b=[scaleB, global_scale], scale_recipe_b=recipe,
+                swizzle_a=swizzle, swizzle_b=swizzle,
+                output_dtype=torch.bfloat16,
+            )
+
+        # NVFP4 is not supported on ROCm.
+        gemms = [mxfp8_gemm] if TEST_WITH_ROCM else [mxfp8_gemm, nvfp4_gemm]
+
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            ref_num_results = len(torch.cuda.tunable.get_results())
+            for gemm in gemms:
+                gemm()
+            total_num_results = len(torch.cuda.tunable.get_results())
+
+            # Each recipe has a distinct problem signature, so each adds one result.
+            self.assertEqual((total_num_results - ref_num_results), len(gemms))
 
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
