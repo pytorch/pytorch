@@ -32,7 +32,7 @@ namespace at::native {
 namespace {
 
 // These values cross the dispatcher as integers and must match the
-// _PHILOX_DISTRIBUTION_* constants used by Python callers and Meta.
+// _PHILOX_DISTRIBUTION_* constants used by Python callers.
 enum class PhiloxDistributionKind : int64_t {
   Normal = 0,
 };
