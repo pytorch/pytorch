@@ -4396,6 +4396,71 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @parametrize(
         "case",
         (
+            ("local_n_g32_tile64", 1, 32, 128, 64, 2, 2),
+            ("local_n_g16_tile160", 1, 16, 128, 160, 2, 2),
+            ("local_n_g32_tile224", 1, 32, 256, 224, 2, 2),
+            ("local_m_g128_tile160", 0, 128, 128, 160, 1, 1),
+            ("local_m_g64_tile_m256", 0, 64, 256, 256, 2, 1),
+            ("local_m_g128_tile_m256", 0, 128, 256, 256, 2, 1),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_tuple_aux_local_reduce_supports_expanded_configs(self, case):
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        _, axis, group, tile_m, tile_n, cluster_m, cluster_n = case
+        m = max(tile_m, group, 256)
+        n = max(tile_n, group if axis == 1 else 256)
+
+        def epilogue_fn(acc):
+            if axis == 1:
+                partial = acc.float().view(m, -1, group).sum(-1)
+            else:
+                partial = acc.float().view(-1, group, n).sum(1)
+            return acc.relu(), partial
+
+        config = dataclasses.asdict(
+            GemmConfig(
+                tile_m=tile_m,
+                tile_n=tile_n,
+                pingpong=False,
+                cluster_m=cluster_m,
+                cluster_n=cluster_n,
+                device_capacity=10,
+            )
+        )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
+        if axis == 1:
+            self.assertLocalReduceAuxCode(code, group, callbacks=group > 32)
+        else:
+            self.assertIn(f"FlexGemmLocalReduceGeometry(group={group}, axis=0)", code)
+            self.assertIn("FlexGemmLocalReduceCallbacks(", code)
+        self.assertIn(f"('tile_m', {tile_m})", code)
+        self.assertIn(f"('tile_n', {tile_n})", code)
+        self.assertIn(f"('cluster_m', {cluster_m})", code)
+        self.assertIn(f"('cluster_n', {cluster_n})", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        (
             (
                 "variance_like",
                 lambda x: ((x - x.mean(-1, keepdim=True)).square()).mean(-1) * 0.5
@@ -4475,7 +4540,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             config
             for config in candidates
             if config.tile_m == 128
-            and config.tile_n == 128
+            and config.tile_n in (128, 160, 224)
             and config.cluster_m > 1
             and validate_flex_gemm_local_reduce_config(config, 16, 1)
         ]
