@@ -427,7 +427,7 @@ def generate_wheels_matrix(
                 continue
 
             # TODO: Enable python 3.15 on non linux OSes
-            if os not in ["linux", "linux-aarch64"] and (
+            if os not in ["linux", "linux-aarch64", "windows", "macos-arm64"] and (
                 python_version == "3.15" or python_version == "3.15t"
             ):
                 continue
