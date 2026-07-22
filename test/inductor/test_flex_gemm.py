@@ -430,6 +430,37 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 explicit_config=swap_config,
             )
 
+    def test_multi_cta_local_reduce_rejects_full_tile_group(self):
+        """Reject full-tile groups until GroupedLocalReduce owns two-CTA stores."""
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            max_flex_gemm_local_reduce_group_for_configs,
+            validate_flex_gemm_local_reduce_config,
+        )
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        configs = (
+            GemmConfig(
+                tile_m=128,
+                tile_n=256,
+                pingpong=False,
+                cluster_m=2,
+                device_capacity=10,
+            ),
+            GemmConfig(
+                tile_m=256,
+                tile_n=512,
+                pingpong=False,
+                cluster_m=2,
+                device_capacity=10,
+            ),
+        )
+        for config in configs:
+            self.assertTrue(validate_flex_gemm_local_reduce_config(config, 128, 1))
+            self.assertFalse(
+                validate_flex_gemm_local_reduce_config(config, config.tile_n, 1)
+            )
+        self.assertEqual(max_flex_gemm_local_reduce_group_for_configs(configs, 1), 256)
+
     def test_precompile_metadata_counts_symbolic_skip(self):
         import sympy
 
