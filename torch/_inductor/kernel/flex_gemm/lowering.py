@@ -340,8 +340,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(
             f"unsupported FlexGEMM kernel options: {sorted(unsupported_options)}"
         )
-    if not isinstance(tuned, bool):
-        raise NotImplementedError("FlexGEMM tuned kernel option must be bool")
     if not isinstance(fast_math, bool):
         raise NotImplementedError("FlexGEMM fast_math kernel option must be bool")
     if "config" in kernel_options and not isinstance(explicit_config, dict):

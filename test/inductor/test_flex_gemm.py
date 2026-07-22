@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import dataclasses
 import importlib
 import math
 import sys
@@ -364,6 +365,10 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 flex_gemm_heuristics.explicit_gemm_config_key(
                     {**config, "cluster_m": True}, device
                 )
+            with self.assertRaisesRegex(NotImplementedError, "not supported"):
+                flex_gemm_heuristics.explicit_gemm_config_key(
+                    {**config, "use_tma_gather": True}, device
+                )
             with self.assertRaisesRegex(
                 NotImplementedError, "targets SM90.*uses SM100"
             ):
@@ -372,18 +377,13 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 )
 
         swap_config_key = flex_gemm_heuristics.gemm_config_key(
-            GemmConfig(
-                tile_m=128,
-                tile_n=192,
-                pingpong=False,
-                is_dynamic_persistent=True,
-                cluster_m=2,
-                swap_ab=True,
-                device_capacity=10,
-            )
+            dataclasses.replace(supported, swap_ab=True)
         )
-        with self.assertRaisesRegex(
-            NotImplementedError, "incompatible with local reduction"
+        with (
+            mock.patch("torch.cuda.get_device_capability", return_value=(10, 0)),
+            self.assertRaisesRegex(
+                NotImplementedError, "incompatible with local reduction"
+            ),
         ):
             flex_gemm_config_keys(
                 device,
@@ -6351,12 +6351,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 lambda acc: acc.relu(),
                 {"backend": "QUACK", "split_k": 2},
                 "unsupported FlexGEMM kernel options",
-            ),
-            (
-                "invalid_tuned_option",
-                lambda acc: acc.relu(),
-                {"backend": "QUACK", "tuned": 1},
-                "tuned kernel option must be bool",
             ),
             (
                 "invalid_fast_math_option",
