@@ -3655,7 +3655,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         (
             ("local_n_g32_tile64", 1, 32, 128, 64, 2, 2),
             ("local_n_g16_tile160", 1, 16, 128, 160, 2, 2),
+            ("local_n_g32_tile192", 1, 32, 128, 192, 2, 1),
             ("local_n_g32_tile224", 1, 32, 256, 224, 2, 2),
+            ("local_n_g32_tile256", 1, 32, 128, 256, 2, 2),
+            ("local_n_g64_tile_m128", 1, 64, 128, 256, 2, 1),
+            ("local_n_g128_tile_m128", 1, 128, 128, 256, 2, 1),
             ("local_m_g128_tile160", 0, 128, 128, 160, 1, 1),
             ("local_m_g64_tile_m256", 0, 64, 256, 256, 2, 1),
             ("local_m_g128_tile_m256", 0, 128, 256, 256, 2, 1),

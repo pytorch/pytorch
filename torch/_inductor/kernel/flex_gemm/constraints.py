@@ -352,6 +352,12 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
                 and (
                     (config.tile_m == 128 and config.cluster_m == 1)
                     or (config.tile_m == 256 and config.cluster_m == 2)
+                    or (
+                        axis == 1
+                        and config.tile_m == 128
+                        and config.tile_n == 256
+                        and config.cluster_m == 2
+                    )
                 )
             )
 
