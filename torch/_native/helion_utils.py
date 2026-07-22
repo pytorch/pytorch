@@ -28,8 +28,17 @@ _HELION_DSL_NAME = "helion"
 # Minimum supported Helion: the latest release verified with the native DSL
 # kernels (older releases carry the same APIs but are untested).
 _HELION_MINIMUM_VERSION = Version("1.2.0")
-# Supported Helion lowering backends. Extend to enable more, e.g. "cutedsl".
-_HELION_BACKENDS = ("triton",)
+# HELION_BACKEND name -> (pip package, import module); extend to add more,
+# e.g. "cute": ("nvidia-cutlass-dsl", "cutlass").
+_HELION_BACKENDS: dict[str, tuple[str, str]] = {"triton": ("triton", "triton")}
+_DEFAULT_HELION_BACKEND = "triton"
+
+
+def _chosen_backend() -> str:
+    """Selected Helion lowering backend (HELION_BACKEND env, default triton)."""
+    import os
+
+    return os.getenv("HELION_BACKEND", _DEFAULT_HELION_BACKEND)
 
 
 @functools.cache
@@ -37,26 +46,26 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
     if not _cuda.is_built():
         return (False, None)
 
-    import os
-
     import torch
 
     if torch.version.hip is not None:
         return (False, None)
 
-    backend = os.getenv("HELION_BACKEND", _HELION_BACKENDS[0])
-    if backend not in _HELION_BACKENDS:
+    backend = _chosen_backend()
+    dep = _HELION_BACKENDS.get(backend)
+    if dep is None:
         log.info(
             "Helion native DSL ops support backends %s; HELION_BACKEND=%s",
-            _HELION_BACKENDS,
+            tuple(_HELION_BACKENDS),
             backend,
         )
         return (False, None)
 
-    reason = _unavailable_reason([("helion", "helion"), ("triton", "triton")])
+    reason = _unavailable_reason([("helion", "helion"), dep])
     if reason is not None:
         log.info(
-            "Helion native DSL ops require optional packages `helion` and `triton`; %s",
+            "Helion native DSL ops require optional packages `helion` and `%s`; %s",
+            dep[0],
             reason,
         )
         return (False, None)
