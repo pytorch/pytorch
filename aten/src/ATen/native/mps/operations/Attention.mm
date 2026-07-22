@@ -83,20 +83,17 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   int64_t qSize = query.size(2);
   int64_t valueHeadSize = value.size(3);
   int64_t maxSeqLength = key.size(2);
-  // bf16/fp16 GEMM loses ~2× precision vs fp32 at the Q*K stage.
-  // Splitting Q also upcasts chunks to fp32 so the entire mm→softmax→mm
-  // pipeline runs in fp32, matching CUDA tensor-core precision.
+  // bf16/fp16 Q*K GEMM loses precision before MPSGraph's internal fp32
+  // upcast.  Upcast only Q to fp32 (small per chunk: 3068×128 = 1.6 MB),
+  // keep K/V in their native dtype to stay within unified-memory budget.
   static constexpr int64_t kChunkSize = 3068;
   if ((query.scalar_type() == at::kBFloat16 || query.scalar_type() == at::kHalf) && qSize > kChunkSize) {
     auto out = at::empty({batchSize, num_head, qSize, valueHeadSize}, query.options());
-    auto q_f32 = query.to(at::kFloat);
-    auto k_f32 = key.to(at::kFloat);
-    auto v_f32 = value.to(at::kFloat);
     for (int64_t start = 0; start < qSize; start += kChunkSize) {
       int64_t end = std::min(start + kChunkSize, qSize);
+      auto q_chunk = query.slice(2, start, end).to(at::kFloat);
       auto [chunk_out, _] = sdpa_general_mps(
-          q_f32.slice(2, start, end), k_f32, v_f32, attn_mask,
-          dropout_p, is_causal, dropout_mask, scale, orig_query, unsqueezed);
+          q_chunk, key, value, attn_mask, dropout_p, is_causal, dropout_mask, scale, orig_query, unsqueezed);
       out.slice(2, start, end).copy_(chunk_out.to(query.scalar_type()));
     }
     return {out, at::empty({0})};
