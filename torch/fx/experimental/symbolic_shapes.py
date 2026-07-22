@@ -6566,22 +6566,6 @@ class ShapeEnv:
         #    This does a lot of work: it covers duck sizing and equality guards.
         all_exprs: list[list[str]] = [[] for _ in langs]
 
-        # Guards can mention a symbol that only appears through a compound
-        # placeholder expression, such as an input tracked as ``s + 1``.  Give
-        # those guard symbols a source early enough for DimConstraints, without
-        # adding unrelated ShapeEnv symbols to this guard expression.
-        guard_symbols: set[sympy.Symbol] = set()
-        active_guards = guards if guards is not None else self.guards
-        for guard in active_guards:
-            guard_symbols.update(guard.expr.free_symbols)
-        if guards is None:
-            for ra in self.deferred_runtime_asserts.get(None, []):
-                guard_symbols.update(ra.expr.free_symbols)
-        for symbol in guard_symbols:
-            if not symbol_to_source.get(symbol):
-                symbol_to_source[symbol].extend(self.var_to_sources.get(symbol, []))
-                fallback_source_symbols.add(symbol)
-
         self.dim_constraints = DimConstraints(
             symbol_to_source,
             self.backed_var_to_val,
