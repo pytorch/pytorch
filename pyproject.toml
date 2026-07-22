@@ -260,7 +260,9 @@ dev = [
     # in PyTorch root until the project fully migrates to pyproject.toml
     # after which this can be removed as it is already specified in the
     # [build-system] section
+    "scikit-build-core>=1.0",
     "setuptools>=77.0.0,<82",  # 77.0 is the first release with PEP 639 license-files support
+    "spin",
     "cmake>=3.27",
     "ninja",
     "numpy",
@@ -268,23 +270,24 @@ dev = [
     "pyyaml",
     "requests",
     "six",  # dependency chain: NNPACK -> PeachPy -> six
-    "typing-extensions>=4.10.0",
+    "typing-extensions>=4.15.0",
+    "pip",  # not technically needed, but this makes setup.py invocation work
 
     # This list should be kept in sync with the requirements.txt in
     # PyTorch root until the project fully migrates to pyproject.toml
-    "build[uv]",
+    "build[uv]",  # for building sdist and wheel
     "expecttest>=0.3.0",
     "filelock",
     "fsspec>=0.8.5",
     "hypothesis",
     "jinja2",
-    "lintrunner; platform_machine != 's390x' and platform_machine != 'riscv64'",
+    "lintrunner ; platform_machine != \"s390x\"",
     "networkx>=2.5.1",
     "optree>=0.13.0",
     "psutil",
+    "spin",
     "sympy>=1.13.3",
-    "typing-extensions>=4.15.0",
-    "wheel",
+    "wheel"
 ]
 
 [project]
