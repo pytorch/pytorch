@@ -160,6 +160,12 @@ if [[ -n $TESTS_TO_INCLUDE ]]; then
   INCLUDE_CLAUSE="--include $TESTS_TO_INCLUDE"
 fi
 
+# Exclude tests from run_test.py (symmetric to TESTS_TO_INCLUDE).
+if [[ -n $TESTS_TO_EXCLUDE ]]; then
+  echo "Setting EXCLUDE_CLAUSE"
+  EXCLUDE_CLAUSE="--exclude $TESTS_TO_EXCLUDE"
+fi
+
 echo "Environment variables"
 env
 
@@ -407,14 +413,14 @@ test_python_shard() {
 
   # modify LD_LIBRARY_PATH to ensure it has the conda env.
   # This set of tests has been shown to be buggy without it for the split-build
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests $EXCLUDE_CLAUSE $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 
   assert_git_not_dirty
 }
 
 test_python() {
   # shellcheck disable=SC2086
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests $EXCLUDE_CLAUSE $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
   assert_git_not_dirty
 }
 
@@ -1169,12 +1175,7 @@ test_inductor_torchbench_smoketest_perf() {
   done
 
   # Perform some "warm-start" runs for a few huggingface models.
-  # NB: DistillGPT2 is excluded here because it has a known A100-specific inductor
-  # accuracy divergence (RMSE ~0.19 vs ~0.008 eager) that fails only on sm80; it
-  # still passes and is covered by the inductor_huggingface accuracy job on other
-  # runners. See pytorch/pytorch#187401. A one-off warm-start accuracy miss should
-  # not fail the whole smoke job. Re-add once the sm80 divergence is fixed.
-  for test in AllenaiLongformerBase DistilBertForMaskedLM GoogleFnet YituTechConvBert; do
+  for test in AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
     python benchmarks/dynamo/huggingface.py --accuracy --training --amp --inductor --device cuda --warm-start-latency \
       --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
     python benchmarks/dynamo/check_accuracy.py \
@@ -1366,17 +1367,27 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   mkdir -p "$TEST_REPORTS_DIR"
 
   test_inductor_set_cpu_affinity
-  local models_speedup_target=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu.csv
+  local models_perf_target=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu.csv
+  local perf_metric=speedup
   if [[ -n "${USE_ARC:-}" ]]; then
-    models_speedup_target=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu_osdc.csv
+    models_perf_target=benchmarks/dynamo/expected_ci_abs_latency_inductor_torchbench_cpu_osdc.csv
+    perf_metric=abs_latency
   fi
 
-  echo "Using CPU TorchBench smoketest targets from $models_speedup_target"
-  grep -v '^ *#' < "$models_speedup_target" | while IFS=',' read -r -a model_cfg
+  if [[ ! -r "$models_perf_target" ]]; then
+    echo "Missing CPU TorchBench smoketest target file: $models_perf_target" >&2
+    return 1
+  fi
+  echo "Using CPU TorchBench smoketest $perf_metric targets from $models_perf_target"
+  local validation_status=0
+  while IFS=',' read -r -a model_cfg
   do
-    local model_name=${model_cfg[0]}
+    local model_name=${model_cfg[0]:-}
+    if [[ -z "$model_name" || "$model_name" == \#* ]]; then
+      continue
+    fi
     local data_type=${model_cfg[2]}
-    local speedup_target=${model_cfg[5]}
+    local perf_target=${model_cfg[5]}
     local threshold_scale=${model_cfg[6]:-0.99}
     local backend=${model_cfg[1]}
     if [[ ${model_cfg[4]} == "cpp" ]]; then
@@ -1398,10 +1409,13 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     cat "$output_name"
     # The threshold value needs to be actively maintained to make this check useful.
     # Allow 1% variance by default for CPU perf to accommodate perf fluctuation.
-    # Some models can override this in the target CSV when a tighter speedup band is flaky.
+    # Some models can override this in the target CSV when a tighter band is flaky.
     # Fail on large improvements too so the baseline is updated promptly.
-    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target" -s "$threshold_scale" --fail-on-improvement
-  done
+    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$perf_target" -s "$threshold_scale" \
+      --metric "$perf_metric" --fail-on-improvement \
+      || validation_status=$?
+  done < "$models_perf_target"
+  return "$validation_status"
 }
 
 test_torchbench_gcp_smoketest(){
@@ -1998,7 +2012,7 @@ EOF
   pip3 install -r requirements.txt
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-  python -m build --wheel --no-isolation -C--build-option=--bdist-dir="base_bdist_tmp" --outdir "base_dist"
+  python -m build --wheel --no-isolation --outdir "base_dist"
   python -mpip install base_dist/*.whl
   echo "::endgroup::"
 
