@@ -1,13 +1,15 @@
 import contextlib
 import os
 
-from flydsl.compiler import jit_argument as flydsl_jit_argument
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     infer_has_k_tail,
     launch_gemm_gfx950,
     make_gemm_param_and_validate,
 )
-from torch._inductor.runtime.flydsl_cache import ensure_flydsl_cache_dir
+from torch._inductor.runtime.flydsl_cache import (
+    ensure_flydsl_cache_dir,
+    make_flydsl_inductor_launcher,
+)
 
 {{gen_defines()}}
 
@@ -16,10 +18,11 @@ _gemm_param = None
 _gemm_executor = None
 
 
-def _dynamic_tensor_arg(tensor):
-    # Keep concrete tensor shapes out of FlyDSL's JIT cache key so the same tile
-    # config can be reused across GEMM shapes.
-    return flydsl_jit_argument.TorchTensorJitArg(tensor)
+def _inductor_tensor_arg(tensor):
+    # FlyDSL's dynamic tensor ABI repacks shape and stride metadata on every
+    # launch. Inductor only emits this template for static layouts, so specialize
+    # the memref once and leave just each tensor's data pointer on the hot path.
+    return flyc.from_torch_tensor(tensor)
 
 
 @contextlib.contextmanager
@@ -53,10 +56,6 @@ def _temporary_env(updates):
             output,
             mat1,
             mat2_nk,
-            GEMM_M,
-            GEMM_N,
-            GEMM_K,
-            _gemm_param,
             stream,
         )
         return output
@@ -90,9 +89,9 @@ def _temporary_env(updates):
     ensure_flydsl_cache_dir()
     executor = flyc.compile(
         launch_gemm_gfx950,
-        _dynamic_tensor_arg(output),
-        _dynamic_tensor_arg(mat1),
-        _dynamic_tensor_arg(mat2_nk),
+        _inductor_tensor_arg(output),
+        _inductor_tensor_arg(mat1),
+        _inductor_tensor_arg(mat2_nk),
         GEMM_M,
         GEMM_N,
         GEMM_K,
@@ -100,7 +99,16 @@ def _temporary_env(updates):
         stream,
     )
     if not os.environ.get("COMPILE_ONLY"):
-        _gemm_executor = executor
+        _gemm_executor = make_flydsl_inductor_launcher(
+            executor,
+            output,
+            mat1,
+            mat2_nk,
+            m=GEMM_M,
+            n=GEMM_N,
+            k=GEMM_K,
+            param=param,
+        )
     return output
 
 
