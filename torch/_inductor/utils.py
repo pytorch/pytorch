@@ -120,16 +120,11 @@ def _gpu_types() -> list[str]:
     """
     from torch._dynamo.device_interface import get_registered_device_interfaces
 
-    gpu_types = []
-    for name, device_interface in get_registered_device_interfaces():
-        if ":" in name:
-            continue
-        try:
-            if device_interface.is_gpu():
-                gpu_types.append(name)
-        except NotImplementedError:
-            continue
-    return gpu_types
+    return [
+        name
+        for name, device_interface in get_registered_device_interfaces()
+        if ":" not in name and device_interface.is_gpu()
+    ]
 
 
 class _GpuTypes:
@@ -145,12 +140,6 @@ class _GpuTypes:
 
     def __contains__(self, item: object) -> bool:
         return item in _gpu_types()
-
-    def __len__(self) -> int:
-        return len(_gpu_types())
-
-    def __getitem__(self, index: Any) -> Any:
-        return _gpu_types()[index]
 
     def __repr__(self) -> str:
         return repr(_gpu_types())
