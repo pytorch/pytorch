@@ -440,6 +440,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         local_reduce_axis: cutlass.Constexpr = 1,
         local_reduce_type: cutlass.Constexpr = "sum",
         local_reduce_source: cutlass.Constexpr = "identity",
+        local_reduce_feeds_main: cutlass.Constexpr = False,
     ):
         """Execute the GEMM operation in steps:
         - Setup static attributes before smem/grid/tma computation
@@ -486,6 +487,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_axis = local_reduce_axis
         self.local_reduce_type = local_reduce_type
         self.local_reduce_source = local_reduce_source
+        self.local_reduce_feeds_main = local_reduce_feeds_main
         self.has_cross_warp_local_reduce = cutlass.const_expr(
             local_reduce_tensor is not None
             and local_reduce_axis == 0
@@ -1599,7 +1601,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                 num_prev_subtiles = tile_sched.num_tiles_executed * subtile_cnt
                 local_reduce_partial = None
                 if cutlass.const_expr(
-                    local_reduce_tensor is not None
+                    (local_reduce_tensor is not None or self.local_reduce_feeds_main)
                     and self.local_reduce_axis == 1
                     and self.local_reduce_group > self.epi_tile_n
                 ):
@@ -1721,7 +1723,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                             mma_tile_coord_mnl[2],
                                         ]
                                 epilogue_values.append(fragment.load())
-                    if cutlass.const_expr(local_reduce_tensor is not None):
+                    if cutlass.const_expr(
+                        local_reduce_tensor is not None
+                        or self.local_reduce_feeds_main
+                    ):
                         local_reduce_vec = acc_vec.to(epilogue_input_dtype).to(
                             self.acc_dtype
                         )
@@ -1729,9 +1734,37 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             local_reduce_vec = local_reduce_vec * local_reduce_vec
                         else:
                             assert self.local_reduce_source == "identity"
-                    epilogue_result = epilogue_op(
-                        acc_vec.to(epilogue_input_dtype), *tuple(epilogue_values)
-                    )
+                    if cutlass.const_expr(self.local_reduce_feeds_main):
+                        group = cutlass.const_expr(self.local_reduce_group)
+                        lane_layout_mn, _ = get_lane_warp_layouts(
+                            tiled_copy_t2r, reference_src=False
+                        )
+                        lanes_in_m = cutlass.const_expr(
+                            cute.size(lane_layout_mn, mode=[0])
+                        )
+                        assert group <= lanes_in_m
+                        feed_value = cute.make_rmem_tensor_like(
+                            local_reduce_vec, self.acc_dtype
+                        )
+                        feed_value.store(local_reduce_vec)
+                        feed_flt = cute.filter_zeros(feed_value)
+                        for i in cutlass.range(cute.size(feed_flt), unroll_full=True):
+                            rows = group // 2
+                            while rows > 0:
+                                feed_flt[i] += cute.arch.shuffle_sync_bfly(
+                                    feed_flt[i],
+                                    offset=cute.crd2idx((rows, 0), lane_layout_mn),
+                                )
+                                rows //= 2
+                            if cutlass.const_expr(self.local_reduce_type == "mean"):
+                                feed_flt[i] /= group
+                        epilogue_result = acc_vec.to(
+                            epilogue_input_dtype
+                        ) - feed_value.load()
+                    else:
+                        epilogue_result = epilogue_op(
+                            acc_vec.to(epilogue_input_dtype), *tuple(epilogue_values)
+                        )
                     if cutlass.const_expr(has_epilogue_outputs):
                         for output_index, tensor in enumerate(
                             (epilogue_output0, epilogue_output1, epilogue_output2)
@@ -1777,7 +1810,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     else:
                         acc_vec = epilogue_result.to(self.c_dtype)
 
-                    if cutlass.const_expr(local_reduce_tensor is not None):
+                    if cutlass.const_expr(
+                        local_reduce_tensor is not None
+                        and not self.local_reduce_feeds_main
+                    ):
                         group = cutlass.const_expr(self.local_reduce_group)
                         mReduce = local_reduce_tensor[
                             mma_tile_coord_mnl[2], None, None
