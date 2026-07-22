@@ -28,6 +28,42 @@ def gemm_config_from_key(config_key: GemmConfigKey) -> quack_gemm_config.GemmCon
     return quack_gemm_config.GemmConfig(**dict(config_key))
 
 
+def explicit_gemm_config_key(
+    config: dict[str, Any], device: torch.device
+) -> GemmConfigKey:
+    """Validate and canonicalize a user-selected QuACK GEMM config.
+
+    Exact type matching prevents bool/int aliases from selecting a different key.
+    """
+    field_names = tuple(field.name for field in fields(quack_gemm_config.GemmConfig))
+    missing = [name for name in field_names if name not in config]
+    unexpected = [name for name in config if name not in field_names]
+    if missing or unexpected:
+        raise NotImplementedError(
+            "FlexGEMM explicit QUACK config must specify exactly the GemmConfig "
+            f"fields; missing={missing}, unexpected={unexpected}"
+        )
+
+    requested = quack_gemm_config.GemmConfig(**config)
+    candidates = candidate_gemm_configs_for_device(device)
+    expected_device_capacity = candidates[0].device_capacity
+    if requested.device_capacity != expected_device_capacity:
+        raise NotImplementedError(
+            f"FlexGEMM explicit QUACK config targets SM{requested.device_capacity}0, "
+            f"but {device} uses SM{expected_device_capacity}0 configs"
+        )
+    for candidate in candidates:
+        if all(
+            type(getattr(requested, name)) is type(getattr(candidate, name))
+            and getattr(requested, name) == getattr(candidate, name)
+            for name in field_names
+        ):
+            return gemm_config_key(candidate)
+    raise NotImplementedError(
+        f"FlexGEMM explicit QUACK config is not supported on {device}: {requested}"
+    )
+
+
 @cache
 def dense_gemm_config_priority_keys() -> tuple[GemmConfigKey, ...]:
     """Return the measured dense FlexGEMM QuACK preference order."""
