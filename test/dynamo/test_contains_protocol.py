@@ -20,7 +20,7 @@ import types
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import make_dynamo_test, xfailIfPy314Plus
 
 
 # ---------------------------------------------------------------------------
@@ -840,6 +840,9 @@ class TestSpecialMethodContainsRegressions(torch._dynamo.test_case.TestCase):
             self.assertIn("is not a container", str(e))
         self.assertTrue(raised)
 
+    # 3.14 slot_sq_contains clears a bind-time AttributeError and falls back to
+    # iteration; <3.14 propagates it. Dynamo does not model the 3.14 clearing yet.
+    @xfailIfPy314Plus
     @make_dynamo_test
     def test_contains_property_attribute_error_propagates(self):
         with self.assertRaises(AttributeError):
