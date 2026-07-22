@@ -498,12 +498,16 @@ def significant_strides_equal(
     shape: Sequence[_IntLike],
 ) -> bool:
     """
-    Returns true if the strides are equal, ignoring dimensions of size 1 .
+    Returns true if the strides are equal, ignoring dimensions of size 0 or 1.
+    If any dimension is size 0, all strides are insignificant since the tensor
+    is empty.
     """
     if not (len(shape) == len(strides1) and len(strides1) == len(strides2)):
         raise AssertionError(
             "Expected len(shape) == len(strides1) and len(strides1) == len(strides2)"
         )
+    if any(V.graph.sizevars.statically_known_equals(dim, 0) for dim in shape):
+        return True
     for dim, s1, s2 in zip(shape, strides1, strides2):
         if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
@@ -537,8 +541,9 @@ def try_match_insignificant_strides(
 
     storage, old_layout = as_storage_and_layout(tensor)
     new_stride = [*old_layout.stride]
+    is_empty = tensor.is_zero_elements()
     for i, s in enumerate(tensor.get_size()):
-        if V.graph.sizevars.statically_known_leq(s, 1):
+        if is_empty or V.graph.sizevars.statically_known_leq(s, 1):
             new_stride[i] = strides[i]
 
     new_layout = FixedLayout(
