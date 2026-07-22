@@ -1,6 +1,7 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 
+#include <algorithm>
 #include <type_traits>
 
 #ifdef USE_KINETO
@@ -100,6 +101,56 @@ std::unordered_set<libkineto::ActivityType> filterActivities(
   return result;
 }
 
+// The result of splitting the names requested for the XPU group into the
+// activity types to collect and the hardware metric names to measure.
+struct XpuActivityRequest {
+  std::unordered_set<libkineto::ActivityType> activity_types;
+  std::vector<std::string> metrics;
+};
+
+// For the XPU group, a requested name that matches an activity type acts as a
+// fine-grained activity filter (see #176351); any other name is treated as an
+// XPU hardware metric name handled by the XPUPTI scope profiler. We cannot
+// validate metric names here: they are device-specific and only known to
+// PTI/driver, so unknown names are forwarded rather than rejected.
+XpuActivityRequest splitXpuRequest(
+    const ActivityTypeMap& defaults,
+    const std::unordered_set<std::string>& requested) {
+  XpuActivityRequest out;
+  for (const auto& name : requested) {
+    const auto it =
+        std::find_if(defaults.begin(), defaults.end(), [&](const auto& entry) {
+          return entry.second == name;
+        });
+    if (it != defaults.end()) {
+      out.activity_types.insert(it->first);
+    } else {
+      out.metrics.push_back(name);
+    }
+  }
+  return out;
+}
+
+// Build the Kineto config fragment that drives the XPUPTI scope profiler.
+// The keys mirror those parsed by XpuptiScopeProfilerConfig::handleOption.
+// Per-kernel (PTI_METRICS_SCOPE_AUTO_KERNEL) is the only mode PTI supports
+// today, so it is intentionally hardcoded here; custom_profiler_config is the
+// reserved channel for a future PTI_METRICS_SCOPE_USER mode.
+std::string buildXpuScopeConfig(const std::vector<std::string>& metrics) {
+  std::stringstream configss;
+  configss << "XPUPTI_PROFILER_METRICS=";
+  bool first = true;
+  for (const auto& metric : metrics) {
+    if (!first) {
+      configss << ',';
+    }
+    configss << metric;
+    first = false;
+  }
+  configss << "\nXPUPTI_PROFILER_ENABLE_PER_KERNEL=true\n";
+  return std::move(configss).str();
+}
+
 } // namespace
 #endif // USE_KINETO
 
@@ -120,9 +171,14 @@ const DeviceAndResource kineto_ids() {
 void addMetadata(
     activity_t* activity,
     const std::string& key,
-    const std::string& value) {
+    const std::string& value,
+    bool quote) {
 #ifdef USE_KINETO
-  activity->addMetadata(key, value);
+  if (quote) {
+    activity->addMetadataQuoted(key, value);
+  } else {
+    activity->addMetadata(key, value);
+  }
 #endif // USE_KINETO
 }
 
@@ -202,63 +258,6 @@ void ActivityTraceWrapper::save(const std::string& path) {
 #endif // USE_KINETO
 }
 
-namespace {
-// Handles processing of Experimental Config options for Kineto
-class ExperimentalConfigWrapper {
- public:
-  explicit ExperimentalConfigWrapper(
-      const torch::profiler::impl::ExperimentalConfig& config)
-      : config_(config) {}
-
-  bool assertValid() {
-    return !config_.profiler_metrics.empty();
-  }
-
-  void prepareTraceWithExperimentalOptions(
-      std::set<libkineto::ActivityType>&& enabled_activities) {
-    std::set<libkineto::ActivityType> k_activities =
-        std::move(enabled_activities);
-#ifdef USE_KINETO
-    k_activities.insert(libkineto::ActivityType::CUDA_PROFILER_RANGE);
-
-    // Add CPU activities if we are measuring per kernel ranges
-    if (config_.profiler_measure_per_kernel) {
-      for (const auto& [type, name] : kCpuTypes) {
-        k_activities.insert(type);
-      }
-    }
-
-    const size_t num_metrics = config_.profiler_metrics.size();
-    std::stringstream configss;
-
-    LOG(INFO) << "CUPTI profiler metrics size = " << num_metrics;
-
-    configss << "ACTIVITIES_WARMUP_PERIOD_SECS=0\n"
-             << "CUPTI_PROFILER_METRICS=";
-
-    for (size_t i = 0; i < num_metrics; i++) {
-      configss << config_.profiler_metrics[i];
-      if (num_metrics > 1 && i < (num_metrics - 1)) {
-        configss << ',';
-      }
-    }
-    configss << "\nCUPTI_PROFILER_ENABLE_PER_KERNEL="
-             << (config_.profiler_measure_per_kernel ? "true" : "false")
-             << '\n';
-    configss << "CUSTOM_CONFIG=" << config_.custom_profiler_config << '\n';
-    LOG(INFO) << "Generated config = " << configss.str();
-
-    libkineto::api().activityProfiler().prepareTrace(
-        k_activities, configss.str());
-#endif // USE_KINETO
-  }
-
- private:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const torch::profiler::impl::ExperimentalConfig& config_;
-};
-} // namespace
-
 bool collectivesProfilerExists() {
 #if defined(KINETO_HAS_HCCL_PROFILER)
   return true;
@@ -276,7 +275,7 @@ static const std::string setTraceID(const std::string& trace_id) {
   std::stringstream configss;
   configss << "REQUEST_TRACE_ID=" << trace_id << '\n';
   configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << '\n';
-  return configss.str();
+  return std::move(configss).str();
 }
 
 static const std::string appendCustomConfig(
@@ -288,7 +287,7 @@ static const std::string appendCustomConfig(
   std::stringstream configss;
   configss << config;
   configss << "CUSTOM_CONFIG=" << custom_profiler_config << '\n';
-  return configss.str();
+  return std::move(configss).str();
 }
 #endif
 
@@ -310,6 +309,7 @@ void prepareTrace(
   }
 
   std::set<libkineto::ActivityType> k_activities;
+  std::string extraConfig;
 
   // Helper: insert activity types for a group, applying the filter if present.
   auto insertActivities = [&](torch::autograd::profiler::ActivityType group,
@@ -325,14 +325,44 @@ void prepareTrace(
     }
   };
 
-  bool has_cpu_activity =
+  const bool has_cpu_activity =
       activities.count(torch::autograd::profiler::ActivityType::CPU);
 
   if (has_cpu_activity) {
     insertActivities(torch::autograd::profiler::ActivityType::CPU, kCpuTypes);
   }
   if (activities.count(torch::autograd::profiler::ActivityType::XPU)) {
-    insertActivities(torch::autograd::profiler::ActivityType::XPU, kXpuTypes);
+    const auto filter_it =
+        activity_filter.find(torch::autograd::profiler::ActivityType::XPU);
+    if (filter_it != activity_filter.end()) {
+      // A filtered XPU request may mix activity type names (fine-grained
+      // filtering) with XPU hardware metric names (scope profiler).
+      const auto request = splitXpuRequest(kXpuTypes, filter_it->second);
+      k_activities.insert(
+          request.activity_types.begin(), request.activity_types.end());
+      if (!request.metrics.empty()) {
+        k_activities.insert(libkineto::ActivityType::XPU_SCOPE_PROFILER);
+        // The scope profiler attaches metrics to individual kernels and needs
+        // the kernel activity view to correlate them to real kernel
+        // timestamps; without it the metrics would land on synthetic
+        // timestamps. Enabling metrics therefore implies collecting kernels.
+        k_activities.insert(libkineto::ActivityType::CONCURRENT_KERNEL);
+        extraConfig = buildXpuScopeConfig(request.metrics);
+        // A dict request collects exactly what it lists (see #176351), so
+        // asking only for metrics drops the default XPU activities (memcpy,
+        // runtime, driver, overhead). Warn since this is rarely intended.
+        if (request.activity_types.empty()) {
+          TORCH_WARN(
+              "Only XPU hardware metrics were requested for ProfilerActivity.XPU; "
+              "default XPU activities (e.g. XPU_RUNTIME, GPU_MEMCPY) will not be "
+              "traced. List the desired activity type names alongside the metrics "
+              "to collect them as well.");
+        }
+      }
+    } else {
+      // Trace default XPU activity types
+      insertActivities(torch::autograd::profiler::ActivityType::XPU, kXpuTypes);
+    }
   }
   if (activities.count(torch::autograd::profiler::ActivityType::MTIA)) {
     if (config.custom_profiler_config.empty()) {
@@ -384,17 +414,10 @@ void prepareTrace(
         kPrivateUse1Types);
   }
 
-  ExperimentalConfigWrapper configWrap(config);
-
-  // Experimental Configuration options are present
-  if (config && configWrap.assertValid()) {
-    configWrap.prepareTraceWithExperimentalOptions(std::move(k_activities));
-    return;
-  }
-
   const std::string traceIdStr = setTraceID(trace_id);
   const std::string configStr =
-      appendCustomConfig(traceIdStr, config.custom_profiler_config);
+      appendCustomConfig(traceIdStr, config.custom_profiler_config) +
+      extraConfig;
 
   libkineto::api().activityProfiler().prepareTrace(k_activities, configStr);
 #endif // USE_KINETO
@@ -499,6 +522,8 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::MTIA_INSIGHT:
     case libkineto::ActivityType::MTIA_COUNTERS:
       return device_type_privateuse1_or(c10::DeviceType::MTIA);
+    case libkineto::ActivityType::XPU_SCOPE_PROFILER:
+      return c10::DeviceType::XPU;
     case libkineto::ActivityType::HPU_OP:
       return c10::DeviceType::HPU;
     case libkineto::ActivityType::CPU_OP:

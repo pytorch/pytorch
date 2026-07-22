@@ -32,7 +32,6 @@
 #include <ATen/core/CheckMemoryFormat.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
 #include <c10/core/SymInt.h>
 #include <ATen/core/TensorAccessor.h>
@@ -144,7 +143,7 @@ class TORCH_API Tensor: public TensorBase {
     C10_DIAGNOSTIC_POP()
   }
 
-  // Aliased by Dimname overloads, so need explicit using
+  // Bring in base class methods
   using TensorBase::size;
   using TensorBase::sym_size;
   using TensorBase::stride;
@@ -240,11 +239,6 @@ class TORCH_API Tensor: public TensorBase {
   // TODO: Deprecate me
   Tensor toBackend(Backend b) const {
     return to(options().device(backendToDeviceType(b)).layout(layout_from_backend(b)), /*non_blocking*/ false, /*copy*/ false);
-  }
-
-  C10_DEPRECATED_MESSAGE("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")
-  bool is_variable() const noexcept {
-    return !at::impl::variable_excluded_from_dispatch();
   }
 
   template<typename T>

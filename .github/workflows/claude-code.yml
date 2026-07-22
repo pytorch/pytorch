@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: Claude Code
 
 on:
@@ -20,3 +21,5 @@ jobs:
       append_system_prompt: |
         When asked to review a PR, always use the /pr-review skill first.
         It contains PyTorch-specific review guidelines, output format, and critical checks.
+        Always put the details of the PR review inside a GitHub collapsible section and
+        a one sentence summary outside.

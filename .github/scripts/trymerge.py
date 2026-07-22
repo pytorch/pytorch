@@ -1911,6 +1911,26 @@ def is_invalid_cancel(
     )
 
 
+def is_crcr_l3(check: JobCheckState, drci_classifications: Any) -> bool:
+    """Return True if this check is a non-blocking CRCR L3 failure.
+
+    Dr.CI is the classification authority. A check is L3 non-blocking when
+    Dr.CI returns it under the ``CRCR_L3`` category. CRCR (cross-repo CI
+    relay) L3 check runs are named ``crcr/<owner>/<repo>/<workflow>`` and will be
+    classified as CRCR_L3 by Dr.CI when their downstream_repo_level is L3.
+    """
+    if not check or not drci_classifications:
+        return False
+
+    name = check.name
+    job_id = check.job_id
+
+    return any(
+        name == crcr["name"] or (job_id and job_id == crcr["id"])
+        for crcr in drci_classifications.get("CRCR_L3", [])
+    )
+
+
 def get_classifications(
     pr_num: int,
     project: str,
@@ -2009,6 +2029,18 @@ def get_classifications(
             )
             continue
 
+        elif is_crcr_l3(check, drci_classifications):
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "CRCR_L3",
+                check.job_id,
+                check.title,
+                check.summary,
+            )
+            continue
+
         if ignore_current_checks is not None and name in ignore_current_checks:
             checks_with_classifications[name] = JobCheckState(
                 check.name,
@@ -2062,6 +2094,7 @@ def validate_revert(
     allowed_apps = {
         "https://github.com/apps/pytorch-auto-revert",
         "https://github.com/apps/facebook-github-tools",
+        "https://github.com/apps/meta-codesync",
     }
     if comment.author_url in allowed_apps:
         allowed_reverters.append("NONE")
@@ -2297,7 +2330,13 @@ def categorize_checks(
             target = (
                 failed_checks_categorization[classification]
                 if classification
-                in ("IGNORE_CURRENT_CHECK", "BROKEN_TRUNK", "FLAKY", "UNSTABLE")
+                in (
+                    "IGNORE_CURRENT_CHECK",
+                    "BROKEN_TRUNK",
+                    "FLAKY",
+                    "UNSTABLE",
+                    "CRCR_L3",
+                )
                 else failed_checks
             )
             target.append((checkname, url, job_id))

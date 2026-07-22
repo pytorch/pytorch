@@ -436,7 +436,9 @@ int register_linear_params() {
                     at::globalContext().qEngine() == at::QEngine::X86) {
                   const auto& weight = std::get<0>(state);
                   if (weight.scalar_type() == at::kQInt8) {
+#if !defined(__aarch64__) && !defined(_M_ARM64)
                     return std::apply(PackedLinearWeight::prepack, std::move(state));
+#endif
                   } else if (weight.scalar_type() == at::kFloat) {
                     // NB: fp16 weight is serialized as float
                     return std::apply(PackedLinearWeightFp16::prepack, std::move(state));
@@ -460,7 +462,8 @@ int register_linear_params() {
                 }
 #endif // USE_PYTORCH_QNNPACK
 #if AT_MKLDNN_ENABLED()
-                if (at::globalContext().qEngine() == at::QEngine::ONEDNN) {
+                if (at::globalContext().qEngine() == at::QEngine::ONEDNN ||
+                    at::globalContext().qEngine() == at::QEngine::X86) {
                   const auto& weight = std::get<0>(state);
                   TORCH_CHECK(
                       weight.scalar_type() == at::kQInt8,
