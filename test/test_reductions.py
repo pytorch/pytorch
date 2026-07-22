@@ -877,6 +877,7 @@ class TestReductions(TestCase):
                 use_integral=False)
 
     @skipIfNoSciPy
+    @skipIfMPS
     def test_logsumexp_dim(self, device):
         from scipy.special import logsumexp
         self._test_dim_ops(
