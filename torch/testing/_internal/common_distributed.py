@@ -495,6 +495,13 @@ def requires_gloo():
     )
 
 
+def requires_tccl():
+    return skip_but_pass_in_sandcastle_if(
+        not c10d.is_tccl_available(),
+        "c10d was not compiled with the TCCL backend",
+    )
+
+
 def requires_nccl_version(version, msg):
     if not TEST_CUDA:
         return lambda f: f
