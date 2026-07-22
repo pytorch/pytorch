@@ -45,6 +45,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     MI350_ARCH,
@@ -835,7 +836,6 @@ class TestFP8Matmul(TestCase):
                 if format == "mxfp8":
                     wh, wq, w_scale = _convert_to_mxfp8_with_hp_ref(W[i])
                 elif format == "nvfp4":
-                    w_scale, wq = to_mxfp(W[i], format="mxfp8")
                     wh, wq, w_scale, w_global_scale = _convert_to_nvfp4_with_hp_ref(W[i])
                     w_global_scale_list.append(w_global_scale)
                 elif format == "mxfp4":
@@ -1273,15 +1273,11 @@ class TestFP8Matmul(TestCase):
     @with_tf32_off
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype, shapes, device):
         M, K, N = shapes
-        # Fp32 out_dtype is only supported by cuBLAS, which however only started
-        # shipping row-wise kernels in CUDA 12.9, and only for sm90+.
+        # Fp32 out_dtype works on the cuBLAS row-wise path when available; otherwise
+        # the CUTLASS row-wise fallback now covers the no-bias case.
         if base_dtype is torch.float32:
             if torch.version.hip:
                 raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
-            if torch.cuda.is_available() and _get_torch_cuda_version() < (12, 9):
-                raise unittest.SkipTest("Need CUDA 12.9+ for row-wise fp8 w/ cuBLAS")
-            if torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0):
-                raise unittest.SkipTest("Need sm90+ for row-wise fp8 w/ cuBLAS")
 
         if base_dtype is torch.float16:
             if torch.version.hip:
@@ -1323,6 +1319,11 @@ class TestFP8Matmul(TestCase):
 
             if base_dtype in {torch.bfloat16, torch.float16}:
                 atol, rtol = 7e-2, 7e-2
+            elif base_dtype is torch.float32:
+                # Backend routing may choose cuBLAS or the CUTLASS fallback; use a
+                # conservative element-wise tolerance for CUDA fp32 row-wise while
+                # keeping cosine strict.
+                atol, rtol = 5e-3, 5e-3
             else:
                 atol, rtol = 2e-3, 2e-3
 
@@ -1333,16 +1334,85 @@ class TestFP8Matmul(TestCase):
             )
             self.assertGreaterEqual(float(cosine_sim), 0.999)
 
-        # only cuBLAS supports rowwise with fp32 output and cuBLAS only supports
-        # rowwise on SM 9.0
-        if torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0) and output_dtype == torch.float:
-            with self.assertRaisesRegex(
-                ValueError,
-                "Only bf16 and fp16 high precision output types are supported for row-wise scaling."
-            ):
-                test()
+        # fp32 output is now supported on both the cuBLAS and CUTLASS row-wise paths.
+        test()
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
+    @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
+    @parametrize("wrap_v2", [True, False])
+    @with_tf32_off
+    def test_scaled_mm_row_wise_no_bias_output_dtypes(self, output_dtype, wrap_v2, device):
+        # No-bias row-wise binds the output dtype directly; this covers bf16/fp16/fp32
+        # through both public entry points. Backend routing may still choose cuBLAS or
+        # the CUTLASS fallback depending on CUDA version / arch.
+        if torch.version.hip and output_dtype is not torch.bfloat16:
+            raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
+
+        M, K, N = 256, 512, 768
+        torch.manual_seed(42)
+        input_dtype = e4m3_type
+        x = random_matrix_with_scaled_reduction_dim(M, K, dtype=torch.float32, device=device, reduction_dim=-1)
+        y = random_matrix_with_scaled_reduction_dim(N, K, dtype=torch.float32, device=device, reduction_dim=-1).t()
+        x_scales = tensor_to_scale(x, input_dtype, dim=1).float()
+        y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
+        x_fp8 = to_fp8_saturated(x * x_scales, e4m3_type)
+        y_fp8 = to_fp8_saturated(y * y_scales, e4m3_type)
+
+        out = scaled_mm_wrap(
+            x_fp8,
+            y_fp8,
+            scale_a=x_scales.reciprocal(),
+            scale_b=y_scales.reciprocal(),
+            out_dtype=output_dtype,
+            bias=None,
+            wrap_v2=wrap_v2,
+        )
+        out_emulated = mm_float8_emulated(x_fp8, x_scales, y_fp8, y_scales, output_dtype, None)
+
+        self.assertEqual(out.dtype, output_dtype)
+        # fp32 differs from the emulated reference only in accumulation order, so compare
+        # by cosine similarity (robust to kernel differences) rather than element-wise.
+        if output_dtype is torch.float32:
+            cosine_sim = torch.nn.functional.cosine_similarity(
+                out.flatten().float(), out_emulated.flatten().float(), dim=0
+            )
+            self.assertGreaterEqual(float(cosine_sim), 0.999)
         else:
-            test()
+            self.assertEqual(out, out_emulated, atol=7e-2, rtol=7e-2)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
+    @parametrize("wrap_v2", [True, False])
+    def test_scaled_mm_row_wise_fp32_out_with_bias_errors(self, wrap_v2, device):
+        # fp32 output combined with a bias is not supported on the row-wise path.
+        if torch.version.hip:
+            raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
+
+        M, K, N = 16, 32, 48
+        input_dtype = e4m3_type
+        x = random_matrix_with_scaled_reduction_dim(M, K, dtype=torch.float32, device=device, reduction_dim=-1)
+        y = random_matrix_with_scaled_reduction_dim(N, K, dtype=torch.float32, device=device, reduction_dim=-1).t()
+        x_scales = tensor_to_scale(x, input_dtype, dim=1).float()
+        y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
+        x_fp8 = to_fp8_saturated(x * x_scales, e4m3_type)
+        y_fp8 = to_fp8_saturated(y * y_scales, e4m3_type)
+        bias = torch.randn((N,), device=device, dtype=torch.bfloat16)
+
+        with self.assertRaisesRegex(
+            (ValueError, RuntimeError),
+            "Bias is not supported when out_dtype is set to Float32",
+        ):
+            scaled_mm_wrap(
+                x_fp8,
+                y_fp8,
+                scale_a=x_scales.reciprocal(),
+                scale_b=y_scales.reciprocal(),
+                out_dtype=torch.float32,
+                bias=bias,
+                wrap_v2=wrap_v2,
+            )
 
     @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
@@ -1770,6 +1840,7 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/164271")
+    @onlyCUDA
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
@@ -1860,7 +1931,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
 
     @skipIfRocm
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("mkn", [
         # Nice shapes
@@ -1881,6 +1952,8 @@ class TestFP8Matmul(TestCase):
         (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
     def test_blockwise_nvfp4_with_global_scale(self, mkn, device) -> None:
+        if "xpu" in device and not Xe2_Or_Later:
+            raise unittest.SkipTest("NVFP4 numerics require Xe2+ on XPU")
         M, K, N = mkn
         BLOCK_SIZE = 16
         # Note: SQNR target from `test_blockwise_mxfp8_nvfp4_mxfp4_numerics` test
@@ -1917,7 +1990,9 @@ class TestFP8Matmul(TestCase):
         if sqnr.item() <= approx_match_sqnr_target:
             raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
+    @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @onlyOn(["cuda", "xpu"])
     @parametrize("test_case_name", [
         "a_eye_b_eye",
         "a_ones_b_ones",
@@ -1961,6 +2036,11 @@ class TestFP8Matmul(TestCase):
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
         if recipe == "mxfp4" and SM120OrLater:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+        if "xpu" in device:
+            if fast_accum:
+                raise unittest.SkipTest("fast_accum not supported on XPU, skipping")
+            if recipe == "nvfp4" and not Xe2_Or_Later:
+                raise unittest.SkipTest("NVFP4 numerics require Xe2+ on XPU")
         M, K, N = mkn
         if recipe == "nvfp4" and K % 32 != 0:
             raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
@@ -2157,7 +2237,7 @@ class TestFP8Matmul(TestCase):
         C_ref = A_ref @ B_ref.t()
 
         # convert to swizzled format
-        if not torch.version.hip:
+        if not torch.version.hip and "xpu" not in device:
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 
@@ -2177,6 +2257,7 @@ class TestFP8Matmul(TestCase):
             if sqnr.item() <= approx_match_sqnr_target:
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
+    @skipXPU
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     def test_passed_swizzle_arrays(self, device) -> None:
         # Ensure that incorrectly-sized swizzle arrays are caught
@@ -2301,6 +2382,8 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_error_messages(self, device, recipe) -> None:
+        if "xpu" in device:
+            raise unittest.SkipTest("Error messages test not supported on XPU, skipping")
         if recipe == "mxfp4" and SM120OrLater:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         M, K, N = (1024, 512, 2048)
@@ -2549,6 +2632,7 @@ class TestFP8Matmul(TestCase):
                 self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
 
 
+    @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     def test_blockwise_mxfp8_compile(self, device) -> None:
 
@@ -2577,6 +2661,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
 
+    @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     def test_blockwise_nvfp4_compile(self, device) -> None:
 

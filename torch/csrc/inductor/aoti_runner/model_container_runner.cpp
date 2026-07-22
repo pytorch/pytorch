@@ -40,6 +40,51 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
         num_models >= 1,
         "num_models must be >=1 when run_single_threaded is false");
   }
+  load_aoti_symbols(model_so_path, device_str, run_single_threaded);
+
+  AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
+      &container_handle_,
+      num_models,
+      device_str.c_str(),
+      cubin_dir.empty() ? nullptr : cubin_dir.c_str()));
+}
+
+AOTIModelContainerRunner::AOTIModelContainerRunner(
+    const std::string& model_so_path,
+    size_t num_models,
+    const std::string& device_str,
+    const std::string& cubin_dir,
+    std::unordered_map<std::string, at::Tensor>& constants) {
+  TORCH_CHECK(num_models >= 1, "num_models must be >=1");
+  load_aoti_symbols(model_so_path, device_str, /*run_single_threaded=*/false);
+  TORCH_CHECK(
+      create_with_external_constants_func_ != nullptr,
+      "AOTInductorModelContainerCreateWithExternalConstants symbol not found "
+      "in .so. Rebuild the model with the latest AOTInductor.");
+
+  // Pass constants as C-ABI-safe entries (name + AtenTensorHandle) so no std
+  // container crosses the .so boundary. AtenTensorHandle borrows the caller's
+  // at::Tensor; the caller retains ownership (tensors must outlive the runner).
+  std::vector<AOTInductorConstantMapEntry> entries;
+  entries.reserve(constants.size());
+  for (auto& [name, tensor] : constants) {
+    entries.push_back(
+        {name.c_str(),
+         torch::aot_inductor::tensor_pointer_to_tensor_handle(&tensor)});
+  }
+  AOTI_RUNTIME_ERROR_CODE_CHECK(create_with_external_constants_func_(
+      &container_handle_,
+      num_models,
+      device_str.c_str(),
+      cubin_dir.empty() ? nullptr : cubin_dir.c_str(),
+      entries.data(),
+      entries.size()));
+}
+
+void AOTIModelContainerRunner::load_aoti_symbols(
+    const std::string& model_so_path,
+    const std::string& device_str,
+    bool run_single_threaded) {
   model_so_ = std::make_unique<at::DynamicLibrary>(model_so_path.c_str());
   TORCH_CHECK(model_so_, "Failed to load model: ", model_so_path);
 
@@ -108,9 +153,15 @@ consider rebuild your model with the latest AOTInductor.");
       get_constants_blob_size_func_,
       "AOTInductorModelContainerGetConstantsBlobSize")
   TRY_LOAD_SYMBOL(
+      did_call_load_constants_func_,
+      "AOTInductorModelContainerDidCallLoadConstants")
+  TRY_LOAD_SYMBOL(
       update_constants_from_blob_func_,
       "AOTInductorModelUpdateConstantsFromBlob")
   TRY_LOAD_SYMBOL(get_last_error_func_, "AOTInductorGetLastError")
+  TRY_LOAD_SYMBOL(
+      create_with_external_constants_func_,
+      "AOTInductorModelContainerCreateWithExternalConstants")
 #undef TRY_LOAD_SYMBOL
 
   // Hack to find the json file name from the model so file
@@ -119,18 +170,12 @@ consider rebuild your model with the latest AOTInductor.");
 
   if (c10::filesystem::exists(json_filename)) {
     proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
-        json_filename, device_str == "cpu");
+        json_filename, device_str);
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
   } else {
     proxy_executor_handle_ = nullptr;
   }
-
-  AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
-      &container_handle_,
-      num_models,
-      device_str.c_str(),
-      cubin_dir.empty() ? nullptr : cubin_dir.c_str()));
 }
 
 AOTIModelContainerRunner::~AOTIModelContainerRunner() {
@@ -146,6 +191,15 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
 std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
     std::vector<AtenTensorHandle>& input_handles,
     void* stream_handle) {
+  // The model steals each input handle and nulls its slot (see
+  // steal_from_raw_handles_to_raii_handles). If run_func_ throws before the
+  // steal (e.g. a failed input runtime check), the un-stolen handles would
+  // leak, keeping their input storage alive. Free whatever the model did not
+  // steal on every exit; on success all slots are null so this is a no-op.
+  auto free_unstolen_input_handles = c10::make_scope_exit([&input_handles]() {
+    torch::aot_inductor::free_unstolen_handles(input_handles);
+  });
+
   // For outputs, we only allocate a vector to hold returned tensor handles,
   // not allocating the actual output tensor storage here
   size_t num_outputs = 0;
@@ -411,6 +465,16 @@ void AOTIModelContainerRunner::free_inactive_constant_buffer() {
       "No free_inactive_constant_buffer in .so! Consider rebuild your model with the latest AOTInductor.");
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       free_inactive_constant_buffer_func_(container_handle_));
+}
+
+bool AOTIModelContainerRunner::did_call_load_constants() const {
+  TORCH_CHECK(
+      did_call_load_constants_func_ != nullptr,
+      "No did_call_load_constants in .so! Consider rebuild your model with the latest AOTInductor.");
+  bool did_call_load_constants = false;
+  AOTI_RUNTIME_ERROR_CODE_CHECK(did_call_load_constants_func_(
+      container_handle_, &did_call_load_constants));
+  return did_call_load_constants;
 }
 
 std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {
