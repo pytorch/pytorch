@@ -1524,7 +1524,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
   std::vector<c10::Event> outputEvents;
 };
 
-// A work that takes an lambda on construction and calls it on wait.
+// A work that takes a lambda on construction and calls it on wait.
 // It is useful for add a continuation to another work, and/or
 // composing multiple works together.
 class LambdaWork : public Work {
