@@ -166,9 +166,7 @@ namespace at { namespace native {
 // See NOTE [ Convolution design ] in aten/src/ATen/native/cudnn/ConvShared.cpp
 
 static bool allowMiopenTF32() {
-  return at::globalContext().float32PrecisionExplicit(
-      at::Float32Backend::CUDA,
-      at::Float32Op::CONV) == at::Float32Precision::TF32;
+  return at::globalContext().allowTF32CuDNN(at::Float32Op::CONV);
 }
 
 // ---------------------------------------------------------------------

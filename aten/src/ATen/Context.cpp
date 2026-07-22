@@ -396,16 +396,15 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
   return float32_matmul_precision;
 }
 
-Float32Precision Context::float32PrecisionImpl(Float32Backend backend, Float32Op op, bool legacy_default_tf32) const {
+Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op) const {
   std::pair<Float32Backend, Float32Op> key{backend, op};
   auto it = fp32_precision.find(key);
   TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
 
   Float32Precision precision = it->second;
 
-  // DEFAULT means "inherit from parent if set". It is only used as the initial
-  // state for CUDA conv/rnn. With no explicit parent override, legacy_default_tf32
-  // selects between the legacy TF32 default (cuDNN) and strict fp32 (MIOpen).
+  // DEFAULT means "inherit from parent if set, otherwise use the legacy TF32
+  // default". It is only used as the initial state for CUDA conv/rnn.
   if (precision == Float32Precision::DEFAULT) {
     key.second = Float32Op::ALL;
     Float32Precision parent = fp32_precision.find(key)->second;
@@ -419,7 +418,7 @@ Float32Precision Context::float32PrecisionImpl(Float32Backend backend, Float32Op
           ? Float32Precision::NONE
           : parent;
     }
-    return legacy_default_tf32 ? Float32Precision::TF32 : Float32Precision::NONE;
+    return Float32Precision::TF32;
   }
 
   if (precision == Float32Precision::NONE) {
@@ -436,14 +435,6 @@ Float32Precision Context::float32PrecisionImpl(Float32Backend backend, Float32Op
     return Float32Precision::NONE;
   }
   return precision;
-}
-
-Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op) const {
-  return float32PrecisionImpl(backend, op, /*legacy_default_tf32=*/true);
-}
-
-Float32Precision Context::float32PrecisionExplicit(Float32Backend backend, Float32Op op) const {
-  return float32PrecisionImpl(backend, op, /*legacy_default_tf32=*/false);
 }
 
 void Context::setFloat32MatmulPrecision(const std::string &s) {
