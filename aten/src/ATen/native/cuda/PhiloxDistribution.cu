@@ -17,14 +17,12 @@
 #include <c10/util/irange.h>
 #include <c10/util/safe_numerics.h>
 #include <array>
-#include <limits>
 #include <type_traits>
 #include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_philox_distribution_shards_native.h>
 #include <ATen/ops/_philox_normal_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #endif
@@ -32,13 +30,6 @@
 namespace at::native {
 
 namespace {
-
-// These values cross the dispatcher as integers and must match the
-// _PHILOX_DISTRIBUTION_* constants used by Python callers.
-enum class PhiloxDistributionKind : int64_t {
-  Normal = 0,
-  Uniform = 1,
-};
 
 void run_normal_distribution_shards(
     Tensor& self,
@@ -64,47 +55,25 @@ void run_uniform_distribution_shards(
 
 } // anonymous namespace
 
-Tensor& _philox_distribution_shards_symint_cuda_(
+void philox_distribution_shards_cuda(
     Tensor& self,
-    c10::SymIntArrayRef global_shape,
-    c10::SymIntArrayRef global_offsets,
-    c10::SymIntArrayRef local_offsets,
-    c10::SymIntArrayRef local_sizes,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
     int64_t chunk_count,
-    int64_t distribution,
-    ArrayRef<Scalar> params,
+    PhiloxDistributionKind distribution,
+    double param0,
+    double param1,
     std::optional<Generator> generator) {
-  const auto global_shape_int = C10_AS_INTARRAYREF_SLOW_ALLOC(global_shape);
-  const auto global_offsets_int = C10_AS_INTARRAYREF_SLOW_ALLOC(global_offsets);
-  const auto local_offsets_int = C10_AS_INTARRAYREF_SLOW_ALLOC(local_offsets);
-  const auto local_sizes_int = C10_AS_INTARRAYREF_SLOW_ALLOC(local_sizes);
-  const auto distribution_kind =
-      static_cast<PhiloxDistributionKind>(distribution);
-  TORCH_CHECK(
-      distribution_kind == PhiloxDistributionKind::Normal ||
-          distribution_kind == PhiloxDistributionKind::Uniform,
-      "_philox_distribution_shards_: unsupported distribution kind ",
-      distribution);
-  TORCH_CHECK(
-      params.size() == 2,
-      "_philox_distribution_shards_: distribution kind ",
-      distribution,
-      " expects 2 parameters, got ",
-      params.size());
-  TORCH_CHECK(
-      !params[0].isComplex() && !params[1].isComplex(),
-      "_philox_distribution_shards_: parameters must be real");
-
-  const double param0 = params[0].toDouble();
-  const double param1 = params[1].toDouble();
-  switch (distribution_kind) {
+  switch (distribution) {
     case PhiloxDistributionKind::Normal:
       run_normal_distribution_shards(
           self,
-          global_shape_int,
-          global_offsets_int,
-          local_offsets_int,
-          local_sizes_int,
+          global_shape,
+          global_offsets,
+          local_offsets,
+          local_sizes,
           chunk_count,
           param0,
           param1,
@@ -113,17 +82,16 @@ Tensor& _philox_distribution_shards_symint_cuda_(
     case PhiloxDistributionKind::Uniform:
       run_uniform_distribution_shards(
           self,
-          global_shape_int,
-          global_offsets_int,
-          local_offsets_int,
-          local_sizes_int,
+          global_shape,
+          global_offsets,
+          local_offsets,
+          local_sizes,
           chunk_count,
           param0,
           param1,
           generator);
       break;
   }
-  return self;
 }
 
 namespace {
@@ -440,13 +408,6 @@ void distribution_shards(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-void validate_normal_std(double stddev) {
-  TORCH_CHECK(
-      stddev >= 0.0,
-      "normal expects std >= 0.0, but found std ",
-      stddev);
-}
-
 void run_normal_distribution_shards(
     Tensor& self,
     IntArrayRef global_shape,
@@ -457,7 +418,6 @@ void run_normal_distribution_shards(
     double mean,
     double stddev,
     std::optional<Generator> generator) {
-  validate_normal_std(stddev);
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
       kBFloat16,
@@ -484,31 +444,6 @@ void run_normal_distribution_shards(
       });
 }
 
-template <typename scalar_t>
-void validate_uniform_bounds(const Tensor& self, double low, double high) {
-  const auto min =
-      static_cast<double>(std::numeric_limits<scalar_t>::lowest());
-  const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
-  TORCH_CHECK(low >= min && low <= max, "from is out of bounds for ", self.dtype());
-  TORCH_CHECK(
-      high >= min && high <= max, "to is out of bounds for ", self.dtype());
-  TORCH_CHECK(
-      low <= high,
-      "uniform_ expects to return a [from, to) range, but found from=",
-      low,
-      " > to=",
-      high);
-  TORCH_CHECK(
-      high - low <= max,
-      "uniform_ expects to-from <= std::numeric_limits<",
-      toString(self.scalar_type()),
-      ">::max(), but found to=",
-      high,
-      " and from=",
-      low,
-      " which result in to-from to exceed the limit");
-}
-
 void run_uniform_distribution_shards(
     Tensor& self,
     IntArrayRef global_shape,
@@ -525,7 +460,6 @@ void run_uniform_distribution_shards(
       self.scalar_type(),
       "_philox_distribution_shards_",
       [&] {
-        validate_uniform_bounds<scalar_t>(self, low, high);
         using opmath_t = at::opmath_type<scalar_t>;
         auto lo = static_cast<scalar_t>(low);
         auto hi = static_cast<scalar_t>(high);
@@ -802,5 +736,9 @@ Tensor& _philox_normal_cuda_(
   });
   return self;
 }
+
+REGISTER_DISPATCH(
+    philox_distribution_shards_stub,
+    &philox_distribution_shards_cuda)
 
 } // namespace at::native
