@@ -841,7 +841,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           R"(Sets the debug level of the torch.distributed package from the
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
-  py::class_<::c10d::ReduceOp> reduce_op(
+  intrusive_ptr_class_<::c10d::ReduceOp> reduce_op(
       module,
       "ReduceOp",
       py::metaclass(reinterpret_cast<PyObject*>(GetReduceOpMetaclass())),

@@ -555,8 +555,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         return IValue::make_capsule(cpp_obj);
       }
       if (py::isinstance<c10d::ReduceOp>(obj)) {
-        const auto& op = obj.cast<const c10d::ReduceOp&>();
-        auto cpp_obj = c10::make_intrusive<c10d::ReduceOp>(op);
+        auto cpp_obj = obj.cast<c10::intrusive_ptr<c10d::ReduceOp>>();
         return IValue::make_capsule(cpp_obj);
       }
 #endif
@@ -778,8 +777,7 @@ py::object toPyObject(IValue ivalue) {
     auto capsule = ivalue.toCapsule();
 #ifdef USE_DISTRIBUTED
     if (dynamic_cast<c10d::ReduceOp*>(capsule.get())) {
-      auto op = c10::static_intrusive_pointer_cast<c10d::ReduceOp>(capsule);
-      return py::cast(*op);
+      return py::cast(c10::static_intrusive_pointer_cast<c10d::ReduceOp>(std::move(capsule)));
     }
     {
       auto pg = c10::static_intrusive_pointer_cast<c10d::ProcessGroup>(capsule);
