@@ -152,6 +152,20 @@ void SpatialSoftMax_getLaunchSizes(
     dim3& grid, dim3& block, uint32_t& smem_size) {
   block = SpatialSoftMax_getBlockSize(dim_size, inner_size);
   uint32_t block_threads = block.x * block.y;
+  // The 64-bit instantiations burn more registers, so the kernel's real
+  // maxThreadsPerBlock can fall below the nominal 1024. HIP fails the
+  // occupancy query outright in that case (CUDA just clamps), so ask the
+  // driver for the actual cap first and shrink the block to fit.
+  cudaFuncAttributes attr;
+#if defined(USE_ROCM)
+  AT_CUDA_CHECK(cudaFuncGetAttributes(&attr, (void*)k));
+#else
+  AT_CUDA_CHECK(cudaFuncGetAttributes(&attr, k));
+#endif
+  if (block_threads > static_cast<uint32_t>(attr.maxThreadsPerBlock)) {
+    block.y = std::max(1u, static_cast<uint32_t>(attr.maxThreadsPerBlock) / block.x);
+    block_threads = block.x * block.y;
+  }
   smem_size = block.x == 1 ? 0 : block_threads * sizeof(accscalar_t);
   int max_active_blocks;
   AT_CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_active_blocks,
