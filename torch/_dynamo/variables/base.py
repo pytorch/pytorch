@@ -2049,6 +2049,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         if slotdef is not None and hasattr(type(self), slotdef.impl):
             return slotdef.invoke(tx, self, args, kwargs)
 
+        if name == "__hash__" and not args and not kwargs:
+            from .object_protocol import generic_hash
+
+            return generic_hash(tx, self)
+
         if name == "__subclasscheck__" and len(args) == 1 and not kwargs:
             if (self_py := self.as_python_constant()) and (
                 derived_py := args[0].as_python_constant()
