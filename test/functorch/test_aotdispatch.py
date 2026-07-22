@@ -66,6 +66,7 @@ from torch._functorch.partitioners import (
     _extract_fwd_bwd_modules,
     _extract_fwd_bwd_outputs,
     _extract_graph_with_inputs_outputs,
+    is_rng_op,
 )
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
@@ -7265,14 +7266,14 @@ def forward(self, primals_1, tangents_1):
         # so the producer op does not appear in the backward graph.
         self.assertNotIn("topk", bw_graph["gm"].code)
 
-    def _assert_dropout_fw_bw_mask_consistency(self, memory_budget):
+    def _assert_dropout_fw_bw_mask_consistency(self, memory_budget, device="cpu"):
         """Partitioner-forced recompute must not redraw dropout randomness in
         the backward (#190717): the gradient must match the mask the forward
         applied, derived here from the compiled forward's own output.
         """
         # The tests sharing this helper differ only in config, so recompile
         torch._dynamo.reset()
-        w = torch.arange(1.0, 26.0).view(5, 5)
+        w = torch.arange(1.0, 26.0, device=device).view(5, 5)
 
         def f(x):
             return F.dropout(x @ w, 0.5, True)
@@ -7280,7 +7281,7 @@ def forward(self, primals_1, tangents_1):
         with torch._functorch.config.patch(activation_memory_budget=memory_budget):
             compiled = torch.compile(f)
             torch.manual_seed(42)
-            x = torch.ones(2, 5, requires_grad=True)
+            x = torch.ones(2, 5, device=device, requires_grad=True)
             out = compiled(x)
             out.sum().backward()
         # x @ w is strictly positive, so the forward output reveals the mask
@@ -7296,7 +7297,17 @@ def forward(self, primals_1, tangents_1):
     def test_min_cut_partitioner_rng_budget_one_dropout_mask_consistency(self):
         self._assert_dropout_fw_bw_mask_consistency(memory_budget=1.0)
 
-    def _assert_rng_mlp_eager_parity(self, memory_budget):
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_min_cut_partitioner_rng_budget_zero_dropout_mask_consistency_cuda(self):
+        self._assert_dropout_fw_bw_mask_consistency(memory_budget=0.0, device="cuda")
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_min_cut_partitioner_rng_budget_one_dropout_mask_consistency_cuda(self):
+        self._assert_dropout_fw_bw_mask_consistency(memory_budget=1.0, device="cuda")
+
+    def _assert_rng_mlp_eager_parity(self, memory_budget, device="cpu"):
         """With fallback_random, compiled fw+bw must exactly match eager even
         when the memory budget forces recompute of everything else (#190717).
         """
@@ -7312,10 +7323,8 @@ def forward(self, primals_1, tangents_1):
 
         def run(fn, seed):
             torch.manual_seed(seed)
-            args = [
-                torch.rand(64, 64, dtype=torch.float64, requires_grad=True)
-                for _ in range(3)
-            ]
+            kwargs = {"dtype": torch.float64, "device": device}
+            args = [torch.rand(64, 64, **kwargs, requires_grad=True) for _ in range(3)]
             out = fn(*args)
             out.sum().backward()
             return out, args
@@ -7343,11 +7352,80 @@ def forward(self, primals_1, tangents_1):
         self._assert_rng_mlp_eager_parity(memory_budget=0.005)
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_rng_budget_half_eager_parity(self):
+        self._assert_rng_mlp_eager_parity(memory_budget=0.5)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_min_cut_partitioner_rng_budget_zero_eager_parity_cuda(self):
+        self._assert_rng_mlp_eager_parity(memory_budget=0.0, device="cuda")
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_min_cut_partitioner_rng_budget_knapsack_eager_parity_cuda(self):
+        self._assert_rng_mlp_eager_parity(memory_budget=0.005, device="cuda")
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_min_cut_partitioner_rng_budget_half_eager_parity_cuda(self):
+        self._assert_rng_mlp_eager_parity(memory_budget=0.5, device="cuda")
+
+    def _assert_rng_ops_saved_not_recomputed(self, memory_budget):
+        """Structural check on the partitioned graphs (#190717): under a
+        forcing memory budget the backward must contain no rng op, and the
+        forward must save the rng outputs (at least each dropout mask).
+        """
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+
+        def f(x, w):
+            h = F.dropout(F.relu(x @ w), 0.5, True)
+            return F.dropout(h @ w, 0.3, True)
+
+        args = [torch.rand(64, 64, requires_grad=True) for _ in range(2)]
+        with torch._functorch.config.patch(activation_memory_budget=memory_budget):
+            aot_function(
+                f,
+                fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+                bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+                partition_fn=min_cut_rematerialization_partition,
+            )(*args).sum().backward()
+
+        fw_graph, bw_graph = fw_graph_cell[0], bw_graph_cell[0]
+        fw_calls = [n for n in fw_graph.graph.nodes if n.op == "call_function"]
+        bw_calls = [n for n in bw_graph.graph.nodes if n.op == "call_function"]
+        fw_rng = [n for n in fw_calls if is_rng_op(n)]
+        self.assertEqual(len(fw_rng), 2)
+        self.assertEqual([n for n in bw_calls if is_rng_op(n)], [])
+        # The budget did force recompute (relu reappears in the backward),
+        # so the absence of rng ops there is not vacuous.
+        self.assertIn(torch.ops.aten.relu.default, [n.target for n in bw_calls])
+        saved = get_ins_outs(fw_graph)[1]
+        for rng_node in fw_rng:
+            getitems = [u for u in rng_node.users if u.target is operator.getitem]
+            masks = [g for g in getitems if g.args[1] == 1]
+            self.assertEqual(len(masks), 1)
+            self.assertIn(masks[0], saved)
+            if memory_budget == 0:
+                # The budget == 0 shortcut saves every getitem projection
+                self.assertTrue(all(g in saved for g in getitems))
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_rng_budget_zero_bw_graph_has_no_rng_ops(self):
+        self._assert_rng_ops_saved_not_recomputed(memory_budget=0.0)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_rng_budget_knapsack_bw_graph_has_no_rng_ops(self):
+        self._assert_rng_ops_saved_not_recomputed(memory_budget=0.005)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     @torch._functorch.config.patch(activation_memory_budget=0.0)
     def test_min_cut_partitioner_rng_budget_zero_backward_only_rng(self):
         """Backward-only rng ops are not forward nodes and must not be forced
-        into the saved values (that would make an invalid node an fw output).
+        into the saved values (that would make an invalid node an fw output);
+        with fallback_random the backward draw must match eager exactly.
         """
+        torch._dynamo.reset()
 
         class NoisyGrad(torch.autograd.Function):
             @staticmethod
@@ -7361,9 +7439,21 @@ def forward(self, primals_1, tangents_1):
         def f(x):
             return NoisyGrad.apply(x * 2.0).sum()
 
-        x = torch.randn(8, 8, requires_grad=True)
-        torch.compile(f)(x).backward()
-        self.assertEqual(x.grad.shape, x.shape)
+        def run(fn, seed):
+            arg = x.detach().clone().requires_grad_()
+            out = fn(arg)
+            torch.manual_seed(seed)
+            out.backward()
+            return arg.grad
+
+        x = torch.randn(8, 8)
+        with torch._inductor.config.patch(fallback_random=True):
+            compiled = torch.compile(f)
+            # Warm up first so compilation cannot perturb the measured rng
+            run(compiled, seed=99999)
+            eager_grad = run(f, seed=42)
+            compiled_grad = run(compiled, seed=42)
+        self.assertEqual(compiled_grad, eager_grad)
 
     def test_disable_functionalization_ignores_effect_token_metadata(self):
         def fn(args):
