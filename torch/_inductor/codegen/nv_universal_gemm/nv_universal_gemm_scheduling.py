@@ -190,33 +190,52 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 epilogue_nodes.append(node)
         return epilogue_nodes
 
-    @staticmethod
+    @classmethod
     def _grouped_reduce_config(
-        gemm_node: Buffer, scheduler_node: BaseSchedulerNode
-    ) -> tuple[str, int, int] | None:
+        cls, gemm_node: Buffer, scheduler_node: BaseSchedulerNode
+    ) -> tuple[str, int, int, str] | None:
         nodes = scheduler_node.get_nodes()
-        if len(nodes) != 1:
+        if len(nodes) not in (1, 2):
             return None
-        node = nodes[0].node
-        if not isinstance(node, ComputedBuffer):
+        buffers = [snode.node for snode in nodes]
+        if not all(isinstance(buffer, ComputedBuffer) for buffer in buffers):
             return None
+        buffers = [cast(ComputedBuffer, buffer) for buffer in buffers]
         origin_targets = OrderedSet(
             str(origin.target)
-            for origin in node.get_origins()
+            for buffer in buffers
+            for origin in buffer.get_origins()
             if hasattr(origin, "target")
         )
+        reduction_targets = {
+            "aten.sum.dim_IntList": "sum",
+            "aten.mean.dim": "mean",
+            "aten.prod.dim_int": "prod",
+            "aten.amax.default": "max",
+            "aten.amin.default": "min",
+        }
+        matched_reductions = origin_targets & reduction_targets.keys()
         allowed_targets = OrderedSet(
-            (
-                "aten.reshape.default",
-                "aten.sum.dim_IntList",
-                "prims.convert_element_type.default",
-            )
-        )
+            ("aten.reshape.default", "prims.convert_element_type.default")
+        ) | OrderedSet(reduction_targets)
         if (
-            "aten.sum.dim_IntList" not in origin_targets
+            len(matched_reductions) != 1
             or not origin_targets.issubset(allowed_targets)
         ):
             return None
+        reduction_type = reduction_targets[next(iter(matched_reductions))]
+        node = buffers[0]
+        access_node = scheduler_node
+        output_name = node.get_name()
+        if len(buffers) == 2:
+            finalizer = buffers[1]
+            if (
+                reduction_type != "mean"
+                or not cls._is_mean_finalizer(nodes[0], nodes[1])
+            ):
+                return None
+            access_node = nodes[0]
+            output_name = finalizer.get_name()
         if len(node.data.ranges) != 2 or len(gemm_node.get_size()) != 2:
             return None
         try:
@@ -232,7 +251,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if isinstance(node.data, Reduction):
             reduction = node.data
             if (
-                reduction.reduction_type != "sum"
+                reduction.reduction_type
+                != ("sum" if reduction_type == "mean" else reduction_type)
                 or len(reduction.reduction_ranges) != 1
             ):
                 return None
@@ -261,14 +281,14 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if group <= 1 or group > max_group:
             return None
 
-        reads = list(scheduler_node.read_writes.reads)
+        reads = list(access_node.read_writes.reads)
         if not reads or any(read.name != gemm_node.get_name() for read in reads):
             return None
-        range_vars = scheduler_node.read_writes.range_vars
+        range_vars = access_node.read_writes.range_vars
         if range_vars is None:
             return None
         if not range_vars:
-            return node.get_name(), group, axis
+            return output_name, group, axis, reduction_type
         if isinstance(node.data, Reduction):
             if len(reads) != 1:
                 return None
@@ -288,7 +308,60 @@ class NVUniversalGemmScheduling(BaseScheduling):
             expected_offsets = OrderedSet(offset * n for offset in range(group))
             if OrderedSet(offsets) != expected_offsets:
                 return None
-        return node.get_name(), group, axis
+        return output_name, group, axis, reduction_type
+
+    @staticmethod
+    def _is_mean_finalizer(
+        reduction_node: BaseSchedulerNode, finalizer_node: BaseSchedulerNode
+    ) -> bool:
+        reduction_nodes = reduction_node.get_nodes()
+        finalizer_nodes = finalizer_node.get_nodes()
+        if len(reduction_nodes) != 1 or len(finalizer_nodes) != 1:
+            return False
+        reduction = reduction_nodes[0].node
+        finalizer = finalizer_nodes[0].node
+        if not (
+            isinstance(reduction, ComputedBuffer)
+            and isinstance(reduction.data, Reduction)
+            and isinstance(finalizer, ComputedBuffer)
+            and isinstance(finalizer.data, Pointwise)
+        ):
+            return False
+        reads = list(finalizer_node.read_writes.reads)
+        return (
+            bool(reads)
+            and all(read.name == reduction.get_name() for read in reads)
+            and V.graph.sizevars.statically_known_list_equals(
+                reduction.get_size(), finalizer.get_size()
+            )
+        )
+
+    @classmethod
+    def _partition_local_reductions(
+        cls, gemm_node: Buffer, epilogue_nodes: Sequence[BaseSchedulerNode]
+    ) -> tuple[list[tuple[str, int, int, str]], OrderedSet[BaseSchedulerNode]]:
+        reductions = []
+        reduction_nodes: OrderedSet[BaseSchedulerNode] = OrderedSet()
+        index = 0
+        while index < len(epilogue_nodes):
+            node = epilogue_nodes[index]
+            config = cls._grouped_reduce_config(gemm_node, node)
+            if config is None:
+                index += 1
+                continue
+            if (
+                config[3] == "mean"
+                and index + 1 < len(epilogue_nodes)
+                and cls._is_mean_finalizer(node, epilogue_nodes[index + 1])
+            ):
+                finalizer = epilogue_nodes[index + 1]
+                config = (finalizer.get_nodes()[0].node.get_name(), *config[1:])
+                reduction_nodes.add(finalizer)
+                index += 1
+            reductions.append(config)
+            reduction_nodes.add(node)
+            index += 1
+        return reductions, reduction_nodes
 
     def _can_fuse_epilogue_impl(
         self,
@@ -567,21 +640,16 @@ class NVUniversalGemmScheduling(BaseScheduling):
         epilogue_reads: list[str] = []
         epilogue_writes: list[str] = []
         epilogue_var_renames: dict[str, Any] = {}
-        local_reduce: tuple[str, int, int, str] | None = None
+        local_reduce: tuple[str, int, int, str, str] | None = None
 
         if epilogue_nodes:
             scheduler = V.graph.scheduler
             try:
-                local_reductions = [
-                    config
-                    for node in epilogue_nodes
-                    if (
-                        config := self._grouped_reduce_config(
-                            original_ir_node, node
-                        )
+                local_reductions, local_reduce_nodes = (
+                    self._partition_local_reductions(
+                        original_ir_node, epilogue_nodes
                     )
-                    is not None
-                ]
+                )
                 if len(local_reductions) > 1:
                     raise NotImplementedError(
                         "NVGEMM supports one grouped local reduction"
@@ -594,7 +662,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 evt_nodes = [
                     node
                     for node in epilogue_nodes
-                    if self._grouped_reduce_config(original_ir_node, node) is None
+                    if node not in local_reduce_nodes
                 ]
                 fused_buffer_names: OrderedSet[str] = OrderedSet(
                     n.get_name() for n in epilogue_nodes
@@ -786,20 +854,13 @@ class NVUniversalGemmScheduling(BaseScheduling):
             template_sn = cast(SchedulerNode, template)
             assert isinstance(template_sn.node, Buffer)  # noqa: S101
             original_buffer_name = template_sn.node.get_name()
-            local_reductions = [
-                local_reduce
-                for node in epilogue
-                if (
-                    local_reduce := self._grouped_reduce_config(
-                        template_sn.node, node
-                    )
-                )
-                is not None
-            ]
+            local_reductions, local_reduce_nodes = self._partition_local_reductions(
+                template_sn.node, epilogue
+            )
             evt_nodes = [
                 node
                 for node in epilogue
-                if self._grouped_reduce_config(template_sn.node, node) is None
+                if node not in local_reduce_nodes
             ]
             removed_buffers_with_gemm = V.graph.removed_buffers.copy()
             if not local_reductions:
