@@ -11,6 +11,8 @@ struct NoOpPythonTracer : public PythonTracerBase {
 
   void stop() override {}
   void restart() override {}
+  void pause_current_thread() override {}
+  void resume_current_thread() override {}
   void register_gc_callback() override {}
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<c10::time_t(c10::approx_time_t)> /*time_converter*/,

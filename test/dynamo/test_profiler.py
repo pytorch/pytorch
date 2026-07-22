@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
+import gc
 import threading
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -68,6 +70,273 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             any("(dynamo_timed)" in name for name in event_names),
             lambda msg: f"{msg}\nExpected dynamo_timed events in profiler: {event_names}",
         )
+
+    def test_profiler_with_stack_skips_compile_python_tracing(self):
+        torch._dynamo.reset()
+
+        def fn(x):
+            return torch.sin(x) * 2
+
+        x = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, backend="inductor")
+
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            with_stack=True,
+        ) as prof:
+            opt_fn(x)
+
+        event_names = [e.name for e in prof.events()]
+        self.assertTrue(
+            any("Torch-Compiled Region" in name for name in event_names),
+            lambda msg: f"{msg}\nExpected compiled-region event in profiler: {event_names}",
+        )
+        self.assertFalse(
+            any("torch/_dynamo/symbolic_convert.py" in name for name in event_names),
+            lambda msg: f"{msg}\nProfiler captured compiler Python frames: {event_names}",
+        )
+        self.assertFalse(
+            any("torch/_dynamo/trace_rules.py" in name for name in event_names),
+            lambda msg: f"{msg}\nProfiler captured compiler Python frames: {event_names}",
+        )
+
+    def test_profiler_with_stack_skips_compile_fx_backward_python_tracing(self):
+        from torch._inductor.compile_fx import (
+            compile_fx_backward,
+            create_compiler_config_extra,
+        )
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        gm = torch.fx.symbolic_trace(Mod())
+        x = torch.randn(4, 4)
+        compiler_config_extra = create_compiler_config_extra(gm)
+        inner_compile_calls = []
+
+        def inner_compile(*args, **kwargs):
+            inner_compile_calls.append(kwargs)
+            return lambda *runtime_args: runtime_args
+
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            with_stack=True,
+        ) as prof:
+            compile_fx_backward(
+                gm,
+                [x],
+                compiler_config_extra,
+                inner_compile=inner_compile,
+            )
+
+        event_names = [e.name for e in prof.events()]
+        compile_fx_events = [
+            name for name in event_names if "torch/_inductor/compile_fx.py" in name
+        ]
+
+        self.assertEqual(len(inner_compile_calls), 1)
+        self.assertTrue(inner_compile_calls[0]["is_backward"])
+        self.assertTrue(
+            any("compile_fx_backward" in name for name in compile_fx_events),
+            lambda msg: f"{msg}\nExpected compile_fx_backward event: {event_names}",
+        )
+        self.assertTrue(
+            all("compile_fx_backward" in name for name in compile_fx_events),
+            lambda msg: f"{msg}\nProfiler captured compiler Python frames: {event_names}",
+        )
+        self.assertFalse(
+            any("inner_compile" in name for name in event_names),
+            lambda msg: f"{msg}\nProfiler captured compiler Python frames: {event_names}",
+        )
+
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "profile_all_threads fails in debug builds, see https://github.com/pytorch/pytorch/pull/150059",
+    )
+    def test_disable_profiler_python_tracing_profile_all_threads(self):
+        from torch._dynamo.convert_frame import _disable_profiler_python_tracing
+
+        def suppressed_profile_all_threads_marker():
+            return 1
+
+        def suppressed_nested_profile_all_threads_marker():
+            return 2
+
+        def visible_profile_all_threads_marker():
+            return 3
+
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            with_stack=True,
+            experimental_config=torch._C._profiler._ExperimentalConfig(
+                profile_all_threads=True
+            ),
+        ) as prof:
+            with _disable_profiler_python_tracing():
+                with _disable_profiler_python_tracing():
+                    suppressed_profile_all_threads_marker()
+                suppressed_nested_profile_all_threads_marker()
+            visible_profile_all_threads_marker()
+
+        event_names = [e.name for e in prof.events()]
+        self.assertFalse(
+            any(
+                "suppressed_profile_all_threads_marker" in name for name in event_names
+            ),
+            lambda msg: f"{msg}\nProfiler captured compiler Python frames: {event_names}",
+        )
+        self.assertFalse(
+            any(
+                "suppressed_nested_profile_all_threads_marker" in name
+                for name in event_names
+            ),
+            lambda msg: f"{msg}\nProfiler resumed inside a nested guard: {event_names}",
+        )
+        self.assertTrue(
+            any("visible_profile_all_threads_marker" in name for name in event_names),
+            lambda msg: f"{msg}\nProfiler did not resume Python tracing: {event_names}",
+        )
+
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "profile_all_threads fails in debug builds, see https://github.com/pytorch/pytorch/pull/150059",
+    )
+    def test_disable_profiler_python_tracing_is_thread_local(self):
+        from torch._dynamo.convert_frame import _disable_profiler_python_tracing
+
+        def suppressed_main_thread_marker():
+            return 1
+
+        def visible_worker_thread_marker():
+            return 2
+
+        def visible_main_thread_marker():
+            return 3
+
+        worker_ready = threading.Event()
+        run_worker_marker = threading.Event()
+        worker_marker_done = threading.Event()
+        finish_worker = threading.Event()
+
+        def worker():
+            worker_ready.set()
+            run_worker_marker.wait()
+            visible_worker_thread_marker()
+            worker_marker_done.set()
+            finish_worker.wait()
+
+        worker_thread = threading.Thread(target=worker)
+        worker_thread.start()
+        self.assertTrue(worker_ready.wait(timeout=10))
+
+        try:
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU],
+                with_stack=True,
+                experimental_config=torch._C._profiler._ExperimentalConfig(
+                    profile_all_threads=True
+                ),
+            ) as prof:
+                with _disable_profiler_python_tracing():
+                    suppressed_main_thread_marker()
+                    run_worker_marker.set()
+                    self.assertTrue(worker_marker_done.wait(timeout=10))
+                visible_main_thread_marker()
+        finally:
+            finish_worker.set()
+            worker_thread.join(timeout=10)
+
+        event_names = [e.name for e in prof.events()]
+        self.assertFalse(
+            any("suppressed_main_thread_marker" in name for name in event_names),
+            lambda msg: f"{msg}\nProfiler captured paused-thread frames: {event_names}",
+        )
+        self.assertTrue(
+            any("visible_worker_thread_marker" in name for name in event_names),
+            lambda msg: f"{msg}\nProfiler paused an unrelated thread: {event_names}",
+        )
+        self.assertTrue(
+            any("visible_main_thread_marker" in name for name in event_names),
+            lambda msg: f"{msg}\nProfiler did not resume the paused thread: {event_names}",
+        )
+
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "profile_all_threads fails in debug builds, see https://github.com/pytorch/pytorch/pull/150059",
+    )
+    def test_disable_profiler_python_tracing_during_teardown(self):
+        from torch._dynamo.convert_frame import _disable_profiler_python_tracing
+
+        worker_ready = threading.Event()
+        start_toggling = threading.Event()
+        first_toggle_done = threading.Event()
+        stop_toggling = threading.Event()
+
+        def worker():
+            worker_ready.set()
+            start_toggling.wait()
+            while not stop_toggling.is_set():
+                with _disable_profiler_python_tracing():
+                    first_toggle_done.set()
+
+        worker_thread = threading.Thread(target=worker)
+        worker_thread.start()
+        self.assertTrue(worker_ready.wait(timeout=10))
+
+        try:
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU],
+                with_stack=True,
+                experimental_config=torch._C._profiler._ExperimentalConfig(
+                    profile_all_threads=True
+                ),
+            ):
+                start_toggling.set()
+                self.assertTrue(first_toggle_done.wait(timeout=10))
+        finally:
+            stop_toggling.set()
+            worker_thread.join(timeout=10)
+
+        self.assertFalse(worker_thread.is_alive())
+
+        def visible_next_session_marker():
+            return 1
+
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            with_stack=True,
+        ) as prof:
+            visible_next_session_marker()
+
+        event_names = [e.name for e in prof.events()]
+        self.assertTrue(
+            any("visible_next_session_marker" in name for name in event_names),
+            lambda msg: f"{msg}\nNext profiler session was not usable: {event_names}",
+        )
+
+    def test_disable_profiler_python_tracing_preserves_gc_events(self):
+        from torch._dynamo.convert_frame import _disable_profiler_python_tracing
+
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU],
+                with_stack=True,
+                experimental_config=torch._C._profiler._ExperimentalConfig(
+                    record_python_gc_info=True
+                ),
+            ) as prof:
+                with _disable_profiler_python_tracing():
+                    pass
+                gc.collect()
+        finally:
+            if gc_was_enabled:
+                gc.enable()
+
+        event_names = [e.name for e in prof.events()]
+        self.assertIn("Python GC", event_names)
 
     def test_record_functions_thread_local(self):
         """Verify record_functions dict is thread-local (no cross-thread contamination)"""

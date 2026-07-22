@@ -831,6 +831,18 @@ void RecordQueue::restart() {
   }
 }
 
+void RecordQueue::pausePythonTracing() {
+  if (python_tracer_) {
+    python_tracer_->pause_current_thread();
+  }
+}
+
+void RecordQueue::resumePythonTracing() {
+  if (python_tracer_) {
+    python_tracer_->resume_current_thread();
+  }
+}
+
 namespace {
 void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(!r->finished_, r->name());

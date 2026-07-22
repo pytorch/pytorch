@@ -181,11 +181,11 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   }
 
   void pausePython() {
-    recordQueue.stop();
+    recordQueue.pausePythonTracing();
   }
 
   void resumePython() {
-    recordQueue.restart();
+    recordQueue.resumePythonTracing();
   }
 
   std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
@@ -703,31 +703,30 @@ static void toggleTorchOpCollectionDynamic(bool enable) {
   }
 }
 
-// Set this function to be unused as profiler implementation needs more
-// refactoring to support Python ops collection dynamic toggling
-#ifdef _MSC_VER
-#define UNUSED
-#else
-#define UNUSED __attribute__((unused))
-#endif
-static UNUSED void togglePythonCollectionDynamic(bool enable) {
-  std::shared_ptr<KinetoThreadLocalState> global_state =
-      KinetoThreadLocalState::getGlobal();
-  if (global_state) {
-    if (enable) {
-      global_state->resumePython();
-    } else {
-      global_state->pausePython();
+void togglePythonCollectionDynamic(const bool enable) {
+  auto toggle_state = [enable](ProfilerStateBase* state_ptr) {
+    if (!state_ptr || state_ptr->profilerType() != ActiveProfilerType::KINETO ||
+        !state_ptr->config().with_stack) {
+      return;
     }
-  } else {
-    KinetoThreadLocalState* tls_state = KinetoThreadLocalState::getTLS();
-    TORCH_CHECK(tls_state);
-    if (enable) {
-      tls_state->resumePython();
-    } else {
-      tls_state->pausePython();
+
+    auto* kineto_state = static_cast<KinetoThreadLocalState*>(state_ptr);
+    enable ? kineto_state->resumePython() : kineto_state->pausePython();
+  };
+
+  if (global_callback_session.isActive()) {
+    global_callback_session.enter();
+    auto in_flight_guard =
+        c10::make_scope_exit([] { global_callback_session.exit(); });
+    if (!global_callback_session.isActive()) {
+      return;
     }
+    auto global_state = ProfilerStateBase::getGlobal();
+    toggle_state(global_state.get());
+    return;
   }
+
+  toggle_state(ProfilerStateBase::getTLS());
 }
 
 static void toggleCPUCollectionDynamic(bool enable) {

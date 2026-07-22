@@ -675,6 +675,7 @@ from torch._C._autograd import (
     _set_empty_test_observer,
     _supported_activities,
     _toggle_collection_dynamic,
+    _toggle_profiler_python_tracing,
     DeviceType,
     kineto_available,
     ProfilerEvent,

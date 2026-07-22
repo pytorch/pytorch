@@ -209,6 +209,15 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 
+@contextlib.contextmanager
+def _disable_profiler_python_tracing() -> typing.Iterator[None]:
+    torch.autograd._toggle_profiler_python_tracing(False)
+    try:
+        yield
+    finally:
+        torch.autograd._toggle_profiler_python_tracing(True)
+
+
 class TODO_UNKNOWN:
     pass
 
@@ -2539,6 +2548,15 @@ class CatchErrorsWrapper:
         cache_entry: CacheEntry | None,
         frame_state: dict[str, int | FrameStateSizeEntry],
     ) -> ConvertFrameReturn:
+        with _disable_profiler_python_tracing():
+            return self._call(frame, cache_entry, frame_state)
+
+    def _call(
+        self,
+        frame: DynamoFrameType,
+        cache_entry: CacheEntry | None,
+        frame_state: dict[str, int | FrameStateSizeEntry],
+    ) -> ConvertFrameReturn:
         if frame_state is None:
             raise AssertionError("frame_state must not be None")
         input_codes.add(frame.f_code)
@@ -2621,7 +2639,7 @@ class CatchErrorsWrapper:
         if torch._dynamo.utils.get_optimize_ddp_mode() == "ddp_optimizer":
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
-                with compile_lock:
+                with compile_lock, _disable_profiler_python_tracing():
                     from torch._dynamo.backends.distributed import DDPOptimizer
 
                     ddp_optimizer = DDPOptimizer(
@@ -2644,7 +2662,7 @@ class CatchErrorsWrapper:
                         frame,
                     )
 
-        with compile_lock, _disable_current_modes():
+        with compile_lock, _disable_profiler_python_tracing(), _disable_current_modes():
             # skip=1: skip this frame
             result = self._torchdynamo_orig_backend(
                 frame, cache_entry, self.hooks, frame_state, skip=1
