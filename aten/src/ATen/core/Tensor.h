@@ -13,7 +13,7 @@ class TORCH_API OptionalTensorRef {
     ref_.unsafeReleaseTensorImpl();
   }
 
-  OptionalTensorRef(const TensorBase& src)
+  OptionalTensorRef(const TensorBase& src C10_LIFETIMEBOUND)
       : ref_(Tensor::unsafe_borrow_t{}, src) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(src.defined());
   }
@@ -31,15 +31,15 @@ class TORCH_API OptionalTensorRef {
     return ref_.defined();
   }
 
-  const Tensor& getTensorRef() const & {
+  const Tensor& getTensorRef() const & C10_LIFETIMEBOUND {
     return ref_;
   }
 
-  const Tensor& operator*() const & {
+  const Tensor& operator*() const & C10_LIFETIMEBOUND {
     return ref_;
   }
 
-  const Tensor* operator->() const & {
+  const Tensor* operator->() const & C10_LIFETIMEBOUND {
     return &ref_;
   }
 
@@ -59,14 +59,14 @@ class TORCH_API TensorRef {
     ref_.unsafeReleaseTensorImpl();
   }
 
-  TensorRef(const TensorBase& src)
+  TensorRef(const TensorBase& src C10_LIFETIMEBOUND)
       : ref_(Tensor::unsafe_borrow_t{}, src) {}
   TensorRef(TensorRef&& other) = default;
   TensorRef(const TensorRef&) = default;
   TensorRef& operator=(const TensorRef&) = default;
   TensorRef& operator=(TensorRef&&) = default;
 
-  const Tensor& operator*() const & {
+  const Tensor& operator*() const & C10_LIFETIMEBOUND {
     return ref_;
   }
  private:
