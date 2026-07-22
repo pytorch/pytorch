@@ -4541,6 +4541,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         from torch._higher_order_ops import triton_kernel_wrap as tkw
         from torch._higher_order_ops.triton_kernel_wrap import (
             analyze_kernel_access,
+            get_tma_stores,
             Intermediate,
             Op,
             Param,
@@ -4581,6 +4582,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
             self.assertListEqual(write_names, ["out_ptr"])
         finally:
             tkw.unregister_kernel_access_op(custom_store)
+            analyze_kernel_access.reset()
+            get_tma_stores.reset()
 
     def test_register_kernel_access_op_rejects_ignore_with_indexes(self):
         from torch._higher_order_ops import triton_kernel_wrap as tkw
@@ -4750,6 +4753,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
 
         from torch._higher_order_ops import triton_kernel_wrap as tkw
         from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            get_tma_stores,
             identify_accessed_tensors,
             Intermediate,
             Op,
@@ -4845,6 +4850,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
         finally:
             tkw.unregister_kernel_access_op(custom_store)
             tkw.unregister_kernel_access_op(custom_load)
+            analyze_kernel_access.reset()
+            get_tma_stores.reset()
 
 
 if HAS_GPU:
