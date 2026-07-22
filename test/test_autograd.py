@@ -15800,6 +15800,7 @@ class TestNestedCheckpoint(TestCase):
             for actual, expected in zip(actual_grads, expected_grads):
                 self.assertTrue(torch.allclose(actual, expected))
 
+    @skipIfTorchDynamo("Dynamo support for curried checkpoint added in later commit")
     def test_checkpoint_curried_kwargs_do_not_collide_with_checkpoint_kwargs(self):
         def fn(
             a,
@@ -15845,6 +15846,7 @@ class TestNestedCheckpoint(TestCase):
         expected_grad = torch.autograd.grad(out, (a,))
         self.assertEqual(actual_grad, expected_grad)
 
+    @skipIfTorchDynamo("Dynamo support for curried checkpoint added in later commit")
     def test_checkpoint_zero_arg_function(self):
         a = torch.tensor(2.0, requires_grad=True)
 
@@ -15863,6 +15865,7 @@ class TestNestedCheckpoint(TestCase):
         self.assertEqual(old_grad, expected_grad)
         self.assertEqual(new_grad, expected_grad)
 
+    @skipIfTorchDynamo("Dynamo support for curried checkpoint added in later commit")
     def test_checkpoint_curried_method(self):
         class Model:
             @checkpoint(use_reentrant=False)
