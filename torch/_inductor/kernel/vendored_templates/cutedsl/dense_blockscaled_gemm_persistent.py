@@ -430,10 +430,16 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         epilogue_tensor_kind1: cutlass.Constexpr = 0,
         epilogue_tensor_kind2: cutlass.Constexpr = 0,
         epilogue_tensor_kind3: cutlass.Constexpr = 0,
+        epilogue_output0: cute.Tensor = None,
+        epilogue_output1: cute.Tensor = None,
+        epilogue_output2: cute.Tensor = None,
+        epilogue_output_count: cutlass.Constexpr = 1,
+        primary_epilogue_output: cutlass.Constexpr = 0,
         local_reduce_tensor: cute.Tensor = None,
         local_reduce_group: cutlass.Constexpr = 0,
         local_reduce_axis: cutlass.Constexpr = 1,
         local_reduce_type: cutlass.Constexpr = "sum",
+        local_reduce_source: cutlass.Constexpr = "identity",
     ):
         """Execute the GEMM operation in steps:
         - Setup static attributes before smem/grid/tma computation
@@ -479,6 +485,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_group = local_reduce_group
         self.local_reduce_axis = local_reduce_axis
         self.local_reduce_type = local_reduce_type
+        self.local_reduce_source = local_reduce_source
 
         a_tensor = cute.make_tensor(
             a_tensor.iterator, cute.select(a_tensor.layout, [1, 2, 0])
@@ -503,6 +510,15 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             epilogue_tensor2 = epilogue_tensor_to_mnl(epilogue_tensor2)
         if cutlass.const_expr(epilogue_tensor3 is not None):
             epilogue_tensor3 = epilogue_tensor_to_mnl(epilogue_tensor3)
+        if cutlass.const_expr(epilogue_output0 is not None):
+            epilogue_output0 = epilogue_tensor_to_mnl(epilogue_output0)
+        if cutlass.const_expr(epilogue_output1 is not None):
+            epilogue_output1 = epilogue_tensor_to_mnl(epilogue_output1)
+        if cutlass.const_expr(epilogue_output2 is not None):
+            epilogue_output2 = epilogue_tensor_to_mnl(epilogue_output2)
+
+        self.epilogue_output_count = epilogue_output_count
+        self.primary_epilogue_output = primary_epilogue_output
 
         # Setup static attributes before smem/grid/tma computation
         self.a_dtype: Type[cutlass.Numeric] = a_tensor.element_type
@@ -746,6 +762,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             epilogue_tensor_kind1,
             epilogue_tensor_kind2,
             epilogue_tensor_kind3,
+            epilogue_output0,
+            epilogue_output1,
+            epilogue_output2,
             local_reduce_tensor,
         ).launch(
             grid=grid,
@@ -792,6 +811,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         epilogue_tensor_kind1: cutlass.Constexpr,
         epilogue_tensor_kind2: cutlass.Constexpr,
         epilogue_tensor_kind3: cutlass.Constexpr,
+        epilogue_output0: cute.Tensor,
+        epilogue_output1: cute.Tensor,
+        epilogue_output2: cute.Tensor,
         local_reduce_tensor: cute.Tensor,
     ):
         """
@@ -1602,8 +1624,13 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         or epilogue_tensor2 is not None
                         or epilogue_tensor3 is not None
                     )
+                    has_epilogue_outputs = cutlass.const_expr(
+                        self.epilogue_output_count > 1
+                    )
                     if cutlass.const_expr(
-                        has_epilogue_tensors or local_reduce_tensor is not None
+                        has_epilogue_tensors
+                        or has_epilogue_outputs
+                        or local_reduce_tensor is not None
                     ):
                         tDcC = partition_for_epilogue(
                             cute.make_identity_tensor(self.cta_tile_shape_mnk[:2]),
@@ -1616,9 +1643,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         coord_flt = cute.filter_zeros(tDcC)
 
                     epilogue_values = []
-                    if cutlass.const_expr(has_epilogue_tensors):
+                    if cutlass.const_expr(
+                        has_epilogue_tensors or has_epilogue_outputs
+                    ):
                         output_m = cute.size(mC_mnl, mode=[0])
                         output_n = cute.size(mC_mnl, mode=[1])
+                    if cutlass.const_expr(has_epilogue_tensors):
                         for tensor, kind in (
                             (epilogue_tensor0, epilogue_tensor_kind0),
                             (epilogue_tensor1, epilogue_tensor_kind1),
@@ -1662,9 +1692,61 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                             mma_tile_coord_mnl[2],
                                         ]
                                 epilogue_values.append(fragment.load())
-                    acc_vec = epilogue_op(
+                    if cutlass.const_expr(local_reduce_tensor is not None):
+                        local_reduce_vec = acc_vec.to(epilogue_input_dtype).to(
+                            self.acc_dtype
+                        )
+                        if cutlass.const_expr(self.local_reduce_source == "square"):
+                            local_reduce_vec = local_reduce_vec * local_reduce_vec
+                        else:
+                            assert self.local_reduce_source == "identity"
+                    epilogue_result = epilogue_op(
                         acc_vec.to(epilogue_input_dtype), *tuple(epilogue_values)
-                    ).to(self.c_dtype)
+                    )
+                    if cutlass.const_expr(has_epilogue_outputs):
+                        for output_index, tensor in enumerate(
+                            (epilogue_output0, epilogue_output1, epilogue_output2)
+                        ):
+                            if cutlass.const_expr(tensor is not None):
+                                result_index = cutlass.const_expr(
+                                    output_index
+                                    if output_index < self.primary_epilogue_output
+                                    else output_index + 1
+                                )
+                                output_vec = epilogue_result[result_index].to(
+                                    tensor.element_type
+                                )
+                                fragment = cute.make_rmem_tensor_like(
+                                    output_vec, tensor.element_type
+                                )
+                                fragment.store(output_vec)
+                                fragment_flt = cute.filter_zeros(fragment)
+                                for i in cutlass.range(
+                                    cute.size(fragment_flt), unroll_full=True
+                                ):
+                                    row_idx = coord_flt[i][0]
+                                    col_idx = coord_flt[i][1]
+                                    global_m = (
+                                        mma_tile_coord_mnl[0]
+                                        * self.cta_tile_shape_mnk[0]
+                                        + row_idx
+                                    )
+                                    global_n = (
+                                        mma_tile_coord_mnl[1]
+                                        * self.cta_tile_shape_mnk[1]
+                                        + col_idx
+                                    )
+                                    if global_m < output_m and global_n < output_n:
+                                        tensor[
+                                            global_m,
+                                            global_n,
+                                            mma_tile_coord_mnl[2],
+                                        ] = fragment_flt[i]
+                        acc_vec = epilogue_result[
+                            self.primary_epilogue_output
+                        ].to(self.c_dtype)
+                    else:
+                        acc_vec = epilogue_result.to(self.c_dtype)
 
                     if cutlass.const_expr(local_reduce_tensor is not None):
                         group = cutlass.const_expr(self.local_reduce_group)
@@ -1678,7 +1760,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             assert group > 1 and group <= fragment_n
                             assert fragment_n % group == 0
                             repeats = cutlass.const_expr(fragment_n // group)
-                            grouped = acc_vec.to(self.acc_dtype).reshape(
+                            grouped = local_reduce_vec.reshape(
                                 ((1, group, repeats), 1, 1)
                             )
                             if cutlass.const_expr(
@@ -1743,9 +1825,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                     gReduce[row_idx, group_idx] = reduced_flt[i]
                         else:
                             tDrReduce = cute.make_rmem_tensor_like(
-                                acc_vec, self.acc_dtype
+                                local_reduce_vec, self.acc_dtype
                             )
-                            tDrReduce.store(acc_vec.to(self.acc_dtype))
+                            tDrReduce.store(local_reduce_vec)
                             reduced_flt = cute.filter_zeros(tDrReduce)
                             lane_layout_mn, _ = get_lane_warp_layouts(
                                 tiled_copy_t2r, reference_src=False
