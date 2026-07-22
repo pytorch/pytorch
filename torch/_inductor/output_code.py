@@ -819,22 +819,8 @@ class CompiledFxGraph(OutputCode):
                 try:
                     # Checking the profiler directly is faster than nullcontext
                     if torch.autograd.profiler._is_profiler_enabled:
-                        profiler_key = self._fx_graph_cache_key
-                        if (
-                            config.trace.provenance_tracking_to_timeline
-                            and getattr(
-                                self, "inductor_provenance_stack_traces_str", None
-                            )
-                        ):
-                            base_key = profiler_key or self.cache_key
-                            profiler_key = f"{base_key}:{id(self)}"
-                            from torch._inductor.profiler import (
-                                _register_compiled_graph,
-                            )
-
-                            _register_compiled_graph(profiler_key, self)
                         with torch._C._profiler._RecordFunctionFast(
-                            f"## Call CompiledFxGraph {profiler_key} ##",
+                            f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
                             keyword_values={"scope": "user_scope"},
                         ):
                             return self.current_callable(inputs)

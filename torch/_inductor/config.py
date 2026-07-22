@@ -2907,7 +2907,7 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
-    # Collect kernel stacks for torch._inductor.profiler.inductor_trace_handler.
+    # Add Inductor kernel stack traces back into exported PyTorch profiler timelines.
     provenance_tracking_to_timeline = (
         os.environ.get("TORCH_COMPILE_DEBUG_EXTEND", "0") == "1"
     )
