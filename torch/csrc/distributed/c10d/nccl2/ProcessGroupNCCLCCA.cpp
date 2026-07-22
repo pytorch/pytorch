@@ -5,6 +5,8 @@
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLCCA.hpp>
 
 #include <ATen/Context.h>
+#include <c10/core/AllocatorConfig.h>
+#include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 namespace c10d::nccl2 {
@@ -23,16 +25,33 @@ NcclCachingAllocatorHook& NcclCachingAllocatorHook::getInstance() {
   return *instance;
 }
 
-NcclCachingAllocatorHook::NcclCachingAllocatorHook() {
+NcclCachingAllocatorHook::NcclCachingAllocatorHook()
+    : register_default_pool_segments_(
+          !c10::CachingAllocator::AcceleratorAllocatorConfig::
+              use_expandable_segments()) {
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+  if (!register_default_pool_segments_) {
+    TC_LOG(INFO)
+        << "Disabling default-pool NCCL memory registration because it is "
+           "incompatible with CUDA allocator expandable segments mode.";
+  }
   registerMemPreHook();
   c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
       &ncclCachingAllocatorHookFn);
 }
 
+bool NcclCachingAllocatorHook::shouldTrackSegment(
+    const c10::MempoolId_t& mempool_id) const {
+  return register_default_pool_segments_ ||
+      mempool_id != c10::MempoolId_t{0, 0};
+}
+
 void NcclCachingAllocatorHook::registerMemPreHook() {
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
   for (const auto& segmentInfo : snapshot.segments) {
+    if (!shouldTrackSegment(segmentInfo.owner_private_pool_id)) {
+      continue;
+    }
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     void* addr = reinterpret_cast<void*>(segmentInfo.address);
     registeredMemMap_.emplace(
@@ -42,6 +61,9 @@ void NcclCachingAllocatorHook::registerMemPreHook() {
 
 void NcclCachingAllocatorHook::regDeregMem(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
+  if (!shouldTrackSegment(te.mempool_)) {
+    return;
+  }
   std::lock_guard<std::mutex> lock(mutex_);
   if (te.action_ ==
       c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_ALLOC) {
