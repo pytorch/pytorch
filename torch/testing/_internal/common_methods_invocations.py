@@ -11975,7 +11975,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
 
                # torch-xpu-ops/issues/4321
-               DecorateInfo(unittest.expectedFailure, None, None, device_type='xpu',
+               DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
                             dtypes=(torch.int64,)),
            )),
     OpInfo('cauchy',

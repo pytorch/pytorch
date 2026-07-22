@@ -1104,7 +1104,7 @@ class TestCommon(TestCase):
                 return tuple(t.stride() for t in out)
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
-            # NOTE: only extracts on the CPU and CUDA device types since some
+            # NOTE: only extracts on the CPU and CUDA/XPU device types since some
             #   device types don't have storage
             def _extract_data_ptrs(out):
                 if self.device_type not in ["cpu", "cuda", "xpu"]:
