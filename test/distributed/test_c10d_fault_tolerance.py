@@ -249,7 +249,7 @@ class AbstractFaultToleranceTest:
 
         self._create_reconfigured_pg("ft_timeout", 1300)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
-        self.backend.set_timeout(timedelta(seconds=2))
+        self.backend.set_timeout(timedelta(milliseconds=50))
         revoke_event = threading.Event()
         self.backend.register_abort_hook(0, revoke_event.set)
 
