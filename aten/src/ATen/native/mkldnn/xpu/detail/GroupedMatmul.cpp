@@ -71,6 +71,33 @@ inline ScaleSpec make_scale_spec(
   }
 }
 
+// Prepare input tensors for grouped matmul: ensure proper contiguity and 64-byte alignment.
+// 2D x 3D (inference): mat_a needs K-contiguous, mat_b needs K-contiguous
+// 2D x 2D (training grad_B): mat_a needs col-major (dim0 stride=1), mat_b needs row-major (N-contiguous)
+std::tuple<Tensor, Tensor, Tensor> prepare_grouped_matmul_inputs(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    Tensor& out,
+    bool a_is_2d,
+    bool b_is_2d) {
+  Tensor contiguous_mat_a, contiguous_mat_b, contiguous_out;
+  if (a_is_2d && !b_is_2d) {
+    // 2D x 3D: A[M,K] needs K-contiguous (row-major), B[E,K,N] needs K-contiguous
+    contiguous_mat_a = make_contiguous_and_aligned(mat_a);
+    contiguous_mat_b = make_contiguous_and_aligned(mat_b.transpose(-2, -1)).transpose(-2, -1);
+  } else if (a_is_2d && b_is_2d) {
+    // 2D x 2D: A[M,K] needs col-major (M-major, dim0 stride=1), B[K,N] needs row-major (N-contiguous)
+    contiguous_mat_a = make_contiguous_and_aligned(mat_a.transpose(-2, -1)).transpose(-2, -1);
+    contiguous_mat_b = make_contiguous_and_aligned(mat_b);
+  } else {
+    TORCH_CHECK(false, "Unsupported grouped matmul input dimensions");
+  }
+  TORCH_CHECK(out.is_contiguous() && is_64_bytes_aligned(out),
+      "Output tensor must be contiguous and 64-byte aligned for oneDNN");
+  contiguous_out = out;
+  return {contiguous_mat_a, contiguous_mat_b, contiguous_out};
+}
+
 std::tuple<dnnl::memory::desc, dnnl::memory::desc, dnnl::memory::desc> get_grouped_gemm_md(
     int64_t M,
     int64_t N,
@@ -96,8 +123,23 @@ std::tuple<dnnl::memory::desc, dnnl::memory::desc, dnnl::memory::desc> get_group
         dst_dtype,
         0,
         group_count);
-  } else{
-    TORCH_CHECK(false, "Currently only 2d x 3d grouped matmul with offsets is supported, but got mat_a.dim() = ", M, " and mat_b.dim() = ", N);
+  } else if (a_is_2d && b_is_2d) {
+    src_md = dnnl::memory::desc::grouped(
+        {M, K},
+        dtype,
+        1,
+        group_count);
+    weights_md = dnnl::memory::desc::grouped(
+        {K, N},
+        dtype,
+        0,
+        group_count);
+    dst_md = dnnl::memory::desc(
+        {group_count, M, N},
+        dst_dtype,
+        {M * N, N, 1});
+  } else {
+    TORCH_CHECK(false, "Unsupported grouped matmul dimensions: mat_a.dim() = ", a_is_2d ? 2 : 3, ", mat_b.dim() = ", b_is_2d ? 2 : 3);
   }
   return {src_md, weights_md, dst_md};
 }
@@ -118,8 +160,12 @@ std::tuple<dnnl::memory, dnnl::memory, dnnl::memory> make_grouped_gemm_mem(
     src_mem = make_onednn_grouped_memory(src_md, engine, src.data_ptr(), offs.data_ptr());
     weights_mem = make_onednn_memory(weights_md, engine, weights.data_ptr());
     dst_mem = make_onednn_grouped_memory(dst_md, engine, dst.data_ptr(), offs.data_ptr());
+  } else if (a_is_2d && b_is_2d) {
+    src_mem = make_onednn_grouped_memory(src_md, engine, src.data_ptr(), offs.data_ptr());
+    weights_mem = make_onednn_grouped_memory(weights_md, engine, weights.data_ptr(), offs.data_ptr());
+    dst_mem = make_onednn_memory(dst_md, engine, dst.data_ptr());
   } else{
-    TORCH_CHECK(false, "Currently only 2d x 3d grouped matmul with offsets is supported, but got mat_a.dim() = ", src.dim(), " and mat_b.dim() = ", weights.dim());
+    TORCH_CHECK(false, "Unsupported grouped matmul dimensions: mat_a.dim() = ", src.dim(), ", mat_b.dim() = ", weights.dim());
   }
   return {src_mem, weights_mem, dst_mem};
 }
@@ -137,7 +183,8 @@ sycl::event scaled_grouped_matmul(
   bool a_is_2d = mat_a.dim() == 2;
   bool b_is_2d = mat_b.dim() == 2;
 
-  TORCH_CHECK((a_is_2d && !b_is_2d), "Currently only 2d x 3d grouped matmul with offsets is supported");
+  TORCH_CHECK((a_is_2d && !b_is_2d) || (a_is_2d && b_is_2d), "Currently only 2d x 3d and 2d x 2d grouped matmul with offsets is supported");
+  TORCH_CHECK(!(a_is_2d && b_is_2d && scale_a.has_value()), "Currently scaling for 2d x 2d grouped matmul only supports fp16/bf16/fp32 input");
 
   bool is_fp4 = mat_a.scalar_type() == at::kFloat4_e2m1fn_x2;
   int32_t M, N, K, group_count;
@@ -146,12 +193,8 @@ sycl::event scaled_grouped_matmul(
   N = mat_b.size(-1);
   group_count = offs.size(0);
 
-  // Input tensors should be K-contiguous and address 64bytes aligned for oneDNN.
-  // Output tensor is new allocated by caller so that it's already contiguous and aligned.
-  Tensor contiguous_mat_a = make_contiguous_and_aligned(mat_a);
-  Tensor contiguous_mat_b = make_contiguous_and_aligned(mat_b.transpose(-2, -1)).transpose(-2, -1);
-  TORCH_CHECK(out.is_contiguous() && is_64_bytes_aligned(out), "Output tensor must be contiguous and 64-byte aligned for oneDNN");
-  Tensor contiguous_out = out;
+  auto [contiguous_mat_a, contiguous_mat_b, contiguous_out] =
+    prepare_grouped_matmul_inputs(mat_a, mat_b, out, a_is_2d, b_is_2d);
 
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();

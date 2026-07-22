@@ -456,7 +456,7 @@ std::optional<c10::ScalarType> out_dtype) {
 
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
-  const bool supported_cases = (a_is_2d && !b_is_2d) && !bias.has_value(); // 2d x 3d with offsets
+  const bool supported_cases = ((a_is_2d && !b_is_2d) || (a_is_2d && b_is_2d)) && !bias.has_value();
 
   bool use_fast_path = a_b_and_out_are_same_type && supported_cases;
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
