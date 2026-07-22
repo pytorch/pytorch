@@ -313,8 +313,9 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
     """Return whether a QuACK config can keep grouped reductions inside one CTA.
 
     This host gate covers tile and cluster fields available on ``GemmConfig``.
-    SM100 128x128 two-CTA configs expose only 16 contiguous N values per
-    epilogue fragment; other accepted configs expose the full 32-wide fragment.
+    SM100 two-CTA configs with tile_m=128 and tile_n in {128, 160, 224}
+    expose only 16 contiguous N values per epilogue fragment; other accepted
+    configs expose the full 32-wide fragment.
     Lane/warp ownership is derived later from QuACK's tiled-copy layout, where
     ``GroupedLocalReduce`` asserts the remaining lane-count, divisibility, and
     stride invariants. Forced-config tests cover the accepted SM100 extremes.
@@ -328,7 +329,7 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
             return False
     if group <= 0 or config.swap_ab:
         return False
-    if config.tile_n < 128 or config.tile_n % 64 != 0:
+    if config.tile_n % LOCAL_REDUCE_FRAGMENT_WIDTH != 0:
         return False
     if tile % group != 0:
         return False
@@ -336,7 +337,7 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
     if (
         axis == 1
         and config.tile_m == 128
-        and config.tile_n == 128
+        and config.tile_n in (128, 160, 224)
         and config.cluster_m > 1
     ):
         fragment_width //= 2
@@ -350,7 +351,7 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
                 and config.cluster_n == 1
                 and (
                     (config.tile_m == 128 and config.cluster_m == 1)
-                    or (axis == 1 and config.tile_m == 256 and config.cluster_m == 2)
+                    or (config.tile_m == 256 and config.cluster_m == 2)
                 )
             )
 
