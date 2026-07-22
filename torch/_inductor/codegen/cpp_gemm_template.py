@@ -438,7 +438,8 @@ def transpose_w(W: _T, trans_w: bool) -> _T:
             W = L.permute(W, [1, 0])
     else:
         if trans_w:
-            assert isinstance(W, torch.Tensor)
+            if not isinstance(W, torch.Tensor):
+                raise AssertionError(f"expected torch.Tensor, got {type(W)}")
             # pyrefly: ignore [bad-assignment]
             W = W.transpose(0, 1)
     # pyrefly: ignore [bad-return]
@@ -454,12 +455,15 @@ def expand_bias(B: _T | None, X: _T) -> _T | None:
             if not isinstance(B, ir.TensorBox):
                 # pyrefly: ignore [bad-assignment]
                 B = ir.TensorBox(B)
-            assert hasattr(X, "get_size")
+            if not hasattr(X, "get_size"):
+                raise AssertionError("expected X to have a get_size attribute")
             # pyrefly: ignore [missing-attribute]
             B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
         else:
-            assert isinstance(B, torch.Tensor)
-            assert isinstance(X, torch.Tensor)
+            if not isinstance(B, torch.Tensor):
+                raise AssertionError(f"expected B to be torch.Tensor, got {type(B)}")
+            if not isinstance(X, torch.Tensor):
+                raise AssertionError(f"expected X to be torch.Tensor, got {type(X)}")
             # pyrefly: ignore [bad-assignment]
             B = B.expand(X.shape[0], B.shape[-1])
     return B
@@ -614,7 +618,8 @@ def gen_2d_view_of_epilogue_buf(
         if isinstance(Y, ir.BaseView):
             storage = ir.StorageBox(Y.unwrap_view())
         else:
-            assert isinstance(Y, ir.Buffer)
+            if not isinstance(Y, ir.Buffer):
+                raise AssertionError(f"expected ir.Buffer, got {type(Y)}")
             storage = ir.StorageBox(Y)
         Y_2d = ir.ReinterpretView(data=storage, layout=template_buffer.get_layout())
     return Y_2d, reindexers
@@ -638,13 +643,14 @@ class CppGemmTemplate(CppTemplate):
         should_block_weights: bool = True,
         name="packed_gemm",
     ) -> None:
-        assert layout.dtype in [
+        if layout.dtype not in [
             torch.float,
             torch.bfloat16,
             torch.half,
             torch.uint8,
             torch.int8,
-        ]
+        ]:
+            raise AssertionError(f"Unsupported layout dtype: {layout.dtype}")
         super().__init__(
             name,
             input_nodes,
@@ -697,20 +703,25 @@ class CppGemmTemplate(CppTemplate):
             thread_block_m = math.ceil(m_blocks / m_factor)
             return GemmBlocking(thread_block_m, thread_block_n, thread_block_k)
 
-        assert not self.is_dynamic_M, (
-            "Unable to determine thread blocking for dynamic M."
-        )
+        if self.is_dynamic_M:
+            raise AssertionError("Unable to determine thread blocking for dynamic M.")
         register_blocking = self.register_blocking
         m_blocks = math.ceil(self.m / register_blocking.block_m)
         n_blocks = math.ceil(self.n / register_blocking.block_n)
         k_blocks = math.ceil(self.k / register_blocking.block_k)
         factors = get_factors(num_threads)
-        assert len(factors) > 0
+        if len(factors) == 0:
+            raise AssertionError(f"expected at least one factor, got {factors}")
 
         if config.cpp.gemm_thread_factors is not None:
             factors = [int(i) for i in config.cpp.gemm_thread_factors.split(",")]
-            assert len(factors) == 3
-            assert math.prod(factors) == self.num_threads
+            if len(factors) != 3:
+                raise AssertionError(f"expected 3 thread factors, got {len(factors)}")
+            if math.prod(factors) != self.num_threads:
+                raise AssertionError(
+                    f"expected factors product == {self.num_threads}, "
+                    f"got {math.prod(factors)}"
+                )
             return get_blocking(
                 factors[0], factors[1], factors[2], m_blocks, n_blocks, k_blocks
             )
@@ -773,7 +784,8 @@ class CppGemmTemplate(CppTemplate):
                     )
                     best_blocking = get_better_blocking(blocking, best_blocking)
 
-        assert best_blocking is not None
+        if best_blocking is None:
+            raise AssertionError("expected a valid thread blocking, got None")
         return best_blocking
 
     def make_cache_blocking_cache(self):
@@ -796,7 +808,10 @@ class CppGemmTemplate(CppTemplate):
 
             if config.cpp.gemm_cache_blocking is not None:
                 blockings = [int(i) for i in config.cpp.gemm_cache_blocking.split(",")]
-                assert len(blockings) == 3
+                if len(blockings) != 3:
+                    raise AssertionError(
+                        f"expected 3 cache blockings, got {len(blockings)}"
+                    )
                 Mc_blocks, Nc_blocks, Kc_blocks = blockings
                 return (
                     min(Mc_blocks, Mt_blocks),
@@ -813,17 +828,19 @@ class CppGemmTemplate(CppTemplate):
             L1_cache_size = torch.cpu.get_capabilities().get(
                 "l1d_cache_size", 0
             )  # per core cache size in Bytes
-            assert L1_cache_size > 0, (
-                f"Expect L1_cache_size > 0 but got {L1_cache_size}"
-            )
+            if L1_cache_size <= 0:
+                raise AssertionError(
+                    f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+                )
             L1 = L1_cache_size * L1_limit_factor
 
             L2_cache_size = torch.cpu.get_capabilities().get(
                 "l2_cache_size", 0
             )  # per core cache size in Bytes
-            assert L2_cache_size > 0, (
-                f"Expect L2_cache_size > 0 but got {L2_cache_size}"
-            )
+            if L2_cache_size <= 0:
+                raise AssertionError(
+                    f"Expect L2_cache_size > 0 but got {L2_cache_size}"
+                )
             L2 = L2_cache_size * L2_limit_factor
 
             def get_num_byte(dtype):
@@ -883,7 +900,10 @@ class CppGemmTemplate(CppTemplate):
             # Step 2: Decide Mc assuming A block is L2-reside.
             min_Mc_ratio = 2  # TODO(jgong5): something to tune?
             min_Mc_blocks = math.ceil(min_Mc_ratio * Mr / Nr)
-            assert min_Mc_blocks >= 1
+            if min_Mc_blocks < 1:
+                raise AssertionError(
+                    f"expected min_Mc_blocks >= 1, got {min_Mc_blocks}"
+                )
             Kt_bytes = Kt_blocks * Kr * num_byte_A
             if min_Mc_blocks * Mr * Kt_bytes < L2:
                 # Strategy 1: A (Mc x Kt) resides in L2 and reused by all Nt
@@ -909,9 +929,8 @@ class CppGemmTemplate(CppTemplate):
 
             return Mc_blocks, Nc_blocks, Kc_blocks
 
-        assert not self.is_dynamic_M, (
-            "Unable to determine cache blocking for dynamic M."
-        )
+        if self.is_dynamic_M:
+            raise AssertionError("Unable to determine cache blocking for dynamic M.")
         register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking(num_threads)
 
@@ -981,27 +1000,46 @@ class CppGemmTemplate(CppTemplate):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
 
+        deduped_input_indices = []
+        deduped_name_to_idx: dict[str, int] = {}
+        for input_node in input_nodes:
+            input_name = input_node.get_name()
+            if input_name not in deduped_name_to_idx:
+                deduped_name_to_idx[input_name] = len(deduped_name_to_idx)
+            deduped_input_indices.append(deduped_name_to_idx[input_name])
+
+        def indices_for_inputs(inputs):
+            if len(inputs) == len(input_nodes):
+                return input_indices
+            if len(inputs) != len(deduped_name_to_idx):
+                raise AssertionError(
+                    f"expected {len(deduped_name_to_idx)} inputs, got {len(inputs)}"
+                )
+            return [deduped_input_indices[idx] for idx in input_indices]
+
         def reorder_and_filter(inputs, layout_or_out):
+            current_input_indices = indices_for_inputs(inputs)
             if has_bias:
-                assert len(input_indices) >= 3
+                if len(current_input_indices) < 3:
+                    raise AssertionError(
+                        f"expected >= 3 input indices, got {len(current_input_indices)}"
+                    )
                 # Assume the input order is [inp, x, w] and we reorder it to [x, w, inp]
-                inp_idx = input_indices[0]
-                x_idx = input_indices[1]
-                w_idx = input_indices[2]
+                inp_idx = current_input_indices[0]
+                x_idx = current_input_indices[1]
+                w_idx = current_input_indices[2]
                 return [
                     inputs[x_idx],
                     inputs[w_idx],
                     inputs[inp_idx],
-                    *[inputs[idx] for idx in input_indices[3:]],
+                    *[inputs[idx] for idx in current_input_indices[3:]],
                 ], layout_or_out
-            elif len(inputs) >= len(input_indices):
-                assert len(input_indices) >= 2
-                return [inputs[idx] for idx in input_indices], layout_or_out
             else:
-                # For when input is used for x and w, i.e. X@X.T or similar
-                # Assumes the first input is the only input
-                assert len(inputs) == 1
-                return [inputs[0]] * len(input_indices), layout_or_out
+                if len(current_input_indices) < 2:
+                    raise AssertionError(
+                        f"expected >= 2 input indices, got {len(current_input_indices)}"
+                    )
+                return [inputs[idx] for idx in current_input_indices], layout_or_out
 
         new_inputs, new_layout = reorder_and_filter(input_nodes, layout)
         is_mkldnn_wgt = (
@@ -1011,7 +1049,8 @@ class CppGemmTemplate(CppTemplate):
         if is_mkldnn_wgt:
             # It shouldn't happen as viewing an mkldnn tensor, we can extend the
             # implementation if it does.
-            assert not isinstance(new_inputs[1], ir.BaseView)
+            if isinstance(new_inputs[1], ir.BaseView):
+                raise AssertionError("expected mkldnn weight to not be a BaseView")
         # Note that the layout of MKLDNN Tensor is with the wrong stride
         view_size = new_inputs[1].layout.size
         view_stride = new_inputs[1].layout.stride
@@ -1029,7 +1068,10 @@ class CppGemmTemplate(CppTemplate):
             if not is_mkldnn_wgt and isinstance(new_inputs[1], torch.Tensor):
                 if has_free_symbols(view_size):
                     # If batch size B is dynamic, we need to set the batch size and possibly stride
-                    assert not has_free_symbols(view_size[1:])
+                    if has_free_symbols(view_size[1:]):
+                        raise AssertionError(
+                            "expected no free symbols in view_size[1:]"
+                        )
                     view_size[:] = V.graph.sizevars.guarding_hints_or_throw(view_size)
                     view_stride[:] = V.graph.sizevars.guarding_hints_or_throw(
                         view_stride
@@ -1078,20 +1120,32 @@ class CppGemmTemplate(CppTemplate):
             use_ref=not cls.is_woq_int4(),
             q_group_size=cls.q_group_size(),
         )
-        assert micro_gemm is not None
+        if micro_gemm is None:
+            raise AssertionError("expected micro_gemm to be created, got None")
         pre_block_weights = cls.check_if_block_weight(new_inputs[1], micro_gemm)
         micro_gemm.use_local_vnni_blocking(not pre_block_weights)
-        only_one_input = (
-            input_nodes[0] == input_nodes[1] if len(input_nodes) > 1 else False
-        ) and not pre_block_weights  # If weights are blocked, use the second input
+        cpp_arg_indices: list[int] | None = None
+
+        def dedupe_runtime_inputs(inputs):
+            nonlocal cpp_arg_indices
+            if not isinstance(inputs[0], torch.Tensor):
+                cpp_arg_indices = []
+                seen_names: OrderedSet[str] = OrderedSet()
+                for idx, input_node in enumerate(inputs):
+                    input_name = input_node.get_name()
+                    if input_name not in seen_names:
+                        seen_names.add(input_name)
+                        cpp_arg_indices.append(idx)
+                return inputs
+            if cpp_arg_indices is None:
+                raise AssertionError("expected cpp_arg_indices to be initialized")
+            return [inputs[idx] for idx in cpp_arg_indices]
 
         def preprocessor(inputs, layout):
             new_inputs, new_layout = normalize_shapes(
                 *maybe_to_dense(*reorder_and_filter(inputs, layout))
             )
-            if only_one_input and isinstance(new_inputs[0], torch.Tensor):
-                return new_inputs[1:], new_layout
-            return cls.prep_weight(
+            new_inputs, new_layout = cls.prep_weight(
                 new_inputs,
                 new_layout,
                 # pyrefly: ignore [bad-argument-type]
@@ -1099,12 +1153,16 @@ class CppGemmTemplate(CppTemplate):
                 pre_block_weights,
                 use_int8_fast_compensation_path,
             )
+            return dedupe_runtime_inputs(new_inputs), new_layout
 
         def postprocessor(output):
             if isinstance(output, ir.TensorBox):
                 # prepack the weight as input to the template buffer
                 template_buffer = ir.InputsKernel.unwrap_storage_for_input(output)
-                assert isinstance(template_buffer, ir.CppTemplateBuffer)
+                if not isinstance(template_buffer, ir.CppTemplateBuffer):
+                    raise AssertionError(
+                        f"expected CppTemplateBuffer, got {type(template_buffer)}"
+                    )
                 new_input_nodes, _ = reorder_and_filter(input_nodes, layout)
 
                 W_node = new_input_nodes[1]
@@ -1207,11 +1265,12 @@ class CppGemmTemplate(CppTemplate):
         W = inputs[1]
         new_inputs = list(inputs)
         if cls.is_woq_int4():
-            assert (
+            if not (
                 len(W.get_size()) == 2
                 if isinstance(W, ir.IRNode)
                 else len(W.shape) == 2
-            )
+            ):
+                raise AssertionError("expected WOQ int4 weight to be 2D")
             n, k = W.get_size() if isinstance(W, ir.IRNode) else W.shape
         else:
             k, n = W.get_size()[-2:] if isinstance(W, ir.IRNode) else W.shape[-2:]
@@ -1223,7 +1282,8 @@ class CppGemmTemplate(CppTemplate):
             blocked_w = cls.block_weight(W, new_size, padding)
             new_inputs[1] = cls.pack_vnni_weight(blocked_w, micro_gemm, new_size)
         elif should_block_weight:
-            assert cls.is_woq_int4()
+            if not cls.is_woq_int4():
+                raise AssertionError("expected WOQ int4 in this branch")
             new_inputs[1] = cls.block_weight(W, new_size, padding)
         elif isinstance(W, ir.IRNode):
             # Require W layout to be fixed & contiguous, happens inplace.
@@ -1259,10 +1319,13 @@ class CppGemmTemplate(CppTemplate):
                 else:
                     # Use the original W, not the blocked_w in new_inputs[1] to calculate BCompensate
                     BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)  # type: ignore[assignment]
-                    assert all(
+                    if not all(
                         isinstance(item, torch.Tensor)
                         for item in (x_scale, x_zp, w_scale)
-                    )
+                    ):
+                        raise AssertionError(
+                            "expected x_scale, x_zp, w_scale to be tensors"
+                        )
                     BCompensate = BCompensate * x_scale * w_scale * x_zp
                     x_w_scale = x_scale * w_scale
                 new_inputs.append(BCompensate)
@@ -1311,7 +1374,8 @@ class CppGemmTemplate(CppTemplate):
                     permute_dims,
                 )
         else:
-            assert isinstance(W, torch.Tensor)
+            if not isinstance(W, torch.Tensor):
+                raise AssertionError(f"expected torch.Tensor, got {type(W)}")
             # Pad the weight tensor and reshape it into a 3D blocked shape
             blocked_size = list(new_size)
             blocked_size[-2], blocked_size[-3] = blocked_size[-3], blocked_size[-2]
@@ -1363,14 +1427,16 @@ class CppGemmTemplate(CppTemplate):
                     if micro_gemm.get_b_layout() == LayoutType.VNNI4
                     else "VNNI2"
                 )
-                assert micro_gemm.get_b_layout() in [
+                if micro_gemm.get_b_layout() not in [
                     LayoutType.VNNI2,
                     LayoutType.VNNI4,
-                ], f"We only support {layout_str} for now"
+                ]:
+                    raise AssertionError(f"We only support {layout_str} for now")
                 vnni_size = 4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
-                assert k % vnni_size == 0, (
-                    f"k should be divisible by vnni_size for {layout_str} layout"
-                )
+                if k % vnni_size != 0:
+                    raise AssertionError(
+                        f"k should be divisible by vnni_size for {layout_str} layout"
+                    )
                 vnni_view_size = list(new_size)
                 vnni_view_size[-2] = k // vnni_size
                 vnni_view_size.insert(-1, vnni_size)
@@ -1393,7 +1459,10 @@ class CppGemmTemplate(CppTemplate):
         flag_template_buffer_has_other_users: bool | None = None,
         epilogue_nodes: list[ir.IRNode] | None = None,
     ) -> dict[str, Any]:
-        assert len(self.input_nodes) >= 2
+        if len(self.input_nodes) < 2:
+            raise AssertionError(
+                f"expected >= 2 input nodes, got {len(self.input_nodes)}"
+            )
 
         int8_gemm = self.input_nodes[0].get_dtype() in [torch.uint8, torch.int8]
         x_scale = None
@@ -1429,7 +1498,10 @@ class CppGemmTemplate(CppTemplate):
             W = template_buffer_node.inputs[1]
             Y = template_buffer_node
 
-            assert flag_template_buffer_has_other_users is not None
+            if flag_template_buffer_has_other_users is None:
+                raise AssertionError(
+                    "expected flag_template_buffer_has_other_users to be set"
+                )
             template_buffer_has_other_users = flag_template_buffer_has_other_users
 
         template_buffer = Y
@@ -1520,7 +1592,8 @@ class CppGemmTemplate(CppTemplate):
         #     --> zero or more out-of-template epilogues (`epilogue_nodes`) -->
         #   Y
         if epilogue_creators:
-            assert isinstance(template_buffer, ir.IRNode)
+            if not isinstance(template_buffer, ir.IRNode):
+                raise AssertionError(f"expected ir.IRNode, got {type(template_buffer)}")
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
             gemm_output_buffer = ir.Buffer(
                 name=gemm_output_name,
@@ -1551,17 +1624,28 @@ class CppGemmTemplate(CppTemplate):
                         layout=template_buffer.layout,
                     )
 
-        assert isinstance(Y, (ir.Buffer, ir.ReinterpretView))
+        if not isinstance(Y, (ir.Buffer, ir.ReinterpretView)):
+            raise AssertionError(
+                f"expected ir.Buffer or ir.ReinterpretView, got {type(Y)}"
+            )
         Y_2d: ir.Buffer | ir.ReinterpretView = Y
 
         if epilogue_nodes:
             if not template_buffer_has_other_users:
-                assert isinstance(template_buffer, ir.IRNode)
+                if not isinstance(template_buffer, ir.IRNode):
+                    raise AssertionError(
+                        f"expected ir.IRNode, got {type(template_buffer)}"
+                    )
                 Y_aliases.add(template_buffer.get_name())
             epilogues.extend(epilogue_nodes)
-            assert Y.get_numel() == epilogues[-1].get_numel()
+            if Y.get_numel() != epilogues[-1].get_numel():
+                raise AssertionError(
+                    f"expected Y numel == epilogue numel, got {Y.get_numel()} "
+                    f"and {epilogues[-1].get_numel()}"
+                )
             Y = cast(ir.Buffer, epilogues[-1])
-            assert isinstance(template_buffer, ir.Buffer)
+            if not isinstance(template_buffer, ir.Buffer):
+                raise AssertionError(f"expected ir.Buffer, got {type(template_buffer)}")
             Y_2d, reindexers = gen_2d_view_of_epilogue_buf(
                 Y,
                 template_buffer,
@@ -1587,9 +1671,14 @@ class CppGemmTemplate(CppTemplate):
             use_ref=not self.is_woq_int4(),
             q_group_size=self.q_group_size(),
         )
-        assert micro_gemm is not None
+        if micro_gemm is None:
+            raise AssertionError("expected micro_gemm to be created, got None")
         micro_gemm.use_local_vnni_blocking(not self.should_block_weights)
-        assert self.register_blocking == micro_gemm.register_blocking
+        if self.register_blocking != micro_gemm.register_blocking:
+            raise AssertionError(
+                f"expected register_blocking == {micro_gemm.register_blocking}, "
+                f"got {self.register_blocking}"
+            )
         self.log_blockings()
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
@@ -1599,12 +1688,14 @@ class CppGemmTemplate(CppTemplate):
         L1_cache_size = torch.cpu.get_capabilities().get(
             "l1d_cache_size", 0
         )  # per core cache size in Bytes
-        assert L1_cache_size > 0, f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+        if L1_cache_size <= 0:
+            raise AssertionError(f"Expect L1_cache_size > 0 but got {L1_cache_size}")
 
         L2_cache_size = torch.cpu.get_capabilities().get(
             "l2_cache_size", 0
         )  # per core cache size in Bytes
-        assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
+        if L2_cache_size <= 0:
+            raise AssertionError(f"Expect L2_cache_size > 0 but got {L2_cache_size}")
 
         options = dict(
             X=X,
@@ -1817,8 +1908,10 @@ class CppWoqInt4GemmTemplateMeta(type):
                     blocked_w = W
                 else:
                     # in this case, we unpack and repack weight
-                    assert isinstance(W, torch.Tensor)
-                    assert W.dim() == 2
+                    if not isinstance(W, torch.Tensor):
+                        raise AssertionError(f"expected torch.Tensor, got {type(W)}")
+                    if W.dim() != 2:
+                        raise AssertionError(f"expected 2D weight, got {W.dim()}D")
                     N = W.size(0)
                     K = W.size(-1) * 2
                     G = cls.q_group_size()

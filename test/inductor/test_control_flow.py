@@ -2,6 +2,7 @@
 
 import itertools
 import unittest
+import uuid
 
 import torch
 import torch._dynamo.testing
@@ -199,6 +200,24 @@ class CondModels:
 
             return torch.cond(p, true_fn, false_fn, [c])
 
+    class BranchTensorConstant(torch.nn.Module):
+        # A branch that materializes a tensor constant (e.g. an index tensor)
+        # which is only referenced from within the subgraph.
+        def forward(self, p, x):
+            def true_fn(t):
+                v = t[:, ::2]
+                index = torch.tensor(
+                    [[0, 0, 1], [1, 1, 2], [2, 2, 0], [0, 0, 2]],
+                    dtype=torch.long,
+                    device=t.device,
+                )
+                return v.scatter_add(1, index, torch.ones(4, 3, device=t.device))
+
+            def false_fn(t):
+                return t[:, 1::2] - 3.0
+
+            return torch.cond(p, true_fn, false_fn, (x,))
+
     class WithNonTensorPredicate(torch.nn.Module):
         def forward(self, a, b):
             def true_fn(x, y):
@@ -234,6 +253,16 @@ class CondModels:
                 return (x + b * z)[:2].cos()
 
             return y.sum() - torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+    class MismatchedOutputSizeInnerDim(torch.nn.Module):
+        def forward(self, p, x, y):
+            def true_fn(x, y):
+                return x * 2
+
+            def false_fn(x, y):
+                return y.clone()
+
+            return torch.cond(p, true_fn, false_fn, (x, y))
 
     class FunctionalCall(torch.nn.Module):
         def __init__(self):
@@ -633,6 +662,16 @@ class CondTests(TestCase):
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_branch_tensor_constant(self, device):
+        # branch references a tensor constant only used inside the subgraph
+        self._run_test(
+            model=CondModels.BranchTensorConstant(),
+            inputs=(torch.arange(24, dtype=torch.float32).reshape(4, 6),),
+            device=device,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_non_tensor_predicates(self, device, dynamic):
         # model with a boolean predicate
@@ -725,18 +764,24 @@ class CondTests(TestCase):
         counters = {"pre_grad": 0, "post_grad": 0}
 
         class PreGradPassCounter(CustomGraphPass):
+            def __init__(self):
+                self._uuid = str(uuid.uuid4())
+
             def __call__(self, graph):
                 counters["pre_grad"] += 1
 
             def uuid(self):
-                return "PreGradPassCounter"
+                return self._uuid
 
         class PostGradPassCounter(CustomGraphPass):
+            def __init__(self):
+                self._uuid = str(uuid.uuid4())
+
             def __call__(self, graph):
                 counters["post_grad"] += 1
 
             def uuid(self):
-                return "PostGradPassCounter"
+                return self._uuid
 
         with torch._inductor.config.patch(
             {
@@ -770,6 +815,22 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
                 torch.randn(10, 20),
             },
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    def test_cond_mismatched_branch_output_size_inner_dim(self, device, dynamic):
+        # inner dim mismatch puts an unbacked symbol in the merged
+        # output strides, which must not leak into subgraph codegen
+        self._run_test(
+            model=CondModels.MismatchedOutputSizeInnerDim(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 21),
+            ),
             device=device,
             dynamic=dynamic,
         )
@@ -814,6 +875,39 @@ class CondTests(TestCase):
             model=FactoryBranches(),
             inputs=(),
             device="cpu",  # device for predicate
+            dynamic=True,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_buffer_reuse_with_large_subgraph(self, device):
+        # Regression test: torch.cond subgraph with more buffers than main
+        # graph scheduler nodes caused segmented_tree OOB in memory planning.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(64, 64) for _ in range(10)]
+                )
+
+            def forward(self, p, x):
+                def true_fn(inp):
+                    h = inp
+                    for layer in self.layers:
+                        h = torch.relu(layer(h))
+                    return h.clone()
+
+                def false_fn(inp):
+                    return inp.new_zeros(inp.shape[0], 64)
+
+                return torch.cond(p, true_fn, false_fn, (x,))
+
+        model = Model().to(device)
+        inputs = (torch.randn(8, 64),)
+        self._run_test(
+            model=model,
+            inputs=inputs,
+            device=device,
             dynamic=True,
         )
 
@@ -2111,6 +2205,12 @@ class ScanTests(TestCase):
     def test_scan_in_cond(
         self, device, dynamic, reverse, dim, pred, scan_length, autograd
     ):
+        # TODO: remove when https://github.com/pytorch/pytorch/issues/182381 is resolved.
+        if autograd:
+            raise unittest.SkipTest(
+                "Fails due to issues with backward pass when compiled."
+            )
+
         init = torch.randn(4, 4, 4, dtype=torch.float64)
         xs = torch.randn(scan_length, 4, 4, 4, dtype=torch.float64)
         xs = xs.movedim(0, dim)

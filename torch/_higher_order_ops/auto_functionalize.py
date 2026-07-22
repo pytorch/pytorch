@@ -16,11 +16,11 @@ from torch._higher_order_ops.utils import (
     HopInstance,
     HopSchema,
     materialize_callable_in_args,
+    register_fake,
     unique_graph_id,
 )
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._prims_common import clone_preserve_strides
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -981,17 +981,15 @@ def auto_functionalized_dense(
         return (out, *result)  # type: ignore[return-value]
 
 
-@auto_functionalized.py_impl(FakeTensorMode)
+@register_fake(auto_functionalized, skip_cache=True)
 def auto_functionalized_fake(
-    mode,
     _mutable_op: OpOverload,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
-    with mode:
-        result = auto_functionalized_dense(
-            _mutable_op, _only_clone_these_tensors=None, **kwargs
-        )
-        return result
+    result = auto_functionalized_dense(
+        _mutable_op, _only_clone_these_tensors=None, **kwargs
+    )
+    return result
 
 
 @auto_functionalized.py_impl(ProxyTorchDispatchMode)
@@ -1131,17 +1129,15 @@ def _generate_new_op_kwargs_from_bases(
     return new_kwargs, all_bases_new
 
 
-@auto_functionalized_v2.py_impl(FakeTensorMode)
+@register_fake(auto_functionalized_v2, skip_cache=True)
 def auto_functionalized_v2_fake(
-    mode,
     _mutable_op: _MutableOpType,
     **kwargs: dict[str, Any],
 ) -> tuple[Any, tuple[Tensor, ...]]:
-    with mode:
-        result = auto_functionalized_v2_dense(
-            _mutable_op, _only_clone_these_bases=None, **kwargs
-        )
-        return result
+    result = auto_functionalized_v2_dense(
+        _mutable_op, _only_clone_these_bases=None, **kwargs
+    )
+    return result
 
 
 @auto_functionalized_v2.py_impl(ProxyTorchDispatchMode)
@@ -1155,7 +1151,7 @@ def auto_functionalized_v2_proxy(
         # Below code materializes the callable inputs to the hop as graph modules.
         # kwargs may contain general callables, that are not proxable e.g. FunctionWithNoFreeVars
         # this could happen when we auto_functionalize the backward of the hop,
-        # where backward fn is a callablle that wraps forward graph module.
+        # where backward fn is a callable that wraps forward graph module.
         # This function materialize the callable args according to the schema of the hop.
 
         # We cannot materialize the callables in kwargs directly because the inputs to callable

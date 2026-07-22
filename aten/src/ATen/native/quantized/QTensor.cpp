@@ -79,6 +79,7 @@ std::vector<Tensor> quantize_per_tensor_list_cpu(
     const Tensor& zero_points,
     ScalarType dtype) {
   std::vector<Tensor> quantized_tensors;
+  quantized_tensors.reserve(tensors.size());
   for (const auto i : c10::irange(tensors.size())) {
     quantized_tensors.push_back(at::quantize_per_tensor(
         tensors[i],
@@ -109,6 +110,7 @@ Tensor dequantize_quantized(const Tensor& self) {
 
 std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
   std::vector<Tensor> dequantized_tensors;
+  dequantized_tensors.reserve(tensors.size());
   for (const auto & tensor : tensors) {
     dequantized_tensors.push_back(tensor.dequantize());
   }
@@ -393,6 +395,6 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   at::Tensor xmin_tensor = at::empty({1});
   xmax_tensor[0] = xmax;
   xmin_tensor[0] = xmin;
-  return std::make_tuple(xmax_tensor, xmin_tensor);
+  return std::make_tuple(std::move(xmax_tensor), std::move(xmin_tensor));
 }
 } // namespace at::native

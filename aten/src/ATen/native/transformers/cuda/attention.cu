@@ -1002,6 +1002,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
   // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
   const bool is_nested = cumulative_sequence_length_q.has_value();
+  TORCH_CHECK(
+      !is_nested || max_seqlen_batch_q > 128,
+      "cuDNN varlen attention does not support query sequence length <= 128.");
   if (!is_nested) {
     const int64_t batch_size = query.size(0);
     const int64_t num_heads = query.size(1);
@@ -1441,9 +1444,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     TORCH_CHECK(seqstart_q->size(0) == seqstart_k->size(0));
     TORCH_CHECK(query.size(0) == 1, "cu_seqlen only supports batch_size=1");
     TORCH_CHECK(max_seqlen_q_.has_value());
+    TORCH_CHECK(max_seqlen_k_.has_value());
     max_seqlen_q = *max_seqlen_q_;
-    max_seqlen_k = 0; // TODO: is this actually being set inside the kernel anywhere?
-                      // see https://github.com/pytorch/pytorch/issues/115590s
+    max_seqlen_k = *max_seqlen_k_;
   } else {
     max_seqlen_q = query.size(1);
     max_seqlen_k = key.size(1);
@@ -1506,12 +1509,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), options);
     }
   } else {
-    // Not using dropout. These tensors are unused by backward, but AOTAutograd
-    // may still save them. Keep their device independent of CUDA graph capture
-    // so checkpoint recomputation sees stable metadata.
+    // Not using dropout. AOTAutograd may still save these dummy tensors, and
+    // ROCm attention backends may read their pointers. Keep their device
+    // independent of CUDA graph capture and their value deterministic.
     const auto options = query.options().dtype(at::kLong);
-    seed_t = at::empty({}, options);
-    offset_t = at::empty({}, options);
+    seed_t = at::zeros({}, options);
+    offset_t = at::zeros({}, options);
   }
 
 #ifdef USE_ROCM
@@ -1572,12 +1575,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     // compute_logsumexp is false
     constexpr int kAlignLSE = 1;
     res = at::empty({B, M, num_heads, Kv}, query.options());
+    const auto lse_batch_size =
+        seqstart_q.has_value() ? seqstart_q->size(0) - 1 : B;
     at::Tensor softmax_lse;
     logsumexp = at::empty(
-      { B, num_heads, compute_logsumexp ? max_seqlen_q : 0},
+      {lse_batch_size, num_heads, compute_logsumexp ? max_seqlen_q : 0},
       query.options().dtype(at::ScalarType::Float));
     if (compute_logsumexp) {
-      softmax_lse = logsumexp.view({B * num_heads, max_seqlen_q});
+      softmax_lse = logsumexp.view({lse_batch_size * num_heads, max_seqlen_q});
     }
     at::Tensor q_t = query.transpose(1, 2);
     at::Tensor k_t = key.transpose(1, 2);
@@ -1600,8 +1605,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       atomic_counter = at::zeros({1}, query.options().dtype(at::kInt));
     }
 
-    using aotriton::v2::flash::attn_fwd;
-    using aotriton::v2::flash::attn_fwd_compact_varlen;
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::mk_philoxtensor;
@@ -1609,100 +1612,64 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, aotriton::DType::kFloat16);
     aotriton::TensorView<2> empty_t2(0, {0, 0}, {0, 0}, aotriton::DType::kFloat32);
     at::Tensor softmax_fa_t = at::empty({ 0, 0, 0, 0 }, query.options());
-    const bool use_philox_state = in_capture_stream;
-    auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
-    auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
+    // Keep the returned dummy tensors on query.device() for AOTAutograd
+    // metadata stability, but preserve the old no-dropout AOTriton backend
+    // contract: CPU scalar placeholders, not query-device scalar pointers.
+    const auto aotriton_seed_t =
+        use_dropout ? seed_t : at::zeros({}, at::dtype(at::kLong));
+    const auto aotriton_offset_t =
+        use_dropout ? offset_t : at::zeros({}, at::dtype(at::kLong));
+    const bool use_philox_state = use_dropout && in_capture_stream;
+    auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr)
+                                 : mk_aoscalartensor(aotriton_seed_t);
+    auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr)
+                                    : mk_aoscalartensor(aotriton_offset_t);
     auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
     auto seed_output = mk_philoxtensor(use_philox_state ? seed_t.data_ptr<int64_t>() : nullptr);
     auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);
     auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
     hipError_t err; // TODO: Error handling
-    if constexpr (AOTRITON_ALWAYS_V3_API) {  // Better readability than nesting ifdef
-#if AOTRITON_V3_API  // if constexpr does not stop errors from undefined functions
-      using aotriton::v3::flash::CausalType;
-      using aotriton::v3::flash::VarlenType;
-      using aotriton::v3::flash::WindowValue;
-      aotriton::v3::flash::attn_fwd_params params;
-      params.Q = mk_aotensor(q_t, "q");
-      params.K = mk_aotensor(k_t, "k");
-      params.V = mk_aotensor(v_t, "v");
-      params.Sm_scale = softmax_scale;
-      params.L = compute_logsumexp ? mk_aotensor<2>(softmax_lse, "M") : empty_t2;
-      params.Out = mk_aotensor(output_t, "Out");
-      params.Max_seqlen_q = max_seqlen_q;    // Unused if cu_seqlens_q is empty
-      params.Max_seqlen_k = max_seqlen_k;    // Unused if cu_seqlens_k is empty
-      params.dropout_p = dropout_p;
-      params.philox_seed_ptr = seed;
-      params.philox_offset1 = offset1;
-      params.philox_offset2 = offset2;
-      params.philox_seed_output = seed_output;
-      params.philox_offset_output = offset_output;
-      params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
-      params.persistent_atomic_counter = persistent_counter;
-      params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
-      if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
-        params.window_left = WindowValue::TopLeftAligned;
-        params.window_right = WindowValue::TopLeftAligned;
-      } else if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
-        params.window_left = WindowValue::BottomRightAligned;
-        params.window_right = WindowValue::BottomRightAligned;
-      }
-      if (bias.has_value()) {
-        params.B = mk_aotensor(bias.value(), "bias");
-      }
-      if (seqstart_q.has_value()) {
-        params.varlen_type = VarlenType::CompactVarlen;
-        params.cu_seqlens_q = mk_aotensor<1>(seqstart_q.value(), "cu_seqlens_q");
-        params.cu_seqlens_k = mk_aotensor<1>(seqstart_k.value(), "cu_seqlens_k");
-      } else {
-        params.varlen_type = VarlenType::None;
-      }
-      err = aotriton::v3::flash::attn_fwd(params,
-                                          aotriton::v3::flash::attn_fwd_params::kVersion,
-                                          stream);
-#endif  // AOTRITON_V3_API
-    } else if (seqstart_q.has_value()) {
-      // varlen aka nested tensor
-      err = attn_fwd_compact_varlen(mk_aotensor(q_t, "q"),
-                                    mk_aotensor(k_t, "k"),
-                                    mk_aotensor(v_t, "v"),
-                                    bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_t4,
-                                    mk_aotensor<1>(seqstart_q.value(), "cu_seqlens_q"),
-                                    mk_aotensor<1>(seqstart_k.value(), "cu_seqlens_k"),
-                                    max_seqlen_q,
-                                    max_seqlen_k,
-                                    softmax_scale,
-                                    compute_logsumexp ? mk_aotensor<2>(softmax_lse, "M") : empty_t2,
-                                    mk_aotensor(output_t, "Out"),
-                                    dropout_p,
-                                    seed,
-                                    offset1,
-                                    offset2,
-                                    seed_output,
-                                    offset_output,
-                                    mk_aotensor(softmax_fa_t, "encoded_softmax"),
-                                    is_causal,
-                                    persistent_counter,
-                                    stream);
-    } else {
-      err = attn_fwd(mk_aotensor(q_t, "q"),
-                     mk_aotensor(k_t, "k"),
-                     mk_aotensor(v_t, "v"),
-                     bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_t4,
-                     softmax_scale,
-                     compute_logsumexp ? mk_aotensor<2>(softmax_lse, "M") : empty_t2,
-                     mk_aotensor(output_t, "Out"),
-                     dropout_p,
-                     seed,
-                     offset1,
-                     offset2,
-                     seed_output,
-                     offset_output,
-                     mk_aotensor(softmax_fa_t, "encoded_softmax"),
-                     is_causal,
-                     persistent_counter,
-                     stream);
+    using aotriton::v3::flash::CausalType;
+    using aotriton::v3::flash::VarlenType;
+    using aotriton::v3::flash::WindowValue;
+    aotriton::v3::flash::attn_fwd_params params;
+    params.Q = mk_aotensor(q_t, "q");
+    params.K = mk_aotensor(k_t, "k");
+    params.V = mk_aotensor(v_t, "v");
+    params.Sm_scale = softmax_scale;
+    params.L = compute_logsumexp ? mk_aotensor<2>(softmax_lse, "M") : empty_t2;
+    params.Out = mk_aotensor(output_t, "Out");
+    params.Max_seqlen_q = max_seqlen_q;    // Unused if cu_seqlens_q is empty
+    params.Max_seqlen_k = max_seqlen_k;    // Unused if cu_seqlens_k is empty
+    params.dropout_p = dropout_p;
+    params.philox_seed_ptr = seed;
+    params.philox_offset1 = offset1;
+    params.philox_offset2 = offset2;
+    params.philox_seed_output = seed_output;
+    params.philox_offset_output = offset_output;
+    params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
+    params.persistent_atomic_counter = persistent_counter;
+    params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
+    if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
+      params.window_left = WindowValue::TopLeftAligned;
+      params.window_right = WindowValue::TopLeftAligned;
+    } else if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
+      params.window_left = WindowValue::BottomRightAligned;
+      params.window_right = WindowValue::BottomRightAligned;
     }
+    if (bias.has_value()) {
+      params.B = mk_aotensor(bias.value(), "bias");
+    }
+    if (seqstart_q.has_value()) {
+      params.varlen_type = VarlenType::CompactVarlen;
+      params.cu_seqlens_q = mk_aotensor<1>(seqstart_q.value(), "cu_seqlens_q");
+      params.cu_seqlens_k = mk_aotensor<1>(seqstart_k.value(), "cu_seqlens_k");
+    } else {
+      params.varlen_type = VarlenType::None;
+    }
+    err = aotriton::v3::flash::attn_fwd(params,
+                                        aotriton::v3::flash::attn_fwd_params::kVersion,
+                                        stream);
 #else
     TORCH_CHECK(false, "Attempting to use AOTriton mem_eff_forward backend in a build that has not built AOTriton");
 #endif
