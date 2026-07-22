@@ -399,13 +399,6 @@ double run_gemv_batch(at::mps::MPSStream* stream,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       for (int i = 0; i < iterations; ++i) {
-        if (i > 0) {
-          // MPS tensors live in untracked heaps, so without a barrier the GPU
-          // overlaps the profiled dispatches and the measured span stops
-          // scaling with the iteration count, which skews candidate means
-          // toward whichever candidate ran the most iterations.
-          [stream->commandEncoder() memoryBarrierWithScope:MTLBarrierScopeBuffers];
-        }
         encode_gemv_launch(stream, launch, mat, vec, out, dims, bias, alpha_beta, false);
       }
       // kernelStartTime/kernelEndTime cover CPU-side scheduling, not GPU
@@ -430,7 +423,16 @@ at::native::tunable::Stats profile_gemv_candidate(at::mps::MPSStream* stream,
                                                   const std::array<float, 2>& alpha_beta,
                                                   int iterations) {
   run_gemv_batch(stream, launch, mat, vec, out, dims, bias, alpha_beta, 2);
-  const double duration_ms = run_gemv_batch(stream, launch, mat, vec, out, dims, bias, alpha_beta, iterations);
+  double duration_ms = run_gemv_batch(stream, launch, mat, vec, out, dims, bias, alpha_beta, iterations);
+  // Batches of tiny kernels finish in tens of us, where command buffer
+  // scheduling jitter swamps the GPU timestamps; rescale so every profiled
+  // span is long enough to measure.
+  constexpr double min_span_ms = 0.5;
+  if (duration_ms > 0.0 && duration_ms < min_span_ms) {
+    const double scale = min_span_ms / duration_ms;
+    iterations = std::min(4096, static_cast<int>(std::ceil(iterations * scale)));
+    duration_ms = run_gemv_batch(stream, launch, mat, vec, out, dims, bias, alpha_beta, iterations);
+  }
   at::native::tunable::Stats stats;
   const double mean_ms = duration_ms / iterations;
   for (int i = 0; i < iterations; ++i) {
@@ -517,9 +519,11 @@ void dispatch_gemv(const Tensor& A,
     return candidates;
   };
 
+  // Benchmark-only calls build candidates lazily inside the tune lambda so
+  // the cached fast path skips the pool; tiny gemvs are dispatch-bound.
   std::vector<std::string> candidate_ids;
   std::vector<std::string> candidate_kernels;
-  if (trace_enabled || forced.has_value() || benchmark_enabled) {
+  if (trace_enabled || forced.has_value()) {
     ensure_candidates();
     if (trace_enabled || forced.has_value()) {
       candidate_ids.reserve(candidates.size());
@@ -617,11 +621,19 @@ void dispatch_gemv(const Tensor& A,
       tuning_policy.default_tuning_iterations = 1000;
       tuning_policy.max_tuning_duration_ms = 5.0;
       tuning_policy.max_tuning_iterations = 1000;
+      tuning_policy.min_improvement_ratio = 1.1;
 
       auto run = [&](size_t index, int iterations) {
         return run_gemv_batch(
             stream, launches[index], matrix.tensor, vvec, scratch, dims, expanded_bias, alpha_beta, iterations);
       };
+      // Tuning fires on the first call of a cold shape; ramp GPU clocks first
+      // or the earliest-profiled candidates measure slow and mis-rank. Tiny
+      // kernels need many batches before the accumulated load lifts clocks.
+      double ramp_ms = 0.0;
+      for (int batch = 0; batch < 64 && ramp_ms < 4.0; ++batch) {
+        ramp_ms += run(0, 64);
+      }
       tuning_result = at::native::tunable::findFastest(
           tuning_candidates.size(),
           0,

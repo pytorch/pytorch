@@ -11767,8 +11767,11 @@ class TestAutotuneMPS(TestCaseMPS):
         self.assertGreaterEqual(
             min(result["samples"] for result in selection["results"]), 10
         )
+        # Up to 4 profile rounds (the fallback is re-profiled hot), each
+        # rescaled to at most 4096 iterations for tiny kernels whose batches
+        # would otherwise finish too fast to measure.
         self.assertLessEqual(
-            max(result["samples"] for result in selection["results"]), 1060
+            max(result["samples"] for result in selection["results"]), 4 * 4096
         )
         selected_result = next(
             result
@@ -11778,14 +11781,15 @@ class TestAutotuneMPS(TestCaseMPS):
         self.assertEqual(selection["kernel"], selected_result["kernel"])
         self.assertTrue(selected_result["active"])
         self.assertGreater(selected_result["mean_us"], 0)
-        self.assertEqual(
-            selected_result["mean_us"],
-            min(
-                result["mean_us"]
-                for result in selection["results"]
-                if result["active"]
-            ),
+        min_active_us = min(
+            result["mean_us"] for result in selection["results"] if result["active"]
         )
+        if selection["config"] == selection["candidates"][0]:
+            # The heuristic keeps the pick unless a challenger beats it by
+            # more than min_improvement_ratio (1.1).
+            self.assertLessEqual(selected_result["mean_us"], min_active_us * 1.1)
+        else:
+            self.assertEqual(selected_result["mean_us"], min_active_us)
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("matrix_layout", ["dense", "transposed", "strided", "sliced"])

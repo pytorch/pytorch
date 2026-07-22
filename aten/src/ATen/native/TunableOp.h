@@ -58,6 +58,9 @@ struct TuningPolicy {
   int max_tuning_iterations = 100;
   double max_warmup_duration_ms = 0.0;
   int max_warmup_iterations = 0;
+  // Keep the fallback candidate unless a challenger beats it by this factor;
+  // the fallback is typically a heuristic that should not lose to noise.
+  double min_improvement_ratio = 1.0;
 };
 
 enum class CandidateStatus {
@@ -156,6 +159,24 @@ TuningResult findFastest(size_t candidate_count,
     if (stats._mean < result.time_ms) {
       result.candidate_index = i;
       result.time_ms = stats._mean;
+    }
+  }
+  if (result.candidate_index != fallback_index && policy.min_improvement_ratio > 1.0) {
+    auto& fallback = result.candidates[fallback_index];
+    if (fallback.status == CandidateStatus::Profiled) {
+      // GPU clocks ramp over the tuning session, so the first-profiled
+      // fallback ran at the lowest frequency; re-profile it hot before
+      // deciding whether the winner truly beats it.
+      auto stats = profile(fallback_index, tuning_iterations(policy, fallback.stats._mean));
+      fallback.samples += stats._n;
+      if (stats._n > 0 && std::isfinite(stats._mean) && stats._mean > 0.0 &&
+          stats._mean < fallback.stats._mean) {
+        fallback.stats = stats;
+      }
+      if (fallback.stats._mean <= result.time_ms * policy.min_improvement_ratio) {
+        result.candidate_index = fallback_index;
+        result.time_ms = fallback.stats._mean;
+      }
     }
   }
   return result;
