@@ -229,12 +229,10 @@ class AbstractFaultToleranceTest:
         # reconfigure() with a fresh uuid.
         self._create_reconfigured_pg("ft_abort", 1200)
         self.backend.abort()
-        try:
+        if hasattr(self.backend, "get_error"):
             from torch._C._distributed_c10d import ErrorType
 
             self.assertEqual(self.backend.get_error(), ErrorType.COMM_ERROR)
-        except RuntimeError:
-            pass
 
         handles = self._collect_handles("ft_abort_recover")
         self._reconfigure(1201, handles)
