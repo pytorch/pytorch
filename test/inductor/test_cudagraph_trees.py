@@ -6688,6 +6688,9 @@ if HAS_CUDA_AND_TRITON:
             def _(x: torch.Tensor) -> torch.Tensor:
                 return torch.empty_like(x)
 
+            from torch._inductor.lowering import make_fallback
+            make_fallback(torch.ops.test_cudagraph_empty_partition.unsafe_mul.default)
+
             def f(x: torch.Tensor) -> torch.Tensor:
                 return unsafe_mul(x)
 
