@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
 import torch.library
 
@@ -162,6 +162,12 @@ _libs: dict[tuple[str, str], torch.library.Library] = {}
 # Keeping the table registry-local means `import torch._native` stays cheap
 # and consumers control exactly when and where overrides take effect.
 _native_decomp_overrides: dict[object, Callable] = {}
+
+# Some CompositeImplicitAutograd operators need higher-key registrations while
+# a backend router is active. Keep those hooks scoped to the affected graph.
+_auxiliary_override_sync_fns: dict[
+    tuple[str, str], list[Callable[[list[_OverrideNode], Any | None], None]]
+] = {}
 
 
 def _has_cow_tensor(*args, **kwargs) -> bool:
@@ -665,6 +671,16 @@ def register_op_override(
     _update_registration_maps(backend, op_symbol, dispatch_key, key=key)
 
 
+def _register_auxiliary_override_sync(
+    op_symbol: str,
+    dispatch_key: str,
+    sync_fn: Callable[[list[_OverrideNode], Any | None], None],
+) -> None:
+    _auxiliary_override_sync_fns.setdefault((op_symbol, dispatch_key), []).append(
+        sync_fn
+    )
+
+
 def _should_reregister_graph(
     original_graph: list[_OverrideNode],
     new_graph: list[_OverrideNode],
@@ -899,6 +915,7 @@ def _register_overrides_from_graph(
     if not cond_impl:
         if overload is not None:
             _native_decomp_overrides.pop(overload, None)
+        _sync_auxiliary_overrides(op_symbol, dispatch_key, graph, None)
         return
 
     # Capture the prior kernel at this (op, dispatch_key) *before* we install
@@ -973,6 +990,17 @@ def _register_overrides_from_graph(
     # comment on `_native_decomp_overrides` for why).
     if overload is not None:
         _native_decomp_overrides[overload] = compile_router
+    _sync_auxiliary_overrides(op_symbol, dispatch_key, graph, fallback_kernel)
+
+
+def _sync_auxiliary_overrides(
+    op_symbol: str,
+    dispatch_key: str,
+    graph: list[_OverrideNode],
+    fallback_kernel: Any | None,
+) -> None:
+    for sync in _auxiliary_override_sync_fns.get((op_symbol, dispatch_key), ()):
+        sync(graph, fallback_kernel)
 
 
 def _register_all_overrides() -> None:
