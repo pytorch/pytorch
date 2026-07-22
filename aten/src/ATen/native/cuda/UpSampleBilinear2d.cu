@@ -653,11 +653,11 @@ __global__ void upsample_gen2d_aa_out_frame(
       buffer1 = &(idata[n][c][ymin + y][xmin]);
       buffer2[y] = static_cast<scalar_t>(
           upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
-              buffer1, wx, xsize));
+              buffer1, wx, xsize, idata.stride(3)));
     }
     odata[n][c][output_y][output_x] = static_cast<scalar_t>(
         upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
-            buffer2, wy, ysize));
+            buffer2, wy, ysize, 1));
   }
 }
 
@@ -780,11 +780,8 @@ static void upsample_gen2d_aa_out_cuda_template(
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_gen2d_aa_out_cuda", {input_arg, output_arg});
 
-  // TODO: remove this when the cuda kernel is updated to support the channels_last memory format.
-  // This is a temporary hack to prevent a silence correctness issue when calling this kernel
-  // with tensors in channels_last format.
-  auto output_c = output.is_contiguous() ? output : at::empty(output.sizes(), output.options());
-  auto input = input_.contiguous();
+  // Strided accessors handle any memory format; no contiguous copy needed.
+  const Tensor& input = input_;
 
   int output_height = output_size[0];
   int output_width = output_size[1];
@@ -806,7 +803,7 @@ static void upsample_gen2d_aa_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = input.packed_accessor64<const scalar_t, 4>();
-        auto odata = output_c.template packed_accessor64<scalar_t, 4>();
+        auto odata = output.packed_accessor64<scalar_t, 4>();
 
         const accscalar_t height_scale = area_pixel_compute_scale<accscalar_t>(
             input_height, output_height, align_corners, scales_h);
@@ -855,10 +852,6 @@ static void upsample_gen2d_aa_out_cuda_template(
                stream>>>(height_scale, width_scale, idata, odata, interp_filter);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
-
-  if (!output.is_contiguous()) {
-      output.copy_(output_c);
-  }
 }
 
 // In the code below interp_filter_t distinguishes between bilinear and bicubic interpolations
@@ -886,7 +879,8 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
   int input_height = input_size[2];
   int input_width = input_size[3];
 
-  Tensor grad_output = grad_output_.contiguous();
+  // Strided accessors handle any memory format; no contiguous copy needed.
+  const Tensor& grad_output = grad_output_;
 
   grad_input.zero_();
 
