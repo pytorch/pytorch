@@ -2314,6 +2314,90 @@ class CudaReproTests(TestCase):
         self.assertIn("reduction_hint=ReductionHint.INNER", persistent_code)
         self.assertNotIn("for roffset", persistent_code)
 
+    @parametrize("use_block_ptr", [False, True])
+    @parametrize("dynamic_batch", [False, True])
+    @config.patch(
+        {
+            "triton.multi_kernel": 0,
+            "triton.tile_reductions": True,
+            "triton.prefer_nd_tiling": False,
+            "triton.max_tiles": 3,
+            "split_reductions": False,
+        }
+    )
+    def test_persistent_reduction_cse_reindexed_epilogue(
+        self, use_block_ptr, dynamic_batch
+    ):
+        if device_type != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        out_dtype = torch.float16
+        fp8_min = -448.0
+        fp8_max = 448.0
+        min_fp8_scale = 1.0 / (fp8_max * 512.0)
+
+        def fn(out, x, scales_out, scale_ub):
+            hidden = x.shape[1] // 2
+            group_size = 128
+            gate = x[:, :hidden].to(torch.float32)
+            up = x[:, hidden:].to(torch.float32)
+            prod = F.silu(gate) * up
+            grouped = prod.view(x.shape[0], hidden // group_size, group_size)
+            scales = torch.amax(torch.abs(grouped), dim=-1)
+            scales = torch.clamp(scales, max=scale_ub)
+            scales = torch.clamp(scales * (1.0 / fp8_max), min=min_fp8_scale)
+            y = torch.clamp(grouped / scales[:, :, None], fp8_min, fp8_max).to(
+                out.dtype
+            )
+            scales_out.copy_(scales)
+            out.copy_(y.view_as(out))
+
+        x = torch.randn(4, 512, device=device_type, dtype=torch.bfloat16)
+        out = torch.empty(4, 256, device=device_type, dtype=out_dtype)
+        scales_out = torch.empty(4, 2, device=device_type)
+        expected_out = torch.empty_like(out)
+        expected_scales = torch.empty_like(scales_out)
+        scale_ub = torch.tensor(1e6, device=device_type)
+
+        fn(expected_out, x, expected_scales, scale_ub)
+        if dynamic_batch:
+            for tensor in (x, out, scales_out):
+                torch._dynamo.mark_dynamic(tensor, 0)
+        with config.patch("triton.use_block_ptr", use_block_ptr):
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            _, code = run_and_get_code(
+                compiled_fn,
+                out,
+                x,
+                scales_out,
+                scale_ub,
+            )
+            if dynamic_batch:
+                x2 = torch.randn(7, 512, device=device_type, dtype=torch.bfloat16)
+                out2 = torch.empty(7, 256, device=device_type, dtype=out_dtype)
+                scales_out2 = torch.empty(7, 2, device=device_type)
+                expected_out2 = torch.empty_like(out2)
+                expected_scales2 = torch.empty_like(scales_out2)
+                fn(expected_out2, x2, expected_scales2, scale_ub)
+                compiled_fn(out2, x2, scales_out2, scale_ub)
+                self.assertEqual(expected_out2, out2)
+                self.assertEqual(expected_scales2, scales_out2)
+        self.assertEqual(expected_out, out)
+        self.assertEqual(expected_scales, scales_out)
+
+        code = "\n".join(code)
+        self.assertIn("@triton_heuristics.persistent_reduction", code)
+        self.assertEqual(1, code.count("@triton_heuristics.persistent_reduction"))
+        persistent_code = code.split("@triton_heuristics.persistent_reduction", 1)[1]
+        if use_block_ptr:
+            self.assertIn("tl.make_block_ptr(in_ptr0", persistent_code)
+            self.assertEqual(
+                2, persistent_code.count("tl.load(tl.make_block_ptr(in_ptr0")
+            )
+        else:
+            self.assertEqual(2, persistent_code.count("tl.load(in_ptr0 +"))
+        self.assertLessEqual(persistent_code.count("libdevice.exp"), 1)
+
     def test_scaled_dot_product_efficient_attention_backward(self):
         from torch import nn, Tensor
 
