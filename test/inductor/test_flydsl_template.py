@@ -68,7 +68,7 @@ class TestFlyDSLTemplate(TestCase):
                     result, (code,) = run_and_get_code(compiled_fn, a, b)
 
                     self.assertIn("async_compile.flydsl", code)
-                    self.assertIn("_flydsl_mm", code)
+                    self.assertNotIn(".run(", code)
                     self.assertIn("TILE_M: fx.Constexpr", code)
                     self.assertIn("STAGES: fx.Constexpr", code)
                     self.assertIn("BLOCK_N_WARPS: fx.Constexpr", code)
