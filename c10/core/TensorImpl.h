@@ -274,8 +274,9 @@ struct C10_API FakeTensorMode {
   void remove_constant(c10::ExtraMeta* extra_meta);
 
   // key = the fake tensor's ExtraMeta, value = the real constant tensor's impl.
-  // Keyed by ExtraMeta (not TensorImpl) so ~ExtraMeta can erase its own entry
-  // on destruction.
+  // Keyed by ExtraMeta (not TensorImpl) so ~ExtraMeta can clear this entry on
+  // destruction, without having to touch the TensorImpl destructor (which has a
+  // much bigger blast radius).
   std::unordered_map<c10::ExtraMeta*, c10::intrusive_ptr<c10::TensorImpl>>
       tensor_to_constant_;
   // key = constant storage, values = all fake tensors that share this storage
@@ -1508,9 +1509,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
-    // Mirrors Python FakeTensor construction: validate a meta fake device
-    // against allow_meta here, where the mode is in hand (no TLS lookup).
-    // set_fake_device() has already recorded fake_device_ by this point.
     auto fake_device = this->fake_device();
     TORCH_CHECK(
         mode == nullptr || mode->allow_meta_ ||
