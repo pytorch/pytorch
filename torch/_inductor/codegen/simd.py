@@ -1600,7 +1600,7 @@ class _DerivedIterationFamily:
         )
 
     def sub_parent_tree(self) -> DerivedIterationRangesRoot:
-        assert self.flat_index_derived_tree is not None
+        assert self.flat_index_derived_tree is not None  # noqa: S101
         return self.flat_index_derived_tree
 
     @contextlib.contextmanager
@@ -2022,7 +2022,7 @@ class _GroupedReductionLayout:
         value: CSEVariable,
         source_layout: scheduler.NestedReduction.SubParentSourceLayout,
     ) -> bool:
-        assert value.dtype is not None
+        assert value.dtype is not None  # noqa: S101
         parent_dim = self.parent_dim(value)
         if parent_dim is None or parent_dim == "1":
             family.remapped_values[name] = value
@@ -2049,7 +2049,7 @@ class _GroupedReductionLayout:
         child_block = sub_parent_tree.block_size_str()
         factor_dim = str(factor)
         shape = value.shape
-        assert shape is not None
+        assert shape is not None  # noqa: S101
         if source_layout is scheduler.NestedReduction.SubParentSourceLayout.CONTIGUOUS:
             if len(shape) == 2:
                 passthrough_dim = str(shape[1 - self.parent_axis])
@@ -2095,8 +2095,8 @@ class _GroupedReductionLayout:
         parent_extent: str,
         elems_per_group: str,
     ) -> CSEVariable:
-        assert value.dtype is not None
-        assert value.shape is not None and len(value.shape) >= 2
+        assert value.dtype is not None  # noqa: S101
+        assert value.shape is not None and len(value.shape) >= 2  # noqa: S101
         passthrough_extent = self.passthrough_block
         num_groups = self.num_groups_str
         pre_broadcast_shape = (passthrough_extent, num_groups, 1)
@@ -2656,7 +2656,7 @@ class SIMDScheduling(BaseScheduling):
         if candidate is None:
             return False
         epilogue_nodes, _sub_parent_factor = candidate
-        assert self.scheduler is not None
+        assert self.scheduler is not None  # noqa: S101
         renames = self.scheduler.mutation_renames
         epilogue_node_set = OrderedSet(epilogue_nodes)
         if not scheduler.NestedReduction._sub_parent_epilogue_outputs_unread(
@@ -3249,7 +3249,7 @@ class SIMDScheduling(BaseScheduling):
                     grouped_parent_half_pointwise,
                     grouped_node.get_nodes(),
                 )
-                assert sub_parent_source_layouts is not None
+                assert sub_parent_source_layouts is not None  # noqa: S101
             self._codegen_remapped_pointwise(
                 kernel,
                 outer_local_reduction_pointwise,
@@ -3274,9 +3274,9 @@ class SIMDScheduling(BaseScheduling):
                 sub_parent_source_layouts,
             )
             if grouped_parent_half_pointwise:
-                assert parent_half_family is not None
-                assert parent_half_source is not None
-                assert sub_parent_source_layouts is not None
+                assert parent_half_family is not None  # noqa: S101
+                assert parent_half_source is not None  # noqa: S101
+                assert sub_parent_source_layouts is not None  # noqa: S101
                 self._codegen_sub_parent_pointwise(
                     kernel,
                     grouped_parent_half_pointwise,
@@ -3494,7 +3494,7 @@ class SIMDScheduling(BaseScheduling):
             load_transform=load_transform,
         )
         if parent_half_family is not None:
-            assert source_layouts is not None
+            assert source_layouts is not None  # noqa: S101
             handler = _SubParentSourceLoadMaterializer(
                 handler,
                 kernel,
@@ -3538,7 +3538,7 @@ class SIMDScheduling(BaseScheduling):
                     sub_parent_source,
                     sn.get_ranges(),
                 )
-                assert not reduction_vars
+                assert not reduction_vars  # noqa: S101
                 with V.set_ops_handler(handler), kernel.set_current_node(sn):
                     sn._body(iter_vars)
 
@@ -3696,7 +3696,7 @@ class SIMDScheduling(BaseScheduling):
         kernel.min_rblock = (
             int(rnumel) if kernel.persistent_reduction else sub_parent_factor
         )
-        assert len(kernel.range_trees) == 2
+        assert len(kernel.range_trees) == 2  # noqa: S101
         layout = _GroupedReductionLayout.from_kernel(
             kernel,
             sympy.Integer(int(rnumel)),

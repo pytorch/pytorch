@@ -6151,7 +6151,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         reshaped = self._reshape_expr(value, reshape_shape)
         permuted = f"tl.permute({reshaped}, ({', '.join(map(str, permute_dims))}))"
         factor = len(part_names)
-        assert factor > 1 and factor & (factor - 1) == 0
+        assert factor > 1 and factor & (factor - 1) == 0  # noqa: S101
         permuted_shape = tuple(reshape_shape[i] for i in permute_dims)
 
         def emit_recursive_split(
