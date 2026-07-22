@@ -3573,6 +3573,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           &::c10d::ProcessGroupGloo::setTimeout,
           py::arg("timeout"),
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_error",
+          &::c10d::ProcessGroupGloo::getError,
+          py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "options",
           &::c10d::ProcessGroupGloo::getOptions,
