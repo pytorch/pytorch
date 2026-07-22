@@ -640,25 +640,23 @@ REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
 
 /*
   Computes the LU decomposition of a m×n matrix or batch of matrices in 'input' tensor.
-  This is an in-place routine, content of 'input', 'pivots', and 'infos' is overwritten.
+  This is an in-place routine, content of 'input' and 'infos' is overwritten.
   This is a "looped" variant for calling single input MAGMA function on batched input.
 
   Args:
   * `input` - [in] the input matrix for LU decomposition
               [out] the LU decomposition
-  * `pivots` - [out] the pivot indices
   * `infos` - [out] error codes, positive values indicate singular matrices
-  * `compute_pivots` - controls whether LU is computed with or without pivoting
 
   For further details, please see the MAGMA documentation for magma_dgetrf_gpu.
 */
 template <typename scalar_t>
-static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos) {
+static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& infos) {
 #if !AT_MAGMA_ENABLED()
   // This should never be thrown if the calling functions are correct.
   TORCH_CHECK(false, "linalg.lu_factor: PyTorch was not compiled with MAGMA support.");
 #else
-  // magmaLuNoPiv require infos and pivots tensor to be on CPU
+  // magmaLuNoPiv require infos tensor to be on CPU
   // the data is later copied back to the appropriate output tensor
   Tensor infos_cpu = at::empty_like(infos, infos.options().device(kCPU).pinned_memory(true));
 
@@ -681,20 +679,18 @@ static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivo
 
 /*
   Computes the LU decomposition of a m×n matrix or batch of matrices in 'input' tensor.
-  This is an in-place routine, content of 'input', 'pivots', and 'infos' is overwritten.
+  This is an in-place routine, content of 'input' and 'infos' is overwritten.
   This is a specialized batched variant, it is expected to be faster than the "looped" version only for small inputs.
 
   Args:
   * `input` - [in] the input matrix for LU decomposition
               [out] the LU decomposition
-  * `pivots` - [out] the pivot indices
   * `infos` - [out] error codes, positive values indicate singular matrices
-  * `compute_pivots` - controls whether LU is computed with or without pivoting
 
   For further details, please see the MAGMA documentation for magma_dgetrf_batched.
 */
 template <typename scalar_t>
-static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos) {
+static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& infos) {
 #if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
       false,
@@ -738,15 +734,15 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
 #endif
 }
 
-static void lu_factor_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos) {
+static void lu_factor_looped_magma(const Tensor& input, const Tensor& infos) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_factor_magma_looped", [&]{
-    apply_lu_factor_looped_magma<scalar_t>(input, pivots, infos);
+    apply_lu_factor_looped_magma<scalar_t>(input, infos);
   });
 }
 
-static void lu_factor_batched_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos) {
+static void lu_factor_batched_magma(const Tensor& input, const Tensor& infos) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_factor_magma_batched", [&]{
-    apply_lu_factor_batched_magma<scalar_t>(input, pivots, infos);
+    apply_lu_factor_batched_magma<scalar_t>(input, infos);
   });
 }
 
@@ -862,11 +858,11 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   auto m = input.size(-2);
   auto n = input.size(-1);
 
-  const auto lu_factor_magma = [batch_size](const Tensor& input, const Tensor& pivots, const Tensor& infos) {
+  const auto lu_factor_magma = [batch_size](const Tensor& input, const Tensor& infos) {
     if (batch_size == 1) {
-      lu_factor_looped_magma(input, pivots, infos);
+      lu_factor_looped_magma(input, infos);
     } else {
-      lu_factor_batched_magma(input, pivots, infos);
+      lu_factor_batched_magma(input, infos);
     }
   };
 
@@ -896,7 +892,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
 
   const auto preferred_linalg_backend = at::globalContext().linalgPreferredBackend();
   if (preferred_linalg_backend == at::LinalgBackend::Magma && !compute_pivots) {
-    lu_factor_magma(input, pivots, infos);
+    lu_factor_magma(input, infos);
   } else { // default and cusolver
     lu_factor_cusolver(input, pivots, infos, compute_pivots);
   }
