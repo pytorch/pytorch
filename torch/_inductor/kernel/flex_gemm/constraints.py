@@ -355,9 +355,11 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
             return (
                 group % LOCAL_REDUCE_FRAGMENT_WIDTH == 0
                 and group <= tile
-                and config.tile_m == 128
-                and config.cluster_m == 1
                 and config.cluster_n == 1
+                and (
+                    (config.tile_m == 128 and config.cluster_m == 1)
+                    or (axis == 1 and config.tile_m == 256 and config.cluster_m == 2)
+                )
             )
 
 

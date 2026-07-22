@@ -4350,6 +4350,49 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("group", (64, 128))
+    def test_mm_tuple_aux_local_n_reduce_supports_clustered_tile_m256(self, group):
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        m = n = 256
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            return acc.relu(), x.sum(-1)
+
+        config = dataclasses.asdict(
+            GemmConfig(
+                tile_m=256,
+                tile_n=256,
+                pingpong=False,
+                cluster_m=2,
+                cluster_n=1,
+                device_capacity=10,
+            )
+        )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
+        self.assertLocalReduceAuxCode(code, group, callbacks=True)
+        self.assertIn("('tile_m', 256)", code)
+        self.assertIn("('cluster_m', 2)", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize(
         "case",
         (
