@@ -56,7 +56,7 @@ bool _call_hooks(PyObject* dict, PyObject* args) {
   // Note: [Extend Hook Lifetime]
   // Hold a reference to hooks till we iterate over them.
   // This is to handle the case when hook calls `handle.remove` inside it
-  // and it's refcount goes to `0`, Python is free to GC it.
+  // and its refcount goes to `0`, Python is free to GC it.
   // We hold onto a stale pointer and subsequent call to
   // `check_single_result`, which tries to fetch the `hook`'s name segfaults.
   // So, we use `PyDict_Values` which returns a new reference to the values

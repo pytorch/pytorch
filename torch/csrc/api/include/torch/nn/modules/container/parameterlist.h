@@ -155,7 +155,7 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
   template <typename Head, typename... Tail>
   void push_back_var(Head&& head, Tail&&... tail) {
     append(std::forward<Head>(head));
-    // Recursively calls this method, until the parameter pack only thas this
+    // Recursively calls this method, until the parameter pack only has this
     // entry left. Then calls `push_back()` a final time (above).
     push_back_var(std::forward<Tail>(tail)...);
   }

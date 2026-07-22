@@ -1588,7 +1588,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           freed_pointer_set.insert(ptr);
         }
         // that block has already been freed,
-        // so even those this will error, so too will the allocator
+        // so even though this will error, so too will the allocator
         // when the corresponding tensor dies because there is no
         // live tensor corresponding to it
         TORCH_CHECK(
