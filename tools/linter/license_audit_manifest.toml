@@ -2,6 +2,7 @@
 excluded = [
   'third_party/NVTX/docs/LICENSE.txt',
   'third_party/NVTX/python/LICENSE.txt',
+  'third_party/NVTX/rust/LICENSE',
   'third_party/NVTX/tools/docs/github-markdown-css/LICENSE',
   'third_party/NVTX/tools/docs/github-markdown-css/license',
   'third_party/aiter/3rdparty/composable_kernel/docs/LICENSE.rst',
@@ -24,6 +25,12 @@ excluded = [
   'third_party/fbgemm/fbgemm_gpu/docs/src/general/LICENSE.rst',
   'third_party/fbgemm/fbgemm_gpu/docs/src/general/License.rst',
   'third_party/fbgemm/fbgemm_gpu/test/quantize/mx/LICENSE',
+  'third_party/fbgemm/third_party/asmjit/LICENSE.md',
+  'third_party/fbgemm/third_party/googletest/LICENSE',
+  'third_party/fbgemm/third_party/googletest/googlemock/LICENSE',
+  'third_party/fbgemm/third_party/googletest/googlemock/scripts/generator/LICENSE',
+  'third_party/fbgemm/third_party/googletest/googletest/LICENSE',
+  'third_party/fbgemm/third_party/hipify_torch/LICENSE.txt',
   'third_party/flash-attention/csrc/composable_kernel/docs/LICENSE.rst',
   'third_party/flash-attention/csrc/composable_kernel/docs/license.rst',
   'third_party/flash-attention/csrc/cutlass/python/LICENSE.txt',
@@ -118,6 +125,8 @@ paths = [
   'third_party/cpuinfo/deps/clog/LICENSE',
   'third_party/fbgemm/external/cpuinfo/LICENSE',
   'third_party/fbgemm/external/cpuinfo/deps/clog/LICENSE',
+  'third_party/fbgemm/third_party/cpuinfo/LICENSE',
+  'third_party/fbgemm/third_party/cpuinfo/deps/clog/LICENSE',
   'third_party/pthreadpool/LICENSE',
 ]
 
@@ -129,6 +138,7 @@ paths = [
   'third_party/cutlass/LICENSE.txt',
   'third_party/fbgemm/LICENSE',
   'third_party/fbgemm/external/cutlass/LICENSE.txt',
+  'third_party/fbgemm/third_party/cutlass/LICENSE.txt',
   'third_party/flash-attention/LICENSE',
   'third_party/flash-attention/csrc/cutlass/LICENSE.txt',
   'third_party/flash-attention/flash_attn/cute/LICENSE',
