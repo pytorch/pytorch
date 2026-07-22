@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#include <ATen/Dispatch.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/PhiloxDistribution.h>
@@ -24,6 +25,9 @@ namespace {
 
 void validate_normal_std(double stddev);
 
+template <typename scalar_t>
+void validate_uniform_bounds(const Tensor& self, double low, double high);
+
 } // anonymous namespace
 
 Tensor& _philox_distribution_shards_symint(
@@ -43,7 +47,8 @@ Tensor& _philox_distribution_shards_symint(
   const auto distribution_kind =
       static_cast<PhiloxDistributionKind>(distribution);
   TORCH_CHECK(
-      distribution_kind == PhiloxDistributionKind::Normal,
+      distribution_kind == PhiloxDistributionKind::Normal ||
+          distribution_kind == PhiloxDistributionKind::Uniform,
       "_philox_distribution_shards_: unsupported distribution kind ",
       distribution);
   TORCH_CHECK(
@@ -61,6 +66,14 @@ Tensor& _philox_distribution_shards_symint(
   switch (distribution_kind) {
     case PhiloxDistributionKind::Normal:
       validate_normal_std(param1);
+      break;
+    case PhiloxDistributionKind::Uniform:
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          kHalf,
+          kBFloat16,
+          self.scalar_type(),
+          "_philox_distribution_shards_",
+          [&] { validate_uniform_bounds<scalar_t>(self, param0, param1); });
       break;
   }
   philox_distribution_shards_stub(
@@ -85,6 +98,31 @@ void validate_normal_std(double stddev) {
       stddev >= 0.0,
       "normal expects std >= 0.0, but found std ",
       stddev);
+}
+
+template <typename scalar_t>
+void validate_uniform_bounds(const Tensor& self, double low, double high) {
+  const auto min =
+      static_cast<double>(std::numeric_limits<scalar_t>::lowest());
+  const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
+  TORCH_CHECK(low >= min && low <= max, "from is out of bounds for ", self.dtype());
+  TORCH_CHECK(
+      high >= min && high <= max, "to is out of bounds for ", self.dtype());
+  TORCH_CHECK(
+      low <= high,
+      "uniform_ expects to return a [from, to) range, but found from=",
+      low,
+      " > to=",
+      high);
+  TORCH_CHECK(
+      high - low <= max,
+      "uniform_ expects to-from <= std::numeric_limits<",
+      toString(self.scalar_type()),
+      ">::max(), but found to=",
+      high,
+      " and from=",
+      low,
+      " which result in to-from to exceed the limit");
 }
 
 bool philox_shard_rectangles_overlap(

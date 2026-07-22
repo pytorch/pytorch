@@ -18,6 +18,7 @@ namespace native {
 // _PHILOX_DISTRIBUTION_* constants used by Python callers.
 enum class PhiloxDistributionKind : int64_t {
   Normal = 0,
+  Uniform = 1,
 };
 
 using philox_distribution_shards_fn = void (*)(

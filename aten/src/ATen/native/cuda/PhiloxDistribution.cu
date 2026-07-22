@@ -11,6 +11,7 @@
 #include <ATen/native/PhiloxDistribution.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
+#include <ATen/OpMathType.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
 #include <c10/util/irange.h>
@@ -41,6 +42,17 @@ void run_normal_distribution_shards(
     double stddev,
     std::optional<Generator> generator);
 
+void run_uniform_distribution_shards(
+    Tensor& self,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    double low,
+    double high,
+    std::optional<Generator> generator);
+
 } // anonymous namespace
 
 void philox_distribution_shards_cuda(
@@ -57,6 +69,18 @@ void philox_distribution_shards_cuda(
   switch (distribution) {
     case PhiloxDistributionKind::Normal:
       run_normal_distribution_shards(
+          self,
+          global_shape,
+          global_offsets,
+          local_offsets,
+          local_sizes,
+          chunk_count,
+          param0,
+          param1,
+          generator);
+      break;
+    case PhiloxDistributionKind::Uniform:
+      run_uniform_distribution_shards(
           self,
           global_shape,
           global_offsets,
@@ -91,11 +115,29 @@ struct CurandNormalDouble2 {
   }
 };
 
+struct CurandUniformFloat4 {
+  __device__ float4 operator()(curandStatePhilox4_32_10_t* state) const {
+    return curand_uniform4(state);
+  }
+};
+
+struct CurandUniformDouble2 {
+  __device__ double2 operator()(curandStatePhilox4_32_10_t* state) const {
+    return curand_uniform2_double(state);
+  }
+};
+
 template <typename scalar_t>
 using CurandNormalSampler = std::conditional_t<
     std::is_same_v<scalar_t, double>,
     CurandNormalDouble2,
     CurandNormalFloat4>;
+
+template <typename scalar_t>
+using CurandUniformSampler = std::conditional_t<
+    std::is_same_v<scalar_t, double>,
+    CurandUniformDouble2,
+    CurandUniformFloat4>;
 
 // Box-Muller: convert 4 uniform uint32 values into 4 standard normal floats.
 __device__ __forceinline__ float4 box_muller_float(uint4 r) {
@@ -398,6 +440,43 @@ void run_normal_distribution_shards(
             chunk_count,
             generator,
             CurandNormalSampler<scalar_t>{},
+            param_func);
+      });
+}
+
+void run_uniform_distribution_shards(
+    Tensor& self,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    double low,
+    double high,
+    std::optional<Generator> generator) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      self.scalar_type(),
+      "_philox_distribution_shards_",
+      [&] {
+        using opmath_t = at::opmath_type<scalar_t>;
+        auto lo = static_cast<scalar_t>(low);
+        auto hi = static_cast<scalar_t>(high);
+        auto range = static_cast<opmath_t>(hi - lo);
+        auto param_func = [range, lo, hi] __device__(opmath_t rand) {
+          auto value = static_cast<scalar_t>(rand * range + lo);
+          return value == hi ? lo : value;
+        };
+        distribution_shards<scalar_t>(
+            self,
+            global_shape,
+            global_offsets,
+            local_offsets,
+            local_sizes,
+            chunk_count,
+            generator,
+            CurandUniformSampler<scalar_t>{},
             param_func);
       });
 }

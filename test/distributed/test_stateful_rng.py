@@ -197,6 +197,36 @@ class TestCheckpointableTensorRNG(TestCase):
 
 class TestPhiloxDistributionShardsOp(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_uniform_matches_dense(self):
+        device = torch.device("cuda")
+        # Must match PhiloxDistributionKind::Uniform in PhiloxDistribution.h.
+        uniform_distribution = 1
+        for dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            with self.subTest(dtype=dtype):
+                generator = torch.Generator(device=device).manual_seed(123)
+                expected = torch.empty(17, dtype=dtype, device=device).uniform_(
+                    -0.2, 0.3, generator=generator
+                )
+                expected_state = generator.get_state()
+
+                generator.manual_seed(123)
+                actual = torch.empty_like(expected)
+                torch.ops.aten._philox_distribution_shards_(
+                    actual,
+                    [17],
+                    [0],
+                    [0],
+                    [17],
+                    1,
+                    uniform_distribution,
+                    [-0.2, 0.3],
+                    generator=generator,
+                )
+
+                self.assertEqual(actual, expected, rtol=0, atol=0)
+                self.assertEqual(generator.get_state(), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_invalid_calls_do_not_advance_generator(self):
         device = torch.device("cuda")
         # Must match PhiloxDistributionKind::Normal in PhiloxDistribution.h.
