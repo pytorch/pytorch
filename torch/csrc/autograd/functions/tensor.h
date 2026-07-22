@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 
 namespace torch::autograd {
 
@@ -173,6 +174,7 @@ struct TORCH_API CopySlices : public Node {
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
   void update_exec_info();
+  c10::intrusive_ptr<Node> get_wrapped_node();
 
   at::TensorGeometry base;
   // view and view_fn are redundant and view_fn will be used if available.
@@ -180,6 +182,10 @@ struct TORCH_API CopySlices : public Node {
   at::TensorGeometry view;
   std::unique_ptr<ViewFunc> view_fn;
   c10::intrusive_ptr<Node> fn;
+
+ private:
+  // fn can be inspected reentrantly while apply_impl holds Node::mutex_.
+  std::mutex wrapped_node_mutex_;
 };
 
 } // namespace torch::autograd

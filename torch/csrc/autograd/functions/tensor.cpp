@@ -228,9 +228,18 @@ inline variable_list CopySlices::apply_impl(
 }
 
 void CopySlices::release_variables() {
-  // Acquire lock to here protect thread safety on fn
-  std::lock_guard<std::mutex> lock(mutex_);
-  fn = nullptr;
+  c10::intrusive_ptr<Node> fn_to_release;
+  {
+    // Synchronize with both apply_impl and get_wrapped_node.
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> wrapped_node_lock(wrapped_node_mutex_);
+    fn_to_release = std::move(fn);
+  }
+}
+
+c10::intrusive_ptr<Node> CopySlices::get_wrapped_node() {
+  std::lock_guard<std::mutex> lock(wrapped_node_mutex_);
+  return fn;
 }
 
 void CopySlices::compiled_args(CompiledNodeArgs& args) const {
