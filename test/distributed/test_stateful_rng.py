@@ -2,7 +2,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import unittest
-from enum import IntEnum
 from typing import Any, cast
 
 import torch
@@ -10,11 +9,6 @@ from torch._library.utils import fill_defaults
 from torch.distributed.checkpoint import CheckpointableTensor
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
-
-
-class _PhiloxDistributionKind(IntEnum):
-    # Must match PhiloxDistributionKind in PhiloxDistribution.h.
-    NORMAL = 0
 
 
 class _StatefulRNGMode(TorchDispatchMode):
@@ -45,6 +39,8 @@ class _StatefulRNGMode(TorchDispatchMode):
         rng_metadata = cast(CheckpointableTensor, tensor_arg)
 
         _, mean, std = filled_args
+        # Must match PhiloxDistributionKind::Normal in PhiloxDistribution.h.
+        normal_distribution = 0
         torch.ops.aten._philox_distribution_shards_.default(
             tensor_arg,
             rng_metadata.global_shape,
@@ -52,7 +48,7 @@ class _StatefulRNGMode(TorchDispatchMode):
             self._flatten_chunks(rng_metadata.local_offsets),
             self._flatten_chunks(rng_metadata.local_sizes),
             len(rng_metadata.global_offsets),
-            _PhiloxDistributionKind.NORMAL,
+            normal_distribution,
             (mean, std),
             generator=filled_kwargs["generator"],
         )
@@ -278,6 +274,8 @@ class TestPhiloxDistributionShardsOp(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_invalid_calls_do_not_advance_generator(self):
         device = torch.device("cuda")
+        # Must match PhiloxDistributionKind::Normal in PhiloxDistribution.h.
+        normal_distribution = 0
         generator = torch.Generator(device=device).manual_seed(123)
 
         def assert_invalid_without_advancing(regex, fn):
@@ -295,7 +293,7 @@ class TestPhiloxDistributionShardsOp(TestCase):
                 [0, 0],
                 [1, 1],
                 2,
-                _PhiloxDistributionKind.NORMAL,
+                normal_distribution,
                 [0.0, 1.0],
                 generator=generator,
             ),
@@ -309,7 +307,7 @@ class TestPhiloxDistributionShardsOp(TestCase):
                 [0],
                 [1],
                 1,
-                _PhiloxDistributionKind.NORMAL,
+                normal_distribution,
                 [0.0, -1.0],
                 generator=generator,
             ),
