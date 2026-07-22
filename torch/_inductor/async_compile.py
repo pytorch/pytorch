@@ -642,6 +642,17 @@ class AsyncCompile:
         main_func_name = f"{kernel_name}_{main_suffix}"
         return wrapper_cls(getattr(mod, main_func_name), kernel_path=path)
 
+    def _load_kernel_fn(self, kernel_name, main_suffix, key, path):
+        """Reload a kernel module from PyCodeCache and return its entry point."""
+        mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+        main_func_name = f"{kernel_name}_{main_suffix}"
+        if not hasattr(mod, main_func_name):
+            available = [name for name in dir(mod) if callable(getattr(mod, name))]
+            raise RuntimeError(
+                f"Could not find kernel function '{main_func_name}'. Available callables: {available}"
+            )
+        return getattr(mod, main_func_name)
+
     def cutedsl(self, kernel_name: str, source_code: str, precompile_metadata=None):
         """
         Compile CuteDSL (CUTLASS Python DSL) kernels.
@@ -714,10 +725,7 @@ class AsyncCompile:
         be imported and its `{kernel_name}_main` entry point can be called
         directly from the Inductor wrapper.
         """
-        from torch._inductor.codegen.flydsl.flydsl_kernel import (
-            FlyDSLKernelWrapper,
-            MAIN_SUFFIX,
-        )
+        from torch._inductor.codegen.flydsl.flydsl_kernel import MAIN_SUFFIX
 
         kernel_code_log.info("FlyDSL Kernel:\n%s", source_code)
         _compile_start()
@@ -739,7 +747,7 @@ class AsyncCompile:
                 precompile_metadata,
             )
 
-            def get_result() -> FlyDSLKernelWrapper:
+            def get_result():
                 try:
                     key, path, elapsed_us = subprocess_task.result()
                 except SubprocException as e:
@@ -749,16 +757,12 @@ class AsyncCompile:
                     kernel_name,
                     elapsed_us,
                 )
-                return self._load_kernel_wrapper(
-                    kernel_name, MAIN_SUFFIX, FlyDSLKernelWrapper, key, path
-                )
+                return self._load_kernel_fn(kernel_name, MAIN_SUFFIX, key, path)
 
             return LambdaFuture(get_result, future=subprocess_task)
         else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
-            return self._load_kernel_wrapper(
-                kernel_name, MAIN_SUFFIX, FlyDSLKernelWrapper, key, path
-            )
+            return self._load_kernel_fn(kernel_name, MAIN_SUFFIX, key, path)
 
     def pallas(self, kernel_name: str, source_code: str):
         """
