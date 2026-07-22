@@ -12,11 +12,24 @@ bool compute_cpp_stack_traces_enabled() {
 bool compute_disable_addr2line() {
   return c10::utils::check_env("TORCH_DISABLE_ADDR2LINE") == true;
 }
+
+// Owns the single cached flag so both the getter and setter operate on the
+// same storage. get_cpp_stacktraces_enabled() previously computed this via
+// its own local static, which meant there was no way to override it later
+// (e.g. from c10d's debug level) -- returning by value gave callers a copy,
+// not the underlying storage.
+bool& cpp_stacktraces_enabled_ref() {
+  static bool enabled = compute_cpp_stack_traces_enabled();
+  return enabled;
+}
 } // namespace
 
 bool get_cpp_stacktraces_enabled() {
-  static bool enabled = compute_cpp_stack_traces_enabled();
-  return enabled;
+  return cpp_stacktraces_enabled_ref();
+}
+
+void set_cpp_stacktraces_enabled(bool enabled) {
+  cpp_stacktraces_enabled_ref() = enabled;
 }
 
 static torch::unwind::Mode compute_symbolize_mode() {
