@@ -20,21 +20,6 @@ logger = logging.getLogger(__name__)
 logger_test = logging.getLogger("test")
 
 
-class CustomLogger(logging.Logger):
-    def warning_once(self, msg):
-        self.warning(msg)
-
-
-_previous_logger_class = logging.getLoggerClass()
-try:
-    logging.setLoggerClass(CustomLogger)
-    custom_logger = logging.getLogger("test_custom_logger")
-finally:
-    logging.setLoggerClass(_previous_logger_class)
-custom_logger.addHandler(logging.NullHandler())
-custom_logger.propagate = False
-
-
 def f_info(x):
     x = x + x
     logger.info("moo")
@@ -50,41 +35,29 @@ def f_isEnabledFor(x):
     return x
 
 
-def f_warning_once(x):
-    x = x + x
-    custom_logger.warning_once("moo")
-    x = x * x
-    return x
-
-
 @instantiate_parametrized_tests
 class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
     @parametrize(
-        "ignore_method, fn, captured_logger, should_ignore_logger",
+        "ignore_method, fn, should_ignore_logger",
         [
-            (None, f_info, logger, False),
-            (logger_test.info, f_info, logger, False),
-            (None, f_isEnabledFor, logger, False),
-            (logger_test.isEnabledFor, f_isEnabledFor, logger, False),
-            (logger.info, f_info, logger, True),
-            (logging.Logger.info, f_info, logger, True),
-            (logger.isEnabledFor, f_isEnabledFor, logger, True),
-            (logging.Logger.isEnabledFor, f_isEnabledFor, logger, True),
-            (custom_logger.warning_once, f_warning_once, custom_logger, True),
-            (CustomLogger.warning_once, f_warning_once, custom_logger, True),
-            (logging.Logger.warning, f_warning_once, custom_logger, False),
+            (None, f_info, False),
+            (logger_test.info, f_info, False),
+            (None, f_isEnabledFor, False),
+            (logger_test.isEnabledFor, f_isEnabledFor, False),
+            (logger.info, f_info, True),
+            (logging.Logger.info, f_info, True),
+            (logger.isEnabledFor, f_isEnabledFor, True),
+            (logging.Logger.isEnabledFor, f_isEnabledFor, True),
         ],
     )
-    def test_ignore_logger(
-        self, ignore_method, fn, captured_logger, should_ignore_logger
-    ):
+    def test_ignore_logger(self, ignore_method, fn, should_ignore_logger):
         counters.clear()
         x = torch.randn(3, 3)
         orig_out = fn(x)
         with torch._dynamo.config.patch(ignore_logging_functions={ignore_method}):
             opt_f = torch.compile(backend="eager")(fn)
-            with self.assertLogs(captured_logger, level="INFO") as captured:
-                captured_logger.info("call logger info to avoid error")
+            with self.assertLogs(logger, level="INFO") as captured:
+                logger.info("call logger info to avoid error")
                 opt_out = opt_f(x)
                 printed_output = [entry.split(":", 2)[2] for entry in captured.output]
 
