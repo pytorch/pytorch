@@ -35,6 +35,8 @@ namespace {
 
 using at::cuda::philox_4x32;
 
+// These values cross the dispatcher as integers and must match the
+// _PHILOX_DISTRIBUTION_* constants used by Python callers and Meta.
 enum class PhiloxDistributionKind : int64_t {
   Normal = 0,
   Uniform = 1,

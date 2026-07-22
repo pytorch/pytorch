@@ -863,6 +863,7 @@ def _check_philox_uniform_bounds(self, low, high):
     )
 
 
+# Must match PhiloxDistributionKind in PhiloxDistribution.cu.
 _PHILOX_DISTRIBUTION_NORMAL = 0
 _PHILOX_DISTRIBUTION_UNIFORM = 1
 
