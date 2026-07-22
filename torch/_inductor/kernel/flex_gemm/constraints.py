@@ -333,6 +333,9 @@ def validate_flex_gemm_local_reduce_config(
     one 32-value epilogue fragment need no cross-fragment combine. Some SM100
     two-CTA layouts expose only 16 contiguous N values, reducing that local limit.
 
+    Non-SM100 devices retain the conservative single-CTA families because the
+    expanded fragment and clustered layouts have only been validated on SM100.
+
     Axis-0 groups and larger axis-1 groups use ``GroupedLocalReduce``'s physical
     callback path, which combines epilogue fragments inside one CTA and directly
     stores one value per ``(row, group)``; it has no explicit two-CTA ownership or
@@ -348,11 +351,34 @@ def validate_flex_gemm_local_reduce_config(
     """
     if axis not in (0, 1) or group <= 0:
         return False
-    if config.swap_ab:
+    swapped = config.swap_ab
+    if swapped:
         if not allow_swap_ab or group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
             return False
         axis = 1 - axis
     tile = config.tile_m if axis == 0 else config.tile_n
+    if config.device_capacity != 10:
+        if swapped or config.tile_n < 128 or config.tile_n % 64 != 0:
+            return False
+        if tile % group != 0:
+            return False
+        fragment_width = LOCAL_REDUCE_FRAGMENT_WIDTH
+        if (
+            axis == 1
+            and config.tile_m == 128
+            and config.tile_n == 128
+            and config.cluster_m > 1
+        ):
+            fragment_width //= 2
+        if group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+            return fragment_width % group == 0 and group < tile
+        return (
+            group % LOCAL_REDUCE_FRAGMENT_WIDTH == 0
+            and group <= tile
+            and config.tile_m == 128
+            and config.cluster_m == 1
+            and config.cluster_n == 1
+        )
     if config.tile_n % LOCAL_REDUCE_FRAGMENT_WIDTH != 0 or tile % group != 0:
         return False
 
