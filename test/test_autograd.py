@@ -16356,6 +16356,64 @@ if not threads_after:
             f"Context manager test failed: {result.stderr}",
         )
 
+    def test_reentrant_thread_pool_with_multithreading_disabled(self):
+        # Verify that the reentrant thread pool (thread_pool_shared_) works
+        # correctly when multithreading is disabled.  With the PR changes,
+        # thread_pool_shared_ is initialized in the Engine constructor (not
+        # in start_device_threads()), so deep reentrant backward that
+        # exceeds max_recursion_depth_ (MAX_DEPTH=60) triggers
+        # add_thread_pool_task() which dereferences thread_pool_shared_.
+        # This must not crash and must produce correct gradients.
+        # Uses the same DeepReentrant pattern as test_deep_reentrant.
+        script = """\
+import sys, torch
+from torch.autograd import Function, Variable
+
+class DeepReentrant(Function):
+    @staticmethod
+    def forward(ctx, x):
+        with torch.enable_grad():
+            ctx.x = Variable(x.detach(), requires_grad=True)
+            ctx.x = ctx.x - 1
+        return ctx.x.detach()
+
+    @staticmethod
+    def backward(ctx, x):
+        if ctx.x < 0:
+            return x
+        with torch.enable_grad():
+            DeepReentrant.apply(ctx.x).sum().backward()
+        return x
+
+torch.autograd.set_multithreading_enabled(False)
+
+# Use 100 to exceed MAX_DEPTH=60, triggering the reentrant thread pool
+v = torch.tensor(100.0, requires_grad=True)
+DeepReentrant.apply(v).sum().backward()
+
+if v.grad is None or v.grad.item() != 1.0:
+    print(f"FAIL: incorrect gradient: {v.grad}", file=sys.stderr)
+    sys.exit(1)
+
+# Run again with a different depth to verify thread pool reuse
+v2 = torch.tensor(200.0, requires_grad=True)
+DeepReentrant.apply(v2).sum().backward()
+
+if v2.grad is None or v2.grad.item() != 1.0:
+    print(f"FAIL: incorrect gradient on reuse: {v2.grad}", file=sys.stderr)
+    sys.exit(1)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Reentrant thread pool test failed: {result.stderr}",
+        )
+
 
 class TestNestedCheckpoint(TestCase):
     @staticmethod
