@@ -891,15 +891,10 @@ class TestCuptiMonitorCUDA(TestCase):
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_approx_timestamp_callback_engages_under_udr(self):
-        # use_approx_timestamps hands CUPTI a per-subscriber timestamp callback
-        # (CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK) so records ride the profiler's approx
-        # clock. Unlike the global cuptiActivityRegisterTimestampCallback (NOT_COMPATIBLE under
-        # user-defined records), the subscriber attribute coexists with the UDR path. It only
-        # re-times device records when the monitor subscribes before any CUDA context exists
-        # (cuptiSubscribe otherwise latches device correlation on the pre-existing context), so
-        # this runs in an inline-script child that never imports common_cuda (which would init
-        # CUDA at import) and subscribes first. Assert the callback engaged and that device
-        # records land on the approx clock (~1e14-1e15 ticks), not CLOCK_REALTIME ns (~1e18).
+        # use_approx hands CUPTI a per-subscriber timestamp callback so records ride the
+        # profiler's approx clock. Runs in a child that subscribes before any CUDA context
+        # (use_approx is snapshotted at singleton construction). Assert the callback engaged and
+        # device records land on the approx clock (< 1e17), not CLOCK_REALTIME (~1e18).
         script = textwrap.dedent(
             """
             import torch
@@ -937,50 +932,145 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertIn("OK", p.stdout)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_approx_timestamp_callback_skipped_with_existing_context(self):
-        # cuptiSubscribe latches device-record correlation against a pre-existing CUDA context,
-        # so the (post-subscribe) per-subscriber callback can't re-time device records. When a
-        # context already exists, the monitor must refuse to engage rather than silently drop
-        # device records; collection still proceeds on the CLOCK_REALTIME pass-through.
+    def test_approx_timestamp_callback_engages_with_existing_context(self):
+        # With a CUDA context already established, use_approx must still re-time DEVICE records
+        # onto the approx clock. Reset the singleton so use_approx (snapshotted at construction)
+        # takes effect, establish a context first, then assert the callback engaged and device
+        # records land on the approx clock (< 1e17), not CLOCK_REALTIME (~1e18).
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
         from torch.profiler._cupti import monitor as cupti_monitor
-        from torch.profiler._cupti.cupti_python import CuptiError
+        from torch.profiler._cupti.cupti_python import CuptiError, pylibcupti
         from torch.profiler._cupti.monitor import CuptiMonitor
         from torch.profiler._cupti.records import Kernel
 
-        kind = ActivityKind.CONCURRENT_KERNEL
-        want = {kind: {Kernel.START, Kernel.END}}
+        if pylibcupti().get_version() < 130303:
+            self.skipTest(
+                "libcupti cannot re-time device records with an existing context"
+            )
+
+        cupti_monitor._reset_for_test()
+        self.addCleanup(cupti_monitor._reset_for_test)
+
+        # Establish a CUDA context first: this is the pre-existing-context case.
         torch.randn(8, device="cuda").sum().item()
         torch.cuda.synchronize()
         self.assertTrue(torch.cuda.is_initialized())
 
-        lock = threading.Lock()
-        columns: list = []
+        kind = ActivityKind.CONCURRENT_KERNEL
+        seen: list = []
         cupti_monitor.configure(use_approx_timestamps=True)
-        monitor = CuptiMonitor()
+        m = CuptiMonitor()
 
         def on_columns(cols):
             if kind in cols:
-                with lock:
-                    columns.append(cols[kind])
+                seen.append(cols[kind])
 
         try:
-            obs = monitor.register(want, on_columns)
+            obs = m.register({kind: {Kernel.START, Kernel.END}}, on_columns)
         except CuptiError as e:
-            self.skipTest(f"monitor could not subscribe: {e}")
-        self.addCleanup(monitor.unregister, obs)
-        self.assertFalse(monitor._timestamp_callback_active)
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        self.assertTrue(m._timestamp_callback_active, "callback did not engage")
+        try:
+            x = torch.randn(256, 256, device="cuda")
+            for _ in range(4):
+                x = torch.relu(x @ x)
+            x.sum().item()
+            torch.cuda.synchronize()
+            m.flush(sync=True)
+        finally:
+            m.unregister(obs)
 
-        x = torch.randn(256, 256, device="cuda")
-        for _ in range(4):
-            x = torch.relu(x @ x)
-        x.sum().item()
-        torch.cuda.synchronize()
-        monitor.flush(sync=True)
-        monitor.unregister(obs)
+        starts = [int(v) for c in seen for v in c[int(Kernel.START)]]
+        self.assertTrue(starts, "no kernel records")
+        self.assertLess(
+            max(starts), 1e17, f"device records off the approx clock: {max(starts)}"
+        )
 
-        self.assertGreater(sum(len(c[int(Kernel.START)]) for c in columns), 0)
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_noisy_apis_suppressed_at_collection(self):
+        # disable_noisy_runtime_apis / disable_noisy_driver_apis (run inside activity_enable)
+        # should keep the pure-noise cbids out of the records. Assert 0 records for them while
+        # kernels + other records still flow (so the check is not vacuous).
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.cupti_python import (
+            _noisy_driver_cbids,
+            _noisy_runtime_cbids,
+            CuptiError,
+            pylibcupti,
+        )
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Api, Kernel
+
+        if pylibcupti().get_version() < 130303:
+            self.skipTest("libcupti predates the UDR per-cbid disable fix")
+
+        noisy_runtime = set(_noisy_runtime_cbids())
+        noisy_driver = set(_noisy_driver_cbids())
+        self.assertTrue(
+            noisy_runtime, "no noisy runtime cbids resolved from the cupti enum"
+        )
+
+        runtime_seen: dict[int, int] = {}
+        driver_seen: dict[int, int] = {}
+        kernels = 0
+
+        def cb(cols):
+            nonlocal kernels
+            for kind, seen in (
+                (ActivityKind.RUNTIME, runtime_seen),
+                (ActivityKind.DRIVER, driver_seen),
+            ):
+                col = cols.get(kind)
+                if col and int(Api.CBID.id) in col:
+                    for v in col[int(Api.CBID.id)]:
+                        seen[int(v)] = seen.get(int(v), 0) + 1
+            kk = cols.get(ActivityKind.CONCURRENT_KERNEL)
+            if kk:
+                kernels += len(next(iter(kk.values())))
+
+        cupti_monitor.configure(buffer_size=1 << 20)
+        m = CuptiMonitor()
+        want = {
+            ActivityKind.CONCURRENT_KERNEL: {Kernel.START, Kernel.END},
+            ActivityKind.RUNTIME: {Api.CBID},
+            ActivityKind.DRIVER: {Api.CBID},
+        }
+        try:
+            obs = m.register(want, cb)
+        except CuptiError as e:
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        try:
+            x = torch.randn(256, 256, device="cuda")
+            for _ in range(50):
+                x = torch.relu(
+                    x @ x
+                )  # each op calls cudaGetDevice/GetLastError internally
+            x.sum().item()
+            torch.cuda.synchronize()
+            m.flush(sync=True)
+        finally:
+            m.unregister(obs)
+
+        # Records must actually be flowing, else the assertions below are vacuous.
+        self.assertGreater(kernels, 0, "no kernel records -- monitor not collecting")
+        self.assertGreater(
+            sum(runtime_seen.values()), 0, "no RUNTIME records collected"
+        )
+
+        leaked_rt = {c: n for c, n in runtime_seen.items() if c in noisy_runtime}
+        self.assertEqual(
+            leaked_rt, {}, f"noisy runtime cbids not suppressed: {leaked_rt}"
+        )
+        # DRIVER records only flow on some stacks (e.g. NCCL/driver launches); assert only when
+        # driver records are present so the check stays meaningful rather than vacuous.
+        if driver_seen:
+            leaked_dr = {c: n for c, n in driver_seen.items() if c in noisy_driver}
+            self.assertEqual(
+                leaked_dr, {}, f"noisy driver cbids not suppressed: {leaked_dr}"
+            )
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_singleton_flush_accessible(self):
