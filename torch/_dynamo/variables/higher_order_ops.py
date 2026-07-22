@@ -2611,6 +2611,8 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         from . import ListVariable
 
+        self.supports_input_mutation = not torch.is_grad_enabled()
+
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         for i, k in enumerate(["index", "branches", "operands"]):
