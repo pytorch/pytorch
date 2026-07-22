@@ -1587,7 +1587,15 @@ class GraphLowering(torch.fx.Interpreter):
             if target in self.seen_subgraphs:
                 return self.seen_subgraphs[target]
 
-            out = ir.Subgraph(name=target, graph_module=value)
+            nested_config = getattr(value, "meta", {}).get("nested_region_config")
+            inductor_config_patches = getattr(
+                nested_config, "inductor_config_patches", None
+            )
+            out = ir.Subgraph(
+                name=target,
+                graph_module=value,
+                inductor_config_patches=inductor_config_patches,
+            )
             self.seen_subgraphs[target] = out
             return out
 
@@ -2117,17 +2125,21 @@ class GraphLowering(torch.fx.Interpreter):
                             result.get_size(), torch.channels_last
                         )
                     if not unbacked_symbols_in_strides and len(strides):
-                        is_view = n.meta["val"]._is_view() or isinstance(
+                        # To avoid converting possible view ops to a copy kernel, we use the previous
+                        # require_exact_strides to handle views. But ultimately it's better to require
+                        # the right strides at the tensor definition.
+                        if n.meta["val"]._is_view() or isinstance(
                             result.data,  # type: ignore[missing-attribute]
                             ir.BaseView,
-                        )
-                        if is_view and not (is_output and config.strict_output_strides):
+                        ):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(strides),
                                 allow_padding=allow_padding,
                             )
                         else:
+                            # Fix for 0-d tensors: if result size is empty,
+                            # strides should also be empty
                             if len(result.get_size()) == 0 and len(strides) > 0:
                                 strides = []
                             result = ir.ExternKernel.require_exact_strides(
