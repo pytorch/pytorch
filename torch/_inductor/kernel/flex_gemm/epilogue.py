@@ -1456,7 +1456,10 @@ class FlexGemmEpilogueEmitter:
             "import cutlass\n"
             "import cutlass.cute as cute\n"
             "import operator\n"
-            "from cutlass._mlir.dialects import math as mlir_math\n\n"
+            "from cutlass._mlir.dialects import math as mlir_math\n"
+            "from torch._inductor.kernel.flex_gemm.quant_intrinsics import (\n"
+            "    mx_e8m0_scale_intrinsic,\n"
+            ")\n\n"
             f"{local_reduce_source}"
             f"@cute.jit\ndef {name}({epilogue_params}):\n"
             f"{body}    return {result}\n",
