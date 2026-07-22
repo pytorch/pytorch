@@ -31,6 +31,7 @@ class NanDetectMode(TorchDispatchMode):
 
     Example::
 
+        >>> # xdoctest: +SKIP(NanDetectMode raises on NaN)
         >>> with NanDetectMode():
         ...     x = torch.tensor([1.0, float('nan')])
         ...     y = x + 1  # raises RuntimeError
