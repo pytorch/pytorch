@@ -13,6 +13,13 @@ import functools
 from torch._C._profiler import gather_traceback, symbolize_tracebacks
 
 logger = logging.getLogger("LoggingTensor")
+# The __torch_dispatch__ hooks below log with extra positional args that are only
+# meaningful to LoggingTensorHandler (which reads record.args directly). Those args
+# are not printf-style format arguments for the message, so if the record reaches a
+# generic Formatter (e.g. pytest's log capture on the root logger) it raises
+# "TypeError: not all arguments converted during string formatting". Keep these
+# records off the ancestor loggers; LoggingTensorHandler is always attached directly.
+logger.propagate = False
 
 # How the chain of calls works for LoggingTensor:
 # 1. Call torch.sin
