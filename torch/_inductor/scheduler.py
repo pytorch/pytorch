@@ -706,7 +706,7 @@ class NestedReduction:
                     reduction_buffer_names |= node.get_buffer_names()
         if not reduction_names:
             return None
-        assert reduction_buffer_names is not None
+        assert reduction_buffer_names is not None  # noqa: S101
 
         candidates: list[tuple[SchedulerNode, int]] = []
         full_numel = V.graph.sizevars.simplify(numel * rnumel)
@@ -8348,7 +8348,7 @@ class Scheduler:
         # broadcasted parent-tile views. Relax matching only for those named
         # producer outputs; all other deps use normal vertical legality.
         if skip_backend_check:
-            assert producer_node is not None
+            assert producer_node is not None  # noqa: S101
             return self.can_fuse_vertical(
                 producer_node,
                 other,
