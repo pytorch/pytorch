@@ -110,8 +110,12 @@ class TestProcessGroupHooks(MultiProcessTestCase):
             HookOpName.RECV,
         }
         for op in expected:
-            self.assertIn(op, pre_ops, f"pre-hook did not fire for {op}")
-            self.assertIn(op, post_ops, f"post-hook did not fire for {op}")
+            self.assertIn(
+                op, pre_ops, lambda msg: f"{msg}\npre-hook did not fire for {op}"
+            )
+            self.assertIn(
+                op, post_ops, lambda msg: f"{msg}\npost-hook did not fire for {op}"
+            )
 
         # Every issued collective fires exactly one pre and one post hook, and
         # each post correlates with its pre via op_id.

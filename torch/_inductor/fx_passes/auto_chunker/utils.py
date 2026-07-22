@@ -68,7 +68,7 @@ def format_node_with_chunking_meta(
     """
     Print the node with chunking metadata for the current node if exists.
 
-    If include_args is True, also print chuning metadata for Node arguments.
+    If include_args is True, also print chunking metadata for Node arguments.
     """
     from torch._inductor.runtime.runtime_utils import green_text
 
