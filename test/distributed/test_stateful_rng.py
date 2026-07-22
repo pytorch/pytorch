@@ -8,18 +8,19 @@ from typing import Any, cast
 
 import torch
 from torch._library.utils import fill_defaults
-from torch.distributed._stateful_rng import (
-    _PHILOX_DISTRIBUTION_NORMAL,
-    _PHILOX_DISTRIBUTION_UNIFORM,
-    _run_stateful_rng_op,
-    _run_stateful_rng_op_for_checkpointable_tensor,
-)
 from torch.distributed.checkpoint import CheckpointableTensor
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
 aten = torch.ops.aten
+
+_PHILOX_DISTRIBUTION_NORMAL = 0
+_PHILOX_DISTRIBUTION_UNIFORM = 1
+
+
+def _flatten_chunks(chunks: tuple[tuple[int, ...], ...]) -> list[int]:
+    return [value for chunk in chunks for value in chunk]
 
 
 class _StatefulRNGMode(TorchDispatchMode):
@@ -35,7 +36,7 @@ class _StatefulRNGMode(TorchDispatchMode):
         if func not in (aten.normal_.default, aten.uniform_.default):
             return func(*args, **kwargs)
 
-        filled_args, _ = fill_defaults(func._schema, args, kwargs)
+        filled_args, filled_kwargs = fill_defaults(func._schema, args, kwargs)
         tensor_arg = filled_args[0]
         if not isinstance(tensor_arg, torch.Tensor):
             return func(*args, **kwargs)
@@ -44,12 +45,23 @@ class _StatefulRNGMode(TorchDispatchMode):
         if not isinstance(tensor_arg, CheckpointableTensor):
             return func(*args, **kwargs)
         rng_metadata = cast(CheckpointableTensor, tensor_arg)
-        return _run_stateful_rng_op_for_checkpointable_tensor(
-            func,
-            args,
-            kwargs,
-            rng_metadata,
+
+        aten._philox_distribution_shards_.default(
+            tensor_arg,
+            rng_metadata.global_shape,
+            _flatten_chunks(rng_metadata.global_offsets),
+            _flatten_chunks(rng_metadata.local_offsets),
+            _flatten_chunks(rng_metadata.local_sizes),
+            len(rng_metadata.global_offsets),
+            (
+                _PHILOX_DISTRIBUTION_NORMAL
+                if func is aten.normal_.default
+                else _PHILOX_DISTRIBUTION_UNIFORM
+            ),
+            tuple(filled_args[1:]),
+            generator=filled_kwargs["generator"],
         )
+        return tensor_arg
 
 
 class TestCheckpointableTensorRNG(TestCase):
