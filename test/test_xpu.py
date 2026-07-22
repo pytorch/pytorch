@@ -5,6 +5,7 @@ import collections
 import contextlib
 import ctypes
 import gc
+import importlib
 import json
 import os
 import random
@@ -54,6 +55,7 @@ from torch.utils.checkpoint import checkpoint_sequential
 
 
 TEST_MULTIXPU = torch.xpu.device_count() > 1
+HAS_PYZES = importlib.util.find_spec("pyzes") is not None
 
 cpu_device = torch.device("cpu")
 xpu_device = torch.device("xpu")
@@ -306,12 +308,8 @@ if __name__ == "__main__":
             with self.assertRaisesRegex(ImportError, "pyzes is required"):
                 torch.xpu.list_gpu_processes()
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_temperature_returns_float(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         try:
             temp = torch.xpu.temperature()
         except RuntimeError as e:
@@ -324,30 +322,16 @@ if __name__ == "__main__":
         self.assertGreaterEqual(temp, 0.0)
         self.assertLess(temp, 150.0)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_clock_rate_returns_float(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
-        try:
-            rate = torch.xpu.clock_rate()
-        except RuntimeError as e:
-            if "elevated privileges" in str(e):
-                self.skipTest("Reading GPU clock rate requires elevated privileges")
-            raise
-
+        rate = torch.xpu.clock_rate()
         self.assertIsInstance(rate, float)
         # Sanity check: GPU clock rate should be in a plausible range (0–5000 MHz)
         self.assertGreaterEqual(rate, 0.0)
         self.assertLess(rate, 5000.0)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_power_draw_returns_float(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         try:
             power = torch.xpu.power_draw()
         except RuntimeError as e:
@@ -360,12 +344,8 @@ if __name__ == "__main__":
         self.assertGreaterEqual(power, 0.0)
         self.assertLess(power, 1000.0)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_utilization_returns_float(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         try:
             util = torch.xpu.utilization()
         except RuntimeError as e:
@@ -378,12 +358,8 @@ if __name__ == "__main__":
         self.assertGreaterEqual(util, 0.0)
         self.assertLessEqual(util, 100.0)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_memory_usage_returns_float(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         try:
             mem_usage = torch.xpu.memory_usage()
         except RuntimeError as e:
@@ -396,12 +372,8 @@ if __name__ == "__main__":
         self.assertGreaterEqual(mem_usage, 0.0)
         self.assertLessEqual(mem_usage, 100.0)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_device_memory_used_returns_int(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         try:
             mem_used = torch.xpu.device_memory_used()
         except RuntimeError as e:
@@ -415,11 +387,8 @@ if __name__ == "__main__":
         self.assertGreaterEqual(mem_used, 0)
         self.assertLessEqual(mem_used, total_memory)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_list_gpu_processes_returns_string(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
         if torch.xpu._get_pyzes_version() < (0, 1, 2):
             with self.assertRaisesRegex(
                 RuntimeError, "requires pyzes version >= 0.1.2"
@@ -433,12 +402,8 @@ if __name__ == "__main__":
         current_device = torch.xpu.current_device()
         self.assertRegex(processes_info, rf"GPU:\s*{current_device}\b")
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_device_count_respects_affinity_mask(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         def _run(mask: str) -> str:
             script = f"""\
 import torch
@@ -466,12 +431,8 @@ print(f"{{r1}}, {{r2}}")
             self.assertEqual(_run("1"), "1, 1")
 
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_device_count_not_cached_pre_init(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         test_script = """\
 import torch
 import os
@@ -493,12 +454,8 @@ print(f"{r1}, {r2}")
         self.assertEqual(f"{x}, 1", r)
 
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_cached_zes_device_infos(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         test_script = """\
 import torch
 import os
@@ -3272,7 +3229,6 @@ class TestXpuOptims(TestCase):
 
         scaler = torch.amp.GradScaler(device="xpu", init_scale=4.0)
         g = torch.xpu.XPUGraph()
-        s = torch.xpu.Stream()
 
         weight = torch.ones((100,), device="xpu", requires_grad=True)
         opt = optim_info.optim_cls([weight], lr=0.1, foreach=foreach, fused=fused)

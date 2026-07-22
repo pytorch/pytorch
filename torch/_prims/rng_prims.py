@@ -87,7 +87,7 @@ def register_philox_rand():
         device: _device,
         dtype: _dtype,
     ):
-        # stride arg will be useful for distributed usecase. Currently, its unused.
+        # stride arg will be useful for distributed usecase. Currently, it's unused.
         if stride is not None:
             raise AssertionError(f"stride must be None, got {stride}")
         stride = make_contiguous_strides_for(shape)
@@ -105,7 +105,7 @@ def register_philox_rand():
         device: _device,
         dtype: _dtype,
     ):
-        # stride arg will be useful for distributed usecase. Currently, its unused.
+        # stride arg will be useful for distributed usecase. Currently, it's unused.
         if stride is not None:
             raise AssertionError(f"stride must be None, got {stride}")
         if device.type == "cpu":

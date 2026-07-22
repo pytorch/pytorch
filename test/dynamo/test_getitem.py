@@ -731,7 +731,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(model, backend="eager")
         self.assertEqual(model(x), compiled(x))
 
-    # --- TorchScriptObjectVariable ---
+    # --- CustomClassObjectVariable ---
 
     def test_opaque_object_getitem(self):
         class OpaqueScaler(CustomClassBase):
@@ -1295,7 +1295,9 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         base = VariableTracker.sq_item_impl
         for cls in (BaseListVariable, RangeVariable, ConstantVariable, DequeVariable):
             self.assertIsNot(
-                cls.sq_item_impl, base, f"{cls.__name__} must override sq_item_impl"
+                cls.sq_item_impl,
+                base,
+                lambda msg: f"{msg}\n{cls.__name__} must override sq_item_impl",
             )
 
 

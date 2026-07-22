@@ -26,8 +26,6 @@ from __future__ import annotations
 
 import _warnings
 
-import collections
-import collections.abc
 import contextlib
 import copy
 import dataclasses
@@ -53,7 +51,11 @@ from typing_extensions import TypeIs
 import torch
 import torch._logging
 from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
-from torch._dynamo.exc import ObservedException, TensorifyScalarRestartAnalysis
+from torch._dynamo.exc import (
+    get_dynamo_observed_exception,
+    ObservedException,
+    TensorifyScalarRestartAnalysis,
+)
 from torch._guards import InlinedCodeCache, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
@@ -100,6 +102,7 @@ from .exc import (
     collapse_resume_frames,
     format_frame_info,
     get_stack_above_dynamo,
+    raise_observed_exception,
     raise_value_error,
     ResumePrologueTracingError,
     StepUnsupported,
@@ -141,6 +144,7 @@ from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
     counters,
+    FrameState,
     get_fake_value,
     get_instruction_source_311,
     get_metrics_context,
@@ -148,6 +152,7 @@ from .utils import (
     istype,
     LazyString,
     proxy_args_kwargs,
+    PySendResult,
     unpack_iterable,
 )
 from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
@@ -171,7 +176,7 @@ from .variables.functions import (
     SkipFunctionVariable,
     UserFunctionVariable,
 )
-from .variables.iter import IteratorVariable, MAX_ITERATOR_LIMIT
+from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
@@ -182,7 +187,6 @@ from .variables.lists import (
 )
 from .variables.misc import (
     CellVariable,
-    ExceptionVariable,
     NullVariable,
     PythonModuleVariable,
     TracebackVariable,
@@ -194,6 +198,7 @@ from .variables.object_protocol import (
     generic_contains,
     generic_getattr,
     generic_getiter,
+    pyiter_send,
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
@@ -237,9 +242,11 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
 )
 
 ExceptionVals: TypeAlias = (
-    variables.ExceptionVariable
-    | UserDefinedExceptionClassVariable
-    | UserDefinedExceptionObjectVariable
+    variables.ExceptionVariable | UserDefinedExceptionObjectVariable
+)
+
+ExceptionTypes: TypeAlias = (
+    variables.BuiltinVariable | UserDefinedExceptionClassVariable
 )
 
 
@@ -1254,6 +1261,54 @@ class BytecodeDispatchTableMeta(type):
         cls.dispatch_table = [dispatch_table.get(i) for i in range(2**8)]
 
 
+def pyexception_class_check(val: VariableTracker) -> TypeIs[ExceptionTypes]:
+    # Mirror's CPython PyExceptionClass_Check
+    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L60-L62
+    if isinstance(val, variables.BuiltinVariable):
+        return issubclass(val.fn, BaseException)
+    return isinstance(val, UserDefinedExceptionClassVariable)
+
+
+def pyexception_instance_check(val: VariableTracker) -> TypeIs[ExceptionVals]:
+    # Mirror's CPython PyExceptionInstance_Check
+    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L64-L65
+    return isinstance(
+        val, (variables.ExceptionVariable, UserDefinedExceptionObjectVariable)
+    )
+
+
+def pyerr_given_exception_match(err: VariableTracker, exc: type[BaseException]) -> bool:
+    # Mirror's PyErr_GivenExceptionMatch
+    if pyexception_class_check(err):
+        return issubclass(err.fn, exc)
+    if pyexception_instance_check(err):
+        return issubclass(err.exc_type, exc)
+    return False
+
+
+def pygen_fetch_stopiteration_value(val: ExceptionVals) -> VariableTracker:
+    # Mirror's CPython PyGen_FetchStopIterationValue
+    if issubclass(val.exc_type, StopIteration):
+        return val.args[0] if val.args else ConstantVariable.create(None)
+    return ConstantVariable.create(None)
+
+
+@dataclasses.dataclass
+class Segment:
+    """
+    One frame's slice of the exception stack, mirroring CPython's
+    `_PyErr_StackItem` (`gi_exc_state`).
+
+    CPython represents the exc_state as a linked list of `_PyErr_StackItem`s,
+    where each item contains the exception type, value, and traceback for the
+    frame. We simulate this with a linked list of `Segment`s, where each
+    `Segment` is a list of `ExceptionVals`
+    """
+
+    items: list[ExceptionVals] = dataclasses.field(default_factory=list)
+    prev: Segment | None = dataclasses.field(default=None)
+
+
 @dataclasses.dataclass
 class ExceptionStack:
     """
@@ -1271,18 +1326,34 @@ class ExceptionStack:
     #  + PUSH_EXC_INFO := pushes the current_exception to the *exception stack*
     #  + POP_EXCEPT := pops TOS from the *exception stack*
 
-    _exc_stack: list[ExceptionVals] = dataclasses.field(default_factory=list)
+    _exc_stack: Segment = dataclasses.field(default_factory=Segment)
     _current_exception: ExceptionVals | None = dataclasses.field(default=None)
+
+    def push_segment(self, segment: Segment) -> None:
+        """Make `segment` the head, linking it to the current head (resume)."""
+        segment.prev = self._exc_stack
+        self._exc_stack = segment
+
+    def pop_segment(self) -> Segment:
+        """Restore the head to the segment below (suspend)."""
+        segment = self._exc_stack
+        if segment.prev is None:
+            raise AssertionError("cannot pop the base exception segment")
+        self._exc_stack = segment.prev
+        segment.prev = None
+        return segment
 
     def clear_current_exception(self) -> None:
         self._current_exception = None
 
-    def set_current_exception(
-        self, val: ExceptionVals, set_context: bool = True
-    ) -> None:
-        if set_context:
-            self._set_context_and_break_context_reference_cycle(val)
+    def set_raised_exception(self, val: ExceptionVals) -> None:
+        # Mirrors CPython's PyErr_SetRaisedException
         self._current_exception = val
+
+    def get_topmost_exception(self) -> ExceptionVals:
+        if not len(self):
+            raise AssertionError("expected len(self.exn_vt_stack) to be true")
+        return self.__getitem__(-1)
 
     def move_current_exception_to_stack(self) -> None:
         if self._current_exception is None:
@@ -1292,7 +1363,8 @@ class ExceptionStack:
         self.append(self._current_exception)
         self.clear_current_exception()
 
-    def get_current_exception(self) -> ExceptionVals:
+    def get_raised_exception(self) -> ExceptionVals:
+        # Mirrors CPython's PyErr_GetRaisedException()
         if self._current_exception is None:
             raise AssertionError(
                 "expected self._current_exception is not None to be true"
@@ -1304,8 +1376,8 @@ class ExceptionStack:
     ) -> ExceptionVals:
         if (ctx := val.__context__) and not ctx.is_constant_none():  # type: ignore[union-attr]
             return val
-        if len(self._exc_stack) + prev_idx > 0:
-            prev = self._exc_stack[prev_idx]
+        if len(self) + prev_idx > 0:
+            prev = self[prev_idx]
             self._set_context_recursive(prev, prev_idx - 1)
             if prev is not val:
                 val.set_context(prev)  # type: ignore[union-attr, arg-type]
@@ -1342,20 +1414,40 @@ class ExceptionStack:
         self, val: ExceptionVals
     ) -> None:
         # set Exception.__context__
-        self._set_context_recursive(val, len(self._exc_stack) - 1)
+        self._set_context_recursive(val, len(self) - 1)
         self._break_context_reference_cycle(val)
 
     def pop(self) -> ExceptionVals:
-        return self._exc_stack.pop()
+        return self._exc_stack.items.pop()
 
     def append(self, val: ExceptionVals) -> None:
-        self._exc_stack.append(val)
+        self._exc_stack.items.append(val)
 
     def __len__(self) -> int:
-        return len(self._exc_stack)
+        n = 0
+        segment: Segment | None = self._exc_stack
+        while segment is not None:
+            n += len(segment.items)
+            segment = segment.prev
+        return n
 
     def __getitem__(self, index: int) -> ExceptionVals:
-        return self._exc_stack[index]
+        # Global indexing over the segment chain: `prev` segments (lower)
+        # concatenated with the head segment (upper), so `[-1]` falls through
+        # to the caller when the head segment is empty.
+        n = len(self)
+        if index < 0:
+            index += n
+        if not 0 <= index < n:
+            raise IndexError("exception stack index out of range")
+        segment = self._exc_stack
+        base = n - len(segment.items)
+        while index < base:
+            if segment.prev is None:
+                raise AssertionError("expected segment.prev to not be None")
+            segment = segment.prev
+            base -= len(segment.items)
+        return segment.items[index - base]
 
     def __str__(self) -> str:
         return f"{self._exc_stack=} - {self._current_exception=}"
@@ -1540,7 +1632,7 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
-        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):
+        if is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(
@@ -2417,13 +2509,13 @@ class InstructionTranslatorBase(
     @cache_method
     def load_builtin_from_argval(self, argval: Any) -> VariableTracker:
         if argval not in self.f_builtins:
-            unimplemented(
-                gb_type="failed to find name in frame builtins",
-                context="",
-                explanation=f"Failed to find name `{argval}` in frame's builtins.",
-                hints=[
-                    *graph_break_hints.DYNAMO_BUG,
-                ],
+            # Name is neither a global nor a builtin: matches CPython raising
+            # NameError with `name` set to the missing identifier.
+            raise_observed_exception(
+                NameError,
+                self,
+                args=[f"name '{argval}' is not defined"],
+                kwargs={"name": ConstantVariable.create(argval)},
             )
         val = self.f_builtins[argval]
 
@@ -2517,14 +2609,57 @@ class InstructionTranslatorBase(
                 self.pop()
             self.jump(inst)
 
-    def _create_exception_type(self, val: VariableTracker) -> VariableTracker:
-        if isinstance(
-            val, (variables.BuiltinVariable, UserDefinedExceptionClassVariable)
-        ):
+    def _create_exception_instance(
+        self, val: ExceptionTypes | ExceptionVals
+    ) -> ExceptionVals:
+        if pyexception_class_check(val):
             # Create the instance of the exception type
             # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
+            type_name = val.python_type_name()
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
+
+            if not issubclass(val.python_type(), BaseException):
+                exc.raise_type_error(
+                    self,
+                    f"calling {type_name} should have returned an instance of BaseException, not {val.python_type_name()}",
+                )
+        if not pyexception_instance_check(val):
+            exc.raise_type_error(
+                self,
+                "exceptions must derive from BaseException",
+            )
         return val
+
+    def set_exception_obj(
+        self, exception: ExceptionTypes, value: VariableTracker | None
+    ) -> ExceptionVals:
+        # Mirrors CPython PyErr_SetObject
+        # Note: This function is here rather than in ExceptionStack because we
+        # need an InstructionTranslator instance to create the exception instance
+
+        # TODO(dynamo-team): check if exception is a subclass of BaseException
+
+        # This function handles construction, normalization, implicit
+        # __context__ chaining and traceback attach.
+        # if value is specified, it can be either an exception instance or args
+        # to exception ctor
+
+        if (
+            value
+            and pyexception_instance_check(value)
+            and issubclass(value.exc_type, exception.fn)
+        ):
+            instance = value
+        else:
+            instance = exception.call_function(self, [value] if value else [], {})
+
+        if not isinstance(instance, ExceptionVals):
+            raise AssertionError("expected instance to be an instance of ExceptionVals")
+
+        self._attach_traceback_to_exception(instance)
+        self.exn_vt_stack._set_context_and_break_context_reference_cycle(instance)
+        self.exn_vt_stack.set_raised_exception(instance)
+        return instance
 
     def _attach_traceback_to_exception(self, exc: ExceptionVals) -> None:
         # based on CPython's PyTraceBack_Here impl
@@ -2546,120 +2681,103 @@ class InstructionTranslatorBase(
             {},
         )
 
-    def _raise_exception_variable(
-        self, val: VariableTracker, set_context: bool
+    def _raise_observed_exception(self, exc_: ExceptionVals) -> NoReturn:
+        # Propagate `exc_` as an ObservedException to unwind the tracer to the
+        # handler, preserving the original raise location via python_stack.
+        observed_exception_type = get_dynamo_observed_exception(exc_.exc_type)  # type: ignore[attr-defined, union-attr]
+        python_stack = getattr(exc_, "python_stack", None)
+        raise observed_exception_type(
+            f"raised exception {exc_.debug_repr()}", real_stack=python_stack
+        )
+
+    def do_raise(
+        self,
+        val: VariableTracker | None,
+        cause: VariableTracker | None,
     ) -> NoReturn:
-        # TODO(dynamo-team): Split this function into two separate functions for
-        # the two different ways users can raise exceptions, and clean up the
-        # code accordingly. Right now it's a bit convoluted since we have to
-        # handle both cases in one function.
+        # Mirrors CPython's `do_raise`
+        # https://github.com/python/cpython/blob/704c4c79e8485c20fb59cea1acec005f365a4fca/Python/ceval.c#L1900
 
-        # User can raise exception in 2 ways
-        #   1) raise exception type - raise NotImplementedError
-        #   2) raise exception instance - raise NotImplementedError("foo")
+        # User can raise exception in 3 ways
+        #   1) raise
+        #   2) raise <instance>
+        #   3) raise <type>
 
-        # 1) when user raises exception type
-        val = self._create_exception_type(val)
+        # bare raise
+        if val is None:
+            # reraise the exception on top of the exception stack
+            if not len(self.exn_vt_stack):
+                exc.raise_observed_exception(
+                    RuntimeError, self, args=["No active exception to reraise"]
+                )
+            val = self.exn_vt_stack.get_topmost_exception()
+            self.exn_vt_stack.set_raised_exception(val)
+            self._raise_observed_exception(val)
 
-        # Handle https://peps.python.org/pep-0479/
-        # CPython 3.12+ has a specific bytecode instruction (CALL_INTRINSIC_1 3) for this
-        if (
-            is_generator(self.f_code)
-            and isinstance(val, variables.ExceptionVariable)
-            and val.exc_type is StopIteration
-        ):
-            val = VariableTracker.build(self, RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+        # normalize type/value
+        if pyexception_class_check(val):
+            type_ = val
+            value = self._create_exception_instance(val)
+        elif pyexception_instance_check(val):
+            value = val
+            type_ = VariableTracker.build(self, val.python_type())
+        else:
+            # not something we can raise
+            exc.raise_type_error(self, "exceptions must derive from BaseException")
+
+        # normalize cause (`raise <val> from <cause>`)
+        if cause:
+            if pyexception_class_check(cause):
+                fixed_cause = self._create_exception_instance(cause)
+            elif pyexception_instance_check(cause) or cause.is_constant_none():
+                fixed_cause = cause
+            else:
+                exc.raise_type_error(
+                    self,
+                    "exception causes must derive from BaseException",
+                )
+            value.call_method(
+                self,
+                "__setattr__",
+                [ConstantVariable.create("__cause__"), fixed_cause],
+                {},
+            )
 
         # Capture the python_stack when the exception is first raised.
         # This preserves the original exception location even if the exception
         # is later re-raised (e.g., in context manager cleanup).
         # ExceptionVariable and UserDefinedExceptionObjectVariable both have
         # a python_stack attribute.
-        if (
-            self._isinstance_exception(val)
-            and getattr(val, "python_stack", None) is None
-        ):
-            val.python_stack = torch._guards.TracingContext.extract_stack()  # type: ignore[union-attr]
+        if getattr(value, "python_stack", None) is None:
+            value.python_stack = torch._guards.TracingContext.extract_stack()  # type: ignore[union-attr]
 
-        # 2) when user raises exception instance
-        if self._isinstance_exception(val):
-            # Save the exception in a global data structure.
-            # set_context=False for re-raises (RERAISE, RAISE_VARARGS 0) to
-            # match CPython semantics: __context__ is set only at the original
-            # raise site, so user code in finally blocks can clear it.
-            self.exn_vt_stack.set_current_exception(val, set_context=set_context)  # type: ignore[arg-type]
-
-            observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            # Pass the stored python_stack to preserve the original exception location
-            python_stack = getattr(val, "python_stack", None)
-            raise observed_exception_type(
-                f"raised exception {val.debug_repr()}", real_stack=python_stack
-            )
-
-        exc.raise_observed_exception(
-            TypeError,
-            self,
-            args=[
-                f"exceptions must derive from BaseException, not {val.python_type_name()}",
-            ],
-        )
+        exc_instance = self.set_exception_obj(type_, value)
+        self._raise_observed_exception(exc_instance)
 
     def RAISE_VARARGS(self, inst: Instruction) -> None:
         if inst.arg == 0:
-            if not len(self.exn_vt_stack):
-                exc.raise_observed_exception(
-                    RuntimeError, self, args=["No active exception to reraise"]
-                )
-
-            # re-raise the previous exception. Here CPython refers to the exception
-            # on top of the exception stack
-            if not len(self.exn_vt_stack):
-                raise AssertionError("expected len(self.exn_vt_stack) to be true")
-            val = self.exn_vt_stack[-1]
-            if not self._isinstance_exception(val):
-                raise AssertionError(val)
-            self._raise_exception_variable(val, set_context=False)
+            # bare raise; do_raise reraises the exception on top of the stack,
+            # or reports "No active exception to reraise" if the stack is empty
+            self.do_raise(None, None)
         elif inst.arg == 1:
             # raise TOS
             val = self.stack[-1]  # type: ignore[assignment]
-            try:
-                self._raise_exception_variable(val, set_context=True)
-            finally:
-                # Update __traceback__ in the raised exception
-                curr_exc = self.exn_vt_stack.get_current_exception()
-                self._attach_traceback_to_exception(curr_exc)
+            self.do_raise(val, None)
         else:
             # raise .. from ...
-            from_vt = self.pop()
+            cause = self.pop()
             val = self.pop()  # type: ignore[assignment]
-            try:
-                self._raise_exception_variable(val, set_context=True)
-            finally:
-                # Update __cause__/__suppress_context__ in the raised exception
-                curr_exc = self.exn_vt_stack.get_current_exception()
-                self._attach_traceback_to_exception(curr_exc)
-                cause = self._create_exception_type(from_vt)
-                curr_exc.call_method(
-                    self,  # pyrefly: ignore [bad-argument-type]
-                    "__setattr__",
-                    [VariableTracker.build(self, "__cause__"), cause],
-                    {},
-                )  # type: ignore[arg-type, union-attr, assignment]
+            self.do_raise(val, cause)
 
     def CLEANUP_THROW(self, inst: Instruction) -> None:
         # https://github.com/python/cpython/pull/96010
         tos = self.stack[-1]
-        if not isinstance(tos, ExceptionVariable):
-            raise AssertionError(
-                "expected isinstance(tos, ExceptionVariable) to be true"
-            )
-        if tos.exc_type is StopIteration:
-            unimplemented(
-                gb_type="CLEANUP_THROW with StopIteration",
-                context="",
-                explanation="Received StopIteration when handling generator.throw/close. This is not supported.",
-                hints=[],
-            )
+        if not isinstance(tos, ExceptionVals):
+            raise AssertionError("expected isinstance(tos, ExceptionVals) to be true")
+        if issubclass(tos.exc_type, StopIteration):
+            self.popn(3)
+            self.push(ConstantVariable.create(None))
+            self.push(tos.args[0] if tos.args else ConstantVariable.create(None))
         else:
             self.RERAISE(inst)
 
@@ -2670,24 +2788,31 @@ class InstructionTranslatorBase(
         #   set f_lasti of the current frame.
 
         if sys.version_info >= (3, 11):
-            # RERAISE is currently supported in a narrow case of `raise ... from None`
+            # Re-raise the exception on top of the stack.
             val = self.pop()
+            if not pyexception_instance_check(val):
+                raise AssertionError(
+                    "expected _exception_instance_check(val) to be true"
+                )
             if inst.argval:
                 # RERAISE 1
                 _ = self.pop()
-                self._raise_exception_variable(val, set_context=False)
+                self.exn_vt_stack.set_raised_exception(val)
             else:
                 # RERAISE 0
                 self.push(val)
-                self._raise_exception_variable(val, set_context=False)
+                self.exn_vt_stack.set_raised_exception(val)
+            self._raise_observed_exception(val)
         else:
             _exc = self.pop()
             val = self.pop()
             _tb = self.pop()
-            self._raise_exception_variable(val, set_context=False)
-
-    def _isinstance_exception(self, val: VariableTracker) -> TypeIs[ExceptionVals]:
-        return isinstance(val, ExceptionVals)
+            if not pyexception_instance_check(val):
+                raise AssertionError(
+                    "expected _exception_instance_check(val) to be true"
+                )
+            self.exn_vt_stack.set_raised_exception(val)
+            self._raise_observed_exception(val)
 
     def WITH_EXCEPT_START(self, inst: Instruction) -> None:
         args: list[VariableTracker] = []
@@ -2706,9 +2831,9 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected len(self.stack) >= fn_loc to be true")
             fn = self.stack[-fn_loc]
             val = self.stack[-1]
-            if not self._isinstance_exception(val):
+            if not pyexception_instance_check(val):
                 raise AssertionError(
-                    "expected self._isinstance_exception(val) to be true"
+                    "expected _exception_instance_check(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
             tb = val.getattro_impl(
@@ -2724,9 +2849,9 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected len(self.stack) >= 7 to be true")
             fn = self.stack[-7]
             val = self.stack[-2]
-            if not self._isinstance_exception(val):
+            if not pyexception_instance_check(val):
                 raise AssertionError(
-                    "expected self._isinstance_exception(val) to be true"
+                    "expected _exception_instance_check(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
 
@@ -2743,7 +2868,7 @@ class InstructionTranslatorBase(
 
         def bubble_exception_to_interpreter() -> None:
             # Bubble the exception to the interpreter
-            curr_exc = self.exn_vt_stack.get_current_exception()
+            curr_exc = self.exn_vt_stack.get_raised_exception()
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             if not isinstance(raised_exception, dynamo_exc):
                 raise AssertionError(
@@ -2777,7 +2902,7 @@ class InstructionTranslatorBase(
                     )
 
                 # 3) push the exception to the stack
-                self.push(self.exn_vt_stack.get_current_exception())
+                self.push(self.exn_vt_stack.get_raised_exception())
 
                 # 4) jump to the handler
                 self.jump(exn_tab_entry)  # type: ignore[arg-type]
@@ -2787,7 +2912,7 @@ class InstructionTranslatorBase(
                 self.stack.clear()
 
                 # attach traceback to the exception and set it as current exception
-                curr_exc = self.exn_vt_stack.get_current_exception()
+                curr_exc = self.exn_vt_stack.get_raised_exception()
                 self._attach_traceback_to_exception(curr_exc)
 
                 if type(self) is InstructionTranslator:
@@ -2821,7 +2946,7 @@ class InstructionTranslatorBase(
                         raise raised_exception
                     block_stack_entry = self.block_stack.pop()
 
-                exception_var = self.exn_vt_stack.get_current_exception()
+                exception_var = self.exn_vt_stack.get_raised_exception()
                 self.exn_vt_stack.move_current_exception_to_stack()
 
                 # 1) pop values from the stack until it matches the stack depth
@@ -2962,7 +3087,7 @@ class InstructionTranslatorBase(
             )
 
         if sys.version_info >= (3, 11):
-            if not self._isinstance_exception(exc_instance):
+            if not pyexception_instance_check(exc_instance):
                 unimplemented(
                     gb_type="Caught non-Exception value",
                     context=str(exc_instance),
@@ -2992,7 +3117,7 @@ class InstructionTranslatorBase(
                     explanation=f"`except ...` expects a non-type: {expected_type}.",
                     hints=[*graph_break_hints.USER_ERROR],
                 )
-            if self._isinstance_exception(exc_instance) and issubclass(
+            if pyexception_instance_check(exc_instance) and issubclass(
                 exc_instance.exc_type,  # type: ignore[union-attr]
                 expected_type.fn,  # type: ignore[attr-defined]
             ):
@@ -3187,10 +3312,10 @@ class InstructionTranslatorBase(
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
-            # pyrefly: ignore [unsupported-operation]
-            if inst.arg % 2:
-                self.LOAD_METHOD(inst)
-                return
+            assert inst.arg is not None and inst.arg % 2 == 0, (  # noqa: S101
+                "LOAD_ATTR method variant should have been normalized by "
+                "remove_load_attr_method_variant in cleaned_instructions"
+            )
         self._load_attr(inst.argval)
 
     @break_graph_if_unsupported(
@@ -4204,7 +4329,7 @@ class InstructionTranslatorBase(
             )
 
             value = LazyVariableTracker.create(
-                LazySymNodeFormatString(value, fmt_spec), source=value.source, tx=self
+                LazySymNodeFormatString(value, fmt_spec), source=None
             )
             self.push(value)
             return
@@ -4333,8 +4458,10 @@ class InstructionTranslatorBase(
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
         val = self.stack[-1]
-        if not self._isinstance_exception(val):
-            raise AssertionError("expected self._isinstance_exception(val) to be true")
+        if not pyexception_instance_check(val):
+            raise AssertionError(
+                f"expected _exception_instance_check(val) to be true, got {val}"
+            )
         if val.exc_type is StopIteration:  # type: ignore[union-attr]
             new_val = VariableTracker.build(self, RuntimeError).call_function(
                 self,  # type: ignore[arg-type]
@@ -4691,7 +4818,7 @@ class InstructionTranslatorBase(
 
     def MAKE_CELL(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12) and not self.accept_prefix_inst:
-            # In 3.12+, MAKE_CELL is not longer necessarily a prefix instruction.
+            # In 3.12+, MAKE_CELL is no longer necessarily a prefix instruction.
             # It can be generated by inlined comprehensions.
             if not isinstance(self.symbolic_locals[inst.argval], NullVariable):
                 raise AssertionError(
@@ -5469,9 +5596,28 @@ class InstructionTranslator(InstructionTranslatorBase):
             if f_code.co_flags & CO_VARKEYWORDS:
                 varkw_name = f_code.co_varnames[_vararg_idx]
 
+            # Skip inputs never read anywhere in the function: they cannot
+            # affect the graph or any resume suffix, so guards on them are
+            # wasteful. Export mode must keep all locals because realize_all()
+            # below needs them. locals()/vars() are handled in _call_frame_locals_snapshot
+            # which adds pruned entries back from tx.f_locals on demand.
+            if export:
+                function_live_names: set[str] | None = None
+            else:
+                function_live_names = livevars_analysis(
+                    self.instructions, self.instructions[0]
+                )
+
             dynamism = code_context.get_context(f_code).get("dynamism", None)
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
+                    if (
+                        function_live_names is not None
+                        and name not in function_live_names
+                        and name != varargs_name
+                        and name != varkw_name
+                    ):
+                        continue
                     local_dynamism = None
                     if dynamism:
                         local_dynamism = frozenset(dynamism.get(name, {}).items())
@@ -6067,43 +6213,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         log.debug("DONE INLINING %s", code)
         self.output.tracing_context.traced_code.append(code)
 
-        if config.enable_faithful_generator_behavior or (
-            isinstance(self, InliningGeneratorInstructionTranslator)
-            and self.is_generator_from_ctx_manager
+        if (
+            is_generator(code)
+            and isinstance(self, InliningGeneratorInstructionTranslator)
+            and self.frame_state == FrameState.FRAME_CLEARED
         ):
-            if (
-                is_generator(code)
-                and isinstance(self, InliningGeneratorInstructionTranslator)
-                and self.generator_exhausted
-            ):
-                if not isinstance(self, InliningGeneratorInstructionTranslator):
-                    raise AssertionError(
-                        "expected isinstance(self, InliningGeneratorInstructionTranslator) to be true"
-                    )
-                # When the generator returns None, we raise StopIteration
-                # pyrefly: ignore [implicit-any]
-                args = []
-                if not self.symbolic_result.is_constant_none():
-                    args = [self.symbolic_result]
-                exc.raise_observed_exception(StopIteration, self, args=args)
-            else:
-                return self.symbolic_result
+            # When the generator returns None, we raise StopIteration
+            # pyrefly: ignore [implicit-any]
+            args = []
+            if not self.symbolic_result.is_constant_none():
+                args = [self.symbolic_result]
+            exc.raise_observed_exception(StopIteration, self, args=args)
         else:
-            if is_generator(code):
-                if not isinstance(self, InliningGeneratorInstructionTranslator):
-                    raise AssertionError(
-                        "expected isinstance(self, InliningGeneratorInstructionTranslator) to be true"
-                    )
-                if not self.symbolic_result.is_constant_none():
-                    raise AssertionError(
-                        "expected self.symbolic_result.is_constant_none() to be true"
-                    )
-                return ListIteratorVariable(
-                    self.generated_items,
-                    mutation_type=ValueMutationNew(),
-                )
-            else:
-                return self.symbolic_result
+            return self.symbolic_result
 
     def __init__(
         self,
@@ -6312,13 +6434,29 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: list[VariableTracker]
-    # Flag whether or not the InlineGenerator should consume the entire iterator
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
-        self.generator_exhausted = False
-        self.is_generator_from_ctx_manager = False
+        self.frame_state = FrameState.FRAME_CREATED
+        self.gi_exc_state = Segment()
+
+    @contextlib.contextmanager
+    def link_gi_exc_state(self):
+        try:
+            self.exn_vt_stack.push_segment(self.gi_exc_state)
+            yield
+        finally:
+            self.exn_vt_stack.pop_segment()
+
+    @contextlib.contextmanager
+    def temporarily_set_frame_state(self, state: FrameState):
+        saved_frame_state = self.frame_state
+        try:
+            self.frame_state = state
+            yield
+        finally:
+            self.frame_state = saved_frame_state
 
     def inline_call_(self) -> VariableTracker:
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
@@ -6331,15 +6469,16 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def YIELD_VALUE(self, inst: Instruction) -> None:
         top = self.pop()
         self.generated_items.append(top)
+        prev = self.instructions[self.indexof[inst] - 1].opname
+        if inst.opname == "YIELD_FROM" or prev == "SEND":
+            self.frame_state = FrameState.FRAME_SUSPENDED_YIELD_FROM
+        else:
+            self.frame_state = FrameState.FRAME_SUSPENDED
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
-        if (
-            config.enable_faithful_generator_behavior
-            or self.is_generator_from_ctx_manager
-        ):
-            self.symbolic_result = top
-            # Stop tracing
-            raise YieldValueOp
+        self.symbolic_result = top
+        # Stop tracing
+        raise YieldValueOp
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
@@ -6353,102 +6492,84 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         raise ReturnValueOp
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
-        self.generator_exhausted = True
+        self.frame_state = FrameState.FRAME_CLEARED
         return super().RETURN_VALUE(inst)
 
     def RETURN_CONST(self, inst: Instruction) -> None:
-        self.generator_exhausted = True
+        self.frame_state = FrameState.FRAME_CLEARED
         return super().RETURN_CONST(inst)
 
     def YIELD_FROM(self, inst: Instruction) -> None:
+        # https://github.com/python/cpython/blob/1790e584142b5db070b74bc64777ad14e26608c2/Python/ceval.c#L2581
+        if not sys.version_info[:2] == (3, 10):
+            raise AssertionError("Python 3.10 specific")
+
         if not (len(self.stack) >= 2):
             raise AssertionError("expected len(self.stack) >= 2 to be true")
         val = self.pop()
-        tos = self.stack[-1]
-        if not val.is_constant_none():
-            # invoke send
-            # Unreachable code - if you hit this, you are implementing generator support and have
-            # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
-            # subgenerator and lines up with this line in Python 3.10
-            # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L2599
-            unimplemented(
-                gb_type="Unreachable sub-generator code",
-                context="",
-                explanation="Should only be encountered while implementing generator support.",
-                hints=[],
-            )
+        receiver = self.stack[-1]
 
+        gen_status = None
         try:
-            val = tos.next_variable(self)
-        except (StopIteration, exc.ObservedUserStopIteration) as ex:
-            if isinstance(ex, exc.ObservedUserStopIteration):
-                exc.handle_observed_exception(self)
-
-            # The iterator is exhausted. Stop the loop and return.
-            self.pop()
-            self.push(ConstantVariable.create(ex.value))
+            result = pyiter_send(self, receiver, val)
+        except exc.ObservedUserStopIteration:
+            gen_status = PySendResult.PYGEN_RETURN
+            raised = self.exn_vt_stack.get_raised_exception()
+            result = pygen_fetch_stopiteration_value(raised)
+            exc.handle_observed_exception(self)
+        except exc.ObservedException:
+            # PYGEN_ERROR
+            gen_status = PySendResult.PYGEN_ERROR
+            raise
         else:
+            # PYGEN_NEXT
+            gen_status = PySendResult.PYGEN_NEXT
+
+        if gen_status == PySendResult.PYGEN_RETURN:
+            self.pop()
+            self.push(result)
+        else:
+            # gen_status == PYGEN_NEXT
             # Repeat the YIELD_FROM instruction in the next eval loop
-            if not isinstance(self.instruction_pointer, int):
+            if isinstance(self.instruction_pointer, int):
+                if not (self.instruction_pointer > 0):
+                    raise AssertionError(
+                        "expected self.instruction_pointer > 0 to be true"
+                    )
+                self.instruction_pointer -= 1
+            else:
                 raise AssertionError(
                     "expected isinstance(self.instruction_pointer, int) to be true"
                 )
-            if not (self.instruction_pointer > 0):
-                raise AssertionError("expected self.instruction_pointer > 0 to be true")
-            self.instruction_pointer -= 1
-
-            self.push(val)
+            self.push(result)
             # Add the value to yield into generated_items and replace the top of the stack with None
             self.YIELD_VALUE(inst)
 
     def SEND(self, inst: Instruction) -> None:
         if not (len(self.stack) >= 2):
             raise AssertionError("expected len(self.stack) >= 2 to be true")
+
         val = self.pop()
         if sys.version_info >= (3, 15):
             receiver = self.stack[-2]
         else:
             receiver = self.stack[-1]
-        if isinstance(receiver, (IteratorVariable, LocalGeneratorObjectVariable)) or (
-            isinstance(receiver, UserDefinedObjectVariable)
-            and isinstance(receiver.value, collections.abc.Iterator)
-        ):
-            if val.is_constant_none():
-                try:
-                    val = receiver.next_variable(self)  # type: ignore[arg-type]
-                except (
-                    StopIteration,
-                    exc.ObservedUserStopIteration,
-                    exc.ObservedIndexError,
-                ):
-                    # To implement SEND, we have to look at the implementation
-                    # when the iterator returns StopIteration. This translates to this code
-                    # 3.11: https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2619
-                    # 3.12: https://github.com/python/cpython/blob/3.12/Python/bytecodes.c#L863-L866
-                    # The implementation is different in 3.11 and 3.12. In 3.12, we rely
-                    # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
-                    if sys.version_info < (3, 12):
-                        self.pop()  # Python 3.12 uses new opcode END_SEND
-                    self.push(val)
-                    self.jump(inst)
-                else:
-                    self.push(val)
-            else:
-                # invoke send
-                # Unreachable code - if you hit this, you are implementing generator support and have
-                # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
-                # subgenerator and lines up with this line in Python 3.11
-                # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2597
-                unimplemented(
-                    gb_type="Unreachable sub-generator code",
-                    context="",
-                    explanation="Should only be encountered while implementing generator support.",
-                    hints=[],
-                )
+
+        try:
+            val = pyiter_send(self, receiver, val)
+        except exc.ObservedUserStopIteration:
+            # To implement SEND, we have to look at the implementation
+            # when the iterator returns StopIteration. This translates to this code
+            # 3.11: https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2619
+            # 3.12: https://github.com/python/cpython/blob/3.12/Python/bytecodes.c#L863-L866
+            # The implementation is different in 3.11 and 3.12. In 3.12, we rely
+            # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
+            ex = self.exn_vt_stack.get_raised_exception()
+            val = pygen_fetch_stopiteration_value(ex)
+            self.exn_vt_stack.clear_current_exception()
+            if sys.version_info < (3, 12):
+                self.pop()  # Python 3.12 uses new opcode END_SEND
+            self.push(val)
+            self.jump(inst)
         else:
-            unimplemented(
-                gb_type="SEND with bad type",
-                context=f"TOS type: {typestr(receiver)}",
-                explanation=f"Attempted to SEND with unsupported type {typestr(receiver)}.",
-                hints=[],
-            )
+            self.push(val)

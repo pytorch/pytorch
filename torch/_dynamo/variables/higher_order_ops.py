@@ -40,7 +40,7 @@ from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
-from torch._dynamo.variables.script_object import TorchScriptObjectVariable
+from torch._dynamo.variables.script_object import CustomClassObjectVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
 from torch._guards import Source
 from torch._higher_order_ops.flex_gemm import FLEX_GEMM_OP_ALIASES
@@ -350,15 +350,15 @@ def overwrite_tensor_vt_proxy(
             (
                 variables.SymNodeVariable,
                 variables.TensorVariable,
-                TorchScriptObjectVariable,
+                CustomClassObjectVariable,
             ),
         ):
             if not (
                 subgraph_vt.is_tensor()
-                or isinstance(subgraph_vt, (SymNodeVariable, TorchScriptObjectVariable))
+                or isinstance(subgraph_vt, (SymNodeVariable, CustomClassObjectVariable))
             ):
                 raise AssertionError(
-                    "Expected subgraph_vt to be a tensor, SymNodeVariable, or TorchScriptObjectVariable"
+                    "Expected subgraph_vt to be a tensor, SymNodeVariable, or CustomClassObjectVariable"
                 )
             orig_vt.proxy = subgraph_vt.proxy
 
@@ -1282,14 +1282,19 @@ def validate_args_and_maybe_create_graph_inputs(
 #     means by node target (branches in separate tracing contexts can produce
 #     distinct proxies for the same nn module attr); the proxy from the first
 #     branch is chosen as the canonical representative.
-#   * unique_per_branch[i]: proxies lifted by branch i but not shared.
+#   * unique_per_branch[i]: proxies lifted by branch i, not shared, and not
+#     already assigned to an earlier branch's unique block. With N > 2 a
+#     freevar can be lifted by some but not all branches; the first such branch
+#     claims it, and later branches that also lift it reuse the same placeholder.
+#     For N == 2 any non-shared freevar is lifted by exactly one branch -> no-op.
 # Each block is sorted by node name for determinism.
 #
 # Side effect: each graph is rewritten in-place so its placeholders follow the
 # 1 + N block layout: shared block (no suffix), then one block per branch
-# (suffixed with "_<branch_name>") holding that branch's unique freevars. Only
-# the originating branch's unique placeholders are wired to the inner uses;
-# the other branches' unique blocks become unused placeholders for signature
+# (suffixed with "_<branch_name>") holding that branch's unique freevars. A
+# branch graph wires its inner uses to whichever block holds the placeholder
+# for the freevar it lifted (its own block, or the earlier branch that
+# claimed it); the remaining blocks become unused placeholders for signature
 # alignment.
 def _merge_graph_inputs(
     graphs: list[torch.fx.Graph],
@@ -1326,28 +1331,23 @@ def _merge_graph_inputs(
     # Step 2: derive the shared block and the per-branch unique blocks. Plain
     # proxies are the same object across branches, so a single canonical entry
     # covers all of them; for shared get_attrs the canonical is the branch-0
-    # proxy.
+    # proxy. A non-shared canonical lifted by multiple branches is assigned
+    # to the first branch that lifted it.
     def _sort_by_name(vars: Iterable[Proxy]) -> list[Proxy]:
         return sorted(vars, key=lambda var: var.node.name)
 
     shared = _sort_by_name(shared_canonical)
-    unique_per_branch = [
-        _sort_by_name(
-            outer
-            for outer, canonical in outer_to_canonical.items()
-            if canonical not in shared_canonical
-        )
-        for outer_to_canonical in per_branch_outer_to_canonical
-    ]
+    claimed_canonical: set[Proxy] = set(shared_canonical)
+    unique_per_branch: list[list[Proxy]] = []
+    for outer_to_canonical in per_branch_outer_to_canonical:
+        branch_unique = []
+        for outer, canonical in outer_to_canonical.items():
+            if canonical in claimed_canonical:
+                continue
+            branch_unique.append(outer)
+            claimed_canonical.add(canonical)
+        unique_per_branch.append(_sort_by_name(branch_unique))
 
-    # Let's say we capture cond(pred, true_fn, false_fn, (x,)).
-    # With set_graph_input set to automatic,
-    #   true_fn has lifted variables x, a, b, c
-    #   false_fn has lifted variables x, a, b, d
-    # Then fixup_branch_inps makes sure both branches have the same signature, i.e.:
-    #   true_fn(x, a, b, c_true_branch, d_false_branch)
-    #   false_fn(x, a, b, c_true_branch, d_false_branch)
-    #
     # For N branches the merged signature has 1 + N blocks: shared (no suffix)
     # then one suffixed block per branch. Within each block proxies are
     # ordered by node name for determinism.
@@ -1867,7 +1867,7 @@ def speculate_subgraph_with_auto_output_flattening(
 
             def visit(vt: VariableTracker) -> None:
                 if vt.is_tensor() or isinstance(
-                    vt, (SymNodeVariable, TorchScriptObjectVariable)
+                    vt, (SymNodeVariable, CustomClassObjectVariable)
                 ):
                     graph_output_vts.append(vt)
 
@@ -2607,6 +2607,8 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch._higher_order_ops.switch import _get_branch
+
         from . import ListVariable
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -2639,8 +2641,7 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
             idx = index.as_python_constant()
             branch_fns = branches.unpack_var_sequence(tx)
-            clamped = min(max(0, idx), len(branch_fns) - 1)
-            return branch_fns[clamped].call_function(
+            return _get_branch(branch_fns, idx).call_function(
                 tx, operands.unpack_var_sequence(tx), {}
             )
 
@@ -2876,7 +2877,7 @@ def validate_subgraph_output_types(
                     out.is_python_constant()
                     and isinstance(out.as_python_constant(), (int, bool))
                 )
-                or isinstance(out, TorchScriptObjectVariable)
+                or isinstance(out, CustomClassObjectVariable)
             ):
                 continue
             unimplemented(
@@ -6150,6 +6151,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             in_grad_placements,
             device_mesh,
             redistribute_inputs,
+            enable_spmd_types,
             *user_args,
         ) = args
 

@@ -34,12 +34,14 @@ from torch._inductor.codecache import (
     DLLWrapper,
     get_hash,
     PyCodeCache,
+    write,
     XPUCodeCache,
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.utils import (
     apply_subprocess_env,
     clear_caches,
+    clear_on_fresh_cache,
     do_bench_using_profiling,
     get_gpu_type,
     get_ld_library_path,
@@ -662,17 +664,29 @@ class _TestEnvBenchmarkRequest:
         return os.environ.get(self.key)
 
 
-class _TestCUDACodeCacheBenchmarkRequest:
+@clear_on_fresh_cache
+class _TestCodeCache:
+    @classmethod
+    def cache_clear(cls) -> None:
+        cls.write.cache_clear()
+
+    @classmethod
+    @functools.lru_cache(None)
+    def write(cls, source_code: str) -> tuple[str, str]:
+        return write(source_code, "txt")
+
+
+class _TestCodeCacheBenchmarkRequest:
     """
     Supports unit testing subprocess codecache resets.
     """
 
-    source_code = 'extern "C" __global__ void test_kernel() {}\n'
+    source_code = "test codecache contents\n"
 
     def benchmark(
         self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None
     ) -> str:
-        _, input_path = CUDACodeCache.write(self.source_code, "so")
+        _, input_path = _TestCodeCache.write(self.source_code)
         return input_path
 
 
