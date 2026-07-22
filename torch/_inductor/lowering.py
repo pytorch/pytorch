@@ -7653,9 +7653,13 @@ def _div_rn(a, b):
 
 
 def _floor_div_floating(a, b):
-    nan = constant_like(float("nan"))(a)
-    neg_one = constant_like(-1.0)(a)
-    zero = constant_like(0.0)(a)
+    # Either operand may be a python scalar (e.g. torch.floor_divide(scalar,
+    # tensor)); constant_like needs a tensor for dtype/device/size, so seed the
+    # constants from whichever operand is a tensor.
+    ref = a if isinstance(a, (TensorBox, IRNode)) else b
+    nan = constant_like(float("nan"))(ref)
+    neg_one = constant_like(-1.0)(ref)
+    zero = constant_like(0.0)(ref)
 
     def fn(a, b, nan, neg_one, zero):
         quotient = ops.div_rn(a, b)

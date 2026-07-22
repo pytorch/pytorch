@@ -3977,6 +3977,18 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
+    def test_div10(self):
+        # A Python-scalar dividend with floor rounding: the floor-division
+        # lowering seeds constants from an operand via get_dtype(), which fails
+        # when the dividend is a scalar (no get_dtype()) rather than a tensor.
+        def fn(x):
+            return (
+                torch.div(5.0, x, rounding_mode="floor"),
+                torch.floor_divide(5.0, x),
+            )
+
+        self.common(fn, (torch.randn(8),))
+
     @skip_if_triton_cpu  # divide by zero; cannot xfail because it crashes process
     def test_div_zero_dim(self):
         def fn(a, b):
