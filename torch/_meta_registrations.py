@@ -6624,7 +6624,7 @@ def meta__scaled_dot_product_efficient_attention(
 
     if torch.version.hip and torch.cuda.is_available():
         """Please see: https://github.com/pytorch/pytorch/issues/146848
-        longsumexp last dim should be seq length
+        logsumexp last dim should be seq length
         """
         logsumexp_dim = M if compute_log_sumexp else 0
     else:
@@ -6971,9 +6971,16 @@ def meta__efficient_attention_forward(
             )
         actual_max_seqlen_q = max_seqlen_q
     actual_max_seqlen_k = max_seqlen_k if max_seqlen_k is not None else N
-    logsumexp_dim = (
-        math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
-    )
+
+    if torch.version.hip is not None:
+        # ROCm efficient-attention backends return compact LSE. CUDA's
+        # memory-efficient attention kernel pads LSE to its kernel alignment.
+        logsumexp_dim = actual_max_seqlen_q if compute_log_sumexp else 0
+    else:
+        logsumexp_dim = (
+            math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
+        )
+
     logsum_exp = torch.empty(
         (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
