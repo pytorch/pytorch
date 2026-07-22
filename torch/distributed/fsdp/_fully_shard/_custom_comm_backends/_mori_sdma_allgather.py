@@ -5,7 +5,7 @@ This is an opt-in :class:`AllGather` backend backed by the ROCm `MORI
 <https://github.com/ROCm/mori>`_ SDMA collectives. Enable it on an FSDP module
 with::
 
-    from torch.distributed.fsdp._fully_shard._mori_sdma_allgather import (
+    from torch.distributed.fsdp._fully_shard._custom_comm_backends import (
         MoriSdmaAllGather,
     )
 
@@ -24,12 +24,12 @@ from typing import Any, TYPE_CHECKING
 import torch
 import torch.distributed as dist
 
-from ._fsdp_api import AllGather
+from .._fsdp_api import AllGather
 
 
 if TYPE_CHECKING:
-    from ._fsdp_collectives import AllGatherResult
-    from ._fsdp_param import FSDPParam
+    from .._fsdp_collectives import AllGatherResult
+    from .._fsdp_param import FSDPParam
 
 
 class _MoriSdmaAllGatherWork:

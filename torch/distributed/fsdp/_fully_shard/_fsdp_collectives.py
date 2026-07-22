@@ -564,17 +564,13 @@ def _can_use_param_contiguous_output(
     param_all_gather_input_numels: list[list[int]],
     all_gather_output_dtype: torch.dtype,
 ) -> bool:
-    """Whether the no-copy parameter-contiguous output fast path is eligible.
+    """Conservative gate for the no-copy param-contiguous output (RFC #186601).
 
-    This implements the RFC's conservative eligibility gate (pytorch/pytorch#
-    186601): the unsharded parameters become views aliasing the backend's
-    all-gather output, so the path is only taken when that aliasing is known to
-    be both correct and safe. Each excluded case below falls back to the
-    rank-major ``split_with_sizes_copy`` copy-out.
+    The unsharded params become views into the backend output, so only take the
+    path when that aliasing is safe; every excluded case falls back to the
+    rank-major copy-out.
     """
-    # Compiled autograd / Traceable FSDP2: the in-place aliasing and the
-    # Python-level view bookkeeping are not traceable today.
-    if _compile_active():
+    if _compile_active():  # in-place aliasing not traceable
         return False
     if len(fsdp_params) != len(param_all_gather_input_numels):
         return False
@@ -582,25 +578,16 @@ def _can_use_param_contiguous_output(
         fsdp_params, param_all_gather_input_dtypes, param_all_gather_input_numels
     ):
         if (
-            # A single dtype-preserving input: more than one input, or an
-            # input whose dtype differs from the output (mixed precision / fp8),
-            # means the output is not a plain reinterpretation of the shard.
+            # a single dtype-preserving dim-0 input that is the param itself
             len(input_dtypes) != 1
             or len(input_numels) != 1
             or input_dtypes[0] != all_gather_output_dtype
-            # Only dim-0 sharding leaves each parameter contiguous in the
-            # ``[param][rank]`` output; Shard(i>0) still needs the chunk-cat.
             or fsdp_param.fsdp_placement.dim != 0
-            # TP/EP DTensor params and the ``fsdp_pre_all_gather`` /
-            # ``fsdp_post_all_gather`` extensions (fp8, custom layouts, ...)
-            # transform the data around the collective, so the gathered output
-            # is not the parameter itself; the RFC excludes them until each is
-            # explicitly validated.
+            # DTensor / pre|post-all-gather extensions transform the data
             or fsdp_param.is_dtensor
             or hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
             or hasattr(fsdp_param._sharded_local_tensor, "fsdp_post_all_gather")
-            # Post-forward mesh reshard all-gathers over a different mesh; the
-            # backing-storage lifetime across that reshard is not yet validated.
+            # post-forward reshard uses a different mesh
             or fsdp_param.sharded_state == ShardedState.SHARDED_POST_FORWARD
         ):
             return False
@@ -622,11 +609,7 @@ def _init_param_contiguous_outputs(
     param_all_gather_input_numels: list[list[int]],
     world_size: int,
 ) -> None:
-    """Point each parameter at its slice of a parameter-contiguous output.
-
-    Eligibility was already validated in ``foreach_all_gather``; here we only
-    carve ``all_gather_output`` into the per-parameter ``[param][rank]`` views.
-    """
+    """Carve ``all_gather_output`` into per-parameter ``[param][rank]`` views."""
     output_offset = 0
     for fsdp_param, input_numels in zip(fsdp_params, param_all_gather_input_numels):
         output_numel = input_numels[0] * world_size

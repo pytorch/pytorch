@@ -840,7 +840,12 @@ class FSDPParam:
         device: torch.device,
     ):
         if len(self.all_gather_outputs) > 0:
-            return  # already initialized
+            if not self._keep_all_gather_output_storage:
+                return  # already initialized
+            # Falling back to the default copy-out after a zero-copy all-gather:
+            # drop the unsharded param aliasing the stale backend buffer.
+            if hasattr(self, "_unsharded_param"):
+                del self._unsharded_param
         self._keep_all_gather_output_storage = False
         self.all_gather_outputs = [
             torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)

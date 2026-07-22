@@ -104,15 +104,11 @@ class Comm(ABC):
 
 
 class AllGather(Comm):
-    """
-    Interface for all_gather comm primitive.
+    """Interface for the all_gather comm primitive.
 
-    By default FSDP all-gathers into a rank-major ``[rank][param]`` buffer and
-    then copies each parameter out into its own contiguous storage. A backend may
-    override :meth:`prepare_output`, :meth:`copy_in`, and
-    :meth:`finalize_outputs` to produce a different output layout, choose the
-    matching all-gather input layout, and decide whether FSDP should copy out of,
-    or view directly into, the backend-owned output buffer.
+    A backend may override :meth:`prepare_output`, :meth:`copy_in`, and
+    :meth:`finalize_outputs` to produce a custom output layout and view
+    parameters into it instead of the default rank-major copy-out.
     """
 
     @abstractmethod
@@ -135,12 +131,9 @@ class AllGather(Comm):
         param_all_gather_input_dtypes: list[list[torch.dtype]],
         param_all_gather_input_numels: list[list[int]],
     ) -> object | None:
-        """
-        Prepare backend state for a custom all-gather output layout.
+        """Prepare backend state for a custom output layout.
 
-        ``all_gather_input_split_sizes`` gives the flattened per-input numels
-        (summing to ``all_gather_input_numel``). The returned value, if any, is
-        opaque backend metadata carried through the all-gather result.
+        Returns opaque backend metadata carried through the all-gather result.
         """
         return None
 

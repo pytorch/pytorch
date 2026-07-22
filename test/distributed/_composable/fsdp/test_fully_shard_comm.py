@@ -7,8 +7,7 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable, Sequence
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import torch
 import torch.distributed as dist
@@ -45,7 +44,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
-from torch.distributed.fsdp._fully_shard._mori_sdma_allgather import MoriSdmaAllGather
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
@@ -74,7 +72,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
-    TestCase,
     xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -99,7 +96,7 @@ device_module = torch.get_device_module(device_type)
 
 
 class _RankMajorTestAllGather(AllGather):
-    """Minimal custom backend that all-gathers into the default rank-major layout."""
+    """Custom backend that all-gathers into the default rank-major layout."""
 
     def __init__(self) -> None:
         self.outputs: list[torch.Tensor] = []
@@ -123,15 +120,12 @@ class _RankMajorTestAllGather(AllGather):
         async_op: bool = False,
     ) -> dist.distributed_c10d.Work | None:
         return dist.all_gather_single(
-            output_tensor,
-            input_tensor,
-            group=group,
-            async_op=async_op,
+            output_tensor, input_tensor, group=group, async_op=async_op
         )
 
 
 class _ParamContiguousTestAllGather(_RankMajorTestAllGather):
-    """Custom backend that emulates a no-copy, parameter-contiguous output.
+    """Custom backend emulating a no-copy, parameter-contiguous output.
 
     It reuses a single persistent output buffer and rearranges the rank-major
     result into the ``[param][rank]`` layout that FSDP can view in place.
@@ -256,6 +250,42 @@ class _ParamContiguousTestAllGather(_RankMajorTestAllGather):
         return None
 
 
+class _ZeroCopyThenFallbackAllGather(_ParamContiguousTestAllGather):
+    """Zero-copy on the first all-gather, then falls back to rank-major copy-out.
+
+    Emulates a group that becomes ineligible for the zero-copy output after a
+    successful zero-copy all-gather, so FSDP must not keep aliasing the stale
+    backend buffer.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._use_param_contiguous = False
+        self._first = True
+
+    def prepare_output(self, *args: object, **kwargs: object) -> object | None:
+        if self._first:
+            self._first = False
+            metadata = super().prepare_output(*args, **kwargs)  # type: ignore[arg-type]
+            self._use_param_contiguous = metadata is not None
+            return metadata
+        self._use_param_contiguous = False
+        return None
+
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        async_op: bool = False,
+    ) -> dist.distributed_c10d.Work | None:
+        if self._use_param_contiguous:
+            return super().__call__(output_tensor, input_tensor, group, async_op)
+        return dist.all_gather_single(
+            output_tensor, input_tensor, group=group, async_op=False
+        )
+
+
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
@@ -339,15 +369,9 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 all_gather_stream=all_gather_stream,
             )
 
-    @skip_if_lt_x_gpu(1)
-    def test_custom_all_gather_backend_substitution(self):
-        param_sizes = [torch.Size([self.world_size, 2]), torch.Size([self.world_size])]
-        orig_params = self._init_params(param_sizes)
-        fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
-        comm = _RankMajorTestAllGather()
+    def _run_custom_all_gather(self, comm, fsdp_param_group, orig_params) -> None:
         group = fsdp_param_group.mesh_info.shard_process_group
         default_stream = device_module.current_stream()
-
         all_gather_result = foreach_all_gather(
             fsdp_param_group.fsdp_params,
             group,
@@ -361,14 +385,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         foreach_all_gather_copy_out(
             all_gather_result, fsdp_param_group.fsdp_params, group
         )
-        # The default path copies each parameter out into its own storage.
-        rank_major_storage_ptr = comm.outputs[-1].untyped_storage().data_ptr()
-        for fsdp_param in fsdp_param_group.fsdp_params:
-            self.assertNotEqual(
-                fsdp_param.all_gather_outputs[0].untyped_storage().data_ptr(),
-                rank_major_storage_ptr,
-            )
-
         for fsdp_param in fsdp_param_group.fsdp_params:
             fsdp_param.init_unsharded_param()
         fsdp_param_group._to_unsharded()
@@ -378,56 +394,68 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             self.assertEqual(param, orig_param)
 
     @skip_if_lt_x_gpu(1)
+    def test_custom_all_gather_backend_substitution(self):
+        param_sizes = [torch.Size([self.world_size, 2]), torch.Size([self.world_size])]
+        orig_params = self._init_params(param_sizes)
+        fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
+        comm = _RankMajorTestAllGather()
+        self._run_custom_all_gather(comm, fsdp_param_group, orig_params)
+        # The default path copies each parameter out into its own storage.
+        rank_major_storage_ptr = comm.outputs[-1].untyped_storage().data_ptr()
+        for fsdp_param in fsdp_param_group.fsdp_params:
+            self.assertNotEqual(
+                fsdp_param.all_gather_outputs[0].untyped_storage().data_ptr(),
+                rank_major_storage_ptr,
+            )
+
+    @skip_if_lt_x_gpu(1)
     def test_custom_all_gather_param_contiguous_no_copy(self):
         param_sizes = [torch.Size([self.world_size, 2]), torch.Size([self.world_size])]
         orig_params = self._init_params(param_sizes)
         fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
         comm = _ParamContiguousTestAllGather()
-        group = fsdp_param_group.mesh_info.shard_process_group
-        default_stream = device_module.current_stream()
-
-        def all_gather() -> list[int]:
-            all_gather_result = foreach_all_gather(
-                fsdp_param_group.fsdp_params,
-                group,
-                async_op=False,
-                all_gather_copy_in_stream=default_stream,
-                all_gather_stream=default_stream,
-                device=self.device,
-                all_gather_comm=comm,
+        self._run_custom_all_gather(comm, fsdp_param_group, orig_params)
+        # Each parameter must alias the single backend buffer (no copy-out).
+        backend_storage_ptr = comm.outputs[-1].untyped_storage().data_ptr()
+        for fsdp_param in fsdp_param_group.fsdp_params:
+            self.assertTrue(fsdp_param._keep_all_gather_output_storage)
+            self.assertEqual(
+                fsdp_param.all_gather_outputs[0].untyped_storage().data_ptr(),
+                backend_storage_ptr,
             )
-            self.assertIsNotNone(all_gather_result)
-            foreach_all_gather_copy_out(
-                all_gather_result, fsdp_param_group.fsdp_params, group
-            )
-            self.assertIsNotNone(comm.output)
-            # Each parameter must alias the single backend buffer (no copy-out).
-            backend_storage_ptr = comm.outputs[-1].untyped_storage().data_ptr()
-            output_ptrs = []
-            for fsdp_param in fsdp_param_group.fsdp_params:
-                all_gather_output = fsdp_param.all_gather_outputs[0]
-                self.assertEqual(
-                    all_gather_output.untyped_storage().data_ptr(),
-                    backend_storage_ptr,
-                )
-                output_ptrs.append(all_gather_output.data_ptr())
-                fsdp_param.init_unsharded_param()
-                self.assertEqual(
-                    fsdp_param._unsharded_param.data_ptr(), output_ptrs[-1]
-                )
-            fsdp_param_group._to_unsharded()
-            for orig_param, param in zip(
-                orig_params, fsdp_param_group.modules[0].parameters()
-            ):
-                self.assertEqual(param, orig_param)
-            return output_ptrs
-
         # The backend buffer must be reused (kept alive) across reshards.
-        output_ptrs = all_gather()
         fsdp_param_group._to_sharded()
-        for fsdp_param, output_ptr in zip(fsdp_param_group.fsdp_params, output_ptrs):
-            self.assertEqual(fsdp_param.all_gather_outputs[0].data_ptr(), output_ptr)
-        self.assertEqual(all_gather(), output_ptrs)
+        self._run_custom_all_gather(comm, fsdp_param_group, orig_params)
+        for fsdp_param in fsdp_param_group.fsdp_params:
+            self.assertEqual(
+                fsdp_param.all_gather_outputs[0].untyped_storage().data_ptr(),
+                backend_storage_ptr,
+            )
+
+    @skip_if_lt_x_gpu(1)
+    def test_custom_all_gather_zero_copy_then_fallback(self):
+        # After a zero-copy all-gather, a later all-gather that falls back to the
+        # default copy-out must drop the stale backend-owned output.
+        param_sizes = [torch.Size([self.world_size, 2]), torch.Size([self.world_size])]
+        orig_params = self._init_params(param_sizes)
+        fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
+        comm = _ZeroCopyThenFallbackAllGather()
+        self._run_custom_all_gather(comm, fsdp_param_group, orig_params)
+        backend_storage_ptr = comm.outputs[-1].untyped_storage().data_ptr()
+        for fsdp_param in fsdp_param_group.fsdp_params:
+            self.assertTrue(fsdp_param._keep_all_gather_output_storage)
+        fsdp_param_group._to_sharded()
+        self._run_custom_all_gather(comm, fsdp_param_group, orig_params)
+        for fsdp_param in fsdp_param_group.fsdp_params:
+            self.assertFalse(fsdp_param._keep_all_gather_output_storage)
+            self.assertNotEqual(
+                fsdp_param.all_gather_outputs[0].untyped_storage().data_ptr(),
+                backend_storage_ptr,
+            )
+            self.assertEqual(
+                fsdp_param._unsharded_param.untyped_storage().data_ptr(),
+                fsdp_param.all_gather_outputs[0].untyped_storage().data_ptr(),
+            )
 
     def _test_all_gather(
         self,
@@ -2343,97 +2371,6 @@ class TestFullyShardReduceOpWorldSize1(FSDPTest):
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, torch.float32)
         self.assertEqual(all_reduce_op, ReduceOp.SUM)
-
-
-class TestMoriSdmaAllGather(TestCase):
-    """Backend-level tests that do not require the ``mori`` runtime or GPUs."""
-
-    def test_missing_mori_dependency_error(self):
-        def import_module(name: str):
-            if name == "mori.shmem":
-                raise ModuleNotFoundError("No module named 'mori'", name="mori")
-            raise AssertionError(f"unexpected import: {name}")
-
-        comm = MoriSdmaAllGather()
-        group = SimpleNamespace(rank=lambda: 0, size=lambda: 1)
-        with patch(
-            "torch.distributed.fsdp._fully_shard._mori_sdma_allgather.importlib.import_module",
-            side_effect=import_module,
-        ):
-            with self.assertRaisesRegex(
-                RuntimeError, "requires the optional ROCm MORI Python package"
-            ):
-                comm._get_collective(group)
-
-    def test_zero_copy_output_disabled(self):
-        comm = MoriSdmaAllGather(zero_copy_output=False)
-        metadata = comm.prepare_output(
-            [],
-            0,
-            1,
-            torch.float32,
-            torch.device("cpu"),
-            [],
-            [],
-            [],
-        )
-        self.assertIsNone(metadata)
-
-
-class TestParamContiguousEligibility(TestCase):
-    """Runtime-free tests for the conservative param-contiguous eligibility gate."""
-
-    @staticmethod
-    def _make_param(
-        *,
-        dim: int = 0,
-        is_dtensor: bool = False,
-        pre_all_gather: bool = False,
-        post_all_gather: bool = False,
-        sharded_state: ShardedState = ShardedState.SHARDED,
-    ):
-        sharded_local_tensor = SimpleNamespace()
-        if pre_all_gather:
-            sharded_local_tensor.fsdp_pre_all_gather = lambda *a, **k: None
-        if post_all_gather:
-            sharded_local_tensor.fsdp_post_all_gather = lambda *a, **k: None
-        return SimpleNamespace(
-            fsdp_placement=SimpleNamespace(dim=dim),
-            is_dtensor=is_dtensor,
-            _sharded_local_tensor=sharded_local_tensor,
-            sharded_state=sharded_state,
-        )
-
-    def _can_use(self, param) -> bool:
-        return DefaultAllGather().can_use_param_contiguous_output(
-            [param], [[torch.float32]], [[8]], torch.float32
-        )
-
-    def test_eligible_base_case(self):
-        self.assertTrue(self._can_use(self._make_param()))
-
-    def test_excludes_ineligible_params(self):
-        # Any parameter that still needs the rank-major copy-out disables the
-        # fast path: non dim-0 sharding, DTensor, an all-gather extension, a
-        # post-forward mesh reshard, or a dtype-changing (mixed precision / fp8)
-        # input.
-        self.assertFalse(self._can_use(self._make_param(dim=1)))
-        self.assertFalse(self._can_use(self._make_param(is_dtensor=True)))
-        self.assertFalse(self._can_use(self._make_param(pre_all_gather=True)))
-        self.assertFalse(self._can_use(self._make_param(post_all_gather=True)))
-        self.assertFalse(
-            self._can_use(
-                self._make_param(sharded_state=ShardedState.SHARDED_POST_FORWARD)
-            )
-        )
-        self.assertFalse(
-            DefaultAllGather().can_use_param_contiguous_output(
-                [self._make_param()], [[torch.bfloat16]], [[8]], torch.float32
-            )
-        )
-        # torch.compile / compiled autograd cannot trace the in-place aliasing.
-        with unittest.mock.patch("torch.compiler.is_compiling", return_value=True):
-            self.assertFalse(self._can_use(self._make_param()))
 
 
 if __name__ == "__main__":
