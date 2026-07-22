@@ -40,10 +40,19 @@ def swap_tensors(t1, t2):
 
     This will not work if t1 and t2 have different slots.
     """
-    # Ensure there are no weakrefs
-    if weakref.getweakrefs(t1):
+
+    # A tensor that is a key/value in an identity-keyed weak container (e.g.
+    # WeakIdKeyDictionary via WeakIdRef, or a WeakValueDictionary via KeyedRef)
+    # cannot be swapped: the swap changes the content behind a stable identity
+    # and silently corrupts the mapping. Such containers use weakref.ref
+    # subclasses. A plain weakref.ref only observes live state (e.g. Dynamo's
+    # TENSOR_MATCH guard, which re-reads metadata each check) and is safe.
+    def has_structural_weakref(t):
+        return any(type(r) is not weakref.ref for r in weakref.getweakrefs(t))
+
+    if has_structural_weakref(t1):
         raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
-    if weakref.getweakrefs(t2):
+    if has_structural_weakref(t2):
         raise RuntimeError("Cannot swap t2 because it has weakref associated with it")
     t1_slots = set(copyreg._slotnames(t1.__class__))  # type: ignore[attr-defined]
     t2_slots = set(copyreg._slotnames(t2.__class__))  # type: ignore[attr-defined]
