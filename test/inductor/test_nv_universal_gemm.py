@@ -7,6 +7,7 @@ from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import torch
+from torch._higher_order_ops import flex_gemm
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
@@ -895,6 +896,47 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, epilogue_fused = self._compile_and_check(fn, a, b)
         torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "pointwise op was NOT fused into epilogue")
+
+    def test_flex_gemm_pointwise_epilogue_fusion(self):
+        dtype = torch.bfloat16
+        a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=dtype)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                torch.relu,
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        torch.testing.assert_close(result, torch.relu(a @ b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused, "FlexGEMM body was NOT fused into epilogue")
+
+    def test_flex_gemm_preserves_output_for_unfused_reduction(self):
+        dtype = torch.bfloat16
+        a = torch.randn(128, 64, device="cuda", dtype=dtype)
+        b = torch.randn(64, 128, device="cuda", dtype=dtype)
+
+        def fn(a, b):
+            def epilogue(acc):
+                grouped = acc.float().view(128, -1, 32)
+                return acc.relu(), grouped.sum(-1)
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        expected = fn(a, b)
+        torch.testing.assert_close(result[0], expected[0], atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(result[1], expected[1], atol=1e-1, rtol=1e-2)
+        self.assertTrue(epilogue_fused, "pointwise consumer was NOT fused")
+        self.assertIn("out_ptr1", code)
 
     def test_scaled_mm_pointwise_epilogue_fusion(self):
         """Unary pointwise op is fused into an NVFP4 scaled GEMM epilogue."""

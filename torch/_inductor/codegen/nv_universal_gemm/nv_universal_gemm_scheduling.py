@@ -314,14 +314,20 @@ class NVUniversalGemmScheduling(BaseScheduling):
         all_epilogue_nodes = list(existing_epilogue_nodes) + list(
             node_to_fuse.get_nodes()
         )
+        fused_buffer_names = OrderedSet(
+            n.get_name() for n in [gemm_template_node, *all_epilogue_nodes]
+        )
+        preserve_gemm_output = not V.graph.scheduler.can_buffer_be_removed_through_fusion(
+            ir_node.get_name(), fused_buffer_names
+        )
 
         # Multi-store epilogues (the GEMM output feeding >1 graph output) are
         # supported: each output store is wired to its own out_ptr (see
         # NVUniversalGemmKernel._ordered_output_buffers). The trial EVT codegen
         # below still gates any chain cutlass can't express.
-        trial_removed_buffers = V.graph.removed_buffers | OrderedSet(
-            [ir_node.get_name()]
-        )
+        trial_removed_buffers = V.graph.removed_buffers.copy()
+        if not preserve_gemm_output:
+            trial_removed_buffers.add(ir_node.get_name())
         try:
             CutlassEVTCodegen.ir_to_evt_python_code(
                 ir_node.get_name(),
@@ -435,10 +441,17 @@ class NVUniversalGemmScheduling(BaseScheduling):
         epilogue_var_renames: dict[str, Any] = {}
 
         if epilogue_nodes:
+            scheduler = V.graph.scheduler
             try:
-                removed_buffers_with_gemm = V.graph.removed_buffers | OrderedSet(
-                    [original_buffer_name]
+                fused_buffer_names: OrderedSet[str] = OrderedSet(
+                    n.get_name() for n in epilogue_nodes
                 )
+                fused_buffer_names.add(original_buffer_name)
+                removed_buffers_with_gemm = V.graph.removed_buffers.copy()
+                if scheduler.can_buffer_be_removed_through_fusion(
+                    original_buffer_name, fused_buffer_names
+                ):
+                    removed_buffers_with_gemm.add(original_buffer_name)
 
                 reads, writes, var_renames, evt_code = (
                     CutlassEVTCodegen.ir_to_evt_python_code(
@@ -455,11 +468,6 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 epilogue_var_renames = var_renames
 
                 if not only_gen_src_code:
-                    fused_buffer_names: OrderedSet[str] = OrderedSet(
-                        n.get_name() for n in epilogue_nodes
-                    )
-                    fused_buffer_names.add(original_buffer_name)
-                    scheduler = V.graph.scheduler
                     write_bufs = OrderedSet(epilogue_writes)
                     # Must add to removed_buffers BEFORE mark_run: mark_run emits
                     # AllocateLine eagerly, and codegen_allocation only skips it
