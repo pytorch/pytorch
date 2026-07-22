@@ -3961,7 +3961,7 @@ class InstructionTranslatorBase(
     )
     def STORE_SUBSCR(self, inst: Instruction) -> None:
         val, obj, key = self.popn(3)
-        obj.call_method(self, "__setitem__", [key, val], {})
+        BuiltinVariable(operator.setitem).call_function(self, [obj, key, val], {})
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
@@ -3969,7 +3969,7 @@ class InstructionTranslatorBase(
         # only. We avoid call_method("__getitem__") because it can execute
         # user code and add unwanted graph nodes.
         self._maybe_sync_dealloc_subscr(obj, key)
-        obj.call_method(self, "__delitem__", [key], {})
+        BuiltinVariable(operator.delitem).call_function(self, [obj, key], {})
 
     def _maybe_sync_dealloc_subscr(
         self, obj: VariableTracker, key: VariableTracker
