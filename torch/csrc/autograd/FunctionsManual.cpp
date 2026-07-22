@@ -5503,9 +5503,21 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_dispatcher(
   } else if (dY.defined()) {
     std::tie(dX, dgamma, dbeta) = at::native_group_norm_backward_symint(
         dY, X, mean, rstd, gamma, N, C, HxW, group, grad_input_mask);
+  } else {
+    // Define only dgamma and dbeta, since dX is guaranteed to be defined below
+    // if we're here.
+    auto dparam_options{
+        (gamma && gamma->defined() ? gamma->options() : X.options())
+            .memory_format(at::MemoryFormat::Contiguous)};
+    if (grad_input_mask[1]) {
+      dgamma = at::zeros_symint({C}, dparam_options);
+    }
+    if (grad_input_mask[2]) {
+      dbeta = at::zeros_symint({C}, dparam_options);
+    }
   }
 
-  if (dmean.defined() || drstd.defined()) {
+  if (grad_input_mask[0] && (dmean.defined() || drstd.defined())) {
     Tensor dvar;
     if (drstd.defined()) {
       auto rstd_view = rstd.reshape_symint({N, group, 1});

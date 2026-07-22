@@ -122,6 +122,7 @@ from .simd import (
     SIMDKernel,
     SIMDScheduling,
 )
+from .simd_kernel_features import tiling_scores_suggest_inner_reduction
 from .triton_utils import (
     config_of,
     equal_1_arg_indices,
@@ -151,11 +152,6 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
-
-
-# Threshold for detecting inner reductions based on tiling score ratio.
-# If r0_tiling_score / x_tiling_score >= this value, upgrade DEFAULT hint to INNER.
-INNER_REDUCTION_RATIO_THRESHOLD = 8
 
 
 def get_triton_reduction_function(reduction_type):
@@ -3696,8 +3692,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return True
 
     def should_use_persistent_reduction(self) -> bool:
-        return self.inside_reduction and V.choices.should_use_persistent_reduction(
-            self.features, self.cooperative_reduction
+        if not self.inside_reduction:
+            return False
+        # ops.sort requires persistent reduction (TritonKernel.sort asserts it), so the
+        # heuristic must never say otherwise. Enforcing it here covers every construction
+        # path, including ones that don't apply apply_feature_required_overrides.
+        if self.features.contains_op("sort") and self.has_persistent_RBLOCK(
+            self.features.reduction_numel
+        ):
+            return True
+        features = self.features.with_tiling_scores(self.tiling_scores)
+        return V.choices.should_use_persistent_reduction(
+            features, self.cooperative_reduction
         )
 
     def want_no_x_dim(self):
@@ -6622,13 +6628,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return result
 
     def imports_for_benchmark_kernel(self):
+        # Dedent BEFORE substituting get_raw_stream: a multi-line override would
+        # otherwise collapse dedent's common prefix and misindent the imports.
         return textwrap.dedent(
             """
             from torch._dynamo.testing import rand_strided
             {}
             import torch
-        """.format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
-        )
+            """
+        ).format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
 
     def _get_heuristic(self):
         if self.fixed_config:
@@ -6853,10 +6861,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 and "x" in tiling_scores
                 and "r0_" in tiling_scores
             ):
-                # large rblock inhibits xblock size, don't attempt if there is a decent amount of
-                # reads coalesced by xblock
-                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
-                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
+                contiguous_red = tiling_scores_suggest_inner_reduction(
+                    tiling_scores, self.features.reduction_numel
+                )
             else:
                 contiguous_red = (
                     self.features.get_reduction_hint(tiling_scores)
@@ -7938,9 +7945,18 @@ class TritonScheduling(SIMDScheduling):
         )
 
     def benchmark_codegened_module(
-        self, mod, n_spills_threshold=8, node_names: OrderedSet[str] | None = None
+        self,
+        mod,
+        n_spills_threshold=8,
+        node_names: OrderedSet[str] | None = None,
+        skip_perf_cache: bool = False,
     ) -> tuple[float, str]:
-        """Benchmark an already compiled module"""
+        """Benchmark an already compiled module.
+
+        skip_perf_cache: don't serve the result from the .kernel_perf memo. Callers that
+        need the autotuned winner in mod.triton_.launchers (not just the timing) must set
+        this, since a perf-cache hit returns before the autotuner ever runs.
+        """
         device_interface = get_interface_for_device(V.graph.device_type)
         with (
             preserve_rng_state(),
@@ -7972,9 +7988,10 @@ class TritonScheduling(SIMDScheduling):
                 node_names,
                 mod.__file__,
             )
-            ms = load_cache()
-            if ms is not None:
-                return ms, mod.__file__
+            if not skip_perf_cache:
+                ms = load_cache()
+                if ms is not None:
+                    return ms, mod.__file__
 
             args = mod.get_args()
             call = mod.call
@@ -8141,93 +8158,99 @@ class TritonScheduling(SIMDScheduling):
 
         total_ms, file_list = 0, []
         total_clone_ms: float = 0.0
+        # Throwaway codegen below mutates these sets; swap in copies and restore
+        # in the finally: speedup_by_combo_kernel swallows some benchmark
+        # exceptions (Loop-carried-variable CompilationError) and continues
+        # compiling with V.graph, so a plain restore-on-return leaks the copies.
         removed_buffers_orig = V.graph.removed_buffers
-        V.graph.removed_buffers = OrderedSet(removed_buffers_orig)
         inplaced_to_remove_orig = V.graph.inplaced_to_remove
+        V.graph.removed_buffers = OrderedSet(removed_buffers_orig)
         V.graph.inplaced_to_remove = OrderedSet(inplaced_to_remove_orig)
         enable_autotune = config.combo_kernels_autotune > 0
         mixed_sizes = config.combo_kernel_allow_mixed_sizes > 0
         per_subkernel_blocks = config.combo_kernel_per_subkernel_blocks
-        kernel_code_list = self.generate_combo_kernel_code(
-            subkernel_nodes=node_list,
-            custom_part_algorithm=True,
-            enable_autotune=enable_autotune,
-            mixed_sizes=mixed_sizes,
-            only_gen_src_code=True,
-            per_subkernel_blocks=per_subkernel_blocks,
-        )
-
-        # pyrefly: ignore [bad-assignment]
-        for src_code, kernel, node_group in kernel_code_list:
-            fused_node_lists = [node.get_nodes() for node in node_group]
-            names = [n.get_name() for nodes in fused_node_lists for n in nodes]
-
-            if len(node_group) == 1:
-                # Single-node partition: use cached benchmark results from speedup_by_combo_kernel
-                node_ms, path = node_benchmark_results[node_group[0]]
-                # Regular kernels have negligible clone overhead
-                total_ms += node_ms
-                total_clone_ms += 0
-                file_list.append(path)
-                continue
-
-            if src_code is None:
-                raise AssertionError("src_code must not be None")
-            src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
-            mod = PyCodeCache.load(src_code)
-
-            log.debug(
-                "kernel src code for %s written to: %s",
-                names,
-                mod.__file__,
+        try:
+            kernel_code_list = self.generate_combo_kernel_code(
+                subkernel_nodes=node_list,
+                custom_part_algorithm=True,
+                enable_autotune=enable_autotune,
+                mixed_sizes=mixed_sizes,
+                only_gen_src_code=True,
+                per_subkernel_blocks=per_subkernel_blocks,
             )
-            ms, ms_clone = load_cache()
-            if ms is not None:
-                total_ms += ms  # type: ignore[assignment]
+
+            # pyrefly: ignore [bad-assignment]
+            for src_code, kernel, node_group in kernel_code_list:
+                fused_node_lists = [node.get_nodes() for node in node_group]
+                names = [n.get_name() for nodes in fused_node_lists for n in nodes]
+
+                if len(node_group) == 1:
+                    # Single-node partition: use cached benchmark results from speedup_by_combo_kernel
+                    node_ms, path = node_benchmark_results[node_group[0]]
+                    # Regular kernels have negligible clone overhead
+                    total_ms += node_ms
+                    total_clone_ms += 0
+                    file_list.append(path)
+                    continue
+
+                if src_code is None:
+                    raise AssertionError("src_code must not be None")
+                src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
+                mod = PyCodeCache.load(src_code)
+
+                log.debug(
+                    "kernel src code for %s written to: %s",
+                    names,
+                    mod.__file__,
+                )
+                ms, ms_clone = load_cache()
+                if ms is not None:
+                    total_ms += ms  # type: ignore[assignment]
+                    total_clone_ms += ms_clone
+                    file_list.append(mod.__file__)
+                    continue
+
+                args = mod.get_args()
+                call = mod.call
+                wrapped_jit_function = mod.triton_
+
+                # call once to trigger the compilation
+                call(wrapped_jit_function.clone_args(*args)[0])
+
+                launchers = wrapped_jit_function.launchers
+                if len(launchers) != 1:
+                    raise AssertionError(f"expected 1 launcher, got {len(launchers)}")
+                if launchers[0].n_spills > 0:
+                    # skip benchmarking the kernel if there are register spills
+                    ms = ms_clone = float("inf")
+                else:
+                    device = V.graph.get_current_device_or_throw()
+                    # We have to clone the inplace updated arguments to avoid earlier calls
+                    # generating out of range indices for later calls.
+                    ms = benchmarker.benchmark(
+                        lambda: call(wrapped_jit_function.clone_args(*args)[0]),
+                        device=device,
+                    )
+                    ms_clone = benchmarker.benchmark(
+                        lambda: wrapped_jit_function.clone_args(*args)[0],
+                        device=device,
+                    )
+
+                log.debug(
+                    "The fused kernel for %s took %.3f ms to run, %.3f ms to clone inputs",
+                    OrderedSet(n.get_name() for n in node_group),
+                    ms,
+                    ms_clone,
+                )
+                store_cache()
+                total_ms += ms
                 total_clone_ms += ms_clone
                 file_list.append(mod.__file__)
-                continue
-
-            args = mod.get_args()
-            call = mod.call
-            wrapped_jit_function = mod.triton_
-
-            # call once to trigger the compilation
-            call(wrapped_jit_function.clone_args(*args)[0])
-
-            launchers = wrapped_jit_function.launchers
-            if len(launchers) != 1:
-                raise AssertionError(f"expected 1 launcher, got {len(launchers)}")
-            if launchers[0].n_spills > 0:
-                # skip benchmarking the kernel if there are register spills
-                ms = ms_clone = float("inf")
-            else:
-                device = V.graph.get_current_device_or_throw()
-                # We have to clone the inplace updated arguments to avoid earlier calls
-                # generating out of range indices for later calls.
-                ms = benchmarker.benchmark(
-                    lambda: call(wrapped_jit_function.clone_args(*args)[0]),
-                    device=device,
-                )
-                ms_clone = benchmarker.benchmark(
-                    lambda: wrapped_jit_function.clone_args(*args)[0],
-                    device=device,
-                )
-
-            log.debug(
-                "The fused kernel for %s took %.3f ms to run, %.3f ms to clone inputs",
-                OrderedSet(n.get_name() for n in node_group),
-                ms,
-                ms_clone,
-            )
-            store_cache()
-            total_ms += ms
-            total_clone_ms += ms_clone
-            file_list.append(mod.__file__)
-            args = call = wrapped_jit_function = None
-            torch.accelerator.empty_cache()
-        V.graph.removed_buffers = removed_buffers_orig
-        V.graph.inplaced_to_remove = inplaced_to_remove_orig
+                args = call = wrapped_jit_function = None
+                torch.accelerator.empty_cache()
+        finally:
+            V.graph.removed_buffers = removed_buffers_orig
+            V.graph.inplaced_to_remove = inplaced_to_remove_orig
         return total_ms, total_clone_ms, file_list
 
 
