@@ -2156,9 +2156,15 @@ graph():
 
         f = Basic()
         args = (torch.randn(1, 3),)
-        # strict-mode will error out because foo is registered as parameter
-        # in dynamo (a behavior that's different from eager). We decided to
-        # follow eager behavior.
+        # foo is registered as a parameter in Dynamo, but not in eager.
+        # Follow eager behavior and treat it as a lifted tensor constant.
+        ep = export(f, args, strict=True)
+        gm = ep.module()
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        self.assertEqual(gm(*args), f(*args))
+
         ep = export(f, args, strict=False)
         gm = ep.module()
         self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
@@ -2176,6 +2182,46 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lifted_tensor_0), kwargs = {})
     return (add,)""",
         )
+
+    def test_strict_export_unregistered_module_list_parameters(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.ones(3, 3))
+
+            def forward(self, x):
+                return x + self.a
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.models = [A(), A()]
+
+            def forward(self, x):
+                for m in self.models:
+                    x = m(x)
+                return x
+
+        f = M()
+        args = (torch.ones(3, 3),)
+        ep = export(f, args, strict=True)
+        gm = ep.module()
+
+        self.assertEqual(
+            [spec.kind for spec in ep.graph_signature.input_specs],
+            [
+                InputKind.CONSTANT_TENSOR,
+                InputKind.CONSTANT_TENSOR,
+                InputKind.USER_INPUT,
+            ],
+        )
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 2)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        for constant in ep.constants.values():
+            self.assertFalse(isinstance(constant, torch.nn.Parameter))
+        self.assertEqual(gm(*args), f(*args))
 
     def test_int_shape_specialization(self):
         class M(torch.nn.Module):
@@ -6717,6 +6763,112 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             torch.export.export(M(), input1, dynamic_shapes=ai)
 
+    def test_dynamic_shapes_kwargs_call_like(self):
+        class KwargsModel(torch.nn.Module):
+            def forward(self, *, x, y, **kwargs):
+                return x.sum() + y.sum() + kwargs["z"].sum()
+
+        inputs = {
+            "z": torch.rand(4, 4),
+            "y": torch.randn(3, 4),
+            "x": torch.randn(2, 4),
+        }
+        dynamic_shapes = torch.utils._pytree.tree_map_only(
+            torch.Tensor,
+            lambda t: {i: torch.export.Dim.AUTO for i in range(t.dim())},
+            inputs,
+        )
+        m = KwargsModel()
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                epm = export(
+                    m, (), kwargs=inputs, dynamic_shapes=dynamic_shapes, strict=strict
+                ).module()
+                self.assertTrue(torch.allclose(m(**inputs), epm(**inputs)))
+                inputs2 = {**inputs, "z": torch.rand(6, 4)}
+                self.assertTrue(torch.allclose(m(**inputs2), epm(**inputs2)))
+
+    def test_dynamic_shapes_kwargs_nested(self):
+        class KwargsModel(torch.nn.Module):
+            def forward(self, *, x, y, **kwargs):
+                return x.sum() + y.sum() + kwargs["z"].sum()
+
+        inputs = {
+            "z": torch.rand(4, 4),
+            "y": torch.randn(3, 4),
+            "x": torch.randn(2, 4),
+        }
+        dynamic_shapes = {
+            "x": None,
+            "y": None,
+            "kwargs": {"z": {0: torch.export.Dim("z_batch", min=2, max=8)}},
+        }
+        m = KwargsModel()
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                epm = export(
+                    m, (), kwargs=inputs, dynamic_shapes=dynamic_shapes, strict=strict
+                ).module()
+                self.assertTrue(torch.allclose(m(**inputs), epm(**inputs)))
+                inputs2 = {**inputs, "z": torch.rand(6, 4)}
+                self.assertTrue(torch.allclose(m(**inputs2), epm(**inputs2)))
+
+    def test_dynamic_shapes_kwargs_name_collision(self):
+        class ArgsKwargsModel(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                return args[0].sum() + kwargs["args_0"].sum()
+
+        class PositionalOnlyCollisionModel(torch.nn.Module):
+            def forward(self, x, /, **kwargs):
+                return x.sum() + kwargs["x"].sum()
+
+        x = torch.randn(4, 4)
+        y = torch.randn(5, 4)
+        dynamic_shapes = {
+            "args": ({0: Dim.AUTO},),
+            "args_0": {0: Dim.AUTO},
+        }
+        for strict in (False, True):
+            with self.subTest(kind="varargs", strict=strict):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.UserError,
+                    "collide with another input name",
+                ):
+                    export(
+                        ArgsKwargsModel(),
+                        (x,),
+                        kwargs={"args_0": y},
+                        dynamic_shapes=dynamic_shapes,
+                        strict=strict,
+                    )
+
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.UserError,
+                    "collide with another input name",
+                ):
+                    export(
+                        ArgsKwargsModel(),
+                        (x,),
+                        kwargs={"args_0": y},
+                        dynamic_shapes=(({0: Dim.AUTO},), {"args_0": {0: Dim.AUTO}}),
+                        strict=strict,
+                    )
+            with self.subTest(kind="positional_only", strict=strict):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.UserError,
+                    "collide with another input name",
+                ):
+                    export(
+                        PositionalOnlyCollisionModel(),
+                        (x,),
+                        kwargs={"x": y},
+                        dynamic_shapes={
+                            "x": {0: Dim.AUTO},
+                            "kwargs": {"x": {0: Dim.AUTO}},
+                        },
+                        strict=strict,
+                    )
+
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -10758,6 +10910,40 @@ def forward(self, b_a_buffer, x):
                 1,
             )
 
+    # associative_scan is not supported by the cpp (NativeRT) runtime yet
+    @testing.expectedFailureCppRuntime
+    def test_export_associative_scan_pointwise_cpu(self):
+        # combine_mode="pointwise" only has Inductor codegen on backends with
+        # scan support (CUDA/XPU), but the device constraint is enforced in the
+        # lowering rather than the eager wrapper, so the HOP can be captured on
+        # other devices. See https://github.com/pytorch/pytorch/issues/186594.
+        def combine_fn(x, y):
+            return x + y
+
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
+        xs = torch.randn(8, 4)
+
+        # A pure-eager (non-exported) CPU call runs via the generic fallback.
+        self.assertEqual(M()(xs), torch.cumsum(xs, dim=0))
+
+        # Export succeeds and retains the associative_scan HOP.
+        ep = export(M(), (xs,))
+        self.assertTrue(
+            any(
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.associative_scan
+                for node in ep.graph_module.graph.nodes
+            ),
+            "exported graph should retain the associative_scan HOP",
+        )
+
+        # The exported program runs on CPU via the HOP's eager fallback and
+        # matches the reference scan.
+        self.assertEqual(ep.module()(xs), torch.cumsum(xs, dim=0))
+
     # scan is not supported in sigmoid yet
     @testing.expectedFailureCppRuntime
     def test_export_scan_pytree_output(self):
@@ -11114,6 +11300,33 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
+    def test_export_decomps_linalg_vector_norm(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.vector_norm(x, ord=2, dim=1, keepdim=True)
+
+        inp = (torch.randn(2, 3),)
+        m = M()
+        ep = export(m, inp)
+        self.assertTrue(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in ep.graph.nodes
+            )
+        )
+
+        core_aten_ep = ep.run_decompositions()
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in core_aten_ep.graph.nodes
+            )
+        )
+        FileCheck().check("torch.ops.aten.pow.Tensor_Scalar").check(
+            "torch.ops.aten.sum.dim_IntList"
+        ).run(core_aten_ep.graph_module.code)
+        self.assertEqual(core_aten_ep.module()(*inp), m(*inp))
+
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
     def test_export_decomp_torture_case_1(self):
         class M(torch.nn.Module):
@@ -11271,7 +11484,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             self.assertIsInstance(
                 result.shape[0],
                 torch.SymInt,
-                f"where output dim 0 should be symbolic but got {result.shape[0]}",
+                lambda msg: f"{msg}\nwhere output dim 0 should be symbolic but got {result.shape[0]}",
             )
 
     def test_nonzero_2(self):
@@ -11370,8 +11583,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             foo,
             (torch.randn(4, 4), torch.randn(4, 4)),
             {"kw2": torch.ones(4, 4), "kw1": torch.zeros(4, 4)},
-            # We are specifying dynamism on the first kwarg even though user passed in
-            # different order
+            # Tuple dynamic_shapes follows the original function signature order.
             dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
         )
 
@@ -14490,7 +14702,7 @@ graph():
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_opaque_obj(self):
         @dataclass(frozen=True)
-        class MyInput(torch._opaque_base.OpaqueBase):
+        class MyInput(torch._custom_class_base.CustomClassBase):
             int_1: int
             int_2: int
 
@@ -14507,7 +14719,7 @@ graph():
             def forward(self, x, f):
                 return x + f.int_1 + f.int_2
 
-        torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
+        torch._library.opaque_object.register_custom_class(MyInput, typ="constant")
         self.addCleanup(
             lambda name=torch._library.opaque_object.get_opaque_type_name(MyInput): (
                 torch._C._unregister_opaque_type(name),

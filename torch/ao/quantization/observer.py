@@ -1061,7 +1061,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         self, delta_begin: torch.Tensor, delta_end: torch.Tensor, density: torch.Tensor
     ) -> torch.Tensor:
         r"""
-        Compute the norm of the values uniformaly distributed between
+        Compute the norm of the values uniformly distributed between
         delta_begin and delta_end.
         Currently only L2 norm is supported.
 

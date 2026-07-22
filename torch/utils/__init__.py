@@ -43,6 +43,7 @@ def swap_tensors(t1, t2):
 
     This will not work if t1 and t2 have different slots.
     """
+    # Free-threaded Python can defer destruction of cleared WeakIdRef objects.
     if _IS_FREE_THREADED and (weakref.getweakrefs(t1) or weakref.getweakrefs(t2)):
         gc.collect(1)
 
