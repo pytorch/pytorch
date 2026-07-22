@@ -35,6 +35,32 @@ def _node_metadata_hook(
     # pyrefly: ignore [bad-assignment]
     fake_mode = fake_mode or contextlib.nullcontext()
 
+    # Inductor's FX wrapper can create symbolic scalar call_method nodes (e.g.
+    # __sym_float__/__ceil__ for a float-bound arange size) while this hook is
+    # active. They are not call_function nodes, so compute their value via the
+    # method dunder and skip the call_function-only handling below.
+    _SYM_DUNDER_METHODS = (
+        "__sym_float__",
+        "__sym_int__",
+        "__ceil__",
+        "__floor__",
+        "__trunc__",
+        "__round__",
+    )
+    if node.op == "call_method" and node.target in _SYM_DUNDER_METHODS:
+        fake_args, fake_kwargs = pytree.tree_map_only(
+            torch.fx.Node, lambda arg: arg.meta["val"], (node.args, node.kwargs)
+        )
+        # pyrefly: ignore [bad-context-manager]
+        with fake_mode, enable_python_dispatcher():
+            node.meta["val"] = getattr(fake_args[0], node.target)(
+                *fake_args[1:], **fake_kwargs
+            )
+        if metadata is not None:
+            for k, v in metadata.items():
+                node.meta[k] = v
+        return
+
     if node.op != "call_function" or not callable(node.target):
         raise AssertionError(f"node: {node}, target: {node.target}")
 

@@ -884,6 +884,29 @@ class FxirTestCase(InductorTestCase):
         self.assertEqual(len(perm_arg), 3)
         self.assertEqual(tuple(perm_arg), (0, 2, 1))
 
+    def test_node_metadata_hook_sym_call_method(self):
+        """
+        Inductor's FX wrapper creates symbolic-scalar call_method nodes (e.g.
+        __ceil__ for a float-bound arange size). The metadata hook must compute
+        their value via the method dunder instead of asserting on a node whose
+        op is not call_function.
+        """
+        from torch._export.passes._node_metadata_hook import _node_metadata_hook
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        sym_float = shape_env.create_unbacked_symfloat()
+
+        graph = torch.fx.Graph()
+        arg = graph.placeholder("x")
+        arg.meta["val"] = sym_float
+        ceil_node = graph.call_method("__ceil__", (arg,))
+
+        _node_metadata_hook(ceil_node, fake_mode=fake_mode)
+        self.assertIsInstance(ceil_node.meta["val"], torch.SymInt)
+
 
 @instantiate_parametrized_tests
 class AOTFxirTestCase(InductorTestCase):
