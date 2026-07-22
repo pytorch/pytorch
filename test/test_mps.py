@@ -10195,6 +10195,40 @@ class TestMPS(TestCaseMPS):
         r_cpu = emb_cpu(torch.tensor([1, 2, 3]), torch.tensor([0]))
         self.assertEqual(r_mps.cpu(), r_cpu)
 
+    # https://github.com/pytorch/pytorch/issues/149325
+    # Generic nonzero correctness (baseline, empty, dtypes, N-D) is covered by
+    # the nonzero OpInfo; only the large-tensor paths are MPS-specific and can't
+    # be reached through OpInfo, so they live here.
+    # ~11 GiB unified memory needed: the input bool tensor is ~2.2 GiB and the
+    # int32 prefix-sum temporary buffer is ~8 GiB (numel * 4 bytes).
+    @serialTest()
+    @largeTensorTest("11GB", device="mps")
+    def test_nonzero_multichunk_above_int32(self):
+        # (1<<31)+1024 elements: above INT_MAX, and above the 2^31 per-dispatch
+        # chunk size, so it exercises the multi-chunk count/scatter path and the
+        # 64-bit scatter index variant. Must match CPU on a sparse pattern.
+        n = (1 << 31) + 1024
+        x = torch.zeros(n, dtype=torch.bool, device="mps")
+        positions = torch.tensor([0, 7, 1023, (1 << 30), (1 << 31) - 1, n - 1], device="mps")
+        x[positions] = True
+        out = x.nonzero().squeeze(-1)
+        self.assertEqual(out, positions.sort().values.to(torch.int64))
+
+    # ~22 GiB unified memory needed (input bool ~4 GiB + int32 prefix ~16 GiB);
+    # skips on machines/CI without enough memory.
+    @serialTest()
+    @largeTensorTest("22GB", device="mps")
+    def test_nonzero_above_uint32(self):
+        # More than 2^32 elements: the flat index and the count/scatter dispatch
+        # both exceed Metal's 32-bit thread_position_in_grid, so this exercises
+        # the chunked dispatch with a set position beyond 2^32.
+        n = (1 << 32) + 1024
+        x = torch.zeros(n, dtype=torch.bool, device="mps")
+        positions = torch.tensor([0, (1 << 31), (1 << 32) - 1, n - 1], device="mps")
+        x[positions] = True
+        out = x.nonzero().squeeze(-1)
+        self.assertEqual(out, positions.sort().values.to(torch.int64))
+
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)
