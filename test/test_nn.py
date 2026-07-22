@@ -47,7 +47,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
-    skipCUDAIf, skipCUDAIfRocm, skipMPSIf, skipMPS, \
+    skipCUDAIf, expectedFailureIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     skipMeta, get_all_device_types
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
@@ -10569,7 +10569,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out[0], out[-1])
 
     @onlyCUDA
-    @skipCUDAIfRocm(msg="launch bounds error out on ROCM")
+    @expectedFailureIfRocm
     @dtypes(torch.half, torch.bfloat16)
     @largeTensorTest('40GB')
     def test_upsampling_64bit_indexing_bilinear_channels_last(self, device, dtype):
@@ -10588,7 +10588,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out[0], out[-1])
 
     @onlyCUDA
-    @skipCUDAIfRocm(msg="launch bounds error out on ROCM")
+    @expectedFailureIfRocm
     @dtypes(torch.half, torch.bfloat16)
     @largeTensorTest('10GB')
     def test_upsampling_64bit_indexing_bilinear_channels_last_backward(self, device, dtype):
