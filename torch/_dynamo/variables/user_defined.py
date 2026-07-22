@@ -76,7 +76,6 @@ from ..source import (
 from ..utils import (
     base_exception_methods,
     check_constant_args,
-    cmp_name_to_op_mapping,
     deque_iterator,
     deque_methods,
     deque_rev_iterator,
@@ -714,16 +713,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
             tg_vt = variables.TupleGetterVariable(cls_attr, source=descriptor_source)
             return tg_vt.tp_descr_get_impl(tx, None, self)
-
-        # TODO(tp_descr_get) - Comparison dunders must be checked before
-        # WrapperDescriptor/MethodDescriptor to avoid VT type mismatches in
-        # identity checks. Revisit once we implement tp_richcompare slot.
-        if name in cmp_name_to_op_mapping and not isinstance(
-            cls_attr, types.FunctionType
-        ):
-            return variables.GetAttrVariable(
-                self, name, py_type=type(cls_attr), source=source
-            )
 
         # wrapperdescr_get/method_get with obj=NULL returns the
         # descriptor itself.
