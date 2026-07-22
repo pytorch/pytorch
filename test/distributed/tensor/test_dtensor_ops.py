@@ -32,6 +32,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
+    HardwareClassification,
     np,
     run_tests,
     SEED,
@@ -686,6 +687,8 @@ class TestDTensorOps(TestCase):
 
 
 class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
+    hw_classification = HardwareClassification.GENERIC
+
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
     _op_db_sample_lock = threading.Lock()
 
@@ -705,6 +708,8 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
 
 
 class TestLocalDTensorOps(TestDTensorOps):
+    hw_classification = HardwareClassification.GENERIC
+
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestLocalDTensorOps")
 
     def setUp(self) -> None:
@@ -874,6 +879,8 @@ class TestUnbackedDTensorOps(TestDTensorOps):
     and the op compiled with fullgraph=True to catch DDEs during tracing.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestUnbackedDTensorOps")
 
     def setUp(self) -> None:
@@ -986,6 +993,8 @@ class TestUnbackedDTensorOps(TestDTensorOps):
 
 
 class TestSingleDimStrategies(DTensorOpTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1127,6 +1136,8 @@ class TestCompiledDTensorOps(TestDTensorOps):
     Test DTensor ops compile successfully with aot_eager backend.
     Uses fake PG for speed - focuses on compilation, not output correctness.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestCompiledDTensorOps")
 
