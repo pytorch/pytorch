@@ -62,7 +62,7 @@ def _origami_enabled() -> bool:
     return config.rocm.origami
 
 
-USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "0"
+USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "1"
 
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
@@ -2677,7 +2677,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             flatten = (
                 template_kwargs.get("FLATTEN", True)
                 and not constraints_violated
-                and USE_META_WS
+                and not USE_META_WS
             )
             yield {
                 **template_kwargs,
