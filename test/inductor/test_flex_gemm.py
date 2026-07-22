@@ -321,7 +321,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                     torch.device("cuda")
                 )
 
-    def test_explicit_dense_config_requires_complete_supported_schema(self):
+    def test_explicit_dense_config_supports_partial_constraints(self):
         from torch._inductor.heuristics.template import (
             flex_gemm as flex_gemm_heuristics,
         )
@@ -329,6 +329,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             FlexGemmLocalReduceGeometry,
         )
         from torch._inductor.kernel.flex_gemm.lowering import flex_gemm_config_keys
+        from torch._inductor.virtualized import V
         from torch._vendor.quack.gemm_config import GemmConfig
 
         supported = GemmConfig(
@@ -339,48 +340,86 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             cluster_m=2,
             device_capacity=10,
         )
+        alternative = dataclasses.replace(supported, tile_n=256, cluster_m=1)
         config = dict(flex_gemm_heuristics.gemm_config_key(supported))
         device = torch.device("cuda")
+        fake_graph = SimpleNamespace(
+            sizevars=SimpleNamespace(guard_or_false=lambda expr: bool(expr))
+        )
         with (
             mock.patch("torch.cuda.get_device_capability", return_value=(10, 0)),
             mock.patch(
                 "torch._vendor.quack.gemm_config.get_all_configs",
-                return_value=[supported],
+                return_value=[supported, alternative],
             ),
+            V.set_graph_handler(fake_graph),
         ):
             self.assertEqual(
-                flex_gemm_heuristics.explicit_gemm_config_key(config, device),
-                flex_gemm_heuristics.gemm_config_key(supported),
+                flex_gemm_heuristics.explicit_gemm_configs_for_device(config, device),
+                (supported,),
             )
-            with self.assertRaisesRegex(NotImplementedError, "missing=.*tile_n"):
-                flex_gemm_heuristics.explicit_gemm_config_key(
-                    {name: value for name, value in config.items() if name != "tile_n"},
+            self.assertEqual(
+                flex_gemm_heuristics.explicit_gemm_configs_for_device(
+                    {"tile_m": 128}, device
+                ),
+                (supported, alternative),
+            )
+            self.assertEqual(
+                flex_gemm_config_keys(
                     device,
-                )
-            with self.assertRaisesRegex(NotImplementedError, "unexpected=.*stages"):
-                flex_gemm_heuristics.explicit_gemm_config_key(
+                    128,
+                    128,
+                    (),
+                    tuned=False,
+                    explicit_config={"tile_m": 128},
+                ),
+                (flex_gemm_heuristics.gemm_config_key(supported),),
+            )
+            self.assertEqual(
+                flex_gemm_config_keys(
+                    device,
+                    128,
+                    128,
+                    (),
+                    tuned=True,
+                    explicit_config={"tile_m": 128},
+                ),
+                tuple(
+                    flex_gemm_heuristics.gemm_config_key(candidate)
+                    for candidate in (supported, alternative)
+                ),
+            )
+            with self.assertRaisesRegex(NotImplementedError, "unexpected.*stages"):
+                flex_gemm_heuristics.explicit_gemm_configs_for_device(
                     {**config, "stages": 4}, device
                 )
             with self.assertRaisesRegex(NotImplementedError, "not supported"):
-                flex_gemm_heuristics.explicit_gemm_config_key(
+                flex_gemm_heuristics.explicit_gemm_configs_for_device(
                     {**config, "cluster_m": True}, device
                 )
             with self.assertRaisesRegex(NotImplementedError, "not supported"):
-                flex_gemm_heuristics.explicit_gemm_config_key(
+                flex_gemm_heuristics.explicit_gemm_configs_for_device(
                     {**config, "use_tma_gather": True}, device
                 )
             with self.assertRaisesRegex(
                 NotImplementedError, "targets SM90.*uses SM100"
             ):
-                flex_gemm_heuristics.explicit_gemm_config_key(
+                flex_gemm_heuristics.explicit_gemm_configs_for_device(
                     {**config, "device_capacity": 9}, device
                 )
 
-        swap_config_key = flex_gemm_heuristics.gemm_config_key(
-            dataclasses.replace(supported, swap_ab=True)
+        swap_config = dict(
+            flex_gemm_heuristics.gemm_config_key(
+                dataclasses.replace(supported, swap_ab=True)
+            )
         )
         with (
             mock.patch("torch.cuda.get_device_capability", return_value=(10, 0)),
+            mock.patch(
+                "torch._vendor.quack.gemm_config.get_all_configs",
+                return_value=[dataclasses.replace(supported, swap_ab=True)],
+            ),
+            V.set_graph_handler(fake_graph),
             self.assertRaisesRegex(
                 NotImplementedError, "incompatible with local reduction"
             ),
@@ -391,7 +430,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 128,
                 (FlexGemmLocalReduceGeometry(group=16, axis=1),),
                 tuned=False,
-                explicit_config_key=swap_config_key,
+                explicit_config=swap_config,
             )
 
     def test_precompile_metadata_counts_symbolic_skip(self):
@@ -2089,6 +2128,55 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("tuned", (False, True))
+    def test_mm_partial_config_matches_reference(self, tuned):
+        from torch._inductor.heuristics.template.flex_gemm import (
+            candidate_gemm_configs_for_device,
+        )
+
+        def epilogue_fn(acc):
+            return (acc + 1).relu()
+
+        config = next(
+            config
+            for config in candidate_gemm_configs_for_device(torch.device("cuda"))
+            if config.swap_ab
+        )
+        pinned = {
+            name: getattr(config, name)
+            for name in ("tile_m", "tile_n", "cluster_m", "cluster_n", "swap_ab")
+        }
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={
+                    "backend": "QUACK",
+                    "config": pinned,
+                    "tuned": tuned,
+                },
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            epilogue_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
+        self.assertFlexGemmGeneratedCode(code)
+        for item in pinned.items():
+            self.assertIn(repr(item), code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_dynamic_shapes_compiled_matches_reference(self):
         def epilogue_fn(acc):
             return (acc + 1).relu()
@@ -3240,9 +3328,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 64,
                 128,
                 (),
-                tuned=False,
+                tuned=True,
                 main_transform=FlexGemmGroupedMainOutputTransform(group=2),
-                explicit_config_key=gemm_config_key(unsafe_config),
+                explicit_config=dict(gemm_config_key(unsafe_config)),
             )
         with mock.patch("torch.cuda.get_device_capability", return_value=(12, 0)):
             with self.assertRaisesRegex(
@@ -6592,16 +6680,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 "config kernel option must be a dict",
             ),
             (
-                "incomplete_config_option",
+                "unknown_config_field",
                 lambda acc: acc.relu(),
-                {"backend": "QUACK", "config": {"tile_m": 128}},
-                "explicit QUACK config must specify exactly",
-            ),
-            (
-                "config_and_tuned",
-                lambda acc: acc.relu(),
-                {"backend": "QUACK", "config": {}, "tuned": True},
-                "config and tuned kernel options are mutually exclusive",
+                {"backend": "QUACK", "config": {"stages": 4}},
+                "unexpected GemmConfig fields",
             ),
         ),
         name_fn=lambda case: case[0],

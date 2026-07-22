@@ -195,7 +195,7 @@ def flex_gemm_config_keys(
     local_reduce_geometries: tuple[Any, ...],
     tuned: bool,
     main_transform: FlexGemmGroupedMainOutputTransform | None = None,
-    explicit_config_key: tuple[tuple[str, Any], ...] | None = None,
+    explicit_config: dict[str, Any] | None = None,
 ) -> tuple[tuple[Any, ...], ...]:
     """Select QuACK config keys after applying grouped-layout config constraints.
 
@@ -204,7 +204,9 @@ def flex_gemm_config_keys(
     reshape in the generated epilogue: swap_ab reorients the accumulator
     fragment and non-divisible tiles split groups across fragments. Contracted
     main stores additionally require tile_n not to oversubscribe physical N and
-    a single CTA along N until QuACK predicates those layouts correctly.
+    a single CTA along N until QuACK predicates those layouts correctly. Explicit
+    config fields constrain the candidate set; untuned selection fills omitted
+    fields from the normal default, while tuned selection benchmarks the matches.
     """
 
     def fits_main_output(config) -> bool:
@@ -227,28 +229,18 @@ def flex_gemm_config_keys(
     from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
         default_gemm_config_key,
+        explicit_gemm_configs_for_device,
         gemm_config_from_key,
         gemm_config_key,
     )
 
-    if explicit_config_key is not None:
-        config = gemm_config_from_key(explicit_config_key)
-        if main_transform is not None and not fits_main_output(config):
-            raise NotImplementedError(
-                "FlexGEMM explicit QUACK config is incompatible with grouped main output"
-            )
-        for geometry in local_reduce_geometries:
-            if not validate_flex_gemm_local_reduce_config(
-                config, geometry.group, geometry.axis
-            ):
-                raise NotImplementedError(
-                    "FlexGEMM explicit QUACK config is incompatible with local "
-                    f"reduction group={geometry.group}, axis={geometry.axis}"
-                )
-        return (explicit_config_key,)
-
+    candidate_configs = (
+        candidate_gemm_configs_for_device(device)
+        if explicit_config is None
+        else explicit_gemm_configs_for_device(explicit_config, device)
+    )
     if not tuned:
-        default_key = default_gemm_config_key(device, m, n)
+        default_key = default_gemm_config_key(device, m, n, candidate_configs)
         default_config = gemm_config_from_key(default_key)
         if all(
             validate_flex_gemm_local_reduce_config(
@@ -258,13 +250,17 @@ def flex_gemm_config_keys(
         ) and (main_transform is None or fits_main_output(default_config)):
             return (default_key,)
 
-    candidate_configs = candidate_gemm_configs_for_device(device)
     configs = (
         candidate_configs
         if main_transform is None
         else tuple(config for config in candidate_configs if fits_main_output(config))
     )
     if main_transform is not None and not configs:
+        if explicit_config is not None:
+            raise NotImplementedError(
+                "FlexGEMM explicit QUACK config constraints are incompatible with "
+                "grouped main output"
+            )
         raise NotImplementedError(
             "FlexGEMM grouped main outputs require statically known physical N "
             "large enough for a single-CTA QuACK tile"
@@ -278,6 +274,11 @@ def flex_gemm_config_keys(
             )
         )
         if not configs:
+            if explicit_config is not None:
+                raise NotImplementedError(
+                    "FlexGEMM explicit QUACK config constraints are incompatible "
+                    f"with local reduction group={geometry.group}, axis={geometry.axis}"
+                )
             raise NotImplementedError(
                 flex_gemm_local_reduce_config_error(
                     candidate_configs,
@@ -338,10 +339,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError("FlexGEMM fast_math kernel option must be bool")
     if "config" in kernel_options and not isinstance(explicit_config, dict):
         raise NotImplementedError("FlexGEMM config kernel option must be a dict")
-    if explicit_config is not None and tuned:
-        raise NotImplementedError(
-            "FlexGEMM config and tuned kernel options are mutually exclusive"
-        )
 
     from torch._inductor.kernel.flex_gemm.epilogue import (
         analyze_flex_gemm_epilogue,
@@ -480,13 +477,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         epilogue_arg_placeholders,
         fast_math=fast_math,
     )
-    explicit_config_key = None
-    if explicit_config is not None:
-        from torch._inductor.heuristics.template.flex_gemm import (
-            explicit_gemm_config_key,
-        )
-
-        explicit_config_key = explicit_gemm_config_key(explicit_config, layout.device)
     quack_config_keys = flex_gemm_config_keys(
         layout.device,
         gemm_args[mat1_index].get_size()[-2],
@@ -494,7 +484,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         epilogue_analysis.required_geometries,
         tuned,
         main_transform,
-        explicit_config_key,
+        explicit_config,
     )
     epilogue_arg_indices = tuple(
         range(
