@@ -1,0 +1,130 @@
+name: PR 190744 instruction-count benchmark
+
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable perf counters
+        run: |
+          sudo sysctl -w kernel.perf_event_paranoid=-1
+          echo "perf_event_paranoid: $(cat /proc/sys/kernel/perf_event_paranoid)"
+
+      - name: Install torch nightly (CPU)
+        run: |
+          pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu -q
+          python -c "import torch; print('torch', torch.__version__)"
+
+      - name: Run instruction-count benchmark
+        run: |
+          python - <<'PYEOF'
+          import sys
+          import torch
+          import torch.fx as fx
+          import torch._C._instruction_counter as ic
+
+          # ── sanity check ────────────────────────────────────────────────
+          _id = ic.start()
+          _x = sum(range(1000))
+          _probe = ic.end(_id)
+
+          UINT64_MAX = (1 << 64) - 1
+          if _probe >= UINT64_MAX // 2:
+              print("BLOCKED: perf_event_open is not available on this runner")
+              print(f"  (got {_probe} — looks like UINT64_MAX)")
+              sys.exit(0)
+
+          print(f"perf_event_open works!  probe count: {_probe:,} instructions")
+
+          # ── build a synthetic FX graph (no 'custom' meta) ───────────────
+          def make_graph(n):
+              g = fx.Graph()
+              x = g.placeholder("x")
+              node = x
+              for _ in range(n):
+                  node = g.call_function(torch.ops.aten.relu.default, (node,))
+              g.output(node)
+              for n_ in g.nodes:
+                  n_.meta = {}
+              return g
+
+          N = 500
+          graph     = make_graph(N)
+          nodes     = list(graph.nodes)
+          call_nodes = [n for n in nodes if n.op == "call_function"]
+
+          # ── implementations being compared ──────────────────────────────
+          # REGRESSED (#185057): 3 throwaway dict allocations per node
+          def ctx_regressed(node):
+              return (
+                  node.meta.get("custom", {}).get("stream", 0),
+                  node.meta.get("custom", {}).get("mempool"),
+                  node.meta.get("custom", {}).get("mempool_device"),
+              )
+
+          # FIXED (#190744): early-return, zero allocations
+          def ctx_fixed(node):
+              custom = node.meta.get("custom")
+              if not custom:
+                  return (0, None, None)
+              return (custom.get("stream", 0), custom.get("mempool"), custom.get("mempool_device"))
+
+          # REGRESSED: n.is_impure() — schema lookup
+          def impure_regressed(n):
+              return n.is_impure()
+
+          # FIXED: O(1) namespace check
+          def impure_fixed(n):
+              return (
+                  n.op == "call_function"
+                  and isinstance(n.target, torch._ops.OpOverload)
+                  and n.target.namespace == "mempool"
+              )
+
+          REPS = 200
+
+          # warm up
+          for _ in range(5):
+              [ctx_regressed(n) for n in nodes]
+              [ctx_fixed(n)     for n in nodes]
+              [impure_regressed(n) for n in call_nodes]
+              [impure_fixed(n)     for n in call_nodes]
+
+          # ── measure custom_context_key ───────────────────────────────────
+          _id = ic.start()
+          for _ in range(REPS):
+              [ctx_regressed(n) for n in nodes]
+          c_reg = ic.end(_id)
+
+          _id = ic.start()
+          for _ in range(REPS):
+              [ctx_fixed(n) for n in nodes]
+          c_fix = ic.end(_id)
+
+          delta_ctx = (c_fix - c_reg) / c_reg * 100
+          print(f"\ncustom_context_key  ({N} nodes × {REPS} reps, no 'custom' annotations):")
+          print(f"  REGRESSED (#185057): {c_reg:,} instructions")
+          print(f"  FIXED     (#190744): {c_fix:,} instructions")
+          print(f"  Delta: {delta_ctx:+.2f}%  ({'improvement' if delta_ctx < 0 else 'regression'})")
+
+          # ── measure is_impure vs namespace check ─────────────────────────
+          _id = ic.start()
+          for _ in range(REPS):
+              [impure_regressed(n) for n in call_nodes]
+          ci_reg = ic.end(_id)
+
+          _id = ic.start()
+          for _ in range(REPS):
+              [impure_fixed(n) for n in call_nodes]
+          ci_fix = ic.end(_id)
+
+          delta_imp = (ci_fix - ci_reg) / ci_reg * 100
+          print(f"\nis_impure check  ({len(call_nodes)} call_function nodes × {REPS} reps):")
+          print(f"  REGRESSED (#185057): {ci_reg:,} instructions")
+          print(f"  FIXED     (#190744): {ci_fix:,} instructions")
+          print(f"  Delta: {delta_imp:+.2f}%  ({'improvement' if delta_imp < 0 else 'regression'})")
+
+          print("\nDone.")
+          PYEOF
