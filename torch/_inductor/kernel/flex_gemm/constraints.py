@@ -415,6 +415,7 @@ class FlexGemmGroupedMainOutputTransform:
         return ("B",) if self.chunked else ()
 
     def validate_quack(self, device_capacity: int) -> None:
+        device_capacity = 10 if device_capacity == 11 else device_capacity
         if device_capacity == 12:
             raise NotImplementedError(
                 "FlexGEMM grouped main outputs are not yet supported on SM120"
@@ -433,8 +434,8 @@ class FlexGemmGroupedMainOutputTransform:
 class FlexGemmLocalReduceGeometry:
     """Describe the canonical grouped M/N layout used by FlexGEMM epilogues.
 
-    The legacy name remains in the generated ABI, but this type also owns the
-    TensorSSA shape contract used by grouped main outputs.
+    This type also owns the TensorSSA shape contract used by grouped main
+    outputs.
 
     Attributes:
         group: Number of contiguous M or N elements in each local group.
@@ -480,10 +481,6 @@ class FlexGemmLocalReduceGeometry:
 
     def keepdim_shape(self, source: Any) -> str:
         return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
-
-    @property
-    def needs_physical_combine(self) -> bool:
-        return self.needs_physical_callbacks
 
     @property
     def reduction_profile(self) -> str:

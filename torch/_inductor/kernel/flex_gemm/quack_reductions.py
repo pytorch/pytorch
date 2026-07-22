@@ -47,19 +47,16 @@ def normalize_shape(shape: Any) -> Any:
     return tuple(shape) if isinstance(shape, (list, tuple, torch.Size)) else shape
 
 
-GroupedTensorSSALayout = FlexGemmLocalReduceGeometry
-
-
 def _syntactic_grouped_tensor_layout(
     shape: tuple[Any, ...],
-) -> GroupedTensorSSALayout | None:
+) -> FlexGemmLocalReduceGeometry | None:
     """Match grouped-reshape syntax before validating source geometry."""
     if len(shape) not in (3, 4):
         return None
     if isinstance(shape[-1], int) and shape[-1] > 0 and shape[-2] == -1:
-        return GroupedTensorSSALayout(group=shape[-1], axis=1)
+        return FlexGemmLocalReduceGeometry(group=shape[-1], axis=1)
     if shape[-3] == -1 and isinstance(shape[-2], int) and shape[-2] > 0:
-        return GroupedTensorSSALayout(group=shape[-2], axis=0)
+        return FlexGemmLocalReduceGeometry(group=shape[-2], axis=0)
     return None
 
 
@@ -88,7 +85,7 @@ def _kept_dim_matches_source(kept_size: Any, source_size: Any) -> bool:
 def _grouped_layout_matches_source_shape(
     shape: tuple[Any, ...],
     source_shape: tuple[Any, ...],
-    layout: GroupedTensorSSALayout,
+    layout: FlexGemmLocalReduceGeometry,
 ) -> bool:
     """Require a 2-D GEMM output reshape to split exactly M or N."""
     if len(shape) != 3:
@@ -114,7 +111,7 @@ def _grouped_layout_matches_source_shape(
 
 def grouped_tensor_layout(
     shape: Any, source_shape: Any | None = None
-) -> GroupedTensorSSALayout | None:
+) -> FlexGemmLocalReduceGeometry | None:
     """Recognize exact grouped M/N reshapes for the local-reduction contract."""
     shape = normalize_shape(shape)
     if not isinstance(shape, tuple):
@@ -127,10 +124,10 @@ def grouped_tensor_layout(
             candidates = []
             match shape:
                 case (*_, int(group)) if group > 0:
-                    candidates.append(GroupedTensorSSALayout(group=group, axis=1))
+                    candidates.append(FlexGemmLocalReduceGeometry(group=group, axis=1))
             match shape:
                 case (*_, int(group), _) if group > 0:
-                    candidates.append(GroupedTensorSSALayout(group=group, axis=0))
+                    candidates.append(FlexGemmLocalReduceGeometry(group=group, axis=0))
             for layout in candidates:
                 if _grouped_layout_matches_source_shape(shape, source_shape, layout):
                     return layout
@@ -302,7 +299,7 @@ def _generate_like(
 
 
 def _keepdim_and_broadcast(
-    kernel: Any, reduced: Any, layout: GroupedTensorSSALayout, source: Any
+    kernel: Any, reduced: Any, layout: FlexGemmLocalReduceGeometry, source: Any
 ) -> tuple[Any, Any]:
     """Materialize keepdim and store-shaped forms of a grouped reduction."""
     keepdim_source = _generate_like(
@@ -421,8 +418,8 @@ def lower_view_or_reshape(
     node: torch.fx.Node,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
-    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
-    active_grouped_layouts: OrderedSet[GroupedTensorSSALayout],
+    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
+    active_grouped_layouts: OrderedSet[FlexGemmLocalReduceGeometry],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
     preserve_value_layout: bool = False,
 ) -> Any | None:
@@ -455,7 +452,7 @@ def lower_grouped_n_split(
     node: torch.fx.Node,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
-    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
+    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
 ) -> tuple[Any, ...] | None:
     """Split one physical N fragment into grouped TensorSSA lanes."""
     if (
@@ -485,7 +482,7 @@ def lower_grouped_n_select(
     node: torch.fx.Node,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
-    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
+    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
 ) -> Any | None:
     """Select one lane from an active grouped-N TensorSSA value."""
     if (
@@ -609,7 +606,7 @@ def lower_prepare_softmax_online(
     node: torch.fx.Node,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
-    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
+    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
 ) -> Any | None:
     if (
@@ -624,7 +621,7 @@ def lower_prepare_softmax_online(
     if input_node not in grouped_tensors:
         raise NotImplementedError(LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR)
     layout = grouped_tensors[input_node]
-    if layout.needs_physical_combine:
+    if layout.needs_physical_callbacks:
         raise NotImplementedError(
             "unsupported FlexGEMM physical local reduction: prepare_softmax_online "
             "needs a multi-value generated physical reducer"
@@ -657,7 +654,7 @@ def lower_tensorssa_reduce(
     node: torch.fx.Node,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
-    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
+    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
     local_reduce_physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction],
 ) -> Any | None:
@@ -681,8 +678,8 @@ def lower_tensorssa_reduce(
     desc = tensorssa_reduction(reduction_name)
     finalize_expr = f"value / {layout.group}.0" if reduction_type == "mean" else "value"
     source = _cute_arg(input_node, env)
-    needs_physical_combine = layout.needs_physical_combine
-    if needs_physical_combine:
+    needs_physical_callbacks = layout.needs_physical_callbacks
+    if needs_physical_callbacks:
         local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
             desc.combine_expr, finalize_expr
         )
@@ -694,7 +691,7 @@ def lower_tensorssa_reduce(
         f"{source}.reduce({desc.cute_op}, init_val={desc.init_val}, reduction_profile={layout.reduction_profile})",
         source,
     )
-    if reduction_type == "mean" and not needs_physical_combine:
+    if reduction_type == "mean" and not needs_physical_callbacks:
         reduced = _generate_like(
             kernel, f"{reduced} / {float(layout.group)!r}", reduced
         )

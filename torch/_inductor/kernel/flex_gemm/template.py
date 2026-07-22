@@ -61,21 +61,12 @@ class FlexGemmEpilogueLocalReduceConfig:
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmEpilogueMainOutputConfig:
-    """Template-time logical main-output transform."""
-
-    transform: FlexGemmGroupedMainOutputTransform | None = None
-
-
-@dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueOutputConfig:
     """Template input indices and plans for all user-visible outputs."""
 
     aux_out_indices: tuple[int, ...] = ()
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None = None
-    main: FlexGemmEpilogueMainOutputConfig = dataclasses.field(
-        default_factory=FlexGemmEpilogueMainOutputConfig
-    )
+    main_transform: FlexGemmGroupedMainOutputTransform | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -280,7 +271,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         local_reduce_expr = self._local_reduce_expr(
             input_args, outputs.local_reduce, config.epilogue_name
         )
-        transform = outputs.main.transform
+        transform = outputs.main_transform
         transform_expr = (
             "None"
             if transform is None

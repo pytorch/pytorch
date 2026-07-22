@@ -388,7 +388,9 @@ def dispatch_gemm_act(
     )
     if config.swap_ab:
         if main_transform is not None:
-            raise NotImplementedError(LOCAL_REDUCE_SWAP_AB_ERROR)
+            raise NotImplementedError(
+                "FlexGEMM grouped main outputs do not support swap_ab configs yet"
+            )
         quack_a, quack_b = quack_b, quack_a
         quack_out = out.mT
         if local_reduce is not None:

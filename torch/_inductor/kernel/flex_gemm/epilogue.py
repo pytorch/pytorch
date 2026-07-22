@@ -61,7 +61,6 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     _local_reduce_store_arg,
     FlexGemmPhysicalReduction,
     grouped_tensor_layout,
-    GroupedTensorSSALayout,
     is_shape_preserving_pointwise_node,
     iter_fx_node_inputs,
     lower_full_scalar,
@@ -335,7 +334,7 @@ class FlexGemmLocalReduceAnalysis:
     """Collect grouped TensorSSA layouts and supported local-reduction matches.
 
     ``from_graph_module`` visits the FX graph in topological order. See
-    ``GroupedTensorSSALayout`` for the grouped layout attached to reshape and
+    ``FlexGemmLocalReduceGeometry`` for the grouped layout attached to reshape and
     pointwise nodes, and ``FlexGemmLocalReduceMatch`` for each supported reduced
     value found from those layouts.
 
@@ -346,8 +345,8 @@ class FlexGemmLocalReduceAnalysis:
     """
 
     graph: FlexGemmEpilogueGraph
-    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout] = dataclasses.field(
-        default_factory=dict
+    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry] = (
+        dataclasses.field(default_factory=dict)
     )
     matches: dict[torch.fx.Node, FlexGemmLocalReduceMatch] = dataclasses.field(
         default_factory=dict
@@ -459,7 +458,7 @@ class FlexGemmLocalReduceAnalysis:
         physical_grouped_nodes = OrderedSet(
             node
             for node, layout in self.grouped_tensors.items()
-            if layout.needs_physical_combine and layout in active_geometries
+            if layout.needs_physical_callbacks and layout in active_geometries
         )
         return any(
             node in physical_grouped_nodes
@@ -501,7 +500,7 @@ class FlexGemmLocalReduceAnalysis:
         self,
         value: Any,
         grouped_source: torch.fx.Node,
-        layout: GroupedTensorSSALayout,
+        layout: FlexGemmLocalReduceGeometry,
     ) -> FlexGemmLocalReduceMatch | None:
         """Find the grouped reduction that produces a broadcast value."""
         if not isinstance(value, torch.fx.Node):
@@ -608,7 +607,7 @@ class FlexGemmLocalReduceAnalysis:
         self,
         value: Any,
         grouped_source: torch.fx.Node,
-        layout: GroupedTensorSSALayout,
+        layout: FlexGemmLocalReduceGeometry,
     ) -> bool:
         """Return whether a candidate contains a grouped feed-main reduction."""
         if not isinstance(value, torch.fx.Node):
@@ -866,17 +865,35 @@ def grouped_main_output_transform(
     local_reduce: FlexGemmLocalReduceAnalysis,
 ) -> FlexGemmGroupedMainOutputTransform | None:
     """Recognize one innermost-axis grouping feeding the logical main output."""
-    selected_key: tuple[Any, ...] | None = None
+    selected_key: tuple[torch.fx.Node, tuple[Any, ...], int, bool] | None = None
     selected_group: int | None = None
     selected_chunked = False
     selected_indices: OrderedSet[int] = OrderedSet()
     seen: OrderedSet[torch.fx.Node] = OrderedSet()
+    pending_grouped: dict[torch.fx.Node, FlexGemmLocalReduceGeometry] = {}
+
+    def grouped_source(node: torch.fx.Node) -> torch.fx.Node:
+        """Canonicalize a lane source through shape-preserving pointwise wrappers."""
+        while node is not gemm and is_shape_preserving_pointwise_node(node):
+            inputs = [
+                arg
+                for arg in iter_fx_node_inputs((node.args, node.kwargs))
+                if local_reduce.graph.depends_on(arg, gemm)
+            ]
+            if len(inputs) != 1:
+                break
+            node = inputs[0]
+        return node
 
     def bind_lane(
-        shape: tuple[Any, ...], group: int, chunked: bool, index: int
+        source: torch.fx.Node,
+        shape: tuple[Any, ...],
+        group: int,
+        chunked: bool,
+        index: int,
     ) -> bool:
         nonlocal selected_chunked, selected_group, selected_key
-        key = (tuple(str(dim) for dim in shape), group, chunked)
+        key = (grouped_source(source), shape, group, chunked)
         if selected_key is not None and selected_key != key:
             return False
         if not -group <= index < group:
@@ -916,8 +933,10 @@ def grouped_main_output_transform(
                     and physical_n % split.args[1] == 0
                 ):
                     group = physical_n // split.args[1]
-                    if group > 1 and bind_lane(source_shape, group, True, node.args[1]):
-                        local_reduce.grouped_tensors[split] = GroupedTensorSSALayout(
+                    if group > 1 and bind_lane(
+                        split.args[0], source_shape, group, True, node.args[1]
+                    ):
+                        pending_grouped[split] = FlexGemmLocalReduceGeometry(
                             group=group, axis=1
                         )
                         return True
@@ -933,13 +952,16 @@ def grouped_main_output_transform(
             shape = tensor_meta_shape(view)
             if (
                 view_args is not None
+                and isinstance(view_args[0], torch.fx.Node)
                 and local_reduce.graph.depends_on(view_args[0], gemm)
                 and shape is not None
                 and isinstance(node.args[1], int)
                 and -len(shape) <= node.args[1] < len(shape)
             ):
                 dim = node.args[1] % len(shape)
-                layout = local_reduce.grouped_tensors.get(view)
+                layout = pending_grouped.get(
+                    view, local_reduce.grouped_tensors.get(view)
+                )
                 chunked = (
                     len(shape) == 3
                     and dim == 1
@@ -947,21 +969,23 @@ def grouped_main_output_transform(
                     and shape[1] > 1
                 )
                 if chunked:
-                    layout = GroupedTensorSSALayout(group=shape[1], axis=1)
+                    layout = FlexGemmLocalReduceGeometry(group=shape[1], axis=1)
                 if (
                     layout is not None
                     and layout.axis == 1
                     and (chunked or dim == len(shape) - 1)
-                    and bind_lane(shape, layout.group, chunked, node.args[2])
+                    and bind_lane(
+                        view_args[0], shape, layout.group, chunked, node.args[2]
+                    )
                 ):
                     if chunked:
-                        local_reduce.grouped_tensors[view] = layout
+                        pending_grouped[view] = layout
                     return True
         if node is gemm:
             return False
-        if node in local_reduce.grouped_tensors and local_reduce.graph.depends_on(
-            node, gemm
-        ):
+        if (
+            node in local_reduce.grouped_tensors or node in pending_grouped
+        ) and local_reduce.graph.depends_on(node, gemm):
             return False
         return all(visit(arg) for arg in iter_fx_node_inputs((node.args, node.kwargs)))
 
@@ -976,6 +1000,7 @@ def grouped_main_output_transform(
     expected_shape = (gemm_meta.shape[0], gemm_meta.shape[1] // selected_group)
     if not statically_known_shape_equal(output_meta.shape, expected_shape):
         raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR)
+    local_reduce.grouped_tensors.update(pending_grouped)
     return FlexGemmGroupedMainOutputTransform(
         group=selected_group,
         chunked=selected_chunked,
@@ -1053,6 +1078,7 @@ def analyze_flex_gemm_epilogue(
 
     Args:
         graph_module: FlexGEMM body graph containing GEMM and epilogue nodes.
+        gemm: The GEMM node within ``graph_module`` that the epilogue consumes.
 
     Returns:
         Output and local-reduction analysis shared by later lowering phases.
@@ -1130,9 +1156,7 @@ class FlexGemmEpilogueEmitter:
             )
         }
         self.grouped_tensors = dict(analysis.local_reduce.grouped_tensors)
-        self.active_grouped_layouts = OrderedSet(
-            geometry for geometry in analysis.required_geometries
-        )
+        self.active_grouped_layouts = OrderedSet(analysis.required_geometries)
         self.store_sources: dict[torch.fx.Node, Any] = {}
         self.physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction] = {}
         self.local_reduce = self.outputs.local_reduce

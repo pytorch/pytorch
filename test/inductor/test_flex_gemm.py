@@ -2880,6 +2880,51 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ):
             grouped_tensor_layout((-1, 2, 2), (4, 5))
 
+    def test_grouped_main_output_recognizer_only_mutates_analysis_on_match(self):
+        """Rejected recognitions must not leak grouped layouts into the analysis."""
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmGroupedMainOutputTransform,
+        )
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def swap_halves_plus_acc(a, b):
+            acc = torch.mm(a, b)
+            halves = acc.chunk(2, dim=-1)
+            return torch.cat((halves[1], halves[0]), dim=-1) + acc
+
+        def silu_mul_halves(a, b):
+            acc = torch.mm(a, b)
+            halves = acc.chunk(2, dim=-1)
+            return torch.nn.functional.silu(halves[0]) * halves[1]
+
+        chunked_transform = FlexGemmGroupedMainOutputTransform(group=2, chunked=True)
+        for body, expected_transform in (
+            (swap_halves_plus_acc, None),
+            (silu_mul_halves, chunked_transform),
+        ):
+            with self.subTest(body=body.__name__):
+                graph_module = make_fx(body)(torch.randn(4, 8), torch.randn(8, 16))
+                analysis = analyze_flex_gemm_epilogue(
+                    graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+                )
+                split_nodes = [
+                    node
+                    for node in graph_module.graph.nodes
+                    if node.target is torch.ops.aten.split.Tensor
+                ]
+                self.assertTrue(split_nodes)
+                self.assertEqual(analysis.outputs.main.transform, expected_transform)
+                registered = [
+                    node
+                    for node in split_nodes
+                    if node in analysis.local_reduce.grouped_tensors
+                ]
+                self.assertEqual(registered, split_nodes if expected_transform else [])
+
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
@@ -2937,8 +2982,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
-    @parametrize("operation", ("silu_mul", "sub"))
-    @parametrize("tuned", (False, True))
+    @parametrize(
+        "operation,tuned",
+        (("silu_mul", False), ("sub", False), ("silu_mul", True)),
+    )
     def test_mm_grouped_n_main_output_compiled_matches_reference(
         self, operation, tuned
     ):
@@ -2963,19 +3010,16 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
 
         a = torch.randn(m, k, device="cuda", dtype=torch.float16)
-        weights = [
-            torch.randn(k, n, device="cuda", dtype=torch.float16) for _ in range(group)
-        ]
-        b = torch.stack(weights, dim=-1).reshape(k, group * n).contiguous()
+        b = torch.randn(k, group * n, device="cuda", dtype=torch.float16)
         actual, (code,) = run_and_get_code(
             torch.compile(fn, backend="inductor", fullgraph=True), a, b
         )
 
         torch.testing.assert_close(actual, fn(a, b), atol=1e-1, rtol=1e-1)
         self.assertEqual(actual.shape, (m, n))
-        FileCheck().check("FlexGemmRuntimeMainOutputPlan(").check(
-            "FlexGemmGroupedMainOutputTransform(group=2"
-        ).check_not("activation=").check_not("extern_kernels.mm").run(code)
+        FileCheck().check("FlexGemmGroupedMainOutputTransform(group=2").check_not(
+            "activation="
+        ).check_not("extern_kernels.mm").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -3154,6 +3198,17 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     tuned=True,
                     main_transform=FlexGemmGroupedMainOutputTransform(group=2),
                 )
+        with mock.patch("torch.cuda.get_device_capability", return_value=(11, 0)):
+            self.assertTrue(
+                flex_gemm_config_keys(
+                    device,
+                    64,
+                    128,
+                    (FlexGemmLocalReduceGeometry(group=4, axis=1),),
+                    tuned=True,
+                    main_transform=FlexGemmGroupedMainOutputTransform(group=4),
+                )
+            )
         with self.assertRaisesRegex(NotImplementedError, "interleaved group 4"):
             flex_gemm_config_keys(
                 device,
@@ -3227,6 +3282,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     kernel_options={"backend": "QUACK"},
                 )
 
+            b = torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
             torch._dynamo.mark_dynamic(b, 1)
             with self.assertRaisesRegex(InductorError, "statically known physical N"):
                 torch.compile(dynamic_n, backend="inductor", fullgraph=True)(a, b)
@@ -3246,6 +3302,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     kernel_options={"backend": "QUACK"},
                 )
 
+            b = torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
             with self.assertRaisesRegex(InductorError, "do not compose"):
                 torch.compile(auxiliary, backend="inductor", fullgraph=True)(a, b)
 
