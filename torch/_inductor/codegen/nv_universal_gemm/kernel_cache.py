@@ -10,6 +10,7 @@ The first call to get_kernel_by_name() loads all kernels from cutlass.operators
 dict for O(1) lookup (~0.1 μs).
 """
 
+import dataclasses
 import functools
 import logging
 import threading
@@ -191,9 +192,51 @@ def _args_query_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     metadata_filter = (
         (lambda md: "EFC" in md.operator_class.__name__) if efc_only else None
     )
-    return cutlass.operators.get_operators(
-        args=args, target_sm=f"{cc}a", metadata_filter=metadata_filter
+    return _replace_dense_efc_with_vendored(
+        cutlass.operators.get_operators(
+            args=args, target_sm=f"{cc}a", metadata_filter=metadata_filter
+        )
     )
+
+
+def _replace_dense_efc_with_vendored(kernels: Any) -> list[Any]:
+    from cutlass.operators.providers.cutedsl.gemm.sm100_static_persistent_efc import (
+        PersistentDenseGemmEFCOperator,
+    )
+
+    from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
+        VendoredDenseGemmEFCOperator,
+    )
+
+    result = []
+    for kernel in kernels:
+        if kernel.metadata.operator_class is not PersistentDenseGemmEFCOperator:
+            result.append(kernel)
+            continue
+        design = kernel.metadata.design
+        tile_m, tile_n, tile_k = design.tile_shape
+        for vendored_tile_n in (tile_n, 64, 128):
+            if vendored_tile_n < tile_n:
+                continue
+            operator_name = kernel.metadata.operator_name.replace(
+                "cutedsl.PersistentDenseGemmEFCOperator",
+                "inductor_vendored.VendoredDenseGemmEFCOperator",
+                1,
+            ).replace(
+                f"tile{tile_m}x{tile_n}x{tile_k}",
+                f"tile{tile_m}x{vendored_tile_n}x{tile_k}",
+                1,
+            )
+            metadata = dataclasses.replace(
+                kernel.metadata,
+                operator_name=operator_name,
+                operator_class=VendoredDenseGemmEFCOperator,
+                design=dataclasses.replace(
+                    design, tile_shape=(tile_m, vendored_tile_n, tile_k)
+                ),
+            )
+            result.append(VendoredDenseGemmEFCOperator(metadata))
+    return result
 
 
 def _filter_supported(kernels: Any, args: Any, cc: int) -> list[Any]:
@@ -233,7 +276,7 @@ def _manifest_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
             for kernel in kernels
             if "EFC" in kernel.metadata.operator_class.__name__
         )
-    return _filter_supported(kernels, args, cc)
+    return _replace_dense_efc_with_vendored(_filter_supported(kernels, args, cc))
 
 
 def _blockscaled_provider_classes() -> list[Any]:
@@ -342,16 +385,34 @@ def _scaled_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     """
     manifest = _blockscaled_manifest(cc, _scaled_operand_type_signature(args))
     if manifest.operators:
-        metadata_filter = (
-            (lambda md: "EFC" in md.operator_class.__name__) if efc_only else None
-        )
         out = manifest.filter_operators(
             args=args,
-            metadata_filter=metadata_filter,
             target_sm=f"{cc}a",
         )
         if out:
-            return out
+            from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel import (
+                VendoredDenseBlockScaledGemmEFC,
+                VendoredDenseBlockScaledGemmKernel,
+            )
+
+            efc = []
+            for op in out:
+                if op.metadata.operator_class is not VendoredDenseBlockScaledGemmKernel:
+                    continue
+                metadata = dataclasses.replace(
+                    op.metadata,
+                    operator_name=op.metadata.operator_name.replace(
+                        "VendoredDenseBlockScaledGemmKernel",
+                        "VendoredDenseBlockScaledGemmEFC",
+                        1,
+                    ),
+                    operator_class=VendoredDenseBlockScaledGemmEFC,
+                )
+                efc.append(VendoredDenseBlockScaledGemmEFC(metadata))
+            if efc:
+                return efc if efc_only else [*out, *efc]
+            if not efc_only:
+                return out
     return _manifest_candidates(args, cc, efc_only)
 
 
@@ -425,7 +486,19 @@ def get_kernel_by_name(kernel_name: str) -> Any:
     kernel = _ops_by_name.get(kernel_name)
     if kernel is not None:
         return kernel
-    return _get_kernel_cache().get(kernel_name)
+    cache = _get_kernel_cache()
+    kernel = cache.get(kernel_name)
+    if kernel is None and "VendoredDenseGemmEFCOperator" in kernel_name:
+        upstream_name = kernel_name.replace(
+            "inductor_vendored.VendoredDenseGemmEFCOperator",
+            "cutedsl.PersistentDenseGemmEFCOperator",
+            1,
+        )
+        upstream = cache.get(upstream_name)
+        if upstream is not None:
+            kernel = _replace_dense_efc_with_vendored((upstream,))[0]
+            _ops_by_name[kernel_name] = kernel
+    return kernel
 
 
 def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
@@ -450,11 +523,43 @@ def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
     if cached is not None:
         return cached
 
-    ops = cutlass.operators.get_operators(args=args, target_sm=f"{cc}a")
+    query_args = args
+    if "VendoredDenseGemmEFCOperator" in kernel_name:
+        from cutlass.operators.arguments import GemmArguments
+
+        query_args = GemmArguments(
+            args.A,
+            args.B,
+            args.out,
+            accumulator_type=args.accumulator_type,
+        )
+    ops = _replace_dense_efc_with_vendored(
+        cutlass.operators.get_operators(args=query_args, target_sm=f"{cc}a")
+    )
     for op in ops:
         # setdefault: keep an already-cached (possibly already-compiled) object
         # rather than replacing it with a fresh instance from this query.
         _ops_by_name.setdefault(op.metadata.operator_name, op)
+    if (
+        kernel_name not in _ops_by_name
+        and "VendoredDenseBlockScaledGemmEFC" in kernel_name
+    ):
+        from cutlass.operators.arguments import GemmArguments
+
+        base_args = GemmArguments(
+            args.A,
+            args.B,
+            args.out,
+            accumulator_type=args.accumulator_type,
+        )
+        scaled_ops = _scaled_candidates(base_args, cc, efc_only=False)
+        log.debug(
+            "Scaled by-name fallback found %d candidates for %s",
+            len(scaled_ops),
+            kernel_name,
+        )
+        for op in scaled_ops:
+            _ops_by_name.setdefault(op.metadata.operator_name, op)
     return _ops_by_name.get(kernel_name)
 
 
@@ -487,6 +592,58 @@ from torch._inductor.utils import clear_on_fresh_cache
 
 
 clear_on_fresh_cache(_NVGEMMCacheWrapper())
+
+
+def _fake_epilogue_metadata(epilogue_args: Any) -> Any:
+    """Build the cached kernel's epilogue metadata from fake (meta) tensors.
+
+    The EFC kernel is cached in ``_efc_epilogue_cache`` and reused across every
+    call; the real output/aux tensors are supplied per call via the runtime
+    ``GemmArguments.epilogue``, so the cached kernel needs only the epilogue's
+    shape/dtype/layout (its IR). Building it from the real ``EpilogueArguments``
+    would make it retain those tensors forever -- ``EpilogueMetadata`` shares the
+    arguments' ``tensors`` (wrapping the output ``D`` and aux inputs) and traced
+    functor -- keeping the (often intermediate) output alive: a memory leak, and
+    it breaks CUDA graph capture (a live graph-pool allocation that is not a
+    tracked graph output). Re-trace the epilogue with meta tensors (carrying
+    dtype/layout but no device storage; the tracer reads only their metadata) so
+    the cached kernel holds nothing real.
+    """
+    from cutlass.operators.arguments.epilogue import EpilogueArguments
+    from cutlass.operators.metadata import EpilogueMetadata
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    from .nv_universal_gemm_utils import cutlass_dtype_to_torch
+
+    def _meta_like(t: torch.Tensor) -> torch.Tensor:
+        return torch.empty_strided(t.shape, t.stride(), dtype=t.dtype, device="meta")
+
+    fake_kwargs = {}
+    for name, val in epilogue_args.tensors.items():
+        # Build a storage-free meta tensor with the same shape/stride/dtype.
+        # A TensorWrapper built from a fake tensor (the subprocess-precompile
+        # path) has no runtime tensor -- its `.runtime_tensor` property raises
+        # ValueError -- so read `_runtime_tensor` directly (None when fake) and
+        # fall back to the wrapper's own shape/stride and its cutlass dtype.
+        if isinstance(val, torch.Tensor):
+            fake_kwargs[name] = _meta_like(val)
+        elif isinstance(val, TensorWrapper) and isinstance(
+            val._runtime_tensor, torch.Tensor
+        ):
+            fake_kwargs[name] = _meta_like(val._runtime_tensor)
+        elif (
+            isinstance(val, TensorWrapper)
+            and (dtype := cutlass_dtype_to_torch(val.dtype)) is not None
+        ):
+            fake_kwargs[name] = torch.empty_strided(
+                tuple(val.shape), tuple(val.stride), dtype=dtype, device="meta"
+            )
+        else:
+            fake_kwargs[name] = val
+    fake_args = EpilogueArguments(epilogue_args.epilogue_fn, **fake_kwargs)
+    accum = epilogue_args.traced_epilogue.example_inputs["accum"]
+    fake_args.trace(accum.shape, accum.element)
+    return EpilogueMetadata.from_args(fake_args)
 
 
 def get_efc_kernel_with_epilogue(
@@ -526,9 +683,9 @@ def get_efc_kernel_with_epilogue(
             log.debug("Base EFC kernel not found: %s", efc_kernel_name)
             return None
 
-        from cutlass.operators.metadata import EpilogueMetadata, OperatorMetadata
+        from cutlass.operators.metadata import OperatorMetadata
 
-        epilogue_metadata = EpilogueMetadata.from_args(epilogue_args)
+        epilogue_metadata = _fake_epilogue_metadata(epilogue_args)
 
         base_metadata = base_kernel.metadata
         new_metadata = OperatorMetadata(
