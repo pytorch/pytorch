@@ -1,0 +1,465 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates
+# Owner(s): ["oncall: distributed"]
+
+from __future__ import annotations
+
+import contextlib
+import unittest
+from typing import Any, cast
+
+import torch
+from torch._library.utils import fill_defaults
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed._local_tensor import LocalIntNode, LocalTensor, LocalTensorMode
+from torch.distributed._stateful_rng import (
+    _is_supported_stateful_rng_op,
+    _PHILOX_DISTRIBUTION_NORMAL,
+    _PHILOX_DISTRIBUTION_UNIFORM,
+    _run_stateful_rng_op,
+    _run_stateful_rng_op_for_checkpointable_tensor,
+)
+from torch.distributed.checkpoint import CheckpointableTensor
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
+from torch.utils._python_dispatch import TorchDispatchMode
+
+
+aten = torch.ops.aten
+
+
+class _StatefulRNGMode(TorchDispatchMode):
+    def __torch_dispatch__(
+        self,
+        func: torch._ops.OpOverload,
+        types: tuple[type, ...],
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        if kwargs is None:
+            kwargs = {}
+        if func not in (aten.normal_.default, aten.uniform_.default):
+            return func(*args, **kwargs)
+
+        filled_args, _ = fill_defaults(func._schema, args, kwargs)
+        tensor_arg = filled_args[0]
+        if not isinstance(tensor_arg, torch.Tensor):
+            return func(*args, **kwargs)
+        if tensor_arg.is_meta or tensor_arg.device.type != "cuda":
+            return func(*args, **kwargs)
+        if not isinstance(tensor_arg, CheckpointableTensor):
+            return func(*args, **kwargs)
+        rng_metadata = cast(CheckpointableTensor, tensor_arg)
+        return _run_stateful_rng_op_for_checkpointable_tensor(
+            func,
+            args,
+            kwargs,
+            rng_metadata,
+        )
+
+
+class TestCheckpointableTensorRNG(TestCase):
+    @staticmethod
+    def _set_shard_metadata(
+        tensor: torch.Tensor,
+        global_shape: tuple[int, ...],
+        global_offsets: tuple[tuple[int, ...], ...],
+        local_offsets: tuple[tuple[int, ...], ...],
+        local_sizes: tuple[tuple[int, ...], ...],
+    ) -> None:
+        setattr(tensor, "global_shape", global_shape)  # noqa: B010
+        setattr(tensor, "global_offsets", global_offsets)  # noqa: B010
+        setattr(tensor, "local_offsets", local_offsets)  # noqa: B010
+        setattr(tensor, "local_sizes", local_sizes)  # noqa: B010
+
+    @staticmethod
+    def _layout_cases(total_stride: int):
+        return (
+            (
+                "shard",
+                (5, 7),
+                (2, 7),
+                ((3, 0),),
+                ((0, 0),),
+                ((2, 7),),
+            ),
+            # Reorder chunks that span CUDA grid-stride iterations.
+            (
+                "strided_shard",
+                (5, total_stride + 8),
+                (5, 4),
+                ((0, total_stride + 4), (0, 0)),
+                ((0, 2), (0, 0)),
+                ((5, 2), (5, 2)),
+            ),
+            (
+                "ragged_shard",
+                (4, 4),
+                (3, 4),
+                ((1, 0),),
+                ((0, 0),),
+                ((3, 4),),
+            ),
+            (
+                "grouped_ragged_shard",
+                (4, 2),
+                (2, 2),
+                ((2, 0),),
+                ((0, 0),),
+                ((2, 2),),
+            ),
+            (
+                "grouped_owned",
+                (4, 2, 3),
+                (2, 2, 3),
+                ((2, 0, 0),),
+                ((0, 0, 0),),
+                ((2, 2, 3),),
+            ),
+            (
+                "empty_shard",
+                (7,),
+                (0,),
+                (),
+                (),
+                (),
+            ),
+            (
+                "empty_global",
+                (0,),
+                (0,),
+                (),
+                (),
+                (),
+            ),
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_layouts_match_dense(self):
+        device = torch.device("cuda")
+        properties = torch.cuda.get_device_properties(device)
+        block_size = 256
+        total_stride = (
+            block_size
+            * properties.multi_processor_count
+            * (properties.max_threads_per_multi_processor // block_size)
+        )
+        for dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            for (
+                name,
+                global_shape,
+                local_shape,
+                global_offsets,
+                local_offsets,
+                local_sizes,
+            ) in self._layout_cases(total_stride):
+                with self.subTest(layout=name, dtype=dtype):
+                    expected_generator = torch.Generator(device=device).manual_seed(123)
+                    torch.rand(11, device=device, generator=expected_generator)
+                    dense = torch.empty(
+                        global_shape, dtype=dtype, device=device
+                    ).normal_(0.1, 0.02, generator=expected_generator)
+                    expected_state = expected_generator.get_state()
+                    expected = torch.empty(local_shape, dtype=dtype, device=device)
+                    for global_offset, local_offset, local_size in zip(
+                        global_offsets,
+                        local_offsets,
+                        local_sizes,
+                        strict=True,
+                    ):
+                        global_slices = tuple(
+                            slice(offset, offset + size)
+                            for offset, size in zip(
+                                global_offset, local_size, strict=True
+                            )
+                        )
+                        local_slices = tuple(
+                            slice(offset, offset + size)
+                            for offset, size in zip(
+                                local_offset, local_size, strict=True
+                            )
+                        )
+                        expected[local_slices].copy_(dense[global_slices])
+
+                    actual_generator = torch.Generator(device=device).manual_seed(123)
+                    torch.rand(11, device=device, generator=actual_generator)
+                    actual = torch.empty(local_shape, dtype=dtype, device=device)
+                    self._set_shard_metadata(
+                        actual,
+                        global_shape,
+                        global_offsets,
+                        local_offsets,
+                        local_sizes,
+                    )
+                    with _StatefulRNGMode():
+                        actual.normal_(0.1, 0.02, generator=actual_generator)
+
+                    self.assertEqual(actual, expected, rtol=0, atol=0)
+                    self.assertEqual(actual_generator.get_state(), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_private_adapter_replays_explicit_generator_for_local_tensor(self):
+        device = torch.device("cuda")
+        expected_generator = torch.Generator(device=device).manual_seed(123)
+        expected = torch.empty(7, device=device).uniform_(
+            -0.2, 0.3, generator=expected_generator
+        )
+        expected_state = expected_generator.get_state()
+
+        actual_generator = torch.Generator(device=device).manual_seed(123)
+        local_tensor = LocalTensor(
+            {
+                0: torch.empty(3, device=device),
+                1: torch.empty(3, device=device),
+            }
+        )
+        with LocalTensorMode(local_tensor._ranks):
+            self.assertTrue(
+                _is_supported_stateful_rng_op(aten.uniform_.default, local_tensor)
+            )
+            returned = _run_stateful_rng_op(
+                aten.uniform_.default,
+                (local_tensor, -0.2, 0.3),
+                {"generator": actual_generator},
+                (7,),
+                ((2,),),
+                ((0,),),
+                ((3,),),
+            )
+
+        self.assertIs(returned, local_tensor)
+        for local_result in local_tensor._local_tensors.values():
+            self.assertEqual(local_result, expected[2:5], rtol=0, atol=0)
+        self.assertEqual(actual_generator.get_state(), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_private_adapter_default_generator_with_rank_local_layout(self):
+        device = torch.device("cuda")
+        torch.manual_seed(123)
+        expected = torch.empty(7, device=device).uniform_(-0.2, 0.3)
+        expected_state = torch.cuda.get_rng_state(device)
+
+        torch.manual_seed(123)
+        local_tensor = LocalTensor(
+            {
+                0: torch.empty(3, device=device),
+                1: torch.empty(3, device=device),
+            }
+        )
+        rank_local_start = torch.SymInt(LocalIntNode({0: 0, 1: 4}))
+        with LocalTensorMode(local_tensor._ranks):
+            returned = _run_stateful_rng_op(
+                aten.uniform_.default,
+                (local_tensor, -0.2, 0.3),
+                {},
+                (7,),
+                ((rank_local_start,),),
+                ((0,),),
+                ((3,),),
+            )
+
+        self.assertIs(returned, local_tensor)
+        self.assertEqual(local_tensor._local_tensors[0], expected[:3], rtol=0, atol=0)
+        self.assertEqual(local_tensor._local_tensors[1], expected[4:], rtol=0, atol=0)
+        self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_empty_local_tensor_matches_dense_increment(self):
+        device = torch.device("cuda")
+        for global_numel in (0, 7):
+            with self.subTest(global_numel=global_numel):
+                torch.manual_seed(123)
+                torch.empty(global_numel, device=device).normal_()
+                expected_state = torch.cuda.get_rng_state(device)
+
+                torch.manual_seed(123)
+                actual = torch.empty(0, device=device)
+                self._set_shard_metadata(actual, (global_numel,), (), (), ())
+                with _StatefulRNGMode():
+                    actual.normal_()
+
+                self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_invalid_metadata_does_not_advance_generator(self):
+        device = torch.device("cuda")
+        generator = torch.Generator(device=device).manual_seed(123)
+        actual = torch.empty(3, device=device)
+        self._set_shard_metadata(
+            actual,
+            (7,),
+            ((2,),),
+            ((0,),),
+            ((2,),),
+        )
+        state = generator.get_state().clone()
+
+        with self.assertRaisesRegex(RuntimeError, "cover the entire tensor"):
+            with _StatefulRNGMode():
+                actual.normal_(generator=generator)
+
+        self.assertEqual(generator.get_state(), state)
+
+
+class TestPhiloxDistributionShardsOp(TestCase):
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_uniform_matches_dense(self):
+        device = torch.device("cuda")
+        # Must match PhiloxDistributionKind::Uniform in PhiloxDistribution.h.
+        uniform_distribution = 1
+        for dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            with self.subTest(dtype=dtype):
+                generator = torch.Generator(device=device).manual_seed(123)
+                expected = torch.empty(17, dtype=dtype, device=device).uniform_(
+                    -0.2, 0.3, generator=generator
+                )
+                expected_state = generator.get_state()
+
+                generator.manual_seed(123)
+                actual = torch.empty_like(expected)
+                torch.ops.aten._philox_distribution_shards_(
+                    actual,
+                    [17],
+                    [0],
+                    [0],
+                    [17],
+                    1,
+                    uniform_distribution,
+                    [-0.2, 0.3],
+                    generator=generator,
+                )
+
+                self.assertEqual(actual, expected, rtol=0, atol=0)
+                self.assertEqual(generator.get_state(), expected_state)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_invalid_calls_do_not_advance_generator(self):
+        device = torch.device("cuda")
+        # Must match PhiloxDistributionKind::Normal in PhiloxDistribution.h.
+        normal_distribution = 0
+        generator = torch.Generator(device=device).manual_seed(123)
+
+        def assert_invalid_without_advancing(regex, fn):
+            state = generator.get_state().clone()
+            with self.assertRaisesRegex(RuntimeError, regex):
+                fn()
+            self.assertEqual(generator.get_state(), state)
+
+        assert_invalid_without_advancing(
+            "local shards 0 and 1 must not overlap",
+            lambda: torch.ops.aten._philox_distribution_shards_(
+                torch.empty(2, device=device),
+                [4],
+                [0, 2],
+                [0, 0],
+                [1, 1],
+                2,
+                normal_distribution,
+                [0.0, 1.0],
+                generator=generator,
+            ),
+        )
+        assert_invalid_without_advancing(
+            "normal expects std >= 0.0",
+            lambda: torch.ops.aten._philox_distribution_shards_(
+                torch.empty(1, device=device),
+                [1],
+                [0],
+                [0],
+                [1],
+                1,
+                normal_distribution,
+                [0.0, -1.0],
+                generator=generator,
+            ),
+        )
+
+    def test_meta_validation(self):
+        result = torch.empty((2, 3), device="meta")
+        returned = aten._philox_distribution_shards_(
+            result,
+            [4, 5],
+            [1, 2],
+            [0, 0],
+            [2, 3],
+            1,
+            _PHILOX_DISTRIBUTION_NORMAL,
+            [0.0, 1.0],
+        )
+        self.assertIs(returned, result)
+
+        cases = (
+            (
+                "normal expects std >= 0.0",
+                torch.float32,
+                _PHILOX_DISTRIBUTION_NORMAL,
+                [0.0, -1.0],
+            ),
+            (
+                "found from=1.*> to=0",
+                torch.float32,
+                _PHILOX_DISTRIBUTION_UNIFORM,
+                [1.0, 0.0],
+            ),
+            (
+                "unsupported distribution kind 2",
+                torch.float32,
+                2,
+                [0.0, 1.0],
+            ),
+            (
+                "unsupported dtype",
+                torch.float8_e4m3fn,
+                _PHILOX_DISTRIBUTION_UNIFORM,
+                [0.0, 1.0],
+            ),
+        )
+        for regex, dtype, distribution, params in cases:
+            with self.subTest(error=regex):
+                with self.assertRaisesRegex(RuntimeError, regex):
+                    aten._philox_distribution_shards_(
+                        torch.empty(1, device="meta", dtype=dtype),
+                        [1],
+                        [0],
+                        [0],
+                        [1],
+                        1,
+                        distribution,
+                        params,
+                    )
+
+    def test_symbolic_metadata_meta_and_fake(self):
+        self.assertIn(
+            "SymInt[] global_shape",
+            str(aten._philox_distribution_shards_.default._schema),
+        )
+
+        for device in ("meta", "cuda"):
+            with self.subTest(device=device):
+                shape_env = ShapeEnv()
+                global_size = shape_env.create_unbacked_symint()
+                local_size = shape_env.create_unbacked_symint()
+                context = (
+                    FakeTensorMode(shape_env=shape_env)
+                    if device == "cuda"
+                    else contextlib.nullcontext()
+                )
+                with context:
+                    result = torch.empty(local_size, device=device)
+                    returned = aten._philox_distribution_shards_(
+                        result,
+                        [global_size],
+                        [0],
+                        [0],
+                        [local_size],
+                        1,
+                        _PHILOX_DISTRIBUTION_UNIFORM,
+                        [0.0, 1.0],
+                    )
+
+                self.assertIs(returned, result)
+                self.assertIsNone(global_size.node.maybe_as_int())
+                self.assertIsNone(local_size.node.maybe_as_int())
+
+
+if __name__ == "__main__":
+    run_tests()
