@@ -470,7 +470,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return Foo.apply(x)
 
-        x = torch.tensor([-2.0, 1.0, 3.0], requires_grad=True)
+        x = torch.tensor([-2.0, 1.0, 3.0], requires_grad=True, device=device_type)
         res = fn(x)
         self.assertEqual(res, Foo.apply(x))
         res.sum().backward()
@@ -497,7 +497,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return Foo.apply(x)
 
-        x = torch.tensor([1.0, 3.0], requires_grad=True)
+        x = torch.tensor([1.0, 3.0], requires_grad=True, device=device_type)
         res = fn(x)
         self.assertEqual(res, Foo.apply(x))
         res.sum().backward()
@@ -927,8 +927,8 @@ class GraphModule(torch.nn.Module):
             b = torch.rand(1, requires_grad=True)
             MyFn.apply(a)
 
-            a = torch.ones(2, requires_grad=True)
-            b = torch.ones(2, requires_grad=True)
+            a = torch.ones(2, requires_grad=True, device=device_type)
+            b = torch.ones(2, requires_grad=True, device=device_type)
             c = MyAdder.apply(a.clone(), b)
             c.sum().backward()
 
@@ -1477,7 +1477,7 @@ class GraphModule(torch.nn.Module):
             x, _ = MyCube.apply(x)
             return x
 
-        inp = torch.ones(2, requires_grad=True)
+        inp = torch.ones(2, requires_grad=True, device=device_type)
         out = fn(inp)
         out.sum().backward()
         self.assertEqual(out, inp**3)
@@ -1534,8 +1534,8 @@ class GraphModule(torch.nn.Module):
             z = Add.apply(x, y)
             return z
 
-        x = torch.randn(10, device=device_type, requires_grad=True)
-        y = torch.randn(10, device=device_type, requires_grad=True)
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
         z = f(x, y)
         loss = z.sum()
         loss.backward()
@@ -1569,8 +1569,8 @@ class GraphModule(torch.nn.Module):
             z = Add.apply(x, y)
             return z
 
-        x = torch.randn(10, device=device_type, requires_grad=True)
-        y = torch.randn(10, device=device_type, requires_grad=True)
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
         z, _ = f(x, y)
         loss = z.sum()
         loss.backward()
@@ -1635,8 +1635,8 @@ class GraphModule(torch.nn.Module):
         def compiled_f(x, y):
             return TritonAddWithBuffer.apply(x, y)
 
-        x = torch.randn(1024, device=device_type, requires_grad=False)
-        y = torch.randn(1024, device=device_type, requires_grad=True)
+        x = torch.randn(1024, requires_grad=False)
+        y = torch.randn(1024, requires_grad=True)
 
         out_compiled, buffer_compiled = compiled_f(x, y)
         loss_compiled = out_compiled.sum()
@@ -1693,8 +1693,8 @@ class GraphModule(torch.nn.Module):
         def compiled_f(x, offsets):
             return FnWithReadOnlyBwdInput.apply(x, offsets)
 
-        x = torch.randn(1024, device=device_type, requires_grad=True)
-        offsets = torch.tensor([0, 512, 1024], device=device_type)
+        x = torch.randn(1024, requires_grad=True)
+        offsets = torch.tensor([0, 512, 1024])
 
         out, offsets_out = compiled_f(x, offsets)
         loss = out.sum()
@@ -2159,7 +2159,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return Foo.apply(x)
 
-        x = torch.randn(8, device="cpu", requires_grad=True)
+        x = torch.randn(8, device=device_type, requires_grad=True)
 
         # Eager reference
         x_ref = x.detach().clone().requires_grad_(True)
@@ -2259,7 +2259,7 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         def loss_fn(x):
             return compiled_fn(x).sum()
 
-        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        x = torch.tensor([1.0, 2.0], requires_grad=True, device=device_type)
         result = torch.func.grad(loss_fn)(x)
         self.assertEqual(result, torch.tensor([2.0, 2.0]))
 

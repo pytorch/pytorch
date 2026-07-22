@@ -231,7 +231,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device=device_type)
+        x = torch.randn((2, 2))
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -262,7 +262,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device=device_type)
+        x = torch.randn((2, 2))
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
@@ -298,7 +298,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device=device_type)
+        x = torch.randn((2, 2))
         s = torch.get_device_module(device_type).Stream()
         ref = fn(x, s)
         cnts = torch._dynamo.testing.CompileCounter()
@@ -336,7 +336,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device=device_type)
+        x = torch.randn((2, 2))
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -365,7 +365,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 return x + 1
             return x - 1
 
-        x = torch.randn((2, 2), device=device_type)
+        x = torch.randn((2, 2))
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -426,7 +426,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.add(x, 2)
             return x, e
 
-        x = torch.randn((2, 2), device=device_type)
+        x = torch.randn((2, 2))
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
@@ -453,7 +453,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x, e
 
-        x = torch.randn((2, 2), device=device_type)
+        x = torch.randn((2, 2))
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
@@ -469,13 +469,13 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_cuda_event_created_outside_of_graph(self):
         user_stream = torch.get_device_module(device_type).Stream()
         event = torch.get_device_module(device_type).Event()
-        foo = torch.empty((2, 2), device=device_type)
+        foo = torch.empty((2, 2))
 
         def func(foo):
             event.wait()
             return foo + 1, event
 
-        x = torch.randn((1024, 1024), device=device_type)
+        x = torch.randn((1024, 1024))
         cnts = torch._dynamo.testing.CompileCounter()
 
         def run_iters(fn, compile=False):
@@ -528,7 +528,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device=device_type)
+        x = torch.randn((2, 2))
         cur_stream = torch.accelerator.current_stream()
         new_stream = torch.get_device_module(device_type).Stream()
         ref = fn(x, cur_stream, new_stream)
@@ -570,7 +570,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device=device_type)
+        x = torch.randn((2, 2))
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -586,7 +586,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 x = torch.sin(x + 1)
             return x
 
-        x = torch.randn((2, 2), device=device_type)
+        x = torch.randn((2, 2))
         ref = fn(x)
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(x)
@@ -636,9 +636,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device=device_type)
-                b_float32 = torch.rand((8, 8), device=device_type)
-                d_float32 = torch.rand((8, 8), device=device_type)
+                a_float32 = torch.rand((8, 8))
+                b_float32 = torch.rand((8, 8))
+                d_float32 = torch.rand((8, 8))
 
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                     e_float16 = torch.mm(a_float32, b_float32)
@@ -663,8 +663,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_cuda_amp_autocast(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device=device_type)
-                b_float32 = torch.rand((8, 8), device=device_type)
+                a_float32 = torch.rand((8, 8))
+                b_float32 = torch.rand((8, 8))
 
                 with torch.autocast(device_type="cuda", dtype=torch.float64):
                     c_float64 = torch.mm(a_float32, b_float32)
@@ -722,7 +722,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             8,
             seq_len_q,
             head_dim,
-            device=device_type,
+            
             dtype=dtype,
             requires_grad=True,
         )
@@ -731,7 +731,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             8,
             seq_len_k,
             head_dim,
-            device=device_type,
+            
             dtype=dtype,
             requires_grad=True,
         )
@@ -740,7 +740,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             8,
             seq_len_k,
             head_dim,
-            device=device_type,
+            
             dtype=dtype,
             requires_grad=True,
         )
@@ -937,9 +937,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_autocast_float64(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device=device_type)
-                b_float32 = torch.rand((8, 8), device=device_type)
-                d_float32 = torch.rand((8, 8), device=device_type)
+                a_float32 = torch.rand((8, 8))
+                b_float32 = torch.rand((8, 8))
+                d_float32 = torch.rand((8, 8))
 
                 with torch.autocast(device_type="cuda", dtype=torch.float64):
                     e_float64 = torch.mm(a_float32, b_float32)
@@ -963,9 +963,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_autocast_device(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device=device_type)
-                b_float32 = torch.rand((8, 8), device=device_type)
-                d_float32 = torch.rand((8, 8), device=device_type)
+                a_float32 = torch.rand((8, 8))
+                b_float32 = torch.rand((8, 8))
+                d_float32 = torch.rand((8, 8))
 
                 with torch.autocast("cuda"):
                     e_float64 = torch.mm(a_float32, b_float32)
@@ -1040,8 +1040,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         def fn(a, b):
             return mm_float16(a, b), mm_float16_cuda(a, b), mm_float16_cpu(a, b)
 
-        a_float32 = torch.rand((8, 8), device=device_type)
-        b_float32 = torch.rand((8, 8), device=device_type)
+        a_float32 = torch.rand((8, 8))
+        b_float32 = torch.rand((8, 8))
 
         ref = fn(a_float32, b_float32)
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
@@ -2998,7 +2998,7 @@ class GraphModule(torch.nn.Module):
             y = ctx.__enter__()
             return x + y, ctx
 
-        x = torch.tensor([1.0])
+        x = torch.tensor([1.0], device=device_type)
         expected = fn(x)
         result = torch.compile(fn, backend="eager", fullgraph=False)(x)
         self.assertEqual(expected[0], result[0])

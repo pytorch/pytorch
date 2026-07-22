@@ -3595,7 +3595,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         def fn(x):
             return torch.vmap(lambda x: x.sin())(x)
 
-        x = torch.randn(3, 3, 4, 5)
+        x = torch.randn(3, 3, 4, 5, device=device_type)
         y = fn(x)
         # sanity check
         self.assertEqual(len(records), 0)
@@ -6049,7 +6049,7 @@ class GraphModule(torch.nn.Module):
         def f(x):
             return x**2
 
-        x = torch.randn(2, requires_grad=True)
+        x = torch.randn(2, requires_grad=True, device=device_type)
         y = f(x)
 
         def get_vjp(v):
@@ -6067,7 +6067,7 @@ class GraphModule(torch.nn.Module):
         def f(x):
             return x**2
 
-        x = torch.randn(2, requires_grad=True)
+        x = torch.randn(2, requires_grad=True, device=device_type)
         y = f(x)
 
         def get_vjp(v):
@@ -6085,7 +6085,7 @@ class GraphModule(torch.nn.Module):
         def f(x):
             return x**2
 
-        x = torch.randn(2, requires_grad=True)
+        x = torch.randn(2, requires_grad=True, device=device_type)
         y = f(x)
 
         def get_vjp(v):
@@ -6909,8 +6909,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        x = torch.randn(4, 4, device=device_type, requires_grad=True)
-        y = torch.randn(4, 4, device=device_type, requires_grad=True)
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
 
         fw_compiler = functools.partial(
             count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
@@ -6935,8 +6935,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        x = torch.randn(4, 4, device=device_type, requires_grad=True)
-        y = torch.randn(4, 4, device=device_type, requires_grad=True)
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
 
         backend = "inductor"
         self._validate(

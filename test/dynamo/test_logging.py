@@ -130,7 +130,7 @@ def inductor_error_fn(a):
 
 
 def inductor_schedule_fn(a):
-    output = a.add(torch.ones(1000, 1000, device=device_type))
+    output = a.add(torch.ones(1000, 1000))
     return output
 
 
@@ -171,7 +171,7 @@ class LoggingTests(LoggingTestCase):
     @make_logging_test(schedule=True)
     def test_schedule(self, records):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device=device_type))
+        fn_opt(torch.ones(1000, 1000))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
 
@@ -179,7 +179,7 @@ class LoggingTests(LoggingTestCase):
     @make_logging_test(fusion=True)
     def test_fusion(self, records):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device=device_type))
+        fn_opt(torch.ones(1000, 1000))
         self.assertGreater(len(records), 0)
 
         # LOAF will add an extra round of fusion and result in more logs
@@ -191,7 +191,7 @@ class LoggingTests(LoggingTestCase):
     @make_logging_test(cudagraphs=True)
     def test_cudagraphs(self, records):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
-        fn_opt(torch.ones(1000, 1000, device=device_type))
+        fn_opt(torch.ones(1000, 1000))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
 
@@ -1343,7 +1343,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
     @make_logging_test(perf_hints=True)
     @requires_gpu
     def test_optimizer_non_static_param(self, records):
-        params = [torch.randn(10, 10, device=device_type) for _ in range(2)]
+        params = [torch.randn(10, 10) for _ in range(2)]
         for param in params:
             param.grad = torch.zeros_like(param)
         opt = torch.optim.Adam(params)
@@ -1363,8 +1363,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 
             f = torch.compile(f, mode="max-autotune-no-cudagraphs")
             f(
-                torch.randn(10, 10, device=device_type),
-                torch.randn(10, 10, device=device_type),
+                torch.randn(10, 10),
+                torch.randn(10, 10),
             )
             self.assertGreater(len(records), 0)
             self.assertLess(len(records), 40)
@@ -1485,7 +1485,7 @@ fn(torch.randn(5))
         def baz(x):
             return x + 1
 
-        baz(torch.ones(3))
+        baz(torch.ones(3, device=device_type))
 
         # `_log_traced_frames` is registered as an atexit callback, so we invoke
         # it explicitly for testing.
