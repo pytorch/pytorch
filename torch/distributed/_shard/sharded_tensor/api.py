@@ -774,10 +774,7 @@ class ShardedTensor(ShardedTensorBase):
             gathered_metadatas = [None for _ in range(world_size)]
 
             dist.all_gather_object(
-                gathered_metadatas,
-                local_sharded_tensor_metadata,
-                group=process_group,
-                weights_only=True,
+                gathered_metadatas, local_sharded_tensor_metadata, group=process_group
             )
         else:
             gathered_metadatas = [local_sharded_tensor_metadata]

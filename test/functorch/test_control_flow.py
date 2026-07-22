@@ -1849,6 +1849,37 @@ def forward(self, pred_1, x_1):
         # Clamped above-range index picks branch N-1.
         self.assertEqual(f_huge(x), branch2(x))
 
+    @skipIfTorchDynamo("mark_dynamic cannot be traced under dynamo_wrapped")
+    def test_switch_symint_index_clamped(self):
+        def branch0(inp_x):
+            return inp_x.sin()
+
+        def branch1(inp_x):
+            return inp_x.cos()
+
+        def branch2(inp_x):
+            return inp_x.abs()
+
+        branches = (branch0, branch1, branch2)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(idx_carrier, inp_x):
+            idx = idx_carrier.shape[0] - 5
+            return switch(idx, branches, (inp_x,))
+
+        x = torch.randn(4)
+
+        # shape[0] - 5 is negative -> clamps to branch0.
+        idx_carrier = torch.zeros(2)
+        torch._dynamo.mark_dynamic(idx_carrier, 0)
+        self.assertEqual(f(idx_carrier, x), branch0(x))
+
+        # shape[0] - 5 == 3 (above range) -> clamps to branch2.
+        torch._dynamo.reset()
+        idx_carrier = torch.zeros(8)
+        torch._dynamo.mark_dynamic(idx_carrier, 0)
+        self.assertEqual(f(idx_carrier, x), branch2(x))
+
     def test_switch_nn_module_branches(self):
         # Each branch is a different nn.Module whose parameters are
         # captured as free variables. Dynamo must lift the parameters of
@@ -6517,10 +6548,11 @@ class TestControlFlowTraced(TestCase):
 def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor):
     l_inp_x_ = L_inp_x_
     l_idx_ = L_idx_
+    index = l_idx_.clamp(0, 2);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
     switch_branch2_0 = self.switch_branch2_0
-    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_,));  l_idx_ = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = None
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_,));  index = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = None
     getitem = switch[0];  switch = None
     return (getitem,)""",
         )
@@ -6589,10 +6621,11 @@ def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_branch0_clos
     l_branch0_closure_0_cell_contents = L_branch0_closure_0_cell_contents
     l_branch1_closure_0_cell_contents = L_branch1_closure_0_cell_contents
     l_branch2_closure_0_cell_contents = L_branch2_closure_0_cell_contents
+    index = l_idx_.clamp(0, 2);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
     switch_branch2_0 = self.switch_branch2_0
-    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_contents, l_branch2_closure_0_cell_contents));  l_idx_ = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = l_branch0_closure_0_cell_contents = l_branch1_closure_0_cell_contents = l_branch2_closure_0_cell_contents = None
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_contents, l_branch2_closure_0_cell_contents));  index = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = l_branch0_closure_0_cell_contents = l_branch1_closure_0_cell_contents = l_branch2_closure_0_cell_contents = None
     getitem = switch[0];  switch = None
     return (getitem,)""",
         )
@@ -6621,6 +6654,85 @@ def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1
 def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1_closure_0_cell_contents_branch1, l_branch2_closure_0_cell_contents_branch2):
     l_inp_x__1 = l_inp_x_
     add = l_inp_x__1 + l_branch2_closure_0_cell_contents_branch2;  l_inp_x__1 = l_branch2_closure_0_cell_contents_branch2 = None
+    return (add,)""",
+        )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_switch_lifted_args_dedup_check_graph(self):
+        a = torch.ones(2, 3)
+        b = torch.ones(2, 3) + 1
+        c = torch.ones(2, 3) * 2
+
+        # branch0 closes over {a, b}, branch1 over {a, b, c}, branch2 over {c}.
+        # No leaf is in *all* three -> shared block is empty; `a` is lifted by
+        # branches 0+1, `b` by branches 0+1, `c` by branches 1+2.
+        def branch0(inp_x):
+            return inp_x + a + b
+
+        def branch1(inp_x):
+            return inp_x + a + b + c
+
+        def branch2(inp_x):
+            return inp_x + c
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1, branch2), (inp_x,))
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend, fullgraph=True)(
+            torch.tensor([1]), torch.randn(2, 3)
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        # The outer operand tuple lists `a`, `b`, `c` exactly once each, with
+        # no duplicates from the per-branch unique lists.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_branch0_closure_0_cell_contents : torch.Tensor, L_branch0_closure_1_cell_contents : torch.Tensor, L_branch1_closure_2_cell_contents : torch.Tensor):
+    l_inp_x_ = L_inp_x_
+    l_idx_ = L_idx_
+    l_branch0_closure_0_cell_contents = L_branch0_closure_0_cell_contents
+    l_branch0_closure_1_cell_contents = L_branch0_closure_1_cell_contents
+    l_branch1_closure_2_cell_contents = L_branch1_closure_2_cell_contents
+    index = l_idx_.clamp(0, 2);  l_idx_ = None
+    switch_branch0_0 = self.switch_branch0_0
+    switch_branch1_0 = self.switch_branch1_0
+    switch_branch2_0 = self.switch_branch2_0
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_, l_branch0_closure_0_cell_contents, l_branch0_closure_1_cell_contents, l_branch1_closure_2_cell_contents));  index = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = l_branch0_closure_0_cell_contents = l_branch0_closure_1_cell_contents = l_branch1_closure_2_cell_contents = None
+    getitem = switch[0];  switch = None
+    return (getitem,)""",
+        )
+        # Every branch submodule shares the same placeholder signature,
+        # listing each of {a, b, c} once. The "_branch0" / "_branch2" suffixes
+        # reflect which branch first lifted the leaf.
+        self.assertExpectedInline(
+            gm.switch_branch0_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch0_closure_1_cell_contents_branch0, l_branch1_closure_2_cell_contents_branch1):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch0_closure_0_cell_contents_branch0;  l_inp_x__1 = l_branch0_closure_0_cell_contents_branch0 = None
+    add_1 = add + l_branch0_closure_1_cell_contents_branch0;  add = l_branch0_closure_1_cell_contents_branch0 = None
+    return (add_1,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch1_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch0_closure_1_cell_contents_branch0, l_branch1_closure_2_cell_contents_branch1):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch0_closure_0_cell_contents_branch0;  l_inp_x__1 = l_branch0_closure_0_cell_contents_branch0 = None
+    add_1 = add + l_branch0_closure_1_cell_contents_branch0;  add = l_branch0_closure_1_cell_contents_branch0 = None
+    add_2 = add_1 + l_branch1_closure_2_cell_contents_branch1;  add_1 = l_branch1_closure_2_cell_contents_branch1 = None
+    return (add_2,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch2_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch0_closure_1_cell_contents_branch0, l_branch1_closure_2_cell_contents_branch1):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch1_closure_2_cell_contents_branch1;  l_inp_x__1 = l_branch1_closure_2_cell_contents_branch1 = None
     return (add,)""",
         )
 
@@ -6758,9 +6870,10 @@ def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_linear0_para
     l_linear0_parameters_bias_ = L_linear0_parameters_bias_
     l_linear1_parameters_weight_ = L_linear1_parameters_weight_
     l_linear1_parameters_bias_ = L_linear1_parameters_bias_
+    index = l_idx_.clamp(0, 1);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
-    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0], (l_inp_x_, l_linear0_parameters_bias_, l_linear0_parameters_weight_, l_linear1_parameters_bias_, l_linear1_parameters_weight_));  l_idx_ = switch_branch0_0 = switch_branch1_0 = l_inp_x_ = l_linear0_parameters_bias_ = l_linear0_parameters_weight_ = l_linear1_parameters_bias_ = l_linear1_parameters_weight_ = None
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0], (l_inp_x_, l_linear0_parameters_bias_, l_linear0_parameters_weight_, l_linear1_parameters_bias_, l_linear1_parameters_weight_));  index = switch_branch0_0 = switch_branch1_0 = l_inp_x_ = l_linear0_parameters_bias_ = l_linear0_parameters_weight_ = l_linear1_parameters_bias_ = l_linear1_parameters_weight_ = None
     getitem = switch[0];  switch = None
     return (getitem,)""",
         )
@@ -11179,6 +11292,37 @@ class GraphModule(torch.nn.Module):
             m, backend=backend, dynamic=dynamic, fullgraph=True
         )(x, y)
         self.assertEqual(compiled_out, out)
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_cond_branch_closure_over_int_args(self, backend):
+        def f(rows: int, cols: int):
+            pred = torch.tensor(True)
+
+            def true_fn():
+                return torch.ones(rows, cols)
+
+            def false_fn():
+                return torch.zeros(rows, cols)
+
+            return torch.cond(pred, true_fn, false_fn)
+
+        compiled = torch.compile(f, backend=backend, dynamic=True, fullgraph=True)
+        self.assertEqual(compiled(5, 1000), f(5, 1000))
+
+        # differing sizes still fail on inductor (#189528), hence eager/aot_eager only
+        def g(rows: int, cols: int):
+            pred = torch.tensor(True)
+
+            def true_fn():
+                return torch.ones(rows, cols)
+
+            def false_fn():
+                return torch.zeros(rows, cols + 1)
+
+            return torch.cond(pred, true_fn, false_fn)
+
+        compiled = torch.compile(g, backend=backend, dynamic=True, fullgraph=True)
+        self.assertEqual(compiled(5, 7), g(5, 7))
 
 
 class TestAutoFunctionalizeControlFlow(TestCase):

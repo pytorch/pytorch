@@ -14,6 +14,7 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
@@ -53,6 +54,8 @@ def _lookup_tensor_categories(
 
 @skipIfTorchDynamo("TorchDynamo removes profiler altogether.")
 class TestMemoryProfiler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_config_check(self) -> None:
         with torch.profiler.profile() as prof:
             pass
@@ -132,6 +135,8 @@ class RecordInputOutputDispatchMode(torch.utils._python_dispatch.TorchDispatchMo
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestIdentifyGradients(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def gradient_detected(
         self,
         prof: torch.profiler.profile,
@@ -336,6 +341,8 @@ class TestIdentifyGradients(TestCase):
 
 @skipIfTorchDynamo("TorchDynamo removes profiler altogether.")
 class TestDataFlow(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         self.maxDiff = None
@@ -767,6 +774,8 @@ class TestDataFlow(TestCase):
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2E(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_and_format_categories(self, fn, indent=12):
         """Generate summary of assigned categories for expecttest."""
 
@@ -1258,6 +1267,8 @@ class TestMemoryProfilerE2E(TestCase):
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2EDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_and_check_parameters_and_gradients(
         self, inner_fn, model, grads_none: bool = False
     ):
@@ -1486,6 +1497,8 @@ class TestMemoryProfilerE2EDeviceType(TestCase):
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerTimeline(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipXPUIf(
         True,
         "The XPU Profiler will not cover this case for now. Will support it in next period.",

@@ -2573,7 +2573,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ),
             f"&{tmp_name}",
         ]
-        # We return the lines instead of writing here because writing here is bug prune.
+        # We return the lines instead of writing here because writing here is bug prone.
         # If you write aoti_torch__alloc_from_pool lines, you must write the RAIIAtenTensorHandle
         # as well, otherwise you get memory leaks
         allocations_to_write = [
@@ -3304,7 +3304,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ) -> str | None | _OUTPUT_ARGS_TYPE:
             if out is None:
                 return None
-            if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
+            if isinstance(
+                out, (ir.MultiOutput, ir._CollectiveKernel, ir.FallbackKernel)
+            ):
                 return out.get_name()
             if isinstance(out, ir.MutationOutput):
                 mutated_buf_names = out.get_mutation_names()
@@ -4044,12 +4046,23 @@ if (!custom_op_wrapper) {
                 if output_arg is not None
             ]
 
-        if num_returned_outputs == 1 and returned_output_slots:
+        # custom_op_wrapper returns a bare capsule only for a single, non-list
+        # Tensor return. A Tensor[] return (even of length 1) or multiple returns
+        # come back as a Python list that must be indexed with PyList_GET_ITEM.
+        schema_returns = op_overload._schema.returns
+        returns_python_list = len(schema_returns) != 1 or isinstance(
+            schema_returns[0].real_type, torch.ListType
+        )
+        if (
+            num_returned_outputs == 1
+            and returned_output_slots
+            and not returns_python_list
+        ):
             # result is a single tensor
             _, output = returned_output_slots[0]
             lines += f"{output} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
         else:
-            # result is a tuple of tensors
+            # result is a list of tensors (Tensor[] or multiple returns)
             for idx, output_arg in returned_output_slots:
                 lines += f"{output_arg} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));\n"
 
