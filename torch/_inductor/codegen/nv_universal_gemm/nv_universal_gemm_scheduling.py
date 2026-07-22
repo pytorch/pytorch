@@ -552,28 +552,20 @@ class NVUniversalGemmScheduling(BaseScheduling):
         preserve_gemm_output = not V.graph.scheduler.can_buffer_be_removed_through_fusion(
             ir_node.get_name(), fused_buffer_names
         )
-        has_local_reduce = local_reduce is not None or any(
-            self._grouped_reduce_config(ir_node, node) is not None
-            for node in existing_epilogue_nodes
-        )
-        if scaled_epilogue and preserve_gemm_output and not has_local_reduce:
-            log.debug("NVGEMM scaled EVT does not support multiple output stores")
-            return False
-
-        # Dense EFC supports multiple EVT stores. Scaled kernels use a separate
-        # local-reduction output slot but otherwise require one EVT output.
+        # Multi-store epilogues wire each output to its own destination tensor.
         trial_removed_buffers = V.graph.removed_buffers.copy()
         if not preserve_gemm_output:
             trial_removed_buffers.add(ir_node.get_name())
         try:
             trial_reads: list[str] = []
+            trial_writes: list[str] = []
             evt_nodes = [
                 node
                 for node in all_epilogue_nodes
                 if self._grouped_reduce_config(ir_node, node) is None
             ]
             if evt_nodes:
-                trial_reads, _, _, _ = (
+                trial_reads, trial_writes, _, _ = (
                     CutlassEVTCodegen.ir_to_evt_python_code(
                         ir_node.get_name(),
                         evt_nodes,
@@ -581,7 +573,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     )
                 )
             if scaled_epilogue:
-                if len(trial_reads) > 4:
+                if len(trial_reads) > 4 or len(trial_writes) > 4:
                     return False
                 for read_name in trial_reads:
                     read_buf = name_to_buf.get(read_name)
