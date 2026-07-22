@@ -275,11 +275,11 @@ class NVUniversalGemmScheduling(BaseScheduling):
             if m == out_m and n % group == 0 and out_n == n // group:
                 axis = 1
                 expected_strides = [n, group, 1]
-                max_group = 32
+                max_group = n
             elif n == out_n and m % group == 0 and out_m == m // group:
                 axis = 0
                 expected_strides = [group * n, 1, n]
-                max_group = 4
+                max_group = 16
             else:
                 return None
         elif isinstance(node.data, Pointwise):
@@ -287,7 +287,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 return None
             group = m // out_m
             axis = 0
-            max_group = 4
+            max_group = 16
             expected_strides = [group * n, 1]
         else:
             return None
