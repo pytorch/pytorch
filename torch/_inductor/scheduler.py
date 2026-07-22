@@ -59,6 +59,7 @@ from torch._inductor.stream_utils import get_stream_name
 from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from torch.utils._triton import has_triton
 
 from . import comms, config, config_comms, dependencies, ir, metrics
@@ -79,7 +80,7 @@ from .ir import (
     MultiOutputLayout,
     NoneLayout,
 )
-from .loop_body import LoopBody
+from .loop_body import LoopBody, MemoryUsageType
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, is_power_of_2, red_text
@@ -150,6 +151,7 @@ class PendingFusion:
     callable_fn: Callable[[], bool]
     node1: BaseSchedulerNode
     node2: BaseSchedulerNode
+    can_reorder: bool = False
     future: LambdaFuture | None = None
 
     def get_fusion_nodes(self) -> tuple[BaseSchedulerNode, BaseSchedulerNode]:
@@ -2320,8 +2322,10 @@ class SchedulerNode(BaseSchedulerNode):
 
     def snapshot_loop_state(self) -> tuple[Any, ...]:
         """Snapshot mutable state modified by loop transformations
-        (apply_new_loop_order, apply_loop_reindexing). Must be kept
-        in sync with those methods and restore_loop_state."""
+        (apply_new_loop_order, apply_loop_reindexing,
+        _apply_indexing_expr_replacements,
+        expand_dimension_for_pointwise_node). Must be kept in sync with those
+        methods and restore_loop_state."""
         return (
             self._body,
             self._sizes,
@@ -2361,6 +2365,8 @@ class SchedulerNode(BaseSchedulerNode):
             [Sequence[sympy.Expr], Sequence[sympy.Expr]], Sequence[sympy.Expr]
         ]
         | None = None,
+        *,
+        refresh_dependencies: bool = True,
     ) -> None:
         if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
             raise AssertionError(
@@ -2375,19 +2381,21 @@ class SchedulerNode(BaseSchedulerNode):
         group_fn = self.scheduler.get_backend(device).group_fn
         self.group = (device, group_fn(self._sizes))
 
-        self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
+        if refresh_dependencies:
+            self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
     def _apply_indexing_expr_replacements(
         self,
         replacements: dict[str, sympy.Expr],
         *,
         normalize: bool,
+        need_clear_tiling_cache: bool = False,
     ) -> None:
         self._before_loop_state_mutation()
         self._body = self._body._replace_indexing_exprs(replacements)
         self.refresh_dependencies(
             normalize=normalize,
-            need_clear_tiling_cache=False,
+            need_clear_tiling_cache=need_clear_tiling_cache,
         )
 
     def swap_pw_red_dimension(self) -> None:
@@ -2423,6 +2431,7 @@ class SchedulerNode(BaseSchedulerNode):
                 "expected self.node to be a ComputedBuffer or TemplateBuffer"
             )
 
+        self._before_loop_state_mutation()
         self._body = self._body.expand_dimension_for_pointwise_node(
             dimension, new_range
         )
@@ -4096,8 +4105,9 @@ class _LoopMutationTracker:
     installing nested listeners, so the captured state is the original state at
     the outermost decision boundary.
 
-    Usage: call finish(commit=True) to keep mutations, or finish(commit=False)
-    to restore the original state. If no mutation occurred, finish() is a no-op.
+    Usage: call finish(rollback=False) to keep mutations, or
+    finish(rollback=True) to restore the original state. If no mutation occurred,
+    finish() is a no-op.
     """
 
     nodes: tuple[BaseSchedulerNode, ...]
@@ -6034,16 +6044,22 @@ class Scheduler:
         node2: BaseSchedulerNode,
         speedup_fn: Callable[[], bool],
         fused_nodes: OrderedSet[BaseSchedulerNode],
+        *,
+        can_reorder: bool = False,
     ):
-        if (
-            self.can_fuse(node1, node2)
-            and not self.will_fusion_create_cycle(node1, node2)
-            and speedup_fn()
-        ):
-            self.fuse_two_nodes(node1, node2, fused_nodes)
-            return True
-
-        return False
+        tracker = _LoopMutationTracker.create((node1, node2))
+        fused = False
+        try:
+            if (
+                self._can_fuse_impl(node1, node2, can_reorder=can_reorder)
+                and not self.will_fusion_create_cycle(node1, node2)
+                and speedup_fn()
+            ):
+                self.fuse_two_nodes(node1, node2, fused_nodes)
+                fused = True
+            return fused
+        finally:
+            tracker.finish(rollback=not fused)
 
     def _evaluate_pending_template_fusions(
         self,
@@ -6108,7 +6124,11 @@ class Scheduler:
                 else:
                     # Non AsyncCompile path, perform fusion
                     if self.fuse_if_speedup(
-                        node1, node2, pending_fusion.callable_fn, fused_nodes
+                        node1,
+                        node2,
+                        pending_fusion.callable_fn,
+                        fused_nodes,
+                        can_reorder=pending_fusion.can_reorder,
                     ):
                         fusions_to_remove.add(candidate)
 
@@ -6120,6 +6140,7 @@ class Scheduler:
                     self.get_fused_node(pending_fusion.node2),
                     pending_fusion.callable_fn,
                     fused_nodes,
+                    can_reorder=pending_fusion.can_reorder,
                 ):
                     fusions_to_remove.add(cand)
 
@@ -6160,10 +6181,13 @@ class Scheduler:
                 if self.get_fused_node(node_key2) is not node_key2:
                     raise AssertionError("expected node_key2 to be its own fused node")
 
-                if not is_speedup() or self.will_fusion_create_cycle(node1, node2):
-                    continue
-
-                self.fuse_two_nodes(node_key1, node_key2, fused_nodes)
+                self.fuse_if_speedup(
+                    node_key1,
+                    node_key2,
+                    is_speedup,
+                    fused_nodes,
+                    can_reorder=pending_fusion.can_reorder,
+                )
 
         for node1, node2 in possible_fusion_pairs:
             # if either node is in a pending fusion, resolve it.
@@ -6179,15 +6203,21 @@ class Scheduler:
             ):
                 continue
 
-            if self.can_fuse(
-                node1, node2, is_reorder_round
-            ) and not self.will_fusion_create_cycle(node1, node2):
+            tracker = _LoopMutationTracker.create((node1, node2))
+            fused = False
+            try:
+                if not self._can_fuse_impl(
+                    node1, node2, is_reorder_round
+                ) or self.will_fusion_create_cycle(node1, node2):
+                    continue
+
                 fusion_res = self.speedup_by_fusion(node1, node2)
                 if fusion_res.callable_fn is not None:
                     pending_fusion = PendingFusion(
                         callable_fn=fusion_res.callable_fn,
                         node1=node1,
                         node2=node2,
+                        can_reorder=is_reorder_round,
                         future=fusion_res.future,
                     )
 
@@ -6212,6 +6242,9 @@ class Scheduler:
                     continue
 
                 self.fuse_two_nodes(node1, node2, fused_nodes)
+                fused = True
+            finally:
+                tracker.finish(rollback=not fused)
 
     def _finish_pending_fusions(
         self,
@@ -6237,7 +6270,13 @@ class Scheduler:
             if self.get_fused_node(node_key2) is not node_key2:
                 raise AssertionError("expected node_key2 to be its own fused node")
 
-            self.fuse_if_speedup(node_key1, node_key2, is_speedup_fn, fused_nodes)
+            self.fuse_if_speedup(
+                node_key1,
+                node_key2,
+                is_speedup_fn,
+                fused_nodes,
+                can_reorder=pending_fusion.can_reorder,
+            )
 
     def _handle_template_overlap(
         self,
@@ -6978,6 +7017,35 @@ class Scheduler:
 
         return str(reasons)
 
+    @staticmethod
+    def _prove_expr_equals_with_ranges(
+        lhs: sympy.Expr,
+        rhs: sympy.Expr,
+        var_ranges: dict[sympy.Symbol, sympy.Expr],
+    ) -> bool:
+        difference = V.graph.sizevars.simplify_with_ranges(
+            sympy.expand(lhs - rhs), var_ranges
+        )
+        value_ranges = {
+            var: ValueRanges(0, size - 1) for var, size in var_ranges.items()
+        }
+        return bound_sympy(difference, value_ranges) == ValueRanges(0, 0)
+
+    @staticmethod
+    def _prove_expr_in_bounds(
+        expr: sympy.Expr,
+        var_ranges: dict[sympy.Symbol, sympy.Expr],
+        upper_bound: sympy.Expr,
+    ) -> bool:
+        expr = V.graph.sizevars.simplify_with_ranges(expr, var_ranges)
+        value_ranges = {
+            var: ValueRanges(0, size - 1) for var, size in var_ranges.items()
+        }
+        bounds = bound_sympy(expr, value_ranges)
+        return V.graph.sizevars.statically_known_geq(
+            bounds.lower, 0
+        ) and V.graph.sizevars.statically_known_lt(bounds.upper, upper_bound)
+
     def shared_data_after_inverting_indexing(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
@@ -6994,7 +7062,7 @@ class Scheduler:
             node2: Second scheduler node (target for inversion)
 
         Returns:
-            int: Fusion score if successful, 0 if optimization not applicable
+            int: Fusion score if successful, -1 if optimization is not applicable
         """
 
         if not config.loop_index_inversion_in_fusion:
@@ -7003,15 +7071,9 @@ class Scheduler:
         if any(n.is_cpu() for n in [node1, node2]):
             return -1
 
-        # Check for shared buffers between nodes
         node1_buffer_names = node1.read_writes.buffer_names()
-        node2_buffer_names = node2.read_writes.buffer_names()
-        common_buffer_names = node1_buffer_names & node2_buffer_names
 
-        if not common_buffer_names:
-            return -1
-
-        # only invert if node1 is single unmet dep
+        # Only invert when node1 can satisfy every unmet dependency in node2.
         node2_unmet_dependencies = OrderedSet(
             dep.name for dep in node2.unmet_dependencies
         )
@@ -7113,31 +7175,65 @@ class Scheduler:
             )
         simplified_read_expr = sum(simplified_terms)
 
-        inverse_formula = generate_inverse_formula(simplified_read_expr, index_vars[0])
+        try:
+            inverse_formula = generate_inverse_formula(
+                simplified_read_expr, index_vars[0]
+            )
+            if inverse_formula is None:
+                return -1
 
-        # formula is not invertible
-        if inverse_formula is None:
+            iter_sizes = node2._body.sizes[0]
+            if (
+                len(iter_sizes) != 1
+                or free_symbols(iter_sizes[0])
+                or V.graph.sizevars.statically_known_equals(iter_sizes[0], 0)
+            ):
+                return -1
+
+            index_var = index_vars[0]
+            iter_size = iter_sizes[0]
+            var_ranges = {index_var: iter_size}
+            write_expr = node2._body.indexing_exprs[write_expr_index]
+            if not self._prove_expr_equals_with_ranges(
+                write_expr, index_var, var_ranges
+            ):
+                return -1
+
+            inverse_read = sympy_subs(read_expr, {index_var: inverse_formula})
+            if not self._prove_expr_equals_with_ranges(
+                inverse_read, index_var, var_ranges
+            ) or not self._prove_expr_in_bounds(inverse_formula, var_ranges, iter_size):
+                return -1
+        except Exception:
+            fusion_log.debug("Failed to prove index inversion", exc_info=True)
             return -1
 
-        # === Apply Inversion ===
+        state = node2.snapshot_loop_state()
+        success = False
+        try:
+            # Replace the indexing expressions copy-on-write so speculative fusion
+            # rollback retains an untouched LoopBody snapshot.
+            node2._apply_indexing_expr_replacements(
+                {
+                    read_expr_index: write_expr,
+                    write_expr_index: inverse_formula,
+                },
+                normalize=True,
+            )
 
-        # Replace the indexing expressions copy-on-write so speculative fusion
-        # rollback retains an untouched LoopBody snapshot.
-        node2._apply_indexing_expr_replacements(
-            {
-                read_expr_index: node2._body.indexing_exprs[write_expr_index],
-                write_expr_index: inverse_formula,
-            },
-            normalize=True,
-        )
+            score = self.score_fusion_memory(node1, node2)
+            if not isinstance(score, int):
+                raise AssertionError("expected score to be an int")
 
-        # Calculate fusion score
-        score = self.score_fusion_memory(node1, node2)
-        if not isinstance(score, int):
-            raise AssertionError("expected score to be an int")
-
-        fusion_log.info("Shared memory after inversion: %d", score)
-        return score
+            success = True
+            fusion_log.info("Shared memory after inversion: %d", score)
+            return score
+        except Exception:
+            fusion_log.debug("Failed to apply index inversion", exc_info=True)
+            return -1
+        finally:
+            if not success:
+                node2.restore_loop_state(state)
 
     def _try_reindex_invertible_memory_copy(
         self,
@@ -7172,8 +7268,6 @@ class Scheduler:
 
         read_exprs = body.get_read_exprs()
         write_exprs = body.get_write_exprs()
-        if len(read_exprs) != 1 or len(write_exprs) != 1:
-            return -1
 
         iter_vars = body.vars[0]
         if not iter_vars:
@@ -7217,19 +7311,48 @@ class Scheduler:
         if not self._is_dense_and_injective_memory_dep(node1_write):
             return -1
 
-        flat_var = sympy.Dummy("copy_flat", integer=True, nonnegative=True)
-        old_iter_idx = decompose_index(flat_var, old_iter_sizes)
-        flattened_read = sympy_subs(read_exprs[0], dict(zip(iter_vars, old_iter_idx)))
-        simplified_terms = [
-            sizevars.combine_modular_indexing_pairs(term)
-            for term in sympy.Add.make_args(sympy.expand(flattened_read))
-        ]
-        flattened_read = sum(simplified_terms)
+        try:
+            flat_var = sympy.Dummy("copy_flat", integer=True, nonnegative=True)
+            old_iter_idx = decompose_index(flat_var, old_iter_sizes)
+            flattened_read = sympy_subs(
+                read_exprs[0], dict(zip(iter_vars, old_iter_idx))
+            )
+            simplified_terms = [
+                sizevars.combine_modular_indexing_pairs(term)
+                for term in sympy.Add.make_args(sympy.expand(flattened_read))
+            ]
+            flattened_read = sum(simplified_terms)
 
-        from torch._inductor.invert_expr_analysis import generate_inverse_formula
+            from torch._inductor.invert_expr_analysis import generate_inverse_formula
 
-        inverse_formula = generate_inverse_formula(flattened_read, flat_var)
-        if inverse_formula is None:
+            inverse_formula = generate_inverse_formula(flattened_read, flat_var)
+            if inverse_formula is None:
+                return -1
+
+            proof_iter_vars = tuple(
+                sympy.Dummy(f"reindex_{i}", integer=True, nonnegative=True)
+                for i in range(len(producer_size))
+            )
+            proof_ranges = dict(zip(proof_iter_vars, producer_size))
+            proof_producer_index = sympy_subs(
+                node1_write.index,
+                dict(zip(node1_write.var_names, proof_iter_vars)),
+            )
+            proof_old_flat = sympy_subs(
+                inverse_formula, {flat_var: proof_producer_index}
+            )
+            proof_old_indices = decompose_index(proof_old_flat, old_iter_sizes)
+            proof_read = sympy_subs(
+                read_exprs[0], dict(zip(iter_vars, proof_old_indices))
+            )
+            if not self._prove_expr_equals_with_ranges(
+                proof_read, proof_producer_index, proof_ranges
+            ):
+                return -1
+        except Exception:
+            fusion_log.debug(
+                "Failed to prove invertible memory-copy reindex", exc_info=True
+            )
             return -1
 
         old_score = self.score_fusion_memory(node1, node2)
@@ -7246,29 +7369,56 @@ class Scheduler:
             old_flat = sympy_subs(inverse_formula, {flat_var: producer_index})
             return decompose_index(old_flat, old_iter_sizes)
 
-        node2.apply_loop_reindexing(producer_size, indexer=indexer)
-        node2.refresh_dependencies(normalize=True, need_clear_tiling_cache=False)
+        success = False
+        try:
+            node2.apply_loop_reindexing(
+                producer_size,
+                indexer=indexer,
+                refresh_dependencies=False,
+            )
+            load_entries = node2._body.memory_usage[MemoryUsageType.LOAD]
+            if len(load_entries) != 1:
+                return -1
 
-        matching_reads = [
-            dep
-            for dep in node2.read_writes.reads
-            if isinstance(dep, MemoryDep) and dep.name == node1_write.name
-        ]
-        if len(matching_reads) != 1 or not self.deps_match_normalized(
-            node1_write, matching_reads[0]
-        ):
-            node2.restore_loop_state(state)
+            canonical_read = sympy_subs(
+                node1_write.index,
+                dict(zip(node1_write.var_names, node2._body.iter_vars)),
+            )
+            node2._apply_indexing_expr_replacements(
+                {load_entries[0].index_name: canonical_read},
+                normalize=True,
+                need_clear_tiling_cache=True,
+            )
+
+            matching_reads = [
+                dep
+                for dep in node2.read_writes.reads
+                if isinstance(dep, MemoryDep) and dep.name == node1_write.name
+            ]
+            if len(matching_reads) != 1 or not self.deps_match_normalized(
+                node1_write, matching_reads[0]
+            ):
+                return -1
+
+            score = self.score_fusion_memory(node1, node2)
+            if not isinstance(score, int):
+                raise AssertionError("expected score to be an int")
+            if score <= old_score or score <= 0:
+                return -1
+
+            success = True
+            fusion_log.info(
+                "Shared memory after invertible memory-copy reindex: %d", score
+            )
+            return score
+        except Exception:
+            fusion_log.debug(
+                "Failed to apply invertible memory-copy reindex", exc_info=True
+            )
             return -1
-
-        score = self.score_fusion_memory(node1, node2)
-        if not isinstance(score, int):
-            raise AssertionError("expected score to be an int")
-        if score <= old_score or score <= 0:
-            node2.restore_loop_state(state)
-            return -1
-
-        fusion_log.info("Shared memory after invertible memory-copy reindex: %d", score)
-        return score
+        finally:
+            if not success:
+                node2.restore_loop_state(state)
 
     def shared_data_after_reordering_loop(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -7768,18 +7918,20 @@ class Scheduler:
     ) -> bool:
         """Determine if node1 and node2 can be combined into a single fused node.
 
-        Speculative loop mutations (reordering, reindexing) are automatically
-        rolled back if the fusion decision ultimately fails.
+        This is a legality query, so its speculative loop mutations are always
+        rolled back. Fusion entry points install an outer tracker and keep the
+        mutations only when the fusion is materialized.
         """
         tracker = _LoopMutationTracker.create((node1, node2))
-        can_fuse = self._can_fuse_impl(
-            node1,
-            node2,
-            can_reorder=can_reorder,
-            allow_mix_order_reduction=allow_mix_order_reduction,
-        )
-        tracker.finish(rollback=not can_fuse)
-        return can_fuse
+        try:
+            return self._can_fuse_impl(
+                node1,
+                node2,
+                can_reorder=can_reorder,
+                allow_mix_order_reduction=allow_mix_order_reduction,
+            )
+        finally:
+            tracker.finish(rollback=True)
 
     def _can_fuse_impl(
         self,

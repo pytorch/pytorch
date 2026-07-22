@@ -13,13 +13,13 @@ import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import config as inductor_config, dependencies, ir, metrics
+from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.dependencies import MemoryDep, ReadWrites
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
-from torch._inductor.loop_body import LoopBody
-from torch._inductor.scheduler import _LoopMutationTracker, Scheduler, SchedulerNode
+from torch._inductor.loop_body import LoopBody, MemoryUsageType
+from torch._inductor.scheduler import FusionResult, Scheduler, SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
@@ -335,15 +335,43 @@ class LoopOrderingTest(TestCase):
         body.get_write_exprs.return_value = [write.index]
         body.vars = (list(read.var_names), [])
         body.sizes = (list(read.size), [])
+        body.iter_vars = list(read.var_names)
+        body.indexing_exprs = {"index0": read.index, "index1": write.index}
+        body.memory_usage = {MemoryUsageType.LOAD: [mock.Mock(index_name="index0")]}
         node._body = body
+        node._loop_mutation_listener = None
         node.apply_loop_reindexing = mock.Mock()
+        node._apply_indexing_expr_replacements = mock.Mock()
+        return node
+
+    @staticmethod
+    def _fake_loop_state_scheduler_node():
+        node = object.__new__(SchedulerNode)
+        node._body = mock.sentinel.original_body
+        node._sizes = mock.sentinel.original_sizes
+        node.group = mock.sentinel.original_group
+        node.read_writes = ReadWrites(
+            reads=OrderedSet(),
+            writes=OrderedSet(),
+            index_exprs=OrderedSet(),
+        )
+        node.unmet_dependencies = OrderedSet()
+        node._loop_mutation_listener = None
+        node.clear_loop_body_dependent_caches = mock.Mock()
+        node.get_nodes = mock.Mock(return_value=[node])
         return node
 
     @staticmethod
     def _fake_index_inversion_graph():
         graph = mock.Mock()
-        graph.sizevars.statically_known_equals.side_effect = (
-            lambda left, right: sympy.simplify(left - right) == 0
+        graph.sizevars.statically_known_equals.side_effect = lambda left, right: (
+            sympy.simplify(left - right) == 0
+        )
+        graph.sizevars.statically_known_geq.side_effect = lambda left, right: bool(
+            sympy.simplify(left >= right)
+        )
+        graph.sizevars.statically_known_lt.side_effect = lambda left, right: bool(
+            sympy.simplify(left < right)
         )
         graph.sizevars.simplify.side_effect = lambda expr: expr
         graph.sizevars.simplify_with_ranges.side_effect = lambda expr, ranges: expr
@@ -919,7 +947,65 @@ class LoopOrderingTest(TestCase):
         loop_reindexing_after_fusion=True,
         constant_and_index_propagation=False,
     )
-    def test_index_inversion_right_inverse_fallback_rollback(self):
+    def test_index_inversion_accepts_bijective_legacy_fallback(self):
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        transposed_index = 10 * ModularIndexing(i0, 1, 10) + ModularIndexing(i0, 10, 10)
+        producer_write = MemoryDep("source", i0, (i0,), (sympy.Integer(100),))
+        consumer_read = MemoryDep(
+            "source", transposed_index, (i0,), (sympy.Integer(100),)
+        )
+        consumer_write = MemoryDep("output", i0, (i0,), (sympy.Integer(100),))
+        node1 = self._fake_scheduler_node(writes=(producer_write,))
+        node2 = object.__new__(SchedulerNode)
+        node2.is_cpu = mock.Mock(return_value=False)
+        node2.read_writes = ReadWrites(
+            reads=OrderedSet((consumer_read,)),
+            writes=OrderedSet((consumer_write,)),
+            index_exprs=OrderedSet(),
+        )
+        node2.unmet_dependencies = OrderedSet((consumer_read,))
+        node2._body = mock.Mock()
+        node2._body.indexing_exprs = {
+            "index0": consumer_read.index,
+            "index1": consumer_write.index,
+        }
+        node2._body.subblocks = {}
+        node2._body.get_read_exprs.return_value = [consumer_read.index]
+        node2._body.vars = ([i0], [])
+        node2._body.sizes = ([sympy.Integer(100)], [])
+        node2.snapshot_loop_state = mock.Mock(return_value=mock.sentinel.snapshot)
+        node2.restore_loop_state = mock.Mock()
+        node2._apply_indexing_expr_replacements = mock.Mock()
+        scheduler = object.__new__(Scheduler)
+        scheduler.score_fusion_memory = mock.Mock(return_value=5)
+        graph = GraphLowering(torch.fx.symbolic_trace(lambda: 0))
+        graph.scheduler = MockScheduler
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch.object(
+                scheduler, "_try_reindex_invertible_memory_copy", return_value=-1
+            ),
+            mock.patch.object(MemoryDep, "normalize", return_value=producer_write),
+        ):
+            score = scheduler.shared_data_after_inverting_indexing(node1, node2)
+
+        self.assertEqual(score, 5)
+        node2._apply_indexing_expr_replacements.assert_called_once_with(
+            {
+                "index0": i0,
+                "index1": FloorDiv(i0, 10) + 10 * ModularIndexing(i0, 1, 10),
+            },
+            normalize=True,
+        )
+        node2.restore_loop_state.assert_not_called()
+
+    @inductor_config.patch(
+        loop_index_inversion_in_fusion=True,
+        loop_reindexing_after_fusion=True,
+        constant_and_index_propagation=False,
+    )
+    def test_index_inversion_rejects_right_inverse_fallback(self):
         i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
 
         def copy_body(iter_indices, _reduction_indices):
@@ -970,35 +1056,7 @@ class LoopOrderingTest(TestCase):
         node2.group = mock.sentinel.group
         node2._loop_mutation_listener = None
         node2.clear_loop_body_dependent_caches = mock.Mock()
-        computed_buffer = object.__new__(ir.ComputedBuffer)
-        computed_buffer.get_device_or_error = mock.Mock(
-            return_value=torch.device("cpu")
-        )
-        node2.node = computed_buffer
-        node2.scheduler = mock.Mock()
-        node2.scheduler.get_backend.return_value.group_fn.return_value = (
-            mock.sentinel.reindexed_group
-        )
-
-        def refresh_dependencies(normalize, need_clear_tiling_cache):
-            node2.read_writes = dependencies.extract_read_writes(
-                node2._body,
-                *node2._sizes,
-                normalize=False,
-            )
-
-        node2.refresh_dependencies = refresh_dependencies
         scheduler = object.__new__(Scheduler)
-        scheduler.score_fusion_memory = mock.Mock(side_effect=(0, 5))
-        refreshed_reads = []
-
-        def reject_refreshed_dependency(producer, refreshed_read):
-            refreshed_reads.append(refreshed_read)
-            return False
-
-        scheduler.deps_match_normalized = reject_refreshed_dependency
-
-        tracker = _LoopMutationTracker.create((node2,))
 
         with (
             V.set_graph_handler(graph),
@@ -1008,43 +1066,17 @@ class LoopOrderingTest(TestCase):
                 return_value=True,
             ),
             mock.patch.object(MemoryDep, "normalize", return_value=producer_write),
-            mock.patch.object(
-                node2,
-                "apply_loop_reindexing",
-                wraps=node2.apply_loop_reindexing,
-            ) as apply_reindex,
-            mock.patch.object(
-                node2,
-                "restore_loop_state",
-                wraps=node2.restore_loop_state,
-            ) as restore_loop_state,
         ):
             score = scheduler.shared_data_after_inverting_indexing(node1, node2)
 
-        self.assertEqual(score, 5)
-        apply_reindex.assert_called_once()
-        restore_loop_state.assert_called_once()
-        self.assertEqual(len(refreshed_reads), 1)
-        self.assertNotEqual(refreshed_reads[0].index, producer_write.index)
-        self.assertIsNot(node2._body, body)
-        self.assertEqual(body.indexing_exprs, original_indexing_exprs)
-        self.assertEqual(node2._body.indexing_exprs["index0"], consumer_write.index)
-        self.assertEqual(node2._body.indexing_exprs["index1"], 2 * i0)
-
-        # Equivalent to the final can_fuse() decision rejecting this candidate.
-        with mock.patch.object(
-            node2,
-            "restore_loop_state",
-            wraps=node2.restore_loop_state,
-        ) as outer_restore:
-            tracker.finish(rollback=True)
-
-        outer_restore.assert_called_once()
+        self.assertEqual(score, -1)
         self.assertIs(node2._body, body)
-        self.assertEqual(node2._body.indexing_exprs, original_indexing_exprs)
+        self.assertEqual(body.indexing_exprs, original_indexing_exprs)
         self.assertIsNone(node2._loop_mutation_listener)
 
-    def test_invertible_memory_copy_reindexing_rolls_back_dependency_mismatch(self):
+    def test_invertible_memory_copy_reindexing_rejects_read_mismatch_before_mutation(
+        self,
+    ):
         i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
         producer_write = MemoryDep(
             name="source",
@@ -1074,13 +1106,7 @@ class LoopOrderingTest(TestCase):
                 node2 = self._fake_memory_copy_scheduler_node(
                     consumer_read, consumer_write
                 )
-                snapshot = object()
-                node2.snapshot_loop_state = mock.Mock(return_value=snapshot)
-                node2.refresh_dependencies = mock.Mock()
-                node2.restore_loop_state = mock.Mock()
                 scheduler = object.__new__(Scheduler)
-                scheduler.score_fusion_memory = mock.Mock(return_value=0)
-                scheduler.deps_match_normalized = mock.Mock(return_value=False)
                 graph = self._fake_index_inversion_graph()
 
                 with (
@@ -1104,8 +1130,52 @@ class LoopOrderingTest(TestCase):
                     )
 
                 self.assertEqual(score, -1)
-                node2.apply_loop_reindexing.assert_called_once()
-                node2.restore_loop_state.assert_called_once_with(snapshot)
+                node2.apply_loop_reindexing.assert_not_called()
+                node2._apply_indexing_expr_replacements.assert_not_called()
+
+    def test_invertible_memory_copy_reindexing_rolls_back_dependency_mismatch(self):
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        producer_write = MemoryDep("source", i0, (i0,), (sympy.Integer(8),))
+        consumer_read = MemoryDep("source", i0, (i0,), (sympy.Integer(8),))
+        consumer_write = MemoryDep("output", i0, (i0,), (sympy.Integer(8),))
+        node2 = self._fake_memory_copy_scheduler_node(consumer_read, consumer_write)
+        snapshot = object()
+        node2.snapshot_loop_state = mock.Mock(return_value=snapshot)
+        node2.restore_loop_state = mock.Mock()
+        scheduler = object.__new__(Scheduler)
+        scheduler.score_fusion_memory = mock.Mock(return_value=0)
+        scheduler.deps_match_normalized = mock.Mock(return_value=False)
+        graph = self._fake_index_inversion_graph()
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch.object(
+                scheduler,
+                "_is_dense_and_injective_memory_dep",
+                return_value=True,
+            ),
+            mock.patch.object(
+                scheduler,
+                "_prove_expr_equals_with_ranges",
+                return_value=True,
+            ),
+            mock.patch(
+                "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+                side_effect=lambda expr, var: var,
+            ),
+        ):
+            score = scheduler._try_reindex_invertible_memory_copy(
+                mock.Mock(),
+                node2,
+                producer_write,
+                consumer_read,
+                consumer_write,
+            )
+
+        self.assertEqual(score, -1)
+        node2.apply_loop_reindexing.assert_called_once()
+        node2._apply_indexing_expr_replacements.assert_called_once()
+        node2.restore_loop_state.assert_called_once_with(snapshot)
 
     def test_invertible_memory_copy_reindexing_rolls_back_without_score_gain(self):
         i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
@@ -1115,7 +1185,6 @@ class LoopOrderingTest(TestCase):
         node2 = self._fake_memory_copy_scheduler_node(consumer_read, consumer_write)
         snapshot = object()
         node2.snapshot_loop_state = mock.Mock(return_value=snapshot)
-        node2.refresh_dependencies = mock.Mock()
         node2.restore_loop_state = mock.Mock()
 
         def apply_reindex(*args, **kwargs):
@@ -1138,6 +1207,11 @@ class LoopOrderingTest(TestCase):
                 "_is_dense_and_injective_memory_dep",
                 return_value=True,
             ),
+            mock.patch.object(
+                scheduler,
+                "_prove_expr_equals_with_ranges",
+                return_value=True,
+            ),
             mock.patch(
                 "torch._inductor.invert_expr_analysis.generate_inverse_formula",
                 side_effect=lambda expr, var: var,
@@ -1153,6 +1227,208 @@ class LoopOrderingTest(TestCase):
 
         self.assertEqual(score, -1)
         node2.restore_loop_state.assert_called_once_with(snapshot)
+
+    def test_invertible_memory_copy_reindexing_rolls_back_on_exception(self):
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        producer_write = MemoryDep("source", i0, (i0,), (sympy.Integer(8),))
+        consumer_read = MemoryDep("source", i0, (i0,), (sympy.Integer(8),))
+        consumer_write = MemoryDep("output", i0, (i0,), (sympy.Integer(8),))
+        node2 = self._fake_memory_copy_scheduler_node(consumer_read, consumer_write)
+        snapshot = object()
+        node2.snapshot_loop_state = mock.Mock(return_value=snapshot)
+        node2.restore_loop_state = mock.Mock()
+        node2.apply_loop_reindexing.side_effect = RuntimeError("reindex failed")
+        scheduler = object.__new__(Scheduler)
+        scheduler.score_fusion_memory = mock.Mock(return_value=0)
+        graph = self._fake_index_inversion_graph()
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch.object(
+                scheduler,
+                "_is_dense_and_injective_memory_dep",
+                return_value=True,
+            ),
+            mock.patch.object(
+                scheduler,
+                "_prove_expr_equals_with_ranges",
+                return_value=True,
+            ),
+            mock.patch(
+                "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+                side_effect=lambda expr, var: var,
+            ),
+        ):
+            score = scheduler._try_reindex_invertible_memory_copy(
+                mock.Mock(),
+                node2,
+                producer_write,
+                consumer_read,
+                consumer_write,
+            )
+
+        self.assertEqual(score, -1)
+        node2.restore_loop_state.assert_called_once_with(snapshot)
+
+    def test_can_fuse_query_rolls_back_loop_mutation(self):
+        node1 = self._fake_loop_state_scheduler_node()
+        node2 = self._fake_loop_state_scheduler_node()
+        scheduler = object.__new__(Scheduler)
+
+        def can_fuse_impl(*args, **kwargs):
+            node2._before_loop_state_mutation()
+            node2._body = mock.sentinel.mutated_body
+            return True
+
+        scheduler._can_fuse_impl = mock.Mock(side_effect=can_fuse_impl)
+
+        self.assertTrue(scheduler.can_fuse(node1, node2))
+        self.assertIs(node2._body, mock.sentinel.original_body)
+        self.assertIsNone(node2._loop_mutation_listener)
+
+    def test_can_fuse_exception_rolls_back_loop_mutation(self):
+        node1 = self._fake_loop_state_scheduler_node()
+        node2 = self._fake_loop_state_scheduler_node()
+        scheduler = object.__new__(Scheduler)
+
+        def can_fuse_impl(*args, **kwargs):
+            node2._before_loop_state_mutation()
+            node2._body = mock.sentinel.mutated_body
+            raise RuntimeError("fusion analysis failed")
+
+        scheduler._can_fuse_impl = mock.Mock(side_effect=can_fuse_impl)
+
+        with self.assertRaisesRegex(RuntimeError, "fusion analysis failed"):
+            scheduler.can_fuse(node1, node2)
+
+        self.assertIs(node2._body, mock.sentinel.original_body)
+        self.assertIsNone(node2._loop_mutation_listener)
+
+    def test_can_fuse_query_rolls_back_pointwise_expansion(self):
+        node1 = self._fake_loop_state_scheduler_node()
+        node2 = self._fake_loop_state_scheduler_node()
+        original_body = mock.Mock()
+        expanded_body = mock.Mock(sizes=mock.sentinel.expanded_sizes)
+        original_body.expand_dimension_for_pointwise_node.return_value = expanded_body
+        node2._body = original_body
+
+        computed_buffer = object.__new__(ir.ComputedBuffer)
+        computed_buffer.get_device_or_error = mock.Mock(
+            return_value=torch.device("cuda")
+        )
+        node2.node = computed_buffer
+        node2.scheduler = mock.Mock()
+        node2.scheduler.get_backend.return_value.group_fn.return_value = (
+            mock.sentinel.expanded_group
+        )
+        node2.refresh_dependencies = mock.Mock()
+        scheduler = object.__new__(Scheduler)
+
+        def can_fuse_impl(*args, **kwargs):
+            node2.expand_dimension_for_pointwise_node(0, 8)
+            return True
+
+        scheduler._can_fuse_impl = mock.Mock(side_effect=can_fuse_impl)
+
+        self.assertTrue(scheduler.can_fuse(node1, node2))
+        self.assertIs(node2._body, original_body)
+        self.assertIs(node2._sizes, mock.sentinel.original_sizes)
+        self.assertIs(node2.group, mock.sentinel.original_group)
+        self.assertIsNone(node2._loop_mutation_listener)
+
+    def test_fuse_if_speedup_rolls_back_rejected_loop_mutation(self):
+        node1 = self._fake_loop_state_scheduler_node()
+        node2 = self._fake_loop_state_scheduler_node()
+        scheduler = object.__new__(Scheduler)
+
+        def can_fuse_impl(*args, **kwargs):
+            node2._before_loop_state_mutation()
+            node2._body = mock.sentinel.mutated_body
+            return True
+
+        scheduler._can_fuse_impl = mock.Mock(side_effect=can_fuse_impl)
+        scheduler.will_fusion_create_cycle = mock.Mock(return_value=False)
+
+        fused = scheduler.fuse_if_speedup(
+            node1,
+            node2,
+            mock.Mock(return_value=False),
+            OrderedSet((node1, node2)),
+        )
+
+        self.assertFalse(fused)
+        self.assertIs(node2._body, mock.sentinel.original_body)
+        self.assertIsNone(node2._loop_mutation_listener)
+
+    def test_fuse_if_speedup_keeps_accepted_loop_mutation(self):
+        node1 = self._fake_loop_state_scheduler_node()
+        node2 = self._fake_loop_state_scheduler_node()
+        scheduler = object.__new__(Scheduler)
+
+        def can_fuse_impl(*args, **kwargs):
+            node2._before_loop_state_mutation()
+            node2._body = mock.sentinel.mutated_body
+            return True
+
+        scheduler._can_fuse_impl = mock.Mock(side_effect=can_fuse_impl)
+        scheduler.will_fusion_create_cycle = mock.Mock(return_value=False)
+        scheduler.fuse_two_nodes = mock.Mock()
+        fused_nodes = OrderedSet((node1, node2))
+
+        fused = scheduler.fuse_if_speedup(
+            node1,
+            node2,
+            mock.Mock(return_value=True),
+            fused_nodes,
+        )
+
+        self.assertTrue(fused)
+        self.assertIs(node2._body, mock.sentinel.mutated_body)
+        self.assertIsNone(node2._loop_mutation_listener)
+        scheduler.fuse_two_nodes.assert_called_once_with(node1, node2, fused_nodes)
+
+    def test_deferred_fusion_preserves_reorder_mode(self):
+        node1 = self._fake_loop_state_scheduler_node()
+        node2 = self._fake_loop_state_scheduler_node()
+        scheduler = object.__new__(Scheduler)
+        scheduler.seen_template_fusions = OrderedSet()
+        scheduler.get_fused_node = mock.Mock(side_effect=lambda node: node)
+        scheduler.will_fusion_create_cycle = mock.Mock(return_value=False)
+        scheduler.fuse_two_nodes = mock.Mock()
+
+        def can_fuse_impl(node1, node2, can_reorder=False, **kwargs):
+            return can_reorder
+
+        scheduler._can_fuse_impl = mock.Mock(side_effect=can_fuse_impl)
+        scheduler.speedup_by_fusion = mock.Mock(
+            return_value=FusionResult.from_callable(mock.Mock(return_value=True))
+        )
+        pending_fusions = {}
+        fused_nodes = OrderedSet((node1, node2))
+
+        with mock.patch(
+            "torch._inductor.scheduler.is_template_fusion", return_value=False
+        ):
+            scheduler._try_fusion_pairs(
+                [(node1, node2)],
+                pending_fusions,
+                {},
+                fused_nodes,
+                is_reorder_round=True,
+            )
+            scheduler._finish_pending_fusions(fused_nodes, pending_fusions)
+
+        can_fuse_calls = scheduler._can_fuse_impl.call_args_list
+        self.assertGreaterEqual(len(can_fuse_calls), 2)
+        self.assertTrue(
+            all(
+                call.kwargs.get(
+                    "can_reorder", call.args[2] if len(call.args) > 2 else False
+                )
+                for call in can_fuse_calls
+            )
+        )
+        scheduler.fuse_two_nodes.assert_called_once_with(node1, node2, fused_nodes)
 
     def test_reindex_unfusable_write_read_dep(self):
         """
@@ -2303,7 +2579,9 @@ class TestTiling(TestCase):
             self.assertEqual(
                 len(coalesce_analysis.uncoalesced_addrs),
                 1,
-                lambda msg: f"{msg}\nExpected 1 uncoalesced access, got {len(coalesce_analysis.uncoalesced_addrs)}",
+                lambda msg: (
+                    f"{msg}\nExpected 1 uncoalesced access, got {len(coalesce_analysis.uncoalesced_addrs)}"
+                ),
             )
 
             # The uncoalesced access should have an INDIRECT symbol
