@@ -10976,9 +10976,59 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 with self.assertRaisesRegex(RuntimeError, "AccumulateGrad node that was poisoned by swap_tensors"):
                     out.sum().backward()
 
-            _wr = weakref.ref(t1)
-            with self.assertRaisesRegex(RuntimeError, "has weakref"):
-                torch.utils.swap_tensors(t1, t2)
+            # A weakref no longer blocks the swap. It keeps pointing at the
+            # same object (identity is preserved) and observes the new content.
+            wr = weakref.ref(t1)
+            t2_id = id(t2)
+            torch.utils.swap_tensors(t1, t2)
+            self.assertIs(wr(), t1)
+            self.assertEqual(id(t2), t2_id)
+
+
+    def test_swap_allows_weakref(self):
+        from torch.utils.weak import TensorWeakRef
+
+        # A plain weakref only observes live state and does not block the swap:
+        # it keeps pointing at the same object (identity preserved) and sees the
+        # swapped-in content.
+        t1 = torch.zeros(4, 4)
+        t2 = torch.ones(4, 4)
+        wr1 = weakref.ref(t1)
+        wr2 = weakref.ref(t2)
+        torch.utils.swap_tensors(t1, t2)
+        self.assertIs(wr1(), t1)
+        self.assertIs(wr2(), t2)
+        self.assertEqual(t1, torch.ones(4, 4))
+        self.assertEqual(t2, torch.zeros(4, 4))
+
+        # Dynamo's guard weakref type on a parameter (the issue's repro) wraps a
+        # plain weakref.ref, so it is allowed too.
+        p = torch.nn.Parameter(torch.zeros(4, 4))
+        tw = TensorWeakRef(p)
+        torch.utils.swap_tensors(p, torch.nn.Parameter(torch.ones(4, 4)))
+        self.assertEqual(p, torch.ones(4, 4))
+        self.assertIs(tw(), p)
+        self.assertEqual(tw(), torch.ones(4, 4))
+
+    def test_swap_blocked_by_weak_id_dict(self):
+        # A tensor that is a key in an identity-keyed weak container carries a
+        # weakref.ref subclass (WeakIdRef). Swapping would silently corrupt that
+        # mapping (content changes behind a stable identity), so it is rejected.
+        # This is the mechanism behind nn.Module._apply raising "Couldn't swap"
+        # when a module is converted mid fake-tensor tracing (e.g. export).
+        from torch.utils.weak import WeakIdKeyDictionary
+
+        t1 = torch.zeros(4, 4)
+        t2 = torch.ones(4, 4)
+        d = WeakIdKeyDictionary()
+        d[t1] = 1
+        with self.assertRaisesRegex(RuntimeError, "has weakref"):
+            torch.utils.swap_tensors(t1, t2)
+        # Symmetric: a structural weakref on t2 also blocks.
+        t3 = torch.zeros(4, 4)
+        d[t2] = 2
+        with self.assertRaisesRegex(RuntimeError, "has weakref"):
+            torch.utils.swap_tensors(t3, t2)
 
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
