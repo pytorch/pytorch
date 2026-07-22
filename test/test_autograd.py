@@ -3719,6 +3719,17 @@ class TestAutograd(TestCase):
         self.assertIs(next_functions[0][0], a.grad_fn)
         self.assertIs(next_functions[1][0], None)
 
+    def test_copy_slices_wrapped_node(self):
+        base = torch.randn(4, requires_grad=True).clone()
+        view = base[:2]
+        view.mul_(2)
+
+        copy_slices = base.grad_fn
+        wrapped_node = copy_slices._wrapped_node
+        self.assertIsInstance(copy_slices, torch._C._functions.CopySlices)
+        self.assertEqual(wrapped_node.name(), "MulBackward0")
+        self.assertIs(copy_slices._wrapped_node, wrapped_node)
+
     def test_inplace(self):
         x = torch.ones(5, 5, requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4, requires_grad=True)
