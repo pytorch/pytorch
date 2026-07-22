@@ -230,8 +230,21 @@ def clear_compile_context_weakrefs(
 ) -> None:
     """Clear WeakIdRef entries that can block swap_tensors after compile."""
     should_clear = config.invalidate_compile_context_weakrefs
+    output_graph = tracer_output.output_graph_for_cleanup if tracer_output else None
+    is_graph_break = bool(
+        output_graph and output_graph.compile_subgraph_reason.graph_break
+    )
+    is_graph_break_resume = bool(
+        output_graph and output_graph.is_torch_dynamo_resume_frame
+    )
+    is_graph_break_cleanup = is_graph_break or is_graph_break_resume
     if should_clear is None:
         should_clear = _is_registered_backend(innermost_backend(compiler_fn))
+        if not should_clear:
+            # Graph breaks resume in Python, including Dynamo-generated resume
+            # frames, where stale compile-time weakrefs can make swap_tensors
+            # fail before Dynamo runs again.
+            should_clear = is_graph_break_cleanup
     if not should_clear or not tracer_output:
         return
     # Use output_graph_for_cleanup which is set even on error paths

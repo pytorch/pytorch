@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
 
 import copyreg
+import gc
 import os.path as _osp
+import sysconfig
 import weakref
 
 import torch
@@ -30,6 +32,7 @@ def set_module(obj, mod):
 
 
 cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), "share", "cmake")
+_IS_FREE_THREADED = sysconfig.get_config_var("Py_GIL_DISABLED") == 1
 
 
 def swap_tensors(t1, t2):
@@ -40,6 +43,10 @@ def swap_tensors(t1, t2):
 
     This will not work if t1 and t2 have different slots.
     """
+    # Free-threaded Python can defer destruction of cleared WeakIdRef objects.
+    if _IS_FREE_THREADED and (weakref.getweakrefs(t1) or weakref.getweakrefs(t2)):
+        gc.collect(1)
+
     # Ensure there are no weakrefs
     if weakref.getweakrefs(t1):
         raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
