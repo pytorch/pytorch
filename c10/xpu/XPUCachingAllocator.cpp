@@ -15,7 +15,6 @@
 #if defined(__linux__)
 #include <sys/prctl.h>
 #endif
-#include <unistd.h>
 
 #include <sycl/ext/oneapi/experimental/ipc_memory.hpp>
 
