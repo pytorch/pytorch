@@ -284,6 +284,9 @@ void FlightRecorder<EventType>::retire_id(
   Entry* entry = &entries_.at(getIdxFromId(*id, *reset_epoch));
   if (entry->id_ == *id && entry->reset_epoch_ == *reset_epoch) {
     update_state(*entry);
+    if (!entry->start_ && !entry->end_ && !entry->time_discovered_completed_) {
+      entry->time_discovered_completed_ = c10::getTime();
+    }
 
     if (compute_duration) {
       can_compute_duration = entry->time_discovered_completed_.has_value() &&

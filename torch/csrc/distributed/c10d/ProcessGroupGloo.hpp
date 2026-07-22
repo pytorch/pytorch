@@ -96,10 +96,6 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
    protected:
     friend class ProcessGroupGloo;
-    // unique id used to tell the trace buffer that this
-    // work has completed
-    std::optional<uint64_t> trace_id_;
-    std::optional<uint64_t> trace_reset_epoch_;
     std::shared_ptr<gloo::Context> context_;
     const std::chrono::milliseconds timeout_;
 
@@ -508,10 +504,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
   std::condition_variable workProduceCV_;
   std::condition_variable workConsumeCV_;
   uint64_t seq_{0};
-  size_t local_id_;
   mutable std::vector<uint64_t> defaultRanks_;
-  std::shared_ptr<ProcessGroupStatus> pgStatus_ =
-      std::make_shared<ProcessGroupStatus>();
 };
 
 } // namespace c10d

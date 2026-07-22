@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
+#include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
@@ -141,6 +142,9 @@ void ProcessGroup::setGroupDesc(const std::string& name) {
   // Also set the group desc for all backends
   for (auto& kv : deviceTypeToBackend_) {
     kv.second->setGroupDesc(name);
+  }
+  if (!deviceTypeToBackend_.empty() && FlightRecorderHook::isEnabled()) {
+    FlightRecorderHook::install(this);
   }
 }
 

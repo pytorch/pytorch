@@ -4,7 +4,6 @@
 
 #ifdef USE_C10D_GLOO
 
-#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/gloo/GlooDeviceFactory.hpp>
@@ -560,8 +559,6 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 }
 #endif
 
-static std::atomic<size_t> process_group_id = 0;
-
 c10::intrusive_ptr<ProcessGroupGloo::Options> ProcessGroupGloo::Options::
     create_default(std::chrono::milliseconds timeout) {
   auto options = ::c10d::ProcessGroupGloo::Options::create();
@@ -596,8 +593,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     : Backend(rank, size),
       store_(new GlooStore(store)),
       options_(std::move(options)),
-      c10dStore_(store),
-      local_id_(process_group_id++) {
+      c10dStore_(store) {
   auto& devices = options_->devices;
   if (devices.empty()) {
     TORCH_CHECK(false, "No device(s) specified");
@@ -620,9 +616,6 @@ ProcessGroupGloo::ProcessGroupGloo(
   }
   this->setGroupUid(options_->group_name);
 
-  // TODO: If gloo has version, we also need to log gloo version into FR.
-  FlightRecorder<c10::Event>::get()->record_pg_ranks(
-      std::make_tuple(pg_uid_, pg_desc_), groupRanks());
   init();
 
   // TODO: Add configs print like ProcessGroupNCCL.
@@ -738,22 +731,13 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
     workConsumeCV_.notify_one();
 
     AsyncWork::execute(work);
-    // TODO: Need to find a way to calculate the difference of duration of two
-    // c10d::Event
-    pgStatus_->lastCompletedSeq = static_cast<int64_t>(work->seq_);
-    pgStatus_->lastCompletedWorkName = opTypeToString(work->opType_);
-    // TODO: We need to have numel of tensors for gloo as well.
-    pgStatus_->lastCompletedNumelIn = 0;
-    pgStatus_->lastCompletedNumelOut = 0;
-    FlightRecorder<c10::Event>::get()->retire_id(
-        work->trace_id_, work->trace_reset_epoch_, false);
     lock.lock();
     workInProgress_[workerIndex].reset();
   }
 }
 
 const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
-  if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
+  if (options_->global_ranks_in_group.empty()) {
     if (defaultRanks_.size() != static_cast<size_t>(size_)) {
       defaultRanks_.resize(size_);
       std::iota(defaultRanks_.begin(), defaultRanks_.end(), 0);
@@ -812,30 +796,6 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::merge(
 
 void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
-  pgStatus_->lastEnqueuedSeq = static_cast<int64_t>(work->seq_);
-  pgStatus_->lastEnqueuedWorkName = opTypeToString(work->opType_);
-  // TODO: We need to have numel of tensors for gloo as well.
-  pgStatus_->lastEnqueuedNumelIn = 0;
-  pgStatus_->lastEnqueuedNumelOut = 0;
-  // using c10d::FlightRecorder;
-  // TODO: We need to have a way to use c10::Event inside gloo as well.
-  auto traceId = FlightRecorder<c10::Event>::get()->recordWithResetEnabled(
-      local_id_,
-      std::make_tuple(pg_uid_, pg_desc_),
-      collectiveCounter_,
-      0, // p2p_seq_id, set 0 for now since p2p does not call enqueue
-      work->getSequencenumber(), // We need to differentiate between p2p and
-                                 // non-p2p op.
-      work->getProfilerTitle(),
-      work->getInputTensors(),
-      work->getOutputTensors(),
-      nullptr,
-      nullptr,
-      work->getTimeout(),
-      pgStatus_,
-      false);
-  work->trace_id_ = traceId.id;
-  work->trace_reset_epoch_ = traceId.reset_epoch;
   workQueue_.push_back(std::move(work));
   lock.unlock();
 
@@ -1533,6 +1493,7 @@ class LambdaWork : public Work {
 
   bool wait(std::chrono::milliseconds /* unused */) override {
     fn_();
+    finish();
     return true;
   }
 

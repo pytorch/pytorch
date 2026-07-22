@@ -8,12 +8,14 @@
 
 #ifdef USE_C10D_NCCL
 
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
@@ -80,6 +82,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       options_c10d_(options ? std::move(options) : Options::create()) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
+  ::c10d::recordFlightRecorderAcceleratorVersion(getNcclVersion());
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(

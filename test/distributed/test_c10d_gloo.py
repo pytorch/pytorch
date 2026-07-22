@@ -3233,8 +3233,31 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
         super().setUp()
 
     def tearDown(self) -> None:
+        if c10d.is_initialized():
+            c10d.destroy_process_group()
         del os.environ["TORCH_FR_BUFFER_SIZE"]
         return super().tearDown()
+
+    def _create_fr_process_group(self, store):
+        c10d.init_process_group(
+            "gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=50),
+        )
+        return c10d.distributed_c10d._get_default_group()
+
+    def _wait_for_fr_retirement(self):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            entries = json.loads(torch._C._distributed_c10d._dump_fr_trace_json())[
+                "entries"
+            ]
+            if entries and all(entry["retired"] for entry in entries):
+                return
+            time.sleep(0.05)
+        self.fail(f"Flight Recorder entries were not retired: {entries}")
 
     def _verify_trace(self, t, is_json):
         ver = t["version"]
@@ -3247,20 +3270,19 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
         self.assertIn("ranks", default_pg_info)
         pg_status = t["pg_status"]
         self.assertEqual(len(pg_status), 1)
-        self.assertEqual(str(pg_status["0"]["last_enqueued_collective"]), "3")
-        self.assertEqual(str(pg_status["0"]["last_completed_collective"]), "3")
+        self.assertEqual(str(pg_status["0"]["last_enqueued_collective"]), "2")
+        self.assertEqual(str(pg_status["0"]["last_completed_collective"]), "2")
         self.assertEqual(
             str(pg_status["0"]["last_started_collective"]),
             "-1",
         )
         global_ranks = pg_config["0"]["ranks"]
         self.assertEqual(len(json.loads(global_ranks)), self.world_size)
-        self.assertEqual(len(t["entries"]), 3)
+        self.assertEqual(len(t["entries"]), 2)
         t = t["entries"]
         last = t[-1]
-        self.assertEqual(last["process_group"], ("0", ""))
-        # No event recorded for Gloo.
-        self.assertEqual(last["state"], "scheduled")
+        self.assertEqual(last["process_group"], ("0", "default_pg"))
+        self.assertEqual(last["state"], "completed")
         # we don't collect stack traces in JSON at the moment
         if not is_json:
             self.assertIn("test_c10d_gloo.py", str(last["frames"]))
@@ -3268,22 +3290,19 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
         self.assertEqual(last["input_dtypes"], ["Float"])
         self.assertEqual(last["output_sizes"], ((3, 4),))
         self.assertEqual(last["output_dtypes"], ["Float"])
-        self.assertEqual(last["collective_seq_id"], 3)
-        # TODO: Needs verification
+        self.assertEqual(last["collective_seq_id"], 2)
         self.assertEqual(last["timeout_ms"], 50000)
         self.assertTrue("duration_ms" not in last)
 
     @requires_gloo()
     def test_short_json(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts(group_name="0")
-        )
+        pg = self._create_fr_process_group(store)
         a = torch.full((3, 4), float(self.rank))
         for _ in range(2):
             f = pg.allreduce(a)
             f.wait()
-        time.sleep(1)
+        self._wait_for_fr_retirement()
         t = json.loads(
             torch._C._distributed_c10d._dump_fr_trace_json(includeCollectives=True)
         )
@@ -3292,14 +3311,12 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
     @requires_gloo()
     def test_short_pickle(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts(group_name="0")
-        )
+        pg = self._create_fr_process_group(store)
         a = torch.full((3, 4), float(self.rank))
         for _ in range(2):
             f = pg.allreduce(a)
             f.wait()
-        time.sleep(1)
+        self._wait_for_fr_retirement()
         t = pickle.loads(
             torch._C._distributed_c10d._dump_fr_trace(includeCollectives=True)
         )
@@ -3311,9 +3328,7 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
     @requires_gloo()
     def test_long(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts(group_name="0")
-        )
+        pg = self._create_fr_process_group(store)
         a = torch.full((3, 4), float(self.rank))
         for _ in range(2):
             # test some other primitives to make sure
@@ -3327,13 +3342,14 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
             pg.reduce_scatter(xs, ys).wait()
             f = pg.allreduce(a)
             f.wait()
+        self._wait_for_fr_retirement()
         t = pickle.loads(torch._C._distributed_c10d._dump_fr_trace())
         t = t["entries"]
         self.assertEqual(len(t), 10)
         first = t[0]
         last = t[-1]
         self.assertEqual(last["profiling_name"], "gloo:all_reduce")
-        self.assertEqual(last["state"], "scheduled")
+        self.assertEqual(last["state"], "completed")
         self.assertIn("test_c10d_gloo.py", str(last["frames"]))
         self.assertEqual(last["input_sizes"], ((3, 4),))
         self.assertEqual(last["input_dtypes"], ["Float"])

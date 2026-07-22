@@ -26,6 +26,8 @@ constexpr auto kProcessGroupDefaultTimeout =
 
 namespace c10d {
 
+class FlightRecorderHook;
+
 // We only call `register_work()` in two cases:
 // 1. If the work object is created from a functional collective call.
 // 2. If the work object is created from a non-functional collective call within
@@ -1139,6 +1141,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       const int& size);
 
  protected:
+  friend class FlightRecorderHook;
+
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
