@@ -3,54 +3,30 @@
  ******************************************************************************/
 
 #include <ATen/native/transformers/hip/flash_attn/flash_common_hip.hpp>
+#include <mha_bwd.h>
 #include <fmha_bwd.hpp>
 #include <mask.hpp>
 
+#include <memory>
 #include <type_traits>
+#include <utility>
 
 namespace pytorch_flash {
 
-// SFINAE for newer composable_kernel `fmha_bwd.hpp` layout vs older CK revisions.
-// New CK adds extended `fmha_bwd_traits` (shape / head dims at trait level) and
-// `sink_ptr` / `d_sink_ptr` on `fmha_bwd_args`. We assume those land together.
-// Same pattern as `mha_fwd_ck.hip`: value-init, assign fields, then helpers for
-// version-gated members (`set_fmha_fwd_block_scale_fields`).
-template <typename T, typename = void>
-struct has_fmha_bwd_extended_traits : std::false_type {};
-
-template <typename T>
-struct has_fmha_bwd_extended_traits<T, std::void_t<decltype(std::declval<T&>().seqlen_q)>>
-    : std::true_type {};
-
+// SFINAE for version-gated `aiter::mha_bwd_args` members (mirrors mha_bwd_ck.hip, the
+// batch-mode counterpart). The struct evolved across AITER snapshots:
+//  - `sink_ptr` / `d_sink_ptr` were added,
+//  - older CK carried a separate `ck_mask_type`,
+//  - the explicit dq accumulation buffer (`dq_acc_ptr` + strides) was replaced by
+//    kernel-managed scratch via `workspace_alloc` / `pinned_host_alloc` callbacks.
+// Value-init the struct, assign the always-present fields, then route the optional
+// members through these helpers so a single source compiles against every snapshot.
 template <typename T, typename = void>
 struct has_fmha_bwd_args_sink_fields : std::false_type {};
 
 template <typename T>
 struct has_fmha_bwd_args_sink_fields<T, std::void_t<decltype(std::declval<T&>().sink_ptr)>>
     : std::true_type {};
-
-template <typename Traits>
-void set_fmha_bwd_varlen_traits_fields([[maybe_unused]] Traits &traits,
-                                       [[maybe_unused]] int seqlen_q,
-                                       [[maybe_unused]] int seqlen_k,
-                                       [[maybe_unused]] int batch,
-                                       [[maybe_unused]] int max_seqlen_q,
-                                       [[maybe_unused]] int max_seqlen_k,
-                                       [[maybe_unused]] int nhead_q,
-                                       [[maybe_unused]] int nhead_k)
-{
-    if constexpr(has_fmha_bwd_extended_traits<Traits>::value) {
-        // seqlen_q / seqlen_k match CK group-mode "shape" lengths: cumulative totals
-        // (seqstart back()), i.e. total_q / total_k for varlen tensors.
-        traits.seqlen_q     = seqlen_q;
-        traits.seqlen_k     = seqlen_k;
-        traits.batch        = batch;
-        traits.max_seqlen_q = max_seqlen_q;
-        traits.max_seqlen_k = max_seqlen_k;
-        traits.nhead_q      = nhead_q;
-        traits.nhead_k      = nhead_k;
-    }
-}
 
 template <typename Args>
 void set_fmha_bwd_sink_ptr_fields([[maybe_unused]] Args &args)
@@ -61,40 +37,82 @@ void set_fmha_bwd_sink_ptr_fields([[maybe_unused]] Args &args)
     }
 }
 
-fmha_bwd_traits get_ck_fmha_varlen_bwd_traits(const mask_info &mask,
-                                              std::string dtype,
-                                              int seqlen_q,
-                                              int seqlen_k,
-                                              int batch,
-                                              int max_seqlen_q,
-                                              int max_seqlen_k,
-                                              int hdim_q,
-                                              int hdim_v,
-                                              int nhead_q,
-                                              int nhead_k,
-                                              bool has_dropout,
-                                              bool enable_bias,
-                                              bool deterministic,
-                                              bool bias_requires_grad)
+template <typename T, typename = void>
+struct has_fmha_bwd_args_ck_mask_type : std::false_type {};
+
+template <typename T>
+struct has_fmha_bwd_args_ck_mask_type<T, std::void_t<decltype(std::declval<T&>().ck_mask_type)>>
+    : std::true_type {};
+
+template <typename Args>
+void set_fmha_bwd_ck_mask_type([[maybe_unused]] Args &args, [[maybe_unused]] int ck_mask_type)
 {
-    fmha_bwd_traits traits{};
-    traits.data_type         = std::move(dtype);
-    traits.is_group_mode    = true;
-    traits.mask_type        = mask.type;
-    traits.bias_type =
-        enable_bias ? bias_enum::elementwise_bias : bias_enum::no_bias;
-    traits.has_dbias        = bias_requires_grad;
-    traits.has_dropout      = has_dropout;
-    traits.is_store_randval = false;
-    traits.is_deterministic = deterministic;
-    traits.hdim_q           = hdim_q;
-    traits.hdim_v           = hdim_v;
-    set_fmha_bwd_varlen_traits_fields(
-        traits, seqlen_q, seqlen_k, batch, max_seqlen_q, max_seqlen_k, nhead_q, nhead_k);
-    return traits;
+    if constexpr(has_fmha_bwd_args_ck_mask_type<Args>::value) {
+        args.ck_mask_type = ck_mask_type;
+    }
 }
 
-fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
+// Older `aiter::mha_bwd_args` consumes an explicit dq_acc buffer (pointer + strides);
+// newer AITER removed these and lets the kernel manage scratch via `workspace_alloc`
+// (+ `pinned_host_alloc`, required in group mode). Exactly one regime is present.
+template <typename T, typename = void>
+struct has_fmha_bwd_args_dq_acc : std::false_type {};
+
+template <typename T>
+struct has_fmha_bwd_args_dq_acc<T, std::void_t<decltype(std::declval<T&>().dq_acc_ptr)>>
+    : std::true_type {};
+
+template <typename Args>
+void set_fmha_bwd_dq_acc_fields([[maybe_unused]] Args &args,
+                                [[maybe_unused]] void *dq_acc_ptr,
+                                [[maybe_unused]] int64_t stride_dq_acc,
+                                [[maybe_unused]] int64_t nhead_stride_dq_acc,
+                                [[maybe_unused]] int64_t batch_stride_dq_acc,
+                                [[maybe_unused]] int64_t split_stride_dq_acc)
+{
+    if constexpr(has_fmha_bwd_args_dq_acc<Args>::value) {
+        args.dq_acc_ptr          = dq_acc_ptr;
+        args.stride_dq_acc       = stride_dq_acc;
+        args.nhead_stride_dq_acc = nhead_stride_dq_acc;
+        args.batch_stride_dq_acc = batch_stride_dq_acc;
+        args.split_stride_dq_acc = split_stride_dq_acc;
+    }
+}
+
+template <typename T, typename = void>
+struct has_fmha_bwd_args_workspace_alloc : std::false_type {};
+
+template <typename T>
+struct has_fmha_bwd_args_workspace_alloc<T, std::void_t<decltype(std::declval<T&>().workspace_alloc)>>
+    : std::true_type {};
+
+template <typename Args, typename Fn>
+void set_fmha_bwd_workspace_alloc([[maybe_unused]] Args &args, [[maybe_unused]] Fn &&workspace_alloc)
+{
+    if constexpr(has_fmha_bwd_args_workspace_alloc<Args>::value) {
+        args.workspace_alloc = std::forward<Fn>(workspace_alloc);
+    }
+}
+
+template <typename T, typename = void>
+struct has_fmha_bwd_args_pinned_host_alloc : std::false_type {};
+
+template <typename T>
+struct has_fmha_bwd_args_pinned_host_alloc<T, std::void_t<decltype(std::declval<T&>().pinned_host_alloc)>>
+    : std::true_type {};
+
+template <typename Args, typename Fn>
+void set_fmha_bwd_pinned_host_alloc([[maybe_unused]] Args &args, [[maybe_unused]] Fn &&pinned_host_alloc)
+{
+    if constexpr(has_fmha_bwd_args_pinned_host_alloc<Args>::value) {
+        args.pinned_host_alloc = std::forward<Fn>(pinned_host_alloc);
+    }
+}
+
+aiter::mha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
+                                          std::string dtype,
+                                          bool has_dropout,
+                                          bool deterministic,
                                           // sizes
                                           const int b,
                                           const int max_seqlen_q,
@@ -174,12 +192,6 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
     ck_tile::index_t stride_dv = dv.stride(0);
     ck_tile::index_t nhead_stride_dv = dv.stride(1);
 
-    // dq_acc: (split, total_q, nheads, hdim)
-    ck_tile::index_t split_stride_dq_acc = dq_acc.stride(0);
-    ck_tile::long_index_t batch_stride_dq_acc = 0;
-    ck_tile::index_t stride_dq_acc = dq_acc.stride(1);
-    ck_tile::long_index_t nhead_stride_dq_acc = dq_acc.stride(2);
-
     float p_undrop = 1.0 - p_dropout;
 
     // bias: (batch_size, nheads, seqlen_q, seqlen_k)
@@ -212,7 +224,28 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
         batch_stride_dbias = dbias.stride(0);
     }
 
-    fmha_bwd_args args{};
+    bool enable_bias = attn_bias_.has_value();
+
+    aiter::mha_bwd_args args{};
+    args.use_asm_v3     = false; // fallback to CK instead of asm_v3 until supported
+    args.v3_atomic_fp32 = true;
+    args.v3_bf16_cvt    = 1;
+    args.v3_api_check   = false;
+
+    args.hdim_q            = hdim;
+    args.hdim_v            = hdim;
+    args.data_type         = dtype;
+    args.is_group_mode     = true;
+    args.mask_type         = static_cast<int>(mask.type);
+    set_fmha_bwd_ck_mask_type(args, static_cast<int>(mask.type));
+    args.bias_type =
+        enable_bias ? static_cast<int>(bias_enum::elementwise_bias)
+                    : static_cast<int>(bias_enum::no_bias);
+    args.has_dbias           = bias_requires_grad;
+    args.has_dropout         = has_dropout;
+    args.is_store_randval    = false;
+    args.is_deterministic    = deterministic;
+
     args.q_ptr       = q.data_ptr();
     args.k_ptr       = k.data_ptr();
     args.v_ptr       = v.data_ptr();
@@ -226,7 +259,6 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
     args.dk_ptr      = dk.data_ptr();
     args.dv_ptr      = dv.data_ptr();
     args.dbias_ptr   = dbias_ptr;
-    args.dq_acc_ptr  = dq_acc.data_ptr();
     set_fmha_bwd_sink_ptr_fields(args);
     args.seqstart_q_ptr   = seqlens_q.data_ptr();
     args.seqstart_k_ptr   = seqlens_k.data_ptr();
@@ -239,8 +271,6 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
     args.batch            = b;
     args.max_seqlen_q     = max_seqlen_q;
     args.max_seqlen_k     = max_seqlen_k;
-    args.hdim_q           = hdim;
-    args.hdim_v           = hdim;
     args.nhead_q          = h;
     args.nhead_k          = h_k;
     args.scale            = softmax_scale;
@@ -251,7 +281,6 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
     args.stride_o         = stride_o;
     args.stride_randval   = 0;
     args.stride_do        = stride_do;
-    args.stride_dq_acc    = stride_dq_acc;
     args.stride_dq        = stride_dq;
     args.stride_dk        = stride_dk;
     args.stride_dv        = stride_dv;
@@ -264,7 +293,6 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
     args.nhead_stride_randval = 0;
     args.nhead_stride_do      = nhead_stride_do;
     args.nhead_stride_lsed    = nhead_stride_lse;
-    args.nhead_stride_dq_acc  = nhead_stride_dq_acc;
     args.nhead_stride_dq     = nhead_stride_dq;
     args.nhead_stride_dk     = nhead_stride_dk;
     args.nhead_stride_dv     = nhead_stride_dv;
@@ -277,18 +305,28 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
     args.batch_stride_randval    = 0;
     args.batch_stride_do         = batch_stride_do;
     args.batch_stride_lsed       = batch_stride_lse;
-    args.batch_stride_dq_acc     = batch_stride_dq_acc;
     args.batch_stride_dq         = batch_stride_dq;
     args.batch_stride_dk         = batch_stride_dk;
     args.batch_stride_dv         = batch_stride_dv;
     args.batch_stride_dbias      = batch_stride_dbias;
-    args.split_stride_dq_acc     = split_stride_dq_acc;
     args.window_size_left        = mask.left;
     args.window_size_right       = mask.right;
-    args.mask_type               = static_cast<ck_tile::index_t>(mask.type);
     args.p_drop                  = p_dropout;
     args.p_undrop                = p_undrop;
     args.drop_seed_offset        = drop_seed_offset;
+
+    // Older AITER consumes an explicit dq accumulation buffer; gate so this compiles
+    // against newer AITER where the kernel manages dq scratch via workspace_alloc.
+    if constexpr(has_fmha_bwd_args_dq_acc<aiter::mha_bwd_args>::value) {
+        // dq_acc: (split, total_q, nheads, hdim)
+        set_fmha_bwd_dq_acc_fields(
+            args,
+            dq_acc.data_ptr(),
+            dq_acc.stride(1),   // stride_dq_acc
+            dq_acc.stride(2),   // nhead_stride_dq_acc
+            0,                  // batch_stride_dq_acc (varlen)
+            dq_acc.stride(0));  // split_stride_dq_acc
+    }
     return args;
 }
 
@@ -442,12 +480,16 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
     auto softmax_d = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
     at::Tensor dq_accum;
 
-    if (!deterministic) {
-        dq_accum = at::zeros({1, total_q, num_heads, head_size_8x}, opts.dtype(at::kFloat));
-    } else {
-        const ck_tile::index_t kN0 = head_size_8x <= 128 ? 128 : 64;
-        const ck_tile::index_t nsplits = ck_tile::integer_divide_ceil(max_seqlen_k, kN0);
-        dq_accum = at::zeros({nsplits, total_q, num_heads, head_size_8x}, opts.dtype(at::kFloat));
+    // Newer AITER manages dq scratch internally (via workspace_alloc); only allocate the
+    // explicit dq accumulation buffer when the struct still exposes the dq_acc fields.
+    if constexpr(has_fmha_bwd_args_dq_acc<aiter::mha_bwd_args>::value) {
+        if (!deterministic) {
+            dq_accum = at::zeros({1, total_q, num_heads, head_size_8x}, opts.dtype(at::kFloat));
+        } else {
+            const ck_tile::index_t kN0 = head_size_8x <= 128 ? 128 : 64;
+            const ck_tile::index_t nsplits = ck_tile::integer_divide_ceil(max_seqlen_k, kN0);
+            dq_accum = at::zeros({nsplits, total_q, num_heads, head_size_8x}, opts.dtype(at::kFloat));
+        }
     }
 
     at::Tensor dk_expanded, dv_expanded;
@@ -477,26 +519,13 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
     if (max_seqlen_q > 0) {
         ck_tile::stream_config stream_config{stream};
         dq.zero_(); // ck use atomic operation on dq
-        auto traits =
-            get_ck_fmha_varlen_bwd_traits(mask,
-                                          q_dtype_str,
-                                          total_q,
-                                          total_k,
-                                          batch_size,
-                                          max_seqlen_q,
-                                          max_seqlen_k,
-                                          head_size_8x,
-                                          head_size_8x,
-                                          num_heads,
-                                          num_heads_k,
-                                          is_dropout,
-                                          attn_bias_.has_value(),
-                                          deterministic,
-                                          bias_requires_grad);
 
         auto args =
             get_ck_fmha_varlen_bwd_args(
                 mask,
+                q_dtype_str,
+                is_dropout,
+                deterministic,
                 batch_size,
                 max_seqlen_q,
                 max_seqlen_k,
@@ -522,7 +551,29 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
-        float t = fmha_bwd(traits, args, stream_config);
+
+        // Group mode requires both callbacks on newer AITER (kernel-managed dq scratch
+        // and pinned-host staging for the async metadata pipeline). The device workspace
+        // pointer must stay valid until aiter::mha_bwd returns, so keep its backing
+        // tensor alive in this scope; the pinned buffer's lifetime is owned by the
+        // returned shared_ptr (aiter extends it across the stream). No-ops on older AITER.
+        at::Tensor workspace;
+        auto workspace_alloc = [&workspace, opts](size_t bytes, bool zero_init) -> void* {
+            workspace = zero_init
+                            ? at::zeros({static_cast<int64_t>(bytes)}, opts.dtype(at::kByte))
+                            : at::empty({static_cast<int64_t>(bytes)}, opts.dtype(at::kByte));
+            return workspace.data_ptr();
+        };
+        auto pinned_host_alloc = [](size_t bytes) -> std::shared_ptr<void> {
+            auto t = std::make_shared<at::Tensor>(at::empty(
+                {static_cast<int64_t>(bytes)},
+                at::TensorOptions().dtype(at::kByte).pinned_memory(true)));
+            return std::shared_ptr<void>(t, t->data_ptr());
+        };
+        set_fmha_bwd_workspace_alloc(args, workspace_alloc);
+        set_fmha_bwd_pinned_host_alloc(args, pinned_host_alloc);
+
+        float t = aiter::mha_bwd(args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     } else {
         // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.
