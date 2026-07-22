@@ -13,6 +13,7 @@ import hashlib
 import importlib
 import logging
 import re
+import threading
 from typing import Any, TYPE_CHECKING
 
 from torch._inductor.codegen.common import (
@@ -34,7 +35,6 @@ from torch._inductor.ir import (
     ReinterpretView,
 )
 from torch._inductor.virtualized import V
-from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -401,13 +401,35 @@ def _create_gemm_arguments(
     scale_mode_b: Any | None = None,
     swizzle_mode_b: Any | None = None,
     epilogue: Any | None = None,
+    local_reduce_out: Any | None = None,
+    local_reduce_group: int = 0,
+    local_reduce_axis: int = 1,
 ):
     import cutlass.operators
 
-    if epilogue is not None and variant_name != "GEMM":
+    if local_reduce_out is not None and variant_name != "SCALED_GEMM":
         raise NotImplementedError(
-            "Epilogue fusion is not yet supported for grouped or scaled GEMM variants"
+            "NVGEMM local reductions currently require scaled GEMM"
         )
+    if local_reduce_out is not None and (
+        local_reduce_axis not in (0, 1) or local_reduce_group <= 1
+    ):
+        raise NotImplementedError(
+            "NVGEMM local reductions require an M- or N-axis group greater than 1"
+        )
+
+    def with_local_reduce(args):
+        if local_reduce_out is None:
+            return args
+        from cutlass.operators.utils.tensor import TensorWrapper
+
+        args.local_reduce_out = TensorWrapper(local_reduce_out)
+        args.local_reduce_group = local_reduce_group
+        args.local_reduce_axis = local_reduce_axis
+        return args
+
+    if epilogue is not None and variant_name == "GROUPED_GEMM":
+        raise NotImplementedError("Epilogue fusion is not yet supported for grouped GEMM")
 
     match variant_name:
         case "GROUPED_GEMM":
@@ -426,11 +448,16 @@ def _create_gemm_arguments(
             a, b, scale_a, scale_b = input_tensors
             scaled_a = ScaledOperand(a, scale_a, scale_mode_a, swizzle_mode_a)
             scaled_b = ScaledOperand(b, scale_b, scale_mode_b, swizzle_mode_b)
-            return cutlass.operators.arguments.GemmArguments(
-                scaled_a,
-                scaled_b,
-                out,
-                accumulator_type=accumulator_type,
+            kwargs: dict[str, Any] = {"accumulator_type": accumulator_type}
+            if epilogue is not None:
+                kwargs["epilogue"] = epilogue
+            return with_local_reduce(
+                cutlass.operators.arguments.GemmArguments(
+                    scaled_a,
+                    scaled_b,
+                    out,
+                    **kwargs,
+                )
             )
 
         case "GEMM":
@@ -438,7 +465,9 @@ def _create_gemm_arguments(
             kwargs: dict[str, Any] = {"accumulator_type": accumulator_type}
             if epilogue is not None:
                 kwargs["epilogue"] = epilogue
-            return cutlass.operators.arguments.GemmArguments(a, b, out, **kwargs)
+            return with_local_reduce(
+                cutlass.operators.arguments.GemmArguments(a, b, out, **kwargs)
+            )
 
         case _:
             raise NotImplementedError(f"Unsupported NVGEMM variant: {variant_name}")
@@ -579,6 +608,85 @@ def _rewrap_efc_compiled_obj(compiled_fn, kernel, epilogue_args=None):
     return wrapped_launch
 
 
+def _update_reuse_args_tensors(
+    variant_name, args, input_tensors, out, epilogue_args, args_kwargs=None
+) -> bool:
+    """Redirect the cached args at this call's runtime tensors.
+
+    A cache hit on ``mem_key`` guarantees identical shapes/strides/dtypes, so
+    only the data pointers change; mutating ``TensorWrapper._runtime_tensor`` in
+    place is sufficient and lets us skip the (expensive) _create_gemm_arguments
+    rebuild. Returns False for GROUPED_GEMM (unsupported), signalling the caller
+    to use the rebuild path.
+    """
+    if variant_name == "GROUPED_GEMM":
+        return False
+    if variant_name == "SCALED_GEMM":
+        a, b, scale_a, scale_b = input_tensors
+        args.A.quantized.tensor._runtime_tensor = a
+        args.A.scale.tensor._runtime_tensor = scale_a
+        args.B.quantized.tensor._runtime_tensor = b
+        args.B.scale.tensor._runtime_tensor = scale_b
+        args.out.tensor._runtime_tensor = out
+    else:
+        # GEMM: dense mm and the EFC bias/epilogue addmm path.
+        a, b = input_tensors
+        args.A.tensor._runtime_tensor = a
+        args.B.tensor._runtime_tensor = b
+        args.out.tensor._runtime_tensor = out
+    epilogue = getattr(args, "epilogue", None)
+    if epilogue is not None:
+        for name, wrapper in epilogue.tensors.items():
+            val = epilogue_args.tensors[name]
+            wrapper._runtime_tensor = getattr(val, "runtime_tensor", val)
+    local_reduce = getattr(args, "local_reduce_out", None)
+    if local_reduce is not None:
+        local_reduce._runtime_tensor = args_kwargs["local_reduce_out"]
+    return True
+
+
+def _clear_reuse_args_tensors(variant_name, args, epilogue_args):
+    """Drop the runtime tensors held by cached args after a launch.
+
+    kernel.run enqueues the launch synchronously and reads the pointers during
+    the call, and the caller keeps the tensors alive, so clearing our cached
+    references is safe. Required for cudagraph capture, which fails if a cached
+    object retains a tensor from the graph pool between iterations.
+    """
+    if variant_name == "SCALED_GEMM":
+        args.A.quantized.tensor._runtime_tensor = None
+        args.A.scale.tensor._runtime_tensor = None
+        args.B.quantized.tensor._runtime_tensor = None
+        args.B.scale.tensor._runtime_tensor = None
+        args.out.tensor._runtime_tensor = None
+    else:
+        args.A.tensor._runtime_tensor = None
+        args.B.tensor._runtime_tensor = None
+        args.out.tensor._runtime_tensor = None
+    epilogue = getattr(args, "epilogue", None)
+    if epilogue is not None:
+        for wrapper in epilogue.tensors.values():
+            wrapper._runtime_tensor = None
+        # kernel.run traces the epilogue on first launch, and the trace retains
+        # the real output/aux tensors in example_inputs (used only for tracing,
+        # not the launch). Replace them with meta tensors so the cached args
+        # hold no real storage -- otherwise an intermediate output stays live
+        # and CUDA graph capture fails. Mirrors _fake_epilogue_metadata.
+        import torch
+
+        te = getattr(epilogue, "traced_epilogue", None)
+        example_inputs = getattr(te, "example_inputs", None) if te else None
+        if example_inputs:
+            for name, val in example_inputs.items():
+                if isinstance(val, torch.Tensor) and val.device.type != "meta":
+                    example_inputs[name] = torch.empty_strided(
+                        val.shape, val.stride(), dtype=val.dtype, device="meta"
+                    )
+    local_reduce = getattr(args, "local_reduce_out", None)
+    if local_reduce is not None:
+        local_reduce._runtime_tensor = None
+
+
 def _nvgemm_run(
     variant_name: str,
     kernel_name: str,
@@ -625,6 +733,39 @@ def _nvgemm_run(
 
     if mem_key in compiled_cache:
         artifact = compiled_cache[mem_key]
+        # Fast path: reuse the previously-built args, redirecting only the
+        # runtime tensor pointers. Skips _create_gemm_arguments, whose cost
+        # (get_type_hints + deepcopy + full epilogue/layout reprocessing)
+        # depends solely on shapes/layout -- fixed for a given mem_key.
+        reuse = getattr(artifact, "_nvgemm_reuse", None)
+        if reuse is not None:
+            args, kernel, reuse_lock = reuse
+            # The cached args are shared mutable state. Serialize the
+            # redirect->launch->clear so concurrent launches on the same cached
+            # artifact (e.g. two graph executions sharing this kernel) don't
+            # stomp each other's runtime tensor pointers.
+            with reuse_lock:
+                if _update_reuse_args_tensors(
+                    variant_name,
+                    args,
+                    input_tensors,
+                    out,
+                    epilogue_args,
+                    variant_kwargs,
+                ):
+                    try:
+                        kernel.run(
+                            args,
+                            artifact,
+                            stream=stream,
+                            workspace=workspace,
+                            assume_supported_args=True,
+                        )
+                    finally:
+                        _clear_reuse_args_tensors(variant_name, args, epilogue_args)
+                    return
+        # No reusable args (e.g. artifact loaded from disk by a subprocess
+        # precompile): build them once, then attach below for future calls.
         args = _create_gemm_arguments(
             variant_name,
             input_tensors,
@@ -666,6 +807,7 @@ def _nvgemm_run(
             epilogue_args=epilogue_args,
             epilogue_source=epilogue_source,
             fallback_fn=disk_fallback,
+            cc=_current_target_sm(dev_idx).cc,
         )
 
         if was_compiled:
@@ -680,13 +822,41 @@ def _nvgemm_run(
 
         compiled_cache[mem_key] = artifact
 
-    kernel.run(
+    # Attach the built args for reuse on subsequent calls (skipped for
+    # GROUPED_GEMM, where _update_reuse_args_tensors returns False). This runs
+    # for both the disk-loaded rebuild branch and the fresh-compile branch.
+    reuse_supported = _update_reuse_args_tensors(
+        variant_name,
         args,
-        artifact,
-        stream=stream,
-        workspace=workspace,
-        assume_supported_args=True,
+        input_tensors,
+        out,
+        epilogue_args,
+        variant_kwargs,
     )
+    if reuse_supported:
+        # Publish and launch under the lock so a concurrent reuse-path caller
+        # that picks up these args blocks until this launch has cleared them.
+        reuse_lock = threading.Lock()
+        with reuse_lock:
+            artifact._nvgemm_reuse = (args, kernel, reuse_lock)
+            try:
+                kernel.run(
+                    args,
+                    artifact,
+                    stream=stream,
+                    workspace=workspace,
+                    assume_supported_args=True,
+                )
+            finally:
+                _clear_reuse_args_tensors(variant_name, args, epilogue_args)
+    else:
+        kernel.run(
+            args,
+            artifact,
+            stream=stream,
+            workspace=workspace,
+            assume_supported_args=True,
+        )
 
 
 # Patch both the canonical definition (integration_utils.mma) for callers that
@@ -889,6 +1059,7 @@ class NVUniversalGemmKernel(Kernel):
         epilogue_reads: list[str] | None = None,
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
+        local_reduce: tuple[str, int, int, str] | None = None,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
     ) -> None:
@@ -908,6 +1079,7 @@ class NVUniversalGemmKernel(Kernel):
         self.epilogue_reads = epilogue_reads or []
         self.epilogue_writes = epilogue_writes or []
         self.epilogue_var_renames = epilogue_var_renames or {}
+        self.local_reduce = local_reduce
         self.swap_ab = swap_ab
 
         # An addmm bias baked into the choice becomes a bias-add epilogue. With
@@ -948,8 +1120,9 @@ class NVUniversalGemmKernel(Kernel):
         )
 
         input_tensor_names = [f"in_ptr{i}" for i, _ in enumerate(self.input_nodes)]
+        output_buffers = self._ordered_output_buffers()
         input_params = list(input_tensor_names)
-        input_params.append("out_ptr0")
+        input_params.extend(f"out_ptr{i}" for i in range(len(output_buffers)))
         input_params.extend(self.epilogue_reads)
         if self.workspace_size > 0:
             input_params.append("workspace")
@@ -962,7 +1135,7 @@ class NVUniversalGemmKernel(Kernel):
             input_tensors_expr = f"({', '.join(input_tensor_names)})"
 
         workspace_arg = "workspace" if self.workspace_size > 0 else "None"
-        has_epilogue = bool(self.epilogue_fn_code)
+        has_epilogue = bool(self.epilogue_fn_code) or self.local_reduce is not None
 
         # Build variant_kwargs dict expression for SCALED_GEMM
         variant_kwargs_expr = "None"
@@ -1051,7 +1224,7 @@ class NVUniversalGemmKernel(Kernel):
             epi_args_expr = "None"
             epi_source_expr = '""'
             aux_tensors_expr = "()"
-            if has_epilogue:
+            if self.epilogue_fn_code:
                 epilogue_kwargs = self._render_epilogue_kwargs()
                 epi_kwargs_str = "epilogue_fn=_EPILOGUE_FN_SRC"
                 if epilogue_kwargs:
@@ -1062,6 +1235,19 @@ class NVUniversalGemmKernel(Kernel):
                 if self.epilogue_reads:
                     aux_tensors_expr = "(" + ", ".join(self.epilogue_reads) + ",)"
 
+            run_variant_kwargs = "_VARIANT_KWARGS"
+            if self.local_reduce is not None:
+                reduce_name, reduce_group, reduce_axis, _ = self.local_reduce
+                reduce_ptr = f"out_ptr{output_buffers.index(reduce_name)}"
+                run_variant_kwargs = (
+                    "_VARIANT_KWARGS | {"
+                    f"'local_reduce_out': {reduce_ptr}, "
+                    f"'local_reduce_group': {reduce_group}, "
+                    f"'local_reduce_axis': {reduce_axis}"
+                    "}"
+                )
+                aux_tensors_expr = f"({reduce_ptr},)"
+
             code.writeline("_nvgemm_run(")
             with code.indent():
                 code.writeline(f'"{self.variant.name}", _KERNEL_NAME,')
@@ -1070,7 +1256,7 @@ class NVUniversalGemmKernel(Kernel):
                     "_compiled_cache, _disk_fn_cache, __file__, _DISK_CACHE_CONFIG_KEY,"
                 )
                 code.writeline(f"stream=stream, workspace={workspace_arg},")
-                code.writeline("variant_kwargs=_VARIANT_KWARGS,")
+                code.writeline(f"variant_kwargs={run_variant_kwargs},")
                 code.writeline(f"epilogue_args={epi_args_expr},")
                 code.writeline(f"epilogue_source={epi_source_expr},")
                 code.writeline(f"has_epilogue={has_epilogue},")
@@ -1109,26 +1295,54 @@ class NVUniversalGemmKernel(Kernel):
 
         return code.getvalue()
 
-    def _render_epilogue_kwargs(self) -> str:
-        """Render kwargs for EpilogueArguments constructor.
+    def _ordered_output_buffers(self) -> list[str]:
+        """Graph-output buffer names in out_ptr order.
 
-        Skips intermediate stores (write_buffer entries from CutlassEVTCodegen.store()
-        in a multi-node epilogue chain) -- those names are not kernel parameters and
-        would produce NameError at runtime.
+        out_ptr0 is the primary GEMM output (the epilogue's `D` store, passed as
+        the kernel's `out`). Additional stores -- a multi-store epilogue where the
+        GEMM output feeds more than one graph output -- follow in epilogue_writes
+        order as out_ptr1, out_ptr2, ...
         """
-        kwargs_parts = []
-        write_buffer_names = OrderedSet(self.epilogue_writes)
+        if not self.epilogue_writes:
+            primary_output = (
+                self.local_reduce[3]
+                if self.local_reduce is not None
+                else self.output_node.get_name()
+            )
+            ordered = [primary_output]
+            if self.local_reduce is not None:
+                ordered.append(self.local_reduce[0])
+            return ordered
+        d_buf = (self.epilogue_var_renames or {}).get("D")
+        ordered: list[str] = []
+        if d_buf is not None:
+            ordered.append(d_buf)
+        for w in self.epilogue_writes:
+            if w != d_buf and w not in ordered:
+                ordered.append(w)
+        if self.local_reduce is not None and self.local_reduce[0] not in ordered:
+            ordered.append(self.local_reduce[0])
+        return ordered
 
+    def _render_epilogue_kwargs(self) -> str:
+        """Render kwargs for the EpilogueArguments constructor.
+
+        Each epilogue variable maps to either an output pointer -- the `D` store
+        and any additional multi-store outputs become out_ptr0, out_ptr1, ... in
+        _ordered_output_buffers order -- or, for a read, the aux input buffer.
+        `accum` is the kernel-supplied accumulator and is not a kwarg.
+        """
+        out_ptr_of = {
+            buf: f"out_ptr{i}" for i, buf in enumerate(self._ordered_output_buffers())
+        }
+        kwargs_parts = []
         for var_name, buffer_name in self.epilogue_var_renames.items():
-            if var_name == "D":
-                kwargs_parts.append("D=out_ptr0")
-            elif var_name == _ACCUMULATOR_ARG_NAME:
+            if var_name == _ACCUMULATOR_ARG_NAME:
                 continue
-            elif buffer_name in write_buffer_names:
-                continue
+            if buffer_name in out_ptr_of:
+                kwargs_parts.append(f"{var_name}={out_ptr_of[buffer_name]}")
             else:
                 kwargs_parts.append(f"{var_name}={buffer_name}")
-
         return ", ".join(kwargs_parts)
 
     def _get_reinterpret_view(self, node) -> ReinterpretView | None:
@@ -1148,6 +1362,12 @@ class NVUniversalGemmKernel(Kernel):
         """
         wrapper = V.graph.wrapper_code
 
+        if self.local_reduce is not None:
+            primary_name = self.local_reduce[3]
+            V.graph.removed_buffers.discard(primary_name)
+            primary_output = V.graph.get_buffer(primary_name)
+            wrapper.codegen_allocation(primary_output or self.output_node)
+
         call_args: list[str] = []
         arg_types: list[Any] = []
         raw_args: list[Buffer | ReinterpretView | None] = []
@@ -1166,16 +1386,14 @@ class NVUniversalGemmKernel(Kernel):
             arg_types.append(V.graph.get_dtype(input_node.get_name()))
             raw_keys.append(param_name)
 
-        # The kernel writes to the epilogue's final output, not the GEMM buffer
-        # (which is removed via removed_buffers aliasing).
-        if self.epilogue_writes:
-            output_name = self.epilogue_writes[-1]
-        else:
-            output_name = self.output_node.get_name()
-        call_args.append(output_name)
-        arg_types.append(V.graph.get_dtype(output_name))
-        raw_args.append(None)  # Output buffer is findable by name
-        raw_keys.append("out_ptr0")
+        # The kernel writes the epilogue's output store(s), not the GEMM buffer
+        # (which is removed via removed_buffers aliasing). out_ptr0 is the primary
+        # (`D`) output; a multi-store epilogue adds out_ptr1, ... in order.
+        for i, output_name in enumerate(self._ordered_output_buffers()):
+            call_args.append(output_name)
+            arg_types.append(V.graph.get_dtype(output_name))
+            raw_args.append(None)  # Output buffer is findable by name
+            raw_keys.append(f"out_ptr{i}")
 
         for read_name in self.epilogue_reads:
             call_args.append(read_name)
