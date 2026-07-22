@@ -64,7 +64,7 @@ def clean_string(s: Any) -> Any:
     return s
 
 
-def expand_hints(hints: list[str], dynamo_dir: str | None = None) -> list[str]:
+def expand_hints(hints: list[str], dynamo_dir: str | Path | None = None) -> list[str]:
     """
     Expands hint references to their actual values from graph_break_hints.
     Uses exec() to avoid import dependencies.
@@ -152,7 +152,7 @@ def extract_hint_list(
     source: str,
     value_node: ast.AST,
     substitutions: dict[str, str],
-    dynamo_dir: str | None,
+    dynamo_dir: str | Path | None,
 ) -> list[str]:
     if not isinstance(value_node, ast.List):
         hints = extract_info_from_value(source, value_node, substitutions)
@@ -215,7 +215,7 @@ def extract_call_info(
     source: str,
     node: ast.Call,
     substitutions: dict[str, str],
-    dynamo_dir: str | None,
+    dynamo_dir: str | Path | None,
 ) -> dict[str, Any]:
     info: dict[str, Any] = {
         "gb_type": None,
@@ -235,8 +235,84 @@ def extract_call_info(
     return info
 
 
+def extract_unimplemented_call_info(
+    source: str, node: ast.AST, dynamo_dir: str | Path | None = None
+) -> dict[str, Any] | None:
+    if not (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in ("unimplemented", "unimplemented_with_warning")
+    ):
+        return None
+
+    info: dict[str, Any] = {
+        "gb_type": None,
+        "context": None,
+        "explanation": None,
+        "hints": [],
+    }
+
+    for kw in node.keywords:
+        if kw.arg in info:
+            info[kw.arg] = extract_info_from_keyword(source, kw)
+
+    if info["gb_type"] is None:
+        return None
+
+    if info["hints"]:
+        hints = info["hints"]
+        expanded_hints = []
+        items = re.findall(r'"([^"]*)"', hints)
+        if items:
+            expanded_hints.extend(items)
+
+        if "*graph_break_hints." in hints:
+            expanded_hints.extend(expand_hints([hints], dynamo_dir))
+
+        info["hints"] = expanded_hints
+
+    return info
+
+
+def extract_unimplemented_calls(
+    source: str,
+    nodes: list[ast.AST],
+    dynamo_dir: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    helper_calls = {
+        node.name: helper_call
+        for node in nodes
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "unimplemented_direct_disable_call"
+        and (helper_call := find_helper_unimplemented_call(node)) is not None
+    }
+
+    results = []
+    for node in nodes:
+        info = extract_unimplemented_call_info(source, node, dynamo_dir)
+        if info is not None:
+            results.append(info)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in helper_calls
+        ):
+            api_name = extract_constant_str_arg(node, "api_name", 0)
+            if api_name is not None:
+                info = extract_call_info(
+                    source,
+                    helper_calls[node.func.id],
+                    {"api_name": api_name},
+                    dynamo_dir,
+                )
+                if info["gb_type"] is not None:
+                    results.append(info)
+
+    return results
+
+
 def find_unimplemented_calls(
-    path: str, dynamo_dir: str | None = None
+    path: str | Path, dynamo_dir: str | Path | None = None
 ) -> list[dict[str, Any]]:
     results = []
     path_obj = Path(path)
@@ -249,72 +325,12 @@ def find_unimplemented_calls(
     for file_path in file_paths:
         with open(file_path) as f:
             source = f.read()
+            if "unimplemented" not in source:
+                continue
             try:
                 tree = ast.parse(source)
-                helper_calls = {
-                    node.name: helper_call
-                    for node in ast.walk(tree)
-                    if isinstance(node, ast.FunctionDef)
-                    and node.name == "unimplemented_direct_disable_call"
-                    and (helper_call := find_helper_unimplemented_call(node))
-                    is not None
-                }
-
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.FunctionDef):
-                        if node.name in (
-                            "unimplemented",
-                            "unimplemented_with_warning",
-                        ):
-                            continue
-                    if (
-                        isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Name)
-                        and node.func.id
-                        in ("unimplemented", "unimplemented_with_warning")
-                    ):
-                        info: dict[str, Any] = {
-                            "gb_type": None,
-                            "context": None,
-                            "explanation": None,
-                            "hints": [],
-                        }
-
-                        for kw in node.keywords:
-                            if kw.arg in info:
-                                info[kw.arg] = extract_info_from_keyword(source, kw)
-
-                        if info["gb_type"] is None:
-                            continue
-
-                        if info["hints"]:
-                            hints = info["hints"]
-                            expanded_hints = []
-                            items = re.findall(r'"([^"]*)"', hints)
-                            if items:
-                                expanded_hints.extend(items)
-
-                            if "*graph_break_hints." in hints:
-                                expanded_hints.extend(expand_hints([hints], dynamo_dir))
-
-                            info["hints"] = expanded_hints
-
-                        results.append(info)
-                    elif (
-                        isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Name)
-                        and node.func.id in helper_calls
-                    ):
-                        api_name = extract_constant_str_arg(node, "api_name", 0)
-                        if api_name is not None:
-                            info = extract_call_info(
-                                source,
-                                helper_calls[node.func.id],
-                                {"api_name": api_name},
-                                dynamo_dir,
-                            )
-                            if info["gb_type"] is not None:
-                                results.append(info)
+                nodes = list(ast.walk(tree))
+                results.extend(extract_unimplemented_calls(source, nodes, dynamo_dir))
             except SyntaxError:
                 print(f"Syntax error in {file_path}")
 
