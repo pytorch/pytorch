@@ -691,7 +691,7 @@ class NestedReduction:
                     reduction_buffer_names |= node.get_buffer_names()
         if not reduction_names:
             return None
-        assert reduction_buffer_names is not None
+        assert reduction_buffer_names is not None  # noqa: S101
 
         candidates: list[tuple[SchedulerNode, int]] = []
         full_numel = V.graph.sizevars.simplify(numel * rnumel)
