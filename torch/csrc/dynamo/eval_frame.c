@@ -857,8 +857,30 @@ static PyObject* THPDisableWrapper_repr(THPDisableWrapper* self) {
   return PyObject_Repr(self->fn);
 }
 
+// Delegate function-introspection attributes to the wrapped fn. The old disable
+// wrapper was a functools.wraps'd Python function, so callers that introspect a
+// disabled callable as a function (e.g. torch.export's make_fake_inputs reads
+// forward.__code__) kept working; forward these to fn so they keep working now
+// that the wrapper is a C object. The attribute name is passed via `closure`.
+static PyObject* THPDisableWrapper_fn_attr(PyObject* self, void* closure) {
+  return PyObject_GetAttrString(
+      ((THPDisableWrapper*)self)->fn, (const char*)closure);
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPDisableWrapper_getset[] = {
+    {"__code__", THPDisableWrapper_fn_attr, NULL, NULL, (void*)"__code__"},
+    {"__defaults__",
+     THPDisableWrapper_fn_attr,
+     NULL,
+     NULL,
+     (void*)"__defaults__"},
+    {"__kwdefaults__",
+     THPDisableWrapper_fn_attr,
+     NULL,
+     NULL,
+     (void*)"__kwdefaults__"},
+    {"__globals__", THPDisableWrapper_fn_attr, NULL, NULL, (void*)"__globals__"},
     {"__dict__", PyObject_GenericGetDict, PyObject_GenericSetDict, NULL, NULL},
     {NULL}};
 
