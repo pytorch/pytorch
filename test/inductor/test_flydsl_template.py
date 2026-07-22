@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 import ctypes
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from types import SimpleNamespace
 from unittest import mock
@@ -169,6 +171,104 @@ class TestFlyDSLTemplate(TestCase):
                 + (8, 4096, 4096, stream)
             ],
         )
+
+    def test_compiled_cache_keys_only_on_param(self):
+        from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
+
+        jit_func = SimpleNamespace()
+        compile_args = (object(),)
+        dispatch_args = (object(),)
+        compiled = mock.Mock()
+        compiler = mock.Mock(return_value=compiled)
+
+        class Param:
+            def __cache_signature__(self):
+                return ("param",)
+
+        first = run_cached_flydsl(
+            jit_func,
+            *compile_args,
+            constexpr_param=Param(),
+            compiler=compiler,
+            dispatch_args=dispatch_args,
+        )
+        second = run_cached_flydsl(
+            jit_func,
+            object(),
+            constexpr_param=Param(),
+            compiler=compiler,
+            dispatch_args=dispatch_args,
+        )
+
+        self.assertIs(first, compiled)
+        self.assertIs(second, compiled)
+        compiler.assert_called_once_with(jit_func, *compile_args)
+        compiled.assert_called_once_with(*dispatch_args)
+
+    def test_compiled_cache_serializes_same_param(self):
+        from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
+
+        jit_func = SimpleNamespace()
+        compile_started = threading.Event()
+        allow_compile = threading.Event()
+        compiled = mock.Mock()
+        compile_calls = 0
+
+        class Param:
+            def __cache_signature__(self):
+                return ("param",)
+
+        def compiler(*args):
+            nonlocal compile_calls
+            compile_calls += 1
+            compile_started.set()
+            self.assertTrue(allow_compile.wait(5))
+            return compiled
+
+        def invoke(value):
+            return run_cached_flydsl(
+                jit_func,
+                object(),
+                constexpr_param=Param(),
+                compiler=compiler,
+                dispatch_args=(value,),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(invoke, "first")
+            self.assertTrue(compile_started.wait(5))
+            second = pool.submit(invoke, "second")
+            allow_compile.set()
+            self.assertIs(first.result(), compiled)
+            self.assertIs(second.result(), compiled)
+
+        self.assertEqual(compile_calls, 1)
+        compiled.assert_called_once_with("second")
+
+    def test_compiled_cache_retries_after_failure(self):
+        from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
+
+        jit_func = SimpleNamespace()
+        compiled = mock.Mock()
+        compiler = mock.Mock(side_effect=[RuntimeError("compile failed"), compiled])
+
+        class Param:
+            def __cache_signature__(self):
+                return ("param",)
+
+        kwargs = {
+            "constexpr_param": Param(),
+            "compiler": compiler,
+            "dispatch_args": (),
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "compile failed"):
+            run_cached_flydsl(jit_func, **kwargs)
+        result = run_cached_flydsl(jit_func, **kwargs)
+
+        self.assertIs(result, compiled)
+        self.assertEqual(compiler.call_count, 2)
+        compiled.assert_not_called()
 
     def test_inductor_launcher_falls_back_for_unknown_abi(self):
         from torch._inductor.runtime.flydsl_cache import (

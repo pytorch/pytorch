@@ -9,6 +9,7 @@ from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
 from torch._inductor.runtime.flydsl_cache import (
     ensure_flydsl_cache_dir,
     make_flydsl_inductor_launcher,
+    run_cached_flydsl,
 )
 
 {{gen_defines()}}
@@ -87,8 +88,7 @@ def _temporary_env(updates):
         _gemm_param = param
 
     ensure_flydsl_cache_dir()
-    executor = flyc.compile(
-        launch_gemm_gfx950,
+    compile_args = (
         _inductor_tensor_arg(output),
         _inductor_tensor_arg(mat1),
         _inductor_tensor_arg(mat2_nk),
@@ -98,7 +98,25 @@ def _temporary_env(updates):
         param,
         stream,
     )
-    if not os.environ.get("COMPILE_ONLY"):
+    if os.environ.get("COMPILE_ONLY"):
+        executor = flyc.compile(launch_gemm_gfx950, *compile_args)
+    else:
+        executor = run_cached_flydsl(
+            launch_gemm_gfx950,
+            *compile_args,
+            constexpr_param=param,
+            compiler=flyc.compile,
+            dispatch_args=(
+                output,
+                mat1,
+                mat2_nk,
+                GEMM_M,
+                GEMM_N,
+                GEMM_K,
+                param,
+                stream,
+            ),
+        )
         _gemm_executor = make_flydsl_inductor_launcher(
             executor,
             output,

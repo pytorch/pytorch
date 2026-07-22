@@ -4,10 +4,39 @@ from __future__ import annotations
 
 import ctypes
 import os
+import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
+
+
+_compiled_cache_lock = threading.RLock()
+
+
+def run_cached_flydsl(
+    jit_func: Any,
+    *compile_args: Any,
+    constexpr_param: Any,
+    compiler: Callable[..., Any],
+    dispatch_args: tuple[Any, ...],
+) -> Any:
+    """Cache a FlyDSL dispatcher on its JIT function by constexpr param."""
+    with _compiled_cache_lock:
+        cache_key = constexpr_param.__cache_signature__()
+        compiled_cache = getattr(jit_func, "_compiled_cache", None)
+        if compiled_cache is None:
+            compiled_cache = {}
+            jit_func._compiled_cache = compiled_cache
+
+        compiled = compiled_cache.get(cache_key)
+        if compiled is None:
+            compiled = compiler(jit_func, *compile_args)
+            compiled_cache[cache_key] = compiled
+        else:
+            compiled(*dispatch_args)
+        return compiled
 
 
 def _cache_dir() -> Path:
