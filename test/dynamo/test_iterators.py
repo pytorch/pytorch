@@ -7,7 +7,10 @@ import unittest
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    make_dynamo_test,
+    xfailIfPy313AndEarlier,
+)
 
 
 class CustomIterable:
@@ -1644,7 +1647,7 @@ class TestSpecialMethodIterLookup(torch._dynamo.test_case.TestCase):
     def test_iter_property_returns_callable(self):
         self.assertEqual(list(IterPropReturnsCallable([1, 2, 3])), [1, 2, 3])
 
-    @unittest.expectedFailure
+    @xfailIfPy313AndEarlier
     @make_dynamo_test
     def test_iter_property_raises_value_error(self):
         # Pre-3.14 slot_tp_iter swallows any lookup error (blanket

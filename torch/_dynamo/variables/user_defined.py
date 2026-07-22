@@ -1829,7 +1829,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if type_attr is None:
             raise_type_error(
                 tx,
-                f"'{self.value_type.__name__}' cannot be interpreted as a boolean",
+                f"'{self.python_type_name()}' cannot be interpreted as a boolean",
             )
         elif res is None:
             res = self._maybe_call_special(tx, "__len__", [])
@@ -1859,7 +1859,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if res:
             return res
         return variables.ConstantVariable.create(
-            f"<{self.value_type.__name__} object at f{id(self.value):#x}>"
+            f"<{self.python_type_name()} object at f{id(self.value):#x}>"
         )
 
     def str_impl(
@@ -1987,14 +1987,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/1ad0eef8ce8ec3db548be89c40fa427494e82814/Objects/typeobject.c#L10496
-        res = self._maybe_call_special(tx, "__iter__", [])
         type_attr = self.lookup_class_mro_attr("__iter__")
+        if type_attr is None:
+            raise_type_error(
+                tx,
+                f"'{self.python_type_name()}' object is not iterable",
+            )
+
+        res = self._maybe_call_special(tx, "__iter__", [])
         has_dunder_getitem = type_attr and type_attr is not NO_SUCH_SUBOBJ
 
         if res:
             return res
 
-        if type_attr is None or not has_dunder_getitem:
+        if not has_dunder_getitem:
             raise_type_error(
                 tx,
                 f"'{self.python_type_name()}' object is not iterable",
@@ -2773,8 +2779,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9266
         res = self._vectorcall_method(tx, "__len__", [], {})
-        res = pynumber_index(tx, res)
 
+        # A symbolic length must stay symbolic: coercing it via __index__ /
+        # PyNumber_AsSsize_t would specialize the shape to a constant and
+        # defeat dynamic shapes. The runtime non-negativity check is skipped.
+        if isinstance(res, variables.SymNodeVariable):
+            return res
+
+        res = pynumber_index(tx, res)
         if res.as_python_constant() < 0:
             raise_observed_exception(
                 ValueError,
