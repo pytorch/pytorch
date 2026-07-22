@@ -1,13 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import torch
 from torch._ops import OpOverload
-from torch.distributed.tensor._dtensor_spec import TensorMeta
-from torch.distributed.tensor._op_schema import ArgsType, KwargsType
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._op_schema import ArgsType, KwargsType, OpSchema
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _ShardingPlaceholder,
     register_single_dim_strategy,
 )
-from torch.distributed.tensor.placement_types import Placement
+from torch.distributed.tensor.placement_types import Partial, Placement
 
 
 aten = torch.ops.aten
@@ -35,10 +36,46 @@ def _random_inplace_single_dim_strategy(
     return placements
 
 
-# In-place random sampling ops: output follows input sharding exactly.
-_inplace_random_ops = [
+def _singleton_partial_random_inplace_single_dim_strategy(
+    op: OpOverload,
+    args_schema: ArgsType,
+    kwargs_schema: KwargsType,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    placements = _random_inplace_single_dim_strategy(op, args_schema, kwargs_schema)
+    num_outputs = sum(1 for r in op._schema.returns if "Tensor" in str(r.type))
+    for reduce_op in Partial.ALL_REDUCE_OPS:
+        placements.append([Partial(reduce_op)] * (num_outputs + 1))
+    return placements
+
+
+def _singleton_partial_full_mesh_strategy_filter(
+    mesh: DeviceMesh,
+    _op_schema: OpSchema,
+    input_specs: list[DTensorSpec],
+    _output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
+) -> bool:
+    return all(
+        not isinstance(placement, Partial) or mesh.size(mesh_dim) == 1
+        for input_spec in input_specs
+        for mesh_dim, placement in enumerate(input_spec.placements)
+    )
+
+
+_singleton_partial_random_ops = [
     aten.normal_.default,
     aten.uniform_.default,
+]
+
+for _op in _singleton_partial_random_ops:
+    register_single_dim_strategy(
+        _op,
+        allow_uneven_sharding=True,
+        full_mesh_strategy_filter=_singleton_partial_full_mesh_strategy_filter,
+    )(_singleton_partial_random_inplace_single_dim_strategy)
+
+
+# In-place random sampling ops: output follows input sharding exactly.
+_inplace_random_ops = [
     aten.native_dropout.default,
     aten.bernoulli_.float,
     aten.bernoulli.default,

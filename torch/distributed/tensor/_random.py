@@ -11,7 +11,7 @@ from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
-from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.distributed.tensor.placement_types import _StridedShard, Partial, Shard
 from torch.fx.experimental.symbolic_shapes import (
     statically_known_false,
     statically_known_true,
@@ -68,7 +68,7 @@ def _try_compute_stateful_rng_metadata(
     spec: DTensorSpec,
     local_tensor: torch.Tensor,
 ) -> _StatefulRNGMetadata | None:
-    """Describe a supported DTensor shard as one logical rectangle."""
+    """Describe a supported DTensor layout as one logical rectangle."""
     if spec.mesh.ndim != 1 or len(spec.placements) != 1:
         return None
     if spec.tensor_meta is None or not spec.mesh._is_current_rank_part_of_mesh():
@@ -86,7 +86,9 @@ def _try_compute_stateful_rng_metadata(
         return None
 
     placement = spec.placements[0]
-    if placement.is_replicate():
+    if placement.is_replicate() or (
+        type(placement) is Partial and spec.mesh.size(0) == 1
+    ):
         local_shape = tuple(spec.shape)
         global_offset = (0,) * spec.ndim
     elif isinstance(placement, Shard):
