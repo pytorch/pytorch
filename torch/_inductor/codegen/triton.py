@@ -159,7 +159,12 @@ def get_triton_reduction_function(reduction_type):
     use_helper = reduction_type in ("any", "max", "min", "prod", "fmax")
     module = "triton_helpers" if use_helper else "tl"
     if reduction_type in ("max", "min", "fmax"):
-        return f"{module}.{reduction_type}2"
+        strict = (
+            "_strict"
+            if config.strict_signed_zero and reduction_type in ("max", "min")
+            else ""
+        )
+        return f"{module}.{reduction_type}2{strict}"
     else:
         return f"{module}.{reduction_type}"
 
