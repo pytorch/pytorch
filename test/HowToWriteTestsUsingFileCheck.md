@@ -125,3 +125,25 @@ annotations from the example above one would write:
   ```
 * `CHECK-REGEX: <pattern>`
   Scans the input until `PATTERN` is matched, accepts RE syntax for std::regex.
+
+## String captures and substitutions
+
+FileCheck patterns can capture text matched by a regular expression and reuse
+it in later patterns. `[[NAME:<regex>]]` defines a string variable, and
+`[[NAME]]` substitutes its most recently captured value. For example:
+
+```
+# CHECK: [[NODE:[A-Za-z0-9_]+]] = torch.ops.aten.add.Tensor
+# CHECK: return [[NODE]]
+```
+
+The first pattern accepts any alphanumeric node name and saves it as `NODE`.
+The second pattern then checks that the exact same name is returned. Variables
+may be redefined, in which case later substitutions use the newest value. A
+variable can also be used later in the pattern where it is defined:
+
+```
+# CHECK: op [[REGISTER:r[0-9]+]], [[REGISTER]]
+```
+
+Substitutions can be used in `CHECK-NOT` patterns, but definitions cannot.
