@@ -577,6 +577,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         input_nodes,
         layout,
         input_gen_fns=input_gen_fns or None,
+        **({"return_multi_template": False} if mutated_input_nodes else {}),
     )
     return flex_gemm_ordered_outputs(
         result,

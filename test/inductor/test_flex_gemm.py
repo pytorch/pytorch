@@ -6803,6 +6803,53 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         self.assertIn("('cluster_m', 2)", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
+    def test_mm_tuned_local_reduce_supports_max_autotune(self, device):
+        """Keep mutable local-reduce outputs out of deferred template selection."""
+        from torch._inductor import config as inductor_config
+
+        m, n, group = 256, 512, 512
+
+        def epilogue_fn(acc):
+            partials = acc.float().view(m, -1, group).sum(-1)
+            return acc.relu(), partials
+
+        def fn(a, b):
+            actual, partials = flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+            return actual, partials.sum(-1)
+
+        a = torch.randn(m, 64, device=device, dtype=torch.bfloat16)
+        b = torch.randn(64, n, device=device, dtype=torch.bfloat16)
+        with inductor_config.patch(max_autotune=True):
+            (actual, reduced), (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+
+        expected, expected_partials = epilogue_fn(a @ b)
+        high_precision_expected, high_precision_partials = epilogue_fn(
+            a.double() @ b.double()
+        )
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            expected,
+            high_precision_expected,
+            a.shape[1],
+        )
+        torch.testing.assert_close(
+            reduced,
+            high_precision_partials.float().sum(-1),
+            atol=1e-3,
+            rtol=1e-3,
+        )
+        self.assertFlexGemmGeneratedCode(code)
+        self.assertIn("('tile_m', 256)", code)
+        self.assertIn("('tile_n', 512)", code)
+
+    @unittest.skipIf(SM120OrLater, "SM100 config required")
     @parametrize(
         "case",
         (
