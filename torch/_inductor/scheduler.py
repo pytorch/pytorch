@@ -2788,7 +2788,7 @@ class SchedulerNode(BaseSchedulerNode):
             raise AssertionError("expected a loop body")
         self._before_loop_state_mutation()
         self._body = self._body.with_indexing_exprs(replacements)
-        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=False)
+        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
 
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._before_loop_state_mutation()
@@ -7756,7 +7756,7 @@ class Scheduler:
             return -1
 
         # Currently only handle single read/write operations
-        if len(node2.read_writes.reads) > 1 or len(node2.read_writes.writes) > 1:
+        if len(node2.read_writes.reads) != 1 or len(node2.read_writes.writes) != 1:
             return -1
 
         node2_read = next(iter(node2.read_writes.reads))
@@ -7767,11 +7767,13 @@ class Scheduler:
         ):
             return -1
 
-        node1_writes = {dep.name: dep for dep in node1.read_writes.writes}
-        if node2_read.name not in node1_writes:
+        matching_node1_writes = [
+            dep for dep in node1.read_writes.writes if dep.name == node2_read.name
+        ]
+        if len(matching_node1_writes) != 1:
             return -1
 
-        node1_write = node1_writes[node2_read.name]
+        node1_write = matching_node1_writes[0]
 
         if not isinstance(node1_write, MemoryDep):
             return -1
