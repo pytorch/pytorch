@@ -1047,6 +1047,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             (0, "amax"),
             (0, "amin"),
             (1, "sum"),
+            (1, "mean"),
             (1, "prod"),
             (1, "amax"),
             (1, "amin"),
