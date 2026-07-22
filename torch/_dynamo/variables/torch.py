@@ -33,7 +33,7 @@ import math
 import re
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext
-from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 import torch._C
@@ -47,6 +47,7 @@ from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -65,7 +66,12 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import (
+    _COW_TENSOR_UNSUPPORTED,
+    _try_is_cow_tensor,
+    GuardBuilder,
+    install_guard,
+)
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
@@ -175,6 +181,8 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.graph.disable_saved_tensors_hooks,
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
+        torch.cuda.use_mem_pool,
+        torch.cuda.use_mem_pool.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback.annotate,
         torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
         # We'll let Dynamo inline into the contextlib part of these context
@@ -436,7 +444,7 @@ def _collect_tensors_with_sources(
             raise AssertionError(
                 f"Expected fake_tensor to be a torch.Tensor, got {type(fake_tensor)}"
             )
-        if isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor):
+        if is_fake_tensor(fake_tensor):
             pass
         elif is_traceable_wrapper_subclass(fake_tensor):
             # For tensor subclasses (e.g. DTensor), verify the inner tensors
@@ -447,11 +455,7 @@ def _collect_tensors_with_sources(
                 fake_tensor,  # pyrefly: ignore[bad-argument-type]
                 out=plain,  # pyrefly: ignore[bad-argument-type]
             )
-            if not all(
-                isinstance(t, torch._subclasses.fake_tensor.FakeTensor)
-                for t in plain
-                if isinstance(t, torch.Tensor)
-            ):
+            if not all(is_fake_tensor(t) for t in plain if isinstance(t, torch.Tensor)):
                 raise AssertionError(
                     f"Expected all plain tensors to be FakeTensors, got {[type(t) for t in plain]}"
                 )
@@ -696,6 +700,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
+            CUDAMemPoolContextVariable,
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
             FSDPParamGroupUseTrainingStateVariable,
@@ -719,6 +724,39 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 return ctx.call_function(tx, args, kwargs)
             else:
                 return GradModeVariable.create(tx, False)
+        elif self.value in (
+            torch.cuda.use_mem_pool,
+            torch.cuda.use_mem_pool.__wrapped__,  # type: ignore[attr-defined]
+        ):
+            unexpected_kwargs = [k for k in kwargs if k not in ("pool", "device")]
+            if unexpected_kwargs:
+                raise_type_error(
+                    tx,
+                    "use_mem_pool() got an unexpected keyword argument "
+                    f"'{unexpected_kwargs[0]}'",
+                )
+            if args and "pool" in kwargs:
+                raise_type_error(
+                    tx, "use_mem_pool() got multiple values for argument 'pool'"
+                )
+            if len(args) > 1 and "device" in kwargs:
+                raise_type_error(
+                    tx, "use_mem_pool() got multiple values for argument 'device'"
+                )
+            if len(args) > 2:
+                raise_type_error(
+                    tx,
+                    "use_mem_pool() takes from 1 to 2 positional arguments "
+                    f"but {len(args)} were given",
+                )
+            if not args and "pool" not in kwargs:
+                raise_type_error(
+                    tx,
+                    "use_mem_pool() missing 1 required positional argument: 'pool'",
+                )
+            mempool = args[0] if args else kwargs["pool"]
+            device = args[1] if len(args) > 1 else kwargs.get("device")
+            return CUDAMemPoolContextVariable.create(tx, mempool, device)
         elif self.value is torch.enable_grad:
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable
@@ -1011,7 +1049,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # This should only be done if the example_value is a FakeTensor.
                 # However, if tensor subclasses are present,
                 # it is reasonable for Python to remain in the dispatch key set.
-                if isinstance(example_value, torch._subclasses.FakeTensor):
+                if torch._subclasses.fake_tensor.is_fake_tensor(example_value):
                     dks = (
                         dks
                         - torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
@@ -1334,6 +1372,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return ConstantVariable.create(None)
 
+        @register(torch.set_autocast_dtype)
+        def handle_set_autocast_dtype(
+            self,
+            tx: "InstructionTranslatorBase",
+            device_type: VariableTracker,
+            dtype: VariableTracker,
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function",
+                torch.set_autocast_dtype,
+                (device_type.as_proxy(), dtype.as_proxy()),
+            )
+            dev_py_const = device_type.as_python_constant()
+            prev = torch.get_autocast_dtype(dev_py_const)
+            torch.set_autocast_dtype(dev_py_const, dtype.as_python_constant())
+            tx.output.add_cleanup_hook(
+                lambda: torch.set_autocast_dtype(dev_py_const, prev)
+            )
+            return ConstantVariable.create(None)
+
         @register(torch.set_autocast_cache_enabled)
         def handle_set_autocast_cache_enabled(
             self, tx: "InstructionTranslatorBase", enabled: VariableTracker
@@ -1471,6 +1529,113 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return VariableTracker.build(
                 tx, tx.symbolic_torch_function_state.torch_function_subclass_enabled
             )
+
+        @register(torch._C._is_cow_tensor)  # pyrefly: ignore[missing-attribute]
+        def handle_is_cow_tensor(
+            self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        ) -> ConstantVariable:
+            if not arg.is_tensor():
+                raise AssertionError(
+                    f"_is_cow_tensor expects a tensor, got {arg.python_type_name()}"
+                )
+
+            def has_prior_cow_state_changing_op() -> bool:
+                if not isinstance(arg, TensorVariable):
+                    return False
+                graph = arg.as_proxy().node.graph
+                return any(
+                    (node.op == "call_method" and node.target == "_lazy_clone")
+                    or (node.op == "call_function" and node.target is torch._lazy_clone)
+                    for node in graph.nodes
+                )
+
+            if arg.source is None:
+                unimplemented(
+                    gb_type="source-less COW tensor check",
+                    context="torch._C._is_cow_tensor on source-less tensor",
+                    explanation=(
+                        "Dynamo cannot safely guard COW state for an intermediate "
+                        "tensor without a source."
+                    ),
+                    hints=[
+                        "Avoid checking COW state on intermediate tensors inside "
+                        "torch.compile regions.",
+                    ],
+                )
+            if tx.output.current_tracer.is_export or torch.compiler._is_exporting_flag:
+                unimplemented(
+                    gb_type="COW tensor check during export",
+                    context="torch._C._is_cow_tensor during export",
+                    explanation=(
+                        "Dynamo cannot safely export COW-state-dependent "
+                        "control flow because COW state is not represented in "
+                        "the exported graph."
+                    ),
+                    hints=[
+                        "Avoid checking COW state inside torch.export regions.",
+                    ],
+                )
+            fake_version = arg._get_fake_version()  # pyrefly: ignore[missing-attribute]
+            if fake_version is not None and fake_version > 0:
+                unimplemented(
+                    gb_type="COW tensor check after mutation",
+                    context="torch._C._is_cow_tensor after tensor mutation",
+                    explanation=(
+                        "Dynamo cannot safely fold a COW state check after "
+                        "the tensor's state may have changed inside the "
+                        "compiled frame."
+                    ),
+                    hints=[
+                        "Move the COW state check before tensor mutations or "
+                        "outside the torch.compile region.",
+                    ],
+                )
+            if has_prior_cow_state_changing_op():
+                unimplemented(
+                    gb_type="COW tensor check after COW-state-changing op",
+                    context="torch._C._is_cow_tensor after _lazy_clone",
+                    explanation=(
+                        "Dynamo cannot safely fold a COW state check after "
+                        "an op in the current graph may have changed that "
+                        "tensor's COW state."
+                    ),
+                    hints=[
+                        "Move the COW state check before _lazy_clone or outside "
+                        "the torch.compile region.",
+                    ],
+                )
+            real_value = arg.get_real_value()  # pyrefly: ignore[missing-attribute]
+            if is_fake_tensor(real_value):
+                unimplemented(
+                    gb_type="COW tensor check on FakeTensor",
+                    context="torch._C._is_cow_tensor on FakeTensor",
+                    explanation=(
+                        "Dynamo cannot safely evaluate COW state from a "
+                        "FakeTensor because COW state is not represented in "
+                        "FakeTensor metadata."
+                    ),
+                    hints=[
+                        "Avoid checking COW state on FakeTensors inside "
+                        "torch.compile regions.",
+                    ],
+                )
+            cow_state = _try_is_cow_tensor(real_value)
+            if cow_state is _COW_TENSOR_UNSUPPORTED:
+                unimplemented(
+                    gb_type="COW tensor check on Python tensor subclass",
+                    context="torch._C._is_cow_tensor on Python tensor subclass",
+                    explanation=(
+                        "Dynamo cannot safely evaluate COW state for Python "
+                        "tensor subclasses because their storage semantics are "
+                        "controlled by __torch_dispatch__."
+                    ),
+                    hints=[
+                        "Avoid checking COW state on tensor subclasses inside "
+                        "torch.compile regions.",
+                    ],
+                )
+            install_guard(arg.source.make_guard(GuardBuilder.COW_TENSOR_MATCH))
+            return VariableTracker.build(tx, cast(bool, cow_state))
 
         @register(torch._C._is_torch_function_all_disabled)
         def handle_is_torch_function_all_disabled(
@@ -3100,7 +3265,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         strict=True,
                     )
                 )
-                return ConstDictVariable(items, dict)
+                return ConstDictVariable(items)
             return result
 
         @register(torch._functorch.eager_transforms._autograd_grad)

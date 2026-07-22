@@ -1382,6 +1382,67 @@ class TestDeserialize(TestCase):
 
             self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
 
+    def test_list_of_int_and_float_lists_custom_op(self):
+        # Example program: a custom op that takes List[List[int]] and
+        # List[List[float]] arguments. Round-tripping it (export -> serialize ->
+        # deserialize) exercises the serde nested-list path end to end: these
+        # args must serialize as as_int_lists / as_float_lists, for both
+        # non-empty and empty lists.
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::apply_groups",
+                "(Tensor x, int[][] int_groups, float[][] float_groups) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::apply_groups", "cpu", lib=lib)
+            @torch.library.register_fake("mylib::apply_groups")
+            def apply_groups_impl(x, int_groups, float_groups):
+                bias = sum(v for group in int_groups for v in group) + sum(
+                    v for group in float_groups for v in group
+                )
+                return x + bias
+
+            class NonEmpty(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.apply_groups(
+                        x, [[1, 2], [3, 4, 5]], [[1.5], [2.5, 3.5]]
+                    )
+
+            class Empty(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.apply_groups(x, [], [])
+
+            # The round-trips must succeed; before nested-list support was added,
+            # serialization raised SerializeError on List[List[int/float]] args.
+            self.check_graph(NonEmpty(), (torch.randn(3),))
+            self.check_graph(Empty(), (torch.randn(3),))
+
+            # Pin down the exact serialized argument kinds and values.
+            def _serialized_op_args(mod):
+                ep = torch.export.export(mod, (torch.randn(3),), strict=True)
+                serialized = ExportedProgramSerializer().serialize(ep)
+                nodes = [
+                    n
+                    for n in serialized.exported_program.graph_module.graph.nodes
+                    if n.target and "apply_groups" in n.target
+                ]
+                self.assertEqual(len(nodes), 1)
+                return {i.name: i.arg for i in nodes[0].inputs}
+
+            args = _serialized_op_args(NonEmpty())
+            self.assertEqual(args["int_groups"].type, "as_int_lists")
+            self.assertEqual(args["int_groups"].as_int_lists, [[1, 2], [3, 4, 5]])
+            self.assertEqual(args["float_groups"].type, "as_float_lists")
+            self.assertEqual(args["float_groups"].as_float_lists, [[1.5], [2.5, 3.5]])
+
+            empty_args = _serialized_op_args(Empty())
+            self.assertEqual(empty_args["int_groups"].type, "as_int_lists")
+            self.assertEqual(empty_args["int_groups"].as_int_lists, [])
+            self.assertEqual(empty_args["float_groups"].type, "as_float_lists")
+            self.assertEqual(empty_args["float_groups"].as_float_lists, [])
+
     def test_unbacked_bindings_serialize(self):
         from torch._export.utils import _get_shape_env_from_gm
         from torch.utils._sympy.symbol import prefix_str, symbol_is_type, SymT

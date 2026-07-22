@@ -22,7 +22,6 @@ on:
       - .github/actions/binary-docker-build/**
 
 env:
-  DOCKER_REGISTRY: "docker.io"
   DOCKER_BUILDKIT: 1
   WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) }}
 
@@ -34,16 +33,19 @@ jobs:
   build-docker:
     if: github.repository_owner == 'pytorch'
     environment: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) && 'docker-build') || '' }}
-    runs-on: linux.9xlarge.ephemeral
+    runs-on: "mt-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
+    container:
+      image: ghcr.io/actions/actions-runner:latest
+    timeout-minutes: 240
     strategy:
       matrix:
-        tag: ["cuda12.6", "cuda13.0", "cuda13.2", "rocm7.1", "rocm7.2", "cpu"]
+        tag: ["cuda12.6", "cuda13.0", "cuda13.2", "cuda13.4", "rocm7.1", "rocm7.2", "cpu"]
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
         with:
           docker-image-name: almalinux-builder
-          custom-tag-prefix: ${{matrix.tag}}
+          custom-tag-prefix: ${{ matrix.tag }}
           docker-build-dir: almalinux
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
           DOCKER_ID: ${{ secrets.DOCKER_ID }}

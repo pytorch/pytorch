@@ -36,6 +36,10 @@ except ModuleNotFoundError as exc:
         "Install cupti-python to use the experimental CUPTI monitor."
     ) from exc
 
+# Generated from the CUPTI ABI header (tools/gen_cupti_stubs.py): the
+# CUpti_ActivityAttribute selectors, so their (ABI-renumbered) ints are never hardcoded.
+from torch.profiler._cupti._cupti_stubs import ActivityAttr
+
 
 if TYPE_CHECKING:
     # Used only in pylibcupti method signatures (Any to pyrefly; cupti has no stub).
@@ -53,17 +57,11 @@ LIBCUPTI_SONAME = "libcupti.so.13"
 # are stable ABI values, so they are spelled out rather than resolved.
 CUPTI_SUCCESS = 0
 
-# CUpti_ActivityAttribute::CUPTI_ACTIVITY_ATTR_USER_DEFINED_RECORDS (not surfaced
-# by cupti-python); set on the subscription to turn on the v2 user-defined-record
-# path.
-_ATTR_USER_DEFINED_RECORDS = 11
-
-# CUPTI_ACTIVITY_ATTR_ENABLE_KERNEL_LATENCY_TIMESTAMPS -- per-subscriber toggle for the
-# kernel queued/submitted timestamps (not surfaced by cupti-python). Empirically 15 on
-# the runtime CUPTI ABI (the enum is renumbered vs the header, same reason the value
-# above is 11). Set via cuptiActivitySetAttribute_v2 on the subscriber; unlike the global
-# cuptiActivityEnableLatencyTimestamps it works post-CUDA-init under UDR and with HES.
-_ATTR_ENABLE_KERNEL_LATENCY_TIMESTAMPS = 15
+# CUpti_ActivityAttribute selectors the monitor sets on its subscription
+# (ActivityAttr.USER_DEFINED_RECORDS / .ENABLE_KERNEL_LATENCY_TIMESTAMPS /
+# .TIMESTAMP_CALLBACK, ...). cupti-python does not surface this enum, so the values come
+# from the generated _cupti_stubs module (tools/gen_cupti_stubs.py, straight from the ABI
+# header) rather than hardcoded ints -- they are renumbered vs cupti-python's own enum.
 
 # Minimum libcupti the monitor supports. The v2 user-defined-record API arrived in
 # 13.2, but only 13.3 populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
@@ -153,14 +151,6 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
             ctypes.POINTER(ctypes.c_uint64),
         ]
         lib.cuptiGetTimestamp_v2.restype = ctypes.c_int
-    # Custom timestamp callback (CUpti_TimestampCallbackFunc, a uint64_t(*)(void)):
-    # registers a function CUPTI invokes to stamp activity records, replacing its
-    # default CPU timer. Used to put records on the profiler's approx clock (kineto's
-    # timebase). Global, and per the header usable only when multiple subscribers are
-    # NOT allowed; NULL unregisters.
-    if hasattr(lib, "cuptiActivityRegisterTimestampCallback"):
-        lib.cuptiActivityRegisterTimestampCallback.argtypes = [ctypes.c_void_p]
-        lib.cuptiActivityRegisterTimestampCallback.restype = ctypes.c_int
     # External correlation push/pop. The plain (v1) calls return
     # CUPTI_ERROR_NOT_COMPATIBLE while a user-defined-record subscriber is active
     # (same as cuptiGetTimestamp), so the subscriber-aware _v2 variants are required
@@ -344,6 +334,15 @@ class _PyLibCupti:
             or 0
         )
 
+    def get_flush_fn_address(self) -> int:
+        """Raw address of ``cuptiActivityFlushAll``, for the native decode worker to
+        drive the periodic plain flush directly -- so the native module needs no
+        libcupti link either (mirrors ``get_next_record_fn_address``). Returns 0 if
+        the symbol is absent."""
+        if not hasattr(self._lib, "cuptiActivityFlushAll"):
+            return 0
+        return ctypes.cast(self._lib.cuptiActivityFlushAll, ctypes.c_void_p).value or 0
+
     def get_timestamp(self, sub_handle: int) -> int:
         """CUPTI's normalized nanosecond clock for a subscriber -- the same timebase
         as activity record START/END timestamps, so a value captured here is directly
@@ -360,25 +359,41 @@ class _PyLibCupti:
         )
         return ts.value
 
-    def register_timestamp_callback(self, callback_addr: int) -> int:
-        """Register a CUpti_TimestampCallbackFunc (by address) so CUPTI stamps activity
-        records with the caller's clock instead of its default CPU timer -- used to put
-        records directly on the profiler's approx clock (kineto's timebase). Returns the
-        raw CUptiResult rather than raising: current libcupti rejects this with
-        CUPTI_ERROR_NOT_COMPATIBLE while multiple subscribers are allowed (a documented
-        beta limitation), so the caller decides whether to fall back. Returns -1 if the
-        symbol is absent (libcupti too old)."""
-        fn = getattr(self._lib, "cuptiActivityRegisterTimestampCallback", None)
-        if fn is None:
-            return -1
-        return fn(ctypes.c_void_p(callback_addr))
+    def arm_approx_timestamp_callback(
+        self, sub_handle: int, callback_addr: int
+    ) -> bool:
+        """Arm this subscriber's timestamp callback via CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK:
+        CUPTI stamps the subscriber's activity records with ``callback_addr`` (a
+        CUpti_TimestampCallbackFunc, uint64_t(*)(void)) instead of its default CPU timer -- used
+        to put records directly on the profiler's approx clock (kineto's timebase). Unlike the
+        global cuptiActivityRegisterTimestampCallback (CUPTI_ERROR_NOT_COMPATIBLE under
+        user-defined records) this per-subscriber attribute coexists with UDR. Best-effort:
+        returns False if CUPTI rejects it -- the attribute is beta and still usable only when
+        multiple subscribers are NOT allowed."""
+        val = ctypes.c_void_p(callback_addr or None)
+        size = ctypes.c_size_t(ctypes.sizeof(ctypes.c_void_p))
+        return (
+            self._lib.cuptiActivitySetAttribute_v2(
+                ctypes.c_void_p(sub_handle),
+                ActivityAttr.TIMESTAMP_CALLBACK,
+                ctypes.byref(size),
+                ctypes.byref(val),
+            )
+            == CUPTI_SUCCESS
+        )
 
-    def unregister_timestamp_callback(self) -> None:
-        """Clear a previously registered timestamp callback (NULL restores CUPTI's
-        default timer). Best-effort -- teardown continues regardless."""
-        fn = getattr(self._lib, "cuptiActivityRegisterTimestampCallback", None)
-        if fn is not None:
-            fn(None)
+    def disarm_approx_timestamp_callback(self, sub_handle: int) -> None:
+        """Restore CUPTI's default CPU timer for this subscriber (callback_addr=0), the
+        inverse of arm_approx_timestamp_callback -- called before unsubscribe so a following
+        consumer isn't left with our callback."""
+        val = ctypes.c_void_p(None)
+        size = ctypes.c_size_t(ctypes.sizeof(ctypes.c_void_p))
+        self._lib.cuptiActivitySetAttribute_v2(
+            ctypes.c_void_p(sub_handle),
+            ActivityAttr.TIMESTAMP_CALLBACK,
+            ctypes.byref(size),
+            ctypes.byref(val),
+        )
 
     def activity_flush_all(self) -> None:
         """Hand over COMPLETED buffers only (``cuptiActivityFlushAll(0)``). The monitor
@@ -452,7 +467,7 @@ class _PyLibCupti:
         self._check(
             self._lib.cuptiActivitySetAttribute_v2(
                 ctypes.c_void_p(sub_handle),
-                _ATTR_USER_DEFINED_RECORDS,
+                ActivityAttr.USER_DEFINED_RECORDS,
                 ctypes.byref(size),
                 ctypes.byref(enabled),
             ),
@@ -481,7 +496,7 @@ class _PyLibCupti:
         size = ctypes.c_size_t(1)
         rc = self._lib.cuptiActivitySetAttribute_v2(
             ctypes.c_void_p(sub_handle),
-            _ATTR_USER_DEFINED_RECORDS,
+            ActivityAttr.USER_DEFINED_RECORDS,
             ctypes.byref(size),
             ctypes.byref(disabled),
         )
@@ -502,7 +517,7 @@ class _PyLibCupti:
         return (
             self._lib.cuptiActivitySetAttribute_v2(
                 ctypes.c_void_p(sub_handle),
-                _ATTR_ENABLE_KERNEL_LATENCY_TIMESTAMPS,
+                ActivityAttr.ENABLE_KERNEL_LATENCY_TIMESTAMPS,
                 ctypes.byref(size),
                 ctypes.byref(val),
             )
@@ -530,12 +545,8 @@ class _PyLibCupti:
             ),
             "cuptiActivityEnable_v2",
         )
-        # ``kind`` is passed as a plain int (the monitor keys its selection by int), so
-        # the old ``kind.name`` check never matched and these were dead code. Compare the
-        # kind value instead. The disable is best-effort: the per-cbid runtime/driver
-        # activity filter returns CUPTI_ERROR_NOT_COMPATIBLE under the user-defined-record
-        # subscriber (a no-op on the monitor's UDR path), so the post-decode blocklist in
-        # monitor_trace is what actually keeps the noise out of the trace.
+        # ``kind`` is a plain int here, so compare by value. The per-cbid runtime/driver
+        # disable must follow the kind enable.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
         k = int(kind)
@@ -545,10 +556,9 @@ class _PyLibCupti:
             self.disable_noisy_driver_apis(sub_handle)
 
     def disable_noisy_runtime_apis(self, sub_handle: int) -> None:
-        """Best-effort: stop CUPTI emitting RUNTIME records for the noise-only cbids
+        """Stop CUPTI emitting RUNTIME records for the noise-only cbids
         (cudaGetDevice/SetDevice/GetLastError) so they don't fill the UDR buffers, via the
-        subscriber-scoped _v2 entry (the UDR path's form). A no-op if it is absent (the
-        post-decode blocklist still keeps them out of the chrome trace)."""
+        subscriber-scoped _v2 entry (the UDR path's form). A no-op if it is absent."""
         cbids = _noisy_runtime_cbids()
         fn_v2 = getattr(self._lib, "cuptiActivityEnableRuntimeApi_v2", None)
         if not cbids or fn_v2 is None:
@@ -557,10 +567,10 @@ class _PyLibCupti:
             fn_v2(ctypes.c_void_p(sub_handle), ctypes.c_uint32(cbid), ctypes.c_uint8(0))
 
     def disable_noisy_driver_apis(self, sub_handle: int) -> None:
-        """Best-effort: stop CUPTI emitting DRIVER records for the noise-only cbids
+        """Stop CUPTI emitting DRIVER records for the noise-only cbids
         (cuKernelGetAttribute/cuDevicePrimaryCtxGetState/cuCtxGetCurrent) so they don't
         fill the UDR buffers, via the subscriber-scoped _v2 entry (the UDR path's form). A
-        no-op if it is absent (the post-decode driver allowlist still keeps them out)."""
+        no-op if it is absent."""
         cbids = _noisy_driver_cbids()
         fn_v2 = getattr(self._lib, "cuptiActivityEnableDriverApi_v2", None)
         if not cbids or fn_v2 is None:

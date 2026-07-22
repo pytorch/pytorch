@@ -1545,7 +1545,7 @@ std::string FunctionSignature::toString() const {
     i++;
   }
   ss << ')';
-  return ss.str();
+  return std::move(ss).str();
 }
 
 [[noreturn]] static void extra_args(

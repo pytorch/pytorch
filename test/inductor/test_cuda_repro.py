@@ -269,8 +269,8 @@ class CudaReproTests(TestCase):
     # Mismatched elements: 23 / 33062912 (0.0%)
     # Greatest absolute difference: 0.07861328125 at index (14, 13, 1008, 36) (up to 1e-05 allowed)
     # Greatest relative difference: 2.90625 at index (14, 13, 1008, 36) (up to 0.016 allowed)
+    @skipIfXpu(msg="RuntimeError, not target, torch-xpu-ops: 2697")
     @skipIfRocmArch(MI350_ARCH)
-    @skipIfXpu(msg="RuntimeError, torch-xpu-ops: 2697")
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -1190,7 +1190,8 @@ class CudaReproTests(TestCase):
         out = compiled(inp)
         norm = out.norm(dim=-1)
         self.assertTrue(
-            torch.all(norm <= 1.0), f"expected norm <= 1.0 but got {norm.item()}"
+            torch.all(norm <= 1.0),
+            lambda msg: f"{msg}\nexpected norm <= 1.0 but got {norm.item()}",
         )
 
     def test_libdevice_routing(self):
@@ -1650,9 +1651,8 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180948")
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "requires CUDA or XPU")
     @config.patch(
         emulate_precision_casts=False,
         emulate_precision_casts_on_saved_tensors=True,
@@ -1699,6 +1699,16 @@ class CudaReproTests(TestCase):
     def test_emulate_precision_casts_preserves_explicit_precision_cast(
         self, lowp_dtype
     ):
+        if TEST_XPU and lowp_dtype is torch.float16:
+            # To be enabled once triton-xpu emits a constrained fptrunc for
+            # `arith.truncf f32 -> f16`, so the fp32 -> fp16 -> fp32 barrier
+            # survives SPIR-V/IGC lowering (currently folded to identity).
+            # Upstream triton bug: intel/intel-xpu-backend-for-triton#7491.
+            # Tracker: intel/torch-xpu-ops#4358.
+            raise unittest.SkipTest(
+                "XPU: to be enabled after triton-xpu fix "
+                "(intel/intel-xpu-backend-for-triton#7491)"
+            )
         torch.manual_seed(0)
         torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
         lowp_name = str(lowp_dtype).removeprefix("torch.")
@@ -2270,6 +2280,40 @@ class CudaReproTests(TestCase):
         self.assertEqual(outer_reduce(a), out)
         self.assertTrue("for roffset" not in code)
 
+    @config.patch(
+        {
+            "triton.multi_kernel": 0,
+            "triton.tile_reductions": True,
+            "triton.prefer_nd_tiling": False,
+            "triton.max_tiles": 3,
+            "split_reductions": False,
+        }
+    )
+    def test_persistent_reduction_selection_uses_tiling_scores(self):
+        if device_type != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(x):
+            hidden = x.shape[1] // 2
+            group_size = 128
+            gate = x[:, :hidden].to(torch.float32)
+            up = x[:, hidden:].to(torch.float32)
+            prod = F.silu(gate) * up
+            grouped = prod.view(x.shape[0], hidden // group_size, group_size)
+            return torch.amax(torch.abs(grouped), dim=-1)
+
+        x = torch.randn(4, 512, device=device_type, dtype=torch.bfloat16)
+        expected = fn(x)
+        out, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(expected, out)
+
+        code = "\n".join(code)
+        self.assertIn("@triton_heuristics.persistent_reduction", code)
+        self.assertEqual(1, code.count("@triton_heuristics.persistent_reduction"))
+        persistent_code = code.split("@triton_heuristics.persistent_reduction", 1)[1]
+        self.assertIn("reduction_hint=ReductionHint.INNER", persistent_code)
+        self.assertNotIn("for roffset", persistent_code)
+
     def test_scaled_dot_product_efficient_attention_backward(self):
         from torch import nn, Tensor
 
@@ -2512,6 +2556,50 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         )
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(not SM90OrLater, "needs at least 6 GiB of GPU memory headroom")
+    def test_chunked_unrolled_slice_gather_int32_overflow(self):
+        # Regression for an int32-indexing miscompile when an unrolled chunked
+        # loop containing a per-chunk F.linear and a gather gets fused into one
+        # pointwise kernel. Per-chunk buffer storage individually fits in int32,
+        # but the cross-buffer index `V * x0` reaches `V * total_numel` which
+        # overflows int32, and a separate kernel-level fusion synthesizes
+        # exactly that expression. Result before the fix: cudaErrorIllegalAddress.
+        torch.manual_seed(0)
+        T, D, V_, CHUNKSZ = 16384, 128, 200008, 2048
+        x = torch.randn(1, T, D, device=device_type, dtype=torch.bfloat16)
+        targets = torch.randint(0, V_, (1, T), device=device_type, dtype=torch.int64)
+        W = torch.randn(V_, D, device=device_type, dtype=torch.bfloat16) * 0.01
+        bias = torch.zeros(V_, device=device_type, dtype=torch.bfloat16)
+
+        def fwd(x, targets, W, bias):
+            seqlen = x.shape[-2]
+            out = torch.empty(x.shape[:-1], device=x.device, dtype=torch.float32)
+            for start in range(0, seqlen, CHUNKSZ):
+                end = start + CHUNKSZ
+                chunk_x = x[..., start:end, :]
+                chunk_targets = targets[..., start:end]
+                logits = torch.nn.functional.linear(chunk_x, W) + bias
+                m = logits.amax(dim=-1, keepdim=True)
+                tok = (
+                    torch.log(
+                        torch.sum(torch.exp(logits - m), dim=-1, dtype=torch.float32)
+                    )
+                    + m.squeeze(-1).to(torch.float32)
+                    - torch.gather(logits, -1, chunk_targets[..., None])
+                    .squeeze(-1)
+                    .to(torch.float32)
+                )
+                out[..., start:end] = tok
+            return out
+
+        eager = fwd(x, targets, W, bias)
+        opt = torch.compile(fwd, dynamic=False, fullgraph=True)
+        compiled = opt(x, targets, W, bias)
+        torch.accelerator.synchronize()
+        # bf16 matmul + log_sum_exp leaves some slack; loose tol is fine here,
+        # the test is about not crashing.
+        self.assertTrue(torch.allclose(eager, compiled, atol=1e-2, rtol=1e-2))
+
     def test_int64_index_intermediate(self):
         def foo(inp):
             view_23 = torch.ops.aten.view.default(inp, [-1, 8192, 8192])
@@ -2862,7 +2950,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 # They should be identical (or very close)
                 self.assertTrue(
                     torch.allclose(eager_output, compiled_output, rtol=1e-5, atol=1e-5),
-                    f"Results differ for input shape {(batch, channels, h, w)}. "
+                    lambda msg: f"{msg}\nResults differ for input shape {(batch, channels, h, w)}. "
                     f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
                 )
 
@@ -3149,7 +3237,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     @unittest.skipUnless(HAS_GPU, "requires GPU")
     def test_fused_slice_scatter_int32_const_overflow(self):
         # End-to-end repro for the int32 address-constant overflow guarded
-        # by SIMDKernelFeatures.any_index_expr_const_overflows_int32.
+        # by SIMDKernelFeatures.any_index_expr_overflows_int32.
         # On unfixed builds the fused backward kernel raises
         #   ValueError('Scalar -2779057358 is out of range for type int32')
         # because slice_scatter.backward + mm.backward fuse into a kernel

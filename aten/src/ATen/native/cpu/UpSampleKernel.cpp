@@ -1325,7 +1325,7 @@ struct HelperInterpCubic : public HelperInterpBase {
 
           for (const auto j : c10::irange(interp_size)) {
             idx_ptr = output[2 * j + 0].data_ptr<int64_t>();
-            idx_ptr[i] = static_cast<int64_t>(std::max(std::min(input_index + j - 1, input_size - 1), zero)) * stride;
+            idx_ptr[i] = std::clamp<int64_t>(input_index + j - 1, zero, input_size - 1) * stride;
             wt_ptr = output[2 * j + 1].data_ptr<scalar_t>();
             wt_ptr[i] = coeffs[j];
           }

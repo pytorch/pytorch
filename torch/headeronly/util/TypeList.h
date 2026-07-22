@@ -167,24 +167,14 @@ struct count_if final {
  *  contains<typelist<int, string>, double> == false_type
  */
 namespace detail {
-template <class TypeList, class Type, class Enable = void>
-struct contains {};
-template <class Type>
-struct contains<typelist<>, Type, void> : std::false_type {};
-template <class Type, class Head, class... Tail>
-struct contains<
-    typelist<Head, Tail...>,
-    Type,
-    std::enable_if_t<std::is_same_v<Head, Type>>> : std::true_type {};
-template <class Type, class Head, class... Tail>
-struct contains<
-    typelist<Head, Tail...>,
-    Type,
-    std::enable_if_t<!std::is_same_v<Head, Type>>>
-    : contains<typelist<Tail...>, Type> {};
+template <class TypeList, class Type>
+struct contains_impl : std::false_type {};
+template <class Type, class... Types>
+struct contains_impl<typelist<Types...>, Type>
+    : std::bool_constant<(std::is_same_v<Types, Type> || ...)> {};
 } // namespace detail
 template <class TypeList, class Type>
-using contains = typename detail::contains<TypeList, Type>::type;
+using contains = typename detail::contains_impl<TypeList, Type>::type;
 
 /**
  * Returns true iff the type trait is true for all types in the type list
@@ -453,21 +443,14 @@ struct find_if<typelist<>, Condition, void> final {
       "In typelist::find_if<Type/List, Condition>, didn't find any type fulfilling the Condition.");
 };
 template <class Head, class... Tail, template <class> class Condition>
-struct find_if<
-    typelist<Head, Tail...>,
-    Condition,
-    std::enable_if_t<Condition<Head>::value>>
-    final {
-  static constexpr size_t value = 0;
-};
-template <class Head, class... Tail, template <class> class Condition>
-struct find_if<
-    typelist<Head, Tail...>,
-    Condition,
-    std::enable_if_t<!Condition<Head>::value>>
-    final {
-  static constexpr size_t value =
-      1 + find_if<typelist<Tail...>, Condition>::value;
+struct find_if<typelist<Head, Tail...>, Condition, void> final {
+  static constexpr size_t value = [] {
+    if constexpr (Condition<Head>::value) {
+      return size_t{0};
+    } else {
+      return size_t{1} + find_if<typelist<Tail...>, Condition>::value;
+    }
+  }();
 };
 
 /**
