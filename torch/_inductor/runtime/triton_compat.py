@@ -85,6 +85,11 @@ if triton is not None:
         knobs = None
 
     try:
+        HAS_META_WS = knobs is not None and hasattr(knobs.nvidia, "use_meta_ws")
+    except Exception:
+        HAS_META_WS = False
+
+    try:
         from triton.runtime.cache import triton_key  # type: ignore[attr-defined]
     except ImportError:
         from triton.compiler.compiler import (
@@ -144,6 +149,7 @@ else:
         pass
 
     HAS_WARP_SPEC = False
+    HAS_META_WS = False
     triton_key = _raise_error
     HAS_TRITON = False
 

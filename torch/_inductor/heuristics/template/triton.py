@@ -32,6 +32,7 @@ from ...kernel.mm import (
 from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
+from ...runtime.triton_compat import HAS_META_WS
 from ...utils import (
     get_backend_num_stages,
     get_default_kpack,
@@ -62,7 +63,14 @@ def _origami_enabled() -> bool:
     return config.rocm.origami
 
 
-USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "0"
+USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "1"
+
+
+def _use_template_autows() -> bool:
+    """Expand the GEMM search space with Meta Triton autoWS knobs. Requires the
+    opt-in flag, TRITON_USE_META_WS=1, and a meta-WS Triton build (the extra
+    tl.range kwargs are a compile error otherwise)."""
+    return config.triton.enable_template_autows and USE_META_WS and HAS_META_WS
 
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
@@ -2657,6 +2665,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
+        use_autows = _use_template_autows()
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
@@ -2677,14 +2686,41 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             flatten = (
                 template_kwargs.get("FLATTEN", True)
                 and not constraints_violated
-                and USE_META_WS
+                and not USE_META_WS
             )
-            yield {
+            base_kwargs = {
                 **template_kwargs,
                 "NUM_SMS": get_num_sms(),
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
             }
+            if not use_autows:
+                yield base_kwargs
+                continue
+
+            block_m = base_kwargs["BLOCK_M"]
+            block_n = base_kwargs["BLOCK_N"]
+            # Keep each config's own EPILOGUE_SUBTILE and also try a deeper
+            # subtile=8 variant when the N tile stays wide enough.
+            base_subtile = base_kwargs.get("EPILOGUE_SUBTILE", 1)
+            subtiles = [base_subtile]
+            if base_subtile < 8 and block_n // 8 >= 32:
+                subtiles.append(8)
+            for epilogue_subtile in subtiles:
+                if block_n // epilogue_subtile < 32:
+                    continue
+                for data_partition_factor in (1, 2):
+                    # dp=2 splits a 256-row tile into two 128-row MMA partitions.
+                    if data_partition_factor == 2 and block_m != 256:
+                        continue
+                    for separate_epilogue_store in (False, True):
+                        yield {
+                            **base_kwargs,
+                            "USE_META_WS": True,
+                            "EPILOGUE_SUBTILE": epilogue_subtile,
+                            "DATA_PARTITION_FACTOR": data_partition_factor,
+                            "SEPARATE_EPILOGUE_STORE": separate_epilogue_store,
+                        }
 
     @staticmethod
     def _generate_exhaustive_configs() -> list[BaseConfig]:
