@@ -50,20 +50,31 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: lf
 
-  # Computes the manylinux builder image tag suffix at runtime. On release
-  # candidate tag pushes (v1.2.3-rc4) it resolves to "-<.ci/docker tree hash>",
-  # pinning the build/test/upload jobs to the reproducible image published by
-  # binary-docker-build; otherwise it is empty (main's floating tag). ciflow/*
-  # tags keep the floating tag. Done in a shared job so the value can feed the
-  # job-level `container:` directives, which are resolved before any step runs.
+  # Computes the manylinux builder image tag suffix + registry host at runtime,
+  # feeding the job-level `container:` directives (resolved before any step runs):
+  #   - release-candidate tag (v1.2.3-rc4): suffix = "-<.ci/docker tree hash>",
+  #     host = "" -> the reproducible image binary-docker-build pinned on Docker
+  #     Hub.
+  #   - ciflow/binaries PR test: the PR builds its own .ci/docker and
+  #     binary-docker-build pushes the content-addressed image to ECR, so
+  #     suffix = "-<hash>" and host = the ECR host. Because build-manywheel-images
+  #     runs in parallel on the same PR, this job WAITS (polls ECR) until those
+  #     images are pushed before the build/test jobs start pulling them.
+  #   - otherwise (nightly branch, etc.): skipped; outputs read blank -> Docker
+  #     Hub floating tag, unchanged.
   get-docker-tag:
-    # Only runs on tag pushes (release candidates); on branch/PR runs it is
-    # skipped and its output reads as blank, so the floating tag is used.
+    # Runs on tag pushes only (release candidates + ciflow/binaries). On branch
+    # (nightly) runs it is skipped and its outputs read blank, so the floating
+    # Docker Hub tag is used.
     if: ${{ github.repository_owner == 'pytorch' && github.ref_type == 'tag' }}
     name: get-docker-tag
     runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
     outputs:
       docker_image_suffix: ${{ steps.calc.outputs.docker_image_suffix }}
+      docker_registry_host: ${{ steps.calc.outputs.docker_registry_host }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -72,18 +83,63 @@ jobs:
           fetch-depth: 1
           submodules: false
           show-progress: false
-      - name: Calculate docker image suffix
+      - name: Calculate docker image suffix and registry host
         id: calc
         env:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          GITHUB_REF: ${{ github.ref }}
         shell: bash
         run: |
+          set -euo pipefail
           suffix=""
-          if [[ "${REF_TYPE}" == "tag" && "${REF_NAME}" == v* ]]; then
+          registry_host=""
+          if [[ "${GITHUB_REF}" == refs/tags/ciflow/binaries/* ]]; then
+            # PR test run: the content-addressed image lives in ECR.
+            suffix="-$(git rev-parse HEAD:.ci/docker)"
+            registry_host="308535385114.dkr.ecr.us-east-1.amazonaws.com/"
+          elif [[ "${REF_TYPE}" == "tag" && "${REF_NAME}" == v* ]]; then
+            # Release candidate: pin the Docker Hub image.
             suffix="-$(git rev-parse HEAD:.ci/docker)"
           fi
           echo "docker_image_suffix=${suffix}" >> "${GITHUB_OUTPUT}"
+          echo "docker_registry_host=${registry_host}" >> "${GITHUB_OUTPUT}"
+      # ciflow/binaries only: the builder images are pushed to ECR by
+      # build-manywheel-images / build-almalinux-images, which run concurrently
+      # on the same PR. Log in (read-only) and wait for the content-addressed
+      # tags to appear before the build/test jobs try to pull them.
+      - name: Login to ECR
+        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries/') }}
+        uses: pytorch/pytorch/.github/actions/ecr-login@main
+      - name: Wait for content-addressed builder image in ECR
+        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries/') }}
+        env:
+          DOCKER_IMAGE_SUFFIX: ${{ steps.calc.outputs.docker_image_suffix }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Drop the leading dash: "-<hash>" -> "<hash>".
+          tree_hash="${DOCKER_IMAGE_SUFFIX#-}"
+          # build-manywheel-images builds and pushes all variants together, so
+          # wait on a single representative image as the readiness signal.
+          repo="pytorch/manylinux2_28-builder"
+          tag="cpu-${tree_hash}"
+          echo "Waiting for ${repo}:${tag} to be pushed to ECR by build-manywheel-images..."
+          # Poll every 5 min, up to 60 min.
+          deadline=$(( SECONDS + 60 * 60 ))
+          until aws ecr describe-images \
+              --region us-east-1 \
+              --repository-name "${repo}" \
+              --image-ids imageTag="${tag}" >/dev/null 2>&1; do
+            if (( SECONDS > deadline )); then
+              echo "ERROR: timed out (60 min) waiting for ${repo}:${tag} in ECR." >&2
+              echo "Is build-manywheel-images / build-almalinux-images still running or did it fail?" >&2
+              exit 1
+            fi
+            echo "  not in ECR yet (build-manywheel-images still running); retrying in 5 min..."
+            sleep 300
+          done
+          echo "Found ${repo}:${tag}"
 
   manywheel-cpu-build:
     name: manywheel-cpu-build
@@ -92,14 +148,14 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 280
     container:
-      image: pytorch/manylinux2_28-builder:cpu${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cpu${{ needs.get-docker-tag.outputs.docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cpu
       GPU_ARCH_VERSION: ""
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cpu${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
@@ -180,14 +236,14 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 280
     container:
-      image: pytorch/manylinux2_28-builder:cuda12.6${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda12.6${{ needs.get-docker-tag.outputs.docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda12.6${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
@@ -269,14 +325,14 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 280
     container:
-      image: pytorch/manylinux2_28-builder:cuda13.0${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.0${{ needs.get-docker-tag.outputs.docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda13.0${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.0${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
@@ -358,14 +414,14 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 280
     container:
-      image: pytorch/manylinux2_28-builder:cuda13.2${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.2${{ needs.get-docker-tag.outputs.docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cu132
       GPU_ARCH_VERSION: "13.2"
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda13.2${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.2${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
@@ -672,7 +728,10 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      # ROCm/XPU are excluded from the content-addressed ECR path: their test
+      # runners have no ECR pull credentials, so they stay on the Docker Hub
+      # image (this matrix only carries rocm/xpu; cpu/cuda build inline above).
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}
@@ -958,6 +1017,7 @@ jobs:
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
       DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      DOCKER_IMAGE_REGISTRY_HOST: "${{ needs.get-docker-tag.outputs.docker_registry_host }}"
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
       build_environment: linux-binary-manywheel
@@ -1096,7 +1156,9 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      # ROCm test runners have no ECR pull credentials, so ROCm stays on the
+      # Docker Hub image (excluded from the content-addressed ECR path).
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
 
@@ -1163,7 +1225,9 @@ jobs:
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      # XPU test runners have no ECR pull credentials, so XPU stays on the
+      # Docker Hub image (excluded from the content-addressed ECR path).
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
 
