@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/core/Tensor.h>
+#include <ATen/native/FusedAdam.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/Pow.cuh>
@@ -7,8 +8,6 @@
 #include <utility>
 
 namespace at::native {
-
-enum class ADAM_MODE : uint8_t { ORIGINAL = 0, ADAMW = 1 };
 
 // Validates the dtype configuration for mixed-precision fused Adam/AdamW.
 //
