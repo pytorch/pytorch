@@ -7,10 +7,15 @@ from logging import getLogger
 from typing import Optional
 
 import torch
+from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.fx.experimental.symbolic_shapes import (
+    statically_known_false,
+    statically_known_true,
+)
 from torch.types import IntLikeType
 
 
@@ -23,6 +28,13 @@ __all__ = [
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
+
+_StatefulRNGMetadata = tuple[
+    tuple[IntLikeType, ...],
+    tuple[tuple[IntLikeType, ...], ...],
+    tuple[tuple[IntLikeType, ...], ...],
+    tuple[tuple[IntLikeType, ...], ...],
+]
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
@@ -50,6 +62,70 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
             stacklevel=2,
         )
         return False
+
+
+def _try_compute_stateful_rng_metadata(
+    spec: DTensorSpec,
+    local_tensor: torch.Tensor,
+) -> _StatefulRNGMetadata | None:
+    """Describe a supported DTensor shard as one logical rectangle."""
+    if spec.mesh.ndim != 1 or len(spec.placements) != 1:
+        return None
+    if spec.tensor_meta is None or not spec.mesh._is_current_rank_part_of_mesh():
+        return None
+
+    global_stride = make_contiguous_strides_for(spec.shape)
+    if tuple(spec.stride) != tuple(global_stride):
+        return None
+
+    logical_numel: IntLikeType = 1
+    for size in spec.shape:
+        logical_numel *= size
+    # Dense replay currently uses a 32-bit grid policy.
+    if statically_known_true(logical_numel > torch.iinfo(torch.int32).max):
+        return None
+
+    placement = spec.placements[0]
+    if placement.is_replicate():
+        local_shape = tuple(spec.shape)
+        global_offset = (0,) * spec.ndim
+    elif isinstance(placement, Shard):
+        shard_dim = placement.dim
+        if shard_dim < 0:
+            shard_dim += spec.ndim
+        if shard_dim < 0 or shard_dim >= spec.ndim:
+            return None
+        shard_size, shard_offset = placement._local_shard_size_and_offset(
+            spec.shape[shard_dim],
+            spec.mesh.size(0),
+            spec.mesh._sym_get_coordinate(0),
+        )
+        local_shape_list = list(spec.shape)
+        local_shape_list[shard_dim] = shard_size
+        local_shape = tuple(local_shape_list)
+        global_offset_list: list[IntLikeType] = [0] * spec.ndim
+        global_offset_list[shard_dim] = shard_offset
+        global_offset = tuple(global_offset_list)
+    else:
+        return None
+
+    if len(local_shape) != local_tensor.ndim or any(
+        statically_known_false(expected == actual)
+        for expected, actual in zip(local_shape, local_tensor.shape, strict=True)
+    ):
+        raise RuntimeError(
+            f"Local shape mismatch for {spec.shape}: metadata={local_shape}, "
+            f"actual={tuple(local_tensor.shape)}"
+        )
+
+    global_shape = tuple(spec.shape)
+    local_offset = (0,) * spec.ndim
+    return (
+        global_shape,
+        (global_offset,),
+        (local_offset,),
+        (local_shape,),
+    )
 
 
 def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
