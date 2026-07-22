@@ -72,7 +72,6 @@ ignored_c_binding_in_graph_function_names = {
     "torch.resize_as_",
     "torch.resize_as_sparse_",
     "torch._C._data_address",
-    "torch._C._is_cow_tensor",
     "torch._lazy_clone",
     "torch._test_parallel_materialize",
     "torch._C._storage_address",
@@ -335,7 +334,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             else:
                 self.assertTrue(
                     isinstance(mod, types.ModuleType),
-                    f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
+                    lambda msg: f"{msg}\n{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
                     "is not a python module, please check and correct it.",
                 )
 
@@ -499,7 +498,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             self.assertFalse(
                 fn_name in torch_non_c_binding_in_graph_functions,
                 (
-                    f"torch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
+                    lambda msg: f"{msg}\ntorch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
                     "We expected all functions in `torch_non_c_binding_in_graph_functions` to be safe to cache.\n"
                     "Functions with special handlers may not be safe to cache, since they can close over global state.\n"
                     "If your handler/function is safe to cache, please add it to the list of safe handlers above.\n"

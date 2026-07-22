@@ -195,10 +195,10 @@ class DistTestCases:
 
     # Sets showing that something is implemented
     backend_feature = {}
-    backend_feature["gpu"] = {"nccl", "gloo", "ucc"}
+    backend_feature["gpu"] = {"nccl", "gloo", "ucc", "xccl"}
     backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
-    backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
-    backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
+    backend_feature["ddp"] = {"nccl", "gloo", "ucc", "xccl"}
+    backend_feature["subgroup"] = {"nccl", "gloo", "ucc", "xccl"}
     backend_feature["plugin"] = set()
     if TEST_HPU:
         backend_feature["hpu"] = {"hccl"}
@@ -520,6 +520,13 @@ def requires_nccl():
     return skip_but_pass_in_sandcastle_if(
         not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
+    )
+
+
+def requires_xccl():
+    return skip_but_pass_in_sandcastle_if(
+        not c10d.is_xccl_available(),
+        "c10d was not compiled with the XCCL backend",
     )
 
 
@@ -2045,7 +2052,10 @@ class MultiProcContinuousTest(TestCase):
         This supports instantiate_device_type_tests which calls setUpClass during
         class creation (before any tests run), when spawning would be premature.
         """
-        if cls._processes_spawned:
+        # Check the class's own dict: a subclass must not inherit the flag from
+        # a base test class that already ran and tore down its workers, else it
+        # would dispatch tests to the base class's dead worker processes.
+        if cls.__dict__.get("_processes_spawned", False):
             return
 
         # Handle method, property, and string attribute for device_type
@@ -2093,8 +2103,10 @@ class MultiProcContinuousTest(TestCase):
         Class-scope test fixture. Run once for entire test class, after all tests finish.
         Tear down the process group if spawned.
         """
-        # If processes were never spawned (e.g., all tests were skipped), nothing to tear down
-        if not cls._processes_spawned:
+        # If processes were never spawned (e.g., all tests were skipped), nothing to tear down.
+        # Check the class's own dict to avoid tearing down an already-finished
+        # base class's workers (see _ensure_processes_spawned).
+        if not cls.__dict__.get("_processes_spawned", False):
             super().tearDownClass()
             return
 

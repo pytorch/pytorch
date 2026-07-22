@@ -10,6 +10,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.logging
 import torch._dynamo.test_case
+import torch._inductor.comms as comms
 import torch.distributed as c10d
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
@@ -24,6 +25,7 @@ from torch._inductor.comms import (
     sink_waits_iterative,
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+from torch._inductor.dependencies import WeakDep
 from torch._inductor.fx_passes.bucketing import (
     _insert_fn_trace_before_node,
     _trace as bucketing_trace,
@@ -34,6 +36,7 @@ from torch._inductor.fx_passes.bucketing import (
     is_reduce_scatter_tensor,
     reduce_scatter_merge_fn_to_trace_custom_ops,
 )
+from torch._inductor.memory import SNodeMemory
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
@@ -64,6 +67,29 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+# Opaque custom op so torch.compile traces the coalescing manager into the graph
+# (Dynamo otherwise graph-breaks on it) and reduce-overhead captures the
+# coalesced collective into a cudagraph. Used by
+# TestCollectivesMultiProc.test_coalescing_manager_reduce_overhead.
+@torch.library.custom_op(
+    "test_inductor_collectives::coalesced_all_gather", mutates_args=()
+)
+def _coalesced_all_gather(
+    inp: torch.Tensor, world_size: int, group_name: str
+) -> torch.Tensor:
+    group = c10d.distributed_c10d._resolve_process_group(group_name)
+    out = inp.new_empty(inp.numel() * world_size)
+    with c10d._coalescing_manager(group=group, device=inp.device, async_ops=True) as cm:
+        c10d.all_gather_single(out, inp)
+    cm.wait()
+    return out
+
+
+@_coalesced_all_gather.register_fake
+def _(inp, world_size, group_name):
+    return inp.new_empty(inp.numel() * world_size)
 
 
 class TestBucketingTrace(torch._dynamo.test_case.TestCase):
@@ -197,6 +223,62 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
         self.assertEqual(transposed.meta["val"].stride(), (1, 8))
 
 
+class TestSimpleOverlap(torch._dynamo.test_case.TestCase):
+    def test_preserves_fake_dep_ordering(self):
+        class FakeBuffer:
+            def __init__(self, name):
+                self.name = name
+
+            def get_name(self):
+                return self.name
+
+        class FakeSNode:
+            def __init__(self, name, kind, outputs, deps=()):
+                self.name = name
+                self.kind = kind
+                self.outputs = [FakeBuffer(output) for output in outputs]
+                self.unmet_dependencies = deps
+
+            def get_outputs(self):
+                return self.outputs
+
+            def get_name(self):
+                return self.name
+
+        sync_coll = FakeSNode("sync_coll", "sync_collective", ["sync_out"])
+        compute = FakeSNode("compute", "compute", ["compute_out"])
+        async_coll = FakeSNode(
+            "async_coll",
+            "async_collective",
+            ["async_out"],
+            [WeakDep("sync_out", mutating_buf="async_out", is_fake=True)],
+        )
+
+        def memory_tracking(snodes):
+            return (
+                0,
+                dict.fromkeys(snodes, (0, 0)),
+                {snode: SNodeMemory(0, 0) for snode in snodes},
+                {},
+                {},
+                {},
+            )
+
+        with (
+            mock.patch.object(comms, "_initialize_memory_tracking", memory_tracking),
+            mock.patch.object(
+                comms,
+                "contains_async_collective",
+                lambda snode: snode.kind == "async_collective",
+            ),
+            mock.patch.object(comms, "contains_wait", lambda snode: False),
+        ):
+            self.assertEqual(
+                comms.simple_overlap([sync_coll, compute, async_coll]),
+                [sync_coll, async_coll, compute],
+            )
+
+
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @instantiate_parametrized_tests
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
@@ -328,6 +410,41 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 for _ in range(3):
                     compiled_out = compiled_func(x)
                     self.assertEqual(golden_out, compiled_out)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing_manager_reduce_overhead(self):
+        # An async coalescing manager around a fast-path collective used to
+        # stash the gathered tensors on the discarded per-call Work, so
+        # cm.wait() never freed them and reduce-overhead cudagraph capture
+        # failed its "not tracked as outputs" pool check. The gathered buffer is
+        # an intermediate here (consumed by + 1), so the leak is not masked by
+        # being a graph output.
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+
+            def f(inp):
+                gathered = torch.ops.test_inductor_collectives.coalesced_all_gather(
+                    inp, self.world_size, group_name
+                )
+                return gathered + 1
+
+            compiled = torch.compile(f, mode="reduce-overhead")
+            inp = torch.full((16,), self.rank + 1.0, device=self.device)
+            expected = (
+                torch.cat(
+                    [
+                        torch.full((16,), r + 1.0, device=self.device)
+                        for r in range(self.world_size)
+                    ]
+                )
+                + 1
+            )
+            for _ in range(3):  # warmup iters before cudagraph capture kicks in
+                self.assertEqual(compiled(inp), expected)
+            torch.cuda.synchronize(device=self.device)
 
     def test_c10d_functional_tagged_pt2_compliant(self):
         op = torch.ops._c10d_functional.all_reduce.default
@@ -1008,7 +1125,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(debug=True)
+    @torch._inductor.config.patch(
+        {
+            "debug": True,
+            "aten_distributed_optimizations.enable_simple_overlap": False,
+        }
+    )
     def test_inductor_steal_buffer(self):
         """
         it's ok and optimal if inductor allreduce mutates the buffer of an intermediate
@@ -1042,6 +1164,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
 
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.enable_simple_overlap": False}
+    )
     def _test_inductor_doesnt_mutate_shared(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
@@ -1861,7 +1986,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(
             num_triton_kernels,
             1,
-            f"Expected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
+            lambda msg: f"{msg}\nExpected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -2494,6 +2619,41 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         self._init_process_group()
         saved_values = _sync_decision_cross_ranks(test_graph, saved_values)
         self.assertEqual(saved_values, [wt1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_different_inputs_skips_sync(self):
+        # When ranks have structurally different graphs, has_same_nodes returns
+        # False and the cross-rank sync is skipped, so each rank keeps its own
+        # saved_values instead of converging to a single rank's decision.
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        test_graph = torch.fx.Graph()
+        node1 = test_graph.placeholder("x")
+        ag = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (node1,),
+        )
+        wt = test_graph.create_node(
+            "call_function", torch.ops._c10d_functional.wait_tensor.default, (ag,)
+        )
+        wt.meta["val"] = torch.randn(10, 10)
+
+        # Diverge the graph structure across ranks so the canonical hashes differ.
+        if self.rank == 0:
+            extra = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+        else:
+            extra = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (wt,)
+            )
+        extra.meta["val"] = torch.randn(10, 10)
+        test_graph.output((extra,))
+
+        self._init_process_group()
+        saved_values = _sync_decision_cross_ranks(test_graph, [extra])
+        self.assertEqual(saved_values, [extra])
 
     @skip_if_lt_x_gpu(2)
     def test_sync_decision_cross_ranks_different_node_order(self):

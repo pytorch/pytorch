@@ -290,7 +290,7 @@ class TestFullyShardMemory(FSDPTest):
             self.assertLessEqual(
                 mem_after_steps - mem_after_warmup,
                 2,
-                f"Memory grew by {mem_after_steps - mem_after_warmup} MB over "
+                lambda msg: f"{msg}\nMemory grew by {mem_after_steps - mem_after_warmup} MB over "
                 f"{num_steps} steps with gc disabled, indicating a reference "
                 f"cycle leak in FSDP's autograd graph",
             )
@@ -485,14 +485,14 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
                 # magnitude; any collapse shows up as a large mismatch here.
                 self.assertFalse(
                     math.isnan(slow_sum),
-                    f"NaN in slow-AR grad for {name}",
+                    lambda msg: f"{msg}\nNaN in slow-AR grad for {name}",
                 )
                 self.assertAlmostEqual(
                     slow_sum,
                     ref_sum,
                     delta=max(abs(ref_sum) * 1e-3, 1e-3),
                     msg=(
-                        f"HSDP AR buffer lifetime regression ({mp_dtype}): "
+                        lambda msg: f"{msg}\nHSDP AR buffer lifetime regression ({mp_dtype}): "
                         f"grad sum for {name} differs under slow AR. "
                         f"reference={ref_sum:.4f}, slow={slow_sum:.4f}. "
                         f"All layers collapsing to the same value indicates "
