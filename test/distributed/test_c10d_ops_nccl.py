@@ -197,7 +197,10 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         # Premul Sum
         if torch.cuda.nccl.version() >= (2, 11, 1):
-            for dtype in torch.half, torch.float, torch.double:
+            # bfloat16 exercises the host-scalar path that silently zeroed the
+            # reduction when the factor was passed as a 4-byte float; the
+            # tensor factor covers the device-scalar path.
+            for dtype in torch.half, torch.float, torch.double, torch.bfloat16:
                 for factor in (
                     3.0,
                     torch.tensor([5.0], device=local_device_id, dtype=dtype),

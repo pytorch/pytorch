@@ -115,7 +115,12 @@ ncclRedOpRAII getNcclReduceOp(
         case ncclFloat:
           return unpackPreMulSum<float, ncclFloat>(reduceOp, comm);
         case ncclBfloat16:
-          return unpackPreMulSum<float, ncclBfloat16>(reduceOp, comm);
+          // The scalar type must match the reduction datatype: NCCL reads
+          // ncclTypeSize(dataType) bytes from the factor. Using float here
+          // made NCCL read the low 2 bytes of a 4-byte float (zero for any
+          // power-of-two host scalar such as FSDP2's 1/factor), silently
+          // zeroing the reduction, and rejected bfloat16 device factors.
+          return unpackPreMulSum<at::BFloat16, ncclBfloat16>(reduceOp, comm);
         case ncclDouble:
           return unpackPreMulSum<double, ncclDouble>(reduceOp, comm);
         default:
