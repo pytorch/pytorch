@@ -2,6 +2,7 @@
 
 import functools
 import logging
+from unittest import mock
 
 import torch
 from torch._inductor import utils
@@ -9,6 +10,7 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
 from torch.autograd import DeviceType
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -81,7 +83,9 @@ class TestBench(TestCase):
         super().setUpClass()
         x = torch.rand(1024, 10).to(device_type).half()
         w = torch.rand(512, 10).to(device_type).half()
-        cls._bench_fn = functools.partial(torch.nn.functional.linear, x, w)
+        cls._bench_fn = staticmethod(
+            functools.partial(torch.nn.functional.linear, x, w)
+        )
 
     def test_benchmarker(self):
         res = benchmarker.benchmark_gpu(self._bench_fn)
@@ -144,6 +148,38 @@ class TestBench(TestCase):
             ),
             0.003,
         )
+
+    def test_get_fused_kernel_name_windows_truncation(self):
+        class FakeOrigin:
+            def __init__(self, name):
+                self.name = name
+                self.op = "call_function"
+
+        class FakeIRNode:
+            def __init__(self, origins):
+                self.origins = origins
+
+        class FakeSchedulerNode:
+            def __init__(self, origins):
+                self.node = FakeIRNode(origins)
+
+        origins = OrderedSet(
+            FakeOrigin(f"some_very_long_op_name_that_exceeds_the_limit_{i}")
+            for i in range(10)
+        )
+        node_schedule = [FakeSchedulerNode(origins)]
+
+        # On non-Windows the full descriptive name is kept.
+        with mock.patch("torch._inductor.utils.is_windows", return_value=False):
+            name = utils.get_fused_kernel_name(node_schedule, "inductor_node")
+            self.assertGreater(len(name), 50)
+
+        # On Windows the name is truncated and a hash suffix is appended.
+        with mock.patch("torch._inductor.utils.is_windows", return_value=True):
+            name_win = utils.get_fused_kernel_name(node_schedule, "inductor_node")
+            self.assertLessEqual(len(name_win), 50)
+            self.assertTrue(name_win.startswith("fused_"))
+            self.assertEqual(len(name_win.rsplit("_", 1)[-1]), 8)
 
     def test_do_bench_profile_result_requires_record_function_event(self):
         with self.assertRaisesRegex(RuntimeError, "Failed to capture"):

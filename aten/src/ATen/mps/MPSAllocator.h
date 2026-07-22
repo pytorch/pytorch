@@ -27,6 +27,19 @@ static const size_t kLargeHeap = MB(32); // "large" allocations may be packed in
 static const size_t kXLargeHeap = MB(1024); // "extra large" allocations may be packed in 1 GiB heaps
 static const size_t kMaxScalarAlloc = (sizeof(int64_t)); // largest "scalar" allocation
 
+enum class HeapTier { SMALL, LARGE, XLARGE, OVERSIZE };
+
+inline HeapTier getHeapTier(size_t size, bool has_memory_pressure) {
+  if (size <= kMaxSmallAlloc) {
+    return HeapTier::SMALL;
+  } else if (size < kMinLargeAlloc) {
+    return HeapTier::LARGE;
+  } else if (size < kXLargeHeap / 2 && !has_memory_pressure) {
+    return HeapTier::XLARGE;
+  }
+  return HeapTier::OVERSIZE;
+}
+
 // buffer pools could be customized with a combination of usage flags
 enum UsageFlags : uint32_t {
   PRIVATE = 0,
@@ -142,15 +155,20 @@ struct HeapBlock {
     const size_t size = params.size();
     MTLHeapDescriptor* d = [MTLHeapDescriptor new];
     if (d) {
-      if (size <= kMaxSmallAlloc) {
-        d.size = kSmallHeap;
-      } else if (size < kMinLargeAlloc) {
-        d.size = kLargeHeap;
-      } else if (size < kXLargeHeap / 2 && !params.has_memory_pressure) {
-        d.size = kXLargeHeap;
-      } else {
-        d.size = kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
-        is_split = false;
+      switch (getHeapTier(size, params.has_memory_pressure)) {
+        case HeapTier::SMALL:
+          d.size = kSmallHeap;
+          break;
+        case HeapTier::LARGE:
+          d.size = kLargeHeap;
+          break;
+        case HeapTier::XLARGE:
+          d.size = kXLargeHeap;
+          break;
+        case HeapTier::OVERSIZE:
+          d.size = kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
+          is_split = false;
+          break;
       }
       d.storageMode = (usage & UsageFlags::SHARED) ? MTLStorageModeShared : MTLStorageModePrivate;
       d.cpuCacheMode = MTLCPUCacheModeDefaultCache;
@@ -408,6 +426,9 @@ class MPSHeapAllocatorImpl {
   void release_buffers(BufferPool& pool);
   bool release_available_cached_buffers(AllocParams& params);
   bool release_cached_buffers();
+  // waits for buffers parked in-flight in the pool's pending-free list to finish
+  // on the GPU and returns them to the pool; returns true if any were reclaimed
+  bool wait_for_pending_free_buffers(BufferPool& pool);
   // free unused cached blocks to reclaim GPU memory if memory pressure is high
   void garbage_collect_cached_buffers(AllocParams& params);
   // returns the suitable buffer pool type for the usage or

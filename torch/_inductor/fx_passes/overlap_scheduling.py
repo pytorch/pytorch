@@ -232,7 +232,7 @@ def estimate_roofline_runtime_ms(node: fx.Node) -> float:
             flop_key, args, kwargs, out, compute_dtypes, node_meta=node.meta
         )
         if isinstance(compute_ns, (torch.SymInt, torch.SymFloat)):
-            compute_ns = compute_ns.node.hint if compute_ns.node.has_hint() else 0.0
+            compute_ns = hint if (hint := compute_ns.hint) is not None else 0.0
 
     # Transfer time (memory bandwidth-based, uses size_hint internally)
     transfer_ns = get_transfer_time(flat_args_kwargs, flat_outs)
@@ -244,11 +244,7 @@ def estimate_roofline_runtime_ms(node: fx.Node) -> float:
 def get_hint(x: int | torch.SymInt) -> int | None:
     if isinstance(x, int):
         return x
-    if not isinstance(x, torch.SymInt):
-        raise AssertionError(f"expected torch.SymInt, got {type(x)}")
-    if not x.node.has_hint():
-        return None
-    return x.node.hint
+    return x.hint
 
 
 def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
@@ -1491,7 +1487,7 @@ class OverlapScheduler:
 
             # if we schedule a wait tensor whose start collective is hidden by the
             # current compute node we are scheduling, then we are effectively exposing it.
-            # similarly, dont schedule a wait of a collective that could be otherwise hidden,
+            # similarly, don't schedule a wait of a collective that could be otherwise hidden,
             # thus forcing it to be exposed.
             # however, if it is already hidden it's fine to schedule it
             if _schedulable_wait_node(node):

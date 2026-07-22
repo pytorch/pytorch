@@ -34,7 +34,7 @@ aten = torch.ops.aten
 # (and possibly produce an unintelligible error) vs erroring out earlier and
 # printing that the forward AD formula is not implemented.
 #
-# The solution to this may be to have an explicitly white list control when
+# The solution to this may be to have an explicit whitelist to control when
 # to enable the decomposition.
 
 

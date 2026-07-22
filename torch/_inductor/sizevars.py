@@ -23,7 +23,15 @@ from torch.fx.experimental.symbolic_shapes import (
     SymNode,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, Max, Min, Mod, ModularIndexing
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    Max,
+    Min,
+    Mod,
+    ModularIndexing,
+    safe_gcd,
+    simple_floordiv_gcd,
+)
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
@@ -373,8 +381,6 @@ class SizeVarAllocator:
             if not statically_known(base >= 0):
                 return base
 
-            from torch.utils._sympy.functions import safe_gcd
-
             for v in base.free_symbols:
                 if v in var_ranges:
                     rest = sympy.Wild("_rest", exclude=[v])
@@ -398,6 +404,16 @@ class SizeVarAllocator:
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
+
+            if isinstance(base, ModularIndexing):
+                inner_base, inner_divisor, inner_modulus = base.args
+                period = divisor * modulus
+                # Target use cases have constant indices; avoid symbolic compile-time analysis.
+                if all(
+                    isinstance(value, sympy.Integer) and value > 0
+                    for value in (inner_modulus, divisor, modulus)
+                ) and self.statically_known_multiple_of(inner_modulus, period):
+                    return ModularIndexing(inner_base, inner_divisor * divisor, modulus)
 
             can_remove_mod = statically_known(base >= 0) and statically_known(
                 base < modulus * divisor
@@ -614,8 +630,6 @@ class SizeVarAllocator:
                 return True
 
         # Rule 6 — cheap gcd check before expensive sympy fallback.
-        from torch.utils._sympy.functions import simple_floordiv_gcd
-
         gcd = simple_floordiv_gcd(numerator, sympy.Integer(denominator))
         if isinstance(gcd, (int, sympy.Integer)) and int(gcd) % denominator == 0:
             return True
@@ -641,9 +655,31 @@ class SizeVarAllocator:
         if isinstance(denominator, (int, sympy.Integer)):
             return self._is_multiple_of(numerator, int(denominator))
 
-        # Symbolic denominator: only the sympy fallback can prove this.
-        if len(free_symbols(numerator)) > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS:
+        if numerator == 0:
+            return True
+
+        # Symbolic denominator: Mod-based reasoning can miss factorable Add
+        # denominators even for small expressions, so prove cancellation
+        # directly under the same limit used for the sympy fallback below.
+        if (
+            len(free_symbols([numerator, denominator]))
+            > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS
+        ):
             return False
+
+        def gcd_covers_denominator(gcd: sympy.Basic) -> bool:
+            return gcd != 1 and (
+                gcd == denominator or self.simplify(gcd - denominator) == 0
+            )
+
+        try:
+            if gcd_covers_denominator(simple_floordiv_gcd(numerator, denominator)):
+                return True
+            if gcd_covers_denominator(safe_gcd(numerator, denominator)):
+                return True
+        except sympy.PolynomialError:
+            pass
+
         expr = sympy.Eq(Mod(numerator, denominator), 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 

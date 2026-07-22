@@ -517,12 +517,13 @@ class intrusive_ptr final {
     rhs.target_ = FromNullType::singleton();
   }
 
-  intrusive_ptr(const intrusive_ptr& rhs) : target_(rhs.target_) {
+  intrusive_ptr(const intrusive_ptr& rhs) noexcept : target_(rhs.target_) {
     retain_();
   }
 
   template <class From, class FromNullType>
-  /* implicit */ intrusive_ptr(const intrusive_ptr<From, FromNullType>& rhs)
+  /* implicit */ intrusive_ptr(
+      const intrusive_ptr<From, FromNullType>& rhs) noexcept
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
@@ -569,7 +570,7 @@ class intrusive_ptr final {
     return *this;
   }
 
-  TTarget* get() const noexcept {
+  [[nodiscard]] TTarget* get() const noexcept {
     return target_;
   }
 
@@ -595,32 +596,32 @@ class intrusive_ptr final {
   }
 
   // We do a lot of null-pointer checks in our code, good to have this be cheap.
-  bool defined() const noexcept {
+  [[nodiscard]] bool defined() const noexcept {
     return target_ != NullType::singleton();
   }
 
-  uint32_t use_count() const noexcept {
+  [[nodiscard]] uint32_t use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
     return target_->refcount(std::memory_order_relaxed);
   }
 
-  uint32_t weak_use_count() const noexcept {
+  [[nodiscard]] uint32_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
     return target_->weakcount(std::memory_order_relaxed);
   }
 
-  bool unique() const noexcept {
+  [[nodiscard]] bool unique() const noexcept {
     return use_count() == 1;
   }
 
   /**
    * Stronger than unique() in that it must not have any weakrefs as well.
    */
-  bool is_uniquely_owned() const noexcept {
+  [[nodiscard]] bool is_uniquely_owned() const noexcept {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(target_ != NullType::singleton());
     return detail::is_uniquely_owned(
         target_->combined_refcount_.load(std::memory_order_acquire));
@@ -753,7 +754,8 @@ template <
     class TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>,
     class... Args>
-inline intrusive_ptr<TTarget, NullType> make_intrusive(Args&&... args) {
+[[nodiscard]] inline intrusive_ptr<TTarget, NullType> make_intrusive(
+    Args&&... args) {
   return intrusive_ptr<TTarget, NullType>::make(std::forward<Args>(args)...);
 }
 
@@ -766,49 +768,49 @@ inline void swap(
 
 // To allow intrusive_ptr inside std::map or std::set, we need operator<
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator<(
+[[nodiscard]] inline bool operator<(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.get() < rhs.get();
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator==(
+[[nodiscard]] inline bool operator==(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.get() == rhs.get();
 }
 
 template <class TTarget1, class NullType1>
-inline bool operator==(
+[[nodiscard]] inline bool operator==(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     std::nullptr_t) noexcept {
   return lhs.get() == nullptr;
 }
 
 template <class TTarget2, class NullType2>
-inline bool operator==(
+[[nodiscard]] inline bool operator==(
     std::nullptr_t,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return nullptr == rhs.get();
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator!=(
+[[nodiscard]] inline bool operator!=(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
 template <class TTarget1, class NullType1>
-inline bool operator!=(
+[[nodiscard]] inline bool operator!=(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     std::nullptr_t) noexcept {
   return !operator==(lhs, nullptr);
 }
 
 template <class TTarget2, class NullType2>
-inline bool operator!=(
+[[nodiscard]] inline bool operator!=(
     std::nullptr_t,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return !operator==(nullptr, rhs);
@@ -872,7 +874,7 @@ class weak_intrusive_ptr final {
   template <class TTarget2, class NullType2>
   friend class weak_intrusive_ptr;
 
-  void retain_() {
+  void retain_() noexcept {
     if (target_ != NullType::singleton()) {
       uint32_t new_weakcount =
           detail::atomic_weakcount_increment(target_->combined_refcount_);
@@ -917,13 +919,14 @@ class weak_intrusive_ptr final {
     rhs.target_ = FromNullType::singleton();
   }
 
-  weak_intrusive_ptr(const weak_intrusive_ptr& rhs) : target_(rhs.target_) {
+  weak_intrusive_ptr(const weak_intrusive_ptr& rhs) noexcept
+      : target_(rhs.target_) {
     retain_();
   }
 
   template <class From, class FromNullType>
   /* implicit */ weak_intrusive_ptr(
-      const weak_intrusive_ptr<From, FromNullType>& rhs)
+      const weak_intrusive_ptr<From, FromNullType>& rhs) noexcept
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
@@ -1011,7 +1014,7 @@ class weak_intrusive_ptr final {
     return target_;
   }
 
-  uint32_t use_count() const noexcept {
+  [[nodiscard]] uint32_t use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
@@ -1019,14 +1022,14 @@ class weak_intrusive_ptr final {
         std::memory_order_relaxed); // refcount, not weakcount!
   }
 
-  uint32_t weak_use_count() const noexcept {
+  [[nodiscard]] uint32_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
     return target_->weakcount(std::memory_order_relaxed);
   }
 
-  bool expired() const noexcept {
+  [[nodiscard]] bool expired() const noexcept {
     return use_count() == 0;
   }
 
@@ -1138,21 +1141,21 @@ inline void swap(
 
 // To allow weak_intrusive_ptr inside std::map or std::set, we need operator<
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator<(
+[[nodiscard]] inline bool operator<(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.target_ < rhs.target_;
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator==(
+[[nodiscard]] inline bool operator==(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.target_ == rhs.target_;
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator!=(
+[[nodiscard]] inline bool operator!=(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return !operator==(lhs, rhs);
@@ -1205,7 +1208,7 @@ inline void decref(intrusive_ptr_target* self) {
 }
 
 template <typename T>
-inline T* make_weak(T* self) {
+[[nodiscard]] inline T* make_weak(T* self) {
   // NB: 'this' is a strong pointer, but we return a weak pointer
   auto ptr = c10::intrusive_ptr<T>::reclaim(self);
   c10::weak_intrusive_ptr<T> wptr(ptr);
@@ -1213,7 +1216,7 @@ inline T* make_weak(T* self) {
   return wptr.release();
 }
 
-inline uint32_t use_count(intrusive_ptr_target* self) {
+[[nodiscard]] inline uint32_t use_count(intrusive_ptr_target* self) {
   auto ptr = c10::intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   auto r = ptr.use_count();
   ptr.release();
@@ -1236,7 +1239,7 @@ inline void decref(weak_intrusive_ptr_target* self) {
 }
 
 template <typename T>
-inline T* lock(T* self) {
+[[nodiscard]] inline T* lock(T* self) {
   auto wptr = c10::weak_intrusive_ptr<T>::reclaim(self);
   auto ptr = wptr.lock();
   wptr.release();
@@ -1244,7 +1247,7 @@ inline T* lock(T* self) {
 }
 
 // This gives the STRONG refcount of a WEAK pointer
-inline uint32_t use_count(weak_intrusive_ptr_target* self) {
+[[nodiscard]] inline uint32_t use_count(weak_intrusive_ptr_target* self) {
   auto wptr = c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   auto r = wptr.use_count();
   wptr.release();
