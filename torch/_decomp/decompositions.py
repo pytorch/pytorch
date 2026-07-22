@@ -2125,7 +2125,7 @@ def native_batch_norm_helper(
         running_var = running_var.to(dtype=computation_dtype, copy=True)
         new_running_var = running_var
         mean = running_mean
-        invstd = 1 / (torch.sqrt(running_var + eps))
+        invstd = torch.rsqrt(running_var + eps)
         # Very annoying inconsistency where CPU and CUDA give different shapes
         if input.device.type != "cpu":
             save_mean = running_mean
@@ -3190,9 +3190,20 @@ def _max_unpoolnd(
                 f"spatial dimensions, but got output_size[{i}]={size}"
             ),
         )
+
+    # The native CPU kernel preserves the input's memory format
+    # (aten/src/ATen/native/MaxUnpooling.cpp uses suggest_memory_format),
+    # while the CUDA kernel and the 3d kernels always return contiguous output.
+    def _restride(t: TensorLike) -> TensorLike:
+        if dim == 2 and self.device.type == "cpu":
+            return t.contiguous(memory_format=utils.suggest_memory_format(self))
+        return t
+
     output_shape = list(self.shape[:-dim]) + list(output_size)
     if any(s == 0 for s in output_shape):
-        return self.new_zeros(output_shape)
+        # The native CPU kernel still applies the memory format to the empty
+        # output (resize_ runs before the numel()==0 guard); mirror it here.
+        return _restride(self.new_zeros(output_shape))
     nc = reduce(operator.mul, self.shape[:-dim])
     hw = reduce(operator.mul, output_size)
     indices_nc_shape = [1] * self.ndim
@@ -3202,9 +3213,21 @@ def _max_unpoolnd(
     ).reshape(-1)
 
     output = self.new_zeros(output_shape)
-    return aten._unsafe_index_put(
+    result = aten._unsafe_index_put(
         output.reshape(-1), [indices_flat], self.reshape(-1), accumulate=False
     ).view(output.shape)
+    return _restride(result)
+
+    # Match the CPU max_unpool2d layout behavior: the native 4D path resizes
+    # the output with self.suggest_memory_format(), preserving channels-last.
+    # The 3D path uses the default contiguous layout.
+    # For compile, FakeTensor preserves the real device here.
+    # The only edge-case we see is direct meta calls, which follow meta strides
+    # and may differ from CPU eager layout.
+    if dim == 2 and self.ndim == 4 and self.device.type == "cpu":
+        result = result.contiguous(memory_format=utils.suggest_memory_format(self))
+
+    return result
 
 
 @register_decomposition(aten.max_unpool2d)
@@ -3395,7 +3418,9 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     sequences_size = len(sequences)
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
-    max_len = max(x.size(0) for x in sequences)
+    # Fold with sym_max (not Python max, which does pairwise `>` comparisons)
+    # so symbolic/unbacked sequence lengths don't trigger a data-dependent guard.
+    max_len = reduce(torch.sym_max, (x.size(0) for x in sequences))
     if batch_first:
         out_dims = (sequences_size, max_len)
     else:
@@ -5010,7 +5035,7 @@ def _grid_sampler_2d(
 
     if _expand_grid:
         # Let's expand grid to [N, C, oH, oW, 2]
-        # This allows to generate a single triton cuda kernel instead of two kernels.
+        # This allows generating a single triton cuda kernel instead of two kernels.
         # Two kernels are due source indices, weights have shape (N, 1, oH, oW), xnumel=N*oH*oW
         # and output has shape (N, C, oH, oW), xnumel=N*C*oH*oW
         # Expanding grid to (N, C, oH, oW, two) unifies xnumel to N*C*oH*oW
@@ -5691,13 +5716,16 @@ def multi_margin_loss(
             weight.ndim == 1 and weight.numel() == dim,  # type: ignore[union-attr]
             lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",  # type: ignore[union-attr]
         )
+    # Keep 1D target for weight indexing
+    target_1d = target
     target = target.unsqueeze(1)
     u = torch.gather(input, dim=1, index=target)
     z = margin - u + input
     z = z.clamp_min(0)
     z = z if p == 1 else z * z
     if weight is not None:
-        z = z * weight[target]
+        # Use 1D indexing to avoid issues with advanced indexing in inductor
+        z = z * weight[target_1d].unsqueeze(1)
     idx = torch.arange(dim, device=input.device)
     z = torch.where(idx != target, z, 0)
     if reduction == Reduction.MEAN.value:
@@ -5747,6 +5775,8 @@ def multilabel_margin_loss_forward(
     z = z / dim
     # masks loss
     z = torch.where(is_target, 0, z)
+    # drops contributions from padded target slots (positions at/after the first -1)
+    z = torch.where(target_mask.T.unsqueeze(dim=-1), z, 0)
     # reduction
     if reduction == Reduction.MEAN.value:
         z = z.sum(dim=(0, -1)).mean()

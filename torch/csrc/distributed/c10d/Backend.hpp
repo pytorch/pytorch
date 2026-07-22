@@ -170,11 +170,11 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support shrink"));
   }
 
-  virtual void setTimeout(std::chrono::milliseconds timeout) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ", getBackendName(), " does not support setting timeout"));
+  virtual void setTimeout(std::chrono::milliseconds /*timeout*/) {
+    TORCH_WARN(
+        "Backend ",
+        getBackendName(),
+        " does not support setting timeout; the new value is ignored");
   }
 
   // Fault Tolerance / Reconfigure API
@@ -398,6 +398,22 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support gather"));
   }
 
+  // Gathers a single tensor inputBuffer from every rank into a single flat
+  // outputBuffer on the root rank, interpreted as a contiguous collection of
+  // size inputBuffer * WORLD_SIZE. This is the single-tensor analog of gather
+  // that avoids materializing a per-rank output tensor list.
+  virtual c10::intrusive_ptr<Work> gather_into_tensor(
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      const GatherOptions& /* opts */ = GatherOptions()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support gather_into_tensor"));
+  }
+
   virtual c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<std::vector<at::Tensor>>& /* inputTensors */,
@@ -504,17 +520,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             " does not support monitoredBarrier, only GLOO supports monitored barrier."));
   }
 
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store. Only implemented
-  // for GLOO and NCCL backends currently.
+  // Deprecated no-op: sequence numbers now always start at 0 on every rank, so
+  // there is no initial value to agree on. Kept for backward compatibility with
+  // existing callers; it warns and does nothing.
   virtual void setSequenceNumberForGroup() {
-    auto backendName = getBackendName();
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ",
-            backendName,
-            " does not yet support sequence numbers."));
+    TORCH_WARN_ONCE(
+        "setSequenceNumberForGroup() is deprecated and is now a no-op; "
+        "sequence numbers always start at 0 on every rank. Remove calls to "
+        "_set_sequence_number_for_group().");
   }
 
   // Retrieves the current sequence number for the whole group, which should be

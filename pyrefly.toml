@@ -53,6 +53,7 @@ ignore-missing-imports = [
     "torch._C._xpu_XPUAllocator",
     "torch._C._XPUMemPool",
     "torch._C._StaticXpuLauncher",
+    "torch.profiler._cupti._cupti_stubs",
     "torch._C._jit_tree_views.*",
     "torch.for_onnx.onnx.*",
     "torch.ao.quantization.experimental.apot_utils.*",
@@ -180,3 +181,113 @@ implicit-any = true
 bad-param-name-override = false
 unannotated-return = true
 unannotated-parameter = true
+
+[[sub-config]]
+matches = "torch/_numpy/linalg.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_numpy/_reductions_impl.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_numpy/fft.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_numpy/_dtypes.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_numpy/_normalizations.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_numpy/_util.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_export/utils.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_export/non_strict_utils.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_export/wrappers.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_export/serde/schema_check.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_export/serde/union.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true

@@ -605,7 +605,7 @@ ProcessGroupUCC::ProcessGroupUCC(
   TORCH_UCC_LOG_INFO(
       TORCH_UCC_INIT,
       c10::str(
-          "Successfully read and set ProcessGroupUCC env. variables as followings",
+          "Successfully read and set ProcessGroupUCC env. variables as follows",
           envs));
 
   if (torch_ucc_config.enable_health_check) {
@@ -1647,8 +1647,6 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::recv(
       tensors,
       "ucc:recv");
 }
-
-void ProcessGroupUCC::setSequenceNumberForGroup() {}
 
 uint64_t ProcessGroupUCC::getSequenceNumberForGroup() {
   return seq_;
