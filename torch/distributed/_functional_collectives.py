@@ -641,46 +641,35 @@ torch.library.register_autograd(
 )
 
 
+def _is_reduceop_supported(op):
+    from torch.distributed import ReduceOp as _ReduceOp
+    if isinstance(op, _ReduceOp):
+        return op.op in (_ReduceOp.SUM, _ReduceOp.AVG, _ReduceOp.PREMUL_SUM, _ReduceOp.MAX, _ReduceOp.MIN)
+    return op in ("sum", "avg", "premul_sum", "max", "min")
+
+
 def all_reduce_backward(ctx, grad_output: torch.Tensor):
-    """
-    Backward for all_reduce: all_reduce with same reduce_op.
-    Forward aggregates tensors, backward aggregates gradients.
-
-    Args:
-        ctx: Context object
-        grad_output: Gradient from downstream operations
-
-    Returns:
-        Tuple of (grad_input, grad_group_name, grad_reduce_op)
-        grad_group_name and grad_reduce_op are None (not differentiable)
-    """
-    group_name = ctx.group_name
+    from torch.distributed import ReduceOp as _ReduceOp
     reduce_op = ctx.reduce_op
-
-    if reduce_op not in ("sum", "avg"):
-        raise RuntimeError(
-            f"all_reduce backward only supports 'sum' and 'avg' reductions, got '{reduce_op}'"
-        )
-
-    # Backward does all_reduce with the same reduce_op
+    if not _is_reduceop_supported(reduce_op):
+        raise RuntimeError(f"all_reduce backward only supports sum-like reductions, got '{reduce_op}'")
     output = torch.ops._c10d_functional.all_reduce(
-        grad_output.contiguous(), reduce_op, group_name
+        grad_output.contiguous(), reduce_op, ctx.group_name
     )
+    if reduce_op == "min" or reduce_op == "max" or reduce_op == _ReduceOp.MIN or reduce_op == _ReduceOp.MAX:
+        output = torch.ops.aten.where.ScalarOther(ctx.mask, output, 0)
+
     return wait_tensor(output), None, None
 
 
 def all_reduce_setup_context(ctx, inputs, output):
-    """
-    Setup context for all_reduce backward.
-    Args:
-        ctx: Context object to save state for backward
-        inputs: Tuple of (input, reduce_op, group_name)
-        output: Output from forward pass
-    """
     input, reduce_op, group_name = inputs
     ctx.group_name = group_name
-    ctx.reduce_op = reduce_op.lower()
-
+    ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
+    if reduce_op == "min" or reduce_op == "max" or reduce_op == _ReduceOp.MIN or reduce_op == _ReduceOp.MAX:
+        # TODO: handle is_nan
+        print("input", input, "output", output)
+        ctx.mask = input == output
 
 torch.library.register_autograd(
     "_c10d_functional::all_reduce",
