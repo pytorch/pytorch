@@ -434,6 +434,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         local_reduce_group: cutlass.Constexpr = 0,
         local_reduce_axis: cutlass.Constexpr = 1,
         local_reduce_type: cutlass.Constexpr = "sum",
+        local_reduce_source: cutlass.Constexpr = "identity",
     ):
         """Execute the GEMM operation in steps:
         - Setup static attributes before smem/grid/tma computation
@@ -479,6 +480,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_group = local_reduce_group
         self.local_reduce_axis = local_reduce_axis
         self.local_reduce_type = local_reduce_type
+        self.local_reduce_source = local_reduce_source
 
         a_tensor = cute.make_tensor(
             a_tensor.iterator, cute.select(a_tensor.layout, [1, 2, 0])
@@ -1662,6 +1664,14 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                             mma_tile_coord_mnl[2],
                                         ]
                                 epilogue_values.append(fragment.load())
+                    if cutlass.const_expr(local_reduce_tensor is not None):
+                        local_reduce_vec = acc_vec.to(epilogue_input_dtype).to(
+                            self.acc_dtype
+                        )
+                        if cutlass.const_expr(self.local_reduce_source == "square"):
+                            local_reduce_vec = local_reduce_vec * local_reduce_vec
+                        else:
+                            assert self.local_reduce_source == "identity"
                     acc_vec = epilogue_op(
                         acc_vec.to(epilogue_input_dtype), *tuple(epilogue_values)
                     ).to(self.c_dtype)
@@ -1678,7 +1688,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             assert group > 1 and group <= fragment_n
                             assert fragment_n % group == 0
                             repeats = cutlass.const_expr(fragment_n // group)
-                            grouped = acc_vec.to(self.acc_dtype).reshape(
+                            grouped = local_reduce_vec.reshape(
                                 ((1, group, repeats), 1, 1)
                             )
                             if cutlass.const_expr(
@@ -1743,9 +1753,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                     gReduce[row_idx, group_idx] = reduced_flt[i]
                         else:
                             tDrReduce = cute.make_rmem_tensor_like(
-                                acc_vec, self.acc_dtype
+                                local_reduce_vec, self.acc_dtype
                             )
-                            tDrReduce.store(acc_vec.to(self.acc_dtype))
+                            tDrReduce.store(local_reduce_vec)
                             reduced_flt = cute.filter_zeros(tDrReduce)
                             lane_layout_mn, _ = get_lane_warp_layouts(
                                 tiled_copy_t2r, reference_src=False

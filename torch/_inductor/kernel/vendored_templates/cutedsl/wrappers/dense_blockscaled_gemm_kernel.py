@@ -210,6 +210,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 getattr(args, "local_reduce_group"),
                 getattr(args, "local_reduce_axis"),
                 getattr(args, "local_reduce_type"),
+                getattr(args, "local_reduce_source"),
                 target_sm=target_sm,
             )
         return self.cute_compile(
