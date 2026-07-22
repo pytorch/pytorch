@@ -129,6 +129,32 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         if alpha is None:
             alpha = _ones_alpha()
 
+        epilogue_op = lambda v: v
+        if getattr(args, "epilogue", None) is not None:
+            epilogue_op = args.epilogue.epilogue_fn
+            if isinstance(epilogue_op, str):
+                scope = {}
+                exec(epilogue_op, {}, scope)
+                epilogue_op = next(value for value in scope.values() if callable(value))
+        local_reduce_out = getattr(args, "local_reduce_out", None)
+        if local_reduce_out is not None:
+            return self.cute_compile(
+                self.impl,
+                args.A.tensor,
+                args.B.tensor,
+                args.A.scale.tensor,
+                args.B.scale.tensor,
+                args.out.tensor,
+                max_active_clusters,
+                stream,
+                epilogue_op,
+                alpha,
+                local_reduce_out.compile_time_tensor,
+                getattr(args, "local_reduce_group"),
+                getattr(args, "local_reduce_axis"),
+                getattr(args, "local_reduce_type"),
+                target_sm=target_sm,
+            )
         return self.cute_compile(
             self.impl,
             args.A.tensor,
@@ -138,7 +164,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             args.out.tensor,
             max_active_clusters,
             stream,
-            lambda v: v,
+            epilogue_op,
             alpha,
             target_sm=target_sm,
         )
@@ -164,6 +190,21 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         if alpha is None:
             alpha = _ones_alpha()
 
+        local_reduce_out = getattr(args, "local_reduce_out", None)
+        if local_reduce_out is not None:
+            self.cute_run(  # pyrefly: ignore[missing-attribute]
+                compiled_gemm,
+                args.A.tensor,
+                args.B.tensor,
+                args.A.scale.tensor,
+                args.B.scale.tensor,
+                args.out.tensor,
+                stream,
+                alpha,
+                local_reduce_out.runtime_tensor,
+            )
+            return
+
         self.cute_run(  # pyrefly: ignore[missing-attribute]
             compiled_gemm,
             args.A.tensor,
@@ -173,6 +214,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             args.out.tensor,
             stream,
             alpha,
+            None,
         )
 
     def _supports(
@@ -183,6 +225,36 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         # rather than re-inferring the layout (the old _infer_scale_swizzle_impl
         # check wrongly rejected valid NVFP4 args on the transposed B operand).
         from cutlass.operators.arguments import ScaledOperand
+
+        local_reduce_out = getattr(args, "local_reduce_out", None)
+        if local_reduce_out is not None:
+            group = getattr(args, "local_reduce_group")
+            axis = getattr(args, "local_reduce_axis")
+            m, n = args.out.shape[-2:]
+            selected_size = n if axis == 1 else m
+            max_group = 32 if axis == 1 else 4
+            if (
+                axis not in (0, 1)
+                or group <= 1
+                or group > max_group
+                or selected_size % group != 0
+            ):
+                return Status.fail(
+                    "Grouped reduction requires a supported M- or N-axis group "
+                    "that divides the selected dimension."
+                )
+            expected_shape = (m, n // group) if axis == 1 else (m // group, n)
+            if local_reduce_out.shape != expected_shape:
+                return Status.fail(
+                    "Grouped reduction output shape must be "
+                    f"{expected_shape}; got {local_reduce_out.shape}."
+                )
+            if local_reduce_out.dtype is not cutlass.Float32 or tuple(
+                local_reduce_out.stride
+            ) != (expected_shape[1], 1):
+                return Status.fail(
+                    "Grouped reduction output must be contiguous Float32."
+                )
 
         m, n = args.out.shape[-2:]
         k = args.A.shape[-1]
@@ -364,8 +436,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                     accumulator_type=cutlass.Float32,
                 )
 
-    @staticmethod
-    def _valid_metadata(metadata: OperatorMetadata) -> bool:
+    @classmethod
+    def _valid_metadata(cls, metadata: OperatorMetadata) -> bool:
         scale_vec = metadata.operands.A.mode
 
         if len(scale_vec) > 1:
@@ -403,7 +475,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         if use_2cta and cm % 2 != 0:
             return False
 
-        if metadata.epilogue is not None:
+        if metadata.epilogue is not None and "EFC" not in cls.__name__:
             return False
 
         return True
@@ -442,7 +514,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 design = Sm100DesignMetadata(**dict(zip(param_names, values)))
 
                 operator_name = (
-                    "inductor_vendored.DenseBlockScaledGemmKernel_sm100_"
+                    f"inductor_vendored.{cls.__name__}_sm100_"
                     "{layout}_A{A}_B{B}_out{out}_SFA{SFA}_SFB{SFB}_"
                     "acc{acc}_scale{scale_mode}_swizzle{scale_swizzle}_"
                     "{num_cta}cta_cluster{cluster}_tile{tile}"
@@ -487,8 +559,18 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         return operator_list
 
 
+class VendoredDenseBlockScaledGemmEFC(VendoredDenseBlockScaledGemmKernel):
+    """Block-scaled provider variant using the kernel's unary epilogue hook."""
+
+    supported_args_type = GemmArguments
+    designed_for_min_cc = 100
+
+
 # Only register if kernel implementation is available
 if BlockScaledGemmKernelImpl is not None:
     cutlass.operators.providers.cutedsl.CuTeDSLProvider.register(
         VendoredDenseBlockScaledGemmKernel
+    )
+    cutlass.operators.providers.cutedsl.CuTeDSLProvider.register(
+        VendoredDenseBlockScaledGemmEFC
     )
