@@ -27,7 +27,7 @@ bool cuda_scaled_mm_arch_allowed(std::initializer_list<CudaScaledMmArch> require
     return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
   }
   for (auto arch : required_archs) {
-    if (dprops->major == static_cast<int64_t>(arch)) {
+    if (dprops->major == static_cast<int>(arch)) {
       return true;
     }
   }

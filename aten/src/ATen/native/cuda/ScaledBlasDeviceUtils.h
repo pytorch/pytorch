@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/macros/Export.h>
-#include <cstdint>
 #include <initializer_list>
 
 namespace at::native::scaled {
@@ -14,7 +13,7 @@ bool rocm_scaled_mm_arch_allowed();
 #else
 // SM generations relevant to torch._scaled_mm / torch._scaled_grouped_mm
 // device gating. Values match the corresponding SM major version.
-enum class CudaScaledMmArch : int64_t {
+enum class CudaScaledMmArch : int {
   Sm90 = 9,
   Sm100 = 10,
 };
