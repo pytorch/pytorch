@@ -2,8 +2,11 @@
 
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <mutex>
 #include <string>
+#include <string_view>
 
 #include <nccl.h>
 
@@ -13,6 +16,14 @@
 // ncclInvalidUsage on older NCCL, so the value is never read at runtime.
 #if NCCL_VERSION_CODE < NCCL_VERSION(2, 27, 0) && !defined(NCCL_SHRINK_ABORT)
 #define NCCL_SHRINK_ABORT 0x01
+#endif
+
+// ncclCommSuspend/ncclCommResume/ncclCommMemStats (memory offload) landed in
+// NCCL 2.29.7. NCCL_SUSPEND_MEM is the only suspend flag; define a fallback so
+// callers compile against older headers -- the wrappers return ncclInvalidUsage
+// there, so the value is never read at runtime.
+#ifndef NCCL_SUSPEND_MEM
+#define NCCL_SUSPEND_MEM 0x01
 #endif
 
 // ncclWindow_t was introduced in NCCL 2.27; the window/RMA APIs
@@ -40,7 +51,7 @@ class NcclApi {
   virtual ~NcclApi() = default;
 
   // Error handling
-  virtual const char* getErrorString(ncclResult_t result) = 0;
+  virtual std::string_view getErrorString(ncclResult_t result) = 0;
   virtual std::string getLastError(ncclComm_t comm) = 0;
 
   // Unique ID generation
@@ -205,6 +216,17 @@ class NcclApi {
   [[nodiscard]] virtual ncclResult_t memAlloc(void** buff, size_t size) = 0;
   [[nodiscard]] virtual ncclResult_t memFree(void* buff) = 0;
 
+  // Memory offload (suspend/resume) operations.
+  // Available on NCCL 2.29.7+ (older NCCL returns ncclInvalidUsage).
+  [[nodiscard]] virtual ncclResult_t commSuspend(
+      ncclComm_t comm,
+      int flags) = 0;
+  [[nodiscard]] virtual ncclResult_t commResume(ncclComm_t comm) = 0;
+  [[nodiscard]] virtual ncclResult_t commMemStats(
+      ncclComm_t comm,
+      int stat,
+      uint64_t* value) = 0;
+
   // Window / one-sided RMA operations.
   // Available on NCCL 2.29+ (older NCCL returns ncclInvalidUsage).
   [[nodiscard]] virtual ncclResult_t commWindowRegister(
@@ -264,7 +286,7 @@ class DefaultNcclApi : public NcclApi {
   ~DefaultNcclApi() override = default;
 
   // Error handling
-  const char* getErrorString(ncclResult_t result) override;
+  std::string_view getErrorString(ncclResult_t result) override;
   std::string getLastError(ncclComm_t comm) override;
 
   // Unique ID generation
@@ -323,6 +345,13 @@ class DefaultNcclApi : public NcclApi {
 
   [[nodiscard]] ncclResult_t commDeregister(ncclComm_t comm, void* handle)
       override;
+
+  [[nodiscard]] ncclResult_t commSuspend(ncclComm_t comm, int flags) override;
+  [[nodiscard]] ncclResult_t commResume(ncclComm_t comm) override;
+  [[nodiscard]] ncclResult_t commMemStats(
+      ncclComm_t comm,
+      int stat,
+      uint64_t* value) override;
 
   // Point-to-point operations
   [[nodiscard]] ncclResult_t send(
@@ -474,3 +503,5 @@ class DefaultNcclApi : public NcclApi {
 };
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL

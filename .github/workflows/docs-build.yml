@@ -40,7 +40,7 @@ jobs:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
-      check_experiments: arc,lf
+      check_experiments: lf
 
   linux-jammy-py3_10-gcc11-build:
     name: linux-jammy-py3.10-gcc11

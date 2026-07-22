@@ -24,6 +24,7 @@
 #include <c10/core/InferenceMode.h>
 
 #include <iostream>
+#include <utility>
 
 // This file contains functorch's Python bindings.
 
@@ -260,7 +261,7 @@ static int64_t _grad_increment_nesting() {
   if (prev_inference_mode) {
     auto state = c10::AutogradState::get_tls_state();
     state.set_inference_mode(false);
-    c10::AutogradState::set_tls_state(state);
+    c10::AutogradState::set_tls_state(std::move(state));
   }
   return initAndPushDynamicLayer(
       TransformType::Grad,
@@ -279,7 +280,7 @@ static int64_t _grad_decrement_nesting() {
   if (meta.prevInferenceMode_) {
     auto state = c10::AutogradState::get_tls_state();
     state.set_inference_mode(true);
-    c10::AutogradState::set_tls_state(state);
+    c10::AutogradState::set_tls_state(std::move(state));
   }
   return layer.layerId();
 }
@@ -292,7 +293,7 @@ static int64_t _jvp_increment_nesting() {
   if (prev_inference_mode) {
     auto state = c10::AutogradState::get_tls_state();
     state.set_inference_mode(false);
-    c10::AutogradState::set_tls_state(state);
+    c10::AutogradState::set_tls_state(std::move(state));
   }
   return initAndPushDynamicLayer(
       TransformType::Jvp,
@@ -311,7 +312,7 @@ static int64_t _jvp_decrement_nesting() {
   if (meta.prevInferenceMode_) {
     auto state = c10::AutogradState::get_tls_state();
     state.set_inference_mode(true);
-    c10::AutogradState::set_tls_state(state);
+    c10::AutogradState::set_tls_state(std::move(state));
   }
   return layer.layerId();
 }
