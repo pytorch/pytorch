@@ -3,16 +3,13 @@
 #include <torch/csrc/stable/ops.h>
 #include <torch/csrc/stable/pyobject.h>
 #include <torch/csrc/stable/tensor.h>
-#include <torch/csrc/stable/version.h>
 
-// Importable (abi3) module functions that exercise the real use case for the
+// Importable (abi3) module functions that exercise the use case for the
 // PyObject<->Tensor stable shims: a raw PyObject arrives straight from Python
 // (no dispatcher boxing), so the GIL is naturally held. This is how a consumer
 // (e.g. a python-registered custom op) would actually call from_pyobject /
 // to_pyobject. The module links only libtorch; the conversion is serviced by
 // the vtable that libtorch_python registers.
-
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 
 using torch::stable::Tensor;
 
@@ -89,21 +86,3 @@ PyModuleDef moduledef = {
 extern "C" PyObject* PyInit__C() {
   return PyModule_Create(&moduledef);
 }
-
-#else
-
-extern "C" PyObject* PyInit__C() {
-  static PyModuleDef moduledef = {
-      PyModuleDef_HEAD_INIT,
-      "_C",
-      nullptr,
-      -1,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr};
-  return PyModule_Create(&moduledef);
-}
-
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
