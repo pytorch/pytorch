@@ -3183,6 +3183,7 @@ class TestDataLoaderDeviceType(TestCase):
         for batch in loader:
             self.assertTrue(batch[0].is_pinned())
 
+    @unittest.skipIf(not TEST_XPU_IPC, "XPU IPC not available")
     @onlyXPU
     def test_xpu_ipc_concurrent_access_stress(self, device):
         dataset_size = 12
@@ -3230,6 +3231,7 @@ class TestDataLoaderDeviceType(TestCase):
                 torch.xpu.synchronize(xpu_device)
                 torch.xpu.empty_cache()
 
+    @unittest.skipIf(not TEST_XPU_IPC, "XPU IPC not available")
     @onlyXPU
     def test_xpu_ipc_imported_tensor_flag(self, device):
         xpu_device = torch.device(device)
@@ -3246,6 +3248,7 @@ class TestDataLoaderDeviceType(TestCase):
             self.assertEqual(batch.device.type, "xpu")
             self.assertTrue(batch.size(0) == 1)
 
+    @unittest.skipIf(not TEST_XPU_IPC, "XPU IPC not available")
     @onlyXPU
     def test_xpu_ipc_high_throughput_cleanup(self, device):
         xpu_device = torch.device(device)
@@ -3265,6 +3268,7 @@ class TestDataLoaderDeviceType(TestCase):
                     self.assertEqual(batch.size(0), 5)
                     torch.xpu.synchronize(xpu_device)
 
+    @unittest.skipIf(not TEST_XPU_IPC, "XPU IPC not available")
     @onlyXPU
     def test_xpu_ipc_device_context_safety(self, device):
         xpu_device = torch.device(device)
@@ -3285,6 +3289,7 @@ class TestDataLoaderDeviceType(TestCase):
             result = batch * 2.0
             self.assertEqual(result.device, batch.device)
 
+    @unittest.skipIf(not TEST_XPU_IPC, "XPU IPC not available")
     @onlyXPU
     def test_xpu_ipc_storage_pickle_roundtrip(self, device):
         xpu_device = torch.device(device)
