@@ -156,10 +156,10 @@ class _FlatLayout:
 
     def all_ranks_from_zero(self) -> list[int]:
         """
-        This function computes the all ranks specified by the layout staring from zero.
+        This function computes the all ranks specified by the layout starting from zero.
 
         How it works:
-        1. we enumerates every possible coordinate (like a nested for-loop).
+        1. we enumerate every possible coordinate (like a nested for-loop).
         If sizes = (2, 3), we get the following coordinates:
             (0,0), (0,1), (0,2), (1,0), (1,1), (1,2)
 
