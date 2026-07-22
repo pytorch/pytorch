@@ -7,10 +7,6 @@ from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._library.utils import fill_defaults
-from torch.distributed._local_tensor import (
-    enabled_local_tensor_mode,
-    maybe_run_for_local_tensor,
-)
 
 
 if TYPE_CHECKING:
@@ -129,38 +125,6 @@ def _flatten_shard_metadata(
     )
 
 
-@maybe_run_for_local_tensor
-def _run_stateful_rng_op_rankwise(
-    tensor: torch.Tensor,
-    global_shape: list[int],
-    global_offsets: list[int | torch.SymInt],
-    local_offsets: list[int | torch.SymInt],
-    local_sizes: list[int | torch.SymInt],
-    chunk_count: int,
-    distribution: int,
-    generator: torch.Generator | None,
-    generator_state: torch.Tensor | None,
-    params: tuple[object, ...],
-) -> torch.Tensor:
-    if generator_state is not None:
-        if generator is None:
-            raise AssertionError
-        # LocalTensor runs every virtual rank in one process. Replay each rank
-        # from the same explicit state, leaving one logical draw consumed.
-        generator.set_state(generator_state)
-    return aten._philox_distribution_shards_.default(
-        tensor,
-        global_shape,
-        global_offsets,
-        local_offsets,
-        local_sizes,
-        chunk_count,
-        distribution,
-        params,
-        generator=generator,
-    )
-
-
 def _run_stateful_rng_op(
     op_call: torch._ops.OpOverload,
     args: tuple[Any, ...],
@@ -201,7 +165,7 @@ def _run_stateful_rng_op(
             f"{op_call}: expected a strided local tensor, got layout {tensor.layout}"
         )
 
-    # Validate before entering the rankwise helper or reserving generator state.
+    # Validate before reserving generator state.
     distribution, validate = _STATEFUL_RNG_OP_SPECS[op_call]
     validate(tensor, op_args)
     params = tuple(op_args)
@@ -213,36 +177,17 @@ def _run_stateful_rng_op(
             local_sizes,
         )
     )
-    generator_state = (
-        generator.get_state()
-        if generator is not None and enabled_local_tensor_mode()
-        else None
+    aten._philox_distribution_shards_.default(
+        tensor,
+        global_shape,
+        flat_global_offsets,
+        flat_local_offsets,
+        flat_local_sizes,
+        chunk_count,
+        distribution,
+        params,
+        generator=generator,
     )
-    if generator_state is None:
-        aten._philox_distribution_shards_.default(
-            tensor,
-            global_shape,
-            flat_global_offsets,
-            flat_local_offsets,
-            flat_local_sizes,
-            chunk_count,
-            distribution,
-            params,
-            generator=generator,
-        )
-    else:
-        _run_stateful_rng_op_rankwise(
-            tensor,
-            list(global_shape),
-            flat_global_offsets,
-            flat_local_offsets,
-            flat_local_sizes,
-            chunk_count,
-            distribution,
-            generator,
-            generator_state,
-            params,
-        )
     return tensor
 
 
