@@ -510,7 +510,7 @@ def estimate_region_peak_memory(
     step_of: Callable[[BaseSchedulerNode], int],
     graph_outputs: OrderedSet[str],
     cur_memory: int = 0,
-) -> int:
+) -> tuple[int, list[int], list[int]]:
     """Peak memory inside `[region_start, region_end]` for the
     hypothetical post-reorder schedule.
 
@@ -518,18 +518,23 @@ def estimate_region_peak_memory(
     each node: alloc = sum of `size_alloc` over its outputs; free =
     sum of `size_free` over `pred_buffers` whose proposed last
     consumer is this node. Then accumulates per step starting from
-    `cur_memory` (live bytes at the window boundary) and returns
-    the maximum live bytes.
+    `cur_memory` (live bytes at the window boundary) and returns the peak
+    plus live-before/live-after vectors for the simulated region.
     """
     R = region_end - region_start + 1
-    region = [SNodeMemory(0, 0) for _ in range(R)]
+    allocs = [0] * R
+    frees = [0] * R
     last_use_step_cache: dict[int, int | None] = {}
 
     def last_use_step(buffer) -> int | None:
         key = id(buffer)
         if key not in last_use_step_cache:
-            succ_steps = [step_of(n) for n in buffer.succ_nodes]
-            last_use_step_cache[key] = max(succ_steps) if succ_steps else None
+            last_step = None
+            for n in buffer.succ_nodes:
+                step = step_of(n)
+                if last_step is None or step > last_step:
+                    last_step = step
+            last_use_step_cache[key] = last_step
         return last_use_step_cache[key]
 
     for node in nodes_in_window:
@@ -540,12 +545,12 @@ def estimate_region_peak_memory(
 
         for buf in node.get_outputs():
             bi = buf.mpi_buffer
-            region[slot].size_alloc += bi.size_alloc
+            allocs[slot] += bi.size_alloc
             name = buf.get_name()
             if name in graph_outputs:
                 continue
             if last_use_step(bi) is None:
-                region[slot].size_free += bi.size_free
+                frees[slot] += bi.size_free
 
         for pb in node.mpi_node.pred_buffers:
             name = pb.get_name()
@@ -555,16 +560,22 @@ def estimate_region_peak_memory(
             if last_step is None:
                 raise AssertionError("expected non-empty succ_steps")
             if last_step == s:
-                region[slot].size_free += pb.mpi_buffer.size_free
+                frees[slot] += pb.mpi_buffer.size_free
 
     cur = cur_memory
     peak = cur
-    for af in region:
-        cur += af.size_alloc
+    region_live_before = [0] * (R + 1)
+    region_live_after = [0] * R
+    for i in range(R):
+        region_live_before[i] = cur
+        cur += allocs[i]
         if cur > peak:
             peak = cur
-        cur -= af.size_free
-    return peak
+        # Match peak_memory_from_buf_info_list: frees apply at the next step.
+        region_live_after[i] = cur
+        cur -= frees[i]
+    region_live_before[R] = cur
+    return peak, region_live_before, region_live_after
 
 
 @dataclasses.dataclass

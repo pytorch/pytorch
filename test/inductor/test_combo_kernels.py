@@ -2579,6 +2579,9 @@ class _PeakMemFakeNode:
             return out
         return self._outputs
 
+    def get_nodes(self):
+        return self.snodes if self.snodes is not None else [self]
+
 
 class _PeakMemFakeBuffer:
     def __init__(self, name: str, succ_nodes, size_alloc: int, size_free: int) -> None:
@@ -2881,7 +2884,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         steps = {a1: 1, a2: 2, a3: 3, a100: 100, b3: 3, b5: 5}
         nodes_in_window = [a1, a2, a3, b3, b5]
 
-        peak = mem_mod.estimate_region_peak_memory(
+        peak, live_before, live_after = mem_mod.estimate_region_peak_memory(
             nodes_in_window,
             region_start=0,
             region_end=5,
@@ -2898,6 +2901,45 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         # a100 (step 100) is outside the window, so bufD is never seen.
         # bufC is a graph output, so it is never freed.
         self.assertEqual(peak, 350)
+        self.assertEqual(live_before, [0, 0, 100, 300, 250, 250, 50])
+        self.assertEqual(live_after, [0, 100, 300, 350, 250, 250])
+
+    def test_fusion_memory_update_splices_context(self):
+        from torch._inductor.scheduler import FusionMemoryContext, FusionMemoryUpdate
+
+        a, b, c = (_PeakMemFakeNode(n) for n in ("a", "b", "c"))
+        candidate = _PeakMemFakeNode("candidate")
+        fused = _PeakMemFakeNode("fused")
+        fused.snodes = [a, b]
+        ctx = FusionMemoryContext(
+            nodes=[a, b, c],
+            graph_outputs=set(),
+            node_to_idx={a: 0, b: 1, c: 2},
+            baseline_peak=30,
+            baseline_live_before=[0, 10, 20, 30],
+            baseline_live_after=[10, 20, 30, 30],
+        )
+        update = FusionMemoryUpdate(
+            node1=a,
+            node2=b,
+            candidate=candidate,
+            candidate_step=0,
+            region_start=0,
+            region_end=1,
+            local_nodes=[candidate],
+            live_before=[1, 2, 3],
+            live_after=[4, 5],
+        )
+
+        ctx.apply_accepted_fusion(update, fused)
+
+        self.assertEqual(ctx.nodes, [fused, None, c])
+        self.assertEqual(ctx.baseline_live_before, [1, 2, 3, 30])
+        self.assertEqual(ctx.baseline_live_after, [4, 5, 30, 30])
+        self.assertEqual(ctx.baseline_peak, 30)
+        self.assertEqual(ctx.node_to_idx[fused], 0)
+        self.assertEqual(ctx.node_to_idx[a], 0)
+        self.assertEqual(ctx.node_to_idx[b], 0)
 
 
 if __name__ == "__main__":
