@@ -4713,14 +4713,17 @@ class PythonWrapperCodegen(CodeGen):
 
         outer_inputs = [buf.codegen_reference() for buf in node.operands]
 
-        selector = node.selector.codegen_reference()
+        selector_ref = node.selector.codegen_reference()
+        # Evaluate the selector once into a named local.
+        selector_var = f"{name}_selector"
         if not isinstance(node.selector, ir.ShapeAsConstantBuffer):
             # move the Tensor selector to host; always as int so the branch loop
             # can use uniform index comparisons (cond: True==1, False==0)
-            selector = f"int({selector}.item())"
+            self.writeline(f"{selector_var} = int({selector_ref}.item())")
         else:
-            # ShapeAsConstantBuffer yields a Python bool/int expression; Wrap in int().
-            selector = f"int({selector})"
+            # ShapeAsConstantBuffer yields a Python bool/int expression; wrap in
+            # int() so "== <idx>" comparisons don't form a Python chained comparison.
+            self.writeline(f"{selector_var} = int({selector_ref})")
 
         self.writeline(f"{name} = [None] * {len(node.outputs)}")
 
@@ -4737,9 +4740,9 @@ class PythonWrapperCodegen(CodeGen):
         num_branches = len(node.branches)
         for b_idx, branch in enumerate(node.branches):
             if b_idx == 0:
-                keyword, condition = "if", f" {selector} == 0"
+                keyword, condition = "if", f" {selector_var} == 0"
             elif b_idx < num_branches - 1:
-                keyword, condition = "elif", f" {selector} == {b_idx}"
+                keyword, condition = "elif", f" {selector_var} == {b_idx}"
             else:
                 keyword, condition = "else", ""
             _emit_branch(keyword, condition, branch)

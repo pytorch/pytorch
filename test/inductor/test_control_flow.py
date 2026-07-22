@@ -2643,12 +2643,8 @@ class SwitchTests(TestCase):
             dynamic=dynamic,
         )
 
-    # WithNNModuleParams is an expectedFailure: FunctionalTensor/FakeTensor mismatch
-    # in gen_schema when branches are nn.Modules.
-    # Tracked in https://github.com/pytorch/pytorch/pull/188903
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
-    @unittest.expectedFailure
     def test_switch_nn_module_params(self, device):
         self._run_test(
             model=SwitchModels.WithNNModuleParams(device),
