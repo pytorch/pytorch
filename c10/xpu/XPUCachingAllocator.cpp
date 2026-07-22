@@ -1881,20 +1881,15 @@ namespace xpu_ipc {
 using SyclIpcHandle =
     sycl::ext::oneapi::experimental::ipc_memory::handle_data_t;
 
-// Caches opened IPC memory pointers to avoid repeated open/close operations.
-// The cache key is the serialized IPC handle data, and the value is a
-// shared_ptr that manages the lifetime of the opened memory.
 struct IpcMemoryCache {
   std::mutex cache_mutex;
   ska::flat_hash_map<std::string, std::weak_ptr<void>> handle_to_ptr;
 
-  // Opens or retrieves a cached IPC handle for the given device
   std::shared_ptr<void> getOrOpenHandle(
       const SyclIpcHandle& handle_data,
       c10::DeviceIndex device) {
     std::lock_guard<std::mutex> lock(cache_mutex);
 
-    // Serialize handle for use as cache key
     auto handle_key = std::string(
         reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
 
@@ -1904,11 +1899,9 @@ struct IpcMemoryCache {
       if (shared_ptr) {
         return shared_ptr;
       }
-      // Cached weak_ptr has expired, remove it
       handle_to_ptr.erase(it);
     }
 
-    // Open the IPC handle using SYCL API
     c10::DeviceGuard guard(c10::Device(c10::kXPU, device));
     auto& current_queue = xpu::getCurrentXPUStream(device).queue();
     sycl::context ctx = current_queue.get_context();
@@ -1959,7 +1952,6 @@ struct IpcMemoryCache {
       TORCH_CHECK(false, "XPU IPC open failed: ", first_error.what());
     }
 
-    // Create a shared_ptr with custom deleter that closes the handle
     auto shared_ptr = std::shared_ptr<void>(raw_ptr, [device](void* ptr) {
       try {
         c10::DeviceGuard guard(c10::Device(c10::kXPU, device));
@@ -2248,7 +2240,6 @@ class NativeCachingAllocator : public XPUAllocator {
     return device_allocators[device]->getPoolUseCount(std::move(mempool_id));
   }
 
-  // XPU IPC Support: Export allocated memory for inter-process sharing
   ShareableHandle shareIpcHandle(void* ptr) {
     Block* block = get_allocated_block(ptr);
     TORCH_CHECK(block, "Invalid device pointer for XPU IPC: ", ptr);
@@ -2256,13 +2247,11 @@ class NativeCachingAllocator : public XPUAllocator {
         !block->expandable_segment,
         "XPU IPC is not supported for expandable segments");
 
-    // Find the base block (first block in the chain)
     Block* base_block = block;
     while (base_block->prev != nullptr) {
       base_block = base_block->prev;
     }
 
-    // Calculate offset within the base block
     const auto storage_offset_bytes = static_cast<ptrdiff_t>(
         reinterpret_cast<char*>(block->ptr) -
         reinterpret_cast<char*>(base_block->ptr));
@@ -2271,12 +2260,10 @@ class NativeCachingAllocator : public XPUAllocator {
       c10::DeviceGuard guard(c10::Device(c10::kXPU, block->device));
       auto& current_queue = xpu::getCurrentXPUStream(block->device).queue();
       sycl::context ctx = current_queue.get_context();
-      // Use SYCL experimental IPC API to get the handle
       auto handle = sycl::ext::oneapi::experimental::ipc_memory::get(
           base_block->ptr, ctx);
       auto handle_data = handle.data();
 
-      // Return handle and offset for multiprocessing
       return {
           storage_offset_bytes,
           std::string(
@@ -2287,17 +2274,14 @@ class NativeCachingAllocator : public XPUAllocator {
     }
   }
 
-  // XPU IPC Support: Import shared memory from another process
   std::shared_ptr<void> getIpcDevPtr(
       std::string handle_str,
       c10::DeviceIndex device) {
-    // Reconstruct the handle from the serialized string
     xpu_ipc::SyclIpcHandle handle_data(
         reinterpret_cast<const std::byte*>(handle_str.data()),
         reinterpret_cast<const std::byte*>(handle_str.data()) +
             handle_str.size());
 
-    // Use the cache to efficiently manage opened IPC handles
     return xpu_ipc::ipc_memory_cache.getOrOpenHandle(handle_data, device);
   }
 };
@@ -2382,7 +2366,6 @@ int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.getPoolUseCount(device, mempool_id);
 }
 
-// XPU IPC Support API
 ShareableHandle shareIpcHandle(void* ptr) {
   return native_allocator.shareIpcHandle(ptr);
 }
