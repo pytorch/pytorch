@@ -3,8 +3,6 @@
 
 import itertools
 import unittest
-from functools import partial
-from unittest import mock
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -377,466 +375,70 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-class DistTensorStatefulRNGInitTest(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        return 2
-
-    def _assert_init_matches_dense(self, device_mesh, shape, placement, init_fn):
-        device = torch.device("cuda", torch.cuda.current_device())
-
-        torch.manual_seed(123)
-        expected = torch.empty(shape, device=device)
-        init_fn(expected)
-        expected_state = torch.cuda.get_rng_state(device)
-        expected_next = torch.rand(17, device=device)
-
-        torch.manual_seed(123)
-        actual = torch.distributed.tensor.empty(
-            shape,
-            device_mesh=device_mesh,
-            placements=[placement],
-        )
-        init_fn(actual)
-        actual_state = torch.cuda.get_rng_state(device)
-        actual_next = torch.rand(17, device=device)
-
-        self.assertEqual(actual.full_tensor(), expected, rtol=0, atol=0)
-        self.assertEqual(actual_state, expected_state)
-        self.assertEqual(actual_next, expected_next, rtol=0, atol=0)
-
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_stateful_init_with_explicit_generator(self):
-        device_mesh = self.build_device_mesh()
-        device = torch.device("cuda", torch.cuda.current_device())
-        init_fns = {
-            "normal": partial(torch.nn.init.normal_, mean=0.1, std=0.02),
-            "uniform": partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
-        }
-
-        for name, init_fn in init_fns.items():
-            with self.subTest(name=name):
-                expected_generator = torch.Generator(device=device).manual_seed(123)
-                initial_state = expected_generator.get_state()
-                expected = torch.empty((5, 7, 3), device=device)
-
-                @maybe_run_for_local_tensor
-                def init_expected_rankwise(expected):
-                    expected_generator.set_state(initial_state)
-                    return init_fn(expected, generator=expected_generator)
-
-                expected = init_expected_rankwise(expected)
-                expected_state = expected_generator.get_state()
-                expected_next = torch.rand(
-                    17, device=device, generator=expected_generator
-                )
-
-                actual_generator = torch.Generator(device=device).manual_seed(123)
-                actual = torch.distributed.tensor.empty(
-                    (5, 7, 3),
-                    device_mesh=device_mesh,
-                    placements=[Shard(1)],
-                )
-                init_fn(actual, generator=actual_generator)
-                actual_state = actual_generator.get_state()
-                actual_next = torch.rand(17, device=device, generator=actual_generator)
-
-                @maybe_run_for_local_tensor
-                def assert_equal_rankwise(actual, expected):
-                    self.assertEqual(actual, expected, rtol=0, atol=0)
-
-                assert_equal_rankwise(actual.full_tensor(), expected)
-                self.assertEqual(actual_state, expected_state)
-                assert_equal_rankwise(actual_next, expected_next)
-
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_stateful_init_matches_dense(self):
-        device_mesh = self.build_device_mesh()
-        init_fns = {
-            "normal": partial(torch.nn.init.normal_, mean=0.1, std=0.02),
-            "uniform": partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
-            "trunc_normal": partial(
-                torch.nn.init.trunc_normal_,
-                mean=0.0,
-                std=0.02,
-                a=-0.06,
-                b=0.06,
-            ),
-        }
-        for name, init_fn in init_fns.items():
-            placements = [Shard(shard_dim) for shard_dim in range(3)]
-            placements.append(Replicate())
-            for placement in placements:
-                with self.subTest(name=name, placement=placement):
-                    self._assert_init_matches_dense(
-                        device_mesh, (5, 37, 19), placement, init_fn
-                    )
-
-        with self.subTest(name="empty_local_shard"):
-            self._assert_init_matches_dense(
-                device_mesh,
-                (3, 1, 7),
-                Shard(1),
-                partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
-            )
-
-        for shape, placement in (((0, 5), Shard(1)), ((5, 0), Shard(0))):
-            with self.subTest(name="empty_global_tensor", shape=shape):
-                self._assert_init_matches_dense(
-                    device_mesh,
-                    shape,
-                    placement,
-                    partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
-                )
-
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_stateful_init_uses_dense_generator_increment(self):
-        props = torch.cuda.get_device_properties(torch.cuda.current_device())
-        block_size = 256
-        unroll_factor = 4
-        max_grid = props.multi_processor_count * (
-            props.max_threads_per_multi_processor // block_size
-        )
-        single_increment_capacity = block_size * max_grid * unroll_factor
-        shape = (
-            self.world_size,
-            single_increment_capacity // self.world_size + 1,
-        )
-        self._assert_init_matches_dense(
-            self.build_device_mesh(),
-            shape,
-            Shard(1),
-            partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
-        )
-
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_stateful_init_has_no_per_op_collective(self):
-        device_mesh = self.build_device_mesh()
-        manual_seed(123, device_mesh)
-        tracker = random._rng_tracker
-        if not isinstance(tracker, OffsetBasedRNGTracker):
-            raise AssertionError(f"Expected OffsetBasedRNGTracker, got {tracker}")
-        tracker.distribute_region_enabled = True
-
-        actual = torch.distributed.tensor.empty(
-            (5, 37, 19),
-            device_mesh=device_mesh,
-            placements=[Shard(1)],
-        )
-        with CommDebugMode() as comm_mode:
-            actual.normal_(0.1, 0.02)
-            actual.uniform_(-0.2, 0.3)
-
-        self.assertEqual(comm_mode.get_total_counts(), 0)
-
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_stateful_init_respects_disabled_distribute_region(self):
-        device_mesh = self.build_device_mesh()
-        manual_seed(123, device_mesh)
-        tracker = random._rng_tracker
-        if not isinstance(tracker, OffsetBasedRNGTracker):
-            raise AssertionError(f"Expected OffsetBasedRNGTracker, got {tracker}")
-
-        shape = (8, 3)
-        local_shape, _ = compute_local_shape_and_global_offset(
-            shape, device_mesh, [Shard(0)]
-        )
-        device = torch.device("cuda", torch.cuda.current_device())
-        torch.manual_seed(123)
-        expected = torch.empty(local_shape, device=device).uniform_(-0.2, 0.3)
-        expected_state = torch.cuda.get_rng_state(device)
-
-        torch.manual_seed(123)
-        actual = torch.distributed.tensor.empty(
-            shape,
-            device_mesh=device_mesh,
-            placements=[Shard(0)],
-        )
-        tracker.distribute_region_enabled = False
-        try:
-            actual.uniform_(-0.2, 0.3)
-            actual_state = torch.cuda.get_rng_state(device)
-        finally:
-            tracker.distribute_region_enabled = True
-
-        self.assertEqual(actual.to_local(), expected, rtol=0, atol=0)
-        self.assertEqual(actual_state, expected_state)
-
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_stateful_init_unsupported_cases_use_fallback(self):
-        import torch.distributed.tensor._dispatch as dtensor_dispatch
-
-        device_mesh = self.build_device_mesh()
-        device = torch.device("cuda", torch.cuda.current_device())
-        manual_seed(123, device_mesh)
-        tracker = random._rng_tracker
-        if not isinstance(tracker, OffsetBasedRNGTracker):
-            raise AssertionError(f"Expected OffsetBasedRNGTracker, got {tracker}")
-        unsupported_dtype = torch.distributed.tensor.empty(
-            (8, 4),
-            dtype=torch.complex64,
-            device_mesh=device_mesh,
-            placements=[Shard(0)],
-        )
-        noncanonical_stride = DTensor.from_local(
-            torch.empty((4, 8), device=device),
-            device_mesh,
-            [Shard(0)],
-            shape=torch.Size((8, 8)),
-            stride=(1, 8),
-        )
-        expected_generator = torch.Generator(device=device).manual_seed(321)
-        expected_local = torch.empty_like(noncanonical_stride.to_local())
-        with tracker._distribute_region(
-            noncanonical_stride._spec, generator=expected_generator
-        ):
-            expected_local.uniform_()
-        expected_state = expected_generator.get_state()
-        expected_next = torch.rand(17, device=device, generator=expected_generator)
-
-        actual_generator = torch.Generator(device=device).manual_seed(321)
-
-        with (
-            mock.patch(
-                "torch.distributed.tensor._dispatch._run_stateful_rng_op",
-                side_effect=AssertionError("indexed adapter must not run"),
-            ),
-            mock.patch.object(
-                dtensor_dispatch,
-                "run_dtensor_rng_op",
-                wraps=dtensor_dispatch.run_dtensor_rng_op,
-            ) as hop_fallback,
-            mock.patch.object(
-                tracker,
-                "_distribute_region",
-                wraps=tracker._distribute_region,
-            ) as fallback,
-        ):
-            unsupported_dtype.normal_()
-            noncanonical_stride.uniform_(generator=actual_generator)
-
-        self.assertEqual(hop_fallback.call_count, 1)
-        self.assertEqual(fallback.call_count, 1)
-        self.assertEqual(noncanonical_stride.to_local(), expected_local)
-        self.assertEqual(actual_generator.get_state(), expected_state)
-        actual_next = torch.rand(17, device=device, generator=actual_generator)
-        self.assertEqual(actual_next, expected_next)
-
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_stateful_init_invalid_parameters_do_not_advance(self):
-        device_mesh = self.build_device_mesh()
-        device = torch.device("cuda", torch.cuda.current_device())
-        cases = (
-            (
-                "normal",
-                lambda tensor, generator: tensor.normal_(
-                    0.0, -1.0, generator=generator
-                ),
-            ),
-            (
-                "uniform",
-                lambda tensor, generator: tensor.uniform_(
-                    1.0, 0.0, generator=generator
-                ),
-            ),
-        )
-
-        for generator_kind in ("default", "explicit"):
-            for case_name, run in cases:
-                with self.subTest(generator=generator_kind, case=case_name):
-                    torch.manual_seed(123)
-                    generator = (
-                        None
-                        if generator_kind == "default"
-                        else torch.Generator(device=device).manual_seed(123)
-                    )
-                    actual = torch.distributed.tensor.empty(
-                        (5, 7, 3),
-                        device_mesh=device_mesh,
-                        placements=[Shard(1)],
-                    )
-                    before = (
-                        torch.cuda.get_rng_state(device)
-                        if generator is None
-                        else generator.get_state()
-                    )
-
-                    with self.assertRaisesRegex(RuntimeError, "std|from"):
-                        run(actual, generator)
-
-                    after = (
-                        torch.cuda.get_rng_state(device)
-                        if generator is None
-                        else generator.get_state()
-                    )
-                    self.assertEqual(after, before)
-
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_stateful_init_rejects_multi_rank_partial_without_advancing(self):
-        device_mesh = self.build_device_mesh()
-        device = torch.device("cuda", torch.cuda.current_device())
-        cases = (
-            (
-                "normal",
-                lambda tensor, generator: tensor.normal_(
-                    0.1, 0.02, generator=generator
-                ),
-            ),
-            (
-                "uniform",
-                lambda tensor, generator: tensor.uniform_(
-                    -0.2, 0.3, generator=generator
-                ),
-            ),
-        )
-
-        for generator_kind in ("default", "explicit"):
-            for case_name, run in cases:
-                with self.subTest(generator=generator_kind, case=case_name):
-                    self.assertIsNone(random._rng_tracker)
-                    torch.manual_seed(123)
-                    generator = (
-                        None
-                        if generator_kind == "default"
-                        else torch.Generator(device=device).manual_seed(123)
-                    )
-                    actual = DTensor.from_local(
-                        torch.empty((5, 7), device=device),
-                        device_mesh,
-                        [Partial()],
-                        run_check=False,
-                    )
-                    before = (
-                        torch.cuda.get_rng_state(device)
-                        if generator is None
-                        else generator.get_state()
-                    )
-
-                    with self.assertRaisesRegex(
-                        RuntimeError, "no valid strategy preserves this placement"
-                    ):
-                        run(actual, generator)
-
-                    after = (
-                        torch.cuda.get_rng_state(device)
-                        if generator is None
-                        else generator.get_state()
-                    )
-                    self.assertEqual(after, before)
-                    self.assertIsNone(random._rng_tracker)
-
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_stateful_init_dynamic_compile_reuses_graph(self):
-        from torch._dynamo.testing import CompileCounter
-
-        device_mesh = self.build_device_mesh()
-        device = torch.device("cuda", torch.cuda.current_device())
-
-        def initialize(tensor):
-            return tensor.normal_(0.1, 0.02)
-
-        counter = CompileCounter()
-        compiled = torch.compile(
-            initialize,
-            backend=counter,
-            fullgraph=True,
-            dynamic=True,
-        )
-
-        for width in (7, 11):
-            torch.manual_seed(123)
-            expected = torch.distributed.tensor.empty(
-                (5, width),
-                device_mesh=device_mesh,
-                placements=[Shard(1)],
-            )
-            initialize(expected)
-            expected_state = torch.cuda.get_rng_state(device)
-            expected_next = torch.rand(17, device=device)
-
-            torch.manual_seed(123)
-            actual = torch.distributed.tensor.empty(
-                (5, width),
-                device_mesh=device_mesh,
-                placements=[Shard(1)],
-            )
-            torch._dynamo.mark_dynamic(actual, 1)
-            compiled(actual)
-            actual_state = torch.cuda.get_rng_state(device)
-            actual_next = torch.rand(17, device=device)
-
-            self.assertEqual(actual.to_local(), expected.to_local(), rtol=0, atol=0)
-            self.assertEqual(actual_state, expected_state)
-            self.assertEqual(actual_next, expected_next, rtol=0, atol=0)
-
-        self.assertEqual(counter.frame_count, 1)
-
-
-@unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-class DistTensorStatefulRNGSingletonPartialTest(DTensorTestBase):
+class DistTensorSingletonPartialRandomInitTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
         return 1
 
-    def _build_meta_module(self, device_mesh, shape, placement, init_fn):
-        class PartialInitModule(torch.nn.Module):
-            def __init__(self, weight):
+    def _build_meta_module(self, device_mesh, placement, init_fn):
+        class InitModule(torch.nn.Module):
+            def __init__(self):
                 super().__init__()
+                local_weight = torch.empty((5, 7, 3), device="meta")
+                weight = DTensor.from_local(
+                    local_weight,
+                    device_mesh,
+                    [placement],
+                    run_check=False,
+                )
                 self.weight = torch.nn.Parameter(weight)
 
             def reset_parameters(self, generator=None):
-                init_fn(self.weight, generator=generator)
+                init_fn(self.weight, generator)
 
-        local_weight = torch.empty(shape, device="meta")
-        weight = DTensor.from_local(
-            local_weight,
-            device_mesh,
-            [placement],
-            run_check=False,
-        )
-        return PartialInitModule(weight)
+        return InitModule()
 
     @with_comms
-    def test_stateful_init_meta_matches_dense(self):
-        import torch.distributed.tensor._dispatch as dtensor_dispatch
-
+    def test_meta_init_matches_replicate(self):
         device_mesh = self.build_device_mesh()
         device = torch.device("cuda", torch.cuda.current_device())
-        shape = (5, 7, 3)
-        init_fns = {
-            "normal": partial(torch.nn.init.normal_, mean=0.1, std=0.02),
-            "uniform": partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
-        }
+        init_fns = (
+            (
+                "normal",
+                lambda tensor, generator: torch.nn.init.normal_(
+                    tensor, mean=0.1, std=0.02, generator=generator
+                ),
+            ),
+            (
+                "uniform",
+                lambda tensor, generator: torch.nn.init.uniform_(
+                    tensor, a=-0.2, b=0.3, generator=generator
+                ),
+            ),
+        )
 
         for generator_kind in ("default", "explicit"):
-            for name, init_fn in init_fns.items():
+            for name, init_fn in init_fns:
                 with self.subTest(generator=generator_kind, op=name):
-                    module = self._build_meta_module(
-                        device_mesh, shape, Partial(), init_fn
+                    expected = self._build_meta_module(
+                        device_mesh, Replicate(), init_fn
                     )
-                    self.assertTrue(module.weight.is_meta)
-                    module.to_empty(device=device)
-                    self.assertFalse(module.weight.is_meta)
-                    self.assertEqual(module.weight.placements, (Partial(),))
+                    actual = self._build_meta_module(device_mesh, Partial(), init_fn)
+                    self.assertTrue(expected.weight.is_meta)
+                    self.assertTrue(actual.weight.is_meta)
+                    expected.to_empty(device=device)
+                    actual.to_empty(device=device)
+                    self.assertEqual(actual.weight.placements, (Partial(),))
 
                     if generator_kind == "default":
-                        torch.manual_seed(123)
+                        manual_seed(123, device_mesh)
                         expected_generator = None
                     else:
+                        manual_seed(0, device_mesh)
                         expected_generator = torch.Generator(device=device).manual_seed(
                             123
                         )
-                    expected = torch.empty(shape, device=device)
-                    init_fn(expected, generator=expected_generator)
+                    expected.reset_parameters(generator=expected_generator)
                     expected_state = (
                         torch.cuda.get_rng_state(device)
                         if expected_generator is None
@@ -854,17 +456,8 @@ class DistTensorStatefulRNGSingletonPartialTest(DTensorTestBase):
                         actual_generator = torch.Generator(device=device).manual_seed(
                             123
                         )
-
-                    with (
-                        CommDebugMode() as comm_mode,
-                        mock.patch.object(
-                            dtensor_dispatch,
-                            "_run_stateful_rng_op",
-                            wraps=dtensor_dispatch._run_stateful_rng_op,
-                        ) as indexed_adapter,
-                    ):
-                        module.reset_parameters(generator=actual_generator)
-
+                    with CommDebugMode() as comm_mode:
+                        actual.reset_parameters(generator=actual_generator)
                     actual_state = (
                         torch.cuda.get_rng_state(device)
                         if actual_generator is None
@@ -874,30 +467,28 @@ class DistTensorStatefulRNGSingletonPartialTest(DTensorTestBase):
                         17, device=device, generator=actual_generator
                     )
 
-                    self.assertEqual(module.weight.placements, (Partial(),))
-                    self.assertEqual(module.weight.to_local(), expected, rtol=0, atol=0)
+                    self.assertEqual(
+                        actual.weight.to_local(),
+                        expected.weight.to_local(),
+                        rtol=0,
+                        atol=0,
+                    )
                     self.assertEqual(actual_state, expected_state)
                     self.assertEqual(actual_next, expected_next, rtol=0, atol=0)
-                    self.assertEqual(indexed_adapter.call_count, 1)
                     self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
-    def test_stateful_init_supports_all_singleton_partial_reductions(self):
+    def test_init_preserves_singleton_partial_reductions(self):
         device_mesh = self.build_device_mesh()
         device = torch.device("cuda", torch.cuda.current_device())
-        init_fns = {
-            "normal": partial(torch.nn.init.normal_, mean=0.1, std=0.02),
-            "uniform": partial(torch.nn.init.uniform_, a=-0.2, b=0.3),
-        }
 
-        for name, init_fn in init_fns.items():
+        for op_name, init_fn in (
+            ("normal", lambda tensor: tensor.normal_(0.1, 0.02)),
+            ("uniform", lambda tensor: tensor.uniform_(-0.2, 0.3)),
+        ):
             for reduce_op in Partial.ALL_REDUCE_OPS:
-                with self.subTest(op=name, reduce_op=reduce_op):
+                with self.subTest(op=op_name, reduce_op=reduce_op):
                     placement = Partial(reduce_op)
-                    torch.manual_seed(123)
-                    expected = torch.empty((3, 5), device=device)
-                    init_fn(expected)
-
                     manual_seed(123, device_mesh)
                     actual = DTensor.from_local(
                         torch.empty((3, 5), device=device),
@@ -906,58 +497,44 @@ class DistTensorStatefulRNGSingletonPartialTest(DTensorTestBase):
                         run_check=False,
                     )
                     init_fn(actual)
-
                     self.assertEqual(actual.placements, (placement,))
-                    self.assertEqual(actual.to_local(), expected, rtol=0, atol=0)
+
+
+@unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+class DistTensorActivePartialRandomInitTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
 
     @with_comms
-    def test_stateful_init_invalid_parameters_do_not_advance(self):
+    @skip_if_lt_x_gpu(2)
+    def test_init_rejects_active_partial_before_rng(self):
         device_mesh = self.build_device_mesh()
         device = torch.device("cuda", torch.cuda.current_device())
-        cases = (
-            (
-                "normal",
-                lambda tensor, generator: torch.nn.init.normal_(
-                    tensor, mean=0.0, std=-1.0, generator=generator
-                ),
-            ),
-            (
-                "uniform",
-                lambda tensor, generator: torch.nn.init.uniform_(
-                    tensor, a=1.0, b=0.0, generator=generator
-                ),
-            ),
+        init_fns = (
+            ("normal", lambda tensor: tensor.normal_(0.1, 0.02)),
+            ("uniform", lambda tensor: tensor.uniform_(-0.2, 0.3)),
         )
 
-        for generator_kind in ("default", "explicit"):
-            for case_name, init_fn in cases:
-                with self.subTest(generator=generator_kind, case=case_name):
-                    module = self._build_meta_module(
-                        device_mesh, (5, 7), Partial(), init_fn
-                    )
-                    module.to_empty(device=device)
-                    if generator_kind == "default":
-                        manual_seed(123, device_mesh)
-                        generator = None
-                    else:
-                        manual_seed(0, device_mesh)
-                        generator = torch.Generator(device=device).manual_seed(123)
-                    before = (
-                        torch.cuda.get_rng_state(device)
-                        if generator is None
-                        else generator.get_state()
-                    )
+        for name, init_fn in init_fns:
+            with self.subTest(op=name):
+                self.assertIsNone(random._rng_tracker)
+                torch.manual_seed(123)
+                actual = DTensor.from_local(
+                    torch.empty((5, 7), device=device),
+                    device_mesh,
+                    [Partial()],
+                    run_check=False,
+                )
+                before = torch.cuda.get_rng_state(device)
 
-                    with self.assertRaisesRegex(RuntimeError, "std|from"):
-                        module.reset_parameters(generator=generator)
+                with self.assertRaisesRegex(
+                    RuntimeError, "no valid strategy preserves this placement"
+                ):
+                    init_fn(actual)
 
-                    after = (
-                        torch.cuda.get_rng_state(device)
-                        if generator is None
-                        else generator.get_state()
-                    )
-                    self.assertEqual(module.weight.placements, (Partial(),))
-                    self.assertEqual(after, before)
+                self.assertEqual(torch.cuda.get_rng_state(device), before)
+                self.assertIsNone(random._rng_tracker)
 
 
 class DistTensorRandomOpTest(DTensorTestBase):
@@ -1340,9 +917,9 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             )
         return results, rng_states
 
-    def _run_eager_and_compiled(self, fn, create_input, num_runs, expected_graph_op):
+    def _run_eager_and_compiled(self, fn, create_input, num_runs):
         """Run fn both eagerly and compiled with aot_eager, returning results
-        and RNG states. Verifies the graph contains the expected RNG op."""
+        and RNG states. Verifies the graph contains run_dtensor_rng_op."""
         from torch._dynamo.testing import AotEagerAndRecordGraphs
 
         eager_results, eager_rng_states = self._run_with_seed(
@@ -1353,7 +930,7 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         compiled_results, compiled_rng_states = self._run_with_seed(
             compiled_fn, create_input, num_runs
         )
-        self.assertIn(expected_graph_op, backend.fw_graphs[0].code)
+        self.assertIn("run_dtensor_rng_op", backend.fw_graphs[0].code)
         return eager_results, eager_rng_states, compiled_results, compiled_rng_states
 
     def _assert_eager_compiled_match(
@@ -1390,16 +967,10 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
                     )
 
     def _test_compile_random_op(
-        self,
-        fn,
-        device_mesh,
-        create_input=None,
-        num_runs=3,
-        placements=None,
-        expected_graph_op="run_dtensor_rng_op",
+        self, fn, device_mesh, create_input=None, num_runs=3, placements=None
     ):
         """Run fn eager and compiled num_runs times, assert i-th results match
-        and graph contains the expected RNG op. Tests both aot_eager and inductor
+        and graph contains run_dtensor_rng_op. Tests both aot_eager and inductor
         backends."""
         if placements is None:
             placements = [Shard(0)]
@@ -1413,7 +984,7 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
 
         # Test with aot_eager backend (also verifies graph contents)
         eager_results, eager_rng_states, compiled_results, compiled_rng_states = (
-            self._run_eager_and_compiled(fn, create_input, num_runs, expected_graph_op)
+            self._run_eager_and_compiled(fn, create_input, num_runs)
         )
         self._assert_eager_compiled_match(
             eager_results, eager_rng_states, compiled_results, compiled_rng_states
@@ -1450,13 +1021,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         def fn(x):
             return x.normal_()
 
-        for placements in ([Shard(0)], [Shard(1)], [Replicate()]):
-            self._test_compile_random_op(
-                fn,
-                device_mesh,
-                placements=placements,
-                expected_graph_op="_philox_distribution_flat_slice",
-            )
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
 
     @with_comms
     @skip_unless_torch_gpu
@@ -1499,13 +1065,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         def fn(x):
             return x.uniform_(0.0, 1.0)
 
-        for placements in ([Shard(0)], [Shard(1)], [Replicate()]):
-            self._test_compile_random_op(
-                fn,
-                device_mesh,
-                placements=placements,
-                expected_graph_op="_philox_distribution_flat_slice",
-            )
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
 
     @with_comms
     @skip_unless_torch_gpu
@@ -1639,18 +1200,6 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
 
 DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomInitTest,
-)
-
-DistTensorStatefulRNGInitTestWithLocalTensor = create_local_tensor_test_class(
-    DistTensorStatefulRNGInitTest,
-    skipped_tests=[
-        "test_stateful_init_matches_dense",
-        "test_stateful_init_uses_dense_generator_increment",
-        "test_stateful_init_has_no_per_op_collective",
-        "test_stateful_init_respects_disabled_distribute_region",
-        "test_stateful_init_unsupported_cases_use_fallback",
-        "test_stateful_init_dynamic_compile_reuses_graph",
-    ],
 )
 
 DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(

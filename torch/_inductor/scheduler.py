@@ -87,6 +87,7 @@ from .sizevars import SimplifyIndexing
 from .utils import (
     _unstable_customized_partition_wrapper,
     cache_on_self,
+    cache_on_self_and_args,
     cmp,
     device_need_guard,
     get_current_backend,
@@ -1328,6 +1329,7 @@ class BaseSchedulerNode:
 
     def clear_read_writes_dependent_caches(self) -> None:
         self.get_coalesce_analysis.clear_cache(self)
+        typing.cast(Any, self.get_tiling).clear_cache(self)
 
     @cache_on_self
     def get_coalesce_analysis(self) -> CoalesceVarAnalysis | None:
@@ -1336,6 +1338,14 @@ class BaseSchedulerNode:
         if not isinstance(self, (SchedulerNode, FusedSchedulerNode)):
             return None
         return _analyze_memory_coalescing(self)
+
+    @cache_on_self_and_args("BaseSchedulerNode")
+    def get_tiling(
+        self, numel: sympy.Expr, rnumel: sympy.Expr
+    ) -> dict[str, sympy.Expr]:
+        from .codegen.simd import SIMDScheduling
+
+        return SIMDScheduling.select_tiling(self.get_nodes(), numel, rnumel)
 
     def set_last_usage(
         self, future_used_buffers: OrderedSet[str], mutation_real_name: dict[str, str]
@@ -2285,10 +2295,11 @@ class SchedulerNode(BaseSchedulerNode):
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
-        if fake_deps:
-            self.set_read_writes(
-                self.read_writes.with_read(fake_deps).rename(self.mutation_renames)
-            )
+        if fake_deps or self.mutation_renames:
+            read_writes = self.read_writes
+            if fake_deps:
+                read_writes = read_writes.with_read(fake_deps)
+            self.set_read_writes(read_writes.rename(self.mutation_renames))
 
     def refresh_dependencies(
         self, normalize: bool, need_clear_tiling_cache: bool

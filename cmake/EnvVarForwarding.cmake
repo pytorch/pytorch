@@ -41,7 +41,6 @@ set(_ENV_PASSTHROUGH
   TORCH_CUDA_ARCH_LIST
   TORCH_XPU_ARCH_LIST
   TRACING_BASED
-  PYTHON_LIB_REL_PATH
 )
 
 # Low-priority aliases: if the canonical var is not set, use the alias.
@@ -70,33 +69,61 @@ foreach(_var IN LISTS _ENV_PASSTHROUGH)
   endif()
 endforeach()
 
-# Forward all BUILD_*, USE_*, CMAKE_* env vars not already set as CMake
-# variables, plus vars ending in EXITCODE or EXITCODE__TRYRUN_OUTPUT.
-# This matches the existing behavior where setup.py passed everything with
-# these prefixes/suffixes through to CMake.
-# We use execute_process + env to get the full list since CMake has no
-# built-in way to enumerate environment variables.
-execute_process(
-  COMMAND "${CMAKE_COMMAND}" -E environment
-  OUTPUT_VARIABLE _all_env
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-string(REPLACE "\n" ";" _env_lines "${_all_env}")
-foreach(_line IN LISTS _env_lines)
-  if(_line MATCHES "^([A-Za-z_0-9]+)=(.*)")
-    set(_var_name "${CMAKE_MATCH_1}")
-    set(_var_value "${CMAKE_MATCH_2}")
-    # Only forward vars with BUILD_/USE_/CMAKE_ prefix or *EXITCODE* suffix.
-    string(REGEX MATCH "^(BUILD_|USE_|CMAKE_)" _has_prefix "${_var_name}")
-    string(REGEX MATCH "(EXITCODE|EXITCODE__TRYRUN_OUTPUT)$" _has_suffix "${_var_name}")
-    if(NOT _has_prefix AND NOT _has_suffix)
-      continue()
-    endif()
-    if(NOT DEFINED ${_var_name})
-      set(${_var_name} "${_var_value}" CACHE STRING "From environment" FORCE)
-    endif()
+# Forward all BUILD_*, USE_*, CMAKE_* environment variables (plus names ending
+# in EXITCODE / EXITCODE__TRYRUN_OUTPUT) into the CMake cache, mirroring the -D
+# flags setup.py used to pass.
+#
+# CMake cannot enumerate environment variables, and serializing the whole
+# environment to text and re-parsing it in CMake is unsafe: values such as PS1
+# contain ';' and '\' (and some exported shell functions even contain newlines),
+# all of which collide with CMake's list, escape, and line semantics and
+# silently corrupt unrelated variables. The top-level CMakeLists.txt already
+# requires Python (find_package(Python COMPONENTS Interpreter REQUIRED)) before
+# including this module, so read os.environ directly there -- the full
+# environment is never serialized -- and have it emit only the selected,
+# properly escaped cache assignments for CMake to evaluate.
+
+# Applies one forwarded variable. An explicitly-set environment variable takes
+# priority, matching the -D semantics this module emulates: override the cache
+# (do not merely fill when undefined) so a value left by an earlier env-less
+# configure -- an option() default or a ninja-triggered reconfigure -- cannot
+# permanently shadow the environment.
+function(_envfwd_apply _name _value)
+  if(NOT DEFINED ${_name} OR NOT "${${_name}}" STREQUAL "${_value}")
+    set(${_name} "${_value}" CACHE STRING "From environment" FORCE)
   endif()
-endforeach()
+endfunction()
+
+# Reads os.environ and prints `_envfwd_apply("<name>" "<value>")` for each
+# selected variable, escaping the value for a CMake double-quoted argument.
+set(_envfwd_script [==[
+import os, re, sys
+
+select = re.compile(r"^(BUILD_|USE_|CMAKE_)|(EXITCODE|EXITCODE__TRYRUN_OUTPUT)$")
+
+def q(s):
+    # Escape for a CMake double-quoted argument. Backslash and quote are
+    # structural; '$' is escaped to suppress ${}/$ENV{} expansion. ';' and
+    # newlines are literal inside quotes and need no escaping.
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
+
+sys.stdout.write("\n".join(
+    '_envfwd_apply("%s" "%s")' % (q(name), q(value))
+    for name, value in os.environ.items()
+    if select.search(name)
+))
+]==])
+
+execute_process(
+  COMMAND "${Python_EXECUTABLE}" -c "${_envfwd_script}"
+  OUTPUT_VARIABLE _envfwd_code
+  RESULT_VARIABLE _envfwd_rc
+)
+if(NOT _envfwd_rc EQUAL 0)
+  message(FATAL_ERROR
+    "EnvVarForwarding: failed to read the environment via Python (exit ${_envfwd_rc}).")
+endif()
+cmake_language(EVAL CODE "${_envfwd_code}")
 
 # Low-priority aliases
 foreach(_alias IN LISTS _LOW_PRIORITY_ALIASES)
@@ -108,21 +135,44 @@ foreach(_alias IN LISTS _LOW_PRIORITY_ALIASES)
   endif()
 endforeach()
 
-# Ensure Python's purelib is on CMAKE_PREFIX_PATH so CMake can find
-# packages installed there (e.g., pybind11, numpy).
+# Ensure Python's sys.prefix (the venv/conda env root) and purelib are on
+# CMAKE_PREFIX_PATH so CMake can find packages installed there.
+#
+# - sys.prefix is needed because conda-style envs put libraries under
+#   <prefix>/lib (Linux) or <prefix>/Library/lib (Windows). CMake 3.28
+#   removed the find_library() heuristic that derived <prefix>/lib from
+#   <prefix>/bin entries on PATH, so without sys.prefix on the prefix
+#   path, find_package(MKL) and similar fail to locate conda-provided
+#   libraries (e.g. mkl_intel_lp64, libiomp5md). The Linux CI scripts
+#   used to set CMAKE_PREFIX_PATH=$CONDA_PREFIX explicitly as a
+#   workaround for the same issue (see gh-119557); having it here makes
+#   that redundant and gives the same coverage to Windows pull-CI and
+#   to local builds outside of CI.
+# - purelib is needed for python-package CMake configs (e.g., pybind11,
+#   numpy headers).
 if(Python_EXECUTABLE)
   execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c "import sysconfig; print(sysconfig.get_path('purelib'))"
-    OUTPUT_VARIABLE _py_purelib
+    COMMAND "${Python_EXECUTABLE}" -c
+      "import sys, sysconfig; print(sys.prefix); print(sysconfig.get_path('purelib'))"
+    OUTPUT_VARIABLE _py_paths
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
   )
-  if(_py_purelib AND NOT "${_py_purelib}" STREQUAL "")
-    list(PREPEND CMAKE_PREFIX_PATH "${_py_purelib}")
+  if(_py_paths AND NOT "${_py_paths}" STREQUAL "")
+    string(REPLACE "\n" ";" _py_paths "${_py_paths}")
+    # On Windows, conda envs lay out installed libraries under
+    # <prefix>/Library/{lib,include,bin}, which CMake's find_library does
+    # not search by default. Prepend <prefix>/Library so the standard
+    # <prefix>/lib heuristic resolves <prefix>/Library/lib (where MKL,
+    # OpenSSL, libiomp5md, etc. live in conda-on-Windows installs).
+    list(GET _py_paths 0 _py_prefix)
+    if(WIN32 AND EXISTS "${_py_prefix}/Library")
+      list(PREPEND _py_paths "${_py_prefix}/Library")
+    endif()
+    list(PREPEND CMAKE_PREFIX_PATH ${_py_paths})
     # Preserve paths from the CMAKE_PREFIX_PATH environment variable.
     # Setting the cmake variable shadows the env var, so we must merge it in
-    # explicitly. This ensures conda's prefix (e.g. /opt/conda/envs/py_3.10)
-    # is present so cmake can find conda-provided libraries (libgomp, libnuma).
+    # explicitly.
     if(DEFINED ENV{CMAKE_PREFIX_PATH} AND NOT "$ENV{CMAKE_PREFIX_PATH}" STREQUAL "")
       if(WIN32)
         # On Windows the env var is already ;-separated and : appears in drive
@@ -135,4 +185,28 @@ if(Python_EXECUTABLE)
     endif()
     list(REMOVE_DUPLICATES CMAKE_PREFIX_PATH)
   endif()
+endif()
+
+# BUILD_PYTHON_ONLY implies BUILD_LIBTORCHLESS=ON.
+if(BUILD_PYTHON_ONLY)
+  set(BUILD_LIBTORCHLESS ON CACHE BOOL "Build without libtorch" FORCE)
+endif()
+
+# Installing pre-built nightly binaries instead of building is handled by
+# tools/nightly.py, not by the build: a PEP 517 build cannot skip itself.
+# Fail loudly rather than let USE_NIGHTLY be silently ignored.
+if(USE_NIGHTLY)
+  message(FATAL_ERROR
+    "USE_NIGHTLY is not supported with the scikit-build-core build system. "
+    "Use 'python tools/nightly.py checkout' instead (it checks out the nightly "
+    "commit and installs matching pre-built binaries; see --help), or install "
+    "a nightly wheel directly: "
+    "pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu"
+  )
+endif()
+
+# Conflict check
+if(BUILD_LIBTORCH_WHL AND BUILD_PYTHON_ONLY)
+  message(FATAL_ERROR
+    "Conflict: BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY cannot both be ON.")
 endif()

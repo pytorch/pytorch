@@ -47,7 +47,7 @@ class AHOperation:
 
 class AHContext:
     """
-    This class is used to specify which information AutoHeuristic should store. For each choice, AutoHeursitic will
+    This class is used to specify which information AutoHeuristic should store. For each choice, AutoHeuristic will
     store the context and the collected feedback. The context could be something like the shape of a tensor, i.e.,
     information that will help to learn a heuristic.
     """
