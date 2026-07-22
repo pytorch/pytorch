@@ -534,6 +534,7 @@ test_lazy_tensor_meta_reference_disabled() {
 }
 
 test_dynamo_core() {
+  install_tvm
   time python test/run_test.py \
     --include-dynamo-core-tests \
     --verbose \

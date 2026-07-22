@@ -316,6 +316,10 @@ function install_torchao() {
   pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
 }
 
+function install_tvm() {
+  pip_install apache-tvm==0.25.0.post1
+}
+
 function install_torchcomms() {
   local commit
   commit=$(get_pinned_commit torchcomms)
