@@ -6649,16 +6649,7 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
     yield from sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
 
-    def make_arg(shape, *, requires_grad=requires_grad, **kwargs):
-        return make_tensor(
-            shape,
-            **{
-                "device": device,
-                "dtype": dtype,
-                "requires_grad": requires_grad,
-                **kwargs,
-            },
-        )
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_scalar_tensor = partial(make_tensor, (), device='cpu', dtype=dtype, requires_grad=requires_grad)
     supported_dtypes = op.supported_dtypes(device)
 
@@ -6675,43 +6666,9 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
     )
 
     for a, b, c in cases:
-        input = make_arg(a)
-        output_shape = torch.broadcast_shapes(input.shape, b, c)
-        args = (
-            make_arg(
-                b,
-                requires_grad=requires_grad
-                and (op.name != "clamp" or b == output_shape),
-            ),
-            make_arg(
-                c,
-                requires_grad=requires_grad
-                and (op.name != "clamp" or c == output_shape),
-            ),
-        )
-        yield SampleInput(
-            input,
-            args=args,
-            broadcasts_input=input.shape != output_shape,
-        )
-
-        input = make_arg(a, noncontiguous=True)
-        b = make_arg(b).transpose(0, -1)
-        c = make_arg(c, noncontiguous=True).transpose(0, -1)
-        output_shape = torch.broadcast_shapes(input.shape, b.shape, c.shape)
-        args = (
-            b.detach().requires_grad_(
-                requires_grad and (op.name != "clamp" or b.shape == output_shape)
-            ),
-            c.detach().requires_grad_(
-                requires_grad and (op.name != "clamp" or c.shape == output_shape)
-            ),
-        )
-        yield SampleInput(
-            input,
-            args=args,
-            broadcasts_input=input.shape != output_shape,
-        )
+        yield SampleInput(make_arg(a), args=(make_arg(b), make_arg(c)))
+        yield SampleInput(make_arg(a, noncontiguous=True),
+                          args=(make_arg(b).transpose(0, -1), make_arg(c, noncontiguous=True).transpose(0, -1)))
 
     # scalar cases
     if supports_scalars:
