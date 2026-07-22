@@ -124,6 +124,7 @@ from .graph_id_filter import (
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
+from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .side_effects import AttributeMutationExisting, SideEffects, ValueMutationExisting
 from .source import (
     _get_source_debug_name,
@@ -955,6 +956,12 @@ class OutputGraph(OutputGraphCommon):
         self._current_tx: list[InstructionTranslatorBase] = []
         self.cleanups: list[CleanupHook] = []
         self.should_exit = False
+        self.compile_subgraph_reason = GraphCompileReason(
+            "output graph has not been compiled", [], graph_break=False
+        )
+        self.is_torch_dynamo_resume_frame = f_code.co_name.startswith(
+            TORCH_DYNAMO_RESUME_IN_PREFIX
+        )
         self.unspec_variable_map: dict[str, UnspecializedPythonVariable] = {}
 
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
