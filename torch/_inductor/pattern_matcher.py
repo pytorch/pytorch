@@ -191,6 +191,46 @@ def _transfer_meta(
         new_meta["tensor_meta"] = old_node.meta["tensor_meta"]
 
 
+def _common_custom_context(nodes: Sequence[torch.fx.Node]) -> dict[str, Any]:
+    if not nodes:
+        return {}
+
+    stream = nodes[0].meta.get("custom", {}).get("stream", 0)
+    mempool = nodes[0].meta.get("custom", {}).get("mempool")
+    mempool_device = nodes[0].meta.get("custom", {}).get("mempool_device")
+    if any(
+        (
+            node.meta.get("custom", {}).get("stream", 0),
+            node.meta.get("custom", {}).get("mempool"),
+            node.meta.get("custom", {}).get("mempool_device"),
+        )
+        != (stream, mempool, mempool_device)
+        for node in nodes[1:]
+    ):
+        return {}
+
+    context: dict[str, Any] = {}
+    if stream != 0 or any("stream" in node.meta.get("custom", {}) for node in nodes):
+        context["stream"] = stream
+    if mempool is not None:
+        context["mempool"] = mempool
+        context["mempool_device"] = mempool_device
+    return context
+
+
+def _merge_custom_context(
+    new_meta: dict[str, Any], custom_context: dict[str, Any]
+) -> None:
+    # Replacement nodes inherit user stream/mempool context only at explicit
+    # graph transform hooks. Other transforms must preserve meta["custom"] or
+    # avoid moving context-tagged values across boundaries.
+    if not custom_context:
+        return
+    custom = new_meta.setdefault("custom", {})
+    for key, value in custom_context.items():
+        custom.setdefault(key, value)
+
+
 class Match:
     """
     Represents a successfully matched pattern.
@@ -1380,6 +1420,7 @@ class ReplacementPatternEntry(PatternEntry):
         """
 
         added_replacement_nodes: list[torch.fx.Node] = []
+        custom_context = _common_custom_context(match.nodes)
 
         class Replacer(torch.fx.Interpreter):
             call_method = None  # type: ignore[assignment]
@@ -1401,6 +1442,7 @@ class ReplacementPatternEntry(PatternEntry):
                         old_node=node,
                         pass_name=pass_name or "",
                     )
+                    _merge_custom_context(result.meta, custom_context)
                     # This function copy-pastes the replacement graph into
                     # the graph. If the replacement graph had any eager_input_vals,
                     # we propagate those over (val/tensor_meta are handled by
@@ -2403,7 +2445,9 @@ class _GraphMutationTracker:
 @contextlib.contextmanager
 def _track_graph_mutation_ops(
     graph: torch.fx.Graph,
+    custom_context: dict[str, Any] | None = None,
 ) -> Generator[_GraphMutationTracker, None, None]:
+    custom_context = custom_context or {}
     tracker = _GraphMutationTracker()
     create_node = graph.create_node
     erase_node = graph.erase_node
@@ -2414,6 +2458,7 @@ def _track_graph_mutation_ops(
 
     def tracked_create_node(*args: Any, **kwargs: Any) -> torch.fx.Node:
         created_node = create_node(*args, **kwargs)
+        _merge_custom_context(created_node.meta, custom_context)
         tracker.created_nodes.append(created_node)
         return created_node
 
@@ -2623,7 +2668,11 @@ class PatternMatcherPass:
                         is_match(m)
                         and len(
                             OrderedSet(
-                                n.meta.get("custom", {}).get("stream", 0)
+                                (
+                                    n.meta.get("custom", {}).get("stream", 0),
+                                    n.meta.get("custom", {}).get("mempool"),
+                                    n.meta.get("custom", {}).get("mempool_device"),
+                                )
                                 for n in m.nodes
                             )
                         )
@@ -2648,7 +2697,9 @@ class PatternMatcherPass:
                                 graph, m.nodes
                             )
                         if isinstance(entry, GraphPatternEntry):
-                            with _track_graph_mutation_ops(graph) as mutation_tracker:
+                            with _track_graph_mutation_ops(
+                                graph, _common_custom_context(m.nodes)
+                            ) as mutation_tracker:
                                 entry.apply(m, graph, node)
                             if mutation_tracker.changed_mutation_regions():
                                 compute_mutation_region_ids(graph)
