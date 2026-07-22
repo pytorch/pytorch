@@ -996,23 +996,6 @@ def unregister_kernel_access_op(name: str) -> None:
     _KERNEL_ACCESS_OPS.pop(name, None)
 
 
-def register_kernel_access_unknown_op(name: str, ignore: IgnoreUnknownOp) -> None:
-    """
-    Register a Triton op with unknown effects for kernel access analysis.
-
-    The callback returns True when the op can be ignored, and False when
-    analysis should raise rather than risk missing a side effect.
-    """
-    register_kernel_access_op(name, ignore_if=ignore)
-
-
-def unregister_kernel_access_unknown_op(name: str) -> None:
-    """
-    Unregister a Triton op with unknown effects from kernel access analysis.
-    """
-    unregister_kernel_access_op(name)
-
-
 @MemoizeWithCycleCheck
 def analyze_kernel_access(
     functions: dict[str, dict[Intermediate, list[Op]]],
