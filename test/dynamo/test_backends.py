@@ -507,6 +507,34 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         self.assertEqual(device_from_inputs([NotATensor()]), torch.device("cpu"))
         self.assertEqual(dtype_from_inputs([NotATensor()]), torch.float32)
 
+    def test_is_registered_backend(self):
+        from torch._dynamo.backends.registry import _is_registered_backend
+
+        self.assertTrue(_is_registered_backend(lookup_backend("eager")))
+        self.assertTrue(
+            _is_registered_backend(torch._TorchCompileInductorWrapper(None, None, None))
+        )
+        self.assertTrue(
+            _is_registered_backend(
+                torch._TorchCompileWrapper("eager", None, None, None)
+            )
+        )
+
+        class FakeBackend:
+            compiler_name = "inductor"
+
+        self.assertFalse(_is_registered_backend(FakeBackend()))
+
+        def my_custom_backend(gm, example_inputs):
+            return gm.forward
+
+        self.assertFalse(_is_registered_backend(my_custom_backend))
+        self.assertFalse(
+            _is_registered_backend(
+                torch._TorchCompileWrapper(my_custom_backend, None, None, None)
+            )
+        )
+
     def test_lookup_backend_suggestion(self):
         from torch._dynamo.backends.registry import lookup_backend
         from torch._dynamo.exc import InvalidBackend
