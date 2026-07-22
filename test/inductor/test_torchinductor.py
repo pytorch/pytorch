@@ -524,6 +524,7 @@ def check_model(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
+    gradcheck_wrapper: Callable | None = None,
     output_process_fn_grad=lambda x: x,
     # TODO: enable this for all tests
     exact_stride=False,
@@ -531,7 +532,22 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
+    from torch.testing._internal.opinfo.core import gradcheck_wrapper_masked_operation
+
+    use_gradcheck_wrapper = check_gradient and gradcheck_wrapper
+    add_original_op = gradcheck_wrapper is gradcheck_wrapper_masked_operation
+
+    example_inputs_gradcheck = (
+        [clone_preserve_strides_offset(x) for x in example_inputs]
+        if use_gradcheck_wrapper
+        else example_inputs
+    )
     ref_inputs = [clone_preserve_strides_offset(x) for x in example_inputs]
+    ref_gradcheck_inputs = (
+        [clone_preserve_strides_offset(x) for x in example_inputs]
+        if use_gradcheck_wrapper
+        else ref_inputs
+    )
     ref_kwargs = kwargs
     has_lowp_args = False
 
@@ -573,13 +589,30 @@ def check_model(
         # if example_inputs is already fp32 and get inplace updated in the model.
         # Call on the cloned tensors instead
         ref_inputs = list(map(upcast_fn, ref_inputs))
+        ref_gradcheck_inputs = (
+            list(map(upcast_fn, ref_gradcheck_inputs))
+            if use_gradcheck_wrapper
+            else ref_inputs
+        )
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
         if has_lowp_args and hasattr(model, "to"):
             ref_model = copy.deepcopy(model).to(torch.float)
 
     torch.manual_seed(0)
-
     correct = ref_model(*ref_inputs, **ref_kwargs)
+
+    if use_gradcheck_wrapper:
+        torch.manual_seed(0)
+        if add_original_op:
+            correct_gradcheck = gradcheck_wrapper(
+                ref_model, *ref_gradcheck_inputs, original_op=model, **ref_kwargs
+            )
+        else:
+            correct_gradcheck = gradcheck_wrapper(
+                ref_model, *ref_gradcheck_inputs, **ref_kwargs
+            )
+    else:
+        correct_gradcheck = correct
 
     torch._inductor.metrics.reset()
 
@@ -590,18 +623,26 @@ def check_model(
         called = True
         return compile_fx(model_, example_inputs_)
 
+    @torch.compile(backend=compile_fx_wrapper, fullgraph=nopython)
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
 
-    run = torch.compile(run, backend=compile_fx_wrapper, fullgraph=nopython)
-
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
-    # if not called:
-    #     exp = torch._dynamo.explain(run)(*example_inputs)
-    #     print("Explain:", exp[0])
-    #     for graph in exp[2]:
-    #         print("Graph", graph)
+
+    if use_gradcheck_wrapper:
+        torch.manual_seed(0)
+        if add_original_op:
+            actual_gradcheck = gradcheck_wrapper(
+                run, *example_inputs_gradcheck, original_op=model, **kwargs
+            )
+        else:
+            actual_gradcheck = gradcheck_wrapper(
+                run, *example_inputs_gradcheck, **kwargs
+            )
+    else:
+        actual_gradcheck = actual
+
     if check_has_compiled:
         if not called:
             raise AssertionError("Ran graph without calling compile_fx")
@@ -668,6 +709,20 @@ def check_model(
     if reference_in_float:
         correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
+
+        if use_gradcheck_wrapper:
+            correct_gradcheck_flat, correct_gradcheck_spec = tree_flatten(
+                correct_gradcheck
+            )
+            actual_gradcheck_flat = pytree.tree_leaves(actual_gradcheck)
+            correct_gradcheck_flat = reference_to_expect(
+                actual_gradcheck_flat, correct_gradcheck_flat
+            )
+            correct_gradcheck = tree_unflatten(
+                correct_gradcheck_flat, correct_gradcheck_spec
+            )
+        else:
+            correct_gradcheck = correct
 
     def has_zero_dim(x):
         if not isinstance(x, tuple):
@@ -741,8 +796,8 @@ def check_model(
                             f"Expected dtype {correct_val.dtype}, got {actual_val.dtype}"
                         )
     if check_gradient:
-        actual = output_process_fn_grad(actual)
-        correct = output_process_fn_grad(correct)
+        actual = output_process_fn_grad(actual_gradcheck)
+        correct = output_process_fn_grad(correct_gradcheck)
         actual_flat = pytree.tree_leaves(actual)
         correct_flat = pytree.tree_leaves(correct)
 
@@ -755,11 +810,11 @@ def check_model(
         for g in grads:
             g /= g.norm()
 
-        correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
+        correct_grad = compute_grads(ref_gradcheck_inputs, ref_kwargs, correct, grads)
         all_none_grads = all(x is None for x in correct_grad)
         tensor_args = [
             x
-            for x in pytree.tree_flatten(example_inputs)[0]
+            for x in pytree.tree_flatten(example_inputs_gradcheck)[0]
             if isinstance(x, torch.Tensor)
         ]
         any_non_leaves = any(x.grad_fn is not None for x in tensor_args)
@@ -778,7 +833,7 @@ def check_model(
             ]
             self.assertEqual(len(results_that_require_grad), 0)
         else:
-            actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
+            actual_grad = compute_grads(example_inputs_gradcheck, kwargs, actual, grads)
 
             if reference_in_float:
                 expect_grad = reference_to_expect(actual_grad, correct_grad)
@@ -821,6 +876,7 @@ def check_model_gpu(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
+    gradcheck_wrapper: Callable | None = None,
     output_process_fn_grad=lambda x: x,
     # TODO: enable this for all tests
     exact_stride=False,
@@ -849,6 +905,7 @@ def check_model_gpu(
         assert_equal=assert_equal,
         check_gradient=check_gradient,
         check_has_compiled=check_has_compiled,
+        gradcheck_wrapper=gradcheck_wrapper,
         output_process_fn_grad=output_process_fn_grad,
         exact_stride=exact_stride,
     )
@@ -882,6 +939,7 @@ def check_model_gpu(
             assert_equal=assert_equal,
             check_gradient=check_gradient,
             check_has_compiled=check_has_compiled,
+            gradcheck_wrapper=gradcheck_wrapper,
             output_process_fn_grad=output_process_fn_grad,
             exact_stride=exact_stride,
         )
