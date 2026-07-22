@@ -10,6 +10,7 @@ import itertools
 import math
 import operator
 import os
+import pickle
 import signal
 import sys
 import tempfile
@@ -3283,6 +3284,25 @@ class TestDataLoaderDeviceType(TestCase):
             self.assertEqual(batch.device.type, "xpu")
             result = batch * 2.0
             self.assertEqual(result.device, batch.device)
+
+    @onlyXPU
+    def test_xpu_ipc_storage_pickle_roundtrip(self, device):
+        xpu_device = torch.device(device)
+        tensor = torch.arange(16, device=xpu_device, dtype=torch.float32).reshape(4, 4)
+
+        storage = tensor.storage()
+        restored_storage = pickle.loads(pickle.dumps(storage))
+
+        self.assertEqual(restored_storage, storage)
+
+        restored_tensor = torch.empty(0, device=xpu_device, dtype=tensor.dtype)
+        restored_tensor = restored_tensor.set_(
+            restored_storage,
+            0,
+            tensor.size(),
+            tensor.stride(),
+        )
+        self.assertEqual(restored_tensor, tensor)
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
