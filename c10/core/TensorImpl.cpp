@@ -192,10 +192,6 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
 }
 
 void TensorImpl::set_fake_device(c10::Device fake_device) {
-  // NB: the allow_meta validation lives in set_fake_tensor_mode(), which every
-  // caller invokes right after this with the mode in hand -- avoids a TLS
-  // lookup on this hot (per-op-output) path.
-
   // in python FakeTensor, it checks whether or not
   // we are in in_kernel_invocation manager to determine
   // which device we return
