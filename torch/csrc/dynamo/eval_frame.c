@@ -850,6 +850,13 @@ static PyObject* THPDisableWrapper_descr_get(
   return PyMethod_New(self, obj);
 }
 
+// Report as the wrapped function so graph-break / debug messages (and any other
+// repr()/str() of a disabled callable) name the user's function rather than the
+// opaque wrapper -- matches the old functools.wraps'd Python closure.
+static PyObject* THPDisableWrapper_repr(THPDisableWrapper* self) {
+  return PyObject_Repr(self->fn);
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPDisableWrapper_getset[] = {
     {"__dict__", PyObject_GenericGetDict, PyObject_GenericSetDict, NULL, NULL},
@@ -860,6 +867,7 @@ static PyTypeObject THPDisableWrapperType = {
     .tp_name = "torch._C._dynamo.eval_frame.DisableWrapper",
     .tp_basicsize = sizeof(THPDisableWrapper),
     .tp_dealloc = (destructor)THPDisableWrapper_dealloc,
+    .tp_repr = (reprfunc)THPDisableWrapper_repr,
     .tp_vectorcall_offset = offsetof(THPDisableWrapper, vectorcall),
     .tp_call = PyVectorcall_Call,
     .tp_getattro = PyObject_GenericGetAttr,
