@@ -11,6 +11,7 @@ from collections import defaultdict
 from typing import Any
 
 import torch._inductor.config as inductor_config
+from torch.utils._ordered_set import OrderedSet
 
 
 __all__ = ["inductor_trace_handler"]
@@ -20,7 +21,7 @@ log = logging.getLogger(__name__)
 # https://github.com/pytorch/kineto/blob/a054a4be0db117c579a21747debf19c863631f26/libkineto/src/output_json.cpp#L559
 # Kernel and CUDA runtime API events are connected by ac2g; forward and backward
 # ATen ops are connected by fwdbwd.
-_profile_flow_types = {"fwdbwd", "ac2g"}
+_profile_flow_types = OrderedSet(["fwdbwd", "ac2g"])
 
 
 class _EventItem:
@@ -51,7 +52,7 @@ def _find_events_covered_in(
         tid: [event.start for event in event_items]
         for tid, event_items in top_level_by_tid.items()
     }
-    top_level_id_to_events = defaultdict(set)
+    top_level_id_to_events = defaultdict(OrderedSet)
 
     for event in events:
         if event.get("cat") not in {
@@ -470,8 +471,7 @@ def inductor_trace_handler(
             file_name = file_name + ".gz"
         path = os.path.join(dir_name, file_name)
         provenance_enabled = (
-            kineto_available()
-            and inductor_config.trace.provenance_tracking_to_timeline
+            kineto_available() and inductor_config.trace.provenance_tracking_to_timeline
         )
 
         if getattr(prof, "_use_cupti_monitor", False):
