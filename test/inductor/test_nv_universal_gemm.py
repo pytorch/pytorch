@@ -1136,24 +1136,38 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     @parametrize(
         "case",
         (
-            (0, "sum"),
-            (0, "mean"),
-            (0, "prod"),
-            (0, "amax"),
-            (0, "amin"),
-            (1, "sum"),
-            (1, "mean"),
-            (1, "prod"),
-            (1, "amax"),
-            (1, "amin"),
+            (0, "sum", 4),
+            (0, "mean", 4),
+            (0, "prod", 4),
+            (0, "amax", 4),
+            (0, "amin", 4),
+            (0, "sum", 8),
+            (0, "mean", 8),
+            (0, "prod", 8),
+            (0, "amax", 8),
+            (0, "amin", 8),
+            (0, "sum", 16),
+            (0, "mean", 16),
+            (0, "prod", 16),
+            (0, "amax", 16),
+            (0, "amin", 16),
+            (1, "sum", 32),
+            (1, "mean", 32),
+            (1, "prod", 32),
+            (1, "amax", 32),
+            (1, "amin", 32),
+            (1, "sum", 64),
+            (1, "mean", 64),
+            (1, "prod", 64),
+            (1, "amax", 64),
+            (1, "amin", 64),
         ),
-        name_fn=lambda case: f"axis_{case[0]}_{case[1]}",
+        name_fn=lambda case: f"axis_{case[0]}_{case[1]}_group_{case[2]}",
     )
     def test_scaled_mm_grouped_reduce_fusion(self, case):
-        axis, reduction = case
-        m, n, k = 128, 128, 512
+        axis, reduction, group = case
+        m, n, k = 128, 256 if group > 32 else 128, 512
         packed_k = k // 2
-        group = 4 if axis == 0 else 32
         a = _create_tensor_with_layout(
             "contiguous", m, packed_k, torch.float4_e2m1fn_x2
         )

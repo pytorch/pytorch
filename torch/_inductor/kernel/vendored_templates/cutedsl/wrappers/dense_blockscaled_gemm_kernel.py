@@ -155,6 +155,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             use_prefetch=os.environ.get("TORCHINDUCTOR_NVGEMM_PREFETCH", "0") == "1",
         )
         self.cluster_shape_mn = cluster_shape_mn
+        self.mma_tiler_mn = mma_tiler_mn
 
     @staticmethod
     def _major_modes(args):
@@ -333,7 +334,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             axis = getattr(args, "local_reduce_axis")
             m, n = args.out.shape[-2:]
             selected_size = n if axis == 1 else m
-            max_group = 32 if axis == 1 else 4
+            max_group = self.mma_tiler_mn[axis] if axis == 1 else 16
             if (
                 axis not in (0, 1)
                 or group <= 1
