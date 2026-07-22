@@ -65,7 +65,7 @@ from .object_protocol import (
     _is_method_type,
     generic_richcompare_bool,
     mro_lookup,
-    vt_getitem,
+    generic_getitem,
 )
 
 
@@ -664,7 +664,7 @@ class ConstDictVariable(VariableTracker):
                 ):
                     keys = other.call_method(tx, "keys", [], {})
                     for key in unpack_iterable(tx, keys):
-                        self.items[Hashable(key)] = vt_getitem(tx, other, key)
+                        self.items[Hashable(key)] = generic_getitem(tx, other, key)
                 else:
                     for idx, item in enumerate(unpack_iterable(tx, other)):
                         pair = unpack_iterable(tx, item)

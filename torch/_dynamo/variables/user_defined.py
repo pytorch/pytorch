@@ -38,7 +38,8 @@ import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast, NoReturn, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Any, NoReturn, Union, cast
+
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -53,9 +54,9 @@ from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
-    handle_observed_exception,
     ObservedAttributeError,
     ObservedKeyError,
+    handle_observed_exception,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -106,10 +107,10 @@ from ..utils import (
 )
 from .base import (
     _RICHCOMPARE_OPS,
+    NO_SUCH_SUBOBJ,
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
     MutationType,
-    NO_SUCH_SUBOBJ,
     ValueMutationNew,
     VariableTracker,
 )
@@ -123,7 +124,6 @@ from .object_protocol import (
     type_implements_nb_slot,
 )
 from .sets import SetVariable
-
 
 try:
     import numpy as np
@@ -1036,9 +1036,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # preserved.
             return args[0].call_method(tx, name, [], kwargs)
         elif name == "__len__" and len(args) == 1 and not kwargs:
-            from .object_protocol import generic_len
+            from .object_protocol import generic_size
 
-            return generic_len(tx, args[0])
+            return generic_size(tx, args[0])
         elif issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
             return SourcelessBuilder.create(tx, dict).call_method(
@@ -4616,7 +4616,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # Dict implements __len__ via mp_length (mapping protocol), not
-        # sq_length (sequence protocol). Redirect so generic_len works.
+        # sq_length (sequence protocol). Redirect so generic_size works.
         return self.mp_length(tx)
 
     def mp_subscript_impl(

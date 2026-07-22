@@ -97,26 +97,27 @@ from .object_protocol import (
     _NO_DEFAULT,
     binary_iop,
     binary_op,
-    generic_abs,
-    generic_add,
-    generic_bool,
-    generic_contains,
+    binary_op,
+    pynumber_absolute,
+    pynumber_add,
+    generic_is_true,
+    pysequence_contains,
     generic_delitem,
-    generic_float,
+    pynumber_float,
     generic_getattr,
     generic_getiter,
     generic_hash,
-    generic_inplace_add,
-    generic_inplace_matmul,
-    generic_inplace_multiply,
-    generic_int,
-    generic_invert,
+    pynumber_inplace_add,
+    pynumber_inplace_matrix_multiply,
+    pynumber_inplace_multiply,
+    pynumber_int,
+    pynumber_invert,
     generic_issubclass,
-    generic_len,
-    generic_matmul,
-    generic_multiply,
-    generic_neg,
-    generic_pos,
+    generic_size,
+    pynumber_matrix_multiply,
+    pynumber_multiply,
+    pynumber_negative,
+    pynumber_positive,
     generic_repr,
     generic_richcompare,
     generic_setitem,
@@ -130,7 +131,22 @@ from .object_protocol import (
     ternary_op,
     type_implements_mp_length,
     type_implements_sq_length,
-    vt_getitem,
+    generic_getitem,
+    vt_identity_compare,
+    generic_repr,
+    generic_richcompare,
+    generic_setitem,
+    generic_str,
+    maybe_get_python_type,
+    pycallable_check,
+    pyiter_check,
+    pysequence_check,
+    python_constant_richcompare_impl,
+    ternary_iop,
+    ternary_op,
+    type_implements_mp_length,
+    type_implements_sq_length,
+    generic_getitem,
     vt_identity_compare,
 )
 from .sets import FrozensetVariable, SetVariable
@@ -1842,7 +1858,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         if name == "__len__" and len(args) == 1 and not kwargs:
             # type.__len__(instance) → len(instance)
             # e.g. list.__len__(my_list) → len(my_list)
-            return generic_len(tx, args[0])
+            return generic_size(tx, args[0])
 
         if name == "__str__" and len(args) == 1 and not kwargs:
             return super().call_method(tx, name, args, kwargs)
@@ -1859,22 +1875,22 @@ class BuiltinVariable(BaseBuiltinVariable):
         if name == "__neg__" and len(args) == 1 and not kwargs:
             # type.__neg__(instance) → neg(instance)
             # e.g., int.__neg__(4) → neg(4)
-            return generic_neg(tx, args[0])
+            return pynumber_negative(tx, args[0])
 
         if name == "__pos__" and len(args) == 1 and not kwargs:
             # type.__pos__(instance) → pos(instance)
             # e.g., int.__pos__(4) → pos(4)
-            return generic_pos(tx, args[0])
+            return pynumber_positive(tx, args[0])
 
         if name == "__abs__" and len(args) == 1 and not kwargs:
             # type.__abs__(instance) → abs(instance)
             # e.g., int.__abs__(-4) → abs(-4)
-            return generic_abs(tx, args[0])
+            return pynumber_absolute(tx, args[0])
 
         if name == "__invert__" and len(args) == 1 and not kwargs:
             # type.__invert__(instance) → ~instance
             # e.g., int.__invert__(4) → ~4
-            return generic_invert(tx, args[0])
+            return pynumber_invert(tx, args[0])
 
         if name == "__hash__" and len(args) == 1 and not kwargs:
             arg = args[0]
@@ -1889,18 +1905,18 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_int(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
-        return generic_int(tx, arg)
+        return pynumber_int(tx, arg)
 
     def call_float(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
-        return generic_float(tx, arg)
+        return pynumber_float(tx, arg)
 
     def call_bool(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
         # Emulate PyBool_Type.tp_vectorcall which boils down to PyObject_IsTrue.
-        return generic_bool(tx, arg)
+        return generic_is_true(tx, arg)
 
     def call_hash(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
@@ -2085,12 +2101,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_abs(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
-        return generic_abs(tx, arg)
+        return pynumber_absolute(tx, arg)
 
     def call_pos(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
-        return generic_pos(tx, arg)
+        return pynumber_positive(tx, arg)
 
     def call_index(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
@@ -2315,7 +2331,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             raise_type_error(
                 tx, f"len() takes exactly one argument ({len(args)} given)"
             )
-        return generic_len(tx, args[0])
+        return generic_size(tx, args[0])
 
     def call_length_hint(
         self,
@@ -2336,7 +2352,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         obj_type = maybe_get_python_type(obj)
 
         if type_implements_sq_length(obj_type) or type_implements_mp_length(obj_type):
-            return generic_len(tx, obj)
+            return generic_size(tx, obj)
 
         if getattr(obj_type, "__length_hint__", None) is None:
             return default
@@ -2356,7 +2372,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             raise_type_error(tx, "_operator.getitem() takes no keyword arguments")
         if len(args) != 2:
             raise_type_error(tx, f"getitem expected 2 arguments, got {len(args)}")
-        return vt_getitem(tx, args[0], args[1])
+        return generic_getitem(tx, args[0], args[1])
 
     def call_setitem(
         self,
@@ -2696,12 +2712,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_neg(
         self, tx: "InstructionTranslatorBase", a: VariableTracker
     ) -> VariableTracker:
-        return generic_neg(tx, a)
+        return pynumber_negative(tx, a)
 
     def call_invert(
         self, tx: "InstructionTranslatorBase", a: VariableTracker
     ) -> VariableTracker:
-        return generic_invert(tx, a)
+        return pynumber_invert(tx, a)
 
     def call_format(
         self,
@@ -2858,22 +2874,22 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_mul(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return generic_multiply(tx, a, b)
+        return pynumber_multiply(tx, a, b)
 
     def call_imul(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return generic_inplace_multiply(tx, a, b)
+        return pynumber_inplace_multiply(tx, a, b)
 
     def call_matmul(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return generic_matmul(tx, a, b)
+        return pynumber_matrix_multiply(tx, a, b)
 
     def call_imatmul(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return generic_inplace_matmul(tx, a, b)
+        return pynumber_inplace_matrix_multiply(tx, a, b)
 
     def call_sub(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
@@ -2888,12 +2904,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_add(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return generic_add(tx, a, b)
+        return pynumber_add(tx, a, b)
 
     def call_iadd(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return generic_inplace_add(tx, a, b)
+        return pynumber_inplace_add(tx, a, b)
 
     def call_and_(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
@@ -3016,8 +3032,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_contains(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
-        return generic_contains(tx, a, b)
-
+        return pysequence_contains(tx, a, b)
 
 class DictBuiltinVariable(BaseBuiltinVariable):
     """Variable tracker for the `dict` builtin constructor."""
