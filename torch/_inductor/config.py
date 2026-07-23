@@ -884,6 +884,10 @@ cache_sdpa_constraint = (
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
 
+# Whether view outputs must match eager strides exactly instead of only matching
+# their stride order. Exact matching can introduce additional copy kernels.
+strict_output_strides = False
+
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging
 # since kernel with mixed layout inputs may run much slower then one whose inputs
@@ -1092,6 +1096,15 @@ combo_kernel_max_num_nodes = 8
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
+# When True, each combo sub-kernel autotunes its block sizes standalone at compile time; the
+# winning per-subkernel blocks are stitched into the combo kernel and passed as args (the combo
+# then autotunes num_warps/num_stages over the winners). Requires
+# combo_kernel_per_subkernel_blocks.
+combo_kernel_compile_time_autotune: bool = Config(
+    justknob="pytorch/inductor:combo_kernel_compile_time_autotune",
+    env_name_force="TORCHINDUCTOR_COMBO_KERNEL_COMPILE_TIME_AUTOTUNE",
+    default=False,
+)
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
 combo_kernel_autotune_grouping = True

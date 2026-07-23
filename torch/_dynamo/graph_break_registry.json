@@ -1308,6 +1308,17 @@
       ]
     }
   ],
+  "GB4528": [
+    {
+      "Gb_type": "data_ptr() in a higher-order operator",
+      "Context": "subgraph={tx.output.current_tracer.description}",
+      "Explanation": "Dynamo cannot preserve the lifetime of a tensor whose data_ptr() escapes from a higher-order operator subgraph.",
+      "Hints": [
+        "Move the data_ptr() call outside the higher-order operator.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0090": [
     {
       "Gb_type": "Operator does not support running with fake tensors",
@@ -4144,6 +4155,17 @@
       ]
     }
   ],
+  "GB3240": [
+    {
+      "Gb_type": "data_ptr() in export",
+      "Context": "data_ptr() was materialized as a graph value",
+      "Explanation": "Export cannot preserve the lifetime of a tensor whose data_ptr() escapes as an integer.",
+      "Hints": [
+        "Wrap the pointer-consuming code in a custom operator.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
   "GB0266": [
     {
       "Gb_type": "Weird method call on TorchScript object",
@@ -4579,17 +4601,6 @@
     }
   ],
   "GB0291": [
-    {
-      "Gb_type": "logging.Logger method not supported for non-export cases",
-      "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
-      "Explanation": "logging.Logger methods are not supported for non-export cases.",
-      "Hints": [
-        "If you do not need this logging side effect, add the exact method being called to `torch._dynamo.config.ignore_logging_functions`. Dynamo will skip the call and return `None`.",
-        "For example, for `logger.{name}(...)`, use `torch._dynamo.config.ignore_logging_functions.add(logger.{name})`. If `{name}` is defined on the logger class, add the class method `{logger_cls_name}.{name}` to ignore this method for all instances of that class.",
-        "Dynamo does not trace into logging.Logger method bodies, so only the method you call directly (`{name}`) is checked against the ignore set. Ignoring a method that `{name}` calls internally has no effect.",
-        "If you need the log side effect to run, then you can try one of (1) `torch._higher_order_ops.print(...)`, (2) wrap the logging call in a custom op (marked as mutable), or (3) preserve the logging contents and move the logging call outside the compiled region."
-      ]
-    },
     {
       "Gb_type": "logging.Logger method not supported for non-export cases",
       "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",

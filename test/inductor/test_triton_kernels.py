@@ -462,6 +462,34 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 self.assertIn("device_guard.set_index(", code[:sync_idx])
 
     @requires_gpu
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_data_ptr_packing_keeps_source_alive(self, backend):
+        if GPU_TYPE != "cuda":
+            self.skipTest("Raw pointer dereference regression requires CUDA")
+
+        @triton.jit
+        def load_kernel(packed, junk, out, n: "tl.constexpr"):
+            offsets = tl.arange(0, n)
+            ptr = tl.load(packed).to(tl.pointer_type(tl.float32))
+            tl.store(out + offsets, tl.load(ptr + offsets))
+
+        def f(x):
+            tmp = x + 1
+            packed = torch.scalar_tensor(
+                tmp.data_ptr(), dtype=torch.long, device=x.device
+            )
+            junk = torch.full_like(x, 77)
+            out = torch.empty_like(x)
+            load_kernel[(1,)](packed, junk, out, x.numel())
+            return out, junk
+
+        x = torch.arange(1024, device=GPU_TYPE, dtype=torch.float32)
+        actual, _ = torch.compile(f, backend=backend, fullgraph=True)(x)
+        torch.accelerator.synchronize()
+
+        self.assertEqual(actual, x + 1)
+
+    @requires_gpu
     def test_triton_kernel_dunder_name_no_name_mangling(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/170398
         # Triton kernels whose names start with ``__`` must not trigger

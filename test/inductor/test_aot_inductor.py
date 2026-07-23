@@ -27,7 +27,6 @@ from torch._export.passes import ReplaceViewOpsWithViewCopyOpsPass
 from torch._inductor import config
 from torch._inductor.codecache import WritableTempFile
 from torch._inductor.cpp_builder import normalize_path_separator
-from torch._inductor.exc import InductorError
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
@@ -9194,18 +9193,17 @@ class AOTInductorLoggingTest(LoggingTestCase):
 
 
 class TestAOTInductorConfig(TestCase):
-    def test_traced_data_ptr_rejected(self):
+    def test_traced_data_ptr_rejected_before_aoti(self):
         def f(x):
             return torch.tensor([x.data_ptr()])
 
         x = torch.randn(4)
-        exported = torch._dynamo.export(f)(x)
 
         with self.assertRaisesRegex(
-            InductorError,
-            "AOTInductor does not support tracing data_ptr",
+            torch._dynamo.exc.Unsupported,
+            r"data_ptr\(\) in export",
         ):
-            torch._inductor.aot_compile(exported.graph_module, (x,))
+            torch._dynamo.export(f)(x)
 
     def test_no_compile_standalone(self):
         with config.patch({"aot_inductor_mode.compile_standalone": False}):
