@@ -162,6 +162,13 @@ struct PftraceRenderStages {
   std::vector<PftraceComputeName> compute_kernels; // -> InternedData field 1000
   std::vector<PftraceComputeName>
       compute_arg_names; // -> InternedData field 1001
+  // Per-row collective-descriptor JSON blob (row i is
+  // meta_buffer[meta_offsets[i], meta_offsets[i+1]); empty = none), spread onto
+  // the render stage as extra_data (mirrors the chrome path's
+  // metadata-into-args, so consumers need no correlation-id join). meta_offsets
+  // nullable (no metadata column).
+  const int32_t* meta_offsets; // nullable, length n + 1
+  const char* meta_buffer;
 };
 
 // One per-kind group of slices sharing an annotation schema. ts / end /

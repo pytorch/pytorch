@@ -1274,6 +1274,122 @@ class TestCuptiRecords(TestCase):
             },
         )
 
+    def test_pftrace_kernel_carries_collective_metadata(self):
+        # The per-kernel collective descriptor (metadata column) is spread onto the GPU
+        # render stage as extra_data (name/value string pairs), mirroring the chrome path
+        # which spreads the same blob into the GPU op's args -- so consumers need no
+        # correlation-id join. Runs the REAL native encoder end-to-end, gunzips, and decodes
+        # the protobuf with a hand-rolled scanner (no perfetto python lib). No CUDA. Field
+        # numbers (perfetto.h): TracePacket.gpu_render_stage_event=53;
+        # GpuRenderStageEvent.extra_data=6; ExtraData.name=1, ExtraData.value=2.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            merge_trace_window_into_chrome_trace,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        descriptor = {"Process Group Name": "0", "dtype": "bf16", "In msg nelems": 1024}
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000),
+                "end_ns": i64(2000),
+                "device_id": i64(0),
+                "context_id": i64(1),
+                "stream_id": i64(7),
+                "correlation_id": i64(50),
+                "graph_id": i64(0),
+                "graph_node_id": i64(0),
+                "name": np.array(["allreduce_kernel"], dtype=object),
+                "annotation": np.array([None], dtype=object),
+                "metadata": np.array([json.dumps(descriptor)], dtype=object),
+                "grid_x": i64(1),
+                "grid_y": i64(1),
+                "grid_z": i64(1),
+                "block_x": i64(32),
+                "block_y": i64(1),
+                "block_z": i64(1),
+                "registers_per_thread": i64(0),
+                "static_shared_memory": i64(0),
+                "dynamic_shared_memory": i64(0),
+                "priority": i64(0),
+                "queued": i64(0),
+                "channel": i64(0),
+                "channel_type": i64(0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+
+        def rv(b, i):  # read a varint at offset i, return (value, next_offset)
+            s = r = 0
+            while True:
+                x = b[i]
+                i += 1
+                r |= (x & 0x7F) << s
+                if not x & 0x80:
+                    return r, i
+                s += 7
+
+        def flds(b):  # scan a message into [(field_no, wire_type, value)]
+            i = 0
+            o = []
+            while i < len(b):
+                k, i = rv(b, i)
+                fn, wt = k >> 3, k & 7
+                if wt == 0:
+                    v, i = rv(b, i)
+                    o.append((fn, 0, v))
+                elif wt == 2:
+                    n, i = rv(b, i)
+                    o.append((fn, 2, b[i : i + n]))
+                    i += n
+                elif wt == 5:
+                    i += 4
+                elif wt == 1:
+                    i += 8
+            return o
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps({"baseTimeNanoseconds": 0, "traceEvents": []}).encode()
+                )
+            out_path = os.path.join(d, "out.pftrace")
+            merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
+            with gzip.open(out_path, "rb") as f:
+                raw = f.read()
+
+        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
+
+        # Collect the extra_data (field 6) name/value pairs across all GPU render stages.
+        extra = {}
+        for pkt in packets:
+            for fn, _wt, v in flds(pkt):
+                if fn != 53:
+                    continue
+                for sfn, _swt, sv in flds(v):
+                    if sfn != 6:
+                        continue
+                    name = value = None
+                    for efn, _ewt, ev in flds(sv):
+                        if efn == 1:
+                            name = bytes(ev).decode()
+                        elif efn == 2:
+                            value = bytes(ev).decode()
+                    if name is not None:
+                        extra[name] = value
+
+        # Each descriptor field is spread as its own extra_data entry: JSON strings keep
+        # their raw value, numbers are stringified via dump().
+        self.assertEqual(extra["Process Group Name"], "0")
+        self.assertEqual(extra["dtype"], "bf16")
+        self.assertEqual(extra["In msg nelems"], "1024")
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuptiMonitorCUDA(TestCase):

@@ -412,6 +412,9 @@ void initCuptiMonitorBindings(py::module& m) {
         //                   (args = [(name_iid, int64_col, skip_zero), ...])
         //   tables       = (compute_kernels, compute_arg_names); each
         //                   [(iid, name), ...]
+        //   const_extra  = [(key, value), ...] (r[6], trace-wide string args)
+        //   metadata     = (int32_offsets, blob_bytes) CSR (r[7], collective
+        //                   descriptor spread as extra_data)
         std::vector<PftraceGpuSpec> spec_vec;
         std::vector<PftraceGfxContext> ctx_vec;
         PftraceRenderStages stages{};
@@ -485,6 +488,16 @@ void initCuptiMonitorBindings(py::module& m) {
               auto tb = r[5].cast<py::tuple>();
               stages.compute_kernels = names_from(tb[0]);
               stages.compute_arg_names = names_from(tb[1]);
+            }
+            // r[7] (optional): metadata = (int32_offsets, blob_bytes) CSR
+            // spread as extra_data (the collective descriptor mirrored onto
+            // each render stage).
+            if (py::len(r) > 7 && !r[7].is_none()) {
+              auto mt = r[7].cast<py::tuple>();
+              stages.meta_offsets = i32(mt[0]);
+              auto blob = mt[1].cast<py::bytes>();
+              keepalive.push_back(blob);
+              stages.meta_buffer = PyBytes_AS_STRING(blob.ptr());
             }
           }
         }

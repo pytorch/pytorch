@@ -981,6 +981,7 @@ def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: 
     dim_p: dict[str, list] = {k: [] for k in _LAUNCH_DIMS}
     arg_p: dict[int, list] = {iid: [] for iid, _n, _g in _COMPUTE_ARGS}
     extra_p: dict[str, list] = {k: [] for k, _g, _s in _RENDER_EXTRA}
+    meta_p: list = []  # per-row collective-descriptor JSON blob (str/bytes/None)
     stream_p: list = []
     lane_names_by_id: dict[int, str] = {}  # reassigned logical lane -> resolver name
     for ks, stage_iid, _name, _cat in _RENDER_STAGES:
@@ -1029,6 +1030,10 @@ def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: 
         for key, getter, _skip in _RENDER_EXTRA:
             v = getter(c)
             extra_p[key].append(z if v is None else np.ascontiguousarray(v, np.int64))
+        # Collective-descriptor blob per row (kernels only; memcpy/memset/annotation and
+        # eager kernels have none), spread onto the render stage as extra_data below.
+        mc = c.get("metadata")
+        meta_p.append([None] * n if mc is None else mc.tolist())
     if not ts_p:
         return None
     ts, dur, gpu = np.concatenate(ts_p), np.concatenate(dur_p), np.concatenate(gpu_p)
@@ -1106,6 +1111,19 @@ def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: 
     ]
     launch = (*dims, kernel_iid, launch_args)
     arg_names = [(iid, name) for iid, name, _g in _COMPUTE_ARGS]
+    # CSR of the per-row metadata blobs (offsets int32 length n+1 + concatenated bytes;
+    # empty slice = no metadata), mirroring the CPU json_anno column. The native encoder
+    # spreads each blob's top-level fields onto the render stage as extra_data.
+    meta_l = [b for sub in meta_p for b in sub]
+    meta_enc = [
+        b"" if b is None else (b if isinstance(b, bytes) else b.encode())
+        for b in meta_l
+    ]
+    meta_offsets = np.zeros(len(meta_enc) + 1, dtype=np.int32)
+    np.cumsum(
+        np.fromiter((len(b) for b in meta_enc), dtype=np.int32, count=len(meta_enc)),
+        out=meta_offsets[1:],
+    )
     return (
         specs,
         [
@@ -1116,6 +1134,7 @@ def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: 
         launch,
         (compute_kernels, arg_names),
         _gpu_panel_const_extra(gpu),
+        (meta_offsets, b"".join(meta_enc)),
     )
 
 

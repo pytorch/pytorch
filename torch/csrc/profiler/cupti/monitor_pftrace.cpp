@@ -97,6 +97,31 @@ void emitJsonBlob(pbz::TrackEvent* te, const char* data, size_t len) {
     emitJsonValue(a, parsed);
   }
 }
+
+// Spread one JSON blob onto a GpuRenderStageEvent as extra_data (name/value
+// string pairs), the extra_data analogue of emitJsonBlob: object -> one entry
+// per top-level key (value = the raw string for a JSON string, else the compact
+// dump()); array / scalar / parse failure -> a single "metadata" entry.
+// extra_data has no typed values, so everything is stringified.
+void emitJsonExtraData(
+    pbz::GpuRenderStageEvent* gse,
+    const char* data,
+    size_t len) {
+  auto parsed = nlohmann::json::parse(data, data + len, nullptr, false);
+  if (parsed.is_object()) {
+    for (auto it = parsed.begin(); it != parsed.end(); ++it) {
+      auto* ed = gse->add_extra_data();
+      ed->set_name(it.key());
+      const auto& v = it.value();
+      ed->set_value(v.is_string() ? v.get<std::string>() : v.dump());
+    }
+  } else {
+    auto* ed = gse->add_extra_data();
+    ed->set_name("metadata");
+    ed->set_value(
+        parsed.is_discarded() ? std::string(data, len) : parsed.dump());
+  }
+}
 } // namespace
 
 std::string cuptiMonitorEncodePftrace(
@@ -368,6 +393,16 @@ std::string cuptiMonitorEncodePftrace(
       auto* ed = gse->add_extra_data();
       ed->set_name(ce.key);
       ed->set_value(ce.value);
+    }
+    // Per-row collective-descriptor JSON, spread as extra_data (mirrors the
+    // chrome path spreading metadata into the GPU op's args).
+    if (stages.meta_offsets) {
+      const int32_t off = stages.meta_offsets[i];
+      const int32_t len = stages.meta_offsets[i + 1] - off;
+      if (len > 0) {
+        emitJsonExtraData(
+            gse, stages.meta_buffer + off, static_cast<size_t>(len));
+      }
     }
   }
 
