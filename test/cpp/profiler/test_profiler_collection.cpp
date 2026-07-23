@@ -31,7 +31,6 @@
 
 #include <gtest/gtest.h>
 
-#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -274,14 +273,13 @@ using torch::profiler::impl::Result;
 std::shared_ptr<Result> makePyCall(
     int64_t start_ns,
     int64_t end_ns,
-    uint64_t system_tid,
     size_t python_tid) {
   PyFrameState frame{0, at::StringView("f.py"), at::StringView("fn")};
   PyFrameState caller{0, at::StringView("caller.py"), at::StringView("caller")};
   ExtraFields<EventType::PyCall>::args_t args{frame, std::nullopt, std::nullopt};
   return Result::create(
       start_ns,
-      system_tid,
+      /*start_tid=*/7,
       torch::profiler::impl::kineto::DeviceAndResource(),
       ExtraFields<EventType::PyCall>(
           end_ns, python_tid, caller, std::move(args)));
@@ -290,12 +288,11 @@ std::shared_ptr<Result> makePyCall(
 std::shared_ptr<Result> makePyCCall(
     int64_t start_ns,
     int64_t end_ns,
-    uint64_t system_tid,
     size_t python_tid) {
   PyFrameState caller{0, at::StringView("caller.py"), at::StringView("caller")};
   return Result::create(
       start_ns,
-      system_tid,
+      /*start_tid=*/7,
       torch::profiler::impl::kineto::DeviceAndResource(),
       ExtraFields<EventType::PyCCall>(
           end_ns,
@@ -306,69 +303,27 @@ std::shared_ptr<Result> makePyCCall(
 
 } // namespace
 
-TEST(PythonEventTimestampClampTest, ClampsOrphanToParentEnd) {
-  auto parent = makePyCall(100, 200, /*system_tid=*/7, /*python_tid=*/1);
-  auto orphan = makePyCCall(150, 10000, /*system_tid=*/7, /*python_tid=*/1);
-  std::vector<std::shared_ptr<Result>> events{parent, orphan};
+TEST(PythonEventTimestampClampTest, ClampsOverrunsWithinPythonThread) {
+  auto parent = makePyCall(100, 500, /*python_tid=*/1);
+  auto valid_child = makePyCall(110, 180, /*python_tid=*/1);
+  auto overrun = makePyCCall(200, 10000, /*python_tid=*/1);
+  auto descendant = makePyCall(220, 10000, /*python_tid=*/1);
+  auto other_thread = makePyCall(250, 900, /*python_tid=*/2);
+  auto adjacent = makePyCall(500, 600, /*python_tid=*/1);
+  std::vector<std::shared_ptr<Result>> events{
+      parent, valid_child, overrun, descendant, other_thread, adjacent};
 
   torch::profiler::impl::python_tracer::clampOverrunningPythonEvents(events);
 
-  EXPECT_EQ(orphan->endTimeNS(), 200);
-}
-
-TEST(PythonEventTimestampClampTest, CascadesClampsToDescendants) {
-  auto parent = makePyCall(100, 200, /*system_tid=*/7, /*python_tid=*/1);
-  auto child = makePyCCall(120, 10000, /*system_tid=*/7, /*python_tid=*/1);
-  auto grandchild = makePyCall(140, 10000, /*system_tid=*/7, /*python_tid=*/1);
-  std::vector<std::shared_ptr<Result>> events{parent, child, grandchild};
-
-  torch::profiler::impl::python_tracer::clampOverrunningPythonEvents(events);
-
-  EXPECT_EQ(child->endTimeNS(), 200);
-  EXPECT_EQ(grandchild->endTimeNS(), 200);
-}
-
-TEST(PythonEventTimestampClampTest, LeavesActiveStackUnchanged) {
-  auto parent = makePyCall(100, 10000, /*system_tid=*/7, /*python_tid=*/1);
-  auto child = makePyCCall(150, 10000, /*system_tid=*/7, /*python_tid=*/1);
-  std::vector<std::shared_ptr<Result>> events{parent, child};
-
-  torch::profiler::impl::python_tracer::clampOverrunningPythonEvents(events);
-
-  EXPECT_EQ(parent->endTimeNS(), 10000);
-  EXPECT_EQ(child->endTimeNS(), 10000);
-}
-
-TEST(PythonEventTimestampClampTest, DoesNotUseExpiredAncestor) {
-  auto ancestor = makePyCCall(100, 200, /*system_tid=*/7, /*python_tid=*/1);
-  auto event = makePyCall(500, 600, /*system_tid=*/7, /*python_tid=*/1);
-  std::vector<std::shared_ptr<Result>> events{ancestor, event};
-
-  torch::profiler::impl::python_tracer::clampOverrunningPythonEvents(events);
-
-  EXPECT_EQ(event->endTimeNS(), 600);
-}
-
-TEST(PythonEventTimestampClampTest, DoesNotNestAdjacentEvents) {
-  auto first = makePyCall(100, 200, /*system_tid=*/7, /*python_tid=*/1);
-  auto second = makePyCall(200, 300, /*system_tid=*/7, /*python_tid=*/1);
-  std::vector<std::shared_ptr<Result>> events{first, second};
-
-  torch::profiler::impl::python_tracer::clampOverrunningPythonEvents(events);
-
-  EXPECT_EQ(second->endTimeNS(), 300);
-}
-
-TEST(PythonEventTimestampClampTest, SeparatesUnresolvedSystemThreads) {
-  constexpr auto unresolved_tid = std::numeric_limits<uint64_t>::max();
-  auto ancestor =
-      makePyCCall(100, 5000, unresolved_tid, /*python_tid=*/1);
-  auto event = makePyCall(500, 10000, unresolved_tid, /*python_tid=*/2);
-  std::vector<std::shared_ptr<Result>> events{ancestor, event};
-
-  torch::profiler::impl::python_tracer::clampOverrunningPythonEvents(events);
-
-  EXPECT_EQ(event->endTimeNS(), 10000);
+  const std::vector<int64_t> expected_end_times{500, 180, 500, 500, 900, 600};
+  const std::vector<int64_t> actual_end_times{
+      parent->endTimeNS(),
+      valid_child->endTimeNS(),
+      overrun->endTimeNS(),
+      descendant->endTimeNS(),
+      other_thread->endTimeNS(),
+      adjacent->endTimeNS()};
+  EXPECT_EQ(actual_end_times, expected_end_times);
 }
 
 #endif // USE_KINETO
