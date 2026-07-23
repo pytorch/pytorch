@@ -373,6 +373,7 @@ User code traceback:
         self.assertIn('return d["abc"]', msg)
         self.assertNotIn("\n    raise\n", msg)
         self.assertNotIn("During handling of the above exception", msg)
+        self.assertFalse(any(record.exc_info is not None for record in records))
 
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_backend_suppress_line(self):
@@ -408,7 +409,7 @@ ReluCompileError:""",
     def test_trigger_on_error(self):
         from torch.fx.experimental.validator import ValidationException
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def fn(x, shape):
             return x.split(shape)
 
@@ -470,7 +471,7 @@ Failed Source Expressions:
     def test_trigger_bisect_on_error(self):
         from torch.fx.experimental.validator import BisectValidationException
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def fn(x, shape):
             return x.split(shape)
 

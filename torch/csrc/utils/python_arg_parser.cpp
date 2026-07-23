@@ -485,7 +485,7 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
       if (ret.ptr() == nullptr) {
         throw python_error();
       }
-      return std::make_tuple(ret, mode_obj);
+      return std::make_tuple(std::move(ret), std::move(mode_obj));
     }
   }
 
@@ -513,7 +513,7 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
   if (ret.ptr() == nullptr) {
     throw python_error();
   }
-  return std::make_tuple(ret, mode_obj);
+  return std::make_tuple(std::move(ret), std::move(mode_obj));
 }
 
 // See Note: [Overloaded args] for what they hold
@@ -1545,7 +1545,7 @@ std::string FunctionSignature::toString() const {
     i++;
   }
   ss << ')';
-  return ss.str();
+  return std::move(ss).str();
 }
 
 [[noreturn]] static void extra_args(
@@ -1679,7 +1679,7 @@ bool FunctionSignature::parse(
 
   if (static_cast<size_t>(nargs) > max_pos_args && !allow_varargs_intlist) {
     if (raise_exception) {
-      // foo() takes takes 2 positional arguments but 3 were given
+      // foo() takes 2 positional arguments but 3 were given
       extra_args(*this, nargs);
     }
     return false;
