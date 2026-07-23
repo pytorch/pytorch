@@ -275,7 +275,7 @@ class MultiKernel:
                 if isinstance(precompile_arg, TensorArg):
                     line = f"assert not {arg}.isnan().any().item()"
                     wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
+                    line = f"assert not {arg}.float().isinf().any().item()"
                     wrapper.writeline(line)
 
     @property
