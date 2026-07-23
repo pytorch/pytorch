@@ -44,6 +44,8 @@ COMMON_BUILD_ENV: dict[str, str] = {
     "INSTALL_TEST": "0",
     "MSSdk": "1",
     "DISTUTILS_USE_SDK": "1",
+    # Ninja is forced for Windows builds via cmake.define.CMAKE_GENERATOR in
+    # pyproject.toml (single source of truth), so it is not set here.
 }
 
 
@@ -57,7 +59,6 @@ CPU_BUILD_ENV: dict[str, str] = {
 CUDA_BUILD_ENV_STATIC: dict[str, str] = {
     "USE_CUDA": "1",
     "TORCH_NVCC_FLAGS": "-Xfatbin -compress-all",
-    "CMAKE_GENERATOR": "Ninja",
 }
 
 
