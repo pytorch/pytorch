@@ -1973,7 +1973,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         direct_fn: Any,
     ) -> VariableTracker:
         if (
-            isinstance(method_var, variables.GetAttrVariable)
+            isinstance(method_var, variables.CallMethodVariable)
             and self.is_python_constant()
         ):
             return variables.ConstantVariable.create(
