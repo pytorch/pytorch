@@ -600,6 +600,15 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     ) -> None:
         self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
 
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: str,
+        mask: str,
+    ) -> None:
+        self.store(name, index, value)
+
     def store_reduction(self, name: str, index: sympy.Expr, value: str) -> None:
         self.store(name, index, f"store_reduction({value})")
 
