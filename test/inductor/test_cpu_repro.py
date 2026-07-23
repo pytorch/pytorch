@@ -1458,6 +1458,91 @@ class CPUReproTests(TestCase):
             # for parallel reduction.
             self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
 
+    @requires_vectorization
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @config.patch(freezing=True)
+    def test_parallel_reduction_not_nested_in_loop(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/190757
+        # Under freezing, the channels-last layout propagated from the conv /
+        # linear rewrites leaves the shifted-window masked-softmax reduction with
+        # a small (size-4, the number of attention heads) vectorized outer loop.
+        # The outer-work estimate in LoopNest.max_parallel_depth used to underflow
+        # to 0 (FloorDiv(4, vec_width)), so parallelism was relocated onto the
+        # inner reduction, emitting an OpenMP parallel region *inside* a serial
+        # loop that re-forked the thread pool once per iteration. Make sure no
+        # parallel region is nested inside a loop body.
+        C, WS, SHIFT, NH = 96, 8, 4, 4
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = torch.nn.Conv2d(1, C, 4, 4)
+                self.gate = torch.nn.Conv2d(C, C, 1)
+                self.ln = torch.nn.LayerNorm(C)
+                self.qkv = torch.nn.Linear(C, 3 * C)
+                self.out = torch.nn.Linear(C, C)
+
+            def forward(self, x):
+                x = F.interpolate(
+                    x, (1024, 64), mode="bicubic", align_corners=True
+                ).reshape(1, 1, 256, 256)
+                g = self.proj(x)
+                x = g * torch.sigmoid(self.gate(g))
+                b, c, h, w = x.shape
+                x = self.ln(x.flatten(2).transpose(1, 2)).view(b, h, w, c)
+                x = torch.roll(x, (-SHIFT, -SHIFT), (1, 2))
+                win = (
+                    x.view(b, h // WS, WS, w // WS, WS, c)
+                    .permute(0, 1, 3, 2, 4, 5)
+                    .reshape(-1, WS * WS, c)
+                )
+                n = win.shape[0]
+                r = (torch.arange(h) >= h - WS).long() + (
+                    torch.arange(h) >= h - SHIFT
+                ).long()
+                reg = (
+                    (r[:, None] * 3 + r[None, :])
+                    .view(h // WS, WS, w // WS, WS)
+                    .permute(0, 2, 1, 3)
+                    .reshape(-1, WS * WS)
+                )
+                mask = (
+                    (reg.unsqueeze(1) - reg.unsqueeze(2))
+                    .to(x.dtype)
+                    .masked_fill_(reg.unsqueeze(1) != reg.unsqueeze(2), -100.0)
+                )
+                q, k, v = (
+                    self.qkv(win)
+                    .view(n, WS * WS, 3, NH, c // NH)
+                    .permute(2, 0, 3, 1, 4)
+                )
+                s = q @ k.transpose(-1, -2) / math.sqrt(c // NH)
+                s = (
+                    s.view(1, n, NH, WS * WS, WS * WS) + mask.unsqueeze(1).unsqueeze(0)
+                ).view(-1, NH, WS * WS, WS * WS)
+                o = (s.softmax(-1) @ v).transpose(1, 2).reshape(n, WS * WS, c)
+                return self.out(o)
+
+        mod = Model().eval()
+        x = torch.randn(1, 1, 1001, 64)
+        with torch.no_grad():
+            expected = mod(x)
+            compiled_m = torch.compile(mod)
+            actual, code = run_and_get_cpp_code(compiled_m, x)
+            self.assertEqual(expected, actual, atol=1e-3, rtol=1e-3)
+            # An OpenMP parallel region must never be opened inside a loop body:
+            # doing so re-forks the thread pool on every iteration. Every
+            # `#pragma omp parallel` should be hoisted to the top of its kernel
+            # (i.e. at the kernel body indentation level, not nested in loops).
+            for line in code.splitlines():
+                if "#pragma omp parallel" in line:
+                    indent = len(line) - len(line.lstrip())
+                    self.assertLessEqual(
+                        indent,
+                        4,
+                        msg=f"OpenMP parallel region nested inside a loop: {line!r}",
+                    )
+
     def test_cat_mul(self):
         # https://github.com/pytorch/pytorch/issues/93365
         def fn(p0, p1):

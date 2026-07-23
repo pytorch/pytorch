@@ -20,7 +20,7 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, Max, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
@@ -6388,7 +6388,9 @@ class LoopNest:
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            num_steps = num_steps * FloorDiv(loop.size, loop.steps)
+            # num_steps == 0 would make the heuristic below think there is no outer
+            # work and wrongly move parallelism onto an inner reduction loop.
+            num_steps = num_steps * Max(1, FloorDiv(loop.size, loop.steps))
             max_depth += 1
 
         def get_simd_vec_depth(loops):
