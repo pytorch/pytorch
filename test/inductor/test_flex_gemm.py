@@ -235,9 +235,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         name_fn=lambda case: case[0],
     )
     def test_fast_math_decompositions_preserve_type_promotion(self, case):
-        from torch._higher_order_ops.flex_gemm import (
-            flex_gemm_body_decomposition_table,
-        )
+        from torch._higher_order_ops.flex_gemm import flex_gemm_body_decomposition_table
         from torch._inductor.decomposition import decompositions
         from torch.fx.experimental.proxy_tensor import make_fx
 
