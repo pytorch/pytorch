@@ -3,6 +3,8 @@ import warnings
 from functools import cache
 from typing import cast
 
+import torch
+
 # This handles collecting registration of all native ops
 # Also need to import DSL utils to make sure DSL registration is ok
 from . import cutedsl_utils, dsl_registry, ops, registry, triton_utils
@@ -57,3 +59,53 @@ with warnings.catch_warnings():
         category=UserWarning,
     )
     registry._register_all_overrides()
+
+
+@cache
+def _load_native_aot_lib() -> str | None:
+    """Load the native-AOT kernel library, if present.
+
+    The library's static initializers register kernels on the
+    at::native DispatchStubs in the generated NativeAotStubs.h; without
+    it the stubs have no kernel and the generated wrappers run the
+    stock impls. Loading must not initialize CUDA: kernel cubins load
+    lazily on first use.
+
+    Search order: $TORCH_NATIVE_AOT_LIB, torch/lib (installed),
+    build/native_aot (development). Returns the loaded path or None.
+    """
+    if os.getenv("TORCH_DISABLE_NATIVE_AOT") == "1":
+        return None
+    torch_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    name = "libtorch_native_aot_cuda.so"
+    candidates = [
+        os.getenv("TORCH_NATIVE_AOT_LIB"),
+        os.path.join(torch_dir, "lib", name),
+        os.path.join(os.path.dirname(torch_dir), "build", "native_aot", name),
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            try:
+                # Registers the lib in torch.ops.loaded_libraries as well
+                # as dlopen-ing it (static initializers do the stub
+                # registration; there are no TORCH_LIBRARY defs inside).
+                torch.ops.load_library(path)
+            except OSError as e:
+                warnings.warn(f"Failed to load native-AOT library {path}: {e}")
+                return None
+            return path
+    return None
+
+
+_load_native_aot_lib()
+
+
+def set_aot_enabled(enabled: bool) -> None:
+    """Toggle at::globalContext().allowNativeAot(): the switch every
+    generated stub consultation checks, so False gives stock-aten
+    behavior even with the AOT kernel library loaded."""
+    torch._C._set_native_aot_enabled(enabled)
+
+
+def aot_enabled() -> bool:
+    return torch._C._get_native_aot_enabled()
