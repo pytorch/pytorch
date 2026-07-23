@@ -88,8 +88,17 @@ def load(
         All tensors in ``state_dict`` must be allocated on their
         destination device *prior to* calling this function.
 
-        All non-tensor data is loaded using `torch.load()` and modified in place
-        on state_dict.
+        Non-tensor payloads are loaded using ``torch.load()`` and modified in
+        place on ``state_dict``. Note, however, that the checkpoint's
+        ``.metadata`` sidecar is read with a plain ``pickle.load()`` (in
+        ``FileSystemReader.read_metadata``), so the ``weights_only`` safeguard
+        of ``torch.load`` does **not** apply to the metadata read.
+
+    .. warning::
+        Loading a checkpoint deserializes data with ``pickle`` (the
+        ``.metadata`` sidecar, and by default the non-tensor payloads), which
+        can execute arbitrary code. Only load checkpoints produced by a source
+        you trust -- the same caveat :func:`torch.load` documents.
 
     .. warning::
         Users must call `load_state_dict` on the root module to ensure load
