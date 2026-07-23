@@ -4775,7 +4775,7 @@ class TestDistributionsGPU(DistributionsTestCase):
 
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_gpu_sample(self):
         set_rng_seed(0)
