@@ -1104,17 +1104,25 @@ THPObjectPtr createXpuShareTuple(const at::Storage& storage) {
   THPObjectPtr offset_bytes(THPUtils_packInt32(0));
 
   if (storage.data()) {
-    c10::xpu::syncStreamsOnDevice(storage.device().index());
     auto shandle =
         c10::xpu::XPUCachingAllocator::shareIpcHandle(storage.mutable_data());
-    auto ipc_event = XpuIpcEvent::create(storage.device().index());
-    ipc_event.signal();
+    auto ipc_event = std::make_shared<XpuIpcEvent>(
+        XpuIpcEvent::create(storage.device().index()));
     handle = PyBytes_FromStringAndSize(
         shandle.handle.c_str(), static_cast<Py_ssize_t>(shandle.handle.size()));
-    const auto event_handle = ipc_event.exportHandle();
+    const auto event_handle = ipc_event->exportHandle();
     event = PyBytes_FromStringAndSize(
         event_handle.c_str(), static_cast<Py_ssize_t>(event_handle.size()));
     offset_bytes = PyLong_FromSsize_t(static_cast<Py_ssize_t>(shandle.offset));
+
+    c10::xpu::getCurrentXPUStream(storage.device().index()).synchronize();
+    try {
+      ipc_event->signal();
+    } catch (const c10::Error& e) {
+      TORCH_WARN("XPU IPC event host signal failed: ", e.msg());
+    } catch (const std::exception& e) {
+      TORCH_WARN("XPU IPC event host signal failed: ", e.what());
+    }
 
     at::DataPtr sent_data_ptr =
         GetNewRefCountedXpuSentData(storage.mutable_data(), storage.device());
@@ -1234,16 +1242,15 @@ c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
             static_cast<XpuIpcDeleterContext*>(ctx_));
         // Ensure device context is correct before operations on device memory
         c10::DeviceGuard device_guard(c10::Device(c10::kXPU, ctx->device));
-        
-        // Synchronize streams to ensure all pending operations complete
-        // BEFORE closing the IPC handle
+
+        // Synchronize current stream before closing the IPC handle.
         if (ctx->device >= 0) {
-          c10::xpu::syncStreamsOnDevice(ctx->device);
+          c10::xpu::getCurrentXPUStream(ctx->device).synchronize();
         }
-        
+
         // Close IPC handle after synchronization is complete
         ctx->base_ptr.reset();
-        
+
         // Release reference counter after IPC handle is closed
         ReleaseXpuIPCRefCounter(
             ctx->ref_counter_handle, ctx->ref_counter_offset);
