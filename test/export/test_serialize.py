@@ -158,7 +158,7 @@ class TestSerialize(TestCase):
         new_gm = copy.deepcopy(ep.graph_module)
         # Inject the custom operator.
         for node in new_gm.graph.nodes:
-            if node.name == "add":
+            if node.name == "add_tensor":
                 node.target = foo_custom_op
 
         new_ep = ep._update(new_gm, ep.graph_signature, verifiers=[ExtensionVerifier])
@@ -244,8 +244,8 @@ class TestSerialize(TestCase):
             str(ep.graph_module.code).strip(),
             """\
 def forward(self, x):
-    sin = torch.ops.aten.sin.default(x);  x = None
-    return (sin,)""",
+    sin_default = torch.ops.aten.sin.default(x);  x = None
+    return (sin_default,)""",
         )
 
     def test_metadata_parsing_with_layer_split(self):
@@ -339,7 +339,7 @@ def forward(self, x):
         save(ep, buffer)
         loaded_ep = load(buffer)
         val = loaded_ep.graph_signature.parameters_to_mutate
-        self.assertEqual({"div": "parameter"}, val)
+        self.assertEqual({"div_tensor": "parameter"}, val)
 
     def test_serialize_constant_outputs(self):
         class MyModule(torch.nn.Module):
@@ -1940,13 +1940,34 @@ class TestDeserialize(TestCase):
             deserialized_ep.graph_module.code.strip("\n"),
             """\
 def forward(self, x):
-    topk = torch.ops.aten.topk.default(x, 2);  x = None
-    getitem = topk[0]
-    getitem_1 = topk[1];  topk = None
-    mul_tensor = torch.ops.aten.mul.Tensor(getitem, 2)
-    mul = torch.ops.aten.mul.Tensor(getitem, mul_tensor);  getitem = mul_tensor = None
-    return (mul, getitem_1)
+    topk_default = torch.ops.aten.topk.default(x, 2);  x = None
+    getitem = topk_default[0]
+    getitem_1 = topk_default[1];  topk_default = None
+    mul_tensor_1 = torch.ops.aten.mul.Tensor(getitem, 2)
+    mul_tensor = torch.ops.aten.mul.Tensor(getitem, mul_tensor_1);  getitem = mul_tensor_1 = None
+    return (mul_tensor, getitem_1)
     """,
+        )
+
+    def test_canonicalized_getitem_roundtrip_stable(self):
+        # Canonicalization can interleave a multi-output node's getitems with
+        # other computation (e.g. a[0]+a[1]+a[2]), but serialization drops
+        # getitem nodes and the deserializer regroups them after their
+        # producer.  _group_getitem_nodes normalizes the exported graph to that
+        # same layout so the serialize/deserialize roundtrip preserves node
+        # order.  Regression test for that stability, covering multiple
+        # producers where one consumes another's getitem (grouping must chain).
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a = torch.split(x, 2)
+                b = torch.split(a[0], 1)
+                return b[0] + b[1] + a[1] + a[2]
+
+        ep = torch.export.export(M(), (torch.randn(6, 4),), strict=True)
+        deserialized_ep = deserialize(serialize(ep))
+        self.assertEqual(
+            [n.name for n in ep.graph.nodes],
+            [n.name for n in deserialized_ep.graph_module.graph.nodes],
         )
 
     @parametrize(
@@ -2629,9 +2650,9 @@ class TestSerializeCustomClass(TestCase):
             str(ep.graph_module.code).strip(),
             """\
 def forward(self, obj_attr, x):
-    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(obj_attr, x);  obj_attr = None
-    add = torch.ops.aten.add.Tensor(x, takes_foo);  x = takes_foo = None
-    return (add,)""",
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(obj_attr, x);  obj_attr = None
+    add_tensor = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
+    return (add_tensor,)""",
         )
         self.assertTrue(isinstance(ep.constants["attr"], torch.ScriptObject))
         gm = ep.module()
@@ -2642,9 +2663,9 @@ def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
     _guards_fn = self._guards_fn(x);  _guards_fn = None
-    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(attr, x);  attr = None
-    add = torch.ops.aten.add.Tensor(x, takes_foo);  x = takes_foo = None
-    return pytree.tree_unflatten((add,), self._out_spec)""",
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, x);  attr = None
+    add_tensor = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
+    return pytree.tree_unflatten((add_tensor,), self._out_spec)""",
         )
         self.assertTrue(isinstance(gm.attr, torch.ScriptObject))
 

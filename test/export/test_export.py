@@ -19351,22 +19351,22 @@ class TestExportCustomClass(TorchTestCase):
             traced.graph_module.code,
             """\
 def forward(self, x, mask):
-    masked_select = torch.ops.aten.masked_select.default(x, mask);  x = mask = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(masked_select, 0)
-    ge = sym_size_int_1 >= 0
+    masked_select_default = torch.ops.aten.masked_select.default(x, mask);  x = mask = None
+    sym_size_int = torch.ops.aten.sym_size.int(masked_select_default, 0)
+    ge = sym_size_int >= 0
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-    le = sym_size_int_1 <= 1188864
+    le = sym_size_int <= 1188864
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 1188864 on node 'le'");  le = _assert_scalar_default_1 = None
-    mod = sym_size_int_1 % 1548
-    eq_2 = mod == 0;  mod = None
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(Mod(u0, 1548), 0) on node 'eq_2'");  eq_2 = _assert_scalar_default_2 = None
-    floordiv = sym_size_int_1 // 1548
-    mul_2 = 1548 * floordiv;  floordiv = None
-    eq_3 = sym_size_int_1 == mul_2;  sym_size_int_1 = mul_2 = None
-    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(eq_3, "Runtime assertion failed for expression Eq(u0, 1548*((u0//1548))) on node 'eq_3'");  eq_3 = _assert_scalar_default_3 = None
-    view = torch.ops.aten.view.default(masked_select, [-1, 1548]);  masked_select = None
-    add = torch.ops.aten.add.Tensor(view, 1);  view = None
-    return (add,)""",
+    mod = sym_size_int % 1548
+    eq = mod == 0;  mod = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(Mod(u0, 1548), 0) on node 'eq_2'");  eq = _assert_scalar_default_2 = None
+    floordiv = sym_size_int // 1548
+    mul = 1548 * floordiv;  floordiv = None
+    eq_1 = sym_size_int == mul;  sym_size_int = mul = None
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(eq_1, "Runtime assertion failed for expression Eq(u0, 1548*((u0//1548))) on node 'eq_3'");  eq_1 = _assert_scalar_default_3 = None
+    view_default = torch.ops.aten.view.default(masked_select_default, [-1, 1548]);  masked_select_default = None
+    add_tensor = torch.ops.aten.add.Tensor(view_default, 1);  view_default = None
+    return (add_tensor,)""",
             ignore_empty_lines=True,
         )
 
@@ -19386,9 +19386,9 @@ def forward(self, x, mask):
             traced.graph_module.code,
             """\
 def forward(self, x, y):
-    item = torch.ops.aten.item.default(y);  y = None
-    select = torch.ops.aten.select.int(x, 0, item);  x = item = None
-    return (select,)""",
+    item_default = torch.ops.aten.item.default(y);  y = None
+    select_int = torch.ops.aten.select.int(x, 0, item_default);  x = item_default = None
+    return (select_int,)""",
             ignore_empty_lines=True,
         )
 
