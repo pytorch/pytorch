@@ -599,6 +599,32 @@ class TestStandaloneInductor(TestCase):
         finally:
             self._clear_cpp_builder_compiler_caches()
 
+    def test_is_msvc_cl_handles_invalid_help_bytes(self):
+        help_output = (
+            b"Compilateur d'optimisation Microsoft (R) C/C++ version"
+            b"\xff19.35.32216.1\r\n"
+        )
+        completed_process = subprocess.CompletedProcess(
+            ["cl", "/help"], 0, stdout=help_output
+        )
+
+        cpp_builder._is_msvc_cl.cache_clear()
+        try:
+            # Keep decode settings strict; this probe should not decode /help output.
+            with (
+                mock.patch("torch._inductor.cpp_builder._IS_WINDOWS", True),
+                mock.patch(
+                    "torch._inductor.cpp_builder.SUBPROCESS_DECODE_ARGS", ("utf-8",)
+                ),
+                mock.patch(
+                    "torch._inductor.cpp_builder.subprocess.run",
+                    return_value=completed_process,
+                ),
+            ):
+                self.assertTrue(cpp_builder._is_msvc_cl("cl"))
+        finally:
+            cpp_builder._is_msvc_cl.cache_clear()
+
 
 if __name__ == "__main__":
     if HAS_CPU:

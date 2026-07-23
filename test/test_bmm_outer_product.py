@@ -111,7 +111,9 @@ class TestBmmOuterProductDevice(TestCase):
 
             out = torch.bmm(a, b)
 
-            self.assertEqual(torch.accelerator.current_device_index(), devices[0])
+            self.assertEqual(
+                torch.accelerator.current_device_index(), int(devices[0].split(":")[1])
+            )
             self.assertEqual(out.device, torch.device(devices[1]))
             self.assertEqual(out, a * b)
 
