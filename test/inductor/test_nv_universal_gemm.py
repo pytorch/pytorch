@@ -316,8 +316,9 @@ class TestNVUniversalGemm(TestCase):
         """An NVGEMM addmm whose bias-epilogue output is an intermediate consumed
         downstream must not leave that output retained by the cached EFC kernel,
         or CUDA graph capture fails ("tensor(s) in the cudagraph pool not tracked
-        as outputs") and the tensor leaks. The cached kernel is built from fake
-        tensors, so runtime outputs flow only through the per-call arguments.
+        as outputs") and the tensor leaks. The cached kernel is built from
+        meta-device tensors, so runtime outputs flow only through the per-call
+        arguments.
         """
         dtype = torch.bfloat16
         m, k = 512, 512
