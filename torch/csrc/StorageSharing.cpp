@@ -1206,7 +1206,6 @@ bool parseXpuSharedStorageArgs(PyObject* args, XpuSharedStorageArgs& parsed) {
 
 c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
     const XpuSharedStorageArgs& args) {
-  c10::DeviceGuard device_guard(c10::Device(c10::kXPU, args.device));
   XpuIpcEventRefGuard event_guard;
   if (!args.event.empty()) {
     XpuIpcEvent event = XpuIpcEvent::open(args.device, args.event);
@@ -1240,18 +1239,20 @@ c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
       +[](void* ctx_) {
         std::unique_ptr<XpuIpcDeleterContext> ctx(
             static_cast<XpuIpcDeleterContext*>(ctx_));
-        // Ensure device context is correct before operations on device memory
-        c10::DeviceGuard device_guard(c10::Device(c10::kXPU, ctx->device));
-
-        // Synchronize current stream before closing the IPC handle.
         if (ctx->device >= 0) {
-          c10::xpu::getCurrentXPUStream(ctx->device).synchronize();
+          try {
+            c10::xpu::getCurrentXPUStream(ctx->device).synchronize();
+          } catch (const std::exception& e) {
+            TORCH_WARN(
+                "XPU IPC deleter synchronize failed: ",
+                e.what(),
+                ". This is a defensive fallback; once Copy.cpp reports/handles "
+                "device-lost cleanly, this warning path should stop triggering.");
+          }
         }
 
-        // Close IPC handle after synchronization is complete
         ctx->base_ptr.reset();
 
-        // Release reference counter after IPC handle is closed
         ReleaseXpuIPCRefCounter(
             ctx->ref_counter_handle, ctx->ref_counter_offset);
       },
@@ -1283,8 +1284,6 @@ static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
         "Attempted to send XPU tensor received from another process; "
         "this is not currently supported. Consider cloning before sending.");
   }
-
-  at::DeviceGuard device_guard(storage.device());
 
   try {
     auto tuple = createXpuShareTuple(storage);
