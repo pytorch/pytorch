@@ -21,12 +21,14 @@ from torch.profiler._cupti.monitor_trace import merge_trace_window_into_chrome_t
 from torch.profiler._cupti.observers.base import (
     CuptiMonitorObserver,
     default_graph_annotation_resolver,
+    default_graph_dependency_resolver,
     ObserverAnnotationSettings,
 )
 from torch.profiler._cupti.observers.observation_window import WindowFinalizerMixin
 from torch.profiler._cupti.records import (
     Api,
     CudaEvent,
+    Environment,
     ExternalCorrelation,
     Field,
     Kernel,
@@ -162,6 +164,14 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Overhead.END,
         Overhead.CORRELATION_ID,
     },
+    # Periodically-sampled GPU environment (power/clock/thermal/cooling). Always on; rendered
+    # as counter tracks. DATA is the 20-byte metric union, split by ENVIRONMENT_KIND.
+    ActivityKind.ENVIRONMENT: {
+        Environment.DEVICE_ID,
+        Environment.TIMESTAMP,
+        Environment.ENVIRONMENT_KIND,
+        Environment.ENVIRONMENT_KIND_DATA,
+    },
 }
 
 
@@ -236,6 +246,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             selection,
             annotations=ObserverAnnotationSettings(
                 graph_annotation_resolver=default_graph_annotation_resolver,
+                graph_dependency_resolver=default_graph_dependency_resolver,
             ),
         )
         if self.available:
@@ -416,7 +427,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             if w is None:
                 return
             w["cpu"] = os.fspath(cpu_trace_path)
-            # Monitor traces are always gzipped; the writer keys gzip off the .gz suffix.
+            # Monitor traces are always gzipped (chrome JSON or .pftrace alike); the writer
+            # keys gzip + format off the suffix.
             out = os.fspath(output_path)
             w["out"] = out if out.endswith(".gz") else out + ".gz"
         self._maybe_write(window_id)
@@ -496,6 +508,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # Attach the per-collective blob as a "metadata" column on the GPU-op kinds (these
         # columns are this thread's now, no lock). No-op without comms metadata.
         _attach_metadata(columns, meta, self._metadata_resolver)
+        graph_deps = _window_graph_deps(self._dependency_resolver, columns)
         with self._lock:
             w = self._windows.get(window_id)
             if w is None:
@@ -505,6 +518,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 "user_annotations": w["annotations"],
                 "thread_resource_map": w["thread_map"],
                 "start_ns": start,
+                "graph_deps": graph_deps,
             }
 
     def _maybe_write(self, window_id: int) -> None:
@@ -603,6 +617,29 @@ def _attach_metadata(
                     if blob is not None:
                         meta[i] = blob
         c["metadata"] = meta
+
+
+def _window_graph_deps(
+    resolver: Any, columns: dict[str, dict[str, Any]]
+) -> dict[int, list[int]]:
+    """Resolve the graph node->node dependency edges for the graph_node_ids present in this
+    window, so the pftrace export can draw node->node arrows. Calls ``resolver`` per present
+    graph_node_id (memoized by the observer, see CuptiMonitorObserver._dependency_resolver) and
+    keeps only nodes with a nonempty predecessor list. Empty when there is no resolver, no
+    graphed ops, or no recorded dependencies."""
+    if resolver is None:
+        return {}
+    present: set[int] = set()
+    for kind_str in ("kernel", "gpu_memcpy", "gpu_memset"):
+        c = columns.get(kind_str)
+        if c is not None and "graph_node_id" in c:
+            present.update(int(g) for g in np.unique(c["graph_node_id"]) if g)
+    deps: dict[int, list[int]] = {}
+    for g in present:
+        preds = resolver(g)
+        if preds:
+            deps[g] = preds
+    return deps
 
 
 def _demangle_column(names: Any) -> Any:
@@ -809,6 +846,19 @@ def _cuda_event_columns(cols, convert, resolver):
     }
 
 
+def _environment_columns(cols, convert, resolver):
+    del resolver
+    # DATA is the union's first 8 bytes (u64): the primary metric pair (e.g. POWER ->
+    # power | powerLimit<<32, SPEED -> smClock | memoryClock<<32). Split by environment_kind
+    # in the consumer (monitor_trace) into the counter tracks.
+    return {
+        "start_ns": convert(cols[Environment.TIMESTAMP.id]),
+        "device_id": cols[Environment.DEVICE_ID.id].astype(np.int64),
+        "environment_kind": cols[Environment.ENVIRONMENT_KIND.id].astype(np.int64),
+        "data": cols[Environment.ENVIRONMENT_KIND_DATA.id].astype(np.uint64),
+    }
+
+
 # kind -> (chrome-trace tag, column builder, is_timed). Timed kinds bucket into windows;
 # untimed kinds (external_correlation, cuda_event) are join inputs that ride along.
 _COLUMN_BUILDERS: dict[int, tuple[str, Any, bool]] = {
@@ -826,4 +876,5 @@ _COLUMN_BUILDERS: dict[int, tuple[str, Any, bool]] = {
     int(ActivityKind.OVERHEAD): ("overhead", _overhead_columns, True),
     int(ActivityKind.SYNCHRONIZATION): ("cuda_sync", _sync_columns, True),
     int(ActivityKind.CUDA_EVENT): ("cuda_event", _cuda_event_columns, False),
+    int(ActivityKind.ENVIRONMENT): ("environment", _environment_columns, True),
 }

@@ -37,6 +37,12 @@ GraphAnnotationResolver = Callable[[int], "Any | None"]
 # annotation resolver; it reads the node's name via the graph annotation registry.
 LaneResolver = Callable[[int], "tuple[int, str] | None"]
 
+# graph_node_id -> predecessor graph_node_ids (or None when the node has no recorded
+# dependencies): the CUDA-graph node->node edges the pftrace export draws as dependency arrows,
+# read from the recorded dependency registry (survives replay, keyed on graph_node_id like the
+# annotation resolver). Pluggable; see ObserverAnnotationSettings.graph_dependency_resolver.
+GraphDependencyResolver = Callable[[int], "list[int] | None"]
+
 
 def default_graph_annotation_resolver(graph_node_id: int) -> Any | None:
     """Default resolver: map a CUDA-graph node id to its registered annotation, or None when
@@ -50,6 +56,20 @@ def default_graph_annotation_resolver(graph_node_id: int) -> Any | None:
     except Exception:
         return None
     return annotations.get(graph_node_id)
+
+
+def default_graph_dependency_resolver(graph_node_id: int) -> list[int] | None:
+    """Default resolver: map a CUDA-graph node id to its recorded predecessor graph_node_ids,
+    or None when it has none."""
+    if graph_node_id == 0:
+        return None
+    try:
+        from torch.cuda._graph_annotations import get_graph_dependencies
+
+        dependencies = get_graph_dependencies()
+    except Exception:
+        return None
+    return dependencies.get(graph_node_id)
 
 
 @dataclass(frozen=True)
@@ -72,6 +92,10 @@ class ObserverAnnotationSettings:
     # CUDA stream lane (no reassignment). Independent of graph_annotation_resolver, though a
     # consumer's implementation typically maps the node's annotation to a lane.
     graph_lane_resolver: LaneResolver | None = None
+    # Pluggable graph node->node dependency lookup (see GraphDependencyResolver). None -> no
+    # dependency arrows. Keyed on graph_node_id like graph_annotation_resolver; pass
+    # default_graph_dependency_resolver to enable.
+    graph_dependency_resolver: GraphDependencyResolver | None = None
 
 
 class CuptiMonitorObserver:
@@ -113,6 +137,16 @@ class CuptiMonitorObserver:
     def _lane_resolver(self, fn: LaneResolver | None) -> None:
         self._lane_resolver_cached = functools.cache(fn) if fn is not None else None
 
+    @property
+    def _dependency_resolver(self) -> GraphDependencyResolver | None:
+        return self._dependency_resolver_cached
+
+    @_dependency_resolver.setter
+    def _dependency_resolver(self, fn: GraphDependencyResolver | None) -> None:
+        self._dependency_resolver_cached = (
+            functools.cache(fn) if fn is not None else None
+        )
+
     def __init__(
         self,
         activities: Any,
@@ -124,10 +158,12 @@ class CuptiMonitorObserver:
         if annotations is None:
             self._annotation_resolver = None
             self._lane_resolver = None
+            self._dependency_resolver = None
             self._eager = False
         else:
             self._annotation_resolver = annotations.graph_annotation_resolver
             self._lane_resolver = annotations.graph_lane_resolver
+            self._dependency_resolver = annotations.graph_dependency_resolver
             self._eager = annotations.support_eager_annotations
         if self._annotation_resolver is not None:
             activities = self._with_graph_fields(activities)

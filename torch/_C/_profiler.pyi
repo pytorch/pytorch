@@ -312,6 +312,23 @@ class _CuptiMonitorModule:
     def current_external_id() -> int: ...
     @staticmethod
     def metadata_put_external(blob: str, external_id: int = 0) -> None: ...
+    # groups: each a tuple (ts, end, track_uuid, name_iid, int_annos, str_annos,
+    #   arr_annos, json_annos, flow, gpu_corr, cat_iid) where gpu_corr is a
+    #   (int32_offsets, int64_ids) CSR of per-slice render-stage event_ids or None.
+    # render: (gpu_specs, gfx_contexts, stage_cols, extra, launch, tables, const_extra)
+    #   where stage_cols = (ts, dur, event_id, gpu_id, hw_queue_iid, stage_iid,
+    #   context, name_iid, event_wait) and event_wait is a (int32_offsets, uint64_ids)
+    #   CSR of per-stage event_wait_ids (graph node->node dependency arrows).
+    @staticmethod
+    def encode_pftrace(
+        base_ns: int,
+        tracks: list[tuple[int, int, bool, int, int, str]],
+        name_table: list[str],
+        category_table: list[str],
+        groups: list[tuple],
+        render: tuple | None = None,
+        counters: tuple | None = None,
+    ) -> bytes: ...
 
 _cupti_monitor: _CuptiMonitorModule
 
