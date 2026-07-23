@@ -664,6 +664,19 @@ def _is_reduceop_supported(op: str | ReduceOp):
 
 
 def all_reduce_backward(ctx, grad_output: torch.Tensor):
+    """
+    Backward for all_reduce: all_reduce with same reduce_op.
+    Forward aggregates tensors, backward aggregates gradients.
+
+    Args:
+        ctx: Context object
+        grad_output: Gradient from downstream operations
+
+    Returns:
+        Tuple of (grad_input, grad_group_name, grad_reduce_op)
+        grad_group_name and grad_reduce_op are None (not differentiable)
+    """
+    group_name = ctx.group_name
     reduce_op = ctx.reduce_op
     if not _is_reduceop_supported(reduce_op):
         raise RuntimeError(
@@ -671,7 +684,7 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
         )
     grad_reduce_op = "sum" if _is_min_max(reduce_op) else reduce_op
     output = torch.ops._c10d_functional.all_reduce(
-        grad_output.contiguous(), grad_reduce_op, ctx.group_name
+        grad_output.contiguous(), grad_reduce_op, group_name
     )
     if _is_min_max(reduce_op):
         fwd_input, fwd_output = ctx.saved_tensors
@@ -683,6 +696,13 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
 
 
 def all_reduce_setup_context(ctx, inputs, output):
+    """
+    Setup context for all_reduce backward.
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (input, reduce_op, group_name)
+        output: Output from forward pass
+    """
     input, reduce_op, group_name = inputs
     ctx.group_name = group_name
     ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
