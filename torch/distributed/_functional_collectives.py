@@ -659,9 +659,13 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
     group_name = ctx.group_name
     reduce_op = ctx.reduce_op
 
-    if reduce_op != "sum":
+    # Only linear reductions have a well-defined all_reduce backward: for both
+    # 'sum' and 'avg' the gradient is an all_reduce of grad_output with the same
+    # op (grad wrt each rank's input is the same reduction of the per-rank
+    # grad_outputs). Nonlinear ops (min/max/product/premul_sum) do not.
+    if reduce_op not in ("sum", "avg"):
         raise RuntimeError(
-            f"all_reduce backward only supports 'sum' reduction, got '{reduce_op}'"
+            f"all_reduce backward only supports 'sum' and 'avg' reductions, got '{reduce_op}'"
         )
 
     # Backward does all_reduce with the same reduce_op
