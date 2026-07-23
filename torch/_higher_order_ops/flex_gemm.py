@@ -16,6 +16,8 @@ from torch._higher_order_ops.utils import (
     unique_graph_id,
 )
 from torch._ops import HigherOrderOperator
+from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch._prims_common.wrappers import elementwise_type_promotion_wrapper
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
@@ -75,11 +77,19 @@ FLEX_GEMM_BODY_GRAPH_PASSES: tuple[
 ] = (mark_flex_gemm_body_gemm_node,)
 
 
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("x",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
 def flex_gemm_fast_math_sigmoid(x: torch.Tensor) -> torch.Tensor:
     """Use the tanh sigmoid identity selected by QUACK fast math."""
     return torch.tanh(x * 0.5) * 0.5 + 0.5
 
 
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("x",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
 def flex_gemm_fast_math_silu(x: torch.Tensor) -> torch.Tensor:
     """Use the tanh SiLU identity selected by QUACK fast math."""
     half = x * 0.5
@@ -92,10 +102,10 @@ def flex_gemm_fast_math_gelu(
     *,
     fallback: Callable[..., Any],
 ) -> torch.Tensor:
-    """Approximate exact GELU with the standard tanh formulation."""
-    if approximate != "none":
-        return fallback(x, approximate)
-    return 0.5 * x * (1.0 + torch.tanh(0.7978845608028654 * (x + 0.044715 * x * x * x)))
+    """Select the standard tanh GELU approximation for exact GELU calls."""
+    if approximate == "none":
+        approximate = "tanh"
+    return fallback(x, approximate)
 
 
 FLEX_GEMM_FAST_MATH_DECOMPOSITIONS: dict[torch._ops.OpOverload, Callable[..., Any]] = {
