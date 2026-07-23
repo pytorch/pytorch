@@ -851,6 +851,80 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
 
 
+    # --- C descriptor type check (descr_check equivalent) ---
+
+    def test_method_descriptor_incompatible_type(self):
+        class Borrower:
+            append = list.append
+
+        def fn(x, obj):
+            try:
+                obj.append
+                return x + 1
+            except TypeError:
+                return x + 2
+
+        x = torch.randn(4)
+        b = Borrower()
+        eager = fn(x, b).sum()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x, b).sum()
+        self.assertEqual(eager, compiled)
+
+    def test_wrapper_descriptor_incompatible_type(self):
+        class Borrower:
+            add = list.__add__
+
+        def fn(x, obj):
+            try:
+                obj.add
+                return x + 1
+            except TypeError:
+                return x + 2
+
+        x = torch.randn(4)
+        b = Borrower()
+        eager = fn(x, b).sum()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x, b).sum()
+        self.assertEqual(eager, compiled)
+
+    def test_member_descriptor_incompatible_type(self):
+        class Alien:
+            __slots__ = ("x",)
+
+        class Borrower:
+            x = Alien.x
+
+        def fn(x, obj):
+            try:
+                obj.x
+                return x + 1
+            except TypeError:
+                return x + 2
+
+        x = torch.randn(4)
+        b = Borrower()
+        eager = fn(x, b).sum()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x, b).sum()
+        self.assertEqual(eager, compiled)
+
+    def test_getset_descriptor_incompatible_type(self):
+        class Borrower:
+            __class__ = int.__class__
+
+        def fn(x, obj):
+            try:
+                obj.__class__
+                return x + 1
+            except TypeError:
+                return x + 2
+
+        x = torch.randn(4)
+        b = Borrower()
+        eager = fn(x, b).sum()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x, b).sum()
+        self.assertEqual(eager, compiled)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

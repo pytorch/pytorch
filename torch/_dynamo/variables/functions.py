@@ -3942,6 +3942,7 @@ class TritonSetAllocatorVariable(VariableTracker):
 # the descriptor binding step faithfully.
 # ---------------------------------------------------------------------------
 
+
 def _check_descriptor_obj_type(
     tx: "InstructionTranslatorBase",
     descriptor: types.MethodDescriptorType
@@ -4229,17 +4230,7 @@ class MethodDescriptorVariable(VariableTracker):
             )
         obj, *rest = args
         name = self.descriptor.__name__
-        try:
-            obj_type = obj.python_type()
-            if not issubclass(obj_type, self.descriptor.__objclass__):
-                raise_type_error(
-                    tx,
-                    f"descriptor '{name}' for "
-                    f"'{self.descriptor.__objclass__.__name__}' objects "
-                    f"doesn't apply to a '{obj_type.__name__}' object",
-                )
-        except NotImplementedError:
-            pass
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses.
