@@ -17,6 +17,8 @@ import types
 import typing
 import unittest
 
+import numpy as np
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -1357,6 +1359,34 @@ class SetDelItemTests(torch._dynamo.test_case.TestCase):
 
         result = self._compile(fn, torch.arange(3.0))
         self.assertIn("Tensor does not support deleting items", result)
+
+    def test_numpy_setitem_sequence_rhs(self):
+        # Regression: numpy setitem with a Python sequence RHS. numpy broadcasts
+        # the sequence; the tensor setitem path rejects it ("can't assign a
+        # tuple/list to a torch.LongTensor"). Mirrors scipy _broadcast_shapes.
+        def fn(x):
+            a = np.ones((2, 2), dtype=int)
+            for row in a:
+                row[1:] = (7,)  # STORE_SUBSCR, tuple RHS
+            a[0] = [3, 4]  # list RHS
+            operator.setitem(a, 1, (5, 6))  # operator.setitem, tuple RHS
+            return a, x + 1
+
+        self.assertEqual(self._compile(fn, torch.zeros(1)), fn(torch.zeros(1)))
+
+    def test_numpy_delitem_raises(self):
+        # NumpyNdarrayVariable.mp_ass_subscript_impl rejects deletion with the
+        # same ValueError numpy raises eagerly.
+        def fn(x):
+            a = np.ones(3, dtype=int)
+            try:
+                del a[0]
+                return "no error"
+            except ValueError as e:
+                return str(e)
+
+        result = self._compile(fn, torch.zeros(1))
+        self.assertIn("cannot delete array elements", result)
 
 
 if __name__ == "__main__":
