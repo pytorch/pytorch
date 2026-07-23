@@ -4750,10 +4750,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             return c + x, (c + x).clone()
 
         init = torch.tensor(0.0)
-        with self.assertRaisesRegex(
-            (RuntimeError, TypeError),
-            r"combine_fn to accept x=None|unsupported operand type.*NoneType",
-        ):
+        with self.assertRaisesRegex(TypeError, r"unsupported operand type.*NoneType"):
             scan(bad_body, init, None, length=length)
 
     @skipIfTorchDynamo("don't test compile on compile")
@@ -4855,7 +4852,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
         cc = CompileCounterWithBackend("eager")
 
-        @torch.compile(backend=cc, fullgraph=True)
+        @torch.compile(backend=cc, fullgraph=True, dynamic=True)
         def f(i, length):
             return scan(body, i, None, length=length)
 
@@ -4866,7 +4863,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             r6, (torch.tensor(6.0), torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
         )
         f(init, 4)  # should hit cache, no new compilation
-        self.assertEqual(cc.frame_count, 2)
+        self.assertEqual(cc.frame_count, 1)
 
 
 class AssociativeScanModels:
