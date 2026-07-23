@@ -489,8 +489,8 @@ from torch._inductor.utils import clear_on_fresh_cache
 clear_on_fresh_cache(_NVGEMMCacheWrapper())
 
 
-def _fake_epilogue_metadata(epilogue_args: Any) -> Any:
-    """Build the cached kernel's epilogue metadata from fake (meta) tensors.
+def _meta_epilogue_metadata(epilogue_args: Any) -> Any:
+    """Build the cached kernel's epilogue metadata from meta-device tensors.
 
     The EFC kernel is cached in ``_efc_epilogue_cache`` and reused across every
     call; the real output/aux tensors are supplied per call via the runtime
@@ -516,10 +516,10 @@ def _fake_epilogue_metadata(epilogue_args: Any) -> Any:
     fake_kwargs = {}
     for name, val in epilogue_args.tensors.items():
         # Build a storage-free meta tensor with the same shape/stride/dtype.
-        # A TensorWrapper built from a fake tensor (the subprocess-precompile
-        # path) has no runtime tensor -- its `.runtime_tensor` property raises
-        # ValueError -- so read `_runtime_tensor` directly (None when fake) and
-        # fall back to the wrapper's own shape/stride and its cutlass dtype.
+        # A compile-time-only TensorWrapper (the subprocess-precompile path) has
+        # no runtime tensor -- its `.runtime_tensor` property raises ValueError --
+        # so read `_runtime_tensor` directly and fall back to the wrapper's own
+        # shape/stride and its CUTLASS dtype.
         if isinstance(val, torch.Tensor):
             fake_kwargs[name] = _meta_like(val)
         elif isinstance(val, TensorWrapper) and isinstance(
@@ -580,7 +580,7 @@ def get_efc_kernel_with_epilogue(
 
         from cutlass.operators.metadata import OperatorMetadata
 
-        epilogue_metadata = _fake_epilogue_metadata(epilogue_args)
+        epilogue_metadata = _meta_epilogue_metadata(epilogue_args)
 
         base_metadata = base_kernel.metadata
         new_metadata = OperatorMetadata(
