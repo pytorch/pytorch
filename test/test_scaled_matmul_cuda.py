@@ -45,6 +45,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     MI350_ARCH,
@@ -835,7 +836,6 @@ class TestFP8Matmul(TestCase):
                 if format == "mxfp8":
                     wh, wq, w_scale = _convert_to_mxfp8_with_hp_ref(W[i])
                 elif format == "nvfp4":
-                    w_scale, wq = to_mxfp(W[i], format="mxfp8")
                     wh, wq, w_scale, w_global_scale = _convert_to_nvfp4_with_hp_ref(W[i])
                     w_global_scale_list.append(w_global_scale)
                 elif format == "mxfp4":
@@ -1840,6 +1840,7 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/164271")
+    @onlyCUDA
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
@@ -1930,7 +1931,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
 
     @skipIfRocm
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("mkn", [
         # Nice shapes
@@ -1951,6 +1952,8 @@ class TestFP8Matmul(TestCase):
         (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
     def test_blockwise_nvfp4_with_global_scale(self, mkn, device) -> None:
+        if "xpu" in device and not Xe2_Or_Later:
+            raise unittest.SkipTest("NVFP4 numerics require Xe2+ on XPU")
         M, K, N = mkn
         BLOCK_SIZE = 16
         # Note: SQNR target from `test_blockwise_mxfp8_nvfp4_mxfp4_numerics` test
@@ -1989,6 +1992,7 @@ class TestFP8Matmul(TestCase):
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @onlyOn(["cuda", "xpu"])
     @parametrize("test_case_name", [
         "a_eye_b_eye",
         "a_ones_b_ones",
@@ -2032,6 +2036,11 @@ class TestFP8Matmul(TestCase):
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
         if recipe == "mxfp4" and SM120OrLater:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+        if "xpu" in device:
+            if fast_accum:
+                raise unittest.SkipTest("fast_accum not supported on XPU, skipping")
+            if recipe == "nvfp4" and not Xe2_Or_Later:
+                raise unittest.SkipTest("NVFP4 numerics require Xe2+ on XPU")
         M, K, N = mkn
         if recipe == "nvfp4" and K % 32 != 0:
             raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
@@ -2228,7 +2237,7 @@ class TestFP8Matmul(TestCase):
         C_ref = A_ref @ B_ref.t()
 
         # convert to swizzled format
-        if not torch.version.hip:
+        if not torch.version.hip and "xpu" not in device:
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 
@@ -2248,6 +2257,7 @@ class TestFP8Matmul(TestCase):
             if sqnr.item() <= approx_match_sqnr_target:
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
+    @skipXPU
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     def test_passed_swizzle_arrays(self, device) -> None:
         # Ensure that incorrectly-sized swizzle arrays are caught
@@ -2372,6 +2382,8 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_error_messages(self, device, recipe) -> None:
+        if "xpu" in device:
+            raise unittest.SkipTest("Error messages test not supported on XPU, skipping")
         if recipe == "mxfp4" and SM120OrLater:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         M, K, N = (1024, 512, 2048)
