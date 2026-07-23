@@ -1269,9 +1269,21 @@ class GroupedLocalReduce(VecReduce):
             tile = tile_N if const_expr(axis == 1) else tile_M
             assert group != 0 and group <= tile
             assert tile % group == 0
+            tiled_copy = (
+                ctx.tiled_copy_t2r
+                if ctx.tiled_copy_t2r is not None
+                else ctx.tiled_copy_r2s
+            )
+            if const_expr(gemm.arch == 100 and axis == 1 and group == tile_N):
+                _, warp_layout_MN = _get_lane_warp_layouts(
+                    tiled_copy, ctx.tiled_copy_t2r is None
+                )
+                warps_in_N = const_expr(cute.size(warp_layout_MN, mode=[1]))
+                assert warps_in_N == 1, (
+                    "full-N GroupedLocalReduce requires one epilogue N-warp partition"
+                )
             if const_expr(param.feeds_main):
                 assert axis == 0
-                tiled_copy = ctx.tiled_copy_t2r if ctx.tiled_copy_t2r is not None else ctx.tiled_copy_r2s
                 lane_layout_MN, _ = _get_lane_warp_layouts(
                     tiled_copy, ctx.tiled_copy_t2r is None
                 )
