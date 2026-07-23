@@ -3957,6 +3957,9 @@ class InstructionTranslatorBase(
         # TOS: resume 1, resume call args
         cg.extend_output(create_call_function_ex(False, True))
 
+    def _is_in_ngb_suppressed_context(self) -> bool:
+        return False
+
     def should_compile_partial_graph(self) -> bool:
         if sys.version_info >= (3, 11):
             # Do not compile if current instruction's block is not the top with block
@@ -3976,9 +3979,6 @@ class InstructionTranslatorBase(
             # Do not allow nested graph breaks in HOPs
             and self.output.current_tracer.parent is None
         )
-
-    def _is_in_ngb_suppressed_context(self) -> bool:
-        return False
 
     @break_graph_if_unsupported(
         push=False,
