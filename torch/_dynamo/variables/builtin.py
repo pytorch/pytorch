@@ -118,6 +118,7 @@ from .object_protocol import (
     generic_str,
     maybe_get_python_type,
     pycallable_check,
+    pyiter_check,
     pysequence_check,
     ternary_iop,
     ternary_op,
@@ -2463,16 +2464,15 @@ class BuiltinVariable(BaseBuiltinVariable):
         if len(args) > 2:
             raise_type_error(tx, f"next expected at most 2 arguments, got {len(args)}")
         arg = args[0]
+        if not pyiter_check(maybe_get_python_type(arg)):
+            raise_type_error(
+                tx, f"'{arg.python_type_name()}' object is not an iterator"
+            )
         try:
             return arg.next_variable(tx)
         except ObservedUserStopIteration:
             if len(args) == 2:
                 return args[1]
-            raise
-        except Unsupported as ex:
-            if isinstance(arg, variables.BaseListVariable):
-                ex.remove_from_stats()
-                return arg.items[0]
             raise
 
     def call_map(
