@@ -2562,6 +2562,22 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
+    def test_wrapper_subclass_hasattr(self):
+        # Exercise TensorVariable.call_obj_hasattr for a wrapper subclass:
+        # an existing dunder (__tensor_flatten__, previously wrongly False),
+        # an existing instance attr, and a genuinely-absent attr (must be
+        # False, not True). Compare against eager hasattr.
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return (
+                hasattr(x, "__tensor_flatten__"),
+                hasattr(x, "_data"),
+                hasattr(x, "definitely_not_an_attr"),
+            )
+
+        x = ScaledTensor(torch.randn(2, 4), torch.randn(3), constant=2)
+        self.assertEqual(f(x), (True, True, False))
+
     def test_support_bases(self):
         import torch.fx._symbolic_trace
 
