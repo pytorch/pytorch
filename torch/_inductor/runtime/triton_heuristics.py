@@ -4262,6 +4262,8 @@ def triton_config_tiled_reduction(
     register_intensive=False,
     waves_per_eu=None,
     *,
+    num_warps=None,
+    min_num_warps=2,
     warp_size: int = 32,
 ):
     """
@@ -4293,10 +4295,14 @@ def triton_config_tiled_reduction(
         y *= 2
 
     cfg = _get_config({"x": x, "y": y, **rnumels})
-    num_warps = _num_warps(total_numel() // 256, min_num_warps=1, warp_size=warp_size)
+    if num_warps is None:
+        num_warps = _num_warps(
+            total_numel() // 256, min_num_warps=1, warp_size=warp_size
+        )
     num_warps = _num_warps(
         num_warps,
         max_num_warps=16,
+        min_num_warps=min_num_warps,
         register_intensive=register_intensive,
         warp_size=warp_size,
     )

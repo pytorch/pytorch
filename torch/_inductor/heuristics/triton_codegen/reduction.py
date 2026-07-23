@@ -73,7 +73,10 @@ def _match_target_block_product(
         relative_scores[dim] = score / total_score
 
     while curr_block_product < target_block_product and relative_scores:
-        dim, score = max(relative_scores.items(), key=lambda item: item[1])
+        dim, score = max(
+            relative_scores.items(),
+            key=lambda item: (item[1], tiling_scores[item[0]]),
+        )
 
         if (
             block_sizes[dim] >= TRITON_MAX_BLOCK[dim.capitalize()]
@@ -411,6 +414,19 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             configs = []
             tiling_scores = _get_tiling_scores(inductor_meta, size_hints)
             x_y_scores = {dim: tiling_scores[dim] for dim in ("x", "y")}
+            block_sizes_32 = _match_target_block_product(size_hints, x_y_scores, 32)
+            coalesced_dim = max(x_y_scores, key=x_y_scores.__getitem__)
+            strongly_coalesced_small_reduction = (
+                triton_meta["device"].type == "cuda"
+                and reduction_hint in (ReductionHint.DEFAULT, ReductionHint.INNER)
+                and rnumel <= 64
+                and block_sizes_32[coalesced_dim] == 32
+                and all(
+                    size == 1
+                    for dim, size in block_sizes_32.items()
+                    if dim != coalesced_dim
+                )
+            )
             for target_block_size in xblock_vals:
                 if target_block_size * rnumel > MAX_PERSISTENT_BLOCK_NUMEL:
                     continue
@@ -418,12 +434,34 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 block_sizes = _match_target_block_product(
                     size_hints, x_y_scores, target_block_size
                 )
+                # Small inner reductions do not have enough reduction work to
+                # amortize extra warps once the pointwise tile is split.
+                num_warps = 1 if strongly_coalesced_small_reduction else None
                 configs.append(
                     triton_config_tiled_reduction(
                         size_hints,
                         block_sizes["x"],
                         block_sizes["y"],
                         rnumel,
+                        num_warps=num_warps,
+                        min_num_warps=1 if num_warps is not None else 2,
+                        warp_size=warp_size,
+                    )
+                )
+
+            if strongly_coalesced_small_reduction and size_hints[coalesced_dim] >= 64:
+                # The proportional allocator can split a 64-element tile
+                # before the most coalesced dimension reaches 64.
+                block_sizes = dict.fromkeys(x_y_scores, 1)
+                block_sizes[coalesced_dim] = 64
+                configs.append(
+                    triton_config_tiled_reduction(
+                        size_hints,
+                        block_sizes["x"],
+                        block_sizes["y"],
+                        rnumel,
+                        num_warps=1,
+                        min_num_warps=1,
                         warp_size=warp_size,
                     )
                 )
