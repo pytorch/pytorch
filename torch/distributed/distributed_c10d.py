@@ -2971,19 +2971,10 @@ def destroy_process_group(
         _world.group_count = 0
     else:
         if _TORCHCOMM_AVAILABLE:
-            # A single comm may be shared across multiple device types (e.g. a
-            # gloo group reports both 'cuda' and 'cpu' device types backed by the
-            # same _BackendWrapper). Deduplicate by comm identity so we finalize
-            # each comm exactly once — finalize() is not idempotent and raises
-            # "already finalized" on a second call.
-            finalized_comm_ids: set[int] = set()
             for device_type in pg._device_types:
                 backend = pg._get_backend(device_type)
                 if isinstance(backend, _BackendWrapper):
-                    comm = backend.get_comm()
-                    if id(comm) not in finalized_comm_ids:
-                        comm.finalize()
-                        finalized_comm_ids.add(id(comm))
+                    backend.get_comm().finalize()
             _world.comms.clear()
         pg.shutdown()
         del _world.pg_map[pg]
@@ -6381,16 +6372,8 @@ def _create_process_group_wrapper(
 # helper function for hashing a list of ranks to a unique string
 def _hash_ranks_to_str(ranks: Sequence[int]) -> str:
     rank_join: str = "_".join(map(str, ranks))
-    # Disambiguate multiple PGs with the same rank composition. The salt MUST be
-    # identical across all ranks that create this group, otherwise ranks compute
-    # different group names for the same group. Backends that use the group name
-    # as a rendezvous store prefix (e.g. Gloo split's connectFullMesh) then key
-    # off different prefixes and deadlock. len(_world.pg_names) is NOT safe here:
-    # it diverges across ranks after an earlier asymmetric-membership new_group()
-    # (non-member ranks register fewer PGs). _world.group_count is incremented by
-    # _process_group_name() on every rank that reaches it (before the member
-    # check), so it stays consistent and monotonic across ranks.
-    unique_str = "_".join([rank_join, str(_world.group_count)])
+    # In case there is already a PG with the same rank composition
+    unique_str = "_".join([rank_join, str(len(_world.pg_names))])
     return hashlib.sha1(bytes(unique_str, "utf-8"), usedforsecurity=False).hexdigest()
 
 
@@ -6416,12 +6399,8 @@ def _process_group_name(ranks: Sequence[int], use_hashed_name: bool) -> GroupNam
         pg_name = GroupName(_hash_ranks_to_str(ranks))
     else:
         pg_name = GroupName(str(_world.group_count))
-    # Increment on BOTH paths so group_count advances once per group-creation
-    # call on every rank that reaches here. This keeps it a collective-consistent,
-    # monotonic counter usable as the uniqueness salt in _hash_ranks_to_str
-    # (see the comment there). Names need only be unique, not contiguous, so the
-    # hashed path consuming counter values is harmless for the non-hashed names.
-    _world.group_count += 1
+        _world.group_count += 1
+    # TODO: why is group count incremented only in the else path?
     return pg_name
 
 

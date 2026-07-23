@@ -507,9 +507,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.torchbind_constants: dict[
             str, torch._C.ScriptObject | FakeScriptObject
         ] = {}
-        self.torchbind_replay_objects: dict[
-            str, torch._C.ScriptObject | FakeScriptObject
-        ] = {}
         self.opaque_value_type_classes: dict[str, type] = {}
         self.seen_subgraphs: dict[str, ir.Subgraph] = {}
         self.constant_reprs: dict[str, str] = {}

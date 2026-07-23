@@ -567,7 +567,6 @@ static void initXpuMethodBindings(PyObject* module) {
     py::str segment_unmap_s = "segment_unmap";
     py::str snapshot_s = "snapshot";
     py::str oom_s = "oom";
-    py::str annotate_s = "annotate";
     py::str device_free_s = "device_free";
 
     using c10::CachingDeviceAllocator::TraceEntry;
@@ -582,7 +581,6 @@ static void initXpuMethodBindings(PyObject* module) {
         {TraceEntry::SEGMENT_UNMAP, segment_unmap_s},
         {TraceEntry::SNAPSHOT, snapshot_s},
         {TraceEntry::OOM, oom_s},
-        {TraceEntry::ANNOTATE, annotate_s},
     };
 
     auto action_to_str = [&](TraceEntry::Action action) {
