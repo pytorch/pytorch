@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: job-filter
 
 # Job Filter Rules (for trunk.yml, pull.yml)
@@ -36,7 +37,7 @@ on:
 
 jobs:
   compute:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       jobs: ${{ steps.set.outputs.jobs }}
     steps:
