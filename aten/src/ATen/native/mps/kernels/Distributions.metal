@@ -103,23 +103,30 @@ kernel void exponential(
   }
 }
 
+template <typename T>
+struct UniformParams {
+  T from;
+  T to;
+};
+
 // Uniform[from, to). One Philox round per 4 outputs.
 template <typename T>
 kernel void uniform_dist(
     device T* output [[buffer(0)]],
-    constant float2& params [[buffer(1)]],
+    constant UniformParams<T>& params [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
     constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   uint base = tid * 4;
   uint4 raw =
       c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
-  float from = params.x;
-  float scale = params.y - params.x;
+  float from = static_cast<float>(params.from);
+  float scale = static_cast<float>(params.to) - from;
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
-    output[base + i] = static_cast<T>(from + scale * u);
+    T value = static_cast<T>(from + scale * u);
+    output[base + i] = value == params.to ? params.from : value;
   }
 }
 
@@ -214,9 +221,18 @@ REGISTER_OP(geometric, short);
 REGISTER_OP(geometric, char);
 REGISTER_OP(geometric, uchar);
 
-REGISTER_OP(uniform_dist, float);
-REGISTER_OP(uniform_dist, half);
-REGISTER_OP(uniform_dist, bfloat);
+#define REGISTER_UNIFORM_OP(DTYPE)                           \
+  template [[host_name("uniform_dist_" #DTYPE)]] kernel void \
+  uniform_dist<DTYPE>(                                       \
+      device DTYPE*,                                         \
+      constant UniformParams<DTYPE>&,                        \
+      constant long2&,                                       \
+      constant uint&,                                        \
+      uint)
+
+REGISTER_UNIFORM_OP(float);
+REGISTER_UNIFORM_OP(half);
+REGISTER_UNIFORM_OP(bfloat);
 
 REGISTER_OP(normal, float);
 REGISTER_OP(normal, half);

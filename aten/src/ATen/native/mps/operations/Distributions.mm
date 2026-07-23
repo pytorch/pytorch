@@ -222,7 +222,10 @@ REGISTER_MPS_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel_mps)
 REGISTER_MPS_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel_mps)
 
 static void uniform_kernel_mps(TensorIteratorBase& iter, double from, double to, std::optional<Generator> gen) {
-  distribution_kernel_mps_impl(iter, from, to, "uniform_dist", 1, gen);
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "uniform_kernel_mps", [&] {
+    distribution_kernel_mps_impl(
+        iter, std::array<scalar_t, 2>{static_cast<scalar_t>(from), static_cast<scalar_t>(to)}, "uniform_dist", 1, gen);
+  });
 }
 
 static void normal_kernel_mps(const TensorBase& self, double mean, double std, std::optional<Generator> gen) {

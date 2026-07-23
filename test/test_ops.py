@@ -218,6 +218,15 @@ meta_consistency_out_dtype_mismatch_xfails = {
 class TestCommon(TestCase):
     exact_dtype = True
 
+    @ops(
+        [op for op in op_db if op.name == "uniform"],
+        allowed_dtypes=(torch.float16, torch.bfloat16),
+    )
+    def test_uniform_bounds(self, device, dtype, op):
+        result = op(torch.empty(1_000_000, device=device, dtype=dtype), 0.0, 1.0)
+        self.assertGreaterEqual(result.min().item(), 0.0)
+        self.assertLess(result.max().item(), 1.0)
+
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod
     def tearDownClass(cls):
