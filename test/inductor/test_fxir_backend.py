@@ -1157,8 +1157,8 @@ class AOTFxirTestCase(InductorTestCase):
             gm.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
+    true_graph_0 = self.true_graph_0
     cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
     buf1 = cond[0]
     buf2 = cond[1];  cond = None
