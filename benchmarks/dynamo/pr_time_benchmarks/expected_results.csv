@@ -18,19 +18,19 @@ add_loop_inductor_gpu,compile_time_instruction_count,28720000000,0.1
 
 
 
-basic_modules_ListOfLinears_eager,compile_time_instruction_count,968100000,0.1
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,943300000,0.1
 
 
 
-basic_modules_ListOfLinears_inductor,compile_time_instruction_count,14330000000,0.1
+basic_modules_ListOfLinears_inductor,compile_time_instruction_count,14610000000,0.1
 
 
 
-basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,19100000000,0.1
+basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,19570000000,0.1
 
 
 
-basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,11090000000,0.2
+basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,11650000000,0.2
 
 
 
@@ -54,11 +54,11 @@ aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,1938000000
 
 
 
-aotdispatcher_inference_subclass_cpu,compile_time_instruction_count,5378000000,0.1
+aotdispatcher_inference_subclass_cpu,compile_time_instruction_count,5501000000,0.1
 
 
 
-aotdispatcher_partitioner_cpu,compile_time_instruction_count,8996000000,0.1
+aotdispatcher_partitioner_cpu,compile_time_instruction_count,9240000000,0.1
 
 
 
@@ -66,11 +66,11 @@ aotdispatcher_partitioner_cpu2,compile_time_instruction_count,2106000000,0.1
 
 
 
-aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3408000000,0.1
+aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3485000000,0.1
 
 
 
-aotdispatcher_training_subclass_cpu,compile_time_instruction_count,8869000000,0.1
+aotdispatcher_training_subclass_cpu,compile_time_instruction_count,9139000000,0.1
 
 
 
@@ -82,11 +82,11 @@ mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,10270000000,0.1
 
 
 
-basic_NestedModule_eager,compile_time_instruction_count,5675000000,0.1
+basic_NestedModule_eager,compile_time_instruction_count,5527000000,0.1
 
 
 
-basic_InlineMod_eager,compile_time_instruction_count,8174000000,0.1
+basic_InlineMod_eager,compile_time_instruction_count,7939000000,0.1
 
 
 
@@ -94,7 +94,7 @@ dtensor_dispatch_detach,instruction_count,58820,0.1
 
 
 
-dtensor_dispatch_to_from_local,instruction_count,242300,0.1
+dtensor_dispatch_to_from_local,instruction_count,208100,0.1
 
 
 
@@ -118,12 +118,12 @@ dtensor_dispatch_random,instruction_count,592800,0.1
 
 
 
-dtensor_dispatch_custom_handler,instruction_count,34910,0.1
+dtensor_dispatch_custom_handler,instruction_count,36030,0.1
 
 
 
-nn_module_guard_eval,instruction_count,80120,0.1
+nn_module_guard_eval,instruction_count,83710,0.1
 
 
 
-nn_module_guard_eval_dynamic,instruction_count,111714,0.1
+nn_module_guard_eval_dynamic,instruction_count,116300,0.1
