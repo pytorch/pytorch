@@ -24,6 +24,7 @@ _tf32_off_lock = threading.Lock()
 _tf32_off_depth = 0
 _tf32_off_saved_precision = None
 _tf32_off_cudnn_ctx = None
+_tf32_off_mkldnn_ctx = None
 
 
 @contextlib.contextmanager
@@ -33,7 +34,8 @@ def tf32_off():
     # First-in saves state and disables TF32; last-out restores it. Nested
     # contexts can otherwise restore the process-global precision state in the
     # wrong order when tests enter this context from multiple threads.
-    global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx
+    global _tf32_off_depth, _tf32_off_saved_precision
+    global _tf32_off_cudnn_ctx, _tf32_off_mkldnn_ctx
     with _tf32_off_lock:
         if _tf32_off_depth == 0:
             # Save fp32_precision rather than allow_tf32 so that the ``None``
@@ -44,19 +46,22 @@ def tf32_off():
                 enabled=None, benchmark=None, deterministic=None, allow_tf32=False
             )
             _tf32_off_cudnn_ctx.__enter__()
+            _tf32_off_mkldnn_ctx = torch.backends.mkldnn.flags(
+                enabled=None,
+                deterministic=None,
+                allow_tf32=False,
+                fp32_precision=None,
+            )
+            _tf32_off_mkldnn_ctx.__enter__()
         _tf32_off_depth += 1
     try:
-        with torch.backends.mkldnn.flags(
-            enabled=None,
-            deterministic=None,
-            allow_tf32=False,
-            fp32_precision=None,
-        ):
-            yield
+        yield
     finally:
         with _tf32_off_lock:
             _tf32_off_depth -= 1
             if _tf32_off_depth == 0:
+                _tf32_off_mkldnn_ctx.__exit__(None, None, None)
+                _tf32_off_mkldnn_ctx = None
                 _tf32_off_cudnn_ctx.__exit__(None, None, None)
                 _tf32_off_cudnn_ctx = None
                 torch.backends.cuda.matmul.fp32_precision = _tf32_off_saved_precision
