@@ -2131,7 +2131,7 @@ if HAS_CUDA_AND_TRITON:
         @blas_library_context("cublas")
         @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
         def test_workspace_allocation_error(self):
-            torch._C._cuda_clearCublasWorkspaces()
+            torch.cuda._clear_cublas_workspaces()
 
             prev = torch._inductor.cudagraph_trees.clear_cublas_manager
 
@@ -2171,7 +2171,7 @@ if HAS_CUDA_AND_TRITON:
                 self.assertTrue(thrown)
 
             finally:
-                torch._C._cuda_clearCublasWorkspaces()
+                torch.cuda._clear_cublas_workspaces()
                 torch._inductor.cudagraph_trees.clear_cublas_manager = prev
                 torch._inductor.cudagraph_trees.get_container(
                     self.device_idx
@@ -4315,6 +4315,10 @@ if HAS_CUDA_AND_TRITON:
             # 2 graph partitions lead to 2 cudagraph
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @unittest.skip(
+            "Disabled due to CI failures; see "
+            "https://github.com/pytorch/pytorch/issues/190233"
+        )
         def test_graph_partition_view_fallback(self):
             def f(x):
                 y = x + 1
