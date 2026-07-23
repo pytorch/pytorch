@@ -170,7 +170,7 @@ class TestTensorMetaProp(torch._dynamo.test_case.TestCase):
             )
 
 
-instantiate_device_type_tests(TestTensorMetaProp, globals())
+instantiate_device_type_tests(TestTensorMetaProp, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
