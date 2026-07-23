@@ -108,6 +108,7 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .sizevars import SizeVarAllocator
 from .utils import (
+    _rocm_native_device_arch_name,
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
@@ -362,6 +363,35 @@ def is_mkldnn_conv(node: Node) -> bool:
     return False
 
 
+def _conv_device_arch(conv_nodes: list[Node]) -> str:
+    """Return the ROCm device arch name (e.g. "gfx942", "gfx950") of the first
+    aten convolution in the graph, or "" if it cannot be determined.
+
+    Only ``aten.convolution.default`` nodes are inspected: mkldnn conv nodes use
+    a ``functools.partial`` target and do not follow the (input, weight) arg
+    convention, so they are skipped. The weight is read from ``args[1]`` (same
+    convention as ``is_grouped`` / ``is_small_channel``).
+
+    NOTE: picks the first cuda conv it finds, assuming a homogeneous, single-arch
+    box. Mixed multi-device graphs are not the target of this heuristic. The
+    query is wrapped defensively so a HIP build with no usable GPU never turns
+    the layout heuristic into a hard compile failure; on any failure we return
+    "" and fall back to the NVIDIA-tuned defaults.
+    """
+    if not torch.cuda.is_available():
+        return ""
+    for n in conv_nodes:
+        if n.target is not torch.ops.aten.convolution.default:
+            continue
+        weight = n.args[1]
+        meta_val = getattr(weight, "meta", {}).get("val")
+        if not isinstance(meta_val, torch.Tensor) or meta_val.device.type != "cuda":
+            continue
+        try:
+            return _rocm_native_device_arch_name(meta_val.device)
+        except Exception:
+            return ""
+    return ""
 def _realize_efficient_zerotensor_output(r: ir.IRNode, fx_node: object) -> ir.IRNode:
     if (
         isinstance(fx_node, torch.fx.Node)
@@ -802,6 +832,92 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
+        # ROCm-specific layout-opt gates.  Two cases skip channels_last:
+        #   1. RDNA (gfx11xx/gfx12xx): NHWC convs are still experimental there.
+        #   2. CDNA grouped convs that fall back to MIOpen's slow naive kernel.
+        # These run for training too (is_inference=False), which the inference
+        # FLOP-weighted heuristic further below never covers.
+        if torch.version.hip:
+
+            def _conv_device_index(n: torch.fx.Node) -> int:
+                # Derive the device from the conv's own input tensor rather than
+                # hard-coding device 0; fall back to the current device. meta
+                # ["val"] is trusted here as it is everywhere else in this method
+                # (the heuristics below read it unguarded too).
+                dev = n.args[0].meta["val"].device  # type: ignore[union-attr]
+                if dev.index is not None:
+                    return dev.index
+                return torch.cuda.current_device()
+
+            # RDNA (gfx10xx/gfx11xx/gfx12xx) NHWC convs are experimental on every ROCm
+            # version, so this exclusion is intentionally NOT gated on the HIP
+            # version (unlike CDNA enablement). Skip layout opt for RDNA graphs.
+            if all(
+                n.args[idx].meta["val"].device.type == "cuda"
+                for n in conv_nodes
+                for idx in [0, 1]
+            ):
+                gcn_arch = torch.cuda.get_device_properties(
+                    _conv_device_index(conv_nodes[0])
+                ).gcnArchName.split(":", 1)[0]
+                if any(arch in gcn_arch for arch in ["gfx10", "gfx11", "gfx12"]):
+                    return False
+
+            # On CDNA (ROCm), some grouped convolutions fall back to a slow MIOpen
+            # naive kernel (fp64 accumulate -- the observed kernel is named
+            # naive_conv_ab_nonpacked_fwd_nchw_ushort_double_ushort, where
+            # "double" denotes double-precision accumulate) instead of a tuned
+            # NHWC XDL/MFMA kernel.  For those, channels_last cannot accelerate
+            # the kernel and only adds layout-conversion kernels -- a measured
+            # regression on MI355 (depthwise mobilenet/mnasnet/shufflenet:
+            # +10-17% in training).
+            #
+            # Whether a grouped conv takes the naive path depends on both total
+            # channels and groups, not channels-per-group alone. We approximate
+            # "naive-bound" with channels-per-group < MIOPEN_XDL_MIN_CHANNELS_PER_GROUP:
+            # a deliberately conservative proxy that errs toward skipping layout opt
+            # (avoiding regressions) at the cost of leaving some wins on the table for
+            # grouped convs with channels-per-group in the 4-7 range at large channel
+            # counts.
+            MIOPEN_XDL_MIN_CHANNELS_PER_GROUP = 8
+
+            def _rocm_naive_bound(n: torch.fx.Node) -> bool:
+                # Only applies to real aten convolutions; mkldnn conv nodes that
+                # were appended to conv_nodes use a different arg schema.
+                if n.target is not torch.ops.aten.convolution.default:
+                    return False
+                # aten.convolution args:
+                # (input, weight, bias, stride, padding, dilation,
+                #  transposed, output_padding, groups)
+                # Read defensively so a short args list / kwargs cannot IndexError.
+                transposed = (
+                    n.args[6] if len(n.args) > 6 else n.kwargs.get("transposed", False)
+                )
+                groups = n.args[8] if len(n.args) > 8 else n.kwargs.get("groups", 1)
+                # Skip transposed convs: their weight is (C_in, C_out/groups, ...),
+                # so size(1) is not channels-per-group and the heuristic would
+                # misclassify them.
+                if transposed:
+                    return False
+                # Forward conv weight is (C_out, C_in/groups, kH, kW), so
+                # size(1) == channels-per-group. Only grouped convs (groups > 1)
+                # hit the naive fallback; a groups==1 dense conv (e.g. the
+                # 3-channel RGB stem) still uses the fast XDL kernel.
+                return (
+                    groups > 1  # type: ignore[operator]
+                    and n.args[1].meta["val"].size(1)  # type: ignore[union-attr, operator]
+                    < MIOPEN_XDL_MIN_CHANNELS_PER_GROUP
+                )
+
+            if any(_rocm_naive_bound(n) for n in conv_nodes):
+                log.debug(
+                    "Skip layout opt on ROCm: graph has grouped conv(s) with "
+                    "channels/group < %d that fall back to MIOpen naive kernels "
+                    "(channels_last regresses these).",
+                    MIOPEN_XDL_MIN_CHANNELS_PER_GROUP,
+                )
+                return False
+
         # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
         if (
             torch.backends.mkldnn.enabled  # pyrefly: ignore [unbound-name]
@@ -849,6 +965,17 @@ class GraphLowering(torch.fx.Interpreter):
                 and n.args[1].meta["val"].size(1) <= 64  # type: ignore[union-attr, operator]
             )
 
+        def is_pointwise(n: torch.fx.Node) -> bool:
+            """1x1 kernel: MIOpen copies NHWC->NCHW on gfx950 (1.5-8x overhead).
+
+            Measured flop-weighted mean for convnextv2_nano 1x1 shapes on gfx950:
+            NHWC/NCHW ratio = 3.216 (see microbench in PR description).
+            """
+            meta_val = n.args[1].meta["val"]  # type: ignore[union-attr, operator]
+            if not isinstance(meta_val, torch.Tensor):
+                raise AssertionError(f"Expected torch.Tensor, got {type(meta_val)}")
+            return meta_val.size(2) == 1 and meta_val.size(3) == 1  # type: ignore[union-attr, operator]
+
         # only grouped convolutions benchmarked as slower in conv samples for inference only
         if is_inference:
             flop_counts: dict[str, float] = defaultdict(float)
@@ -859,6 +986,8 @@ class GraphLowering(torch.fx.Interpreter):
 
                 if is_grouped(node):
                     node_type = "grouped"
+                elif is_pointwise(node):
+                    node_type = "pointwise"
                 elif is_small_channel(node):
                     node_type = "small"
                 elif is_in_out_channel(node):
@@ -874,14 +1003,43 @@ class GraphLowering(torch.fx.Interpreter):
             # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/
             # To regenerate these numbers follow https://gist.github.com/eellison/55d7a6ed6f39829d68ac56f95f4df5bb
             GROUPED_MULTIPLIER = 1.358
+            POINTWISE_MULTIPLIER = (
+                1.358  # NVIDIA: unmeasured, set conservative (same as GROUPED)
+            )
             DEFAULT_MULTIPLIER = 0.823
             IN_OUT_MULTIPLIER = 0.725
             SMALL_MULTIPLIER = 0.783
 
+            # The constants above were measured on NVIDIA. ROCm CDNA archs
+            # behave differently under MIOpen's channels-last conv path, so the
+            # multipliers are re-tuned per arch:
+            #  - gfx942 (MI300): channels-last regresses small/grouped convs.
+            #    SMALL/GROUPED tuned to per-model channels-last win/loss measured
+            #    on gfx942 (avoiding phlippe_*/resnet18 regressions while keeping
+            #    the resnet/densenet/vgg/resnext wins).
+            #  - gfx950 (MI350): channels-last is broadly favorable on MIOpen.
+            #    Values are mean channels_last/contiguous bucket ratios measured
+            #    in bf16 over operator_inp_logs (torchbench+hf+timm).
+            #    GROUPED (0.553) is calibrated on the cpg>=8 subset: the
+            #    cpg<8 naive-bound gate in decide_layout_opt already skips
+            #    slow grouped convs before this heuristic runs.
+            # These numbers are sensitive to the ROCm / MIOpen version.
+            if torch.version.hip is not None:
+                _arch = _conv_device_arch(conv_nodes)
+                if "gfx942" in _arch:
+                    SMALL_MULTIPLIER = 1.25
+                    GROUPED_MULTIPLIER = 1.05
+                elif "gfx950" in _arch:
+                    GROUPED_MULTIPLIER = 0.553
+                    POINTWISE_MULTIPLIER = 3.216  # measured: NHWC/NCHW flop-weighted mean for 1x1 on gfx950
+                    DEFAULT_MULTIPLIER = 0.813
+                    IN_OUT_MULTIPLIER = 0.642
+                    SMALL_MULTIPLIER = 0.795
+
             total_flops = sum(flop_counts.values())
-            # TODO - get different values per hardware
             weighted_flops = (
                 flop_counts["grouped"] * GROUPED_MULTIPLIER
+                + flop_counts["pointwise"] * POINTWISE_MULTIPLIER
                 + flop_counts["small"] * SMALL_MULTIPLIER
                 + flop_counts["in_out"] * IN_OUT_MULTIPLIER
                 + flop_counts["default"] * DEFAULT_MULTIPLIER

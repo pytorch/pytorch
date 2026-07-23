@@ -4228,7 +4228,7 @@ def setup_determinism(args):
         torch.use_deterministic_algorithms(True, warn_only=True)
 
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.benchmark = True
     torch.backends.mkldnn.deterministic = True
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     torch.backends.cudnn.allow_tf32 = False

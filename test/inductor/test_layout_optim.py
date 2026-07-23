@@ -1,16 +1,22 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import copy
 import os
 import random
+import unittest
+from unittest import mock
 
 import torch
 from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import run_tests, TestCase
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import tf32_off
-from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
+from torch.testing._internal.common_utils import skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
@@ -339,6 +345,359 @@ class TestLayoutOptim(TestCase):
 
         ref = model(x, targets)
         self.assertTrue(torch.allclose(ref, loss))
+
+    @unittest.skipUnless(
+        TEST_WITH_ROCM, "ROCm-only MIOpen grouped-conv layout-opt gate"
+    )
+    def test_rocm_grouped_conv_skips_layout_opt(self):
+        """
+        ROCm-only gate in GraphLowering.decide_layout_opt: grouped convs whose
+        weight has channels-per-group < MIOPEN_XDL_MIN_CHANNELS_PER_GROUP (8)
+        fall back to a slow MIOpen naive kernel that channels_last cannot
+        accelerate, so layout optimization must be skipped for them. Plain
+        convs (groups == 1, e.g. the 3-channel RGB stem) keep using the fast
+        NHWC XDL kernel and must NOT be skipped by this gate.
+        """
+
+        def make_conv_graph(weight_shape, groups, *, transposed=False):
+            # Build an FX graph with a real aten.convolution.default node whose
+            # weight carries meta["val"] -- exactly what the gate inspects.
+            # Passing the weight as an explicit arg lets make_fx fake-trace it.
+            cpg = weight_shape[1]
+            cin = weight_shape[0] if transposed else cpg * groups
+
+            def fn(x, w):
+                return torch.ops.aten.convolution.default(
+                    x, w, None, [1, 1], [0, 0], [1, 1], transposed, [0, 0], groups
+                )
+
+            x = torch.randn(1, cin, 16, 16, device=GPU_TYPE)
+            w = torch.randn(*weight_shape, device=GPU_TYPE)
+            gm = make_fx(fn, tracing_mode="fake")(x, w)
+            # Sanity: a single conv node, far below the 300*nconv node-count
+            # heuristic, so the only thing that can flip the decision here is
+            # the ROCm gate under test.
+            convs = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.aten.convolution.default
+            ]
+            self.assertEqual(len(convs), 1)
+            return gm
+
+        # Depthwise conv: groups=32, channels-per-group=1 (< 8). The gate flips
+        # the decision: with hip it is skipped (False); without hip it would be
+        # eligible (True). Asserting both isolates the gate as the sole cause.
+        depthwise = make_conv_graph((32, 1, 3, 3), groups=32)
+        self.assertFalse(
+            GraphLowering.decide_layout_opt(depthwise, is_inference=True),
+            "depthwise grouped conv (cpg=1) should skip layout opt on ROCm",
+        )
+        with mock.patch.object(torch.version, "hip", None):
+            self.assertTrue(
+                GraphLowering.decide_layout_opt(depthwise, is_inference=True),
+                "depthwise conv is only skipped because of the ROCm gate",
+            )
+
+        # Plain conv with a 3-channel RGB stem: groups=1, so cpg is irrelevant.
+        # The gate must NOT trip (false-positive guard) and layout opt stays on.
+        # Only assert this on CDNA: on RDNA the RDNA-exclusion gate fires first
+        # (correctly returning False before the grouped-conv gate is reached).
+        plain_stem = make_conv_graph((64, 3, 3, 3), groups=1)
+        _arch = torch.cuda.get_device_properties(
+            torch.cuda.current_device()
+        ).gcnArchName
+        if not any(a in _arch for a in ["gfx10", "gfx11", "gfx12"]):
+            self.assertTrue(
+                GraphLowering.decide_layout_opt(plain_stem, is_inference=True),
+                "plain 3-channel conv must not be skipped by the ROCm grouped-conv gate",
+            )
+
+
+@requires_gpu()
+class TestLayoutOptimROCmMultipliers(TestCase):
+    """Validate the per-arch ROCm channels-last cost-multiplier overrides
+    (gfx942 / gfx950) in GraphLowering.decide_layout_opt (inference path).
+
+    The NVIDIA-tuned defaults are
+        GROUPED=1.358, DEFAULT=0.823, IN_OUT=0.725, SMALL=0.783
+    On gfx942 (MI300) channels-last regresses small/grouped convs, so the
+    override sets SMALL=1.25, GROUPED=1.05 (DEFAULT/IN_OUT unchanged). On gfx950
+    (MI350) channels-last is favorable, so GROUPED=0.553, DEFAULT=0.813,
+    IN_OUT=0.642, SMALL=0.795. decide_layout_opt enables channels-last iff
+    weighted_flops <= total_flops, so the re-tuned weights flip the decision for
+    the affected graphs while leaving default-dominated graphs unchanged.
+
+    The arch decision is driven through the cached helper
+    ``torch._inductor.graph._rocm_native_device_arch_name`` and through
+    ``torch.version.hip`` so the gfx942, gfx950 and non-ROCm outcomes are checked
+    regardless of the real card. Graph construction still needs FakeTensor conv
+    meta on a cuda device, hence the GPU gate.
+    """
+
+    NON_GFX942_ARCH = "gfx90a:sramecc+:xnack-"
+    GFX942_ARCH = "gfx942:sramecc+:xnack-"
+    GFX950_ARCH = "gfx950:sramecc+:xnack-"
+
+    @staticmethod
+    def _build_aten_gm(mod, example_input):
+        """Trace mod to an aten fx graph whose convolution.default nodes carry
+        FakeTensor meta['val'] on a cuda device."""
+        mod = mod.to(GPU_TYPE).eval()
+        x = example_input.to(GPU_TYPE)
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        gm = make_fx(mod, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
+        convs = [
+            n for n in gm.graph.nodes if n.target is torch.ops.aten.convolution.default
+        ]
+        assert len(convs) > 0, "expected aten.convolution.default nodes"
+        for n in convs:
+            w = n.args[1].meta["val"]
+            assert isinstance(w, torch.Tensor)
+            assert w.device.type == "cuda", w.device
+        return gm
+
+    @staticmethod
+    def _flop_counts(gm):
+        """Reproduce decide_layout_opt's flop classification so tests can assert
+        non-vacuity (which bucket dominates) independently of the decision."""
+        from collections import defaultdict
+
+        from torch._inductor.fx_utils import count_flops_fx
+
+        def is_grouped(n):
+            mv = n.args[1].meta["val"]
+            return n.args[-1] > 1 and mv.size(1) > 1
+
+        def is_in_out(n):
+            mv = n.args[1].meta["val"]
+            return mv.size(0) * 2 <= mv.size(1) and mv.size(2) > 1
+
+        def is_small(n):
+            mv = n.args[1].meta["val"]
+            return mv.size(0) <= 64 and mv.size(1) <= 64
+
+        fc = defaultdict(float)
+        for n in gm.graph.nodes:
+            if n.target is not torch.ops.aten.convolution.default:
+                continue
+            f = count_flops_fx(n)
+            if f is None:
+                continue
+            if is_grouped(n):
+                t = "grouped"
+            elif is_small(n):
+                t = "small"
+            elif is_in_out(n):
+                t = "in_out"
+            else:
+                t = "default"
+            fc[t] += f
+        return fc
+
+    def _decide(self, gm, arch_name, hip_version="7.0.0", props=None):
+        """Run decide_layout_opt with layout_optimization forced on and the
+        arch / hip version mocked to a deterministic value.
+
+        The gfx942 helper is patched directly (it is functools.cache'd on the
+        device, so patching the underlying torch.cuda.get_device_properties
+        would otherwise leak between cases). When ``props`` is supplied it
+        replaces torch.cuda.get_device_properties so we can assert the non-HIP
+        path never touches the driver (it must not raise).
+        """
+        from unittest import mock
+
+        import torch._inductor.graph as graph_mod
+
+        ctxs = [
+            mock.patch.object(config, "layout_optimization", True),
+            mock.patch.object(torch.version, "hip", hip_version),
+            mock.patch.object(
+                graph_mod,
+                "_rocm_native_device_arch_name",
+                lambda device: arch_name,
+            ),
+        ]
+        if props is not None:
+            ctxs.append(mock.patch("torch.cuda.get_device_properties", props))
+        with contextlib.ExitStack() as stack:
+            for c in ctxs:
+                stack.enter_context(c)
+            return GraphLowering.decide_layout_opt(gm, is_inference=True)
+
+    # --- small-channel dominated: gfx942 SKIPS, NVIDIA ENABLES ----------------
+    def test_small_channel_graph_skips_on_gfx942(self):
+        class SmallConvNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c1 = nn.Conv2d(32, 32, 3)
+                self.c2 = nn.Conv2d(32, 32, 3)
+                self.c3 = nn.Conv2d(32, 32, 3)
+
+            def forward(self, x):
+                return self.c3(self.c2(self.c1(x)))
+
+        gm = self._build_aten_gm(SmallConvNet(), torch.rand(2, 32, 28, 28))
+
+        # Non-vacuity: the graph is small-channel dominated.
+        fc = self._flop_counts(gm)
+        total = sum(fc.values())
+        self.assertGreater(total, 0.0)
+        self.assertGreater(fc["small"] / total, 0.9)
+
+        # gfx942: SMALL=1.25 => weighted_flops > total_flops => skip.
+        self.assertFalse(
+            self._decide(gm, self.GFX942_ARCH),
+            "gfx942 weights should SKIP layout opt for a small-conv graph",
+        )
+        # non-gfx942 ROCm (NVIDIA defaults, SMALL=0.783) => enable.
+        self.assertTrue(
+            self._decide(gm, self.NON_GFX942_ARCH),
+            "non-gfx942 weights should ENABLE layout opt for a small-conv graph",
+        )
+        # non-HIP build also takes the NVIDIA path => enable.
+        self.assertTrue(
+            self._decide(gm, self.GFX942_ARCH, hip_version=None),
+            "non-HIP build should ignore the gfx942 override",
+        )
+
+    # --- M2: grouped portion that actually FLIPS the decision -----------------
+    def test_grouped_graph_flips_decision_on_gfx942(self):
+        # resnext-like: one dense (default) conv + four lightly-grouped convs,
+        # sized so grouped flops are ~2/3 of total. At that fraction the decision
+        # crosses the threshold only when GROUPED moves 1.358 -> 1.05:
+        #   gfx942:  0.823*0.333 + 1.05*0.667  ~= 0.97 <= 1  => ENABLE
+        #   nvidia:  0.823*0.333 + 1.358*0.667 ~= 1.18 >  1  => SKIP
+        class GroupedFlipNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.d1 = nn.Conv2d(256, 256, 3, padding=1)  # dense / default
+                self.g1 = nn.Conv2d(256, 256, 3, padding=1, groups=2)
+                self.g2 = nn.Conv2d(256, 256, 3, padding=1, groups=2)
+                self.g3 = nn.Conv2d(256, 256, 3, padding=1, groups=2)
+                self.g4 = nn.Conv2d(256, 256, 3, padding=1, groups=2)
+
+            def forward(self, x):
+                a = self.d1(x)
+                b = self.g4(self.g3(self.g2(self.g1(x))))
+                return a + b
+
+        gm = self._build_aten_gm(GroupedFlipNet(), torch.rand(2, 256, 32, 32))
+
+        # Non-vacuity: grouped ~0.67, default ~0.33, nothing else.
+        fc = self._flop_counts(gm)
+        total = sum(fc.values())
+        self.assertGreater(total, 0.0)
+        self.assertEqual(set(fc), {"grouped", "default"})
+        self.assertGreater(fc["grouped"] / total, 0.55)
+        self.assertLess(fc["grouped"] / total, 0.78)
+
+        # The decision genuinely flips with the gfx942 weights.
+        self.assertTrue(
+            self._decide(gm, self.GFX942_ARCH),
+            "gfx942 GROUPED=1.05 should ENABLE this resnext-like graph",
+        )
+        self.assertFalse(
+            self._decide(gm, self.NON_GFX942_ARCH),
+            "NVIDIA GROUPED=1.358 should SKIP this resnext-like graph",
+        )
+
+    # --- default-channel dominated: ENABLE under BOTH weight sets -------------
+    def test_default_channel_graph_enables_on_both(self):
+        class DefaultConvNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c1 = nn.Conv2d(256, 256, 3)
+                self.c2 = nn.Conv2d(256, 256, 3)
+
+            def forward(self, x):
+                return self.c2(self.c1(x))
+
+        gm = self._build_aten_gm(DefaultConvNet(), torch.rand(2, 256, 28, 28))
+
+        fc = self._flop_counts(gm)
+        total = sum(fc.values())
+        self.assertGreater(fc["default"] / total, 0.9)
+
+        # DEFAULT_MULTIPLIER is unchanged (0.823 < 1) so both enable.
+        self.assertTrue(
+            self._decide(gm, self.GFX942_ARCH),
+            "default-conv graph should ENABLE under gfx942 weights",
+        )
+        self.assertTrue(
+            self._decide(gm, self.NON_GFX942_ARCH),
+            "default-conv graph should ENABLE under NVIDIA weights",
+        )
+
+    # --- M4: gfx950 has its own (favorable) weights; grouped graph flips -----
+    def test_grouped_graph_flips_decision_on_gfx950(self):
+        # Same resnext-like graph as the gfx942 grouped test (grouped ~2/3):
+        #   gfx950:  0.823*0.333 + 0.553*0.667 ~= 0.64 <= 1  => ENABLE
+        #   nvidia:  0.823*0.333 + 1.358*0.667 ~= 1.18 >  1  => SKIP
+        class GroupedFlipNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.d1 = nn.Conv2d(256, 256, 3, padding=1)
+                self.g1 = nn.Conv2d(256, 256, 3, padding=1, groups=2)
+                self.g2 = nn.Conv2d(256, 256, 3, padding=1, groups=2)
+                self.g3 = nn.Conv2d(256, 256, 3, padding=1, groups=2)
+                self.g4 = nn.Conv2d(256, 256, 3, padding=1, groups=2)
+
+            def forward(self, x):
+                a = self.d1(x)
+                b = self.g4(self.g3(self.g2(self.g1(x))))
+                return a + b
+
+        gm = self._build_aten_gm(GroupedFlipNet(), torch.rand(2, 256, 32, 32))
+
+        fc = self._flop_counts(gm)
+        total = sum(fc.values())
+        self.assertGreater(total, 0.0)
+        self.assertGreater(fc["grouped"] / total, 0.55)
+
+        # gfx950 GROUPED=0.553 ENABLES; NVIDIA GROUPED=1.358 SKIPS.
+        self.assertTrue(
+            self._decide(gm, self.GFX950_ARCH),
+            "gfx950 GROUPED=0.553 should ENABLE this resnext-like graph",
+        )
+        self.assertFalse(
+            self._decide(gm, self.NON_GFX942_ARCH),
+            "NVIDIA GROUPED=1.358 should SKIP this resnext-like graph",
+        )
+        # non-HIP build ignores the gfx950 override too.
+        self.assertFalse(
+            self._decide(gm, self.GFX950_ARCH, hip_version=None),
+            "non-HIP build should ignore the gfx950 override",
+        )
+
+    # --- M3 / C1: NVIDIA (non-HIP) path is unchanged and never touches the ----
+    # --- driver, even if get_device_properties would raise.              ------
+    def test_non_hip_path_unchanged_and_driverless(self):
+        class SmallConvNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c1 = nn.Conv2d(32, 32, 3)
+                self.c2 = nn.Conv2d(32, 32, 3)
+                self.c3 = nn.Conv2d(32, 32, 3)
+
+            def forward(self, x):
+                return self.c3(self.c2(self.c1(x)))
+
+        gm = self._build_aten_gm(SmallConvNet(), torch.rand(2, 32, 28, 28))
+
+        def _boom(*a, **k):
+            raise RuntimeError("driver must not be queried on the non-HIP path")
+
+        # torch.version.hip=None: branch not entered. Even with
+        # get_device_properties rigged to raise, no exception should escape and
+        # the decision must equal the stock NVIDIA outcome (ENABLE for a
+        # small-conv graph). This pins both M3 and the C1 hardening.
+        decision = self._decide(gm, self.GFX942_ARCH, hip_version=None, props=_boom)
+        self.assertTrue(
+            decision,
+            "non-HIP path should use stock constants and ENABLE this graph",
+        )
 
 
 if __name__ == "__main__":

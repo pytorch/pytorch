@@ -539,10 +539,24 @@ def convolution(
         )
         return req_stride_order == ir.NHWC_STRIDE_ORDER
 
+    def rocm_nhwc_1x1() -> bool:
+        """True on ROCm with layout_opt enabled for a 2-D conv.
+
+        MIOpen GemmFwd1x1_0_1 copies NHWC->NCHW before dispatching the GEMM,
+        adding measured 1.5-8x overhead vs NCHW on gfx950.  convert_1x1_conv_to_mm
+        calls rocBLAS directly on the already-contiguous [N*H*W, Ci] reshape,
+        recovering NCHW-equivalent speed without any copy.
+        """
+        return torch.version.hip is not None and V.graph.layout_opt and ndim == 2
+
     autotuning_gemm = config.max_autotune or config.max_autotune_gemm
 
     if (
-        (config.conv_1x1_as_mm or (autotuning_gemm and channels_last_conv()))
+        (
+            config.conv_1x1_as_mm
+            or (autotuning_gemm and channels_last_conv())
+            or rocm_nhwc_1x1()
+        )
         and is_ones(kernel_shape)
         and is_ones(stride)
         and is_zeros(padding)
