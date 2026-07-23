@@ -16,6 +16,7 @@ from torch._inductor.ops_handler import ReductionType
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM100OrLater, TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -185,6 +186,85 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             expected[reduction_type],
         )
 
+    @parametrize(
+        "case",
+        (
+            (
+                "sigmoid_fp16",
+                torch.ops.aten.sigmoid.default,
+                torch.float16,
+                (torch.float32, torch.float16),
+                torch.float16,
+            ),
+            (
+                "sigmoid_bf16",
+                torch.ops.aten.sigmoid.default,
+                torch.bfloat16,
+                (torch.float32, torch.bfloat16),
+                torch.bfloat16,
+            ),
+            (
+                "sigmoid_int",
+                torch.ops.aten.sigmoid.default,
+                torch.int32,
+                (torch.float32,),
+                torch.float32,
+            ),
+            (
+                "sigmoid_bool",
+                torch.ops.aten.sigmoid.default,
+                torch.bool,
+                (torch.float32,),
+                torch.float32,
+            ),
+            (
+                "silu_fp16",
+                torch.ops.aten.silu.default,
+                torch.float16,
+                (torch.float32, torch.float16),
+                torch.float16,
+            ),
+            (
+                "silu_bf16",
+                torch.ops.aten.silu.default,
+                torch.bfloat16,
+                (torch.float32, torch.bfloat16),
+                torch.bfloat16,
+            ),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_fast_math_decompositions_preserve_type_promotion(self, case):
+        from torch._higher_order_ops.flex_gemm import flex_gemm_body_decomposition_table
+        from torch._inductor.decomposition import decompositions
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        _, op, input_dtype, conversion_dtypes, result_dtype = case
+        decomposition_table = flex_gemm_body_decomposition_table(
+            {"backend": "QUACK", "fast_math": True}, decompositions
+        )
+        graph_module = make_fx(
+            lambda x: op(x), decomposition_table=decomposition_table
+        )(torch.ones(4, dtype=input_dtype))
+
+        self.assertEqual(
+            tuple(
+                node.args[1]
+                for node in graph_module.graph.nodes
+                if node.target is torch.ops.prims.convert_element_type.default
+            ),
+            conversion_dtypes,
+        )
+        self.assertEqual(
+            graph_module(torch.ones(4, dtype=input_dtype)).dtype, result_dtype
+        )
+        self.assertTrue(
+            any(
+                node.target is torch.ops.aten.tanh.default
+                for node in graph_module.graph.nodes
+            )
+        )
+
     def test_dense_config_selection_is_explicit_and_sm110_reuses_sm100(self):
         from torch._inductor.heuristics.template import (
             flex_gemm as flex_gemm_heuristics,
@@ -347,10 +427,26 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
 
 class FlexGemmTestCase(TestCase):
-    def makeTensor(self, *shape, dtype=torch.bfloat16):
+    def makeTensor(self, *shape, device="cuda", dtype=torch.bfloat16):
         return torch.testing.make_tensor(
-            *shape, device="cuda", dtype=dtype, low=-0.1, high=0.1
+            *shape, device=device, dtype=dtype, low=-0.1, high=0.1
         )
+
+    def assertFlexGemmGeneratedCode(self, code, *checks):
+        file_check = (
+            FileCheck()
+            .check("from torch._inductor.kernel.flex_gemm.runtime import (")
+            .check("FlexGemmRuntimeLocalReducePlan")
+            .check("gemm_epilogue as flex_gemm_epilogue")
+            .check("flex_gemm_epilogue(")
+        )
+        for check in checks:
+            file_check = file_check.check(check)
+        file_check = (
+            file_check.check("stream=stream").check("config_key=").check_not("tuned=")
+        )
+        file_check = file_check.check_not("epilogue_source=")
+        file_check.check_not("from quack").check_not("import quack").run(code)
 
     def swapAndNonSwapConfigKeys(self, device):
         """Return one swap_ab and one non-swap candidate config key for ``device``."""
@@ -390,11 +486,13 @@ class FlexGemmTestCase(TestCase):
             actual_error.item(),
             eager_error.item() + rounding_atol,
             msg=(
-                lambda msg: f"{msg}\nactual error {actual_error.item()} exceeded low precision eager "
-                f"error {eager_error.item()} with fp32_accumulation_eps="
-                f"{fp32_accumulation_eps}, result_rounding_eps="
-                f"{result_rounding_eps}, output_scale={output_scale}, "
-                f"and atol={rounding_atol}"
+                lambda msg: (
+                    f"{msg}\nactual error {actual_error.item()} exceeded low precision eager "
+                    f"error {eager_error.item()} with fp32_accumulation_eps="
+                    f"{fp32_accumulation_eps}, result_rounding_eps="
+                    f"{result_rounding_eps}, output_scale={output_scale}, "
+                    f"and atol={rounding_atol}"
+                )
             ),
         )
 
@@ -1590,22 +1688,6 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
 
 @instantiate_parametrized_tests
 class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
-    def assertFlexGemmGeneratedCode(self, code, *checks):
-        file_check = (
-            FileCheck()
-            .check("from torch._inductor.kernel.flex_gemm.runtime import (")
-            .check("FlexGemmRuntimeLocalReducePlan")
-            .check("gemm_epilogue as flex_gemm_epilogue")
-            .check("flex_gemm_epilogue(")
-        )
-        for check in checks:
-            file_check = file_check.check(check)
-        file_check = (
-            file_check.check("stream=stream").check("config_key=").check_not("tuned=")
-        )
-        file_check = file_check.check_not("epilogue_source=")
-        file_check.check_not("from quack").check_not("import quack").run(code)
-
     def test_supported_op_names_match_dense_scope(self):
         self.assertEqual(_SUPPORTED_FLEX_GEMM_OP_NAMES, "mm/addmm/bmm/baddbmm")
 
@@ -3311,8 +3393,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         (
             (
                 "variance_like",
-                lambda x: ((x - x.mean(-1, keepdim=True)).square()).mean(-1) * 0.5
-                + 1.0,
+                lambda x: (
+                    ((x - x.mean(-1, keepdim=True)).square()).mean(-1) * 0.5 + 1.0
+                ),
                 " / 4.0",
                 False,
             ),
@@ -5365,6 +5448,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 {"backend": "QUACK", "split_k": 2},
                 "unsupported FlexGEMM kernel options",
             ),
+            (
+                "invalid_fast_math_option",
+                lambda acc: acc.relu(),
+                {"backend": "QUACK", "fast_math": 1},
+                "fast_math kernel option must be bool",
+            ),
         ),
         name_fn=lambda case: case[0],
     )
@@ -5409,6 +5498,181 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 kernel_options={"backend": "CUTLASS"},
             )
 
+
+@skipIfNoCuteDSL
+@unittest.skipIf(not SM100OrLater, "SM100+ required")
+class TestFlexGemmFastMathDevice(FlexGemmTestCase):
+    def test_mm_fast_math_kernel_option_controls_cutedsl_math(self, device):
+        def epilogue_fn(acc):
+            magnitude = acc.abs() + 1.0
+            return (
+                torch.tanh(acc)
+                + torch.sigmoid(acc)
+                + torch.exp(-acc.abs())
+                + torch.log1p(acc.abs())
+                + torch.sqrt(magnitude)
+                + torch.rsqrt(magnitude)
+            )
+
+        def compile_with_fast_math(a, b, fast_math):
+            def fn(a, b):
+                return flex_gemm(
+                    torch.mm,
+                    (a, b),
+                    epilogue_fn,
+                    kernel_options={"backend": "QUACK", "fast_math": fast_math},
+                )
+
+            torch._dynamo.reset()
+            return run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+
+        a = self.makeTensor(128, 64, device=device)
+        b = self.makeTensor(64, 128, device=device)
+        fast_result, (fast_code,) = compile_with_fast_math(a, b, True)
+        precise_result, (precise_code,) = compile_with_fast_math(a, b, False)
+        expected = epilogue_fn(a.double() @ b.double())
+
+        torch.testing.assert_close(fast_result.double(), expected, atol=0.2, rtol=0.02)
+        torch.testing.assert_close(
+            precise_result.double(), expected, atol=0.02, rtol=0.002
+        )
+        for op_name in ("tanh", "exp2", "log", "sqrt", "rsqrt"):
+            self.assertIn(f"cute.math.{op_name}", fast_code)
+        self.assertIn("fastmath=True", fast_code)
+        self.assertNotIn("fastmath=True", precise_code)
+
+    def test_mm_fast_math_sigmoid_uses_tanh_decomposition(self, device):
+        def epilogue_fn(acc):
+            return torch.sigmoid(acc)
+
+        def compile_with_fast_math(a, b, fast_math):
+            def fn(a, b):
+                return flex_gemm(
+                    torch.mm,
+                    (a, b),
+                    epilogue_fn,
+                    kernel_options={"backend": "QUACK", "fast_math": fast_math},
+                )
+
+            torch._dynamo.reset()
+            return run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+
+        a = self.makeTensor(128, 64, device=device)
+        b = self.makeTensor(64, 128, device=device)
+        fast_result, (fast_code,) = compile_with_fast_math(a, b, True)
+        precise_result, (precise_code,) = compile_with_fast_math(a, b, False)
+        expected = epilogue_fn(a.double() @ b.double())
+
+        torch.testing.assert_close(fast_result.double(), expected, atol=0.2, rtol=0.02)
+        torch.testing.assert_close(
+            precise_result.double(), expected, atol=0.02, rtol=0.002
+        )
+        self.assertIn("cute.math.tanh", fast_code)
+        self.assertIn("fastmath=True", fast_code)
+        self.assertNotIn("cute.math.exp2", fast_code)
+        self.assertIn("cute.math.exp2", precise_code)
+        self.assertNotIn("cute.math.tanh", precise_code)
+
+    def test_mm_fast_math_silu_uses_tanh_decomposition(self, device):
+        def epilogue_fn(acc):
+            return torch.nn.functional.silu(acc)
+
+        def compile_with_fast_math(a, b, fast_math):
+            def fn(a, b):
+                return flex_gemm(
+                    torch.mm,
+                    (a, b),
+                    epilogue_fn,
+                    kernel_options={"backend": "QUACK", "fast_math": fast_math},
+                )
+
+            torch._dynamo.reset()
+            return run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+
+        a = self.makeTensor(128, 64, device=device)
+        b = self.makeTensor(64, 128, device=device)
+        fast_result, (fast_code,) = compile_with_fast_math(a, b, True)
+        precise_result, (precise_code,) = compile_with_fast_math(a, b, False)
+        expected = epilogue_fn(a.double() @ b.double())
+
+        torch.testing.assert_close(fast_result.double(), expected, atol=0.2, rtol=0.02)
+        torch.testing.assert_close(
+            precise_result.double(), expected, atol=0.02, rtol=0.002
+        )
+        self.assertIn("cute.math.tanh", fast_code)
+        self.assertIn("fastmath=True", fast_code)
+        self.assertNotIn("cute.math.exp2", fast_code)
+        self.assertIn("cute.math.exp2", precise_code)
+        self.assertNotIn("cute.math.tanh", precise_code)
+
+    def test_mm_fast_math_gelu_none_uses_tanh_decomposition(self, device):
+        def epilogue_fn(acc):
+            return torch.nn.functional.gelu(acc, approximate="none")
+
+        def compile_with_fast_math(a, b, fast_math):
+            def fn(a, b):
+                return flex_gemm(
+                    torch.mm,
+                    (a, b),
+                    epilogue_fn,
+                    kernel_options={"backend": "QUACK", "fast_math": fast_math},
+                )
+
+            torch._dynamo.reset()
+            return run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+
+        a = self.makeTensor(128, 64, device=device)
+        b = self.makeTensor(64, 128, device=device)
+        fast_result, (fast_code,) = compile_with_fast_math(a, b, True)
+        precise_result, (precise_code,) = compile_with_fast_math(a, b, False)
+        expected = epilogue_fn(a.double() @ b.double())
+
+        torch.testing.assert_close(
+            fast_result.double(), expected, atol=0.02, rtol=0.002
+        )
+        torch.testing.assert_close(
+            precise_result.double(), expected, atol=0.02, rtol=0.002
+        )
+        self.assertIn("cute.math.tanh", fast_code)
+        self.assertIn("fastmath=True", fast_code)
+        self.assertNotIn("cute.math.erf", fast_code)
+        self.assertIn("cute.math.erf", precise_code)
+        self.assertNotIn("cute.math.tanh", precise_code)
+
+    def test_mm_fast_math_gelu_tanh_preserves_requested_approximation(self, device):
+        def epilogue_fn(acc):
+            return torch.nn.functional.gelu(acc, approximate="tanh")
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "fast_math": True},
+            )
+
+        a = self.makeTensor(128, 64, device=device)
+        b = self.makeTensor(64, 128, device=device)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = epilogue_fn(a.double() @ b.double())
+
+        torch.testing.assert_close(actual.double(), expected, atol=0.02, rtol=0.002)
+        self.assertIn("cute.math.tanh", code)
+        self.assertIn("fastmath=True", code)
+        self.assertNotIn("cute.math.erf", code)
+
+
+instantiate_device_type_tests(TestFlexGemmFastMathDevice, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
