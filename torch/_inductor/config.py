@@ -3004,6 +3004,7 @@ _cache_config_ignore_prefix: list[str] = [
     # not relevant
     "worker_start_method",
     "compile_threads",
+    "compile_worker_mode",
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
