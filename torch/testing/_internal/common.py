@@ -181,7 +181,8 @@ def tf32_on_and_off(tf32_precision=1e-5, *, only_if=True):
             )
             cond = (cuda_tf32 or xpu_tf32) and only_if
             device = kwargs.get(
-                "device", getattr(kwargs.get("self"), "device", None)
+                "device",
+                getattr(kwargs.get("self"), "device", None),
             )
             if device is not None:
                 dev_type = torch.device(device).type
