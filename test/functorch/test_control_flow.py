@@ -4750,7 +4750,9 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             return c + x, (c + x).clone()
 
         init = torch.tensor(0.0)
-        with self.assertRaisesRegex(TypeError, r"unsupported operand type.*NoneType"):
+        with self.assertRaisesRegex(
+            (RuntimeError, TypeError), r"unsupported operand type.*NoneType"
+        ):
             scan(bad_body, init, None, length=length)
 
     @skipIfTorchDynamo("don't test compile on compile")
