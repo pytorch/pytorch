@@ -787,9 +787,9 @@ class TestFakePG(TestCase):
             device_id=torch.device(device_type, 0),
         )
 
-        # Rank 0 is in none of the splits, so it gets None back.
+        # Rank 0 is in none of the splits, so it gets the non-member sentinel.
         new_pg = dist.split_group(split_ranks=[[1, 2, 3]])
-        self.assertIsNone(new_pg)
+        self.assertIs(new_pg, dist.GroupMember.NON_GROUP_MEMBER)
 
     @skipIfHpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
