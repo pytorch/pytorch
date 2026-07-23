@@ -77,17 +77,12 @@ jobs:
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13
             buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
-            runner_label: mt-rel-l-arm64g4-16-62
+            runner_label: mt-l-arm64g4-16-62
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
             buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
             timeout-minutes: 600
-            runner_label: mt-rel-l-arm64g4-16-62
-    # Use the mt-rel-* release runner labels: their nodes carry
-    # osdc.io/runner-class=release, which exempts them from the cache-enforcer
-    # DaemonSet's iptables block on outbound ghcr.io traffic so the "Mirror image
-    # to GHCR" step can succeed. The regular mt-l-* pool blocks ghcr.io egress at
-    # the host iptables layer.
-    runs-on: ${{ matrix.runner_label || 'mt-rel-l-x86iavx512-8-64' }}
+            runner_label: mt-l-arm64g4-16-62
+    runs-on: ${{ matrix.runner_label || 'mt-l-x86iavx512-8-64' }}
     container:
       image: ghcr.io/actions/actions-runner:latest
     steps:
