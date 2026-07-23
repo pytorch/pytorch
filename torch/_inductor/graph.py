@@ -13,7 +13,7 @@ import time
 import typing_extensions
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, NoReturn, TYPE_CHECKING
+from typing import Any, cast, Literal, NoReturn, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
@@ -36,7 +36,7 @@ from torch._prims_common import (
     compute_required_storage_length,
     make_channels_last_strides_for,
 )
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -362,6 +362,27 @@ def is_mkldnn_conv(node: Node) -> bool:
     return False
 
 
+def _realize_efficient_zerotensor_output(r: ir.IRNode, fx_node: object) -> ir.IRNode:
+    if (
+        isinstance(fx_node, torch.fx.Node)
+        and fx_node.target is torch.ops.aten._efficientzerotensor.default
+        and isinstance(r, (ir.TensorBox, ir.BaseView))
+    ):
+        return ir.ExternKernel.realize_input(
+            fallback_handler(
+                torch.ops.aten._efficientzerotensor.default,
+                add_to_fallback_set=False,
+            )(
+                list(r.get_size()),
+                dtype=r.get_dtype(),
+                layout=torch.strided,
+                device=r.get_device(),
+                pin_memory=False,
+            )
+        )
+    return r
+
+
 class GraphLowering(torch.fx.Interpreter):
     """Lowers an FX graph to Inductor IR and drives backend code generation.
 
@@ -436,6 +457,9 @@ class GraphLowering(torch.fx.Interpreter):
         # InputBuffer offsets are relative to input.data_ptr(); explicit FX
         # as_strided storage offsets are relative to the input's storage.
         self.graph_input_storage_offsets: dict[str, Expr] = {}
+        self.symbolic_input_sources: dict[
+            sympy.Symbol, tuple[str, Literal["size", "stride"], int]
+        ] = {}
         self.partition_maps: list[GraphPartitionMap] | None = None
         self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
@@ -1563,7 +1587,15 @@ class GraphLowering(torch.fx.Interpreter):
             if target in self.seen_subgraphs:
                 return self.seen_subgraphs[target]
 
-            out = ir.Subgraph(name=target, graph_module=value)
+            nested_config = getattr(value, "meta", {}).get("nested_region_config")
+            inductor_config_patches = getattr(
+                nested_config, "inductor_config_patches", None
+            )
+            out = ir.Subgraph(
+                name=target,
+                graph_module=value,
+                inductor_config_patches=inductor_config_patches,
+            )
             self.seen_subgraphs[target] = out
             return out
 
@@ -1667,6 +1699,7 @@ class GraphLowering(torch.fx.Interpreter):
                 f"Mismatch between fx_node_args length ({len(fx_node_args)}) and result length ({len(result)})"
             )
         for r, fx_node in zip(result, fx_node_args):
+            r = _realize_efficient_zerotensor_output(r, fx_node)
             if not isinstance(r, (ir.TensorBox, ir.BaseView)):
                 result_correct_strides.append(r)
             elif isinstance(r.get_output_spec(), ir.CommBufferLayout):
@@ -1781,6 +1814,20 @@ class GraphLowering(torch.fx.Interpreter):
                 f"old_kwargs length ({len(old_kwargs)}) != new_kwargs length ({len(new_kwargs)})"
             )
 
+        def already_reflected(old_arg: Any, new_arg: Any) -> bool:
+            # No propagation is needed when new_arg already reflects the
+            # mutation of old_arg: either they are the same object, or they are
+            # distinct IR nodes aliasing the same buffer (e.g. an in-place op
+            # whose output was not cloned). Emitting copy_ in the aliasing case
+            # would lower to a self-referential (buf = buf) node, which the
+            # scheduler's compute_ancestors cannot represent (self-edge).
+            if old_arg is new_arg:
+                return True
+            if isinstance(old_arg, ir.IRNode) and isinstance(new_arg, ir.IRNode):
+                name = old_arg.maybe_get_name()
+                return name is not None and name == new_arg.maybe_get_name()
+            return False
+
         if fx_node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
             kwargs = fx_node.kwargs["kwargs"]
             if not isinstance(kwargs, dict):
@@ -1797,7 +1844,7 @@ class GraphLowering(torch.fx.Interpreter):
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
                 new_arg = new_kwargs["kwargs"][name]
-                if old_arg is new_arg:
+                if already_reflected(old_arg, new_arg):
                     continue
 
                 self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
@@ -1822,7 +1869,7 @@ class GraphLowering(torch.fx.Interpreter):
                     new_arg = (new_arg,)  # type: ignore[assignment]
 
                 for old_arg_item, new_arg_item in zip(old_arg, new_arg):  # type: ignore[call-overload]
-                    if old_arg_item is new_arg_item:
+                    if already_reflected(old_arg_item, new_arg_item):
                         continue
                     self.call_function(
                         torch.ops.aten.copy_.default, (old_arg_item, new_arg_item), {}
@@ -1846,19 +1893,30 @@ class GraphLowering(torch.fx.Interpreter):
         """Get the user-annotated stream index from FX node metadata."""
         return n.meta.get("custom", {}).get("stream")
 
-    def _realize_inputs_at_stream_boundaries(self, n: torch.fx.Node) -> None:
-        """Realize IR inputs that are on a different stream.
+    @staticmethod
+    def _get_node_mempool(n: torch.fx.Node) -> tuple[int, int] | None:
+        """Get the user-annotated CUDA MemPool from FX node metadata."""
+        custom = n.meta.get("custom", {})
+        if "mempool" not in custom:
+            return None
+        return custom["mempool"], custom["mempool_device"]
 
-        Without this, pointwise ops across stream boundaries would be inlined
+    def _realize_inputs_at_context_boundaries(self, n: torch.fx.Node) -> None:
+        """Realize IR inputs that are in a different stream or mempool context.
+
+        Without this, pointwise ops across context boundaries would be inlined
         into each other during lowering, making it impossible for the scheduler
-        to split them into separate kernels.
+        to split them into separate kernels or allocate buffers in the right
+        memory pool.
 
         None means the default stream, so it is compared like any other value.
         """
         node_stream = self._get_node_stream(n)
+        node_mempool = self._get_node_mempool(n)
         for input_node in n.all_input_nodes:
             input_stream = self._get_node_stream(input_node)
-            if input_stream == node_stream:
+            input_mempool = self._get_node_mempool(input_node)
+            if input_stream == node_stream and input_mempool == node_mempool:
                 continue
             ir_value = self.env.get(input_node)
             if isinstance(ir_value, ir.TensorBox):
@@ -1905,13 +1963,30 @@ class GraphLowering(torch.fx.Interpreter):
         # origins: OrderedSet[Union[Node, ir.IRNode]] = OrderedSet([n])
         origins: OrderedSet[Any] = OrderedSet([n])
         is_call_function = n.op == "call_function"
+        if (
+            is_call_function
+            and isinstance(n.target, torch._ops.OpOverload)
+            and n.target.name() in ("mempool::begin", "mempool::end")
+        ):
+            # Drop marker ops; codegen reintroduces use_mem_pool blocks from
+            # per-node metadata around scheduler nodes that may allocate.
+            return None
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-            self._realize_inputs_at_stream_boundaries(n)
+            self._realize_inputs_at_context_boundaries(n)
+        node_mempool = self._get_node_mempool(n)
+        if node_mempool is not None and self.disable_cudagraphs_reason is None:
+            # User MemPool regions must route allocations to the explicit pool.
+            # CUDA graphs use a private capture pool, so capture would violate
+            # that routing and trip cudagraph memory-pool assertions.
+            self.disable_cudagraphs_reason = (
+                "user CUDA MemPool contexts are not compatible with CUDA graphs"
+            )
         with (
             ir.IRNode.current_origins(origins),
             ir.IRNode.current_stream_idx(self._get_node_stream(n)),
+            ir.IRNode.current_mempool(node_mempool),
             self.set_current_node(n),
             V.set_current_node(n),
         ):
@@ -2050,21 +2125,17 @@ class GraphLowering(torch.fx.Interpreter):
                             result.get_size(), torch.channels_last
                         )
                     if not unbacked_symbols_in_strides and len(strides):
-                        # To avoid converting possible view ops to a copy kernel, we use the previous
-                        # require_exact_strides to handle views. But ultimately it's better to require
-                        # the right strides at the tensor definition.
-                        if n.meta["val"]._is_view() or isinstance(
+                        is_view = n.meta["val"]._is_view() or isinstance(
                             result.data,  # type: ignore[missing-attribute]
                             ir.BaseView,
-                        ):
+                        )
+                        if is_view and not (is_output and config.strict_output_strides):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(strides),
                                 allow_padding=allow_padding,
                             )
                         else:
-                            # Fix for 0-d tensors: if result size is empty,
-                            # strides should also be empty
                             if len(result.get_size()) == 0 and len(strides) > 0:
                                 strides = []
                             result = ir.ExternKernel.require_exact_strides(
@@ -2257,6 +2328,8 @@ class GraphLowering(torch.fx.Interpreter):
         # symbol is likely to hit lots of GuardOnDataDependent errors that
         # we already know facts for.
         renamed_unbacked_bindings = OrderedSet(
+            # unbacked_renamings is not declared on every ShapeEnv path
+            # pyrefly: ignore[missing-attribute]
             V.fake_mode.shape_env.unbacked_renamings.get(s, s)
             for s in unbacked_bindings
         )
@@ -2363,6 +2436,15 @@ class GraphLowering(torch.fx.Interpreter):
 
         if sys.platform not in ("linux", "darwin", "win32"):
             raise CppWrapperCodegenError(f"Unsupported platform {sys.platform}")
+
+        graph_module = cast(torch.fx.GraphModule, self.module)
+        if any(
+            "mempool" in node.meta.get("custom", {})
+            for node in graph_module.graph.nodes
+        ):
+            raise CppWrapperCodegenError(
+                "torch.cuda.use_mem_pool is not supported with C++ wrapper codegen"
+            )
 
     def init_wrapper_code(
         self,
@@ -2508,6 +2590,7 @@ class GraphLowering(torch.fx.Interpreter):
         autotune block (see `DeferredCpuTritonCallWrapper` in
         `cpp_wrapper_cpu.py`).
         """
+        self.validate_can_generate_cpp_wrapper()
         has_gpu = any(device in self.device_types for device in ["cuda", "xpu"])
         # CPU + user-defined Triton + AOTI + autotune block disabled is the
         # only CPU configuration that needs the two-pass dance: the autotune
@@ -2532,7 +2615,7 @@ class GraphLowering(torch.fx.Interpreter):
                     elif isinstance(x, (torch.SymInt, torch.SymFloat)):
                         # Need concrete value to run dynamic shapes and tune the result
                         return not_none(x.hint)
-                    elif isinstance(x, FakeTensor):
+                    elif is_fake_tensor(x):
                         return defake(x)
                     else:
                         if not isinstance(x, torch.Tensor):
@@ -2554,6 +2637,7 @@ class GraphLowering(torch.fx.Interpreter):
                         if param is not None
                     ]
                     real_inputs = [
+                        # pyrefly: ignore[bad-argument-type]
                         materialize(x)
                         for x in itertools.chain(params_flat, V.real_inputs)
                     ]
@@ -2821,11 +2905,16 @@ class GraphLowering(torch.fx.Interpreter):
             next((d for d in self.device_types if d != "meta"), "cpu"),
         )
 
-        real_inputs = extract_real_inputs()
+        # A const graph has no runtime graph inputs (its weights are read as
+        # constants, not placeholders), so its JIT entry point expects only the
+        # appended constant handles. extract_real_inputs() would return the main
+        # model's params/inputs, producing a handle-count/type mismatch, so pass
+        # an empty input list here and rely solely on the constants below.
+        real_inputs = [] if self.is_const_graph else extract_real_inputs()
 
         def materialize_constant(name: str) -> torch.Tensor:
             constant = self.constants[name]
-            if isinstance(constant, FakeTensor):
+            if is_fake_tensor(constant):
                 constant = defake(constant)
             if not isinstance(constant, torch.Tensor):
                 raise AssertionError(f"Expected tensor constant for {name}")
@@ -3108,6 +3197,17 @@ class SubgraphLowering(GraphLowering):
     def __init__(self, parent: GraphLowering, *args: Any, **kwargs: Any) -> None:
         self.parent = parent
         super().__init__(*args, **kwargs)
+
+    def allocate_non_dup_const_name(self, name: str | None, data: Tensor) -> str:
+        name = super().allocate_non_dup_const_name(name, data)
+        # The generated subgraph wrapper shares the parent's module, but tensor
+        # constants are attached to the module from the root graph's constants
+        # dict at load time. Propagate the value up so it is not left as None.
+        root = self.parent
+        while isinstance(root, SubgraphLowering):
+            root = root.parent
+        root.constants[name] = data
+        return name
 
     def init_wrapper_code(
         self,

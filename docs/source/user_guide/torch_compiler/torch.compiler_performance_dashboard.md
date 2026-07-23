@@ -2,7 +2,7 @@
 
 **Author:** [Bin Bao](https://github.com/desertfire) and [Huy Do](https://github.com/huydhn)
 
-PyTorch 2.0's performance is tracked nightly on this [dashboard](https://hud.pytorch.org/benchmark/compilers).
+PyTorch 2.0's performance is tracked nightly on this [dashboard](https://hud.pytorch.org/benchmark/compilers). <!-- @lint-ignore hud.pytorch.org is live but its WAF blocks the URL linter -->
 The performance collection runs on 12 GCP A100 nodes every night. Each node contains a 40GB A100 Nvidia GPU and
 a 6-core 2.2GHz Intel Xeon CPU. The corresponding CI workflow file can be found
 [here](https://github.com/pytorch/pytorch/blob/main/.github/workflows/inductor-perf-test-nightly.yml).
