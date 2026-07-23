@@ -31,12 +31,14 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
+#include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/standalone/privateuse1_profiler.h>
 
 #include <GenericTraceActivity.h>
@@ -261,6 +263,112 @@ TEST(ProfilerCollectionTest, DuplicateFlowIdHandledGracefully) {
   }
   EXPECT_TRUE(saw_per_id_warning);
   EXPECT_TRUE(saw_summary_warning);
+}
+
+namespace {
+using torch::profiler::impl::EventType;
+using torch::profiler::impl::ExtraFields;
+using torch::profiler::impl::PyFrameState;
+using torch::profiler::impl::Result;
+
+std::shared_ptr<Result> makePyCall(
+    int64_t start_ns,
+    int64_t end_ns,
+    uint64_t system_tid,
+    size_t python_tid) {
+  PyFrameState frame{0, at::StringView("f.py"), at::StringView("fn")};
+  PyFrameState caller{0, at::StringView("caller.py"), at::StringView("caller")};
+  ExtraFields<EventType::PyCall>::args_t args{frame, std::nullopt, std::nullopt};
+  return Result::create(
+      start_ns,
+      system_tid,
+      torch::profiler::impl::kineto::DeviceAndResource(),
+      ExtraFields<EventType::PyCall>(
+          end_ns, python_tid, caller, std::move(args)));
+}
+
+std::shared_ptr<Result> makePyCCall(
+    int64_t start_ns,
+    int64_t end_ns,
+    uint64_t system_tid,
+    size_t python_tid) {
+  PyFrameState caller{0, at::StringView("caller.py"), at::StringView("caller")};
+  return Result::create(
+      start_ns,
+      system_tid,
+      torch::profiler::impl::kineto::DeviceAndResource(),
+      ExtraFields<EventType::PyCCall>(
+          end_ns,
+          python_tid,
+          caller,
+          at::StringView("<built-in method foo>")));
+}
+
+} // namespace
+
+TEST(PythonEventTimestampClampTest, ClampsOrphanToParentEnd) {
+  auto parent = makePyCall(100, 200, /*system_tid=*/7, /*python_tid=*/1);
+  auto orphan = makePyCCall(150, 10000, /*system_tid=*/7, /*python_tid=*/1);
+  std::vector<std::shared_ptr<Result>> events{parent, orphan};
+
+  torch::profiler::impl::python_tracer::clampOverrunningPythonEvents(events);
+
+  EXPECT_EQ(orphan->endTimeNS(), 200);
+}
+
+TEST(PythonEventTimestampClampTest, CascadesClampsToDescendants) {
+  auto parent = makePyCall(100, 200, /*system_tid=*/7, /*python_tid=*/1);
+  auto child = makePyCCall(120, 10000, /*system_tid=*/7, /*python_tid=*/1);
+  auto grandchild = makePyCall(140, 10000, /*system_tid=*/7, /*python_tid=*/1);
+  std::vector<std::shared_ptr<Result>> events{parent, child, grandchild};
+
+  torch::profiler::impl::python_tracer::clampOverrunningPythonEvents(events);
+
+  EXPECT_EQ(child->endTimeNS(), 200);
+  EXPECT_EQ(grandchild->endTimeNS(), 200);
+}
+
+TEST(PythonEventTimestampClampTest, LeavesActiveStackUnchanged) {
+  auto parent = makePyCall(100, 10000, /*system_tid=*/7, /*python_tid=*/1);
+  auto child = makePyCCall(150, 10000, /*system_tid=*/7, /*python_tid=*/1);
+  std::vector<std::shared_ptr<Result>> events{parent, child};
+
+  torch::profiler::impl::python_tracer::clampOverrunningPythonEvents(events);
+
+  EXPECT_EQ(parent->endTimeNS(), 10000);
+  EXPECT_EQ(child->endTimeNS(), 10000);
+}
+
+TEST(PythonEventTimestampClampTest, DoesNotUseExpiredAncestor) {
+  auto ancestor = makePyCCall(100, 200, /*system_tid=*/7, /*python_tid=*/1);
+  auto event = makePyCall(500, 600, /*system_tid=*/7, /*python_tid=*/1);
+  std::vector<std::shared_ptr<Result>> events{ancestor, event};
+
+  torch::profiler::impl::python_tracer::clampOverrunningPythonEvents(events);
+
+  EXPECT_EQ(event->endTimeNS(), 600);
+}
+
+TEST(PythonEventTimestampClampTest, DoesNotNestAdjacentEvents) {
+  auto first = makePyCall(100, 200, /*system_tid=*/7, /*python_tid=*/1);
+  auto second = makePyCall(200, 300, /*system_tid=*/7, /*python_tid=*/1);
+  std::vector<std::shared_ptr<Result>> events{first, second};
+
+  torch::profiler::impl::python_tracer::clampOverrunningPythonEvents(events);
+
+  EXPECT_EQ(second->endTimeNS(), 300);
+}
+
+TEST(PythonEventTimestampClampTest, SeparatesUnresolvedSystemThreads) {
+  constexpr auto unresolved_tid = std::numeric_limits<uint64_t>::max();
+  auto ancestor =
+      makePyCCall(100, 5000, unresolved_tid, /*python_tid=*/1);
+  auto event = makePyCall(500, 10000, unresolved_tid, /*python_tid=*/2);
+  std::vector<std::shared_ptr<Result>> events{ancestor, event};
+
+  torch::profiler::impl::python_tracer::clampOverrunningPythonEvents(events);
+
+  EXPECT_EQ(event->endTimeNS(), 10000);
 }
 
 #endif // USE_KINETO
