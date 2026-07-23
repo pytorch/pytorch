@@ -309,6 +309,10 @@ struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
   virtual bool memoryProfilingEnabled() const = 0;
 };
 
+// Sets the memory reporter used when no thread-local reporter is installed.
+C10_API void setGlobalMemoryReportingInfo(
+    std::shared_ptr<MemoryReportingInfoBase> reporter);
+
 C10_API bool memoryProfilingEnabled();
 C10_API void reportMemoryUsageToProfiler(
     void* ptr,

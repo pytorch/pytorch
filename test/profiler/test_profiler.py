@@ -2238,6 +2238,35 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             events = main_with_thread_fn(profile_all_threads)
             verify_events(events)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profile_all_threads_with_memory(self):
+        allocations = []
+
+        def allocate():
+            allocations.append(torch.empty(1_000_003, dtype=torch.float32))
+
+        experimental_config = torch._C._profiler._ExperimentalConfig(
+            profile_all_threads=True
+        )
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            profile_memory=True,
+            experimental_config=experimental_config,
+        ) as prof:
+            allocate()
+            thread = threading.Thread(target=allocate)
+            thread.start()
+            thread.join()
+
+        allocation_size = 1_000_003 * torch.float32.itemsize
+        empty_events = [
+            event
+            for event in prof.events()
+            if event.name == "aten::empty" and event.cpu_memory_usage == allocation_size
+        ]
+        self.assertEqual(len(empty_events), 2)
+        self.assertEqual(len({event.thread for event in empty_events}), 2)
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:

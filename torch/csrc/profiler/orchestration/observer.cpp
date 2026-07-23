@@ -129,6 +129,9 @@ ProfilerStateBase::~ProfilerStateBase() {
     std::shared_ptr<ProfilerStateBase>&& state) {
   TORCH_INTERNAL_ASSERT(state != nullptr);
   if (state->config().pushGlobalCallbacks()) {
+    if (state->memoryProfilingEnabled()) {
+      c10::setGlobalMemoryReportingInfo(state);
+    }
     GlobalManager::push(std::move(state));
   } else {
     c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
@@ -151,7 +154,11 @@ std::shared_ptr<ProfilerStateBase> popTLS() {
 /*static*/ std::shared_ptr<ProfilerStateBase> ProfilerStateBase::pop(
     bool global) {
   auto out = global ? GlobalManager::pop() : popTLS();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!out || out->config().global() == global);
+  if (global && out && out->memoryProfilingEnabled()) {
+    c10::setGlobalMemoryReportingInfo(nullptr);
+  }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !out || out->config().pushGlobalCallbacks() == global);
   return out;
 }
 
