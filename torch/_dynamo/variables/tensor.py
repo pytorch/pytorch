@@ -3192,19 +3192,6 @@ class NumpyNdarrayVariable(TensorVariable):
             kwargs = {kwargs_rename.get(k, k): v for k, v in kwargs.items()}
         return args, kwargs
 
-    def mp_ass_subscript_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        key: VariableTracker,
-        value: VariableTracker | None,
-    ) -> VariableTracker:
-        # numpy assignment follows numpy semantics (e.g. a tuple/list RHS is
-        # coerced to an ndarray), unlike torch.Tensor.__setitem__. Route through
-        # the numpy-aware __setitem__ wrapper rather than operator.setitem.
-        if value is None:
-            raise_type_error(tx, "cannot delete array elements")
-        return self.call_method(tx, "__setitem__", [key, value], {})
-
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
