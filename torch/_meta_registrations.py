@@ -228,7 +228,11 @@ def meta__transformer_encoder_layer_fwd(
         raise NotImplementedError(
             "_transformer_encoder_layer_fwd fake implementation does not support nested tensors"
         )
-    if src.numel() == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    # Unbacked-safe: known-empty takes the empty path; if the size is symbolic
+    # and can't be decided, assume non-empty (the common case) instead of DDE-ing.
+    if guard_or_false(src.numel() == 0):
         return src.clone()
     return torch.empty_like(src)
 
@@ -581,6 +585,27 @@ def meta_philox_key_fold_in(key, data):
     torch._check(
         key.dtype == torch.uint64,
         lambda: f"_philox_key_fold_in: key must have dtype uint64, got {key.dtype}",
+    )
+    return torch.empty_like(key)
+
+
+@register_meta(aten._philox_key_fold_in.Tensor)
+def meta_philox_key_fold_in_tensor(key, data):
+    torch._check(
+        key.dim() >= 1 and key.shape[-1] == 2,
+        lambda: f"_philox_key_fold_in: key must have shape (*batch, 2), got shape {key.shape}",
+    )
+    torch._check(
+        key.dtype == torch.uint64,
+        lambda: f"_philox_key_fold_in: key must have dtype uint64, got {key.dtype}",
+    )
+    torch._check(
+        data.dtype == torch.uint64,
+        lambda: f"_philox_key_fold_in: data must have dtype uint64, got {data.dtype}",
+    )
+    torch._check(
+        data.numel() == 1,
+        lambda: f"_philox_key_fold_in: data must be a single value, got {data.numel()} elements",
     )
     return torch.empty_like(key)
 
@@ -2456,7 +2481,9 @@ def meta__pdist_forward(self: Tensor, p: float = 2) -> Tensor:
 
 @register_meta(aten._pdist_backward)
 @out_wrapper()
-def meta__pdist_backward(grad: Tensor, self: Tensor, p: float, pdist: Tensor) -> Tensor:
+def meta__pdist_backward(
+    grad_output: Tensor, self: Tensor, p: float, pdist: Tensor
+) -> Tensor:
     torch._check(
         self.is_contiguous(), lambda: "_pdist_backward requires self to be contiguous"
     )
@@ -2588,8 +2615,9 @@ def _compute_reduction_shape(self, dims, keepdim):
 # exists so meta kernels which have diverge per device will be more
 # accurate when run with FakeTensors
 def device_hint(tensor) -> "str":
-    if isinstance(tensor, torch._subclasses.FakeTensor):
-        return tensor.fake_device.type
+    fake_device = torch._subclasses.fake_tensor.maybe_get_fake_device(tensor)
+    if fake_device is not None:
+        return fake_device.type
     elif (
         hasattr(tensor, "device")
         and hasattr(tensor.device, "type")
@@ -2735,14 +2763,11 @@ def calc_conv_nd_return_shape(
     # NOTE: Backend behavior for zero-sized spatial dimensions is inconsistent.
     # CUDA (cuDNN) and HIP handle zero-sized conv_transpose outputs by short-circuiting,
     # but other backends fail: CPU rejects it and MPS asserts "Placeholder tensor is empty".
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
     from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
 
-    device = (
-        input_tensor.fake_device
-        if isinstance(input_tensor, FakeTensor)
-        else input_tensor.device
-    )
+    fake_device = maybe_get_fake_device(input_tensor)
+    device = fake_device if fake_device is not None else input_tensor.device
 
     # ROCm reports device.type as "cuda"; keep the existing NVIDIA CUDA behavior
     # unchanged and only apply the new check to HIP.
@@ -4444,7 +4469,7 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
 
 @register_meta(aten._cdist_backward)
 @out_wrapper()
-def meta_cdist_backward(grad, x1, x2, p, cdist):
+def meta_cdist_backward(grad_output, x1, x2, p, cdist):
     c1 = x1.shape[-1]
     r1 = x1.shape[-2]
     r2 = x2.shape[-2]
@@ -6599,7 +6624,7 @@ def meta__scaled_dot_product_efficient_attention(
 
     if torch.version.hip and torch.cuda.is_available():
         """Please see: https://github.com/pytorch/pytorch/issues/146848
-        longsumexp last dim should be seq length
+        logsumexp last dim should be seq length
         """
         logsumexp_dim = M if compute_log_sumexp else 0
     else:
@@ -6946,9 +6971,16 @@ def meta__efficient_attention_forward(
             )
         actual_max_seqlen_q = max_seqlen_q
     actual_max_seqlen_k = max_seqlen_k if max_seqlen_k is not None else N
-    logsumexp_dim = (
-        math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
-    )
+
+    if torch.version.hip is not None:
+        # ROCm efficient-attention backends return compact LSE. CUDA's
+        # memory-efficient attention kernel pads LSE to its kernel alignment.
+        logsumexp_dim = actual_max_seqlen_q if compute_log_sumexp else 0
+    else:
+        logsumexp_dim = (
+            math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
+        )
+
     logsum_exp = torch.empty(
         (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
@@ -7122,27 +7154,44 @@ def _check_scaled_mm_sizes(
             block_size_mn = 128
 
             num_k_blocks = ceil_div(_k, block_size_k)
-            padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
 
-            expected_a_size = (
-                block_size_mn * ceil_div(m, block_size_mn) * padded_num_k_blocks
-            )
-            expected_b_size = (
-                block_size_mn * ceil_div(n, block_size_mn) * padded_num_k_blocks
-            )
+            if device_hint(self) == "xpu":
+                # XPU (oneDNN) uses unswizzled, unpadded blockwise scale shapes,
+                # unlike the L4-padded SWIZZLE_32_4_4 layout CUDA expects.
+                expected_a_size = num_k_blocks * m
+                expected_b_size = num_k_blocks * n
+            else:
+                padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
+
+                expected_a_size = (
+                    block_size_mn * ceil_div(m, block_size_mn) * padded_num_k_blocks
+                )
+                expected_b_size = (
+                    block_size_mn * ceil_div(n, block_size_mn) * padded_num_k_blocks
+                )
 
             if (
                 scale_a.numel() == expected_a_size
                 and scale_b.numel() == expected_b_size
             ):
-                torch._check(
-                    scale_a.is_contiguous(),
-                    lambda: "scale_a must be contiguous",
-                )
-                torch._check(
-                    scale_b.is_contiguous(),
-                    lambda: "scale_b must be contiguous",
-                )
+                if device_hint(self) == "xpu":
+                    torch._check(
+                        scale_a.is_contiguous() or scale_a.t().is_contiguous(),
+                        lambda: "scale_a must be contiguous or column-major contiguous",
+                    )
+                    torch._check(
+                        scale_b.is_contiguous() or scale_b.t().is_contiguous(),
+                        lambda: "scale_b must be contiguous or column-major contiguous",
+                    )
+                else:
+                    torch._check(
+                        scale_a.is_contiguous(),
+                        lambda: "scale_a must be contiguous",
+                    )
+                    torch._check(
+                        scale_b.is_contiguous(),
+                        lambda: "scale_b must be contiguous",
+                    )
             else:
                 torch._check(
                     False,
@@ -8358,10 +8407,20 @@ def _meta_grouped_mm_common(
             mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
             lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
         )
+    elif mat_a.dtype == torch.bfloat16:
+        torch._check(
+            mat_b.dtype == mat_a.dtype,
+            lambda: f"Expected mat_b dtype to match mat_a dtype, got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+        )
+    elif mat_a.dtype == torch.float16:
+        torch._check(
+            mat_b.dtype == mat_a.dtype,
+            lambda: f"Expected mat_b dtype to match mat_a dtype, got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+        )
     else:
         torch._check(
-            mat_a.dtype == torch.bfloat16 and mat_b.dtype == torch.bfloat16,
-            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+            False,
+            lambda: f"Expected mat_a to be BFloat16 or supported Float16 matrix, got {mat_a.dtype}.",
         )
 
     torch._check(
@@ -8523,10 +8582,20 @@ def _meta_grouped_mm_common(
                 offs.dtype == torch.int32,
                 lambda: f"Offsets tensor must be integer (int32) tensor, but got {offs.dtype}.",
             )
+            torch._check(
+                offs.stride() == (1,),
+                lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
+            )
     else:
         torch._check(
             offs is None,
             lambda: "Offsets tensor provided, but is not needed for 3D/3D multiplicand layouts.",
+        )
+
+    if mat_a.dtype == torch.float16:
+        torch._check(
+            _grouped_mm_fp16_cublaslt_supported(mat_a, mat_b, offs),
+            lambda: "Float16 grouped_mm requires cuBLASLt grouped GEMM support.",
         )
 
     torch._check(
@@ -8534,12 +8603,45 @@ def _meta_grouped_mm_common(
         lambda: "Bias tensor provided, but it is not supported yet.",
     )
 
-    torch._check(
-        out_dtype is None or out_dtype == torch.bfloat16,
-        lambda: "If output dtype provided, it must be torch.bfloat16.",
-    )
+    if scaled:
+        torch._check(
+            out_dtype is None or out_dtype == torch.bfloat16,
+            lambda: "If output dtype provided, it must be torch.bfloat16.",
+        )
+    else:
+        out_dtype = out_dtype or mat_a.dtype
+        torch._check(
+            out_dtype == mat_a.dtype,
+            lambda: "Grouped gemm output dtype must match `mat_a` dtype.",
+        )
 
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
+
+
+def _grouped_mm_fp16_cublaslt_supported(
+    mat_a: Tensor, mat_b: Tensor, offs: Tensor | None
+) -> bool:
+    if device_hint(mat_a) != "cuda" or device_hint(mat_b) != "cuda":
+        return False
+    if not torch.cuda.is_available():
+        return False
+    mat_a_is_2d = mat_a.dim() == 2
+    mat_b_is_2d = mat_b.dim() == 2
+    batch_count = (
+        offs.size(0)
+        if offs is not None and (mat_a_is_2d or mat_b_is_2d)
+        else mat_a.size(0)
+    )
+    if batch_count < 1 or batch_count > 1024:
+        return False
+    device_capability = torch.cuda.get_device_capability()
+    cuda_version: tuple[int, int] = (0, 0)
+    if torch.version.cuda:
+        parts = torch.version.cuda.split(".")
+        cuda_version = (int(parts[0]), int(parts[1]))
+    return cuda_version >= (13, 3) and (
+        device_capability[0] >= 9 and device_capability[0] <= 11
+    )
 
 
 @register_meta(aten._grouped_mm)
@@ -8970,6 +9072,7 @@ def activate_meta():
                 "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
                 "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
                 "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
+                "aten::stack",  # use the symint-aware C++ meta kernel (stack_meta)
             }
         ):
             pass

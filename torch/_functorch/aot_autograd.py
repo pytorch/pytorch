@@ -29,7 +29,8 @@ from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
 
 # Runtime annotation consumers still resolve BoxedBool from module globals.
-from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -138,6 +139,10 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
     unwrap_tensor_subclasses_with_indices_to_original,
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
+)
+from ._aot_autograd.to_standalone_python import (  # noqa: F401
+    compile_to_python,
+    load_from_python,
 )
 from ._aot_autograd.utils import (  # noqa: F401
     _get_autocast_states,
@@ -583,7 +588,11 @@ def create_aot_state(
                     "aot_collect_metadata", log_pt2_compile_event=True
                 )
 
-            with dynamo_timed_ctx, ctx:
+            with (
+                dynamo_timed_ctx,
+                ctx,
+                torch._dynamo.eval_frame._use_eager_on_nested_compile(),
+            ):
                 fw_metadata = run_functionalized_fw_and_collect_metadata(
                     flat_fn,
                     flat_args_descs=flat_args_descs,
@@ -993,8 +1002,9 @@ def prepare_aot_config(
 
     dynamic_shapes = False
     for x in full_args:
-        if isinstance(x, FakeTensor):
-            dynamic_shapes = x.fake_mode.shape_env is not None
+        fake_mode = maybe_get_fake_mode(x)
+        if fake_mode is not None:
+            dynamic_shapes = fake_mode.shape_env is not None
             break
 
     aot_config = AOTConfig(

@@ -49,7 +49,7 @@ from ..optimize_indexing import (
     indexing_dtype_strength_reduction,
 )
 from ..runtime.coordinate_descent_tuner import CoordescTuner
-from ..runtime.hints import DeviceProperties
+from ..runtime.hints import DeviceProperties, InductorMeta
 from ..runtime.runtime_utils import (
     green_text,
     last_power_of_2,
@@ -81,6 +81,9 @@ from .simd_kernel_features import (
     NodeScheduleMarker,
     SIMDKernelFeatures,
 )
+
+
+_MAX_INLINE_PRECOMPUTABLE_SIZE_EXPR_OPS = 64
 
 
 if TYPE_CHECKING:
@@ -1127,6 +1130,33 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return f"[{', '.join(map(self.index_to_str, index))}]"
         return self.kexpr(self.rename_indexing(index))  # type: ignore[call-arg]
 
+    @staticmethod
+    def _should_precompute_size_expr(index: sympy.Expr) -> bool:
+        if (
+            isinstance(index, (int, sympy.Symbol, sympy.Number))
+            or index.is_number
+            or index.is_symbol
+            or index.is_integer is not True
+        ):
+            return False
+
+        symbols = index.free_symbols
+        return (
+            bool(symbols)
+            and all(
+                symbol_is_type(
+                    s,
+                    (
+                        SymT.SIZE,
+                        SymT.UNBACKED_INT,
+                        SymT.PRECOMPUTED_SIZE,
+                    ),
+                )
+                for s in symbols
+            )
+            and sympy.count_ops(index) > _MAX_INLINE_PRECOMPUTABLE_SIZE_EXPR_OPS
+        )
+
     def prepare_indexing(
         self,
         index: sympy.Expr,
@@ -1174,6 +1204,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         simp_index = (
             simp_index if not isinstance(simp_index, Identity) else simp_index.args[0]
         )
+
+        if self._should_precompute_size_expr(simp_index):
+            simp_index = V.graph.sizevars.lookup_precomputed_size(simp_index)
 
         return self.codegen_indexing(simp_index)
 
@@ -1443,7 +1476,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         return OpsWrapper._unwrap((mean, m2, rnumel))
 
     def prepare_softmax_twopass_fallback(self, dtype, value):
-        vmax = ops.reduction(dtype, dtype, "max", value)
+        vmax = ops.reduction(dtype, dtype, "fmax", value)
         sub = ops.sub(value, vmax)
         exp = ops.exp(sub)
         vsum = ops.reduction(dtype, dtype, "sum", exp)
@@ -2094,7 +2127,7 @@ class SIMDScheduling(BaseScheduling):
                 # 3. If a candidate node (node2) uses a different loop order (e.g., (z,x,y,r)),
                 #    its tiling is incompatible with native matmul tiling (z,y,x,r).
                 #    This means _split_iteration_ranges will fail, so these nodes should not be fused.
-                tiling = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
+                tiling = node1.get_tiling(numel1, rnumel1)
                 if not all(
                     SIMDKernel.is_compatible(
                         tiling.values(), n2.get_ranges(), reduction_numel=rnumel1
@@ -2144,8 +2177,8 @@ class SIMDScheduling(BaseScheduling):
                     return True
 
             # check for a bad combined tiling
-            tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
-            tiling2 = self.select_tiling(node2.get_nodes(), numel1, rnumel1)
+            tiling1 = node1.get_tiling(numel1, rnumel1)
+            tiling2 = node2.get_tiling(numel1, rnumel1)
             tiling3 = self.select_tiling(
                 node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
             )
@@ -2187,7 +2220,7 @@ class SIMDScheduling(BaseScheduling):
                     and not node1.is_template()
                 ):
                     is_reduction_tiling_valid = tuple(
-                        self.select_tiling(node1.get_nodes(), numel1).values()
+                        node1.get_tiling(numel1, sympy.S.One).values()
                     ) in (
                         (numel1, 1),
                         (numel2, rnumel2, 1),
@@ -3546,10 +3579,13 @@ class SIMDScheduling(BaseScheduling):
             for prefix, numel in kernel.numels.items()
             if not prefix_is_reduction(prefix) or kernel.inside_reduction
         }
-        inductor_meta = {
-            **kernel.inductor_meta_common(),
-            **kernel.inductor_meta_per_kernel(),
-        }
+        inductor_meta = cast(
+            "InductorMeta",
+            {
+                **kernel.inductor_meta_common(),
+                **kernel.inductor_meta_per_kernel(),
+            },
+        )
         if kernel.persistent_reduction:
             configs = persistent_reduction(
                 size_hints,
@@ -3684,7 +3720,8 @@ class SIMDScheduling(BaseScheduling):
             is_persistent_reduction = (
                 features.is_reduction()
                 and V.choices.should_use_persistent_reduction(
-                    features, cooperative_reduction=False
+                    features.with_tiling_scores(tiling_scores),
+                    cooperative_reduction=False,
                 )
             )
             node_schedule_map[pn] = NodeInfo(
@@ -4598,10 +4635,26 @@ class SIMDScheduling(BaseScheduling):
         if not any(n.is_template() for n in nodes):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            tiling = self.select_tiling(node_schedule, numel, rnumel)
+            coalesce_analysis = None
+            if torch._inductor.config.triton.coalesce_tiling_analysis:
+                from torch._inductor.tiling_utils import (
+                    analyze_memory_coalescing_for_nodes,
+                )
+
+                coalesce_analysis = analyze_memory_coalescing_for_nodes(nodes)
+            features = SIMDKernelFeatures(
+                node_schedule, numel, rnumel, coalesce_analysis=coalesce_analysis
+            )
+            tiling, tiling_scores = self.get_tiling_and_scores(
+                node_schedule,
+                numel,
+                rnumel,
+                features.coalesce_analysis,
+            )
             kernel = self.kernel_type(
                 tiling,
-                features=SIMDKernelFeatures(node_schedule, numel, rnumel),
+                features=features,
+                tiling_scores=tiling_scores,
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
             # Collect config_patches from operations
