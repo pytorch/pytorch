@@ -100,7 +100,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        the example. The dynamo artifact inlines marshalled bytecode plus a pickled state
        blob, so it is locked to the Python version that produced it AND, because its import
        aliases can reference private ``torch._dynamo`` modules, to a compatible torch build,
-       unlike the portable ``make_fx`` source.
+       unlike ``make_fx`` source (Python-version portable on either backend; use
+       ``backend='eager'`` for portability across torch builds too, since the default
+       ``make_fx`` inductor artifact inlines private ``torch._inductor`` modules).
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
        decomposition function) forwarded to ``make_fx``; defaults to ``None``. Honored only
        by ``tracer="make_fx"``; passing it with ``tracer="dynamo"`` raises.

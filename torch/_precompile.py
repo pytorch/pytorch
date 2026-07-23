@@ -246,7 +246,10 @@ it.
 # _build_dynamo_forward). It is ALSO locked to a compatible torch build, because its import
 # aliases can reference private torch._dynamo runtime modules (also surfaced as a clean
 # PrecompileError). Regenerate per Python version / torch build, or use make_fx for portable
-# source. A tensor closed over by fn (a global, captured local, or DEFAULT ARGUMENT value,
+# source (backend='eager' for torch-build portability -- the default make_fx inductor artifact
+# itself inlines private torch._inductor modules, so it too is torch-build-locked; the
+# Python-version portability holds for either make_fx backend). A tensor closed over by fn (a
+# global, captured local, or DEFAULT ARGUMENT value,
 # including one nested in a container, an nn.Module, a plain/__slots__ object attribute, or
 # a functools.partial / bound method) is rejected (invariant 1) here too -- Dynamo surfaces
 # it as a used-global / closure content / argdef, not a graph get_attr constant, so the
@@ -1201,23 +1204,32 @@ def _capture_dynamo(
     runtime_env = gco.get_runtime_env()
 
     # get_runtime_env records only the globals the transformed bytecode reads as GRAPH
-    # INPUTS (plus builtins). A global the bytecode references elsewhere -- e.g. a plain
-    # constant folded straight into the output (``return model(x), SCALE``) -- is in
-    # external_refs but NOT used_globals, so without this it would NameError at runtime.
-    # Resolve those uncovered refs from the TRACED code's globals and carry them along
-    # (baking a module constant is consistent with the specialization contract); a tensor
-    # among them is caught by _reject_baked_tensors below (invariant 1). Use gco.f_globals,
-    # NOT fn.__globals__: Dynamo traces get_traced_fn(fn) -- fn.forward for an nn.Module,
-    # the unwrapped target for a functools.partial -- whose globals live in gco.f_globals
-    # (the same dict get_runtime_env built used_globals from). fn.__globals__ is {} for a
-    # raw nn.Module fn, which would drop the folded-in global and NameError at load.
+    # INPUTS (plus a builtins fallback). A global the bytecode references elsewhere -- e.g.
+    # a plain constant folded straight into the output (``return model(x), SCALE``) -- is in
+    # external_refs but NOT (correctly) in used_globals, so without this it would NameError
+    # at runtime. Resolve those uncovered refs from the TRACED code's globals and carry them
+    # along (baking a module constant is consistent with the specialization contract); a
+    # tensor among them is caught by _reject_baked_tensors below (invariant 1). Use
+    # gco.f_globals, NOT fn.__globals__: Dynamo traces get_traced_fn(fn) -- fn.forward for an
+    # nn.Module, the unwrapped target for a functools.partial -- whose globals live in
+    # gco.f_globals (the same dict get_runtime_env built used_globals from). fn.__globals__
+    # is {} for a raw nn.Module fn, which would drop the folded-in global and NameError.
+    #
+    # A real module global always WINS over get_runtime_env's builtin fallback: when a global
+    # shadows a builtin name (``sum = [...]``; ``id``, ``type``, ...) get_runtime_env
+    # pre-seeds used_globals[ref] with the BUILTIN, so override it with fn_globals[ref] rather
+    # than skip on ``ref in used_globals`` -- else the artifact bakes the builtin and silently
+    # miscomputes (and a shadowing tensor global would slip past invariant 1). The override is
+    # a no-op for a ref already recorded as a graph-input global (used_globals[ref] already
+    # equals fn_globals[ref]); skip __builtins_dict__ refs, which get_runtime_env deliberately
+    # stores as the _safe_builtins_dict-filtered (picklable) dict rather than the raw one.
     used_globals = dict(runtime_env.used_globals)
     fn_globals = gco.f_globals
     for ref in runtime_env.external_refs:
         if (
-            ref in used_globals
-            or ref in runtime_env.import_sources
+            ref in runtime_env.import_sources
             or ref == (bi.backend_id if bi is not None else None)
+            or ref.startswith("__builtins_dict__")
         ):
             continue
         if ref in fn_globals:
@@ -2027,6 +2039,22 @@ class PrecompiledModule:
                 "Return a computed tensor, or use backend='eager'."
             )
 
+        if not capture.example_inputs:
+            # inductor + a subgraph that HAS compute but no graph inputs (fn's tensor
+            # compute depends on no lifted param/buffer or user input, e.g.
+            # ``torch.ones(3) * 2``). AOTAutograd's standalone lowering detects its fake
+            # mode off the graph's placeholders -- of which there are none -- and raises a
+            # raw RuntimeError deep in compile_to_python (neither NoRunnableInductorModule
+            # nor InductorError, so the handlers below miss it). Reject up front with a
+            # clean PrecompileError pointing at eager (which runs it fine), like the
+            # no-compute case above.
+            raise PrecompileError(
+                "the inductor backend cannot lower a subgraph with no graph inputs -- the "
+                "traced fn's tensor compute depends on no model parameter/buffer or user "
+                "input (e.g. it builds a constant tensor). Make the compute depend on an "
+                "input, or use backend='eager'."
+            )
+
         # inductor: lower the subgraph to self-contained source exposing
         # call(flat_inputs), reusing the make_fx inductor path. capture.example_inputs are
         # REAL (the model's params/buffers + user inputs), so AOTAutograd re-fakeifies
@@ -2265,7 +2293,10 @@ class _PrecompileApi:
           is locked to the producing Python version (unlike the portable ``make_fx`` source)
           AND, because its import aliases can reference private ``torch._dynamo`` runtime
           modules, to a compatible torch build; load it under the same CPython and a
-          matching torch build (or use ``make_fx`` for portable source).
+          matching torch build (or use ``make_fx`` with ``backend='eager'`` for portable
+          source; the default ``make_fx`` inductor artifact itself inlines private
+          ``torch._inductor`` modules, so it is also torch-build-locked -- only the
+          Python-version portability holds for either ``make_fx`` backend).
 
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its

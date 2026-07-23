@@ -1120,11 +1120,14 @@ class TestPrecompile(TestCase):
             )
 
     def test_tracer_dynamo_no_compute_inductor_rejected_eager_ok(self):
-        # A fn with no tensor compute (returns its input unchanged) has no subgraph for
-        # inductor to lower: the inductor backend rejects it with a clear error (mirroring
-        # the make_fx path), while the eager backend runs the bytecode standalone.
+        # A fn with no tensor compute has no subgraph for inductor to lower: inductor rejects
+        # it (mirroring make_fx), eager runs the bytecode standalone. Two distinct no-compute
+        # sub-cases, both covered: (a) a passthrough (``return xx``) yields a one-placeholder
+        # pass-through gm (the NoRunnableInductorModuleError branch); (b) a pure Python
+        # constant (``return 7``) yields capture.gm is None (the capture.gm is None branch).
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
+        # (a) passthrough: gm is not None (a pass-through); inductor rejects, eager returns xx.
         with self.assertRaisesRegex(PrecompileError, "eager"):
             torch.compiler.precompile(
                 lambda model, xx: xx, m, x, tracer="dynamo", backend="inductor"
@@ -1133,6 +1136,163 @@ class TestPrecompile(TestCase):
             lambda model, xx: xx, m, x, tracer="dynamo", backend="eager"
         )
         self.assertEqual(torch.compiler.precompile.load(code, cache)(m, x), x)
+        # (b) pure constant: capture.gm is None; inductor rejects, eager returns the constant.
+        with self.assertRaisesRegex(PrecompileError, "eager"):
+            torch.compiler.precompile(
+                lambda model, xx: 7, m, x, tracer="dynamo", backend="inductor"
+            )
+        code, cache = torch.compiler.precompile(
+            lambda model, xx: 7, m, x, tracer="dynamo", backend="eager"
+        )
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(m, x), 7)
+
+    def test_tracer_dynamo_builtin_shadowing_global_baked(self):
+        # Regression: a module global that SHADOWS a builtin name (`sum`) and is folded into
+        # fn's output must be baked as the real global's value, not the builtin. Dynamo's
+        # get_runtime_env pre-seeds used_globals[ref] with the BUILTIN for a builtin-shadowing
+        # external ref, so _capture_dynamo must override it with the module global -- else the
+        # reload silently returns <built-in function sum>. Give fn a custom __globals__ where
+        # `sum` is a real list, so the shadow never leaks into this test module's namespace.
+        import types as _types
+
+        def _body(model, xx):
+            return model(xx), sum
+
+        g = dict(globals())
+        g["sum"] = [1, 2, 3]
+        f = _types.FunctionType(_body.__code__, g)
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            f, m, x, tracer="dynamo", backend="eager"
+        )
+        for _label, f_c in _default_and_inlined_loaders(code, cache, "eager"):
+            out = f_c(m, x)
+            self.assertEqual(out[0], m(x))
+            self.assertEqual(
+                out[1], [1, 2, 3]
+            )  # the module global, NOT the builtin sum
+
+    def test_tracer_dynamo_zero_input_subgraph(self):
+        # A subgraph that HAS compute but no graph inputs (fn's tensor compute depends on no
+        # param/buffer or user input, e.g. torch.ones(3) * 2): the inductor backend cannot
+        # detect a fake mode off the (empty) placeholders, so it is rejected up front with a
+        # clean PrecompileError pointing at eager (not a raw RuntimeError from
+        # compile_to_python), while eager runs it and returns the constant tensor.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        with self.assertRaisesRegex(PrecompileError, "no graph inputs"):
+            torch.compiler.precompile(
+                lambda model, xx: torch.ones(3) * 2.0,
+                m,
+                x,
+                tracer="dynamo",
+                backend="inductor",
+            )
+        code, cache = torch.compiler.precompile(
+            lambda model, xx: torch.ones(3) * 2.0,
+            m,
+            x,
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertEqual(
+            torch.compiler.precompile.load(code, cache)(m, x), torch.ones(3) * 2.0
+        )
+
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_nested_multi_tensor_output(self, backend):
+        # Under dynamo the transformed bytecode (NOT the driver's OUT_SPEC path make_fx uses)
+        # reassembles fn's output, so a multi-tensor / nested output exercises a distinct
+        # mechanism: the subgraph returns several tensors in a fixed order the bytecode must
+        # re-thread into the tuple/dict. Assert each leaf on both backends (a mis-ordered
+        # flatten or a dropped dict leaf would silently corrupt the output structure).
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+
+        def f(model, xx):
+            y = model(xx)
+            return y, y * 2, {"k": y + 1}
+
+        code, cache = torch.compiler.precompile(
+            f, m, x, tracer="dynamo", backend=backend
+        )
+        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
+            out = f_c(m, x)
+            ref = f(m, x)
+            self.assertEqual(out[0], ref[0])
+            self.assertEqual(out[1], ref[1])
+            self.assertEqual(out[2]["k"], ref[2]["k"])
+
+    def test_tracer_dynamo_nontensor_output_inductor_ok(self):
+        # DIVERGENCE from make_fx: Dynamo puts a non-tensor Python output (float / complex /
+        # str) in the transformed bytecode, not the subgraph inductor lowers, so it round-
+        # trips on tracer='dynamo' + backend='inductor' where make_fx REJECTS the same output
+        # (test_nontensor_output_inductor_clean_error). Pin that so a regression to make_fx's
+        # rejection under dynamo is caught. The value is folded as a default arg (baked).
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        for val in (3.14, 2 + 3j, "hi"):
+            code, cache = torch.compiler.precompile(
+                lambda model, xx, b=val: (model(xx), b),
+                m,
+                x,
+                tracer="dynamo",
+                backend="inductor",
+            )
+            for _label, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
+                out = f_c(m, x)
+                self.assertEqual(out[0], m(x))
+                self.assertEqual(out[1], val)
+
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_dtensor_subclass(self, backend):
+        # The dynamo-tracer analog of test_dtensor_subclass: a DTensor param/input must
+        # round-trip on both backends. The dynamo eager emit inlines the subgraph against an
+        # empty _GraphSelf and splats flat args, and inductor lowers via AOTAutograd's subclass
+        # wrap/unwrap -- neither is exercised by the dense-input dynamo tests, so cover both.
+        import torch.distributed as dist
+
+        if not dist.is_available() or not dist.is_gloo_available():
+            self.skipTest("gloo not available")
+
+        from torch.distributed.tensor import DeviceMesh, distribute_tensor, Replicate
+        from torch.testing._internal.common_utils import find_free_port
+
+        saved_env = {k: os.environ.get(k) for k in ("MASTER_ADDR", "MASTER_PORT")}
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        dist.init_process_group("gloo", rank=0, world_size=1)
+        try:
+            mesh = DeviceMesh("cpu", list(range(1)))
+            m = torch.nn.Linear(4, 3).eval()
+            for name, p in list(m.named_parameters()):
+                setattr(
+                    m,
+                    name,
+                    torch.nn.Parameter(
+                        distribute_tensor(p.detach(), mesh, [Replicate()])
+                    ),
+                )
+            x = distribute_tensor(torch.randn(5, 4), mesh, [Replicate()])
+            ref = m(x)
+            code, cache = torch.compiler.precompile(
+                lambda model, xx: model(xx), m, x, tracer="dynamo", backend=backend
+            )
+            # load() takes the bundled-artifact path.
+            f_c = torch.compiler.precompile.load(code, cache)
+            self.assertEqual(f_c(m, x).to_local(), ref.to_local())
+            # Also exercise the standalone driver (the generated python, no cache).
+            ns = {"__name__": "_dt"}
+            exec(compile(code, "<dt>", "exec"), ns)
+            self.assertEqual(ns["forward"](m, x).to_local(), ref.to_local())
+        finally:
+            dist.destroy_process_group()
+            for k, v in saved_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
     def test_tracer_dynamo_decompositions_rejected(self):
         # decompositions is only honored by the make_fx tracer (threaded into make_fx); the
@@ -1383,12 +1543,18 @@ class TestPrecompile(TestCase):
         f_c = torch.compiler.precompile.load(code, cache)
         x2 = torch.randn(5, 4)
         try:
-            f_c(m, x2)
+            drifted = f_c(m, x2)
         except PrecompileError:
             self.fail(
                 "dynamo driver unexpectedly validated input drift; the documented gap "
                 "changed -- update the docs and this test"
             )
+        # Pin the "may silently miscompute" half of the gap, not just "no error raised":
+        # the eager dynamo driver baked xx.shape[0]=3 from the traced example, so the (5,4)
+        # input's sum is divided by 3 instead of 5 -- a wrong result. If a future change made
+        # the eager path recompute shape[0] correctly (fixing the miscompute without raising),
+        # this assertion fails, forcing a conscious docs+test update rather than silent rot.
+        self.assertFalse(torch.allclose(drifted, f(m, x2)))
         mf_code, mf_cache = torch.compiler.precompile(f, m, x, backend="eager")
         with self.assertRaisesRegex(PrecompileError, "shape"):
             torch.compiler.precompile.load(mf_code, mf_cache)(m, x2)
@@ -3261,6 +3427,28 @@ class TestPrecompileNumerics(TestCase):
         code, cache = torch.compiler.precompile(lambda a: a.t(), x, backend="eager")
         f_c = torch.compiler.precompile.load(code, cache)
         self.assertEqual(f_c(x), x.t())
+
+    def test_tracer_dynamo_roundtrip_device(self, device):
+        # The dynamo tracer's inductor lowering emits device kernels (it lowers the
+        # Dynamo-produced subgraph through the same AOTAutograd + Inductor codegen as
+        # make_fx), and its eager backend inlines the subgraph as device-agnostic source.
+        # Run a numeric roundtrip device-generically -- like the make_fx numeric tests -- so
+        # the dynamo capture + subgraph lowering is exercised on CUDA, not only CPU. Both
+        # backends must round-trip to eager.
+        m = (
+            torch.nn.Sequential(
+                torch.nn.Linear(4, 4), torch.nn.ReLU(), torch.nn.Linear(4, 3)
+            )
+            .to(device)
+            .eval()
+        )
+        x = make_tensor((5, 4), device=device, dtype=torch.float32)
+        for backend in ("inductor", "eager"):
+            code, cache = torch.compiler.precompile(
+                lambda model, xx: model(xx), m, x, tracer="dynamo", backend=backend
+            )
+            f_c = torch.compiler.precompile.load(code, cache)
+            self.assertEqual(f_c(m, x), m(x))
 
 
 instantiate_device_type_tests(TestPrecompileNumerics, globals())
