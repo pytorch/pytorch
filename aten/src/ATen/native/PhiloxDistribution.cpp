@@ -158,6 +158,7 @@ ValidatedPhiloxShardMetadata validate_philox_shard_metadata(
   }
   int64_t global_numel = has_zero_global_dim ? 0 : 1;
   if (!has_zero_global_dim) {
+    // The API is 64-bit capable; INT_MAX is an implementation limit here.
     for (const auto size : global_shape) {
       TORCH_CHECK(
           size <= std::numeric_limits<int32_t>::max() / global_numel,
