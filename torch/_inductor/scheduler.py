@@ -2440,6 +2440,28 @@ class SchedulerNode(BaseSchedulerNode):
         # Need normalize the prefix name to facilitate finding common dependencies
         self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
 
+    def expand_dimension_for_pointwise_node_with_masked_stores(
+        self, dimension: int, new_range: int
+    ) -> None:
+        if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
+            raise AssertionError(
+                "expected self.node to be a ComputedBuffer or TemplateBuffer"
+            )
+
+        self._before_loop_state_mutation()
+        self._body = (
+            self._body.expand_dimension_for_pointwise_node_with_masked_stores(
+                dimension, new_range
+            )
+        )
+        self._sizes = self._body.sizes
+
+        device = self.node.get_device_or_error()
+        group_fn = self.scheduler.get_backend(device).group_fn
+        self.group = (device, group_fn(self._sizes))
+
+        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
+
     def merge_loops(self) -> None:
         self._body = self._body.merge_loops()
         self._sizes = self._body.sizes
@@ -7513,25 +7535,73 @@ class Scheduler:
             return False
         snodes = typing.cast(list[SchedulerNode], pw_node.get_nodes())
 
-        # All snodes must have the same total iteration numel matching
-        # the reduction's numel * rnumel so they can be reindexed identically.
+        # All snodes must have the same total iteration numel so they can be
+        # transformed identically.
+        pw_numel = sympy_product(snodes[0]._sizes[0])
         if not all(
             V.graph.sizevars.statically_known_equals(
-                sympy_product(sn._sizes[0]), target_numel
+                sympy_product(sn._sizes[0]), pw_numel
             )
             for sn in snodes
         ):
             return False
 
+        needs_expansion = not V.graph.sizevars.statically_known_equals(
+            pw_numel, target_numel
+        )
+        pw_rnumel = red_rnumel
+        masked_expansion_bytes = 0
+        if needs_expansion:
+            # Only a narrower consumer can be safely masked. Expanding a producer
+            # would leave values required by the reduction undefined.
+            if (
+                not node1.is_reduction()
+                or node2.is_reduction()
+                or not node1.get_operation_names() & node2.ancestors
+                or pw_node.has_aliasing_or_mutation()
+            ):
+                return False
+
+            pw_numel_hint = V.graph.sizevars.optimization_hint(pw_numel, fallback=0)
+            target_numel_hint = V.graph.sizevars.optimization_hint(
+                target_numel, fallback=0
+            )
+            pw_access_bytes = pw_node.get_read_write_buffers_sizes()
+            if (
+                not pw_numel_hint
+                or target_numel_hint <= pw_numel_hint
+                or not pw_access_bytes
+            ):
+                return False
+            extra_numel = target_numel_hint - pw_numel_hint
+            masked_expansion_bytes = (
+                pw_access_bytes * extra_numel + pw_numel_hint - 1
+            ) // pw_numel_hint
+
+            pw_rnumel = FloorDiv(pw_numel, red_numel)
+            if (
+                not V.graph.sizevars.statically_known_equals(
+                    red_numel * pw_rnumel, pw_numel
+                )
+                or not V.graph.sizevars.statically_known_lt(pw_rnumel, red_rnumel)
+                # Bound masked work to 10% of the original pointwise domain.
+                or not V.graph.sizevars.statically_known_leq(
+                    target_numel * 10, pw_numel * 11
+                )
+            ):
+                return False
+
         if not all(
-            SIMDKernel.is_compatible((red_numel, red_rnumel), sn.get_ranges())
+            SIMDKernel.is_compatible((red_numel, pw_rnumel), sn.get_ranges())
             for sn in snodes
         ):
             return False
 
         # Nothing to reindex if the pointwise already uses the reduction split.
         target_iter_sizes = (red_numel, red_rnumel)
-        if all(tuple(sn._sizes[0]) == target_iter_sizes for sn in snodes):
+        if not needs_expansion and all(
+            tuple(sn._sizes[0]) == target_iter_sizes for sn in snodes
+        ):
             return False
 
         # Local rollback is still needed even with _LoopMutationTracker: this
@@ -7541,11 +7611,53 @@ class Scheduler:
         rollback_snapshot = _LoopStateSnapshot.create((pw_node,))
 
         for sn in snodes:
-            sn.apply_loop_reindexing([red_numel, red_rnumel])
+            if needs_expansion:
+                iter_sizes = tuple(sn._sizes[0])
+                if (
+                    iter_sizes
+                    and V.graph.sizevars.statically_known_equals(
+                        iter_sizes[-1], pw_rnumel
+                    )
+                    and V.graph.sizevars.statically_known_equals(
+                        sympy_product(iter_sizes[:-1]), red_numel
+                    )
+                ):
+                    expand_dim = len(iter_sizes) - 1
+                else:
+                    sn.apply_loop_reindexing([red_numel, pw_rnumel])
+                    expand_dim = 1
+                sn.expand_dimension_for_pointwise_node_with_masked_stores(
+                    expand_dim, red_rnumel
+                )
+            elif tuple(sn._sizes[0]) != (red_numel, red_rnumel):
+                sn.apply_loop_reindexing([red_numel, red_rnumel])
 
         if isinstance(pw_node, FusedSchedulerNode):
             pw_node.group = snodes[0].group
             refresh_group_node_dependencies(pw_node)
+
+        if needs_expansion:
+            reduction_reads: dict[str, list[Dep]] = defaultdict(list)
+            for dep in reduction_node.read_writes.reads:
+                reduction_reads[dep.name].append(dep)
+            reduction_outputs = reduction_node.get_buffer_names()
+            unmatched_reads = [
+                read
+                for read in pw_node.read_writes.reads
+                if (
+                    read.name not in reduction_outputs
+                    and not any(
+                        self.deps_match_normalized(read, reduction_read)
+                        for reduction_read in reduction_reads[read.name]
+                    )
+                )
+            ]
+            if unmatched_reads:
+                loop_ordering_log.debug(
+                    "masked expansion has unmatched reads: %s", unmatched_reads
+                )
+                rollback_snapshot.restore()
+                return False
 
         # Verify reindexing actually increases shared deps.
         common_names = (
@@ -7553,10 +7665,30 @@ class Scheduler:
         )
         n1_deps = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
         n2_deps = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
-        has_benefit = any(
-            self.deps_match_normalized(n1_deps[name], n2_deps[name])
+        matched_deps = [
+            (n1_deps[name], n2_deps[name])
             for name in common_names
-        )
+            if self.deps_match_normalized(n1_deps[name], n2_deps[name])
+        ]
+        has_benefit = bool(matched_deps)
+        if needs_expansion:
+            shared_bytes = sum(
+                max(self.dep_size_hint(dep1), self.dep_size_hint(dep2))
+                for dep1, dep2 in matched_deps
+            )
+            # Avoid small-read fusions and leave margin for masked compute.
+            if (
+                masked_expansion_bytes * 4 > shared_bytes
+                or pw_access_bytes > shared_bytes * 10
+            ):
+                loop_ordering_log.debug(
+                    "masked expansion costs %s bytes for %s shared bytes and %s pointwise bytes",
+                    masked_expansion_bytes,
+                    shared_bytes,
+                    pw_access_bytes,
+                )
+                rollback_snapshot.restore()
+                return False
         if not has_benefit:
             rollback_snapshot.restore()
             return False
