@@ -414,6 +414,14 @@ class TestPruningNN(NNTestCase):
         with self.assertRaises(ValueError):
             container.add_pruning_method(r)
 
+    def test_pruning_container_add_unnamed_method_to_empty(self):
+        # Neither side carrying a name is fine too; the container just stays
+        # unnamed instead of crashing on attribute access.
+        container = prune.PruningContainer()
+        container.add_pruning_method(prune.L1Unstructured(amount=2))
+        self.assertEqual(len(container), 1)
+        self.assertIsNone(getattr(container, "_tensor_name", None))
+
     def test_pruning_container_compute_mask(self):
         r"""Test `compute_mask` of pruning container with a known `t` and
         `default_mask`. Indirectly checks that Ln structured pruning is
