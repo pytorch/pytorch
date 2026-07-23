@@ -112,14 +112,18 @@ class TestCppExtensionAOT(common.TestCase):
 
     @unittest.skipIf(not torch.backends.mps.is_available(), "MPS not found")
     def test_mps_set_arg_bytes(self):
-        # Exercises torch_mps_set_arg_bytes: float and bool scalars bound
-        # inline to a Metal kernel through the stable shim.
+        # Exercises torch_mps_set_arg_bytes: a float scalar, a bool scalar,
+        # and a float[2] array bound inline to a Metal kernel through the
+        # stable shim.
         import torch_test_cpp_extension.mps as mps_extension
 
         x = torch.randn(1000, device="mps", dtype=torch.float32)
+        low, high = -0.75, 0.75
         for scale, negate in ((0.5, False), (2.0, True)):
-            out = mps_extension.get_mps_scale_negate_output(x, scale, negate)
-            expected = x * scale * (-1.0 if negate else 1.0)
+            out = mps_extension.get_mps_scale_negate_clamp_output(
+                x, scale, negate, low, high
+            )
+            expected = (x * scale * (-1.0 if negate else 1.0)).clamp(low, high)
             self.assertEqual(out, expected)
 
     @unittest.skipIf(not TEST_XPU, "XPU not found")
