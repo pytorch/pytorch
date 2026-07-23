@@ -14,6 +14,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     precisionOverride,
     PrivateUse1TestBase,
+    requires_capabilitys,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
@@ -299,6 +300,54 @@ with _temp_test_configs(
     instantiate_device_type_tests(
         TestSupportedOpsWithOverrides, globals(), only_for=("openreg",)
     )
+
+
+class TestCapabilityGating(TestCase):
+    """Verify that @requires_capabilitys gates tests on PrivateUse1 backends."""
+
+    executed_count = 0
+
+    @classmethod
+    def tearDownClass(cls):
+        expected_runs = 1
+        if cls.executed_count != expected_runs:
+            raise AssertionError(
+                f"Capability gating failed! "
+                f"Expected {expected_runs} tests to run, "
+                f"but {cls.executed_count} tests executed."
+            )
+        super().tearDownClass()
+
+    @requires_capabilitys("test.cap_supported")
+    def test_capability_supported(self, device):
+        type(self).executed_count += 1
+        self.assertEqual(torch.device(device).type, "openreg")
+
+    @requires_capabilitys("test.cap_unsupported")
+    def test_capability_unsupported(self, device):
+        type(self).executed_count += 1
+        self.fail("This test should be skipped")
+
+    @requires_capabilitys("test.cap_missing")
+    def test_capability_missing(self, device):
+        type(self).executed_count += 1
+        self.fail("This test should be skipped")
+
+    @requires_capabilitys(
+        "test.cap_supported", "test.cap_unsupported", "test.cap_missing"
+    )
+    def test_capability_combined(self, device):
+        type(self).executed_count += 1
+        self.fail("This test should be skipped")
+
+
+PrivateUse1TestBase._capabilities = classmethod(
+    lambda cls: {
+        "test.cap_supported": lambda: True,
+        "test.cap_unsupported": lambda: False,
+    }
+)
+instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="openreg")
 
 
 @unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
