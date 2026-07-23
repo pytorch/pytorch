@@ -2,6 +2,7 @@
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorUtils.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -114,9 +115,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                               save_var);
   }
 
-  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kLong, "Long batch norm is not supported with MPS");
-  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
-                              "Batch norm for complex is not supported for MPS");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      isFloatingType(self.scalar_type()), "batch_norm is not implemented for ", self.scalar_type(), " on MPS");
   using namespace at::native::mps;
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -774,7 +774,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
                                                                   secondaryTensor:epsilonTensor
                                                                              name:nil];
 #ifdef __MAC_15_0
-          if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+          if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
             rsqrtTensor = [mpsGraph reciprocalSquareRootWithTensor:varianceEpsTensor name:nil];
           } else
 #endif // __MAC_15_0
@@ -808,7 +808,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
                                                                     secondaryTensor:epsilonTensor
                                                                                name:nil];
 #ifdef __MAC_15_0
-            if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+            if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
               rsqrtTensor = [mpsGraph reciprocalSquareRootWithTensor:varianceEpsTensor name:nil];
             } else
 #endif // __MAC_15_0
@@ -873,7 +873,11 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
       newCachedGraph->gradBiasTensor_ = gradBiasTensor;
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input, input_shape);
+    // For channels_last, input_shape is the NHWC-packed shape; feed the raw buffer directly instead of
+    // viewing the NCHW tensor to NHWC (which view() rejects). Mirrors the forward pass.
+    const auto needs_gather = memory_format != MemoryFormat::ChannelsLast;
+    auto inputPlaceholder =
+        Placeholder(cachedGraph->inputTensor_, input, input_shape, needs_gather, MPSDataTypeInvalid, needs_gather);
     auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_out, input_shape_readonly);
     auto weightPlaceholder = Placeholder();
     if (has_weight)
@@ -893,7 +897,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 
     auto gradInputPlaceholder = Placeholder();
     if (grad_input_mask[0])
-      gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input, input_shape);
+      gradInputPlaceholder =
+          Placeholder(cachedGraph->gradInputTensor_, grad_input, input_shape, false, MPSDataTypeInvalid, needs_gather);
     auto gradWeightPlaceholder = Placeholder();
     if (grad_input_mask[1])
       gradWeightPlaceholder = Placeholder(cachedGraph->gradWeightTensor_, grad_weight);
@@ -944,17 +949,24 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   const Tensor& weight = *weight_maybe_owned;
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
-  auto bias_contig = bias.expect_contiguous();
 
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto M = M_N.first;
   auto X = input.expect_contiguous();
-  auto gamma = weight.expect_contiguous();
+  // The Metal kernels bind gamma/beta at the input dtype, so mixed-dtype
+  // affine params (e.g. fp32 gamma/beta with an fp16 input, the
+  // keep-LayerNorm-in-fp32 recipe) must be cast, not reinterpreted.
+  const Tensor weight_cast =
+      weight.defined() && weight.scalar_type() != input.scalar_type() ? weight.to(input.scalar_type()) : weight;
+  const Tensor bias_cast =
+      bias.defined() && bias.scalar_type() != input.scalar_type() ? bias.to(input.scalar_type()) : bias;
+  auto bias_contig = bias_cast.expect_contiguous();
+  auto gamma = weight_cast.expect_contiguous();
   auto mean = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
   auto rstd = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
 
   auto input_shape = input.sizes();
-  int axis_size = static_cast<int>(N);
+  uint64_t axis_size = static_cast<uint64_t>(N);
   float epsilon_buf = static_cast<float>(eps);
   int use_weight_buf = weight.defined() ? 1 : 0;
   int use_bias_buf = bias.defined() ? 1 : 0;
@@ -967,27 +979,42 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() != kLong, "Not implemented for long on MPS");
   @autoreleasepool {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
-      // which kernel variant to use based on the normalized axis N size
       const int N_READS = 4;
       auto metalType = mps::scalarToMetalTypeString(input);
-      id<MTLComputePipelineState> layerNormKernel = nil;
-      if (axis_size <= 1024 * N_READS) {
-        layerNormKernel = mps::lib.getPipelineStateForFunc("layer_norm_single_row_" + metalType);
-      } else {
-        layerNormKernel = mps::lib.getPipelineStateForFunc("layer_norm_looped_" + metalType);
-      }
+      // Use 32-bit index math unless the tensor is too large for it.
+      const bool use32 = at::native::canUse32BitIndexMath(*X) && at::native::canUse32BitIndexMath(out);
+      const char* idx_str = use32 ? "i32" : "i64";
+      const char* variant = axis_size <= 1024 * N_READS ? "single_row" : "looped";
+      id<MTLComputePipelineState> layerNormKernel =
+          mps::lib.getPipelineStateForFunc(fmt::format("layer_norm_{}_{}_{}", variant, idx_str, metalType));
       id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:layerNormKernel];
 
-      mps::mtl_setArgs(computeEncoder, *X, out, mean, rstd, axis_size, epsilon_buf, use_weight_buf, use_bias_buf);
-      if (use_weight_and_bias_buf) {
-        mps::mtl_setArgs<8>(computeEncoder, *gamma, *bias_contig);
-      } else if (use_weight_buf) {
-        mps::mtl_setArgs<8>(computeEncoder, *gamma);
-      } else if (use_bias_buf) {
-        mps::mtl_setArgs<9>(computeEncoder, *bias_contig);
+      auto setLayerNormArgs = [&](auto idx_tag) {
+        using IDX_T = decltype(idx_tag);
+        mps::mtl_setArgs(computeEncoder,
+                         *X,
+                         out,
+                         mean,
+                         rstd,
+                         static_cast<IDX_T>(axis_size),
+                         epsilon_buf,
+                         use_weight_buf,
+                         use_bias_buf);
+        if (use_weight_and_bias_buf) {
+          mps::mtl_setArgs<8>(computeEncoder, *gamma, *bias_contig);
+        } else if (use_weight_buf) {
+          mps::mtl_setArgs<8>(computeEncoder, *gamma);
+        } else if (use_bias_buf) {
+          mps::mtl_setArgs<9>(computeEncoder, *bias_contig);
+        }
+      };
+      if (use32) {
+        setLayerNormArgs(uint32_t{});
+      } else {
+        setLayerNormArgs(uint64_t{});
       }
-      MTLSize numThreads = MTLSizeMake(std::min((axis_size + N_READS - 1) / N_READS, 1024), 1, 1);
+      MTLSize numThreads = MTLSizeMake(std::min<uint64_t>((axis_size + N_READS - 1) / N_READS, 1024), 1, 1);
       MTLSize numThreadgroups = MTLSizeMake(M, 1, 1);
       [computeEncoder dispatchThreadgroups:numThreadgroups threadsPerThreadgroup:numThreads];
     });
@@ -1135,18 +1162,24 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
       for (const auto i : c10::irange(num_normalized_dims))
         bn_gamma_shape[i + 2] = input_shape[i + num_channel_dims];
 
-      std::string key = fmt::format("layer_norm_backward_mps:{}:{}:{}:{}:{}",
+      std::string key = fmt::format("layer_norm_backward_mps:{}:{}:{}:{}:{}:{}:{}",
                                     has_weight,
                                     getArrayRefString(normalized_shape),
                                     getArrayRefString((*X).sizes()),
                                     c10::Join(",", grad_input_mask),
-                                    getMPSTypeString(*X));
+                                    getMPSTypeString(*X),
+                                    has_weight ? getMPSTypeString(*gamma) : "",
+                                    bias.defined() ? getMPSTypeString(*beta) : "");
       auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
         MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, *X);
         MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, *dOut);
         MPSGraphTensor* weightTensor = nil;
         if (has_weight)
           weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, *gamma);
+        // Compute in the input dtype; MPSGraph rejects mixed-dtype arithmetic
+        // (fp32 gamma with an fp16 input asserts inside the MLIR verifier).
+        MPSGraphTensor* weightComputeTensor =
+            has_weight ? castMPSTensor(mpsGraph, weightTensor, getMPSDataType(*X)) : nil;
 
         // Mean and inv std tensors to be saved and returned
         MPSGraphTensor* meanTensor = mpsGraphRankedPlaceHolder(mpsGraph, mean);
@@ -1180,7 +1213,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
           MPSGraphTensor* bnGradOutputTensor = [mpsGraph reshapeTensor:gradOutputTensor withShape:bn_shape name:nil];
           // Do this at the end
           if (has_weight) {
-            MPSGraphTensor* bnGammaTensor = [mpsGraph reshapeTensor:weightTensor withShape:bn_gamma_shape name:nil];
+            MPSGraphTensor* bnGammaTensor = [mpsGraph reshapeTensor:weightComputeTensor
+                                                          withShape:bn_gamma_shape
+                                                               name:nil];
             bnGradOutputTensor = [mpsGraph multiplicationWithPrimaryTensor:bnGradOutputTensor
                                                            secondaryTensor:bnGammaTensor
                                                                       name:nil];
@@ -1252,11 +1287,17 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
           gradInputTensor = [mpsGraph reshapeTensor:gradient withShape:input_shape name:nil];
         }
 
+        // Gradients are computed in the input dtype; return them in the
+        // affine params' dtype like CPU does.
         if (grad_input_mask[1]) {
-          gradWeightTensor = [mpsGraph reshapeTensor:gradWeightTensor withShape:gamma_shape name:nil];
+          gradWeightTensor = [mpsGraph reshapeTensor:castMPSTensor(mpsGraph, gradWeightTensor, getMPSDataType(*gamma))
+                                           withShape:gamma_shape
+                                                name:nil];
         }
         if (grad_input_mask[2]) {
-          gradBiasTensor = [mpsGraph reshapeTensor:gradBiasTensor withShape:gamma_shape name:nil];
+          gradBiasTensor = [mpsGraph reshapeTensor:castMPSTensor(mpsGraph, gradBiasTensor, getMPSDataType(*beta))
+                                         withShape:gamma_shape
+                                              name:nil];
         }
 
         newCachedGraph->gradOutputTensor_ = gradOutputTensor;

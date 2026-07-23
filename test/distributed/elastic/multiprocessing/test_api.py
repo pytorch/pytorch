@@ -221,11 +221,11 @@ class SignalHandlingTest(TestCase):
 
             self.assertTrue(
                 sighup_logged,
-                f"Expected SIGHUP Windows message in info calls: {info_calls}",
+                lambda msg: f"{msg}\nExpected SIGHUP Windows message in info calls: {info_calls}",
             )
             self.assertTrue(
                 sigusr1_logged,
-                f"Expected SIGUSR1 Windows message in info calls: {info_calls}",
+                lambda msg: f"{msg}\nExpected SIGUSR1 Windows message in info calls: {info_calls}",
             )
 
             # Verify _start was called
@@ -304,7 +304,7 @@ class SignalHandlingTest(TestCase):
                 self.assertEqual(
                     handler,
                     _terminate_process_handler,
-                    f"Signal {sig} should use _terminate_process_handler",
+                    lambda msg: f"{msg}\nSignal {sig} should use _terminate_process_handler",
                 )
 
         # Verify that info messages were logged for successful registration
@@ -320,11 +320,11 @@ class SignalHandlingTest(TestCase):
 
         self.assertTrue(
             sigusr1_logged,
-            f"Expected SIGUSR1 registration message in info calls: {info_calls}",
+            lambda msg: f"{msg}\nExpected SIGUSR1 registration message in info calls: {info_calls}",
         )
         self.assertTrue(
             sigusr2_logged,
-            f"Expected SIGUSR2 registration message in info calls: {info_calls}",
+            lambda msg: f"{msg}\nExpected SIGUSR2 registration message in info calls: {info_calls}",
         )
 
         # Verify _start was called
