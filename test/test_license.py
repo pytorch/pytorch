@@ -11,10 +11,12 @@ from pathlib import Path
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.license_files_audit import audit_repo_license_files, load_project
+
 
 sys.path.remove(str(REPO_ROOT))
 
@@ -52,7 +54,6 @@ class TestLicense(TestCase):
             if os.path.isfile(path)
         }
         self.assertLessEqual(found, set(load_project(REPO_ROOT)["license-files"]))
-
 
 
 if __name__ == "__main__":

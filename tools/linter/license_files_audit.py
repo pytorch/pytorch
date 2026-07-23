@@ -9,12 +9,14 @@ from __future__ import annotations
 import glob
 from pathlib import Path
 
+
 try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore[import-not-found, no-redef]
 
 from packaging.licenses import canonicalize_license_expression
+
 
 LICENSE_GLOBS = (
     "LICENSE",
@@ -49,7 +51,9 @@ def _load_license_audit_tables() -> tuple[frozenset[str], dict[str, str]]:
         expression = str(row["expression"])
         paths = row["paths"]
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
-            raise ValueError(f"{_MANIFEST_PATH.name}: spdx[{i}].paths must be a list of strings")
+            raise ValueError(
+                f"{_MANIFEST_PATH.name}: spdx[{i}].paths must be a list of strings"
+            )
         for path in paths:
             spdx[path] = expression
     return frozenset(ex), spdx
@@ -59,7 +63,9 @@ EXCLUDED_LICENSE_FILES, LICENSE_FILE_SPDX = _load_license_audit_tables()
 
 
 def load_project(repo_root: Path) -> dict:
-    return tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    return tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]
 
 
 def discover_license_files(repo_root: Path) -> set[str]:
@@ -110,7 +116,8 @@ def audit_repo_license_files(repo_root: Path) -> list[str]:
     if unknown:
         err.append(
             "New license file(s) under audit globs; add each to pyproject license-files or "
-            f"manifest excluded list ({_MANIFEST_PATH.name}): " + ", ".join(sorted(unknown))
+            f"manifest excluded list ({_MANIFEST_PATH.name}): "
+            + ", ".join(sorted(unknown))
         )
 
     spdx_keys = set(LICENSE_FILE_SPDX)
