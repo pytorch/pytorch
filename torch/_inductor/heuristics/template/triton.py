@@ -14,7 +14,7 @@ import sympy
 import torch
 from torch._inductor.heuristics.registry import register_template_heuristic
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import Mod
+from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
@@ -31,6 +31,7 @@ from ...kernel.mm import (
 )
 from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
+from ...runtime.hints import DeviceProperties
 from ...utils import (
     get_backend_num_stages,
     get_default_kpack,
@@ -39,6 +40,7 @@ from ...utils import (
     TMA_DESCRIPTOR_SIZE,
     triton_type,
     using_b200,
+    using_rocm_rdna3,
 )
 from ...virtualized import V
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
@@ -275,7 +277,7 @@ class ROCmFlexDecodeConfig(FlexDecodeConfig):
 
 class BaseHeuristicSingleton(type):
     """
-    Thread-safe implementation of single to be used in the config heuristic subclasses
+    Thread-safe implementation of singleton to be used in the config heuristic subclasses
     to ensure heavy __init__ calls are not repeatedly run
     """
 
@@ -1021,17 +1023,22 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
 
         try:
-            device = torch.cuda.current_device()
-            props = torch.cuda.get_device_properties(device)
-            if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
-                sm_available = int(props.shared_memory_per_block_optin)
-            elif hasattr(props, "shared_memory_per_block"):  # for ROCm
-                sm_available = int(props.shared_memory_per_block)
+            if torch.cuda.is_available():
+                device = torch.cuda.current_device()
+                props = torch.cuda.get_device_properties(device)
+                if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+                    sm_available = int(props.shared_memory_per_block_optin)
+                elif hasattr(props, "shared_memory_per_block"):  # for ROCm
+                    sm_available = int(props.shared_memory_per_block)
+                else:
+                    return None
+            elif torch.xpu.is_available():
+                props = torch.xpu.get_device_properties()
+                sm_available = int(props.local_mem_size)
             else:
                 return None
-
         except Exception:
-            # If CUDA is not available or properties cannot be queried, return None
+            # If device properties cannot be queried, return None
             return None
 
         # TODO make a BaseDeviceConfigHeuristics to handle different device configuration in its own implementation.
@@ -1068,11 +1075,22 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         self,
         configs: list[BaseConfig],
     ) -> list[BaseConfig]:
+        try:
+            device = torch.cuda.current_device()
+            props = torch.cuda.get_device_properties(device)
+            warp_size = props.warp_size
+        except (RuntimeError, AttributeError, AssertionError):
+            return configs
+
         pruned_configs = []
+        # NVIDIA-oriented approximation for the per-thread register limit.
+        # TODO: generalize this threshold for ROCm devices.
+        NUM_REG = 255
         for gemm_config in configs:
-            NUM_REG = 255
             acc_regs = math.ceil(
-                gemm_config.block_m * gemm_config.block_n / (gemm_config.num_warps * 32)
+                gemm_config.block_m
+                * gemm_config.block_n
+                / (gemm_config.num_warps * warp_size)
             )
             # Lower bound for register spillage, if exceeds the kernel will certainly spill
             if acc_regs > NUM_REG:
@@ -1164,7 +1182,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
     # Flex attn helpers
-    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(
+        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+    ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
@@ -1326,12 +1346,12 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 128): FlexConfig(32, 64, 3, 4),
             (torch.float32, 192): FlexConfig(32, 64, 2, 4),
             (torch.float32, 256): FlexConfig(32, 32, 3, 4),
-            (torch.bfloat16, 64): FlexConfig(128, 128, 3, 4),
-            (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
+            (torch.bfloat16, 64): FlexConfig(128, 64, 3, 4),
+            (torch.bfloat16, 128): FlexConfig(128, 128, 2, 8),
             (torch.bfloat16, 192): FlexConfig(128, 128, 1, 8),
             (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
-            (torch.float16, 64): FlexConfig(128, 128, 3, 4),
-            (torch.float16, 128): FlexConfig(128, 64, 3, 8),
+            (torch.float16, 64): FlexConfig(128, 64, 3, 4),
+            (torch.float16, 128): FlexConfig(128, 128, 2, 8),
             (torch.float16, 192): FlexConfig(128, 128, 1, 8),
             (torch.float16, 256): FlexConfig(64, 32, 3, 4),
         }
@@ -1373,7 +1393,9 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             if BLOCK_N % BLOCK_M == 0
         ]
 
-    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(
+        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+    ) -> list[FlexConfig]:
         capability = torch.cuda.get_device_capability()
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -1451,6 +1473,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 FlexBwDConfig(64, 64, 64, 64, 2, 4)
             ),
             "sm10x": lambda h: (
+                FlexBwDConfig(32, 64, 64, 32, 3, 4) if h <= 64 else
                 FlexBwDConfig(64, 128, 128, 64, 3, 4) if h <= 128 else
                 FlexBwDConfig(64, 64, 64, 64, 1, 8) if h <= 192 else
                 FlexBwDConfig(64, 64, 64, 64, 1, 4)
@@ -1637,6 +1660,28 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 256): ROCmFlexConfig(32, 32, 1, 8, kpack=default_kpack),
         }
 
+        # RDNA3 (gfx11xx) optimal configs profiled on gfx1151 (head_dim=256).
+        # Three seq_len tiers to match CU occupancy on 16-CU RDNA3:
+        #   short  (seq < 128): BLOCK_M=16, tiny tiles keep all CUs busy
+        #   medium (128 <= seq < 512): BLOCK_M=32, transitional tile size
+        #   long   (seq >= 512): BLOCK_M=64, enough seq rows to fill all CUs
+        self.rdna3_short_seq_flex_config = {
+            (torch.bfloat16, 256): ROCmFlexConfig(16, 16, 1, 4, waves_per_eu=2),
+            (torch.float16, 256): ROCmFlexConfig(16, 16, 1, 4, waves_per_eu=2),
+        }
+        self.rdna3_medium_seq_flex_config = {
+            (torch.bfloat16, 256): ROCmFlexConfig(
+                32, 16, 1, 4, matrix_instr_nonkdim=16, waves_per_eu=2
+            ),
+            (torch.float16, 256): ROCmFlexConfig(
+                32, 16, 1, 4, matrix_instr_nonkdim=16, waves_per_eu=2
+            ),
+        }
+        self.rdna3_default_flex_config = {
+            (torch.bfloat16, 256): ROCmFlexConfig(64, 16, 1, 4, waves_per_eu=2),
+            (torch.float16, 256): ROCmFlexConfig(64, 16, 1, 4, waves_per_eu=2),
+        }
+
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
             ROCmFlexConfig(BLOCK1, BLOCK2, 1, w, kpack=default_kpack)
             for BLOCK1 in [16, 64, 128]
@@ -1811,7 +1856,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     kwargs["GROUP_M"] = group_m
                 yield self.triton_config(**kwargs)
 
-    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(
+        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+    ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
@@ -1827,7 +1874,21 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 default_config = ROCmFlexConfig(64, 64, 1, 4, kpack=default_kpack)
             else:
                 default_config = ROCmFlexConfig(128, 64, 1, 4, kpack=default_kpack)
-            if capability >= (9, 5):  # gfx950 (MI350X/MI355X)
+            if using_rocm_rdna3():
+                sizevars = V.graph.sizevars
+                if sizevars.statically_known_lt(seq_len, 128):
+                    default_config = self.rdna3_short_seq_flex_config.get(
+                        (dtype, head_dim), default_config
+                    )
+                elif sizevars.statically_known_lt(seq_len, 512):
+                    default_config = self.rdna3_medium_seq_flex_config.get(
+                        (dtype, head_dim), default_config
+                    )
+                else:
+                    default_config = self.rdna3_default_flex_config.get(
+                        (dtype, head_dim), default_config
+                    )
+            elif capability >= (9, 5):  # gfx950 (MI350X/MI355X)
                 default_config = self.gfx950_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
@@ -1959,7 +2020,9 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
                 FlexDecodeConfig(64, 2, 1),
             ]
 
-    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(
+        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+    ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
@@ -2074,16 +2137,24 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> dict[str, Any]:
-        assert isinstance(kernel_inputs, MMKernelInputs)
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
-        # allow_tf32 alignment heuristics based on reverse engineering
-        # H100 CUDA 12.8 behavior
-        size_threshold = V.graph.sizevars.statically_known_true(
-            sympy.And(sympy.Ge(m, 16), sympy.Ge(sympy.Min(n, k), 512))
-        )
-        allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
-            size_threshold
-        )
+        device_type = kernel_inputs.device_type
+        if device_type == "xpu":
+            # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
+            allow_tf32 = torch.backends.mkldnn.allow_tf32
+        elif device_type == "cuda":
+            # allow_tf32 alignment heuristics based on reverse engineering
+            # H100 CUDA 12.8 behavior
+            size_threshold = V.graph.sizevars.statically_known_true(
+                sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
+            )
+            allow_tf32 = (
+                torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
+            )
+        else:
+            allow_tf32 = False
 
         return {
             "ALLOW_TF32": allow_tf32,
@@ -2115,9 +2186,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Convert config lists to template kwargs.
         This replaces the logic from choices.get_mm_configs and inlines mm_options.
         """
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            f"{self.__class__.__name__} requires MMKernelInputs"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
         input_nodes = kernel_inputs.nodes()
         if len(input_nodes) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
@@ -2131,9 +2201,24 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         dtype = kernel_inputs.dtype()
         # Get the appropriate config generator
         configs = self._get_config_generator()
+        # origami is a C++ perf model that requires concrete m, n, k; feeding it
+        # sympy symbols (dynamic shapes, e.g. torch.cat with k=s0+s1) yields no
+        # usable selection, so restrict origami to fully static problems and let
+        # symbolic shapes fall through to the regular config generator below.
+        mnk_static = all(not getattr(x, "free_symbols", None) for x in (m, n, k))
+        if (
+            origami is not None
+            and not mnk_static
+            and config.max_autotune_gemm_search_space == "DEFAULT"
+        ):
+            log.debug("Origami skipped: symbolic m/n/k, using regular config generator")
         # `origami is not None` encodes the module-load gate (see top of file);
         # only DEFAULT search space is supported here.
-        if origami is not None and config.max_autotune_gemm_search_space == "DEFAULT":
+        if (
+            origami is not None
+            and config.max_autotune_gemm_search_space == "DEFAULT"
+            and mnk_static
+        ):
             # Extract device and strides for origami GEMM
             device = kernel_inputs.device()
             strides = kernel_inputs.strides_symbolic()
@@ -2234,7 +2319,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 # One MFMA per warp, capped at 2 * parallel_mi_cu.
                 tile_area = cfg.mt.m * cfg.mt.n
                 try:
-                    warp_size = torch.cuda.get_device_properties(device).warp_size
+                    warp_size = DeviceProperties.create(device).warp_size or 64
                 except (RuntimeError, AttributeError) as e:
                     # Fallback to standard warp size if device properties unavailable
                     log.warning(
@@ -2403,7 +2488,12 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Get accumulator type for the given dtype.
         Moved from mm_common.acc_type.
         """
-        if dtype in (torch.float16, torch.bfloat16):
+        if dtype in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float8_e4m3fnuz,
+            torch.float8_e4m3fn,
+        ):
             return "tl.float32"
         return self._dtype_to_triton(dtype)
 
@@ -2431,13 +2521,45 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
         super().__init__()
         self.should_scale_configs = False
 
+    def preprocess_mm_configs(
+        self,
+        m: int,
+        n: int,
+        k: int,
+        configs: list[BaseConfig],
+        has_int8_tensor: bool = False,
+        scale: float = 1.0,
+        exclude: Callable[
+            [sympy.Integer, sympy.Integer, sympy.Integer], bool
+        ] = lambda m, n, k: False,
+        dtype_size: int = 0,
+        op_name: str = "mm",
+        **kwargs,
+    ) -> Generator[TritonConfig, None, None]:
+        configs = [
+            c for c in configs if V.graph.sizevars.statically_known_lt(c.block_k, k)
+        ]
+        return super().preprocess_mm_configs(
+            m,
+            n,
+            k,
+            configs=configs,
+            has_int8_tensor=has_int8_tensor,
+            scale=scale,
+            exclude=exclude,
+            dtype_size=dtype_size,
+            op_name=op_name,
+            **kwargs,
+        )
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
         **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
-        assert isinstance(kernel_inputs, MMKernelInputs), "Expect MMKernelInputs"
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Expect MMKernelInputs")
         m, n, k = kernel_inputs.mnk_symbolic()
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, op_name, **kwargs
@@ -2503,9 +2625,8 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            "TMATemplateConfigMixin requires MMKernelInputs"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("TMATemplateConfigMixin requires MMKernelInputs")
         mat1, mat2 = kernel_inputs.mat1mat2()
         tma_opts = {
             "A_ROW_MAJOR": not mat1.layout.is_transposed(),
@@ -2610,9 +2731,8 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         """
         for scaled_mm, we need to unsqueeze scale tensors, and bias
         """
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            "Expect MMKernelInputs for scaled MM"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Expect MMKernelInputs for scaled MM")
         inputs = super().adjust_kernel_inputs(kernel_inputs, op_name)
         nodes = inputs.nodes()
         mat_a, mat_b, scale_a, scale_b, *bias = nodes
@@ -2625,16 +2745,33 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             # Need to unsqueeze bias from [N] -> [1, N]
             bias = L[aten.unsqueeze](bias, 0)
 
-        if len(scale_a.get_size()) == 0 or len(scale_b.get_size()) == 0:
-            assert len(scale_a.get_size()) == len(scale_b.get_size())
-            # Need to unsqueeze scale from [] -> [1, 1]
-            scale_a = L[aten.unsqueeze](L[aten.unsqueeze](scale_a, 0), 1)
-            scale_b = L[aten.unsqueeze](L[aten.unsqueeze](scale_b, 0), 1)
+        def is_tensorwise_scale(scale: Any) -> bool:
+            size = scale.get_size()
+            return len(size) == 0 or all(
+                V.graph.sizevars.statically_known_equals(dim, 1) for dim in size
+            )
+
+        def normalize_tensorwise_scale(scale: Any, *, allow_high_rank: bool) -> Any:
+            if not is_tensorwise_scale(scale):
+                return scale
+            if not allow_high_rank and len(scale.get_size()) > 2:
+                raise RuntimeError(
+                    f"t() expects a tensor with <= 2 dimensions, "
+                    f"but self is {len(scale.get_size())}D"
+                )
+            return L[aten.reshape](scale, [1, 1])
+
+        # The templates load scale suffixes with 2D output indices. Eager accepts
+        # high-rank all-ones scale_a, but scale_b is internally transposed and
+        # rank > 2 is invalid.
+        scale_a = normalize_tensorwise_scale(scale_a, allow_high_rank=True)
+        scale_b = normalize_tensorwise_scale(scale_b, allow_high_rank=False)
         nodes = [mat_a, mat_b, scale_a, scale_b]
         if bias:
             nodes.append(bias)
         return MMKernelInputs(
             nodes,
+            scalars=kernel_inputs._scalars,
             mat1_idx=kernel_inputs._mat1_idx,
             mat2_idx=kernel_inputs._mat2_idx,
             out_dtype=kernel_inputs._out_dtype,
@@ -2653,9 +2790,10 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         kernel_inputs = self.adjust_kernel_inputs(kernel_inputs, op_name)
         input_nodes = kernel_inputs.nodes()
         # Initial assertion from mm_common.scaled_mm_options
-        assert len(input_nodes) >= 4, (
-            f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
-        )
+        if len(input_nodes) < 4:
+            raise AssertionError(
+                f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
+            )
 
         # Extract scale tensors (typically scale_a and scale_b are input_nodes[2] and input_nodes[3])
         scale_a = input_nodes[2]
@@ -2674,14 +2812,14 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             return False
 
         size_a, size_b = scale_a.get_size(), scale_b.get_size()
-        assert are_compatible_scales(size_a, size_b), (
-            "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
-            f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
-        )
+        if not are_compatible_scales(size_a, size_b):
+            raise AssertionError(
+                "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
+                f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
+            )
 
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            f"{self.__class__.__name__} requires MMKernelInputs"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
 
         if not self._valid(kernel_inputs):
             return
@@ -2698,7 +2836,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
 
 
 class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
-    """Mixing for scaled mm with the regular mm template"""
+    """Mixin for scaled mm with the regular mm template"""
 
     def get_extra_kwargs(
         self,
@@ -2716,9 +2854,8 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
         }
 
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            "Expect MMKernelInputs for ScaledMMConfigMixin"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Expect MMKernelInputs for ScaledMMConfigMixin")
         _, _, k = kernel_inputs.mnk_symbolic()
         if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
             # Triton crashes however uncommon for real workloads
