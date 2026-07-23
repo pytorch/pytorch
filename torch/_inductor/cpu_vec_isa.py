@@ -205,7 +205,15 @@ cdll.LoadLibrary("__lib_path__")
             except Exception:
                 return False
 
-            return self._probe_load(output_path)
+            load_ok_marker = output_path + ".load_ok"
+            if os.path.isfile(load_ok_marker):
+                return True
+
+            load_ok = self._probe_load(output_path)
+            if load_ok:
+                with open(load_ok_marker, "w") as f:
+                    f.write("")
+            return load_ok
 
     def __bool__(self) -> bool:
         return self.__bool__impl(config.cpp.vec_isa_ok)

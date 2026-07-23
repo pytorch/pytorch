@@ -190,7 +190,8 @@ case "$tag" in
     ROCM_VERSION=nightly
     TRITON=yes
     KATEX=yes
-    PYTORCH_ROCM_ARCH="gfx942"
+    # rocm-nightly only runs on MI350 (gfx950) runners.
+    PYTORCH_ROCM_ARCH="gfx950"
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
@@ -320,10 +321,10 @@ case "$tag" in
   ;;
 esac
 
-# The ubuntu and ubuntu-rocm images provision Python from a deadsnakes venv
-# keyed on PYTHON_VERSION, while the xpu image still expresses it as
-# ANACONDA_PYTHON_VERSION (it keeps conda). Mirror the value so every flavor
-# gets what it expects.
+# ubuntu/Dockerfile provisions Python from a deadsnakes venv keyed on
+# PYTHON_VERSION, while the rocm/xpu images still express it as
+# ANACONDA_PYTHON_VERSION (they keep conda). Mirror the value so both flavors
+# get what they expect.
 if [ -z "${PYTHON_VERSION}" ]; then
   PYTHON_VERSION="${ANACONDA_PYTHON_VERSION}"
 fi
