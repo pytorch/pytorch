@@ -357,10 +357,186 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
         self.assertIsNotNone(default_pg.bound_device_id)
         self.assertEqual(default_pg.bound_device_id.type, "cuda")
 
+    def test_new_group_nccl_lazy_builds_per_peer_group(self):
+        # Passing backend="nccl-lazy" builds a per-peer, lazily-initialized
+        # group (a dedicated comm + stream per send/recv peer) usable for P2P.
+        # use_local_synchronization makes it members-only. The parent must be
+        # device-bound (it is, in this class).
+        ranks = list(range(self.world_size))
+        g = dist.new_group(
+            ranks=ranks, backend="nccl-lazy", use_local_synchronization=True
+        )
+        self.assertEqual(dist.get_process_group_ranks(g), ranks)
+        # P2P round-trip over the lazy group: 0 -> 1 -> ... -> 0
+        dev = torch.device(f"cuda:{self.rank}")
+        send_to = (self.rank + 1) % self.world_size
+        recv_from = (self.rank - 1) % self.world_size
+        if self.rank % 2 == 0:
+            dist.send(
+                torch.full((4,), float(self.rank), device=dev), dst=send_to, group=g
+            )
+            r = torch.empty(4, device=dev)
+            dist.recv(r, src=recv_from, group=g)
+        else:
+            r = torch.empty(4, device=dev)
+            dist.recv(r, src=recv_from, group=g)
+            dist.send(
+                torch.full((4,), float(self.rank), device=dev), dst=send_to, group=g
+            )
+        self.assertEqual(r[0].item(), float(recv_from))
+
+    def test_non_torchcomms_backend_falls_through_to_c10d(self):
+        # Under torchcomms, a backend TorchComms does not own (registered the way
+        # mooncake registers a custom c10d backend) must route through the normal
+        # ProcessGroup path, not new_comm. Use a gloo-backed stand-in.
+        def _creator(store, grank, gsize, timeout):
+            return dist.ProcessGroupGloo(store, grank, gsize, timeout)
+
+        name = "tc_gate_stub"
+        if name not in dist.Backend.backend_list:
+            dist.Backend.register_backend(name, _creator, devices=["cpu", "cuda"])
+
+        ranks = list(range(self.world_size))
+        g = dist.new_group(ranks=ranks, backend=name)
+        be = g._get_backend(torch.device("cpu"))
+        # The c10d creator ran (real ProcessGroupGloo), not a TorchComms wrapper.
+        self.assertNotIn("BackendWrapper", type(be).__name__)
+        t = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(t, group=g)
+        self.assertEqual(t.item(), sum(range(1, self.world_size + 1)))
+
 
 instantiate_device_type_tests(
     TestC10dTorchCommsInitAutoQualify, globals(), only_for=["cuda"]
 )
+
+
+@unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+class TestC10dTorchCommsMixedBackends(C10dTorchCommsTestBase):
+    """Verify subgroup creation from a mixed-backend parent under torchcomms.
+
+    The parent PG mixes ``cuda:nccl`` with ``cpu:fake``. Under torchcomms,
+    ``new_group`` builds each subgroup directly via ``new_comm`` (a members-only
+    store rendezvous), so a non-splittable device backend in the parent (here
+    ``cpu:fake``) is no obstacle: members construct the subgroup and non-members
+    return ``NON_GROUP_MEMBER`` without any parent split.
+    """
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        torch.distributed.config.use_torchcomms = True
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        os.environ["RANK"] = str(rank)
+        os.environ["WORLD_SIZE"] = str(world_size)
+        os.environ["TORCHCOMM_STORE_PATH"] = rdvz_file
+        os.environ["LOCAL_RANK"] = str(rank)
+
+        store = dist.FileStore(rdvz_file, world_size)
+        device_id = torch.device(f"cuda:{rank}")
+        torch.cuda.set_device(rank)
+
+        dist.init_process_group(
+            backend="cuda:nccl,cpu:fake",
+            world_size=world_size,
+            rank=rank,
+            store=store,
+            device_id=device_id,
+        )
+        cls.pg = dist.distributed_c10d._get_default_group()
+        torch.set_default_device(device_id)
+
+    @property
+    def _rank_value(self):
+        return self.rank + 1
+
+    def test_mixed_backend_subgroup(self):
+        subg_ranks = list(range(self.world_size // 2))
+        ng = dist.new_group(ranks=subg_ranks)
+
+        if self.rank in subg_ranks:
+            self.assertEqual(dist.get_process_group_ranks(ng), subg_ranks)
+            tensor = torch.tensor([self._rank_value], dtype=torch.float32)
+            dist.all_reduce(tensor, group=ng)
+            self.assertEqual(tensor.item(), sum(r + 1 for r in subg_ranks))
+        else:
+            self.assertIs(ng, dist.GroupMember.NON_GROUP_MEMBER)
+
+
+instantiate_device_type_tests(
+    TestC10dTorchCommsMixedBackends, globals(), only_for=["cuda"]
+)
+
+
+class TestTorchCommsHandlesBackend(TestCase):
+    """Unit-test the pure routing logic of ``_torchcomms_handles_backend``.
+
+    This decides whether a backend is one TorchComms can construct (so it goes
+    through ``new_comm`` / ``split_group``) versus a custom c10d plugin such as
+    ``mooncake`` that must fall through to the normal ProcessGroup path. The
+    function depends only on ``_TORCHCOMM_AVAILABLE`` and the two
+    ``is_backend_*`` callables, all of which we patch -- so these tests run even
+    when torchcomms is not installed.
+    """
+
+    def _patch(self, available=True, built=(), registered=()):
+        built, registered = set(built), set(registered)
+        return mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=available,
+            _torchcomms_is_backend_built=lambda name: name in built,
+            _torchcomms_is_backend_registered=lambda name: name in registered,
+            create=True,
+        )
+
+    def test_unavailable_returns_false(self):
+        with self._patch(available=False, built=["nccl"]):
+            self.assertFalse(c10d._torchcomms_handles_backend("nccl"))
+            self.assertFalse(c10d._torchcomms_handles_backend(None))
+
+    def test_none_backend_inherits_parent(self):
+        with self._patch(built=[]):
+            self.assertTrue(c10d._torchcomms_handles_backend(None))
+
+    def test_builtin_backend(self):
+        with self._patch(built=["nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("nccl"))
+
+    def test_registered_backend(self):
+        with self._patch(registered=["myadapter"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("myadapter"))
+
+    def test_custom_backend_falls_through(self):
+        with self._patch(built=["nccl"]):
+            self.assertFalse(c10d._torchcomms_handles_backend("mooncake"))
+            self.assertFalse(c10d._torchcomms_handles_backend("ucc"))
+
+    def test_case_insensitive(self):
+        with self._patch(built=["nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("NCCL"))
+
+    def test_nccl_lazy_is_own_backend(self):
+        # nccl-lazy is a distinct built torchcomms backend, not aliased to nccl:
+        # it is handled iff nccl-lazy itself is built/registered.
+        with self._patch(built=["nccl-lazy"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("nccl-lazy"))
+        with self._patch(built=["nccl"]):
+            self.assertFalse(c10d._torchcomms_handles_backend("nccl-lazy"))
+        with self._patch(built=[]):
+            self.assertFalse(c10d._torchcomms_handles_backend("nccl-lazy"))
+
+    def test_qualified_all_handled(self):
+        with self._patch(built=["gloo", "nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("cpu:gloo,cuda:nccl"))
+
+    def test_qualified_one_unhandled_falls_through(self):
+        with self._patch(built=["gloo"]):
+            self.assertFalse(c10d._torchcomms_handles_backend("cpu:gloo,cuda:mooncake"))
+
+    def test_empty_parts_are_skipped(self):
+        with self._patch(built=["nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("nccl,"))
+            self.assertTrue(c10d._torchcomms_handles_backend(" nccl , "))
 
 
 class TestC10dTorchCommsNewGroupHelper(TestCase):
@@ -530,6 +706,102 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         res, split_src = self._drive_non_member(torchcomms_enabled=False)
         self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
         split_src.perform_nocolor_split.assert_called_once_with(torch.device("cuda:0"))
+
+
+class TestC10dGroupNameHashSalt(TestCase):
+    """Unit-test the collective-consistent group-name hash salt.
+
+    ``_hash_ranks_to_str`` / ``_process_group_name`` are generic c10d helpers
+    (not TorchComms-specific), but the divergence they can produce was surfaced
+    by the TorchComms subgroup work. After an earlier asymmetric-membership
+    ``new_group`` (e.g. ``new_group([0])``), member and non-member ranks hold
+    different ``len(_world.pg_names)`` because only members register a PG.
+    Salting the hash with that length makes ranks compute DIFFERENT names for the
+    same later group; backends that use the group name as a rendezvous store
+    prefix (e.g. Gloo split's ``connectFullMesh``) then key off mismatched
+    prefixes and deadlock. The salt must instead be ``_world.group_count``, which
+    every rank advances in lockstep -- ``_process_group_name`` increments it
+    before the membership check, on BOTH the hashed and non-hashed paths.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._saved_group_count = c10d._world.group_count
+        self._saved_pg_names = dict(c10d._world.pg_names)
+
+    def tearDown(self):
+        c10d._world.group_count = self._saved_group_count
+        c10d._world.pg_names.clear()
+        c10d._world.pg_names.update(self._saved_pg_names)
+        super().tearDown()
+
+    def _register_dummy_pgs(self, n):
+        # Simulate a rank that registered extra PGs (asymmetric membership).
+        for i in range(n):
+            c10d._world.pg_names[object()] = c10d.GroupName(f"dummy_{i}")
+
+    def test_hash_salt_uses_group_count(self):
+        # Same ranks, different group_count -> different name (salt is live).
+        ranks = [0, 1, 2, 3]
+        c10d._world.group_count = 5
+        name_a = c10d._hash_ranks_to_str(ranks)
+        c10d._world.group_count = 6
+        name_b = c10d._hash_ranks_to_str(ranks)
+        self.assertNotEqual(name_a, name_b)
+
+    def test_hash_independent_of_pg_names_length(self):
+        # ROOT-CAUSE regression: the hash must NOT depend on len(_world.pg_names),
+        # the quantity that diverges across ranks under asymmetric membership.
+        ranks = [0, 1, 2, 3]
+        c10d._world.group_count = 9
+        c10d._world.pg_names.clear()
+        name_few = c10d._hash_ranks_to_str(ranks)
+        self._register_dummy_pgs(5)
+        name_many = c10d._hash_ranks_to_str(ranks)
+        self.assertEqual(name_few, name_many)
+
+    def test_two_asymmetric_ranks_agree_on_name(self):
+        # The deadlock scenario end-to-end through _process_group_name: two ranks
+        # that made the SAME sequence of group-creation calls (equal group_count)
+        # but registered a DIFFERENT number of PGs must compute the same name.
+        ranks = [0, 1, 2, 3]
+        # Rank that was a member of earlier subgroups: more pg_names.
+        c10d._world.group_count = 3
+        c10d._world.pg_names.clear()
+        self._register_dummy_pgs(2)
+        name_member = c10d._process_group_name(ranks, use_hashed_name=True)
+        # Rank that was a non-member: fewer pg_names, but same group_count because
+        # every rank advances it in lockstep regardless of membership.
+        c10d._world.group_count = 3
+        c10d._world.pg_names.clear()
+        name_non_member = c10d._process_group_name(ranks, use_hashed_name=True)
+        self.assertEqual(name_member, name_non_member)
+
+    def test_process_group_name_increments_on_hashed_path(self):
+        c10d._world.group_count = 10
+        c10d._process_group_name([0, 1], use_hashed_name=True)
+        self.assertEqual(c10d._world.group_count, 11)
+
+    def test_process_group_name_increments_on_nonhashed_path(self):
+        c10d._world.group_count = 20
+        c10d._process_group_name([0, 1], use_hashed_name=False)
+        self.assertEqual(c10d._world.group_count, 21)
+
+    def test_nonhashed_name_is_group_count_before_increment(self):
+        c10d._world.group_count = 42
+        name = c10d._process_group_name([0, 1], use_hashed_name=False)
+        self.assertEqual(name, "42")
+        self.assertEqual(c10d._world.group_count, 43)
+
+    def test_repeated_hashed_same_ranks_get_distinct_names(self):
+        # Two distinct PGs over identical ranks must get distinct names; the salt
+        # advancing on the hashed path (fixed by this commit) is what
+        # disambiguates them. Before the fix the hashed path left group_count
+        # unchanged, so back-to-back splits over the same ranks collided.
+        c10d._world.group_count = 0
+        first = c10d._process_group_name([2, 3], use_hashed_name=True)
+        second = c10d._process_group_name([2, 3], use_hashed_name=True)
+        self.assertNotEqual(first, second)
 
 
 if __name__ == "__main__":
