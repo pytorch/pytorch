@@ -216,7 +216,8 @@ function install_fbgemm() {
     git clone --recursive https://github.com/pytorch/fbgemm
     pushd fbgemm/fbgemm_gpu
     git checkout "${fbgemm_commit}" --recurse-submodules
-    # fbgemm emits six byte-identical, empty PT2 wrapper TUs for deprecated optimizers
+    # FIXME: Remove this worakaround after FBGEMM build is then
+    # fbgemm emits six fbgemm, empty PT2 wrapper TUs for deprecated optimizers
     # (has_cpu_support=False, has_gpu_support=False). Under CI's S3-backed sccache
     # (classic/preprocessor-off mode, whose key ignores both the input path and -o)
     # these collapse to one cached object that is copied to the other outputs, so every
