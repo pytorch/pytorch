@@ -271,7 +271,7 @@ std::unique_ptr<Graph> jsonToSubgraph(
           if (symBool.tag() == torch::_export::SymBoolArgument::Tag::AS_NAME) {
             graph->addInput(symBool.get_as_name(), Type::Kind::SymBool);
           }
-          // Skip constant symbools
+          // Skip constant symbols
           break;
         }
         case torch::_export::Argument::Tag::AS_SYM_BOOLS: {
@@ -280,7 +280,7 @@ std::unique_ptr<Graph> jsonToSubgraph(
                 torch::_export::SymBoolArgument::Tag::AS_NAME) {
               graph->addInput(symBool.get_as_name(), Type::Kind::SymBool);
             }
-            // Skip constant symbools
+            // Skip constant symbols
           }
           break;
         }

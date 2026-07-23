@@ -57,7 +57,7 @@ at::Scalar MakeIntScalar(T value) {
   return at::Scalar(static_cast<int64_t>(value));
 }
 
-// Routing values to device data maximizes the changes for compilation cache
+// Routing values to device data maximizes the chances for compilation cache
 // hits, but it can prevent the compiler to perform optimizations. So tensor
 // values which are within a given set, are routed to constant scalars if this
 // API returns true.
