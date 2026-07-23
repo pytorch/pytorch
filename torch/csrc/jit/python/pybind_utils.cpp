@@ -80,7 +80,6 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       }
       if (THPVariable_Check(obj.ptr())) {
         auto var = py::cast<autograd::Variable>(obj);
-        guardAgainstNamedTensor<autograd::Variable>(var);
         return var;
       } else {
         if (!allow_numbers_as_tensors) {
@@ -456,7 +455,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
     }
     case TypeKind::InterfaceType: {
       auto interfaceType = type->expect<InterfaceType>();
-      // When converting an pyobj to an interface, we check if rhs
+      // When converting a pyobj to an interface, we check if rhs
       // is module or normal torchscript class, get the type and ivalue
       // from them correspondingly.
       c10::ClassTypePtr classType = nullptr;
@@ -494,7 +493,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
             " is not compatible with interface ",
             interfaceType->repr_str(),
             "\n",
-            why_not.str()));
+            std::move(why_not).str()));
       }
       return res;
     }
@@ -545,7 +544,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 #ifdef USE_DISTRIBUTED
       // Handle ProcessGroup custom class as a capsule.  FakeScriptObject
       // (used during Dynamo tracing with CooR) passes py::isinstance via
-      // OpaqueBaseMeta but cannot be cast directly; unwrap real_obj first.
+      // CustomClassBaseMeta but cannot be cast directly; unwrap real_obj first.
       if (py::isinstance<c10d::ProcessGroup>(obj)) {
         py::handle target = obj;
         if (py::hasattr(obj, "real_obj")) {
@@ -643,7 +642,6 @@ py::object toPyObject(IValue ivalue) {
               " to a Python object");
       }
     } else {
-      guardAgainstNamedTensor<at::Tensor>(tensor);
       return py::cast(std::move(tensor));
     }
   } else if (ivalue.isStorage()) {
@@ -852,7 +850,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
       for (const auto& err : errors) {
         ss << err.what() << "\n\n";
       }
-      throw std::runtime_error(ss.str());
+      throw std::runtime_error(std::move(ss).str());
     }
 
     return std::make_pair(std::move(found_op), std::move(stack));
@@ -1018,8 +1016,8 @@ std::optional<InferredType> detail::_tryToInferTypeImpl(py::handle input) {
   }
   // During Dynamo tracing with compile-on-one-rank (CooR), opaque reference
   // types like ProcessGroup are wrapped in FakeScriptObject.  Python-level
-  // isinstance() sees through the wrapper (via OpaqueBaseMeta), but the C++
-  // py::isinstance above does too — yet the subsequent pybind11 cast would
+  // isinstance() sees through the wrapper (via CustomClassBaseMeta), but the
+  // C++ py::isinstance above does too -- yet the subsequent pybind11 cast would
   // fail because FakeScriptObject is not a C++ bound object.  Detect this
   // case by checking for the wrapped real_obj attribute.
   if (py::hasattr(input, "real_obj")) {

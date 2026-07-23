@@ -6,7 +6,7 @@ import warnings
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 from typing_extensions import Self
 
 
@@ -382,12 +382,35 @@ class FunctionalTensor(torch.Tensor):
         *,
         masked_grad: builtins.bool | None = None,
     ) -> torch.Tensor:
-        return self.elem.to_dense()
+        if self.layout == torch.strided:
+            return self.to(dtype=dtype) if dtype is not None else self
+
+        inner = torch._from_functional_tensor(self.elem)
+        if not torch._subclasses.fake_tensor.is_fake_tensor(inner):
+            out = self.elem.to_dense(dtype=dtype, masked_grad=masked_grad)
+            if isinstance(out, torch.Tensor) and torch._is_functional_tensor(out):
+                functional_mode = _detect_infra_mode(
+                    torch._C._TorchDispatchModeKey.FUNCTIONAL
+                )
+                if functional_mode is None:
+                    raise AssertionError("functional_mode must not be None")
+                with functional_mode:
+                    return FunctionalTensor(out, functional_mode)
+            return out
+
+        return torch.ops.aten.to_dense.default(
+            self, dtype=dtype, masked_grad=masked_grad
+        )
+
+    @property
+    # pyrefly: ignore[bad-override]
+    def is_mkldnn(self) -> builtins.bool:
+        return torch._from_functional_tensor(self.elem).is_mkldnn
 
     @property
     # pyrefly: ignore[bad-override]
     def layout(self) -> torch.layout:
-        return self.elem.layout
+        return torch._from_functional_tensor(self.elem).layout
 
     def __bool__(self) -> builtins.bool:
         return bool(self.item())
@@ -437,8 +460,9 @@ class FunctionalTensorMode(TorchDispatchMode):
                 return _get_dispatch_mode_pre_dispatch(
                     torch._C._TorchDispatchModeKey.FUNCTIONAL
                 )
-            return torch._C._get_dispatch_mode(
-                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            return cast(
+                "FunctionalTensorMode | None",
+                torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL),
             )
 
         if _get_prev_mode() is None:
@@ -629,6 +653,33 @@ class FunctionalTensorMode(TorchDispatchMode):
         )
 
         if (
+            (
+                func is torch.ops.aten.alias.default
+                or func is torch.ops.aten.detach.default
+            )
+            and len(args) == 1
+            and isinstance(args[0], FunctionalTensor)
+        ):
+            input_unwrapped = torch._from_functional_tensor(args[0].elem)
+            if (
+                isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                    input_unwrapped, torch._subclasses.FakeTensor
+                )
+                and input_unwrapped.dispatch_keys is not None
+            ):
+                input_dispatch_keys = input_unwrapped.dispatch_keys
+
+                def preserve_dispatch_keys(out: object) -> None:
+                    if isinstance(out, FunctionalTensor):
+                        unwrapped = torch._from_functional_tensor(out.elem)
+                        if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                            unwrapped, torch._subclasses.FakeTensor
+                        ):
+                            unwrapped.dispatch_keys = input_dispatch_keys
+
+                pytree.tree_map_(preserve_dispatch_keys, outs_wrapped)
+
+        if (
             # If no outputs are our functional subclass, then don't try to fix up aliasing
             not any(
                 isinstance(x, FunctionalTensor)
@@ -680,6 +731,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                     continue
                 unwrapped = torch._from_functional_tensor(a.elem)
                 try:
+                    # pyrefly: ignore[missing-attribute]
                     tracker_entry = m.tracer.tensor_tracker[unwrapped]
                 except KeyError:
                     # A tensor constant lifted from a nested HOP subgraph

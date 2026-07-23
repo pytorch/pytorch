@@ -438,8 +438,7 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             Model(),
             (torch.randn(4, 4), torch.randn(4, 4)),
             {"kw2": torch.ones(4, 4), "kw1": torch.zeros(4, 4)},
-            # We are specifying dynamism on the first kwarg even though user passed in
-            # different order
+            # Tuple dynamic_shapes follows the original function signature order.
             dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
         )
 
@@ -848,6 +847,84 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         )
 
         onnx_program = self.export(ComplexInitModel(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_adaptive_max_pool2d_global_pooling(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool2d((1, 1))
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 8, 8)
+        onnx_program = self.export(Model(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_adaptive_max_pool2d_evenly_divisible(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool2d((2, 2))
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 4, 4)
+        onnx_program = self.export(Model(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_adaptive_max_pool3d_global_pooling(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool3d((1, 1, 1))
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 4, 4, 4)
+        onnx_program = self.export(Model(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_adaptive_max_pool3d_evenly_divisible(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool3d((2, 2, 2))
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 4, 4, 4)
+        onnx_program = self.export(Model(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_adaptive_max_pool1d_global_pooling(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool1d(1)
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 8)
+        onnx_program = self.export(Model(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_adaptive_max_pool1d_evenly_divisible(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool1d(2)
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 4)
+        onnx_program = self.export(Model(), (x,))
         onnx_testing.assert_onnx_program(onnx_program)
 
 
