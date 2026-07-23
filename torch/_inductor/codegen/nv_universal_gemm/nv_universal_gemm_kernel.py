@@ -674,7 +674,7 @@ def _clear_reuse_args_tensors(variant_name, args, epilogue_args):
         # the real output/aux tensors in example_inputs (used only for tracing,
         # not the launch). Replace them with meta tensors so the cached args
         # hold no real storage -- otherwise an intermediate output stays live
-        # and CUDA graph capture fails. Mirrors _fake_epilogue_metadata.
+        # and CUDA graph capture fails. Mirrors _meta_epilogue_metadata.
         import torch
 
         te = getattr(epilogue, "traced_epilogue", None)
