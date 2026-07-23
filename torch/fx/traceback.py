@@ -304,7 +304,7 @@ def set_stack_trace(stack: list[str]) -> None:
             current_meta["stack_trace"] = "".join(stack)
         else:
             # when the stack is empty, we explicitly clear the stack_trace to avoid
-            # propagating it to future node.˙
+            # propagating it to future node.
             current_meta.pop("stack_trace", None)
 
 
@@ -544,7 +544,7 @@ def get_current_meta() -> dict[str, Any]:
 @contextmanager
 def set_current_replay_node(node: Node | None) -> Iterator[None]:
     """
-    Set the currently replay node. If `current_replay_node` is not None,
+    Set the current replay node. If `current_replay_node` is not None,
     then we're re-generating the `current_replay_node` in FunctionalTensorMode.
     """
     # See [Note] annotation for more details.
@@ -560,7 +560,7 @@ def set_current_replay_node(node: Node | None) -> Iterator[None]:
 @compatibility(is_backward_compatible=False)
 def get_current_replay_node() -> Node | None:
     """
-    Get the currently replay node
+    Get the current replay node
     """
     return current_replay_node
 
