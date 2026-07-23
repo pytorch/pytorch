@@ -38,7 +38,6 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     view_or_reshape_args,
 )
 from torch._inductor.kernel.gemm_epilogue import (
-    epilogue_subgraph_from_origins,
     GemmEpilogueGraph,
     GemmReductionGeometry,
     iter_fx_node_inputs,
@@ -72,11 +71,18 @@ class GemmReductionConfig:
         return self.group, self.axis, self.reduction_type, self.source_type
 
     def replace(
-        self, *, output_name: str | None = None, source_type: str | None = None
+        self,
+        *,
+        output_name: str | None = None,
+        reduction_type: str | None = None,
+        source_type: str | None = None,
     ) -> "GemmReductionConfig":
         return dataclasses.replace(
             self,
             output_name=self.output_name if output_name is None else output_name,
+            reduction_type=(
+                self.reduction_type if reduction_type is None else reduction_type
+            ),
             source_type=self.source_type if source_type is None else source_type,
         )
 
@@ -242,14 +248,6 @@ class GemmLocalReduceAnalysis:
     matches: dict[torch.fx.Node, GemmLocalReduceMatch] = dataclasses.field(
         default_factory=dict
     )
-
-    @classmethod
-    def from_origins(
-        cls, origins: Sequence[torch.fx.Node]
-    ) -> tuple["GemmLocalReduceAnalysis", tuple[torch.fx.Node, ...]]:
-        """Analyze the transitive FX subgraph ending at scheduler origin nodes."""
-        nodes, roots = epilogue_subgraph_from_origins(origins)
-        return cls.from_nodes(nodes), roots
 
     @classmethod
     def from_nodes(cls, nodes: Sequence[torch.fx.Node]) -> "GemmLocalReduceAnalysis":
@@ -732,11 +730,3 @@ class GemmLocalReduceAnalysis:
             aux_outputs,
             match.to_plan(store=None, feeds_main=True),
         )
-
-
-FlexGemmEpilogueGraph = GemmEpilogueGraph
-FlexGemmLocalReduceAnalysis = GemmLocalReduceAnalysis
-FlexGemmLocalReduceMatch = GemmLocalReduceMatch
-FlexGemmLocalReduceStore = GemmLocalReduceStore
-FlexGemmOutputLocalReducePlan = GemmOutputLocalReducePlan
-FlexGemmOutputPlan = GemmOutputPlan
