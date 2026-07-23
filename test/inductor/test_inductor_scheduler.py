@@ -150,7 +150,7 @@ class TestScheduler(TestCase):
             )
         )
 
-    def test_epilogue_fuse_speculative_defers_user_list_update(self):
+    def test_epilogue_fuse_dry_run_defers_user_list_update(self):
         node1, node2, user = self._extern_triton_epilogue_snodes()
         users = node1.scheduler.name_to_buf["real_mutated"].users
 
@@ -158,12 +158,9 @@ class TestScheduler(TestCase):
             FusedExternTritonKernelSchedulerNode, "__init__", return_value=None
         ):
             FusedExternTritonKernelSchedulerNode.epilogue_fuse(
-                node1, node2, speculative=True
+                node1, node2, dry_run=True
             )
         self.assertEqual(users, [user])
-
-        FusedExternTritonKernelSchedulerNode.commit_epilogue_fusion(node1)
-        self.assertEqual(users, [])
 
     def test_epilogue_fuse_default_commits_user_list_update(self):
         node1, node2, _ = self._extern_triton_epilogue_snodes()
@@ -175,7 +172,7 @@ class TestScheduler(TestCase):
             FusedExternTritonKernelSchedulerNode.epilogue_fuse(node1, node2)
         self.assertEqual(users, [])
 
-    def test_base_scheduling_forwards_speculative_to_epilogue_fusion(self):
+    def test_base_scheduling_forwards_dry_run_to_epilogue_fusion(self):
         node1, node2, _ = self._extern_triton_epilogue_snodes()
         fused = object()
 
@@ -193,10 +190,8 @@ class TestScheduler(TestCase):
                 return_value=fused,
             ) as epilogue_fuse,
         ):
-            self.assertIs(
-                BaseScheduling(None).fuse(node1, node2, speculative=True), fused
-            )
-        epilogue_fuse.assert_called_once_with(node1, node2, speculative=True)
+            self.assertIs(BaseScheduling(None).fuse(node1, node2, dry_run=True), fused)
+        epilogue_fuse.assert_called_once_with(node1, node2, dry_run=True)
 
     def test_fuse_two_nodes_builds_fusion(self):
         scheduler = object.__new__(Scheduler)

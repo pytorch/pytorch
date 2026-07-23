@@ -3142,11 +3142,11 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         class FakeBackend:
             def __init__(self) -> None:
                 self.calls = 0
-                self.speculative = False
+                self.dry_run = False
 
-            def fuse(self, node1, node2, *, speculative=False):
+            def fuse(self, node1, node2, *, dry_run=False):
                 self.calls += 1
-                self.speculative = speculative
+                self.dry_run = dry_run
                 return candidate
 
         backend = FakeBackend()
@@ -3164,7 +3164,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(rejected, full_correctness)
         self.assertIsNone(update)
         self.assertEqual(backend.calls, int(full_correctness))
-        self.assertEqual(backend.speculative, full_correctness)
+        self.assertEqual(backend.dry_run, full_correctness)
 
 
 if __name__ == "__main__":

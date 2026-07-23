@@ -3102,20 +3102,20 @@ class FusedMixOrderReductions(FusedSchedulerNode):
                 self.node1, other.node1, (self.node2, other.node2)
             ) and self.sub_node_can_fuse(self.node2, other.node2, tuple())
 
-    def fuse_with(self, other: BaseSchedulerNode, *, speculative: bool = False):
+    def fuse_with(self, other: BaseSchedulerNode, *, dry_run: bool = False):
         device = self.node1.get_device()
         backend = self.scheduler.get_backend(device)
 
         if isinstance(other, FusedMixOrderReductions):
-            fused_node1 = backend.fuse(self.node1, other.node1, speculative=speculative)
-            fused_node2 = backend.fuse(self.node2, other.node2, speculative=speculative)
+            fused_node1 = backend.fuse(self.node1, other.node1, dry_run=dry_run)
+            fused_node2 = backend.fuse(self.node2, other.node2, dry_run=dry_run)
             return FusedMixOrderReductions(fused_node1, fused_node2)
         else:
             if self.sub_node_can_fuse(self.node1, other, (self.node2,)):
-                fused_node = backend.fuse(self.node1, other, speculative=speculative)
+                fused_node = backend.fuse(self.node1, other, dry_run=dry_run)
                 return FusedMixOrderReductions(fused_node, self.node2)
             else:
-                fused_node = backend.fuse(self.node2, other, speculative=speculative)
+                fused_node = backend.fuse(self.node2, other, dry_run=dry_run)
                 return FusedMixOrderReductions(self.node1, fused_node)
 
 
@@ -3210,11 +3210,11 @@ class FusedNestedReductions(FusedSchedulerNode):
         )
 
     def fuse_with(
-        self, other: BaseSchedulerNode, *, speculative: bool = False
+        self, other: BaseSchedulerNode, *, dry_run: bool = False
     ) -> FusedNestedReductions:
         device = self.node2.get_device()
         backend = self.scheduler.get_backend(device)
-        new_node2 = backend.fuse(self.node2, other, speculative=speculative)
+        new_node2 = backend.fuse(self.node2, other, dry_run=dry_run)
         return FusedNestedReductions(self.node1, new_node2)
 
 
@@ -3244,13 +3244,13 @@ class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
         node1: ExternKernelSchedulerNode,
         node2: SchedulerNode,
         *,
-        speculative: bool = False,
+        dry_run: bool = False,
     ) -> FusedSchedulerNode:
         """
         Fuse a user-defined Triton kernel with an epilogue node.
 
-        When speculative=True, skip persistent scheduler mutations. This is used
-        only for analysis-only fusion candidates that may be discarded.
+        When dry_run=True, skip persistent scheduler mutations. This is used only
+        for analysis-only fusion candidates that may be discarded.
         """
         if not isinstance(node1.node, ir.UserDefinedTritonKernel):
             raise AssertionError(
@@ -3263,32 +3263,18 @@ class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
                 f"expected one mutation output, got {len(node1.node.mutation_outputs)}"
             )
         mutated_name = typing.cast(str, node1.node.mutation_outputs[0].name)
-        if not speculative:
+        if not dry_run:
             cls.commit_epilogue_fusion(node1, mutated_name)
         return cls(scheduler, node1, node2)
 
     @staticmethod
     def commit_epilogue_fusion(
-        node1: ExternKernelSchedulerNode, mutated_name: str | None = None
+        node1: ExternKernelSchedulerNode, mutated_name: str
     ) -> None:
-        if not isinstance(node1.node, ir.UserDefinedTritonKernel):
-            raise AssertionError(
-                "expected node1.node to be an ir.UserDefinedTritonKernel"
-            )
         scheduler = node1.scheduler
-        if mutated_name is None:
-            if len(node1.node.mutation_outputs) != 1:
-                raise AssertionError(
-                    f"expected one mutation output, got {len(node1.node.mutation_outputs)}"
-                )
-            real_mutated_name = typing.cast(str, node1.node.mutation_outputs[0].name)
-        else:
-            real_mutated_name = mutated_name
         # Node1's mutated tensor becomes an intermediary tensor. Thus, remove
         # node1 from the allocated buffer's users for dead node elimination.
-        real_name = scheduler.mutation_real_name.get(
-            real_mutated_name, real_mutated_name
-        )
+        real_name = scheduler.mutation_real_name.get(mutated_name, mutated_name)
         scheduler.name_to_buf[real_name].users.remove(NodeUser(node1))
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
@@ -7288,7 +7274,7 @@ class Scheduler:
         region_end = max(step1, step2)
 
         candidate = self.get_backend(node1.get_device()).fuse(
-            node1, node2, speculative=True
+            node1, node2, dry_run=True
         )
         candidate_outputs = self._assign_fusion_memory_planning_info(
             node1, node2, candidate, ctx.graph_outputs
@@ -10748,13 +10734,13 @@ class BaseScheduling:  # noqa: docstring_linter
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         *,
-        speculative: bool = False,
+        dry_run: bool = False,
     ) -> FusedSchedulerNode:
         """
         Fuse two nodes.
 
         Args:
-            speculative: If True, build a candidate for analysis only. Fusion
+            dry_run: If True, build a candidate for analysis only. Fusion
                 implementations must not mutate persistent scheduler state. The
                 default False is the normal fusion path and may apply those side
                 effects immediately.
@@ -10768,9 +10754,9 @@ class BaseScheduling:  # noqa: docstring_linter
         elif MixOrderReduction.are_mix_order_reductions(node1, node2):
             return FusedMixOrderReductions(node1, node2)
         elif isinstance(node1, FusedNestedReductions):
-            return node1.fuse_with(node2, speculative=speculative)
+            return node1.fuse_with(node2, dry_run=dry_run)
         elif isinstance(node1, FusedMixOrderReductions):
-            return node1.fuse_with(node2, speculative=speculative)
+            return node1.fuse_with(node2, dry_run=dry_run)
         elif isinstance(node1, ExternKernelSchedulerNode) and isinstance(
             node2, SchedulerNode
         ):
@@ -10779,7 +10765,7 @@ class BaseScheduling:  # noqa: docstring_linter
                     "expected node1.node to be an ir.UserDefinedTritonKernel"
                 )
             return FusedExternTritonKernelSchedulerNode.epilogue_fuse(
-                node1, node2, speculative=speculative
+                node1, node2, dry_run=dry_run
             )
         else:
             return FusedSchedulerNode.fuse(node1, node2)

@@ -263,15 +263,13 @@ def assign_memory_planning_info_for_scheduler_buffers(
             dep_name_to_succ_nodes_for_ordering[mutating_buf_name]
         )
 
-    # Populate each scheduler buffer. Reuse the planning-info object because this
-    # function runs once per fusion round and buffer sizes do not change.
     for buf_name in name_to_buf:
-        mpi_buffer = name_to_buf[buf_name].mpi_buffer
-        mpi_buffer.size_alloc, mpi_buffer.size_free = sched_buf_to_size[buf_name]
-        mpi_buffer.succ_nodes = dep_name_to_succ_nodes[buf_name]
-        mpi_buffer.succ_nodes_for_ordering = dep_name_to_succ_nodes_for_ordering[
-            buf_name
-        ]
+        name_to_buf[buf_name].mpi_buffer = MemoryPlanningInfoForBuffer(
+            size_alloc=sched_buf_to_size[buf_name][0],
+            size_free=sched_buf_to_size[buf_name][1],
+            succ_nodes=dep_name_to_succ_nodes[buf_name],
+            succ_nodes_for_ordering=dep_name_to_succ_nodes_for_ordering[buf_name],
+        )
 
 
 def assign_memory_planning_info_for_scheduler_nodes(
