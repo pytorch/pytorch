@@ -18,7 +18,7 @@ namespace torch::detail {
 namespace {
 
 struct ConcretePyObjectConversion final : PyObjectConversionInterface {
-  AtenTensorHandle from_pyobject(PyObject* obj) const override {
+  AtenTensorHandle tensor_from_pyobject(PyObject* obj) const override {
     // The GIL guards the THPVariable access below; a boxed STABLE_TORCH_LIBRARY
     // kernel may run with the GIL released, so assert rather than race.
     TORCH_CHECK(
@@ -32,7 +32,7 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
     return new_tensor_handle(at::Tensor(THPVariable_Unpack(obj)));
   }
 
-  PyObject* to_pyobject(AtenTensorHandle ath, PyObject* py_type)
+  PyObject* tensor_to_pyobject(AtenTensorHandle ath, PyObject* py_type)
       const override {
     TORCH_CHECK(
         PyGILState_Check(),

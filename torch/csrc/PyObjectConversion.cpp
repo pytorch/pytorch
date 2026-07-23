@@ -16,10 +16,10 @@ constexpr const char* kNoImplMsg =
 // Mirrors NoopPyInterpreterVTable: calling a method is a hard error rather than
 // silent misbehavior.
 struct NoopPyObjectConversion final : PyObjectConversionInterface {
-  AtenTensorHandle from_pyobject(PyObject* /*obj*/) const override {
+  AtenTensorHandle tensor_from_pyobject(PyObject* /*obj*/) const override {
     TORCH_CHECK(false, kNoImplMsg);
   }
-  PyObject* to_pyobject(AtenTensorHandle /*ath*/, PyObject* /*py_type*/)
+  PyObject* tensor_to_pyobject(AtenTensorHandle /*ath*/, PyObject* /*py_type*/)
       const override {
     TORCH_CHECK(false, kNoImplMsg);
   }
