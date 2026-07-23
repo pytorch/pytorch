@@ -6373,7 +6373,10 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         graph_code = backend.graphs[0].print_readable(print_output=False)
         self.assertIn("torch._C._nn.linear", graph_code)
 
+    @torch._dynamo.config.patch(record_runtime_overhead=True)
     def test_aot_autograd_runtime_wrapper_prologue_profiled(self):
+        # record_runtime_overhead is off by default (its per-call marker hops add
+        # overhead); enable it so the prologue profiling marker is emitted.
         # Names for prologue profiling event
         prologue_name = "AOTDispatcher Runtime Wrapper Prologue"
 
@@ -6409,6 +6412,24 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
             # Make sure there is at least one other event (compiled function) that starts
             # after prologue starts
             self.assertLess(prologue_event.time_range.end, last_start_time)
+
+    def test_record_runtime_overhead_default_off(self):
+        # record_runtime_overhead defaults False, so the "Pregraph bytecode"
+        # profiler marker Dynamo emits into each compiled call is absent by
+        # default (the marker adds per-call overhead). Enabling the flag brings
+        # it back. Pins the default so an accidental re-flip is caught.
+        def has_pregraph_marker():
+            torch._dynamo.reset()
+            f = torch.compile(lambda x: x + 1, backend="eager")
+            x = torch.randn(4)
+            f(x)  # compile + warm the cache
+            with profile(activities=[ProfilerActivity.CPU]) as prof:
+                f(x)
+            return any("Pregraph bytecode" in e.name for e in prof.events())
+
+        self.assertFalse(has_pregraph_marker())
+        with torch._dynamo.config.patch(record_runtime_overhead=True):
+            self.assertTrue(has_pregraph_marker())
 
     def test_changing_stride(self):
         cnt = torch._dynamo.testing.CompileCounter()
