@@ -5,8 +5,7 @@ NVIDIA Universal GEMM scheduling for PyTorch Inductor.
 
 import hashlib
 import logging
-import math
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any, cast
 
 import torch
@@ -28,6 +27,19 @@ from ...ir import (
     NVUniversalGemmBuffer,
     Pointwise,
     Reduction,
+)
+from ...kernel.gemm_epilogue import (
+    centered_mean_consumer_type,
+    fx_targets,
+    grouped_variance_parameters,
+    GroupedReductionLayout,
+    is_grouped_logsumexp,
+    sum_multiply_consumer_type,
+    sum_normalize_consumer_type,
+)
+from ...kernel.gemm_epilogue_analysis import (
+    GemmLocalReduceAnalysis,
+    GemmReductionConfig,
 )
 from ...scheduler import (
     BaseSchedulerNode,
@@ -215,32 +227,78 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 epilogue_nodes.append(node)
         return epilogue_nodes
 
+    @staticmethod
+    def _computed_buffers(
+        nodes: Sequence[BaseSchedulerNode],
+    ) -> tuple[ComputedBuffer, ...] | None:
+        buffers = tuple(node.node for node in nodes)
+        if not buffers or not all(
+            isinstance(buffer, ComputedBuffer) for buffer in buffers
+        ):
+            return None
+        return cast(tuple[ComputedBuffer, ...], buffers)
+
+    @classmethod
+    def _gemm_epilogue_analysis(
+        cls, buffers: Sequence[ComputedBuffer]
+    ) -> tuple[Any, tuple[torch.fx.Node, ...]] | None:
+        """Analyze the GEMM epilogue FX graph represented by scheduler origins."""
+        origins = OrderedSet(
+            origin for buffer in buffers for origin in buffer.get_origins()
+        )
+        if not origins or any(
+            not isinstance(origin, torch.fx.Node) for origin in origins
+        ):
+            return None
+        try:
+            return GemmLocalReduceAnalysis.from_origins(
+                cast(Sequence[torch.fx.Node], origins)
+            )
+        except RuntimeError:
+            return None
+
+    @classmethod
+    def _gemm_local_reduce_match(cls, buffers: Sequence[ComputedBuffer]) -> Any | None:
+        analyzed = cls._gemm_epilogue_analysis(buffers)
+        if analyzed is None:
+            return None
+        analysis, roots = analyzed
+        return analysis.common_output_match(roots)
+
+    @classmethod
+    def _gemm_feed_main_match(cls, buffers: Sequence[ComputedBuffer]) -> Any | None:
+        analyzed = cls._gemm_epilogue_analysis(buffers)
+        if analyzed is None:
+            return None
+        analysis, roots = analyzed
+        try:
+            plan = analysis.feed_main_output_plan(
+                roots[0], roots[1:], allow_dependency_match=True
+            )
+            return plan.local_reduce.match if plan is not None else None
+        except RuntimeError:
+            return None
+
     @classmethod
     def _grouped_reduce_config(
         cls, gemm_node: Buffer, scheduler_node: BaseSchedulerNode
-    ) -> tuple[str, int, int, str, str] | None:
+    ) -> GemmReductionConfig | None:
         nodes = scheduler_node.get_nodes()
         if len(nodes) not in (1, 2):
             return None
-        buffers = [snode.node for snode in nodes]
-        if not all(isinstance(buffer, ComputedBuffer) for buffer in buffers):
+        buffers = cls._computed_buffers(nodes)
+        if buffers is None:
             return None
-        buffers = [cast(ComputedBuffer, buffer) for buffer in buffers]
-        origin_targets = OrderedSet(
-            str(origin.target)
-            for buffer in buffers
-            for origin in buffer.get_origins()
-            if hasattr(origin, "target")
+        origin_targets = fx_targets(
+            origin for buffer in buffers for origin in buffer.get_origins()
         )
-        reduction_targets = {
-            "aten.sum.dim_IntList": "sum",
-            "aten.mean.dim": "mean",
-            "aten.prod.dim_int": "prod",
-            "aten.amax.default": "max",
-            "aten.amin.default": "min",
-        }
+        match = cls._gemm_local_reduce_match(buffers)
+        if match is None or match.reduction_node is None:
+            return None
+        reduction_type = match.reduction_type
+        if reduction_type is None:
+            return None
         source_targets = OrderedSet(["aten.abs.default", "aten.pow.Tensor_Scalar"])
-        matched_reductions = origin_targets & reduction_targets.keys()
         absmax_finalize_targets = OrderedSet(
             ("aten.clamp_min.default", "aten.div.Tensor")
         )
@@ -252,7 +310,15 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     "prims.inductor_force_stride_order.default",
                 )
             )
-            | OrderedSet(reduction_targets)
+            | OrderedSet(
+                (
+                    "aten.sum.dim_IntList",
+                    "aten.mean.dim",
+                    "aten.prod.dim_int",
+                    "aten.amax.default",
+                    "aten.amin.default",
+                )
+            )
             | source_targets
             | absmax_finalize_targets
         )
@@ -261,11 +327,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
             for target in origin_targets
             if target == "flex_gemm" or target.startswith("flex_gemm_body_graph_")
         )
-        if len(matched_reductions) != 1 or not origin_targets.issubset(
-            allowed_targets | flex_gemm_origins
-        ):
+        if not origin_targets.issubset(allowed_targets | flex_gemm_origins):
             return None
-        reduction_type = reduction_targets[next(iter(matched_reductions))]
         is_absmax_scale = OrderedSet(
             (
                 "aten.abs.default",
@@ -378,6 +441,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
             return None
         if group <= 1 or (max_group is not None and group > max_group):
             return None
+        if (group, axis) != (match.geometry.group, match.geometry.axis):
+            return None
 
         reads = list(access_node.read_writes.reads)
         if not reads or any(read.name != gemm_node.get_name() for read in reads):
@@ -386,7 +451,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if range_vars is None:
             return None
         if not range_vars:
-            return output_name, group, axis, reduction_type, source_type
+            return GemmReductionConfig(
+                output_name, group, axis, reduction_type, source_type
+            )
         if isinstance(node.data, Reduction):
             if len(reads) != 1:
                 return None
@@ -424,103 +491,30 @@ class NVUniversalGemmScheduling(BaseScheduling):
             )
             if OrderedSet(offsets) != expected_offsets:
                 return None
-        return output_name, group, axis, reduction_type, source_type
+        return GemmReductionConfig(
+            output_name, group, axis, reduction_type, source_type
+        )
 
     @classmethod
-    def _grouped_variance_config(
-        cls, gemm_node: Buffer, scheduler_node: BaseSchedulerNode
-    ) -> tuple[str, int, int, str, str] | None:
-        nodes = scheduler_node.get_nodes()
-        if len(nodes) != 1 or not isinstance(nodes[0].node, ComputedBuffer):
-            return None
-        buffer = cast(ComputedBuffer, nodes[0].node)
-        if not isinstance(buffer.data, Pointwise):
-            return None
-        origins = OrderedSet(buffer.get_origins())
-        targets = OrderedSet(str(getattr(origin, "target", "")) for origin in origins)
-        allowed = OrderedSet(
-            (
-                "aten.add.Tensor",
-                "aten.mean.dim",
-                "aten.mul.Tensor",
-                "aten.pow.Tensor_Scalar",
-                "aten.reshape.default",
-                "aten.sub.Tensor",
-                "prims.convert_element_type.default",
-            )
-        )
-        if not targets or not targets.issubset(allowed):
-            return None
-
-        def target(node: object) -> str:
-            return str(getattr(node, "target", ""))
-
-        def tensor_and_scalar(node: object, expected_target: str):
-            if target(node) != expected_target:
-                return None
-            args = getattr(node, "args", ())
-            if len(args) < 2:
-                return None
-            if isinstance(args[0], (int, float)):
-                return args[1], float(args[0])
-            if isinstance(args[1], (int, float)):
-                return args[0], float(args[1])
-            return None
-
-        matches: list[tuple[float, float]] = []
-        for add in origins:
-            add_parts = tensor_and_scalar(add, "aten.add.Tensor")
-            if add_parts is None:
-                continue
-            mul, bias = add_parts
-            mul_parts = tensor_and_scalar(mul, "aten.mul.Tensor")
-            if mul_parts is None:
-                continue
-            mean, scale = mul_parts
-            if target(mean) != "aten.mean.dim":
-                continue
-            mean_args = getattr(mean, "args", ())
-            if len(mean_args) < 2 or tuple(mean_args[1]) != (-1,):
-                continue
-            square = mean_args[0]
-            square_parts = tensor_and_scalar(square, "aten.pow.Tensor_Scalar")
-            if square_parts is None or square_parts[1] != 2.0:
-                continue
-            centered = square_parts[0]
-            if target(centered) != "aten.sub.Tensor":
-                continue
-            centered_args = getattr(centered, "args", ())
-            if len(centered_args) < 2:
-                continue
-            grouped, group_mean = centered_args[:2]
-            if target(group_mean) != "aten.mean.dim":
-                continue
-            group_mean_args = getattr(group_mean, "args", ())
-            if (
-                len(group_mean_args) < 3
-                or group_mean_args[0] is not grouped
-                or tuple(group_mean_args[1]) != (-1,)
-                or group_mean_args[2] is not True
-            ):
-                continue
-            matches.append((scale, bias))
-        if len(matches) != 1:
-            return None
-
+    def _n_axis_grouped_pointwise_reads_match(
+        cls,
+        gemm_node: Buffer,
+        buffer: ComputedBuffer,
+        scheduler_node: BaseSchedulerNode,
+        group: int,
+    ) -> bool:
+        """Validate an unrolled N-axis grouped output against scheduler indexing."""
         try:
             m, n = map(V.graph.sizevars.optimization_hint, gemm_node.get_size())
             out_m, out_n = map(V.graph.sizevars.optimization_hint, buffer.get_size())
         except Exception:
-            return None
-        if out_m != m or out_n <= 0 or n % out_n != 0:
-            return None
-        group = n // out_n
-        if group <= 1 or group > 32:
-            return None
+            return False
+        if out_m != m or out_n <= 0 or n != out_n * group:
+            return False
         reads = list(scheduler_node.read_writes.reads)
         range_vars = scheduler_node.read_writes.range_vars
         if not reads or range_vars is None:
-            return None
+            return False
         if not range_vars:
             range_vars = tuple(
                 sorted(
@@ -531,34 +525,56 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 )
             )
         range_vars = cast(tuple[Any, ...], range_vars)
-        if len(range_vars) not in (1, 2):
-            return None
-        if any(read.name != gemm_node.get_name() for read in reads):
-            return None
         if len(range_vars) == 2:
             base = n * range_vars[0] + group * range_vars[1]
             expected_strides = [n, group]
-        else:
+        elif len(range_vars) == 1:
             base = group * range_vars[0]
             expected_strides = [group]
+        else:
+            return False
         offsets = OrderedSet()
         for read in reads:
+            if read.name != gemm_node.get_name():
+                return False
             strides = V.graph.sizevars.stride_vars(read.index, range_vars)
             if list(strides) != expected_strides:
-                return None
+                return False
             offsets.add(V.graph.sizevars.simplify(read.index - base))
-        if offsets != OrderedSet(range(group)):
+        return offsets == OrderedSet(range(group))
+
+    @classmethod
+    def _grouped_variance_config(
+        cls, gemm_node: Buffer, scheduler_node: BaseSchedulerNode
+    ) -> GemmReductionConfig | None:
+        nodes = scheduler_node.get_nodes()
+        if len(nodes) != 1 or not isinstance(nodes[0].node, ComputedBuffer):
             return None
-        scale, bias = matches[0]
+        buffer = cast(ComputedBuffer, nodes[0].node)
+        if not isinstance(buffer.data, Pointwise):
+            return None
+        parameters = grouped_variance_parameters(buffer.get_origins())
+        if parameters is None:
+            return None
+
+        match = cls._gemm_local_reduce_match((buffer,))
+        if match is None or match.geometry.axis != 1:
+            return None
+        group = match.geometry.group
+        if group > 32 or not cls._n_axis_grouped_pointwise_reads_match(
+            gemm_node, buffer, scheduler_node, group
+        ):
+            return None
+        scale, bias = parameters
         reduce_type = "variance_affine:" + ":".join(
             format(value, ".17g") for value in (scale, bias)
         )
-        return buffer.get_name(), group, 1, reduce_type, "identity"
+        return GemmReductionConfig(buffer.get_name(), group, 1, reduce_type, "identity")
 
     @classmethod
     def _direct_bool_mask_config(
         cls, gemm_node: Buffer, scheduler_node: BaseSchedulerNode
-    ) -> tuple[str, int, int, str, str] | None:
+    ) -> GemmReductionConfig | None:
         nodes = scheduler_node.get_nodes()
         if len(nodes) != 1 or not isinstance(nodes[0].node, ComputedBuffer):
             return None
@@ -607,222 +623,46 @@ class NVUniversalGemmScheduling(BaseScheduling):
             for actual, wanted in zip(strides, expected)
         ):
             return None
-        return buffer.get_name(), 2, 1, "direct_bool_gt_zero", "identity"
+        return GemmReductionConfig(
+            buffer.get_name(), 2, 1, "direct_bool_gt_zero", "identity"
+        )
 
     @classmethod
     def _grouped_logsumexp_config(
         cls, gemm_node: Buffer, scheduler_node: BaseSchedulerNode
-    ) -> tuple[str, int, int, str, str] | None:
+    ) -> GemmReductionConfig | None:
         nodes = scheduler_node.get_nodes()
         if len(nodes) != 1 or not isinstance(nodes[0].node, ComputedBuffer):
             return None
         buffer = cast(ComputedBuffer, nodes[0].node)
         if not isinstance(buffer.data, Pointwise):
             return None
-        origins = OrderedSet(buffer.get_origins())
-        targets = OrderedSet(str(getattr(origin, "target", "")) for origin in origins)
-        guarded_required = OrderedSet(
-            (
-                "aten.abs.default",
-                "aten.add.Tensor",
-                "aten.amax.default",
-                "aten.eq.Scalar",
-                "aten.exp.default",
-                "aten.full.default",
-                "aten.log.default",
-                "aten.reshape.default",
-                "aten.squeeze.dims",
-                "aten.sub.Tensor",
-                "aten.sum.dim_IntList",
-                "aten.where.self",
-                "prims.convert_element_type.default",
-            )
-        )
-        stable_required = OrderedSet(
-            (
-                "aten.add.Tensor",
-                "aten.amax.default",
-                "aten.exp.default",
-                "aten.log.default",
-                "aten.reshape.default",
-                "aten.squeeze.dim",
-                "aten.sub.Tensor",
-                "aten.sum.dim_IntList",
-                "prims.convert_element_type.default",
-            )
-        )
-        if targets not in (guarded_required, stable_required):
+        if not is_grouped_logsumexp(buffer.get_origins()):
             return None
 
-        def target(node: object) -> str:
-            return str(getattr(node, "target", ""))
-
-        matched = False
-        for add in origins:
-            if target(add) != "aten.add.Tensor":
-                continue
-            add_args = getattr(add, "args", ())
-            if len(add_args) < 2:
-                continue
-            log_node, squeeze = add_args[:2]
-            if target(log_node) != "aten.log.default":
-                log_node, squeeze = squeeze, log_node
-            if (
-                target(log_node) != "aten.log.default"
-                or target(squeeze) != "aten.squeeze.dims"
-            ):
-                continue
-            sum_node = getattr(log_node, "args", (None,))[0]
-            if target(sum_node) != "aten.sum.dim_IntList":
-                continue
-            sum_args = getattr(sum_node, "args", ())
-            if len(sum_args) < 2 or tuple(sum_args[1]) != (-1,):
-                continue
-            exp = sum_args[0]
-            sub = getattr(exp, "args", (None,))[0]
-            if target(exp) != "aten.exp.default" or target(sub) != "aten.sub.Tensor":
-                continue
-            sub_args = getattr(sub, "args", ())
-            squeeze_args = getattr(squeeze, "args", ())
-            if len(sub_args) < 2 or len(squeeze_args) < 2:
-                continue
-            grouped, shift = sub_args[:2]
-            if squeeze_args[0] is not shift or tuple(squeeze_args[1]) != (-1,):
-                continue
-            if target(shift) != "aten.where.self":
-                continue
-            where_args = getattr(shift, "args", ())
-            if len(where_args) < 3:
-                continue
-            condition, zero, maximum = where_args[:3]
-            if target(maximum) != "aten.amax.default":
-                continue
-            maximum_args = getattr(maximum, "args", ())
-            if (
-                len(maximum_args) < 3
-                or maximum_args[0] is not grouped
-                or tuple(maximum_args[1]) != (-1,)
-                or maximum_args[2] is not True
-            ):
-                continue
-            if target(condition) != "aten.eq.Scalar":
-                continue
-            condition_args = getattr(condition, "args", ())
-            if (
-                len(condition_args) < 2
-                or target(condition_args[0]) != "aten.abs.default"
-                or getattr(condition_args[0], "args", (None,))[0] is not maximum
-                or condition_args[1] != float("inf")
-            ):
-                continue
-            if target(zero) != "aten.full.default":
-                continue
-            zero_args = getattr(zero, "args", ())
-            if len(zero_args) < 2 or zero_args[1] != 0.0:
-                continue
-            matched = True
-            break
-        if not matched and targets == stable_required:
-            for add in origins:
-                if target(add) != "aten.add.Tensor":
-                    continue
-                add_args = getattr(add, "args", ())
-                if len(add_args) < 2:
-                    continue
-                log_node, squeeze = add_args[:2]
-                if target(log_node) != "aten.log.default":
-                    log_node, squeeze = squeeze, log_node
-                if (
-                    target(log_node) != "aten.log.default"
-                    or target(squeeze) != "aten.squeeze.dim"
-                ):
-                    continue
-                sum_node = getattr(log_node, "args", (None,))[0]
-                if target(sum_node) != "aten.sum.dim_IntList":
-                    continue
-                sum_args = getattr(sum_node, "args", ())
-                if len(sum_args) < 2 or tuple(sum_args[1]) != (-1,):
-                    continue
-                exp = sum_args[0]
-                sub = getattr(exp, "args", (None,))[0]
-                if (
-                    target(exp) != "aten.exp.default"
-                    or target(sub) != "aten.sub.Tensor"
-                ):
-                    continue
-                sub_args = getattr(sub, "args", ())
-                squeeze_args = getattr(squeeze, "args", ())
-                if len(sub_args) < 2 or len(squeeze_args) < 2:
-                    continue
-                grouped, maximum = sub_args[:2]
-                if (
-                    squeeze_args[0] is not maximum
-                    or squeeze_args[1] != -1
-                    or target(maximum) != "aten.amax.default"
-                ):
-                    continue
-                maximum_args = getattr(maximum, "args", ())
-                if (
-                    len(maximum_args) < 3
-                    or maximum_args[0] is not grouped
-                    or tuple(maximum_args[1]) != (-1,)
-                    or maximum_args[2] is not True
-                ):
-                    continue
-                matched = True
-                break
-        if not matched:
+        match = cls._gemm_local_reduce_match((buffer,))
+        if match is None or match.geometry.axis != 1:
             return None
-
-        try:
-            m, n = map(V.graph.sizevars.optimization_hint, gemm_node.get_size())
-            out_m, out_n = map(V.graph.sizevars.optimization_hint, buffer.get_size())
-        except Exception:
+        group = match.geometry.group
+        if group > 32 or not cls._n_axis_grouped_pointwise_reads_match(
+            gemm_node, buffer, scheduler_node, group
+        ):
             return None
-        if out_m != m or out_n <= 0 or n % out_n != 0:
-            return None
-        group = n // out_n
-        if group <= 1 or group > 32:
-            return None
-        reads = list(scheduler_node.read_writes.reads)
-        range_vars = scheduler_node.read_writes.range_vars
-        if not reads or range_vars is None:
-            return None
-        if not range_vars:
-            range_vars = tuple(
-                sorted(
-                    OrderedSet(
-                        symbol for read in reads for symbol in read.index.free_symbols
-                    ),
-                    key=str,
-                )
-            )
-        range_vars = cast(tuple[Any, ...], range_vars)
-        if len(range_vars) == 2:
-            base = n * range_vars[0] + group * range_vars[1]
-            expected_strides = [n, group]
-        elif len(range_vars) == 1:
-            base = group * range_vars[0]
-            expected_strides = [group]
-        else:
-            return None
-        offsets = OrderedSet()
-        for read in reads:
-            if read.name != gemm_node.get_name():
-                return None
-            strides = V.graph.sizevars.stride_vars(read.index, range_vars)
-            if list(strides) != expected_strides:
-                return None
-            offsets.add(V.graph.sizevars.simplify(read.index - base))
-        if offsets != OrderedSet(range(group)):
-            return None
-        return buffer.get_name(), group, 1, "logsumexp", "identity"
+        return GemmReductionConfig(buffer.get_name(), group, 1, "logsumexp", "identity")
 
     @classmethod
     def _grouped_reduce_feeds_main_config_from_nodes(
         cls, gemm_node: Buffer, nodes: Sequence[BaseSchedulerNode]
-    ) -> tuple[str, int, int, str, str] | None:
+    ) -> GemmReductionConfig | None:
         if len(gemm_node.get_size()) != 2:
+            return None
+        all_buffers = tuple(
+            cast(ComputedBuffer, node.node)
+            for node in nodes
+            if isinstance(node.node, ComputedBuffer)
+        )
+        feed_match = cls._gemm_feed_main_match(all_buffers)
+        if feed_match is None:
             return None
         allowed_targets = OrderedSet(
             (
@@ -848,33 +688,29 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     for origin in node.node.get_origins()
                 )
             ]
-            buffers = [node.node for node in candidate_nodes]
-            if not all(isinstance(buffer, ComputedBuffer) for buffer in buffers):
+            buffers = cls._computed_buffers(candidate_nodes)
+            if buffers is None:
                 return None
-            targets = OrderedSet(
-                str(origin.target)
-                for buffer in cast(list[ComputedBuffer], buffers)
-                for origin in buffer.get_origins()
-                if hasattr(origin, "target")
+            targets = fx_targets(
+                origin for buffer in buffers for origin in buffer.get_origins()
             )
-            binary_targets = targets & OrderedSet(
-                ("aten.add.Tensor", "aten.sub.Tensor")
-            )
-            if (
-                "aten.mean.dim" not in targets
-                or not binary_targets
-                or not targets.issubset(allowed_targets)
-            ):
+            if not targets.issubset(allowed_targets):
                 return None
             reductions = [
                 config
                 for node in candidate_nodes
                 if (config := cls._grouped_reduce_config(gemm_node, node)) is not None
-                and config[2:] == (0, "mean", "identity")
+                and (config.axis, config.reduction_type, config.source_type)
+                == (0, "mean", "identity")
             ]
-            if len(reductions) != 1 or reductions[0][1] > 64:
+            if len(reductions) != 1 or reductions[0].group > 64:
                 return None
-            group = reductions[0][1]
+            group = reductions[0].group
+            if (group, 0) != (
+                feed_match.geometry.group,
+                feed_match.geometry.axis,
+            ):
+                return None
             m, n = gemm_node.get_size()
 
             def is_full_output_size(size) -> bool:
@@ -897,9 +733,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
             consumer_type = cls._centered_mean_consumer_type(finalizer)
             if consumer_type is None:
                 return None
-            return (
+            return GemmReductionConfig(
                 finalizer.get_name(),
-                reductions[0][1],
+                reductions[0].group,
                 0,
                 consumer_type,
                 "identity",
@@ -909,18 +745,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
         node = cast(ComputedBuffer, nodes[0].node)
         if not isinstance(node.data, Pointwise):
             return None
-        targets = OrderedSet(
-            str(origin.target)
-            for origin in node.get_origins()
-            if hasattr(origin, "target")
-        )
-        binary_targets = targets & OrderedSet(("aten.add.Tensor", "aten.sub.Tensor"))
-        required_targets: OrderedSet[str] = OrderedSet(("aten.mean.dim",))
-        if (
-            not required_targets.issubset(targets)
-            or not targets.issubset(allowed_targets)
-            or not binary_targets
-        ):
+        targets = fx_targets(node.get_origins())
+        if not targets.issubset(allowed_targets):
             return None
         consumer_type = cls._centered_mean_consumer_type(node)
         if consumer_type is None:
@@ -963,7 +789,14 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 )
             ):
                 return None
-            return node.get_name(), group, 0, consumer_type, "identity"
+            if (group, 0) != (
+                feed_match.geometry.group,
+                feed_match.geometry.axis,
+            ):
+                return None
+            return GemmReductionConfig(
+                node.get_name(), group, 0, consumer_type, "identity"
+            )
         if len(reads) <= 2:
             return None
         try:
@@ -973,6 +806,11 @@ class NVUniversalGemmScheduling(BaseScheduling):
         group = len(reads) - 1
         if group <= 1 or group > 4:
             return None
+        if (group, 0) != (
+            feed_match.geometry.group,
+            feed_match.geometry.axis,
+        ):
+            return None
         if any(read.name != gemm_node.get_name() for read in reads):
             return None
         grouped_base = reads[1].index
@@ -981,89 +819,16 @@ class NVUniversalGemmScheduling(BaseScheduling):
             for i, read in enumerate(reads[1:])
         ):
             return None
-        return node.get_name(), group, 0, consumer_type, "identity"
+        return GemmReductionConfig(node.get_name(), group, 0, consumer_type, "identity")
 
     @staticmethod
     def _centered_mean_consumer_type(node: ComputedBuffer) -> str | None:
-        origins = OrderedSet(node.get_origins())
-        arithmetic_targets = OrderedSet(
-            ("aten.add.Tensor", "aten.mul.Tensor", "aten.sub.Tensor")
-        )
-        arithmetic = [
-            origin
-            for origin in origins
-            if str(getattr(origin, "target", "")) in arithmetic_targets
-        ]
-        referenced = OrderedSet(
-            arg
-            for origin in arithmetic
-            for arg in origin.args
-            if hasattr(arg, "target") and arg in origins
-        )
-        roots = [origin for origin in arithmetic if origin not in referenced]
-
-        def scale(value, factor):
-            return tuple(component * factor for component in value)
-
-        def combine(lhs, rhs, rhs_scale=1.0):
-            return tuple(a + rhs_scale * b for a, b in zip(lhs, rhs))
-
-        def lower(value):
-            if isinstance(value, (int, float)):
-                return 0.0, 0.0, float(value)
-            target = str(getattr(value, "target", ""))
-            if target == "aten.mean.dim":
-                return 0.0, 1.0, 0.0
-            if target == "prims.convert_element_type.default":
-                nested = lower(value.args[0]) if value.args else None
-                return nested if nested is not None else (1.0, 0.0, 0.0)
-            if target in (
-                "aten.clone.default",
-                "aten.expand.default",
-                "aten.reshape.default",
-                "aten.view.default",
-                "aten._unsafe_view.default",
-            ):
-                return lower(value.args[0])
-            if target in ("aten.add.Tensor", "aten.sub.Tensor"):
-                lhs = lower(value.args[0])
-                rhs = lower(value.args[1])
-                if lhs is None or rhs is None:
-                    return None
-                alpha = float(value.kwargs.get("alpha", 1.0))
-                return combine(
-                    lhs,
-                    rhs,
-                    alpha if target == "aten.add.Tensor" else -alpha,
-                )
-            if target == "aten.mul.Tensor":
-                lhs = lower(value.args[0])
-                rhs = lower(value.args[1])
-                if lhs is None or rhs is None:
-                    return None
-                if lhs[:2] == (0.0, 0.0):
-                    return scale(rhs, lhs[2])
-                if rhs[:2] == (0.0, 0.0):
-                    return scale(lhs, rhs[2])
-            return None
-
-        for root in roots:
-            coefficients = lower(root)
-            if (
-                coefficients is not None
-                and coefficients[0] != 0.0
-                and coefficients[1] != 0.0
-                and all(math.isfinite(value) for value in coefficients)
-            ):
-                return "mean_linear:" + ":".join(
-                    format(value, ".17g") for value in coefficients
-                )
-        return None
+        return centered_mean_consumer_type(node.get_origins())
 
     @classmethod
     def _grouped_reduce_feeds_main_config(
         cls, gemm_node: Buffer, scheduler_node: BaseSchedulerNode
-    ) -> tuple[str, int, int, str, str] | None:
+    ) -> GemmReductionConfig | None:
         return cls._grouped_reduce_feeds_main_config_from_nodes(
             gemm_node, scheduler_node.get_nodes()
         )
@@ -1071,23 +836,31 @@ class NVUniversalGemmScheduling(BaseScheduling):
     @classmethod
     def _grouped_softmax_config_from_nodes(
         cls, gemm_node: Buffer, nodes: Sequence[BaseSchedulerNode]
-    ) -> tuple[str, int, int, str, str] | None:
+    ) -> GemmReductionConfig | None:
         if len(gemm_node.get_size()) != 2:
             return None
+        computed_buffers = tuple(
+            cast(ComputedBuffer, node.node)
+            for node in nodes
+            if isinstance(node.node, ComputedBuffer)
+        )
+        match = cls._gemm_local_reduce_match(computed_buffers)
+        if (
+            match is None
+            or match.reduction_node is None
+            or str(match.reduction_node.target)
+            != "prims.prepare_softmax_online.default"
+            or match.geometry.axis != 1
+            or match.geometry.group > 32
+        ):
+            return None
+        group = match.geometry.group
         if len(nodes) == 1 and isinstance(nodes[0].node, ComputedBuffer):
             buffer = cast(ComputedBuffer, nodes[0].node)
             if isinstance(buffer.data, Pointwise):
-                try:
-                    group = V.graph.sizevars.optimization_hint(buffer.get_size()[2])
-                except Exception:
-                    return None
                 m, n = gemm_node.get_size()
                 out_m, out_groups, _ = buffer.get_size()
-                targets = OrderedSet(
-                    str(origin.target)
-                    for origin in buffer.get_origins()
-                    if hasattr(origin, "target")
-                )
+                targets = fx_targets(buffer.get_origins())
                 required: OrderedSet[str] = OrderedSet(
                     (
                         "prims.prepare_softmax_online.default",
@@ -1105,8 +878,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     )
                 )
                 if (
-                    1 < group <= 32
-                    and V.graph.sizevars.statically_known_equals(out_m, m)
+                    V.graph.sizevars.statically_known_equals(out_m, m)
                     and V.graph.sizevars.statically_known_equals(out_groups * group, n)
                     and required.issubset(targets)
                     and targets.issubset(allowed)
@@ -1116,23 +888,23 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         for read in nodes[0].read_writes.reads
                     )
                 ):
-                    return buffer.get_name(), group, 1, "online_softmax", "identity"
+                    return GemmReductionConfig(
+                        buffer.get_name(), group, 1, "online_softmax", "identity"
+                    )
             return None
         if len(nodes) != 3:
             return None
-        buffers = [node.node for node in nodes]
+        buffers = cls._computed_buffers(nodes)
         if not (
-            all(isinstance(buffer, ComputedBuffer) for buffer in buffers)
+            buffers is not None
             and all(
-                isinstance(cast(ComputedBuffer, buffer).data, MultiOutputReduction)
-                for buffer in buffers[:2]
+                isinstance(buffer.data, MultiOutputReduction) for buffer in buffers[:2]
             )
-            and isinstance(cast(ComputedBuffer, buffers[2]).data, Pointwise)
+            and isinstance(buffers[2].data, Pointwise)
         ):
             return None
         reductions: list[MultiOutputReduction] = [
-            cast(MultiOutputReduction, cast(ComputedBuffer, buffer).data)
-            for buffer in buffers[:2]
+            cast(MultiOutputReduction, buffer.data) for buffer in buffers[:2]
         ]
         if any(
             reduction.reduction_type != "online_softmax_reduce"
@@ -1140,8 +912,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
             for reduction in reductions
         ):
             return None
-        group = V.graph.sizevars.optimization_hint(reductions[0].reduction_ranges[0])
-        if group <= 1 or group > 32:
+        if not V.graph.sizevars.statically_known_equals(
+            reductions[0].reduction_ranges[0], group
+        ):
             return None
         try:
             m, n = map(V.graph.sizevars.optimization_hint, gemm_node.get_size())
@@ -1152,7 +925,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             output_size = tuple(
                 map(
                     V.graph.sizevars.optimization_hint,
-                    cast(ComputedBuffer, buffers[2]).get_size(),
+                    buffers[2].get_size(),
                 )
             )
         except Exception:
@@ -1164,11 +937,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
             or reductions[0].reduction_ranges != reductions[1].reduction_ranges
         ):
             return None
-        targets = OrderedSet(
-            str(origin.target)
-            for buffer in cast(list[ComputedBuffer], buffers)
-            for origin in buffer.get_origins()
-            if hasattr(origin, "target")
+        targets = fx_targets(
+            origin for buffer in buffers for origin in buffer.get_origins()
         )
         required: OrderedSet[str] = OrderedSet(
             (
@@ -1194,8 +964,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
             for read in node.read_writes.reads
         ):
             return None
-        return (
-            cast(ComputedBuffer, buffers[2]).get_name(),
+        return GemmReductionConfig(
+            buffers[2].get_name(),
             group,
             1,
             "online_softmax",
@@ -1205,7 +975,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
     @classmethod
     def _grouped_softmax_config(
         cls, gemm_node: Buffer, scheduler_node: BaseSchedulerNode
-    ) -> tuple[str, int, int, str, str] | None:
+    ) -> GemmReductionConfig | None:
         return cls._grouped_softmax_config_from_nodes(
             gemm_node, scheduler_node.get_nodes()
         )
@@ -1213,19 +983,14 @@ class NVUniversalGemmScheduling(BaseScheduling):
     @classmethod
     def _grouped_sum_normalize_config_from_nodes(
         cls, gemm_node: Buffer, nodes: Sequence[BaseSchedulerNode]
-    ) -> tuple[str, int, int, str, str] | None:
+    ) -> GemmReductionConfig | None:
         if len(gemm_node.get_size()) != 2:
             return None
-        buffers = [node.node for node in nodes]
-        if not buffers or not all(
-            isinstance(buffer, ComputedBuffer) for buffer in buffers
-        ):
+        buffers = cls._computed_buffers(nodes)
+        if buffers is None:
             return None
-        targets = OrderedSet(
-            str(origin.target)
-            for buffer in cast(list[ComputedBuffer], buffers)
-            for origin in buffer.get_origins()
-            if hasattr(origin, "target")
+        targets = fx_targets(
+            origin for buffer in buffers for origin in buffer.get_origins()
         )
         forward_required: OrderedSet[str] = OrderedSet(
             ("aten.mul.Tensor", "aten.reciprocal.default", "aten.sum.dim_IntList")
@@ -1256,57 +1021,28 @@ class NVUniversalGemmScheduling(BaseScheduling):
             forward_required.issubset(targets) or divide_required.issubset(targets)
         ) or not targets.issubset(allowed | flex_gemm_origins):
             return None
-        m, n = gemm_node.get_size()
         reductions = [
             config
             for node in nodes
             if (config := cls._grouped_reduce_config(gemm_node, node)) is not None
         ]
         finalizers = []
-        for buffer in cast(list[ComputedBuffer], buffers):
+        for buffer in buffers:
             if not isinstance(buffer.data, Pointwise):
                 continue
-            out_size = buffer.get_size()
             consumer_type = cls._sum_normalize_consumer_type(buffer)
             if consumer_type is None:
                 continue
-            if len(out_size) == 2 and len(reductions) == 1:
-                _, group, axis, reduction_type, source_type = reductions[0]
-                if (
-                    reduction_type == "sum"
-                    and source_type == "identity"
-                    and V.graph.sizevars.statically_known_list_equals(out_size, (m, n))
-                ):
-                    reads = list(buffer.get_read_writes().reads)
-                    if len(reads) == 2 and OrderedSet(
-                        read.name for read in reads
-                    ) == OrderedSet((gemm_node.get_name(), reductions[0][0])):
-                        finalizers.append((buffer, group, axis, consumer_type))
+            match = cls._gemm_feed_main_match((buffer,))
+            if match is None:
                 continue
-            if len(out_size) != 3:
-                continue
-            out0, out1, out2 = out_size
-            try:
-                n_group = V.graph.sizevars.optimization_hint(out2)
-            except Exception:
-                n_group = 0
-            if (
-                1 < n_group <= 32
-                and V.graph.sizevars.statically_known_equals(out0, m)
-                and V.graph.sizevars.statically_known_equals(out1 * n_group, n)
+            group, axis = match.geometry.group, match.geometry.axis
+            max_group = 32 if axis == 1 else 64
+            layout = GroupedReductionLayout(axis, group)
+            if group <= max_group and layout.matches_output_shape(
+                buffer.get_size(), gemm_node.get_size()
             ):
-                finalizers.append((buffer, n_group, 1, consumer_type))
-                continue
-            try:
-                m_group = V.graph.sizevars.optimization_hint(out1)
-            except Exception:
-                m_group = 0
-            if (
-                1 < m_group <= 64
-                and V.graph.sizevars.statically_known_equals(out0 * m_group, m)
-                and V.graph.sizevars.statically_known_equals(out2, n)
-            ):
-                finalizers.append((buffer, m_group, 0, consumer_type))
+                finalizers.append((buffer, group, axis, consumer_type))
         if not finalizers or not any(
             read.name == gemm_node.get_name()
             for node in nodes
@@ -1320,7 +1056,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             return None
         group, axis, consumer_type = next(iter(contracts))
         if reductions:
-            if len(reductions) != 1 or reductions[0][1:] != (
+            if len(reductions) != 1 or reductions[0].contract != (
                 group,
                 axis,
                 "sum",
@@ -1335,251 +1071,26 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 or any(read.name != gemm_node.get_name() for read in reads)
             ):
                 return None
-        return finalizers[0][0].get_name(), group, axis, consumer_type, "identity"
+        return GemmReductionConfig(
+            finalizers[0][0].get_name(), group, axis, consumer_type, "identity"
+        )
 
     @staticmethod
     def _sum_normalize_consumer_type(node: ComputedBuffer) -> str | None:
-        origins = OrderedSet(node.get_origins())
-
-        def contains(value, target):
-            if str(getattr(value, "target", "")) == target:
-                return True
-            return any(
-                contains(arg, target)
-                for arg in getattr(value, "args", ())
-                if hasattr(arg, "target")
-            )
-
-        def sum_affine(value):
-            if isinstance(value, (int, float)):
-                return 0.0, float(value)
-            target = str(getattr(value, "target", ""))
-            if target == "aten.sum.dim_IntList":
-                return 1.0, 0.0
-            if target in (
-                "aten.clone.default",
-                "aten.expand.default",
-                "aten.reshape.default",
-                "aten.view.default",
-                "aten._unsafe_view.default",
-            ):
-                return sum_affine(value.args[0])
-            if target in ("aten.add.Tensor", "aten.sub.Tensor"):
-                lhs = sum_affine(value.args[0])
-                rhs = sum_affine(value.args[1])
-                if lhs is None or rhs is None:
-                    return None
-                alpha = float(value.kwargs.get("alpha", 1.0))
-                rhs_scale = alpha if target == "aten.add.Tensor" else -alpha
-                return lhs[0] + rhs_scale * rhs[0], lhs[1] + rhs_scale * rhs[1]
-            if target == "aten.mul.Tensor":
-                lhs = sum_affine(value.args[0])
-                rhs = sum_affine(value.args[1])
-                if lhs is None or rhs is None:
-                    return None
-                if lhs[0] == 0.0:
-                    return rhs[0] * lhs[1], rhs[1] * lhs[1]
-                if rhs[0] == 0.0:
-                    return lhs[0] * rhs[1], lhs[1] * rhs[1]
-            return None
-
-        def normalize_kind(value):
-            target = str(getattr(value, "target", ""))
-            if target == "aten.mul.Tensor":
-                lhs, rhs = value.args[:2]
-                reciprocal = None
-                if contains(lhs, "aten.reciprocal.default") and contains(
-                    rhs, "prims.convert_element_type.default"
-                ):
-                    reciprocal = lhs
-                elif contains(rhs, "aten.reciprocal.default") and contains(
-                    lhs, "prims.convert_element_type.default"
-                ):
-                    reciprocal = rhs
-                if reciprocal is not None:
-                    while str(getattr(reciprocal, "target", "")) != (
-                        "aten.reciprocal.default"
-                    ):
-                        reciprocal = reciprocal.args[0]
-                    affine = sum_affine(reciprocal.args[0])
-                    if affine is not None:
-                        return "forward", *affine
-            if target == "aten.div.Tensor":
-                lhs, rhs = value.args[:2]
-                lhs_sum = contains(lhs, "aten.sum.dim_IntList")
-                rhs_sum = contains(rhs, "aten.sum.dim_IntList")
-                lhs_input = contains(lhs, "prims.convert_element_type.default")
-                rhs_input = contains(rhs, "prims.convert_element_type.default")
-                if lhs_input and rhs_sum:
-                    affine = sum_affine(rhs)
-                    if affine is not None:
-                        return "forward", *affine
-                if lhs_sum and rhs_input:
-                    affine = sum_affine(lhs)
-                    if affine is not None:
-                        return "reverse", *affine
-            return None
-
-        arithmetic = [
-            origin
-            for origin in origins
-            if str(getattr(origin, "target", ""))
-            in (
-                "aten.add.Tensor",
-                "aten.div.Tensor",
-                "aten.mul.Tensor",
-                "aten.sub.Tensor",
-            )
-        ]
-        referenced = OrderedSet(
-            arg
-            for origin in arithmetic
-            for arg in origin.args
-            if hasattr(arg, "target") and arg in origins
-        )
-        roots = [origin for origin in arithmetic if origin not in referenced]
-        normalization_parameters = None
-
-        def scale(value, factor):
-            return value[0] * factor, value[1] * factor, value[2] * factor
-
-        def lower(value):
-            if isinstance(value, (int, float)):
-                return 0.0, 0.0, float(value)
-            kind = normalize_kind(value)
-            if kind is not None:
-                nonlocal normalization_parameters
-                normalization_parameters = kind[1:]
-            if kind is not None and kind[0] == "forward":
-                return 1.0, 0.0, 0.0
-            if kind is not None and kind[0] == "reverse":
-                return 0.0, 1.0, 0.0
-            target = str(getattr(value, "target", ""))
-            if target in (
-                "aten.clone.default",
-                "aten.reshape.default",
-                "aten.view.default",
-                "aten._unsafe_view.default",
-            ):
-                return lower(value.args[0])
-            if target in ("aten.add.Tensor", "aten.sub.Tensor"):
-                lhs = lower(value.args[0])
-                rhs = lower(value.args[1])
-                if lhs is None or rhs is None:
-                    return None
-                alpha = float(value.kwargs.get("alpha", 1.0))
-                rhs_scale = alpha if target == "aten.add.Tensor" else -alpha
-                return tuple(a + rhs_scale * b for a, b in zip(lhs, rhs))
-            if target == "aten.mul.Tensor":
-                lhs = lower(value.args[0])
-                rhs = lower(value.args[1])
-                if lhs is None or rhs is None:
-                    return None
-                if lhs[:2] == (0.0, 0.0):
-                    return scale(rhs, lhs[2])
-                if rhs[:2] == (0.0, 0.0):
-                    return scale(lhs, rhs[2])
-            return None
-
-        for root in roots:
-            coefficients = lower(root)
-            if (
-                coefficients is not None
-                and normalization_parameters is not None
-                and (coefficients[0] != 0.0) != (coefficients[1] != 0.0)
-                and all(math.isfinite(value) for value in coefficients)
-            ):
-                kind = (
-                    "normalize_sum_affine"
-                    if coefficients[0]
-                    else "normalize_sum_reverse_affine"
-                )
-                return (
-                    kind
-                    + ":"
-                    + ":".join(
-                        format(value, ".17g")
-                        for value in (
-                            coefficients[0] or coefficients[1],
-                            coefficients[2],
-                            *normalization_parameters,
-                        )
-                    )
-                )
-        return None
+        return sum_normalize_consumer_type(node.get_origins())
 
     @staticmethod
     def _sum_multiply_consumer_type(node: ComputedBuffer) -> str | None:
-        origins = OrderedSet(node.get_origins())
-
-        def contains(value, target):
-            if str(getattr(value, "target", "")) == target:
-                return True
-            return any(
-                contains(arg, target)
-                for arg in getattr(value, "args", ())
-                if hasattr(arg, "target")
-            )
-
-        def sum_affine(value):
-            if isinstance(value, (int, float)):
-                return 0.0, float(value)
-            target = str(getattr(value, "target", ""))
-            if target == "aten.sum.dim_IntList":
-                return 1.0, 0.0
-            if target in (
-                "aten.clone.default",
-                "aten.expand.default",
-                "aten.reshape.default",
-                "aten.view.default",
-                "aten._unsafe_view.default",
-            ):
-                return sum_affine(value.args[0])
-            if target in ("aten.add.Tensor", "aten.sub.Tensor"):
-                lhs = sum_affine(value.args[0])
-                rhs = sum_affine(value.args[1])
-                if lhs is None or rhs is None:
-                    return None
-                alpha = float(value.kwargs.get("alpha", 1.0))
-                rhs_scale = alpha if target == "aten.add.Tensor" else -alpha
-                return lhs[0] + rhs_scale * rhs[0], lhs[1] + rhs_scale * rhs[1]
-            if target == "aten.mul.Tensor":
-                lhs = sum_affine(value.args[0])
-                rhs = sum_affine(value.args[1])
-                if lhs is None or rhs is None:
-                    return None
-                if lhs[0] == 0.0:
-                    return rhs[0] * lhs[1], rhs[1] * lhs[1]
-                if rhs[0] == 0.0:
-                    return lhs[0] * rhs[1], lhs[1] * rhs[1]
-            return None
-
-        for origin in origins:
-            if str(getattr(origin, "target", "")) != "aten.mul.Tensor":
-                continue
-            lhs, rhs = origin.args[:2]
-            for input_value, reduction_value in ((lhs, rhs), (rhs, lhs)):
-                if not contains(
-                    input_value, "prims.convert_element_type.default"
-                ) or not contains(reduction_value, "aten.sum.dim_IntList"):
-                    continue
-                affine = sum_affine(reduction_value)
-                if affine is not None and all(math.isfinite(value) for value in affine):
-                    return "sum_mul_affine:" + ":".join(
-                        format(value, ".17g") for value in affine
-                    )
-        return None
+        return sum_multiply_consumer_type(node.get_origins())
 
     @classmethod
     def _grouped_absmax_normalize_config_from_nodes(
         cls, gemm_node: Buffer, nodes: Sequence[BaseSchedulerNode]
-    ) -> tuple[str, int, int, str, str] | None:
+    ) -> GemmReductionConfig | None:
         if len(gemm_node.get_size()) != 2:
             return None
-        buffers = [node.node for node in nodes]
-        if not buffers or not all(
-            isinstance(buffer, ComputedBuffer) for buffer in buffers
-        ):
+        buffers = cls._computed_buffers(nodes)
+        if buffers is None:
             return None
         required: OrderedSet[str] = OrderedSet(
             (
@@ -1599,11 +1110,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 "aten.view.default",
             )
         )
-        targets = OrderedSet(
-            str(origin.target)
-            for buffer in cast(list[ComputedBuffer], buffers)
-            for origin in buffer.get_origins()
-            if hasattr(origin, "target")
+        targets = fx_targets(
+            origin for buffer in buffers for origin in buffer.get_origins()
         )
         if not required.issubset(targets) or not targets.issubset(allowed):
             return None
@@ -1612,7 +1120,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         except Exception:
             return None
         finalizers = []
-        for buffer in cast(list[ComputedBuffer], buffers):
+        for buffer in buffers:
             if not isinstance(buffer.data, Pointwise):
                 continue
             try:
@@ -1626,11 +1134,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 and out_m == m
                 and out_groups * group == n
                 and OrderedSet(("aten.mul.Tensor", "aten.reciprocal.default")).issubset(
-                    OrderedSet(
-                        str(origin.target)
-                        for origin in buffer.get_origins()
-                        if hasattr(origin, "target")
-                    )
+                    fx_targets(buffer.get_origins())
                 )
             ):
                 finalizers.append((buffer, group))
@@ -1638,38 +1142,53 @@ class NVUniversalGemmScheduling(BaseScheduling):
             return None
         finalizer, group = finalizers[0]
         reductions = cls._partition_local_reductions(gemm_node, nodes)[0]
-        if len(reductions) != 1 or reductions[0][1:] != (
+        if len(reductions) != 1 or reductions[0].contract != (
             group,
             1,
             "max",
             "abs_scale",
         ):
             return None
-        return finalizer.get_name(), group, 1, "normalize_absmax", "abs_scale"
+        return GemmReductionConfig(
+            finalizer.get_name(), group, 1, "normalize_absmax", "abs_scale"
+        )
 
     @staticmethod
     def _is_mean_finalizer(
         reduction_node: BaseSchedulerNode, finalizer_node: BaseSchedulerNode
     ) -> bool:
-        reduction_nodes = reduction_node.get_nodes()
+        return NVUniversalGemmScheduling._is_pointwise_finalizer(
+            reduction_node, finalizer_node, require_reduction=True
+        )
+
+    @staticmethod
+    def _is_pointwise_finalizer(
+        source_node: BaseSchedulerNode,
+        finalizer_node: BaseSchedulerNode,
+        *,
+        required_targets: Collection[str] = (),
+        require_reduction: bool = False,
+    ) -> bool:
+        source_nodes = source_node.get_nodes()
         finalizer_nodes = finalizer_node.get_nodes()
-        if len(reduction_nodes) != 1 or len(finalizer_nodes) != 1:
+        if len(source_nodes) != 1 or len(finalizer_nodes) != 1:
             return False
-        reduction = reduction_nodes[0].node
+        source = source_nodes[0].node
         finalizer = finalizer_nodes[0].node
         if not (
-            isinstance(reduction, ComputedBuffer)
-            and isinstance(reduction.data, Reduction)
+            isinstance(source, ComputedBuffer)
             and isinstance(finalizer, ComputedBuffer)
             and isinstance(finalizer.data, Pointwise)
+            and (not require_reduction or isinstance(source.data, Reduction))
         ):
             return False
-        reads = list(finalizer_node.read_writes.reads)
+        reads = list(finalizer_nodes[0].read_writes.reads)
         return (
-            bool(reads)
-            and all(read.name == reduction.get_name() for read in reads)
+            OrderedSet(required_targets).issubset(fx_targets(finalizer.get_origins()))
+            and bool(reads)
+            and all(read.name == source.get_name() for read in reads)
             and V.graph.sizevars.statically_known_list_equals(
-                reduction.get_size(), finalizer.get_size()
+                source.get_size(), finalizer.get_size()
             )
         )
 
@@ -1677,84 +1196,52 @@ class NVUniversalGemmScheduling(BaseScheduling):
     def _is_layout_finalizer(
         reduction_node: BaseSchedulerNode, finalizer_node: BaseSchedulerNode
     ) -> bool:
-        reduction_nodes = reduction_node.get_nodes()
-        finalizer_nodes = finalizer_node.get_nodes()
-        if len(reduction_nodes) != 1 or len(finalizer_nodes) != 1:
-            return False
-        reduction = reduction_nodes[0].node
-        finalizer = finalizer_nodes[0].node
-        if not (
-            isinstance(reduction, ComputedBuffer)
-            and isinstance(finalizer, ComputedBuffer)
-            and isinstance(finalizer.data, Pointwise)
-        ):
-            return False
-        targets = OrderedSet(
-            str(origin.target)
-            for origin in finalizer.get_origins()
-            if hasattr(origin, "target")
-        )
-        reads = list(finalizer_nodes[0].read_writes.reads)
-        return (
-            "prims.inductor_force_stride_order.default" in targets
-            and bool(reads)
-            and all(read.name == reduction.get_name() for read in reads)
-            and V.graph.sizevars.statically_known_list_equals(
-                reduction.get_size(), finalizer.get_size()
-            )
+        return NVUniversalGemmScheduling._is_pointwise_finalizer(
+            reduction_node,
+            finalizer_node,
+            required_targets=("prims.inductor_force_stride_order.default",),
         )
 
     @staticmethod
     def _is_absmax_scale_finalizer(
         reduction_node: BaseSchedulerNode, finalizer_node: BaseSchedulerNode
     ) -> bool:
-        reduction_nodes = reduction_node.get_nodes()
-        finalizer_nodes = finalizer_node.get_nodes()
-        if len(reduction_nodes) != 1 or len(finalizer_nodes) != 1:
-            return False
-        reduction = reduction_nodes[0].node
-        finalizer = finalizer_nodes[0].node
-        if not (
-            isinstance(reduction, ComputedBuffer)
-            and isinstance(finalizer, ComputedBuffer)
-            and isinstance(finalizer.data, Pointwise)
+        return NVUniversalGemmScheduling._is_pointwise_finalizer(
+            reduction_node,
+            finalizer_node,
+            required_targets=("aten.clamp_min.default", "aten.div.Tensor"),
+        )
+
+    @classmethod
+    def _local_reduction_config(
+        cls, gemm_node: Buffer, node: BaseSchedulerNode
+    ) -> GemmReductionConfig | None:
+        for matcher in (
+            cls._grouped_reduce_config,
+            cls._grouped_variance_config,
+            cls._grouped_logsumexp_config,
+            cls._direct_bool_mask_config,
         ):
-            return False
-        targets = OrderedSet(
-            str(origin.target)
-            for origin in finalizer.get_origins()
-            if hasattr(origin, "target")
-        )
-        reads = list(finalizer_node.read_writes.reads)
-        return (
-            OrderedSet(("aten.clamp_min.default", "aten.div.Tensor")).issubset(targets)
-            and bool(reads)
-            and all(read.name == reduction.get_name() for read in reads)
-            and V.graph.sizevars.statically_known_list_equals(
-                reduction.get_size(), finalizer.get_size()
-            )
-        )
+            config = matcher(gemm_node, node)
+            if config is not None:
+                return config
+        return None
 
     @classmethod
     def _partition_local_reductions(
         cls, gemm_node: Buffer, epilogue_nodes: Sequence[BaseSchedulerNode]
-    ) -> tuple[list[tuple[str, int, int, str, str]], OrderedSet[BaseSchedulerNode]]:
-        reductions = []
+    ) -> tuple[list[GemmReductionConfig], OrderedSet[BaseSchedulerNode]]:
+        reductions: list[GemmReductionConfig] = []
         reduction_nodes: OrderedSet[BaseSchedulerNode] = OrderedSet()
         index = 0
         while index < len(epilogue_nodes):
             node = epilogue_nodes[index]
-            config = (
-                cls._grouped_reduce_config(gemm_node, node)
-                or cls._grouped_variance_config(gemm_node, node)
-                or cls._grouped_logsumexp_config(gemm_node, node)
-                or cls._direct_bool_mask_config(gemm_node, node)
-            )
+            config = cls._local_reduction_config(gemm_node, node)
             if config is None:
                 index += 1
                 continue
             if (
-                config[3] == "mean"
+                config.reduction_type == "mean"
                 and index + 2 < len(epilogue_nodes)
                 and cls._is_layout_finalizer(node, epilogue_nodes[index + 1])
                 and cls._is_mean_finalizer(
@@ -1764,21 +1251,18 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 layout_finalizer = epilogue_nodes[index + 1]
                 mean_finalizer = epilogue_nodes[index + 2]
                 mean_buffer = cast(ComputedBuffer, mean_finalizer.get_nodes()[0].node)
-                config = (
-                    mean_buffer.get_name(),
-                    *config[1:],
-                )
+                config = config.replace(output_name=mean_buffer.get_name())
                 reduction_nodes.add(layout_finalizer)
                 reduction_nodes.add(mean_finalizer)
                 index += 2
             elif (
-                config[3] == "mean"
+                config.reduction_type == "mean"
                 and index + 1 < len(epilogue_nodes)
                 and cls._is_mean_finalizer(node, epilogue_nodes[index + 1])
             ):
                 finalizer = epilogue_nodes[index + 1]
                 finalizer_buffer = cast(ComputedBuffer, finalizer.get_nodes()[0].node)
-                config = (finalizer_buffer.get_name(), *config[1:])
+                config = config.replace(output_name=finalizer_buffer.get_name())
                 reduction_nodes.add(finalizer)
                 index += 1
             elif index + 1 < len(epilogue_nodes) and cls._is_layout_finalizer(
@@ -1786,10 +1270,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
             ):
                 finalizer = epilogue_nodes[index + 1]
                 finalizer_buffer = cast(ComputedBuffer, finalizer.get_nodes()[0].node)
-                config = (finalizer_buffer.get_name(), *config[1:])
+                config = config.replace(output_name=finalizer_buffer.get_name())
                 reduction_nodes.add(finalizer)
                 index += 1
-            elif config[3:] == ("max", "abs"):
+            elif (config.reduction_type, config.source_type) == ("max", "abs"):
                 finalizer = next(
                     (
                         candidate
@@ -1803,10 +1287,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     if not isinstance(finalizer_buffer, Buffer):
                         index += 1
                         continue
-                    config = (
-                        finalizer_buffer.get_name(),
-                        *config[1:4],
-                        "abs_scale",
+                    config = config.replace(
+                        output_name=finalizer_buffer.get_name(),
+                        source_type="abs_scale",
                     )
                     reduction_nodes.add(finalizer)
             reductions.append(config)
@@ -1904,12 +1387,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         _, local_reduce_nodes = self._partition_local_reductions(
             ir_node, all_scheduler_nodes
         )
-        local_reduce = (
-            self._grouped_reduce_config(ir_node, node_to_fuse)
-            or self._grouped_variance_config(ir_node, node_to_fuse)
-            or self._grouped_logsumexp_config(ir_node, node_to_fuse)
-            or self._direct_bool_mask_config(ir_node, node_to_fuse)
-        )
+        local_reduce = self._local_reduction_config(ir_node, node_to_fuse)
         variants = (
             (ir_node.variant,)
             if isinstance(ir_node, NVUniversalGemmBuffer)
@@ -1927,9 +1405,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
             standard_aux_sum = (
                 bool(variants)
                 and all(variant == GemmVariant.GEMM for variant in variants)
-                and local_reduce[2] in (0, 1)
+                and local_reduce.axis in (0, 1)
                 and (
-                    local_reduce[3]
+                    local_reduce.reduction_type
                     in (
                         "sum",
                         "mean",
@@ -1937,11 +1415,11 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         "max",
                         "min",
                     )
-                    or local_reduce[3].startswith("variance_affine:")
-                    or local_reduce[3] == "logsumexp"
-                    or local_reduce[3] == "direct_bool_gt_zero"
+                    or local_reduce.reduction_type.startswith("variance_affine:")
+                    or local_reduce.reduction_type == "logsumexp"
+                    or local_reduce.reduction_type == "direct_bool_gt_zero"
                 )
-                and local_reduce[4] in ("identity", "square", "abs")
+                and local_reduce.source_type in ("identity", "square", "abs")
             )
             if not scaled_epilogue and not standard_aux_sum:
                 return False
@@ -2376,7 +1854,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 original_ir_node, epilogue_nodes
             )[0]
             min_tile_n = max(
-                (group for _, group, axis, _, _ in reductions if axis == 1),
+                (config.group for config in reductions if config.axis == 1),
                 default=0,
             )
             for matcher in (
@@ -2386,8 +1864,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 self._grouped_absmax_normalize_config_from_nodes,
             ):
                 feed_main = matcher(original_ir_node, epilogue_nodes)
-                if feed_main is not None and feed_main[2] == 1:
-                    min_tile_n = max(min_tile_n, feed_main[1])
+                if feed_main is not None and feed_main.axis == 1:
+                    min_tile_n = max(min_tile_n, feed_main.group)
                     break
         ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(
             template_node,
@@ -2425,26 +1903,27 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     raise NotImplementedError(
                         "NVGEMM supports one grouped local reduction"
                     )
-                if local_reductions and local_reductions[0][3] == "direct_bool_gt_zero":
-                    direct_output, group, axis, reduce_type, source = local_reductions[
-                        0
-                    ]
+                if (
+                    local_reductions
+                    and local_reductions[0].reduction_type == "direct_bool_gt_zero"
+                ):
+                    config = local_reductions[0]
                     local_reduce = (
                         None,
-                        group,
-                        axis,
-                        reduce_type,
-                        source,
+                        config.group,
+                        config.axis,
+                        config.reduction_type,
+                        config.source_type,
                         original_buffer_name,
                         False,
                         None,
-                        direct_output,
-                        reduce_type,
+                        config.output_name,
+                        config.reduction_type,
                     )
                 else:
                     local_reduce = (
                         (
-                            *local_reductions[0],
+                            *local_reductions[0].as_tuple(),
                             original_buffer_name,
                             False,
                             None,
@@ -2470,7 +1949,11 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         original_ir_node, epilogue_nodes
                     )
                 if feed_main is not None:
-                    output_name, group, axis, reduce_type, source = feed_main
+                    output_name = feed_main.output_name
+                    group = feed_main.group
+                    axis = feed_main.axis
+                    reduce_type = feed_main.reduction_type
+                    source = feed_main.source_type
                     reduce_output = (
                         local_reduce[0]
                         if local_reduce is not None
@@ -2880,10 +2363,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     output_bufs = [
                         original_buffer_name,
                         *output_bufs,
-                        local_reductions[0][0],
+                        local_reductions[0].output_name,
                     ]
                 elif feed_main is not None:
-                    output_bufs = [feed_main[0]]
+                    output_bufs = [feed_main.output_name]
             except (NotImplementedError, AssertionError) as e:
                 log.warning("NVGEMM benchmark epilogue codegen failed: %s", e)
 
