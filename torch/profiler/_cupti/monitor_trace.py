@@ -966,7 +966,98 @@ def _gpu_panel_const_extra(gpu: np.ndarray) -> list[tuple[str, str]]:
     return out
 
 
-def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: list):
+def _lists_to_csr(lists: list, dtype) -> tuple:
+    """Flatten a list-of-lists into a CSR: an int32 offsets array (length n + 1) and a flat
+    values array of ``dtype``; slice i is values[offsets[i]:offsets[i + 1]]."""
+    lengths = np.fromiter((len(x) for x in lists), dtype=np.int32, count=len(lists))
+    offsets = np.zeros(len(lists) + 1, dtype=np.int32)
+    np.cumsum(lengths, out=offsets[1:])
+    flat = np.fromiter(
+        (v for x in lists for v in x), dtype=dtype, count=int(offsets[-1])
+    )
+    return offsets, flat
+
+
+def _render_stage_cols(render_columns: dict) -> list:
+    """Authoritative surviving-stage selection: ``(ks, iid, name, cat, c)`` for each stage in
+    ``_RENDER_STAGES`` order whose column is present and nonempty. Row ordering across the render
+    stages is defined once here, so ``_assign_render_event_ids`` and ``_build_render_stages``
+    emit rows in the same order (event_id[i] aligns with render-stage row i)."""
+    out = []
+    for ks, iid, name, cat in _RENDER_STAGES:
+        c = render_columns.get(ks)
+        if not c or not len(c.get("start_ns", ())):
+            continue
+        out.append((ks, iid, name, cat, c))
+    return out
+
+
+def _assign_render_event_ids(render_columns: dict, graph_deps: dict) -> tuple | None:
+    """Assign a unique event_id per GPU render-stage row and derive the host-launch link and the
+    graph node->node dependency arrows. Iterates :func:`_render_stage_cols` (which defines the
+    render-stage row order shared with :func:`_build_render_stages`), so ``event_id[i]`` aligns
+    with render-stage row i. Returns ``None`` when there are no render-stage rows, else a tuple
+    of:
+
+    - ``event_id``: uint64 arange(n) + 1 (0 stays reserved for "none").
+    - ``corr_to_event_ids``: correlation_id -> [event_id, ...] grouping, for the CPU launch
+      slice's gpu_correlation (an eager launch -> 1 id, a graph replay -> all its node ids).
+    - ``(wait_offsets, wait_ids)``: the event_wait_ids CSR. Each graphed row (graph_node_id != 0)
+      resolves ``graph_deps[graph_node_id]`` predecessor tools_ids to the event_ids of the nodes
+      in the SAME replay (grouped by correlation_id), skipping predecessors absent from it.
+    """
+    corr_p, gnid_p = [], []
+    for _ks, _iid, _name, _cat, c in _render_stage_cols(render_columns):
+        n = len(c["start_ns"])
+        z = np.zeros(n, dtype=np.int64)
+        corr_p.append(np.ascontiguousarray(c.get("correlation_id", z), dtype=np.int64))
+        gnid_p.append(np.ascontiguousarray(c.get("graph_node_id", z), dtype=np.int64))
+    if not corr_p:
+        return None
+    corr = np.concatenate(corr_p)
+    gnid = np.concatenate(gnid_p)
+    n = len(corr)
+    event_id = np.arange(n, dtype=np.uint64) + np.uint64(1)
+    # correlation_id -> event_ids, grouped vectorized (event_id[i] == i + 1). A launch's
+    # gpu_correlation reads this: eager -> one id, a graph replay (one shared correlation) ->
+    # all of its node ids.
+    order = np.argsort(corr, kind="stable")
+    uniq_corr, starts = np.unique(corr[order], return_index=True)
+    groups = np.split(event_id[order], starts[1:])
+    corr_to_event_ids = dict(zip(uniq_corr.tolist(), groups))
+    # event_wait_ids: only graphed replays carry node dependencies, so build the per-row CSR
+    # only when deps exist; otherwise every render stage waits on nothing.
+    if graph_deps:
+        corr_l, gnid_l = corr.tolist(), gnid.tolist()
+        # Per-replay graph_node_id -> event_id (a correlation is one replay), to resolve each
+        # graphed row's predecessors to node event_ids within its own replay.
+        node_map_by_corr: dict[int, dict[int, int]] = {}
+        for i, g in enumerate(gnid_l):
+            if g:
+                node_map_by_corr.setdefault(corr_l[i], {})[g] = i + 1
+        wait_lists: list[list[int]] = []
+        for i, g in enumerate(gnid_l):
+            node_map = node_map_by_corr.get(corr_l[i]) if g else None
+            wait_lists.append(
+                [node_map[p] for p in graph_deps.get(g, ()) if p in node_map]
+                if node_map
+                else []
+            )
+        wait_offsets, wait_ids = _lists_to_csr(wait_lists, np.uint64)
+    else:
+        wait_offsets = np.zeros(n + 1, dtype=np.int32)
+        wait_ids = np.empty(0, dtype=np.uint64)
+    return event_id, corr_to_event_ids, wait_offsets, wait_ids
+
+
+def _build_render_stages(
+    columns: dict,
+    gfx_pid: int,
+    iid_of: dict,
+    name_table: list,
+    event_id: Any,
+    event_wait: tuple,
+):
     """Build the GpuRenderStageEvent payload (gpu_specs, gfx_contexts, stage_cols, extra,
     launch, tables) for the native GPU Render Stages hardware-queue lanes, or None if there are
     no GPU ops. Each GPU op becomes one event on a (gpu_id, hardware-queue) lane tagged by stage
@@ -977,22 +1068,18 @@ def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: 
     stream (one lane per stream), so all streams are preserved; the scalar kernel args
     (device/stream/correlation/channel/...) ride along as extra_data. Each event has its own
     duration -- no stack pairing -- so durations are exact (no nesting)."""
-    ts_p, dur_p, gpu_p, stage_p, kname_p, corr_p = [], [], [], [], [], []
+    ts_p, dur_p, gpu_p, stage_p, kname_p = [], [], [], [], []
     dim_p: dict[str, list] = {k: [] for k in _LAUNCH_DIMS}
     arg_p: dict[int, list] = {iid: [] for iid, _n, _g in _COMPUTE_ARGS}
     extra_p: dict[str, list] = {k: [] for k, _g, _s in _RENDER_EXTRA}
     meta_p: list = []  # per-row collective-descriptor JSON blob (str/bytes/None)
     stream_p: list = []
     lane_names_by_id: dict[int, str] = {}  # reassigned logical lane -> resolver name
-    for ks, stage_iid, _name, _cat in _RENDER_STAGES:
-        c = columns.get(ks)
-        if not c or not len(c.get("start_ns", ())):
-            continue
+    for _ks, stage_iid, _name, _cat, c in _render_stage_cols(columns):
         n = len(c["start_ns"])
         z = np.zeros(n, dtype=np.int64)
         ts_p.append(np.ascontiguousarray(c["start_ns"], dtype=np.int64))
         dur_p.append(np.maximum(c["end_ns"] - c["start_ns"], 0).astype(np.int64))
-        corr_p.append(np.ascontiguousarray(c.get("correlation_id", z), dtype=np.int64))
         gpu_p.append(np.ascontiguousarray(c["device_id"], dtype=np.int64))
         # One lane per stream (the hardware queue); preserves all streams (channel is
         # 0/unpopulated in many captures, which would otherwise collapse every stream
@@ -1074,9 +1161,11 @@ def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: 
         for j, k in enumerate(uniq.tolist())
     ]
     hw_queue_iid = (inv + _HW_QUEUE_IID_BASE).astype(np.uint64)
-    # event_id == the kernel's correlation id so the CPU launch's gpu_correlation
-    # (render_stage_submission_event_ids) links to this render stage (the cross-lane arrow).
-    event_id = np.concatenate(corr_p).astype(np.uint64)
+    # event_id is a unique per-row id (assigned by _assign_render_event_ids and passed in, in
+    # this exact row order). The CPU launch's gpu_correlation lists the event_ids of the
+    # render stages it launched (a graph replay -> all its nodes); event_wait_ids (below) draw
+    # the graph node->node dependency arrows between those render stages.
+    event_id = np.ascontiguousarray(event_id, dtype=np.uint64)
     # Graphics context 1 -> gfx_pid (the owning process), matching the reference traces
     # (context_id 1 / upid 1). This also makes the GpuByProcess plugin label its per-process
     # container "<proc> / GPU" rather than "Process 0"; disable that plugin in Perfetto if the
@@ -1103,7 +1192,17 @@ def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: 
             j = iid_of[name] = len(name_table)
             name_table.append(name)
         name_iid[i] = j + 1
-    stage_cols = (ts, dur, event_id, gpu, hw_queue_iid, stage, context, name_iid)
+    stage_cols = (
+        ts,
+        dur,
+        event_id,
+        gpu,
+        hw_queue_iid,
+        stage,
+        context,
+        name_iid,
+        event_wait,
+    )
     extra = [(k, np.concatenate(extra_p[k]), s) for k, _g, s in _RENDER_EXTRA]
     dims = tuple(np.concatenate(dim_p[k]) for k in _LAUNCH_DIMS)
     launch_args = [
@@ -1565,9 +1664,12 @@ def _window_to_pftrace(
                 "flow": None
                 if flow is None
                 else np.ascontiguousarray(flow, dtype=np.int64),
+                # gpu_corr: per-slice list of render-stage event_ids this slice launched
+                # (empty for non-launch slices), stored as a CSR (offsets, ids) for the native
+                # GpuCorrelation.render_stage_submission_event_ids. None when no gpu_corr given.
                 "gpu_corr": None
                 if gpu_corr is None
-                else np.ascontiguousarray(gpu_corr, dtype=np.int64),
+                else _lists_to_csr(gpu_corr, np.int64),
                 "cats": cats,
             }
         )
@@ -1658,6 +1760,23 @@ def _window_to_pftrace(
     # (one lane per stream, with launch stats + scalar args + collective metadata) by
     # _build_render_stages -- not as duplicate track_event slices here.
 
+    # Pre-pass: assign a unique event_id per GPU render-stage row (incl. the synthesized
+    # gpu_annotation column, so the row order matches _build_render_stages) and derive the
+    # host-launch link (corr_to_event_ids) + the graph node->node dependency arrows (the
+    # event_wait CSR). Done before the runtime/driver group so its gpu_correlation can list the
+    # per-replay node event_ids; _build_render_stages is still called later with these.
+    graph_deps = {int(k): v for k, v in (trace_window.get("graph_deps") or {}).items()}
+    render_columns = columns
+    ann_col = _gpu_annotation_render_column(trace_window, base_ns)
+    if ann_col is not None:
+        render_columns = {**columns, "gpu_annotation": ann_col}
+    render_event = _assign_render_event_ids(render_columns, graph_deps)
+    if render_event is not None:
+        render_event_id, corr_to_event_ids, wait_offsets, wait_ids = render_event
+    else:
+        render_event_id, corr_to_event_ids = None, {}
+        wait_offsets, wait_ids = None, None
+
     # --- runtime / driver API: registered names only, remapped onto their CPU thread ---
     for ks in ("cuda_runtime", "cuda_driver"):
         c = _col(ks)
@@ -1699,7 +1818,14 @@ def _window_to_pftrace(
             c["process_id"][keep], tid, "process {}", "thread {}", is_gpu=False
         )
         names = [names_u[i] for i in inv[keep].tolist()]
-        gpu_corr = np.where(corr_u[inv[keep]], corr, 0)
+        # Per launch slice, the render-stage event_ids it launched (a graph launch -> all its
+        # replay's node event_ids, an eager launch -> the one kernel's). Non-launch slices get
+        # an empty list. Links the CPU launch to its GPU render stages via gpu_correlation.
+        launch_mask = corr_u[inv[keep]].tolist()
+        gpu_corr = [
+            corr_to_event_ids.get(int(cc), []) if lm else []
+            for cc, lm in zip(corr.tolist(), launch_mask)
+        ]
         ints = [int_anno("cbid", c["cbid"][keep]), int_anno("correlation", corr)]
         add_group(
             c["start_ns"][keep],
@@ -1853,19 +1979,25 @@ def _window_to_pftrace(
                 cat_ids,
             )
         )
-    # GPU-side user annotations (gpu_user_annotation): emit as render stages (an "Annotation"
+    # GPU-side user annotations (gpu_user_annotation) emit as render stages (an "Annotation"
     # stage) on the same hardware-queue lane as the kernels they span, so the collective/phase
-    # ranges nest over them. Synthesized from the columnar window (NOT cpu_data: kineto emits no
-    # gpu_user_annotation in monitor mode -- the chrome path builds them the same way), which
-    # also carries the graphed-op logical-lane reassignment.
-    render_columns = columns
-    ann_col = _gpu_annotation_render_column(trace_window, base_ns)
-    if ann_col is not None:
-        render_columns = {**columns, "gpu_annotation": ann_col}
+    # ranges nest over them; render_columns (with the synthesized gpu_annotation column) and the
+    # per-row event_id / event_wait CSR were built in the pre-pass above.
     # Graphics context attaches the render stages to the main (first-registered => upid 1)
     # process, matching the reference traces.
     gfx_pid = next((k[1] for k in uuids if isinstance(k, tuple) and k[0] == "p"), 0)
-    render = _build_render_stages(render_columns, gfx_pid, iid_of, name_table)
+    render = (
+        _build_render_stages(
+            render_columns,
+            gfx_pid,
+            iid_of,
+            name_table,
+            render_event_id,
+            (wait_offsets, wait_ids),
+        )
+        if render_event_id is not None
+        else None
+    )
     active_devices = _active_devices(columns)
     # GPU counters (power/temp/clocks) -> GpuCounterEvents: the viewer renders them under
     # "GPU / Counters / <gpu>", a sibling of the render-stage hardware queues, keyed by gpu_id.

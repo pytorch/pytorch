@@ -283,13 +283,19 @@ std::string cuptiMonitorEncodePftrace(
         te->add_flow_ids(static_cast<uint64_t>(g.flow[i]));
       }
       // GpuTrackEvent.gpu_correlation (field 3000): a GpuCorrelation message
-      // whose render_stage_submission_event_ids (field 1) is this correlation;
-      // the viewer links it to the render stage with event_id == this value.
-      // The extension type is absent from the amalgamation, so emit by field
-      // id.
-      if (g.gpu_corr && g.gpu_corr[i]) {
-        auto* gc = te->BeginNestedMessage<protozero::Message>(3000);
-        gc->AppendVarInt(1, static_cast<uint64_t>(g.gpu_corr[i]));
+      // whose render_stage_submission_event_ids (field 1) lists the
+      // render-stage event_ids this slice launched; the viewer links it to
+      // those render stages. The extension type is absent from the
+      // amalgamation, so emit by field id.
+      if (g.gpu_corr_offsets) {
+        const int32_t off = g.gpu_corr_offsets[i];
+        const int32_t end = g.gpu_corr_offsets[i + 1];
+        if (end > off) {
+          auto* gc = te->BeginNestedMessage<protozero::Message>(3000);
+          for (int32_t j = off; j < end; ++j) {
+            gc->AppendVarInt(1, static_cast<uint64_t>(g.gpu_corr_ids[j]));
+          }
+        }
       }
       for (const auto& a : g.int_annos) {
         if (a.skip_zero && a.vals[i] == 0) {
@@ -352,6 +358,16 @@ std::string cuptiMonitorEncodePftrace(
     // (EventName), falling back to the stage name ("Kernel") when absent.
     if (stages.name_iid && stages.name_iid[i]) {
       gse->set_name_iid(stages.name_iid[i]);
+    }
+    // event_wait_ids (field 18): the event_ids this stage depends on; the
+    // viewer draws them as flow arrows (the CUDA-graph node->node dependency
+    // DAG).
+    if (stages.event_wait_offsets) {
+      const int32_t off = stages.event_wait_offsets[i];
+      const int32_t end = stages.event_wait_offsets[i + 1];
+      for (int32_t j = off; j < end; ++j) {
+        gse->add_event_wait_ids(stages.event_wait_ids[j]);
+      }
     }
     // Compute kernels: kernel_iid -> InternedComputeKernel (names the slice)
     // and a structured ComputeKernelLaunch (grid/workgroup Dim3 + args) -> the

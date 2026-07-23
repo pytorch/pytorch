@@ -371,6 +371,20 @@ class CUDAGraph(_CUDAGraph):
 
         remap_to_exec_graph(self)
 
+    def _maybe_record_graph_dependencies(self) -> None:
+        # Record the exec graph's node dependency edges for the profiler's graph node->node
+        # dependency arrows. Gated on _capture_graph_id like _maybe_remap_annotations: a stamp
+        # is present only when annotations were enabled at capture (enable_annotations=True), so
+        # recording follows the same profiling opt-in (mark_kernels scopes are still not
+        # required). Needs keep_graph=True: get_graph_data() reads the live template. Called
+        # from instantiate() (not per replay); record_graph_dependencies is exception-safe and
+        # keyed by the fresh exec graph id, so no dedup is needed.
+        if not self._keep_graph or self._capture_graph_id is None:
+            return
+        from torch.cuda._graph_annotations import record_graph_dependencies
+
+        record_graph_dependencies(self)
+
     def _release_python_resources(self) -> None:
         # Single source of truth for GC-critical Python resources released by
         # both reset() and __del__. Destroy callbacks are NOT fired here: on the
@@ -479,6 +493,7 @@ class CUDAGraph(_CUDAGraph):
         """
         super().instantiate()
         self._maybe_remap_annotations()
+        self._maybe_record_graph_dependencies()
         for hook in list(self._post_instantiate_hooks.values()):
             hook(self)
 

@@ -270,7 +270,7 @@ void initCuptiMonitorBindings(py::module& m) {
   //       arr_annos:  [(key, [int64_col, ...]), ...],
   //       json_annos: [(int32_offsets_col, blob_bytes), ...],
   //       flow: int64_col | None,
-  //       gpu_corr: int64_col | None,
+  //       gpu_corr: (int32_offsets_col, int64_ids_col) CSR | None,
   //       cat_iid: uint64_col | None)
   // All columns are numpy arrays; they are kept alive for the encode.
   cupti_monitor.def(
@@ -394,7 +394,12 @@ void initCuptiMonitorBindings(py::module& m) {
             pg.json_annos.push_back({offsets, PyBytes_AS_STRING(blob.ptr())});
           }
           pg.flow = g[8].is_none() ? nullptr : i64(g[8]);
-          pg.gpu_corr = py::len(g) > 9 && !g[9].is_none() ? i64(g[9]) : nullptr;
+          // gpu_corr: (int32_offsets, int64_ids) CSR or None.
+          if (py::len(g) > 9 && !g[9].is_none()) {
+            auto gc = g[9].cast<py::tuple>();
+            pg.gpu_corr_offsets = i32(gc[0]);
+            pg.gpu_corr_ids = i64(gc[1]);
+          }
           pg.cat_iid =
               py::len(g) > 10 && !g[10].is_none() ? u64(g[10]) : nullptr;
           group_vec.push_back(std::move(pg));
@@ -405,7 +410,8 @@ void initCuptiMonitorBindings(py::module& m) {
         //   gpu_specs    = [(iid, name, category), ...]
         //   gfx_contexts = [(iid, pid), ...]
         //   stage_cols   = (ts, dur, event_id, gpu_id, hw_queue_iid, stage_iid,
-        //                   context) | None
+        //                   context, name_iid,
+        //                   event_wait=(int32_offsets, uint64_ids) CSR) | None
         //   extra        = [(key, int64_col, skip_zero), ...]  (-> extra_data)
         //   launch       = (gx, gy, gz, bx, by, bz, kernel_iid_col, args) |
         //   None
@@ -459,6 +465,12 @@ void initCuptiMonitorBindings(py::module& m) {
             stages.context = u64(sc[6]);
             stages.name_iid =
                 py::len(sc) > 7 && !sc[7].is_none() ? u64(sc[7]) : nullptr;
+            // sc[8] (optional): event_wait = (int32_offsets, uint64_ids) CSR.
+            if (py::len(sc) > 8 && !sc[8].is_none()) {
+              auto ew = sc[8].cast<py::tuple>();
+              stages.event_wait_offsets = i32(ew[0]);
+              stages.event_wait_ids = u64(ew[1]);
+            }
             stages.n = static_cast<size_t>(py::len(sc[0]));
             stages.extra = extras_from(r[3]);
             // r[6] (optional): const_extra = [(key, value), ...] string args.
