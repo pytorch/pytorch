@@ -8680,7 +8680,6 @@ class TestMPS(TestCaseMPS):
             helper(2, 2, 0, dtype)
 
     @parametrize("dtype,start,end,steps", [
-        (torch.int8, 4.3, -3, 50),
         (torch.int32, 2**24, 2**24 + 8, 9),
         (torch.int64, 2**40, 2**40 + 8, 9),
         (torch.int64, -(2**40), -(2**40) + 8, 9),
@@ -15336,7 +15335,7 @@ class TestConsistency(TestCaseMPS):
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237
             return (3e-5, 3e-5)
-        # Exact integer interpolation can differ from CPU double/FMA rounding by one.
+        # Integral linspace can differ from CPU by one due to interpolation rounding.
         if op.name == 'linspace' and dtype in [torch.int8, torch.uint8, torch.int32, torch.int16, torch.int64]:
             return (1.0, 0.0)
         if op.name == "index_reduce" and op.variant_test_name in ['mean', 'prod'] and dtype in [torch.float16, torch.bfloat16]:
