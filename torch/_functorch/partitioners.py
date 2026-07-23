@@ -2550,7 +2550,7 @@ def solve_min_cut(
             if not op_types.is_recomputable(node):
                 return "not in recomputable allowlist"
         else:
-            if op_types.is_random(node):
+            if op_types.is_random(node) or is_rng_op(node):
                 return "random op"
             if op_types.is_compute_intensive(node):
                 return "compute intensive op"
