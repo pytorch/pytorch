@@ -3264,18 +3264,11 @@ class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
             )
         mutated_name = typing.cast(str, node1.node.mutation_outputs[0].name)
         if not dry_run:
-            cls.commit_epilogue_fusion(node1, mutated_name)
+            # node1's mutated tensor becomes an intermediary; drop node1 from
+            # the allocated buffer's users for dead-node elimination.
+            real_name = scheduler.mutation_real_name.get(mutated_name, mutated_name)
+            scheduler.name_to_buf[real_name].users.remove(NodeUser(node1))
         return cls(scheduler, node1, node2)
-
-    @staticmethod
-    def commit_epilogue_fusion(
-        node1: ExternKernelSchedulerNode, mutated_name: str
-    ) -> None:
-        scheduler = node1.scheduler
-        # Node1's mutated tensor becomes an intermediary tensor. Thus, remove
-        # node1 from the allocated buffer's users for dead node elimination.
-        real_name = scheduler.mutation_real_name.get(mutated_name, mutated_name)
-        scheduler.name_to_buf[real_name].users.remove(NodeUser(node1))
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         if not isinstance(self.fused_epilogue.node, ir.ComputedBuffer):
@@ -7408,20 +7401,6 @@ class Scheduler:
 
         return False, update
 
-    def fusion_regresses_estimated_peak_memory(
-        self,
-        ctx: FusionMemoryContext | None,
-        node1: BaseSchedulerNode,
-        node2: BaseSchedulerNode,
-        peak_allowed_increase: int,
-    ) -> bool:
-        if ctx is None:
-            return False
-        rejected, _ = self._fusion_memory_update_cached(
-            ctx, node1, node2, peak_allowed_increase
-        )
-        return rejected
-
     def fusion_prevent_too_many_reads_and_writes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode, threshold: int
     ) -> bool:
@@ -9313,27 +9292,20 @@ class Scheduler:
                 possible_fusions_group_by_priority[fusion_pair_priority].append(
                     (node1, node2)
                 )
-        peak_allowed_increase = (
-            self.fusion_memory_timeline_peak_allowed_increase_bytes()
-        )
+        memory_ctx = self._fusion_memory_context
         for _, possible_fusions_with_highest_priority in sorted(
             possible_fusions_group_by_priority.items(), key=operator.itemgetter(0)
         ):
-            if peak_allowed_increase is not None:
+            if memory_ctx is not None:
                 possible_fusions_with_highest_priority = [
                     (node1, node2)
                     for node1, node2 in possible_fusions_with_highest_priority
-                    if not self.fusion_regresses_estimated_peak_memory(
-                        self._fusion_memory_context,
-                        node1,
-                        node2,
-                        peak_allowed_increase,
-                    )
+                    if not self._check_fusion_memory(memory_ctx, node1, node2)[0]
                 ]
             if possible_fusions_with_highest_priority:
                 return possible_fusions_with_highest_priority
 
-        if peak_allowed_increase is None:
+        if memory_ctx is None:
             raise AssertionError(
                 "expected at least one possible fusion with highest priority"
             )
