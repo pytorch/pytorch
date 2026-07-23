@@ -553,6 +553,34 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertNotIn(aten.slice_scatter.default, targets)
         self.assertEqual(gm(x), f(x))
 
+    def test_generalized_scatter_keeps_overlapping_src_from_factory_base(self):
+        def f(x):
+            out = aten.slice_scatter.default(torch.empty_like(x), x, 0, 0, x.shape[0])
+            src = out[1:3]
+            return aten.slice_scatter.default(out, src, 0, 0, 2)
+
+        x = torch.randn(4, 4, device=device)
+        gm = self._run_reinplace_pass(f, x)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertEqual(targets.count(aten.copy_.default), 1)
+        self.assertEqual(targets.count(aten.slice_scatter.default), 1)
+        self.assertEqual(gm(x), f(x))
+
+    def test_generalized_scatter_reinplaces_same_view_src_from_factory_base(self):
+        def f(x):
+            out = aten.slice_scatter.default(torch.empty_like(x), x, 0, 0, x.shape[0])
+            src = out[0:2]
+            return aten.slice_scatter.default(out, src, 0, 0, 2)
+
+        x = torch.randn(4, 4, device=device)
+        gm = self._run_reinplace_pass(f, x)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertEqual(targets.count(aten.copy_.default), 2)
+        self.assertNotIn(aten.slice_scatter.default, targets)
+        self.assertEqual(gm(x), f(x))
+
     def test_generalized_scatter_reinplaces_initialized_factory_realized_src(self):
         def f(x):
             base = torch.zeros_like(x)

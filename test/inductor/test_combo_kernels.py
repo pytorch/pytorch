@@ -2564,12 +2564,17 @@ class _PeakMemFakeNode:
         self._outputs: list = []
         self.mpi_node = SimpleNamespace(pred_buffers=set())
         self.snodes: list | None = None
+        self.unmet_dependencies: set = set()
+        self.device = torch.device("cpu")
 
     def get_name(self) -> str:
         return self.name
 
     def get_first_name(self) -> str:
         return self.name
+
+    def get_device(self):
+        return self.device
 
     def get_outputs(self):
         if self.snodes is not None:
@@ -2581,6 +2586,9 @@ class _PeakMemFakeNode:
 
     def get_nodes(self):
         return self.snodes if self.snodes is not None else [self]
+
+    def get_buffer_names(self):
+        return {buf.get_name() for buf in self.get_outputs()}
 
 
 class _PeakMemFakeBuffer:
@@ -2607,6 +2615,7 @@ class _PeakMemFakeScheduler:
         return nodes
 
 
+@instantiate_parametrized_tests
 class ComboKernelPeakMemoryTests(InductorTestCase):
     """Coverage for memory-aware combo-kernel acceptance and commit logic."""
 
@@ -3006,6 +3015,36 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(ctx.tracked_nodes, {fused, c})
         self.assertEqual(ctx.last_use_steps, {1: 0, 3: 4})
 
+    def test_fusion_memory_update_filters_internal_candidate_outputs(self):
+        from torch._inductor.scheduler import Scheduler
+
+        producer = _PeakMemFakeNode("producer")
+        consumer = _PeakMemFakeNode("consumer")
+        external = _PeakMemFakeNode("external")
+        candidate = _PeakMemFakeNode("candidate")
+        candidate.snodes = [producer, consumer]
+
+        tmp = _PeakMemFakeBuffer("tmp", {consumer}, 100, 100)
+        out = _PeakMemFakeBuffer("out", {external}, 10, 10)
+        graph_out = _PeakMemFakeBuffer("graph_out", set(), 1, 1)
+
+        producer._outputs = [tmp]
+        consumer._outputs = [out, graph_out]
+        consumer.mpi_node.pred_buffers = {tmp}
+
+        scheduler = object.__new__(Scheduler)
+        candidate_outputs = Scheduler._assign_fusion_memory_planning_info(
+            scheduler,
+            producer,
+            consumer,
+            candidate,
+            {"graph_out"},
+        )
+
+        self.assertEqual(candidate_outputs, [out, graph_out])
+        self.assertEqual(candidate.mpi_node.size, 11)
+        self.assertEqual(candidate.mpi_node.pred_buffers, set())
+
     def test_fusion_memory_update_modes(self):
         from torch._inductor.scheduler import FusionMemoryContext, Scheduler
 
@@ -3079,6 +3118,53 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 (False, exact_update),
             )
             update_mock.assert_called_once_with(ctx, a, b, 0)
+
+    @parametrize("full_correctness", [False, True])
+    def test_fusion_memory_update_mode_runs_real_full_check(self, full_correctness):
+        from torch._inductor.scheduler import FusionMemoryContext, Scheduler
+
+        a, b, peak = (_PeakMemFakeNode(n) for n in ("a", "b", "peak"))
+        candidate = _PeakMemFakeNode("candidate")
+        candidate.snodes = [a, b]
+        out = _PeakMemFakeBuffer("out", set(), 100, 100)
+        b._outputs = [out]
+        ctx = FusionMemoryContext(
+            nodes=[a, b, peak],
+            tracked_nodes={a, b, peak},
+            graph_outputs={"out"},
+            node_to_idx={a: 0, b: 1, peak: 2},
+            baseline_peak=10,
+            baseline_live_before=[0, 0, 0, 10],
+            baseline_live_after=[0, 0, 10],
+        )
+        ctx.refresh_peak_range()
+
+        class FakeBackend:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.speculative = False
+
+            def fuse(self, node1, node2, *, speculative=False):
+                self.calls += 1
+                self.speculative = speculative
+                return candidate
+
+        backend = FakeBackend()
+        scheduler = object.__new__(Scheduler)
+        scheduler.get_backend = lambda device: backend
+        scheduler.name_to_buf = {}
+        scheduler.name_to_fused_node = {}
+
+        with torch._inductor.config.patch(
+            fusion_memory_timeline_peak_allowed_increase_mb=0,
+            fusion_memory_timeline_full_correctness=full_correctness,
+        ):
+            rejected, update = scheduler._check_fusion_memory(ctx, a, b)
+
+        self.assertEqual(rejected, full_correctness)
+        self.assertIsNone(update)
+        self.assertEqual(backend.calls, int(full_correctness))
+        self.assertEqual(backend.speculative, full_correctness)
 
 
 if __name__ == "__main__":
