@@ -6624,7 +6624,7 @@ def meta__scaled_dot_product_efficient_attention(
 
     if torch.version.hip and torch.cuda.is_available():
         """Please see: https://github.com/pytorch/pytorch/issues/146848
-        longsumexp last dim should be seq length
+        logsumexp last dim should be seq length
         """
         logsumexp_dim = M if compute_log_sumexp else 0
     else:
@@ -6971,9 +6971,16 @@ def meta__efficient_attention_forward(
             )
         actual_max_seqlen_q = max_seqlen_q
     actual_max_seqlen_k = max_seqlen_k if max_seqlen_k is not None else N
-    logsumexp_dim = (
-        math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
-    )
+
+    if torch.version.hip is not None:
+        # ROCm efficient-attention backends return compact LSE. CUDA's
+        # memory-efficient attention kernel pads LSE to its kernel alignment.
+        logsumexp_dim = actual_max_seqlen_q if compute_log_sumexp else 0
+    else:
+        logsumexp_dim = (
+            math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
+        )
+
     logsum_exp = torch.empty(
         (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
@@ -8632,10 +8639,8 @@ def _grouped_mm_fp16_cublaslt_supported(
     if torch.version.cuda:
         parts = torch.version.cuda.split(".")
         cuda_version = (int(parts[0]), int(parts[1]))
-    if device_capability[0] == 9:
-        return cuda_version >= (13, 3)
-    return cuda_version >= (13, 2) and (
-        device_capability[0] == 10 or device_capability == (11, 0)
+    return cuda_version >= (13, 3) and (
+        device_capability[0] >= 9 and device_capability[0] <= 11
     )
 
 
