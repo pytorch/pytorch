@@ -8,7 +8,6 @@ from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
 )
 from torch._inductor.runtime.flydsl_cache import (
     ensure_flydsl_cache_dir,
-    make_flydsl_inductor_launcher,
     run_cached_flydsl,
 )
 
@@ -20,10 +19,7 @@ _gemm_executor = None
 
 
 def _inductor_tensor_arg(tensor):
-    # FlyDSL's dynamic tensor ABI repacks shape and stride metadata on every
-    # launch. Inductor only emits this template for static layouts, so specialize
-    # the memref once and leave just each tensor's data pointer on the hot path.
-    return flyc.from_torch_tensor(tensor)
+    return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
 
 
 @contextlib.contextmanager
@@ -52,16 +48,20 @@ def _temporary_env(updates):
     mat2_nk = mat2.transpose(0, 1)
 {% endif %}
     executor = _gemm_executor
+    param = _gemm_param
     if executor is not None:
         executor(
             output,
             mat1,
             mat2_nk,
+            GEMM_M,
+            GEMM_N,
+            GEMM_K,
+            param,
             stream,
         )
         return output
 
-    param = _gemm_param
     if param is None:
         has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
         if USE_HALF_TILE_INTERLEAVED:
@@ -117,16 +117,7 @@ def _temporary_env(updates):
                 stream,
             ),
         )
-        _gemm_executor = make_flydsl_inductor_launcher(
-            executor,
-            output,
-            mat1,
-            mat2_nk,
-            m=GEMM_M,
-            n=GEMM_N,
-            k=GEMM_K,
-            param=param,
-        )
+        _gemm_executor = executor
     return output
 
 

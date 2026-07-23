@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import ctypes
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -25,66 +24,6 @@ if HAS_FLYDSL:
 
 
 class TestFlyDSLTemplate(TestCase):
-    def test_inductor_launcher_specializes_packed_abi(self):
-        from torch._inductor.runtime.flydsl_cache import (
-            make_flydsl_inductor_launcher,
-        )
-
-        observed = []
-        callback_type = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
-
-        @callback_type
-        def callback(packed):
-            slots = ctypes.cast(packed, ctypes.POINTER(ctypes.c_void_p))
-            observed.append(
-                (
-                    ctypes.c_void_p.from_address(slots[0]).value,
-                    ctypes.c_void_p.from_address(slots[1]).value,
-                    ctypes.c_void_p.from_address(slots[2]).value,
-                    ctypes.c_int32.from_address(slots[3]).value,
-                    ctypes.c_int32.from_address(slots[4]).value,
-                    ctypes.c_int32.from_address(slots[5]).value,
-                    ctypes.c_void_p.from_address(slots[6]).value,
-                )
-            )
-
-        def fill_value(value, storage):
-            storage.value = value
-
-        tensors = [torch.empty(1) for _ in range(3)]
-        state = SimpleNamespace(
-            _spec=[
-                (0, ctypes.c_void_p, fill_value),
-                (1, ctypes.c_void_p, fill_value),
-                (2, ctypes.c_void_p, fill_value),
-                (3, ctypes.c_int32, fill_value),
-                (4, ctypes.c_int32, fill_value),
-                (5, ctypes.c_int32, fill_value),
-                (7, ctypes.c_void_p, fill_value),
-            ],
-            _func_exe=callback,
-        )
-        executor = SimpleNamespace(_call_state=state)
-        launcher = make_flydsl_inductor_launcher(
-            executor,
-            *tensors,
-            m=8,
-            n=4096,
-            k=4096,
-            param=object(),
-        )
-        stream = 0x12345678
-        launcher(*tensors, stream)
-
-        self.assertTrue(hasattr(launcher, "_flydsl_keepalive"))
-        self.assertEqual(
-            observed,
-            [
-                tuple(tensor.data_ptr() for tensor in tensors)
-                + (8, 4096, 4096, stream)
-            ],
-        )
-
     def test_compiled_cache_keys_only_on_param(self):
         from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
 
@@ -183,40 +122,6 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compiler.call_count, 2)
         compiled.assert_not_called()
 
-    def test_inductor_launcher_falls_back_for_unknown_abi(self):
-        from torch._inductor.runtime.flydsl_cache import (
-            make_flydsl_inductor_launcher,
-        )
-
-        class Executor:
-            def __init__(self):
-                self._call_state = SimpleNamespace(
-                    _spec=[(0, ctypes.c_int32, lambda value, storage: None)],
-                    _func_exe=None,
-                )
-                self.calls = []
-
-            def __call__(self, *args):
-                self.calls.append(args)
-
-        tensors = [torch.empty(1) for _ in range(3)]
-        executor = Executor()
-        param = object()
-        launcher = make_flydsl_inductor_launcher(
-            executor,
-            *tensors,
-            m=8,
-            n=4096,
-            k=4096,
-            param=param,
-        )
-        launcher(*tensors, 123)
-
-        self.assertEqual(
-            executor.calls,
-            [(tensors[0], tensors[1], tensors[2], 8, 4096, 4096, param, 123)],
-        )
-
     def test_gen_imports(self):
         if not HAS_FLYDSL:
             self.skipTest("requires flydsl")
@@ -264,6 +169,7 @@ class TestFlyDSLTemplate(TestCase):
                     result, (code,) = run_and_get_code(compiled_fn, a, b)
 
                     self.assertIn("async_compile.flydsl", code)
+                    self.assertIn(".mark_layout_dynamic()", code)
                     self.assertNotIn(".run(", code)
                     self.assertIn("TILE_M: fx.Constexpr", code)
                     self.assertIn("STAGES: fx.Constexpr", code)
