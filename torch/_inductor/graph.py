@@ -108,9 +108,11 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .sizevars import SizeVarAllocator
 from .utils import (
+    convert_symint_to_expr,
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
+    get_dtype_size,
     get_sympy_Expr_dtype,
     GraphPartitionMap,
     is_same_tensor,
@@ -1922,6 +1924,46 @@ class GraphLowering(torch.fx.Interpreter):
             if isinstance(ir_value, ir.TensorBox):
                 ir_value.realize()
 
+    def _should_defer_accumulated_read_realization(
+        self, n: torch.fx.Node, result: TensorBox
+    ) -> bool:
+        if config.deterministic or torch.are_deterministic_algorithms_enabled():
+            return False
+        if len(n.users) != 1:
+            return False
+
+        user = next(iter(n.users))
+        value = n.meta.get("val")
+        user_value = user.meta.get("val")
+        if not isinstance(value, torch.Tensor) or not isinstance(
+            user_value, torch.Tensor
+        ):
+            return False
+        value_numel = convert_symint_to_expr(value.numel())
+        user_numel = convert_symint_to_expr(user_value.numel())
+        if not self.sizevars.statically_known_leq(user_numel, value_numel):
+            return False
+
+        data = result.data
+        while not isinstance(data, StorageBox) and isinstance(
+            data, (ir.BaseView, ir.MutableBox)
+        ):
+            data = data.data
+        if (
+            not isinstance(data, StorageBox)
+            or not isinstance(data.data, Pointwise)
+            or data.get_device().type != "cuda"
+        ):
+            return False
+
+        output_numel = self.sizevars.optimization_hint(data.get_numel(), fallback=0)
+        read_bytes = [self.get_dep_size_hint(dep) for dep in data.get_reads()]
+        if output_numel == 0 or not read_bytes or any(size == 0 for size in read_bytes):
+            return False
+        # Realization adds one write and one read of the producer output.
+        output_bytes = output_numel * get_dtype_size(data.get_dtype())
+        return 2 * output_bytes > sum(read_bytes)
+
     def run_node(self, n: torch.fx.Node) -> object:
         """Lower and execute a single FX node into Inductor IR."""
 
@@ -2236,7 +2278,11 @@ class GraphLowering(torch.fx.Interpreter):
                 result.mark_reuse(len(n.users))
 
             # Realize if the IRNode already has accumulated lots of reads
-            if isinstance(result, TensorBox) and result.has_exceeded_max_reads():
+            if (
+                isinstance(result, TensorBox)
+                and result.has_exceeded_max_reads()
+                and not self._should_defer_accumulated_read_realization(n, result)
+            ):
                 # Prevent excessive accumulation in a computed buffer, when
                 # there are multiple branches each with small number of memory
                 # reads, but they converge to a user.

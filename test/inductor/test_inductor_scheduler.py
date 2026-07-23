@@ -994,6 +994,85 @@ class TestScheduler(TestCase):
     @xfailIfNoAcceleratorTriton
     @onlyCUDA
     @parametrize(
+        "broadcast_reads,index_repeats,expected_kernels",
+        ((True, 1, 1), (False, 1, 2), (True, 2, 2)),
+    )
+    @inductor_config.patch(realize_acc_reads_threshold=1)
+    def test_accumulated_read_realization_uses_io_cost(
+        self, broadcast_reads, index_repeats, expected_kernels
+    ):
+        def fn(x, other, index):
+            gathered = (x.sin() + other.cos())[index]
+            if index_repeats > 1:
+                return gathered.view(index_repeats, -1).sum(0)
+            return gathered + 1
+
+        torch.manual_seed(0)
+        x = torch.randn(4096, device="cuda")
+        shape = () if broadcast_reads else x.shape
+        args = (
+            x,
+            torch.randn(shape, device="cuda"),
+            torch.randperm(x.numel(), device="cuda").repeat(index_repeats),
+        )
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual = torch.compile(fn, fullgraph=True)(*args)
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(metrics.generated_kernel_count, expected_kernels)
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    @inductor_config.patch("triton.multi_kernel", 0)
+    def test_single_use_nonexpanding_consumer_defers_realization(self):
+        def fn(
+            expert, expert_idx, payload, logits, permutation, skip, residual, weight
+        ):
+            rows = payload.shape[0]
+            values = payload + expert[expert_idx]
+            probabilities = torch.softmax(logits.float(), dim=-1).to(payload.dtype)
+            weights = probabilities.reshape(-1)[permutation]
+            weighted = torch.where(skip, 0.0, values * weights[:, None])
+            inverse = torch.empty_like(permutation)
+            inverse[permutation] = torch.arange(rows, device=permutation.device)
+            routed = weighted[inverse].view(*logits.shape, -1).sum(1)
+            add = residual + routed
+            norm_input = add.float()
+            scale = torch.rsqrt(norm_input.square().mean(-1, keepdim=True) + 1e-5)
+            return add, (norm_input * scale * weight).to(payload.dtype)
+
+        tokens, topk, hidden = 64, 4, 2880
+        rows = tokens * topk
+        torch.manual_seed(0)
+        permutation = torch.randperm(rows, device="cuda")
+        args = (
+            torch.randn(32, hidden, device="cuda", dtype=torch.bfloat16),
+            torch.randint(0, 32, (rows,), device="cuda"),
+            torch.randn(rows, hidden, device="cuda", dtype=torch.bfloat16),
+            torch.randn(tokens, topk, device="cuda", dtype=torch.bfloat16),
+            permutation,
+            torch.randint(0, 2, (rows, 1), device="cuda", dtype=torch.bool),
+            torch.randn(tokens, hidden, device="cuda", dtype=torch.bfloat16),
+            torch.randn(hidden, device="cuda", dtype=torch.bfloat16),
+        )
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+
+        self.assertEqual(expected, actual, atol=5e-2, rtol=2e-2)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+        self.assertIn("'add_heavy_reduction_rblock': True", "\n".join(code))
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    @parametrize(
         "extra_cols,with_residual,expected_kernels",
         ((1, False, 1), (1, True, 2), (16, False, 2)),
     )

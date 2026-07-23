@@ -6989,6 +6989,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["native_matmul_persistent_rblock"] = rblock
         if self.add_persistent_rblock:
             out["add_persistent_rblock"] = True
+        if self.add_heavy_reduction_rblock:
+            out["add_heavy_reduction_rblock"] = True
         if (
             config.benchmark_kernel
             or config.profile_bandwidth
@@ -7098,6 +7100,42 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ):
                 return True
         return False
+
+    @functools.cached_property
+    def add_heavy_reduction_rblock(self) -> bool:
+        if (
+            torch.version.hip
+            or V.graph.get_current_device_or_throw().type != "cuda"
+            or not self.features.is_reduction()
+            or self.persistent_reduction
+            or len(self.tiling) != 2
+        ):
+            return False
+
+        memory_stats = self.features.memory_stats(self.tiling)
+        loop_stats = memory_stats.looped.memory.loop
+        if len(loop_stats) < 2:
+            return False
+
+        first_loop_ops = loop_stats[0].count_per_thread
+        remaining_loop_ops = max(stat.count_per_thread for stat in loop_stats[1:])
+        looped_bytes = V.graph.sizevars.optimization_hint(
+            memory_stats.looped.memory.bytes
+        )
+        persistent_bytes = V.graph.sizevars.optimization_hint(
+            memory_stats.persistent.memory.bytes
+        )
+        reduction_numel = self.features.reduction_numel
+        # A full RBLOCK reduces loop overhead for the large first reduction phase.
+        return (
+            self.features.get_reduction_hint(self.tiling_scores)
+            == ReductionHint.INNER
+            and V.graph.sizevars.statically_known_gt(reduction_numel, 2048)
+            and V.graph.sizevars.statically_known_leq(reduction_numel, 4096)
+            and 10 * looped_bytes >= 11 * max(persistent_bytes, 1)
+            and first_loop_ops >= 16
+            and first_loop_ops >= 2 * remaining_loop_ops
+        )
 
     def codegen_kernel(self, name=None) -> str:
         """
