@@ -16,6 +16,11 @@ from torch._dynamo.bytecode_debugger import debug
 from torch._dynamo.test_case import run_tests, TestCase
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
 class InteractiveDebugSession:
     """Allows reactive interaction with the bytecode debugger in tests.
 
@@ -148,7 +153,7 @@ class TestBytecodeDebugger(TestCase):
         def fn(x):
             return x + 1
 
-        input_tensor = torch.tensor([1.0, 2.0, 3.0])
+        input_tensor = torch.tensor([1.0, 2.0, 3.0], device=device_type)
         expected_result = input_tensor + 1
 
         def test_logic(sess, initial):
