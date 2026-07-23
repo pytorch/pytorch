@@ -10,8 +10,10 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/index_select.h>
 #include <ATen/ops/repeat_interleave.h>
 #include <ATen/ops/repeat_interleave_native.h>
+#include <ATen/ops/unflatten_ops.h>
 #endif
 
 template <typename index_t>
@@ -65,6 +67,8 @@ Tensor repeat_interleave_symint(
     std::optional<int64_t> dim,
     std::optional<SymInt> output_size) {
   Tensor input = self;
+  auto memory_format = self.suggest_memory_format();
+  bool has_dim = dim.has_value();
 
   // Store conj and neg bits
   const auto conj = input.is_conj();
@@ -94,13 +98,20 @@ Tensor repeat_interleave_symint(
     TORCH_CHECK(false, "repeats must be 0-dim or 1-dim tensor");
   }
 
-  Tensor repeat_indices =
-      at::repeat_interleave_symint(repeats_, std::move(output_size));
-  if (repeat_indices.scalar_type() != at::kLong &&
-      repeat_indices.scalar_type() != at::kInt) {
-    repeat_indices = repeat_indices.to(at::kLong);
+  auto indices = at::repeat_interleave_symint(repeats_, std::move(output_size));
+  if (indices.scalar_type() != at::kLong &&
+      indices.scalar_type() != at::kInt) {
+    indices = indices.to(at::kLong);
   }
-  auto ret = input.index_select(dim.value(), repeat_indices);
+  Tensor ret;
+  if (has_dim && memory_format != at::MemoryFormat::Contiguous) {
+    auto result_size = input.sym_sizes().vec();
+    result_size[dim.value()] = indices.sym_size(0);
+    ret = at::empty_symint(result_size, input.options(), memory_format);
+    at::index_select_out(ret, input, dim.value(), indices);
+  } else {
+    ret = input.index_select(dim.value(), indices);
+  }
   // Restore conj and neg bits
   if (conj) {
     ret = ret.conj();
@@ -116,6 +127,7 @@ Tensor repeat_interleave_symint(
     c10::SymInt repeats,
     std::optional<int64_t> dim_opt,
     std::optional<SymInt> output_size) {
+  auto memory_format = self.suggest_memory_format();
   Tensor input = dim_opt ? self : self.flatten();
   int64_t dim = c10::maybe_wrap_dim(dim_opt.value_or(0), self.dim());
   TORCH_SYM_CHECK(repeats.sym_ge(0), "Repeats must be non-negative");
@@ -137,6 +149,13 @@ Tensor repeat_interleave_symint(
         *output_size);
   }
 
+  if (dim_opt && memory_format != at::MemoryFormat::Contiguous) {
+    auto result_shape = self.sym_sizes().vec();
+    result_shape[dim] = self.sym_size(dim) * repeats;
+    auto result = at::empty_symint(result_shape, self.options(), memory_format);
+    result.unflatten_symint(dim, {self.sym_size(dim), repeats}).copy_(input);
+    return result;
+  }
   return input.clone(at::MemoryFormat::Contiguous).flatten(dim, dim + 1);
 }
 
