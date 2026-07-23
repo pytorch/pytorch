@@ -198,7 +198,13 @@ try:
         from torchcomms._backend_wrapper import _BackendWrapper
 
     # pyrefly: ignore [missing-import]
-    from torchcomms import new_comm
+    # pyrefly: ignore [missing-import]
+    from torchcomms import is_backend_built as _torchcomms_is_backend_built, new_comm
+
+    # pyrefly: ignore [missing-import]
+    from torchcomms._comms import (
+        _is_backend_registered as _torchcomms_is_backend_registered,
+    )
 
     # pyrefly: ignore [missing-import]
     from torchcomms.hooks import FlightRecorderHook
@@ -211,6 +217,39 @@ except ImportError:
 def _use_torchcomms_enabled() -> bool:
     """Check if torchcomms is enabled via config."""
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
+
+
+def _torchcomms_handles_backend(backend) -> bool:
+    """True if TorchComms can create a comm for *backend*.
+
+    Backends TorchComms doesn't own -- custom c10d plugins such as ``mooncake``
+    or ``ucc`` -- must fall through to the normal ProcessGroup path even when
+    TorchComms is enabled, rather than being routed through ``new_comm`` /
+    ``split_group`` (which cannot construct them).
+
+    ``backend`` may be ``None`` (inherits the parent's TorchComms-owned
+    backend), a bare name (``"nccl"``), or a device-qualified string
+    (``"cpu:gloo,cuda:nccl"``). A built-in backend reports via
+    ``is_backend_built``; a backend dynamically registered through
+    ``torchcomms.register_backend`` (e.g. a Python adapter) reports via
+    ``_is_backend_registered`` -- so registering such an adapter is enough to
+    move that backend onto the native TorchComms path with no change here.
+    """
+    if not _TORCHCOMM_AVAILABLE:
+        return False
+    if backend is None:
+        return True
+    for part in str(backend).lower().split(","):
+        part = part.strip()
+        name = part.split(":", 1)[1] if ":" in part else part
+        if not name:
+            continue
+        if not (
+            _torchcomms_is_backend_registered(name)
+            or _torchcomms_is_backend_built(name)
+        ):
+            return False
+    return True
 
 
 def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
@@ -2365,6 +2404,7 @@ def init_process_group(
         and device_id is not None
         and ":" not in backend
         and backend not in (Backend.UNDEFINED, Backend.MPI, Backend.FAKE)
+        and _torchcomms_handles_backend(backend)
     ):
         bare = backend.lower()
         qualified: dict[str, str] = {}
@@ -2660,7 +2700,11 @@ def _new_process_group_helper(
         # a single store can be reused by multiple groups.
         backend_prefix_store = PrefixStore(f"{device}/", prefix_store)
 
-        if _use_torchcomms_enabled() and backend_str not in [Backend.FAKE]:
+        if (
+            _use_torchcomms_enabled()
+            and backend_str not in [Backend.FAKE]
+            and _torchcomms_handles_backend(backend_str)
+        ):
             torch_device = torch.device(device)
             # Pass this rank's actual device WITH its index. A device-type-only
             # torch.device(device) makes the TorchComms bootstrap default the
@@ -6328,8 +6372,16 @@ def _create_process_group_wrapper(
 # helper function for hashing a list of ranks to a unique string
 def _hash_ranks_to_str(ranks: Sequence[int]) -> str:
     rank_join: str = "_".join(map(str, ranks))
-    # In case there is already a PG with the same rank composition
-    unique_str = "_".join([rank_join, str(len(_world.pg_names))])
+    # Disambiguate multiple PGs with the same rank composition. The salt MUST be
+    # identical across all ranks that create this group, otherwise ranks compute
+    # different group names for the same group. Backends that use the group name
+    # as a rendezvous store prefix (e.g. Gloo split's connectFullMesh) then key
+    # off different prefixes and deadlock. len(_world.pg_names) is NOT safe here:
+    # it diverges across ranks after an earlier asymmetric-membership new_group()
+    # (non-member ranks register fewer PGs). _world.group_count is incremented by
+    # _process_group_name() on every rank that reaches it (before the member
+    # check), so it stays consistent and monotonic across ranks.
+    unique_str = "_".join([rank_join, str(_world.group_count)])
     return hashlib.sha1(bytes(unique_str, "utf-8"), usedforsecurity=False).hexdigest()
 
 
@@ -6355,8 +6407,12 @@ def _process_group_name(ranks: Sequence[int], use_hashed_name: bool) -> GroupNam
         pg_name = GroupName(_hash_ranks_to_str(ranks))
     else:
         pg_name = GroupName(str(_world.group_count))
-        _world.group_count += 1
-    # TODO: why is group count incremented only in the else path?
+    # Increment on BOTH paths so group_count advances once per group-creation
+    # call on every rank that reaches here. This keeps it a collective-consistent,
+    # monotonic counter usable as the uniqueness salt in _hash_ranks_to_str
+    # (see the comment there). Names need only be unique, not contiguous, so the
+    # hashed path consuming counter values is harmless for the non-hashed names.
+    _world.group_count += 1
     return pg_name
 
 
