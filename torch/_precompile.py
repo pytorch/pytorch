@@ -226,7 +226,9 @@ it.
 # only -- a graph-breaking fn (e.g. one that runs .backward(), so a training step) raises
 # a PrecompileError pointing back at tracer="make_fx". Dynamic shapes (mark_unbacked, and
 # the mark_dynamic / specialize_on marks the make_fx path also rejects) are not wired
-# through it yet (rejected loudly). It does NOT check Dynamo's guards at runtime, NOR does
+# through it yet (rejected loudly), and a decompositions table is rejected too (only the
+# make_fx tracer threads it into the trace). It does NOT check Dynamo's guards at runtime,
+# NOR does
 # it reproduce the make_fx drivers' upfront runtime validation (the param/buffer structural
 # check, invariant 2, and the per-input shape/dtype/device checks, invariants 3/6): safety
 # comes from the same specialization contract as make_fx (control flow and shapes are
@@ -241,11 +243,15 @@ it.
 # Unlike the make_fx tracer's rendered source, this artifact inlines MARSHALLED CPython
 # bytecode plus a PICKLED state blob, so it is LOCKED to the producing Python version:
 # loading it under a different CPython (3.10-3.14) fails with a clean PrecompileError (see
-# _build_dynamo_forward). Regenerate per Python version, or use make_fx for portable source.
-# A tensor closed over by fn (a global or captured local, including one nested in a
-# container or an nn.Module) is rejected (invariant 1) here too -- Dynamo surfaces it as a
-# used-global / closure content rather than a graph get_attr constant, so the check scans
-# those (see _reachable_tensors).
+# _build_dynamo_forward). It is ALSO locked to a compatible torch build, because its import
+# aliases can reference private torch._dynamo runtime modules (also surfaced as a clean
+# PrecompileError). Regenerate per Python version / torch build, or use make_fx for portable
+# source. A tensor closed over by fn (a global, captured local, or DEFAULT ARGUMENT value,
+# including one nested in a container, an nn.Module, a plain/__slots__ object attribute, or
+# a functools.partial / bound method) is rejected (invariant 1) here too -- Dynamo surfaces
+# it as a used-global / closure content / argdef, not a graph get_attr constant, so the
+# check scans those by replaying pickle's own traversal (see _baked_tensors and
+# _reject_baked_tensors).
 
 from __future__ import annotations
 
@@ -1028,58 +1034,80 @@ class _Capture:
         self.fake_mode = fake_mode
 
 
-def _reachable_tensors(value: object) -> list[torch.Tensor]:
-    """Gather every tensor a captured global / closure value would embed by VALUE into
-    the artifact: a bare tensor, tensors inside a pytree container (list/dict/tuple), and
-    an nn.Module's registered params/buffers. A shallow ``isinstance(v, Tensor)`` misses
-    the common patterns (a tensor held in a module-level list/dict/config, or a
-    closed-over nn.Module), so the baked-constant check (invariant 1) must look through
-    these -- matching what the make_fx tracer's get_attr scan catches. A tensor hidden in
-    an unregistered custom object (a plain attribute of an arbitrary class) is a residual
-    gap: pass such tensors as explicit arguments.
+def _baked_tensors(value: object) -> list[torch.Tensor]:
+    """Return the tensors pickle would embed BY VALUE when serializing ``value`` -- exactly
+    the tensors a captured global / closure / default holding ``value`` bakes into the
+    artifact's _DYNAMO_STATE. Rather than reimplement pickle's traversal (and mis-handle
+    __slots__, functools.partial, bound methods, custom __reduce__, dict keys, protocol
+    quirks, ...), this RUNS pickle's own traversal with a persistent_id hook that records
+    every Tensor pickle is about to serialize by value and short-circuits it (so its storage
+    is never written). Consequences fall out for free: a tensor in a container, an nn.Module,
+    a plain / __slots__ / custom-__reduce__ object, or a bound method's ``__self__`` is
+    caught, while a by-reference object (a function, class, or module -- re-imported at load,
+    nothing baked) contributes nothing. The hook fires on isinstance(Tensor) BEFORE the
+    object's own reducer, so a tensor SUBCLASS that opts into a by-reference __reduce__ is
+    conservatively (and harmlessly) rejected too -- an accepted tradeoff for not executing
+    arbitrary reducer code. If ``value`` is not fully picklable, returns the tensors found
+    BEFORE the failure (so a tensor preceding an unpicklable object still yields the precise
+    invariant-1 error; an all-unpicklable value returns [] and the real pickle of the
+    artifact state fails loudly on its own). Mirrors the make_fx get_attr constant scan.
     """
-    out: list[torch.Tensor] = []
-    for leaf in pytree.tree_leaves(value):
-        if isinstance(leaf, torch.Tensor):
-            out.append(leaf)
-        elif isinstance(leaf, torch.nn.Module):
-            out.extend(leaf.parameters())
-            out.extend(leaf.buffers())
-    return out
+    found: list[torch.Tensor] = []
+
+    class _TensorFinder(pickle.Pickler):
+        def persistent_id(self, obj: object) -> object:
+            if isinstance(obj, torch.Tensor):
+                found.append(obj)
+                # Any non-None id marks it external, so pickle skips its storage/reduce.
+                return len(found)
+            return None
+
+    try:
+        _TensorFinder(io.BytesIO(), protocol=pickle.DEFAULT_PROTOCOL).dump(value)
+    except Exception:
+        pass
+    return found
 
 
 def _reject_baked_tensors(
-    used_globals: Mapping[str, object], closure_contents: list[object]
+    used_globals: Mapping[str, object],
+    closure_contents: list[object],
+    defaults: Sequence[object] = (),
 ) -> None:
     """Enforce invariant 1 for the dynamo tracer: reject a live tensor referenced from a
-    module global or a closure cell, which would be embedded by VALUE into the artifact
-    rather than passed at runtime.
+    module global, a closure cell, or a default argument value, which would be embedded
+    by VALUE into the artifact rather than passed at runtime.
 
     This is the dynamo tracer's analogue of _check_no_constant_tensors (the make_fx
     tracer's get_attr scan): Dynamo surfaces a closed-over tensor as a used-global or a
     closure content (a global tensor becomes a graph input sourced from its GlobalSource,
     which get_runtime_env records in used_globals -- as the whole container when the
-    tensor is nested), so a recursive scan of those two is where the same baked-constant
-    check lands for this tracer. See _reachable_tensors for what "recursive" covers.
+    tensor is nested), and fn's argdefs + kwdefaults are pickled into _DYNAMO_STATE too, so
+    a tensor default (``def f(m, x, w=W)``) is baked as well. Each source is scanned with
+    _baked_tensors, which uses pickle's own traversal to find exactly the tensors that get
+    baked (see _baked_tensors for what that covers).
     """
     offending = []
     for name, v in used_globals.items():
-        offending += [
-            (name, tuple(t.shape), str(t.dtype)) for t in _reachable_tensors(v)
-        ]
+        offending += [(name, tuple(t.shape), str(t.dtype)) for t in _baked_tensors(v)]
     for v in closure_contents:
         offending += [
-            ("<closure>", tuple(t.shape), str(t.dtype)) for t in _reachable_tensors(v)
+            ("<closure>", tuple(t.shape), str(t.dtype)) for t in _baked_tensors(v)
+        ]
+    for v in defaults:
+        offending += [
+            ("<default arg>", tuple(t.shape), str(t.dtype)) for t in _baked_tensors(v)
         ]
     if offending:
         raise PrecompileError(
             "precompile traced a tensor that is neither a graph input (module "
             "parameter/buffer or user input) nor an intermediate: it is closed over by "
-            "fn (a global or captured local, including one nested in a container or an "
-            "nn.Module) and would be hard-coded into the artifact. Offending constants "
-            f"(name, shape, dtype): {offending}. Fix by passing the tensor as an explicit "
-            "argument; for module state register it as a parameter/buffer, and pass the "
-            "owning nn.Module as an explicit argument rather than closing over it."
+            "fn (a global, captured local, or default argument value, including one "
+            "nested in a container, an nn.Module, or a plain object attribute) and would "
+            "be hard-coded into the artifact. Offending constants (name, shape, dtype): "
+            f"{offending}. Fix by passing the tensor as an explicit argument; for module "
+            "state register it as a parameter/buffer, and pass the owning nn.Module as an "
+            "explicit argument rather than closing over it."
         )
 
 
@@ -1148,12 +1176,15 @@ def _capture_dynamo(
         # Dynamo could not capture fn as one full graph (a graph break / uncaptured HOP /
         # user error) -- e.g. a Tensor.backward() call. These are exactly the exceptions
         # fullgraph_capture re-raises. Surface a clear PrecompileError instead of the raw
-        # dynamo error, and point at the make_fx tracer (which handles training).
+        # dynamo error, and point at the make_fx tracer (which handles training). Guard the
+        # first-line extraction: ``"".splitlines()`` is [], so an empty dynamo message would
+        # otherwise raise IndexError from inside this very handler.
+        reason = (str(e).splitlines() or [""])[0]
         raise PrecompileError(
             "precompile tracer='dynamo' could not capture fn as a single full graph "
-            f"({str(e).splitlines()[0]}). The dynamo tracer supports inference forward "
-            "computations only; for a training step (a fn that runs .backward()) or "
-            "other graph-breaking Python, use tracer='make_fx'."
+            f"({reason}). The dynamo tracer supports inference forward computations only; "
+            "for a training step (a fn that runs .backward()) or other graph-breaking "
+            "Python, use tracer='make_fx'."
         ) from e
 
     gco = capture_output.graph_capture_output
@@ -1164,11 +1195,15 @@ def _capture_dynamo(
     # INPUTS (plus builtins). A global the bytecode references elsewhere -- e.g. a plain
     # constant folded straight into the output (``return model(x), SCALE``) -- is in
     # external_refs but NOT used_globals, so without this it would NameError at runtime.
-    # Resolve those uncovered refs from fn's module globals and carry them along (baking a
-    # module constant is consistent with the specialization contract); a tensor among them
-    # is caught by _reject_baked_tensors below (invariant 1).
+    # Resolve those uncovered refs from the TRACED code's globals and carry them along
+    # (baking a module constant is consistent with the specialization contract); a tensor
+    # among them is caught by _reject_baked_tensors below (invariant 1). Use gco.f_globals,
+    # NOT fn.__globals__: Dynamo traces get_traced_fn(fn) -- fn.forward for an nn.Module,
+    # the unwrapped target for a functools.partial -- whose globals live in gco.f_globals
+    # (the same dict get_runtime_env built used_globals from). fn.__globals__ is {} for a
+    # raw nn.Module fn, which would drop the folded-in global and NameError at load.
     used_globals = dict(runtime_env.used_globals)
-    fn_globals = getattr(fn, "__globals__", {})
+    fn_globals = gco.f_globals
     for ref in runtime_env.external_refs:
         if (
             ref in used_globals
@@ -1179,11 +1214,17 @@ def _capture_dynamo(
         if ref in fn_globals:
             used_globals[ref] = fn_globals[ref]
 
-    # Invariant 1: reject a tensor closed over by fn (global or captured local, including
-    # one nested in a container or nn.Module); Dynamo surfaces it in used_globals /
-    # closure rather than as a graph get_attr constant.
+    # Invariant 1: reject a tensor closed over by fn (global, captured local, or default
+    # argument value, including one nested in a container or nn.Module); Dynamo surfaces
+    # it in used_globals / closure / argdefs+kwdefaults rather than as a graph get_attr
+    # constant. argdefs/kwdefaults are pickled into _DYNAMO_STATE and restored, so a tensor
+    # default is baked too and must be scanned alongside globals/closure.
     closure_contents = [c.cell_contents for c in (runtime_env.closure or ())]
-    _reject_baked_tensors(used_globals, closure_contents)
+    defaults = [
+        *(runtime_env.argdefs or ()),
+        *((runtime_env.kwdefaults or {}).values()),
+    ]
+    _reject_baked_tensors(used_globals, closure_contents, defaults)
 
     gm = bi.graph_module if bi is not None else None
     if gm is not None:
@@ -2176,17 +2217,30 @@ class _PrecompileApi:
           forward computations today: a fn that runs a ``.backward()`` (training) or
           otherwise graph-breaks raises a ``PrecompileError`` pointing at
           ``tracer="make_fx"``, and ``mark_unbacked`` dynamic shapes are not supported
-          with it yet. Dynamo's runtime guards are not embedded; the same specialization
-          contract (and, on the inductor backend, the baked ``assert_size_stride``)
-          applies. See the ``tracer`` note in Note [precompile programming model]. The
-          dynamo artifact inlines marshalled bytecode plus a pickled state blob, so it is
-          locked to the producing Python version (unlike the portable ``make_fx`` source);
-          load it under the same CPython.
+          with it yet, and ``decompositions`` is rejected (only ``make_fx`` honors it).
+          Dynamo's runtime guards are not embedded, and -- UNLIKE the ``make_fx`` tracer --
+          the dynamo driver does NOT re-validate the runtime model/inputs at load: it does
+          not reproduce the ``make_fx`` driver's param/buffer structural check (invariant 2)
+          or per-input shape/dtype/device checks (invariants 3/6). Safety comes from the
+          same specialization contract plus, on the inductor backend, the baked
+          ``assert_size_stride`` (which catches a runtime input/weight whose SHAPE or STRIDE
+          differs, but not its DTYPE); on the EAGER backend nothing is re-checked, so a
+          drifted runtime model (broken weight tying, a retyped/reshaped weight) or a
+          broadcast-compatible input-shape mismatch can SILENTLY miscompute where
+          ``make_fx`` would raise. Pass a model and inputs matching the example, as the
+          contract requires. See the ``tracer`` note in Note [precompile programming model].
+          The dynamo artifact inlines marshalled bytecode plus a pickled state blob, so it
+          is locked to the producing Python version (unlike the portable ``make_fx`` source)
+          AND, because its import aliases can reference private ``torch._dynamo`` runtime
+          modules, to a compatible torch build; load it under the same CPython and a
+          matching torch build (or use ``make_fx`` for portable source).
 
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
         ``decomposition_table`` during capture, so you can control how ATen ops are
-        broken down in the captured graph. Defaults to ``None`` (make_fx's default).
+        broken down in the captured graph. Defaults to ``None`` (make_fx's default). It is
+        honored ONLY by ``tracer="make_fx"``; passing it with ``tracer="dynamo"`` raises a
+        ``PrecompileError`` (Dynamo captures via bytecode analysis and cannot apply it).
 
         Dynamic shapes are opt-in via ``torch._dynamo.decorators.mark_unbacked``
         (inductor backend only), NOT a precompile kwarg: mark dims on the inputs before

@@ -91,12 +91,19 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        trace. ``"dynamo"`` analyzes the Python (bytecode) rather than tracing one path and
        inlines the transformed bytecode Dynamo produces into ``python_code``, lowering the
        compiled subgraph through the same ``backend`` choices; it is scoped to inference
-       forward computations today (a training step or other graph-breaking ``fn``, and
-       ``mark_unbacked`` dynamic shapes, are not supported with it yet and raise). The
-       dynamo artifact inlines marshalled bytecode, so it is locked to the Python version
-       that produced it (unlike the portable ``make_fx`` source).
+       forward computations today (a training step or other graph-breaking ``fn``,
+       ``mark_unbacked`` dynamic shapes, and ``decompositions`` are not supported with it
+       yet and raise). Unlike ``make_fx``, the dynamo driver does NOT re-validate the
+       runtime model/inputs, so on the eager backend a drifted model (broken weight tying,
+       a retyped/reshaped weight) or a broadcast-compatible input-shape mismatch can
+       silently miscompute where ``make_fx`` would raise; pass a model and inputs matching
+       the example. The dynamo artifact inlines marshalled bytecode plus a pickled state
+       blob, so it is locked to the Python version that produced it AND (its import aliases
+       can reference private ``torch._dynamo`` modules) a compatible torch build, unlike
+       the portable ``make_fx`` source.
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
-       decomposition function) forwarded to ``make_fx``; defaults to ``None``.
+       decomposition function) forwarded to ``make_fx``; defaults to ``None``. Honored only
+       by ``tracer="make_fx"``; passing it with ``tracer="dynamo"`` raises.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
        single source of truth for the calling convention) and a binary acceleration
        cache (no weights, no calling-convention metadata; it carries a small

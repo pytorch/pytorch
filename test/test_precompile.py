@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import copy
+import functools
 import io
 import os
 import pickle
@@ -37,6 +38,70 @@ _GLOBAL_TENSOR_LIST = [torch.randn(3)]
 _GLOBAL_TENSOR_DICT = {"w": torch.randn(3)}
 _GLOBAL_SUBMODULE = torch.nn.Linear(4, 3).eval()
 _GLOBAL_SCALE = 10
+
+
+# A tensor held as a plain attribute of an arbitrary (non-pytree / non-Module) global
+# object. The dynamo tracer's baked-constant guard must look THROUGH such an object's
+# __dict__: a tensor reached via _GLOBAL_HOLDER.weight is embedded by value into the
+# artifact, so it must be rejected (invariant 1), matching the make_fx tracer's get_attr
+# scan which bakes-and-rejects the same access.
+class _TensorHolder:
+    def __init__(self, t):
+        self.weight = t
+
+
+_GLOBAL_HOLDER = _TensorHolder(torch.randn(3))
+
+
+# A tensor held in a __slots__ slot (no __dict__), and one held as an UNREGISTERED plain
+# attribute on an nn.Module (not a param/buffer). Both are baked by value when the owning
+# object is a captured global, so the dynamo tracer's invariant-1 scan must reach them --
+# through __slots__ and through the module's own __dict__ -- matching what make_fx rejects.
+class _SlotHolder:
+    __slots__ = ("weight",)
+
+    def __init__(self, t):
+        self.weight = t
+
+
+class _UnregisteredAttrModule(torch.nn.Module):
+    def __init__(self, t):
+        super().__init__()
+        self.foo = t  # a plain attribute, NOT register_parameter/register_buffer
+
+
+_GLOBAL_SLOT_HOLDER = _SlotHolder(torch.randn(3))
+_GLOBAL_UNREGISTERED_MODULE = _UnregisteredAttrModule(torch.randn(3))
+
+
+# A functools.partial carrying a tensor: pickle bakes that tensor BY VALUE via the partial's
+# __reduce__, even though it lives outside __dict__/__slots__, so the invariant-1 scan (which
+# keys off what pickle serializes by value) must reject it. Contrast _global_helper_with_attr:
+# a module-level function is pickled BY REFERENCE, so a tensor merely attached to it is NOT
+# baked and must NOT be (falsely) rejected.
+_GLOBAL_PARTIAL = functools.partial(torch.mul, torch.randn(3))
+
+
+def _global_helper_with_attr():
+    return None
+
+
+_global_helper_with_attr.cache = torch.randn(3)
+
+
+# A bound method carries its __self__ (and any tensor __self__ holds) into the pickle BY
+# VALUE, so a bound method captured by fn (e.g. as a default callback) bakes that tensor and
+# must be rejected (invariant 1) -- the scan replays pickle's traversal, which reaches the
+# tensor through __self__.
+class _MethodHolder:
+    def __init__(self, t):
+        self.t = t
+
+    def add(self, z):
+        return z + self.t
+
+
+_GLOBAL_METHOD_HOLDER = _MethodHolder(torch.randn(3))
 
 
 # A custom pytree node whose context (a set) is not JSON-dumpable and which has no
@@ -1020,19 +1085,22 @@ class TestPrecompile(TestCase):
                 lambda model, xx: model(xx), m, x, tracer="dynamo"
             )
 
-    def test_tracer_dynamo_returned_global_constant_baked(self):
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_returned_global_constant_baked(self, backend):
         # A plain module-level constant folded straight into fn's output is referenced by
         # the transformed bytecode but is NOT a graph input, so it must be baked into the
         # artifact (else it would NameError at load). Baking a non-tensor constant is
-        # consistent with the specialization contract.
+        # consistent with the specialization contract; check both backends.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
 
         def with_scale(model, xx):
             return model(xx), _GLOBAL_SCALE
 
-        code, cache = torch.compiler.precompile(with_scale, m, x, tracer="dynamo")
-        for _label, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
+        code, cache = torch.compiler.precompile(
+            with_scale, m, x, tracer="dynamo", backend=backend
+        )
+        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
             out = f_c(m, x)
             self.assertEqual(out[0], m(x))
             self.assertEqual(out[1], _GLOBAL_SCALE)
@@ -1121,6 +1189,253 @@ class TestPrecompile(TestCase):
         gm = torch.fx.GraphModule(root, g)
         with self.assertRaisesRegex(PrecompileError, "not a liftable graph input"):
             _reject_nonliftable_get_attrs(gm)
+
+    def test_tracer_dynamo_module_fn_folded_global(self):
+        # When fn IS an nn.Module, Dynamo traces fn.forward, whose globals live in the
+        # traced code's f_globals -- not fn.__globals__ (an nn.Module has none). A
+        # module-level constant folded into the output must still be carried into the
+        # artifact from that traced-code globals dict; otherwise the reload NameErrors.
+        # Regression for resolving uncovered external_refs via gco.f_globals.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 3)
+
+            def forward(self, xx):
+                return self.lin(xx), _GLOBAL_SCALE
+
+        m = M().eval()
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(m, x, tracer="dynamo")
+        for _label, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
+            out = f_c(m, x)
+            self.assertEqual(out[0], m(x)[0])
+            self.assertEqual(out[1], _GLOBAL_SCALE)
+
+    def test_tracer_dynamo_default_tensor_arg_rejected(self):
+        # A tensor supplied as a function default (positional or keyword-only) is pickled
+        # into the artifact and restored via types.FunctionType(argdefs=...) /
+        # __kwdefaults__ -- baked by value -- so invariant 1 must reject it just like the
+        # make_fx tracer, scanning argdefs/kwdefaults alongside globals/closure.
+        weight = torch.randn(4, 4)
+        m = torch.nn.Linear(4, 4).eval()
+        x = torch.randn(5, 4)
+
+        def f_pos(model, xx, w=weight):
+            return model(xx) + xx @ w
+
+        def f_kw(model, xx, *, w=weight):
+            return model(xx) + xx @ w
+
+        for fn in (f_pos, f_kw):
+            with self.assertRaisesRegex(PrecompileError, "hard-coded"):
+                torch.compiler.precompile(fn, m, x, tracer="dynamo", backend="eager")
+
+    @parametrize(
+        "kind",
+        ["dict_object", "slots_object", "unregistered_module_attr", "partial"],
+    )
+    def test_tracer_dynamo_baked_tensor_in_object_rejected(self, kind):
+        # A tensor pickle would embed BY VALUE via a captured global must be rejected
+        # (invariant 1): held as a plain attribute (__dict__), a __slots__ slot, an
+        # UNREGISTERED tensor attribute on an nn.Module, or a functools.partial's captured
+        # arg (outside __dict__/__slots__ but baked by the partial's __reduce__). This
+        # matches what make_fx rejects (it bakes the same access as a get_attr constant).
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        fns = {
+            "dict_object": lambda mm, xx: mm(xx) + _GLOBAL_HOLDER.weight.sum(),
+            "slots_object": lambda mm, xx: mm(xx) + _GLOBAL_SLOT_HOLDER.weight.sum(),
+            "unregistered_module_attr": (
+                lambda mm, xx: mm(xx) + _GLOBAL_UNREGISTERED_MODULE.foo.sum()
+            ),
+            "partial": lambda mm, xx: _GLOBAL_PARTIAL(mm(xx)),
+        }
+        with self.assertRaisesRegex(PrecompileError, "hard-coded"):
+            torch.compiler.precompile(fns[kind], m, x, tracer="dynamo", backend="eager")
+
+    def test_tracer_dynamo_bound_method_default_tensor_rejected(self):
+        # A bound method captured as a default arg pickles its __self__ BY VALUE, so the
+        # tensor __self__ holds is baked into the artifact; invariant 1 must reject it. The
+        # scan replays pickle's traversal, so it reaches the tensor through __self__ (make_fx
+        # rejects the same access). Guards against treating bound methods as by-reference.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+
+        def fn(model, xx, cb=_GLOBAL_METHOD_HOLDER.add):
+            return cb(model(xx))
+
+        with self.assertRaisesRegex(PrecompileError, "hard-coded"):
+            torch.compiler.precompile(fn, m, x, tracer="dynamo", backend="eager")
+
+    def test_tracer_dynamo_by_reference_callable_not_rejected(self):
+        # A tensor merely ATTACHED to a by-reference object (a module-level function,
+        # pickled by reference and re-imported at load) is NOT baked by value, so it must
+        # NOT trigger the invariant-1 rejection. The scan keys off what pickle serializes
+        # by value, not on attribute presence -- avoiding a false positive.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            lambda model, xx: (model(xx), _global_helper_with_attr),
+            m,
+            x,
+            tracer="dynamo",
+            backend="eager",
+        )
+        out = torch.compiler.precompile.load(code, cache)(m, x)
+        self.assertEqual(out[0], m(x))
+        self.assertIs(out[1], _global_helper_with_attr)
+
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_nontensor_closure_roundtrip(self, backend):
+        # fn closing over NON-tensor values (a float scale, a dict) drives the dynamo
+        # driver's closure-cell reconstruction (_rebuild_cell + the cells wiring). Every
+        # other closure test closes over a tensor and is rejected BEFORE reconstruction,
+        # so this is the only coverage of the accept-and-rebuild path.
+        def make(sc, cf):
+            return lambda model, xx: model(xx) * sc + cf["bias"]
+
+        fn = make(3.0, {"bias": 1.0})
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            fn, m, x, tracer="dynamo", backend=backend
+        )
+        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
+            self.assertEqual(f_c(m, x), fn(m, x))
+
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_defaults_roundtrip(self, backend):
+        # fn with a positional default and a keyword-only default drives the driver's
+        # argdefs / kwdefaults restoration; the defaults must be honored at the runtime
+        # call (omitting them would TypeError / use a wrong value if they were dropped).
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+
+        def fn(model, xx, scale=2.0, *, bias=1.0):
+            return model(xx) * scale + bias
+
+        code, cache = torch.compiler.precompile(
+            fn, m, x, tracer="dynamo", backend=backend
+        )
+        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
+            self.assertEqual(f_c(m, x), fn(m, x))
+
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_multiple_module_args(self, backend):
+        # Two separate nn.Module args exercise the len(mods)>1 interning path and the
+        # unboxed->boxed subgraph bridge with graph inputs from two distinct modules; a
+        # structurally identical swap confirms no weights are baked (invariant 2).
+        a = torch.nn.Linear(4, 3).eval()
+        b = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            lambda ma, mb, xx: ma(xx) + mb(xx),
+            a,
+            b,
+            x,
+            tracer="dynamo",
+            backend=backend,
+        )
+        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
+            self.assertEqual(f_c(a, b, x), a(x) + b(x))
+            a2 = torch.nn.Linear(4, 3).eval()
+            b2 = torch.nn.Linear(4, 3).eval()
+            self.assertEqual(f_c(a2, b2, x), a2(x) + b2(x))
+
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_tied_weights_roundtrip(self, backend):
+        # A module with a tied weight (two Linears sharing one weight tensor) round-trips
+        # under the dynamo tracer; the shared weight must be read consistently at runtime.
+        class Tied(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(4, 4, bias=False)
+                self.b = torch.nn.Linear(4, 4, bias=False)
+                self.b.weight = self.a.weight
+
+            def forward(self, xx):
+                return self.b(self.a(xx))
+
+        m = Tied().eval()
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            lambda model, xx: model(xx), m, x, tracer="dynamo", backend=backend
+        )
+        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
+            self.assertEqual(f_c(m, x), m(x))
+
+    def test_tracer_dynamo_input_drift_not_validated(self):
+        # DOCUMENTED GAP: unlike the make_fx driver, the dynamo driver does NOT re-validate
+        # runtime inputs, so a shape-drifted input on the eager backend is accepted (and may
+        # silently miscompute) where make_fx raises a clean PrecompileError. This test pins
+        # that intended-for-now asymmetry so adding validation later is a visible, conscious
+        # change rather than a silent regression -- and confirms make_fx DOES reject it.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(3, 4)
+
+        def f(model, xx):
+            return model(xx).sum() / xx.shape[0]
+
+        code, cache = torch.compiler.precompile(
+            f, m, x, tracer="dynamo", backend="eager"
+        )
+        f_c = torch.compiler.precompile.load(code, cache)
+        x2 = torch.randn(5, 4)
+        try:
+            f_c(m, x2)
+        except PrecompileError:
+            self.fail(
+                "dynamo driver unexpectedly validated input drift; the documented gap "
+                "changed -- update the docs and this test"
+            )
+        mf_code, mf_cache = torch.compiler.precompile(f, m, x, backend="eager")
+        with self.assertRaises(PrecompileError):
+            torch.compiler.precompile.load(mf_code, mf_cache)(m, x2)
+
+    def test_tracer_dynamo_pickle_state_corrupt_clean_error(self):
+        # A corrupt _DYNAMO_STATE (pickle blob) surfaces a clean PrecompileError about the
+        # captured state / environment, NOT the Python-version lock-in message (that is only
+        # for the marshalled bytecode) -- distinct diagnostics for distinct failures.
+        import base64 as _b64
+        import re as _re
+
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        code, _cache = torch.compiler.precompile(
+            lambda model, xx: model(xx), m, x, tracer="dynamo"
+        )
+        bad = _b64.b64encode(b"not a pickle blob").decode("ascii")
+        corrupted = _re.sub(
+            r"_DYNAMO_STATE = '[^']*'", f"_DYNAMO_STATE = {bad!r}", code, count=1
+        )
+        self.assertNotEqual(corrupted, code)
+        ns = {"__name__": "_p"}
+        with self.assertRaisesRegex(PrecompileError, "captured state"):
+            exec(compile(corrupted, "<p>", "exec"), ns)
+
+    def test_load_cache_without_tracer_key(self):
+        # BC: a cache produced before the dynamo tracer existed carries no "tracer" key in
+        # its envelope. load() must still pair it with its make_fx python_code via the
+        # blob.get("tracer", "make_fx") default rather than KeyError. Simulate a legacy
+        # envelope by deleting the key. Assert the cache envelope was actually CONSUMED (no
+        # "could not read the cache envelope" warning): a KeyError from a reverted fix would
+        # be swallowed by load()'s except and fall back to JIT, which still returns the
+        # right answer -- so an output-only assertion would not guard the .get default.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(lambda model, xx: model(xx), m, x)
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        del blob["tracer"]
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            f_c = torch.compiler.precompile.load(code, buf.getvalue())
+        self.assertFalse(
+            any("could not read the cache envelope" in msg for msg in cm.output),
+            f"legacy cache envelope was not consumed (fell back to JIT): {cm.output}",
+        )
+        self.assertEqual(f_c(m, x), m(x))
 
     def test_tracer_invalid_raises(self):
         a, b = torch.randn(4, 4), torch.randn(4, 4)

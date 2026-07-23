@@ -414,25 +414,58 @@ def _build_dynamo_forward():
 
     try:
         code = marshal.loads(base64.b64decode(_DYNAMO_CODE))
-        state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
     except Exception as e:
         # The inlined bytecode is marshalled CPython bytecode, specific to the Python
         # version that produced it; loading it under a different CPython (or a corrupt
         # blob) fails here. Surface a clean PrecompileError naming the version lock-in
-        # rather than a raw marshal / pickle error.
+        # rather than a raw marshal error.
         from torch._precompile import PrecompileError as _PrecompileError
 
         raise _PrecompileError(
             "precompile: could not rehydrate the tracer='dynamo' artifact's inlined "
-            "bytecode/state. It embeds marshalled CPython bytecode, which is specific to "
-            "the Python version that produced it; loading it under a different Python "
-            f"(this is {sys.version_info.major}.{sys.version_info.minor}) fails. "
-            "Regenerate the artifact under this Python version, or use tracer='make_fx' "
-            f"(portable source). Underlying: {type(e).__name__}: {e}"
+            "bytecode. It embeds marshalled CPython bytecode, which is specific to the "
+            "Python version that produced it; loading it under a different Python (this "
+            f"is {sys.version_info.major}.{sys.version_info.minor}) fails. Regenerate the "
+            "artifact under this Python version, or use tracer='make_fx' (portable "
+            f"source). Underlying: {type(e).__name__}: {e}"
         ) from e
-    f_globals: dict[str, object] = {
-        alias: importlib.import_module(name) for alias, name in IMPORT_SOURCES.items()
-    }
+    try:
+        state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
+    except Exception as e:
+        # The pickled state (the globals / closure / defaults fn referenced) failed to
+        # unpickle. Unlike the marshalled bytecode this is NOT a Python-version lock: it
+        # usually means a captured object's class or module is not importable in this
+        # environment. Surface that distinctly rather than misdirecting to the Python
+        # version.
+        from torch._precompile import PrecompileError as _PrecompileError
+
+        raise _PrecompileError(
+            "precompile: could not unpickle the tracer='dynamo' artifact's captured state "
+            "(the globals / closure / default arguments fn referenced). This usually "
+            "means a captured object's class or module is not importable here (an "
+            "environment / torch-build mismatch), not a Python-version issue. Load in an "
+            "environment matching the producer, or use tracer='make_fx'. Underlying: "
+            f"{type(e).__name__}: {e}"
+        ) from e
+    try:
+        f_globals: dict[str, object] = {
+            alias: importlib.import_module(name)
+            for alias, name in IMPORT_SOURCES.items()
+        }
+    except Exception as e:
+        # The transformed bytecode's import aliases can include PRIVATE torch._dynamo
+        # runtime modules, so the artifact is locked to a compatible torch build (not just
+        # the Python version); a renamed / moved module fails here. Surface a clean error
+        # rather than a raw ImportError from the artifact's module exec.
+        from torch._precompile import PrecompileError as _PrecompileError
+
+        raise _PrecompileError(
+            "precompile: could not import a module the tracer='dynamo' artifact "
+            "references (IMPORT_SOURCES). The dynamo artifact can reference private "
+            "torch._dynamo runtime modules, so it is locked to a compatible torch build; "
+            "regenerate under a matching torch build, or use tracer='make_fx' "
+            f"(backend='eager' for portable source). Underlying: {type(e).__name__}: {e}"
+        ) from e
     f_globals.update(state["used_globals"])
     if BACKEND_ID is not None:
 
