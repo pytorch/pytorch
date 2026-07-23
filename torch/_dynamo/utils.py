@@ -4070,9 +4070,7 @@ def _get_fake_value_impl(
         )
 
     try:
-        from torch._dynamo.eval_frame import _use_eager_on_nested_compile
-
-        with fake_mode, enable_python_dispatcher(), _use_eager_on_nested_compile():
+        with fake_mode, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )

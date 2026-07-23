@@ -1084,19 +1084,9 @@ def forward(self, x_1: "f32[2][1]cpu"):
         fn_opt = torch._dynamo.optimize("inductor")(fn)
         fn_opt(x)
         torch._dynamo.reset()
-        # Reset raw log so assertParses only validates the cache-hit compilation.
-        # Without this, the raw log contains two compilations with identical
-        # compiled_autograd_id=0 (reset() restarts COMPILE_COUNTER from zero),
-        # which tlparse --strict rejects as duplicate compiled_autograd_id.
-        trace_log.removeHandler(self.raw_handler)
-        self.raw_file.close()
-        self.raw_file = tempfile.NamedTemporaryFile(mode="w", delete=True)  # noqa: SIM115
-        self.raw_handler = logging.StreamHandler(self.raw_file)
-        self.raw_handler.setFormatter(TorchLogsFormatter(trace=True))
-        trace_log.addHandler(self.raw_handler)
         # Trigger a cache hit
         fn_opt(x)
-        # Verify the cache-hit trace (including inductor_output_code) parses cleanly
+        # Should print twice, including inductor_output_code
         self.assertParses()
         chromium_events = [
             (
