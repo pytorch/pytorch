@@ -142,6 +142,7 @@ test_failures = {
     "test_triton_argmin_argmax_transpose_logical_index_dynamic_shapes": TestFailure(
         ("cpu",), is_skip=True
     ),
+    "test_view_as_complex_non_contiguous_dynamic_shapes": TestFailure(("cpu",)),
     # XPU always convert conv1d to conv2d and can not match the expected codegen result.
     "test_conv1d_depthwise_dynamic_shapes": TestFailure(("xpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
@@ -194,6 +195,12 @@ test_failures = {
     # Triton kernel or C++ loop is generated, so dynamic-shape codegen check fails.
     "test_bincount_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_bincount_with_weights_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_bincount_with_int_weights_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
+    "test_bincount_empty_with_weights_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
     "test_unique_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_unique_dim_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_unique_consecutive_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),

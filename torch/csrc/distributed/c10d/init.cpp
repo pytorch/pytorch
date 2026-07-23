@@ -9,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
+#include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -34,6 +35,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl/NCCLXStub.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLLazy.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #endif
@@ -2459,6 +2461,17 @@ Arguments:
 
               See :func:`torch.distributed.gather` for more details.)")
           .def(
+              "gather_into_tensor",
+              &::c10d::ProcessGroup::gather_into_tensor,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::GatherOptions(),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Gathers the input tensor from all processes into a single
+              output tensor on the root rank.
+
+              See :func:`torch.distributed.gather_into_tensor` for more details.)")
+          .def(
               "scatter",
               &::c10d::ProcessGroup::scatter,
               py::arg("output_tensors"),
@@ -3213,6 +3226,13 @@ Arguments:
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "gather_into_tensor",
+              &::c10d::Backend::gather_into_tensor,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::GatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "scatter",
               &::c10d::Backend::scatter,
               py::arg("output_tensors"),
@@ -3552,6 +3572,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           "_set_default_timeout",
           &::c10d::ProcessGroupGloo::setTimeout,
           py::arg("timeout"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_error",
+          &::c10d::ProcessGroupGloo::getError,
           py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "options",
@@ -4035,6 +4059,46 @@ Returns:
           "abort_process_on_timeout_or_error",
           &::c10d::nccl2::ProcessGroupNCCL::Options::
               abort_process_on_timeout_or_error);
+
+  intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCLLazy>(
+      module, "ProcessGroupNCCLLazy", backend)
+      .def(
+          py::init(
+              [](const c10::intrusive_ptr<::c10d::Store>& store,
+                 int rank,
+                 int size,
+                 c10::intrusive_ptr<::c10d::nccl2::ProcessGroupNCCL::Options>
+                     options) {
+                py::gil_scoped_release nogil{};
+                return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
+                    store, rank, size, std::move(options));
+              }),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          py::arg("options"),
+          R"(Create a new ProcessGroupNCCLLazy instance.)")
+      .def(
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                      int rank,
+                      int size) {
+            py::gil_scoped_release nogil{};
+            auto options = ::c10d::nccl2::ProcessGroupNCCL::Options::create();
+            return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
+                store, rank, size, options);
+          }),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          R"(Create a new ProcessGroupNCCLLazy instance.)")
+      .def(
+          "get_error",
+          &::c10d::nccl2::ProcessGroupNCCLLazy::getError,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_num_active_channels",
+          &::c10d::nccl2::ProcessGroupNCCLLazy::numActiveChannels,
+          py::call_guard<py::gil_scoped_release>());
 #endif
 
 #ifdef USE_C10D_UCC
@@ -4629,6 +4693,21 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       []() { ::c10d::reset_nccl_trace(); },
       "API to reset Flight recorder recording when it comes fault tolerance.");
 #endif
+
+  py::class_<
+      ::c10d::FlightRecorderHook,
+      std::shared_ptr<::c10d::FlightRecorderHook>>(module, "FlightRecorderHook")
+      .def_static(
+          "attach",
+          &::c10d::FlightRecorderHook::attach,
+          py::arg("pg"),
+          R"(
+Attach a FlightRecorder hook to a process group. Collectives issued through
+the group are recorded into the generic flight recorder ring buffer (dump
+with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
+backend has native FlightRecorder support. The hook detaches when remove()
+is called or the returned handle is garbage collected.)")
+      .def("remove", &::c10d::FlightRecorderHook::remove);
 
   module.def(
       "_dump_fr_trace_json",

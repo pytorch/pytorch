@@ -14,7 +14,7 @@ autograd needs multithreading to keep up!)  (It might potentially be possible
 to trace through this with torch.compile and then compile it with CUDA graphs
 but this is currently a non-goal.)
 
-We do not directly handling MPMD. However in practice even in SPMD you may
+We do not directly handle MPMD. However in practice even in SPMD you may
 encounter divergence in behavior per rank (for example, uneven sharding
 across ranks). To support scenarios like this, we provide a helper decorator
 that allows you to run a function with no side effects for each LocalTensor
@@ -1492,7 +1492,7 @@ class LocalTensorMode(TorchDispatchMode):
 
     def rank_map(self, cb: Callable[[int], Tensor]) -> LocalTensor:
         """
-        Creates a LocalTensor instance by mapping rank id to ids local shard.
+        Creates a LocalTensor instance by mapping rank id to its local shard.
         """
 
         with self.disable():
@@ -1503,7 +1503,7 @@ class LocalTensorMode(TorchDispatchMode):
         self, tensor: LocalTensor, cb: Callable[[int, Tensor], Tensor | None]
     ) -> LocalTensor:
         """
-        Creates a LocalTensor instance by mapping rank id to ids local shard.
+        Creates a LocalTensor instance by mapping rank id to its local shard.
         """
 
         with self.disable():
