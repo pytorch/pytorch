@@ -135,7 +135,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     }
     err << ". Please define serialization methods via def_pickle() for "
            "this class.";
-    TORCH_CHECK(false, err.str());
+    TORCH_CHECK(false, std::move(err).str());
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
     TORCH_CHECK(
@@ -687,31 +687,31 @@ void Pickler::pushGenericList(const IValue& ivalue) {
 }
 
 void Pickler::pushTuple(const IValue& ivalue) {
-  auto tuple = ivalue.toTuple();
-  auto tuple_size = tuple->elements().size();
+  const auto& tuple = ivalue.toTupleRef();
+  auto tuple_size = tuple.elements().size();
 
   switch (tuple_size) {
     case 0: {
       push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
     } break;
     case 1: {
-      pushIValue(tuple->elements()[0]);
+      pushIValue(tuple.elements()[0]);
       push<PickleOpCode>(PickleOpCode::TUPLE1);
     } break;
     case 2: {
-      pushIValue(tuple->elements()[0]);
-      pushIValue(tuple->elements()[1]);
+      pushIValue(tuple.elements()[0]);
+      pushIValue(tuple.elements()[1]);
       push<PickleOpCode>(PickleOpCode::TUPLE2);
     } break;
     case 3: {
-      pushIValue(tuple->elements()[0]);
-      pushIValue(tuple->elements()[1]);
-      pushIValue(tuple->elements()[2]);
+      pushIValue(tuple.elements()[0]);
+      pushIValue(tuple.elements()[1]);
+      pushIValue(tuple.elements()[2]);
       push<PickleOpCode>(PickleOpCode::TUPLE3);
     } break;
     default: {
       push<PickleOpCode>(PickleOpCode::MARK);
-      for (const IValue& item : tuple->elements()) {
+      for (const IValue& item : tuple.elements()) {
         pushIValue(item);
       }
       push<PickleOpCode>(PickleOpCode::TUPLE);
