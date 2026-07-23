@@ -809,6 +809,127 @@ class TestIsAvailable(TestCase):
         self.assertEqual(is_available(), expected)
 
 
+# Pure registry-lifecycle logic, no CUDA needed. Seeds the module-level
+# annotation/dependency maps directly and checks that remove_graph_data purges
+# only the requested exec graph ids (tools_id >> 32).
+class TestRemoveGraphData(TestCase):
+    @staticmethod
+    def _tools_id(graph_id, node_id):
+        return (graph_id << 32) | node_id
+
+    def tearDown(self):
+        import torch.cuda._graph_annotations as ga
+
+        ga.clear_kernel_annotations()
+        ga.clear_graph_dependencies()
+        super().tearDown()
+
+    def test_removes_only_requested_exec_id(self):
+        import torch.cuda._graph_annotations as ga
+
+        exec_a, exec_b = 1, 2
+        ga.clear_kernel_annotations()
+        ga.clear_graph_dependencies()
+        ann = ga.get_kernel_annotations()
+        deps = ga.get_graph_dependencies()
+        ann[self._tools_id(exec_a, 10)] = ["a"]
+        ann[self._tools_id(exec_b, 10)] = ["b"]
+        deps[self._tools_id(exec_a, 20)] = [self._tools_id(exec_a, 10)]
+        deps[self._tools_id(exec_b, 20)] = [self._tools_id(exec_b, 10)]
+
+        ga.remove_graph_data([exec_a])
+
+        self.assertEqual(
+            ga.get_kernel_annotations(), {self._tools_id(exec_b, 10): ["b"]}
+        )
+        self.assertEqual(
+            ga.get_graph_dependencies(),
+            {self._tools_id(exec_b, 20): [self._tools_id(exec_b, 10)]},
+        )
+
+    def test_missing_and_empty_ids_are_noops(self):
+        import torch.cuda._graph_annotations as ga
+
+        ga.clear_kernel_annotations()
+        ga.clear_graph_dependencies()
+        ann = ga.get_kernel_annotations()
+        ann[self._tools_id(2, 10)] = ["b"]
+        ga.remove_graph_data([])  # empty: no-op
+        ga.remove_graph_data([99])  # unknown exec id: no-op
+        self.assertEqual(ga.get_kernel_annotations(), {self._tools_id(2, 10): ["b"]})
+
+    def test_per_registry_helpers_purge_only_their_own_map(self):
+        import torch.cuda._graph_annotations as ga
+
+        exec_a = 1
+        ga.clear_kernel_annotations()
+        ga.clear_graph_dependencies()
+        ann = ga.get_kernel_annotations()
+        deps = ga.get_graph_dependencies()
+        ann[self._tools_id(exec_a, 10)] = ["a"]
+        deps[self._tools_id(exec_a, 20)] = [self._tools_id(exec_a, 10)]
+
+        # remove_kernel_annotations touches only the annotation map.
+        ga.remove_kernel_annotations([exec_a])
+        self.assertEqual(ga.get_kernel_annotations(), {})
+        self.assertEqual(
+            ga.get_graph_dependencies(),
+            {self._tools_id(exec_a, 20): [self._tools_id(exec_a, 10)]},
+        )
+
+        # remove_graph_dependencies touches only the dependency map.
+        ga.remove_graph_dependencies([exec_a])
+        self.assertEqual(ga.get_graph_dependencies(), {})
+
+
+# Host-side test of the graph-destroy handler registry: consumers register per-
+# resolver cleanup handlers that graphs.py invokes (gated on
+# graph_destroy_handlers_active) via run_graph_destroy_handlers when a CUDA graph is
+# destroyed. No CUDA needed.
+class TestGraphDestroyHandlers(TestCase):
+    def tearDown(self):
+        import torch.cuda._graph_annotations as ga
+
+        ga._graph_destroy_handlers.clear()
+        super().tearDown()
+
+    def test_register_run_unregister(self):
+        import torch.cuda._graph_annotations as ga
+
+        seen = []
+        self.assertFalse(ga.graph_destroy_handlers_active())
+        handle = ga.register_graph_destroy_handler(lambda ids: seen.append(set(ids)))
+        self.assertTrue(ga.graph_destroy_handlers_active())
+        ga.run_graph_destroy_handlers({7})
+        self.assertEqual(seen, [{7}])
+        handle.remove()
+        self.assertFalse(ga.graph_destroy_handlers_active())
+        ga.run_graph_destroy_handlers({8})  # unregistered: not called again
+        self.assertEqual(seen, [{7}])
+
+    def test_multiple_handlers_all_run(self):
+        import torch.cuda._graph_annotations as ga
+
+        seen_a, seen_b = [], []
+        ga.register_graph_destroy_handler(lambda ids: seen_a.append(set(ids)))
+        ga.register_graph_destroy_handler(lambda ids: seen_b.append(set(ids)))
+        ga.run_graph_destroy_handlers({5})
+        self.assertEqual((seen_a, seen_b), ([{5}], [{5}]))
+
+    def test_run_swallows_handler_errors(self):
+        import torch.cuda._graph_annotations as ga
+
+        seen = []
+
+        def boom(ids):
+            raise RuntimeError("boom")
+
+        ga.register_graph_destroy_handler(boom)
+        ga.register_graph_destroy_handler(lambda ids: seen.append(set(ids)))
+        ga.run_graph_destroy_handlers({1})  # first raises, second still runs
+        self.assertEqual(seen, [{1}])
+
+
 # Pure trace-JSON logic, no CUDA needed. Pins the canonical annotation key
 # ("name") and reader tolerance for the two legacy pickle spellings: dicts
 # keyed "str" and bare unwrapped strings.
