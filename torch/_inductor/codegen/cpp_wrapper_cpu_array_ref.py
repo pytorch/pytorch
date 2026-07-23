@@ -253,7 +253,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     code.splice(
                         f"""
                         AtenTensorHandle {cached_output_name}_tmp;
-                        aoti_torch_clone({output}, &{cached_output_name}_tmp);
+                        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone({output}, &{cached_output_name}_tmp));
                         {cached_output_name} = {cached_output_name}_tmp;
                         """
                     )
@@ -709,7 +709,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                             f"AtenTensorHandle {cached_output_name}_tmp;"
                         )
                         self.wrapper_call.writeline(
-                            f"aoti_torch_clone({output}, &{cached_output_name}_tmp);"
+                            "AOTI_TORCH_ERROR_CODE_CHECK("
+                            f"aoti_torch_clone({output}, &{cached_output_name}_tmp));"
                         )
                         self.wrapper_call.writeline(
                             f"{cached_output_name} = {cached_output_name}_tmp;"
@@ -726,7 +727,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     if is_constant_buffer:
                         # See NOTE(return_constant) above.
                         self.wrapper_call.writeline(
-                            f"aoti_torch_clone({output}, &output_handles[{idx}]);"
+                            "AOTI_TORCH_ERROR_CODE_CHECK("
+                            f"aoti_torch_clone({output}, &output_handles[{idx}]));"
                         )
                     else:
                         if output in output2idx:

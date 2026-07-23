@@ -1644,7 +1644,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if is_constant_buffer:
                 # See NOTE(return_constant) above.
                 self.wrapper_call.writeline(
-                    f"aoti_torch_clone({output}, &output_handles[{idx}]);"
+                    "AOTI_TORCH_ERROR_CODE_CHECK("
+                    f"aoti_torch_clone({output}, &output_handles[{idx}]));"
                 )
             else:
                 if output in output2idx:
@@ -3693,7 +3694,8 @@ if (!custom_op_wrapper) {
                         var_name = f"tmp_var_{next(tmp_var_number)}"
                         dispatch_lines.writeline(f"AtenTensorHandle {var_name};")
                         dispatch_lines.writeline(
-                            f"aoti_torch_new_tensor_handle({raii_var}, &{var_name});"
+                            "AOTI_TORCH_ERROR_CODE_CHECK("
+                            f"aoti_torch_new_tensor_handle({raii_var}, &{var_name}));"
                         )
                         return f"torch::stable::detail::from({var_name})"
                     # If the RAII tensor _is_ a temporary scoped to this fallback call,
