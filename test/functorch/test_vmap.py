@@ -53,7 +53,6 @@ from torch.testing._internal.common_cuda import (
     tf32_on_and_off,
     with_tf32_off,
 )
-from torch.testing._internal.common_xpu import get_xpu_codename, XPUCodename
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -3989,9 +3988,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
     def test_sdpa(self, device, backend):
         if device == "cpu":
             raise unittest.SkipTest("This test is only for CUDA for now")
-        # Waiting for PVC driver upgrade
-        if "xpu" in device and get_xpu_codename() == XPUCodename.PVC:
-            raise unittest.SkipTest("SDPA tests not supported on XPU PVC")
 
         def T(*args):
             return torch.randn(*args, dtype=torch.float16, device=device)
@@ -4135,9 +4131,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
     def test_randomness(self, device, randomness, backend):
         if device == "cpu":
             raise unittest.SkipTest("This test is only for CUDA for now")
-        # Waiting for PVC driver upgrade
-        if "xpu" in device and get_xpu_codename() == XPUCodename.PVC:
-            raise unittest.SkipTest("SDPA tests not supported on XPU PVC")
 
         # xfail for cuDNN version between 9.10 and 9.13
         if backend == SDPBackend.CUDNN_ATTENTION and randomness == "different":
