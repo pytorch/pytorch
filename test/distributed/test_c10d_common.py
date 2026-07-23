@@ -63,7 +63,24 @@ if platform == "darwin":
 else:
     LOOPBACK = "lo"
 
-torch.backends.cuda.matmul.allow_tf32 = False
+
+_PRIOR_FP32_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_PRECISION
+    # Snapshot fp32_precision (not allow_tf32) so tearDownModule restores the
+    # exact original; writing allow_tf32 back can't reproduce the "none" default.
+    _PRIOR_FP32_PRECISION = torch.backends.cuda.matmul.fp32_precision
+    torch.backends.cuda.matmul.allow_tf32 = False
+
+
+def tearDownModule():
+    global _PRIOR_FP32_PRECISION
+    if _PRIOR_FP32_PRECISION is not None:
+        torch.backends.cuda.matmul.fp32_precision = _PRIOR_FP32_PRECISION
+        _PRIOR_FP32_PRECISION = None
+
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
@@ -506,7 +523,7 @@ class CommonDistributedDataParallelTest:
     ):
         self.assertTrue(
             len(devices) == 2 or len(devices) == 4,
-            f"unexpected devices for ddp tests {devices}",
+            lambda msg: f"{msg}\nunexpected devices for ddp tests {devices}",
         )
         if len(devices) == 2:
             model = DoubleGpuNet(devices)
@@ -1574,8 +1591,9 @@ class AbstractLargeCommTest:
         self.assertIn(rank, ranks_in)
         self.assertNotIn(rank, ranks_out)
 
-        self.assertIsNone(
-            dist.new_group(ranks=ranks_out, use_local_synchronization=True)
+        self.assertIs(
+            dist.new_group(ranks=ranks_out, use_local_synchronization=True),
+            dist.GroupMember.NON_GROUP_MEMBER,
         )
 
         new_pg = dist.new_group(ranks=ranks_in, use_local_synchronization=True)
@@ -1598,8 +1616,6 @@ class AbstractLargeCommTest:
             rank=self.rank,
             store=store,
         )
-        rank = dist.get_rank()
-
         # split the world in 2 PGs
         rank = dist.get_rank()
         pg_idx = rank // 2
@@ -1634,8 +1650,6 @@ class AbstractLargeCommTest:
             rank=self.rank,
             store=store,
         )
-        rank = dist.get_rank()
-
         # split the world in 2 PGs
         rank = dist.get_rank()
         pg_idx = rank // 2
@@ -1927,6 +1941,48 @@ class DummyProcessGroup(dist.ProcessGroup):
 
     def shutdown(self) -> None:
         self._shutdown = True
+
+
+class BackendRegistrationTest(TestCase):
+    def test_register_backend_with_single_device_string(self):
+        name = "_test_fake_backend"
+        device = "custom_device"
+        backend_attr = name.upper()
+        old_backend_attr = getattr(dist.Backend, backend_attr, None)
+        had_backend_attr = hasattr(dist.Backend, backend_attr)
+        old_backend_list = dist.Backend.backend_list.copy()
+        old_default_device_backend_map = dist.Backend.default_device_backend_map.copy()
+        old_backend_capability = dist.Backend.backend_capability.copy()
+        old_backend_type_map = dist.Backend.backend_type_map.copy()
+        old_plugins = dist.Backend._plugins.copy()
+
+        try:
+
+            def create_backend(*_args, **_kwargs):
+                return None
+
+            dist.Backend.register_backend(name, create_backend, devices=device)
+
+            self.assertEqual(dist.Backend.default_device_backend_map[device], name)
+            self.assertEqual(dist.Backend.backend_capability[name], [device])
+            self.assertEqual(
+                c10d._parse_backend_string(name, available_devices={device}),
+                {device: name},
+            )
+            for character in device:
+                self.assertNotEqual(
+                    dist.Backend.default_device_backend_map.get(character), name
+                )
+        finally:
+            if had_backend_attr:
+                setattr(dist.Backend, backend_attr, old_backend_attr)
+            elif hasattr(dist.Backend, backend_attr):
+                delattr(dist.Backend, backend_attr)
+            dist.Backend.backend_list = old_backend_list
+            dist.Backend.default_device_backend_map = old_default_device_backend_map
+            dist.Backend.backend_capability = old_backend_capability
+            dist.Backend.backend_type_map = old_backend_type_map
+            dist.Backend._plugins = old_plugins
 
 
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
@@ -2800,7 +2856,7 @@ class ThreadLocalSafetyLintTest(TestCase):
         c10d_dir = self._c10d_src_dir()
         self.assertTrue(
             c10d_dir.is_dir(),
-            f"c10d source directory not found: {c10d_dir}",
+            lambda msg: f"{msg}\nc10d source directory not found: {c10d_dir}",
         )
 
         violations = []
@@ -2852,7 +2908,7 @@ class ThreadLocalSafetyLintTest(TestCase):
 
 if __name__ == "__main__":
     if device_type != "cpu":
-        if torch.get_device_module()._initialized:
+        if getattr(torch.get_device_module(device_type), "_initialized", False):
             raise AssertionError(
                 f"test_distributed must not have initialized {device_type} context on main process"
             )

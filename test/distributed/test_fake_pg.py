@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch._C._distributed_c10d import FakeProcessGroup
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.tensor import DeviceMesh, Shard
+from torch.distributed.tensor import Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -222,9 +222,6 @@ class TestFakePG(TestCase):
             backend="fake", rank=0, world_size=world_size, store=store
         )
 
-        device_mesh = DeviceMesh(
-            device_type, torch.arange(0, world_size).view(-1, tp_size)
-        )
         device_mesh = init_device_mesh(
             device_type, (world_size // tp_size, tp_size), mesh_dim_names=["dp", "tp"]
         )
@@ -755,15 +752,15 @@ class TestFakePG(TestCase):
         )
 
         # Interleaved, unsorted subgroups: each rank shares a group with the
-        # rank two away, and is not always listed first. The child rank must
-        # therefore be the position within the *sorted* subgroup -- it cannot
-        # coincide with the parent rank or with the order ranks were listed in,
-        # which is what makes this a meaningful check of rank assignment.
+        # rank two away, and is not always listed first. split_group preserves
+        # the order ranks are listed in, so the child rank is the position
+        # within the subgroup as given -- which here differs from the parent
+        # rank, making this a meaningful check of rank assignment.
         split_ranks = [[2, 0], [3, 1]]
         new_pg = dist.split_group(split_ranks=split_ranks)
         self.assertIsNotNone(new_pg)
 
-        my_group = sorted(next(g for g in split_ranks if rank in g))
+        my_group = next(g for g in split_ranks if rank in g)
         self.assertEqual(new_pg.size(), len(my_group))
         self.assertEqual(new_pg.rank(), my_group.index(rank))
         # Independent cross-check: the child rank must map back to this
@@ -790,9 +787,9 @@ class TestFakePG(TestCase):
             device_id=torch.device(device_type, 0),
         )
 
-        # Rank 0 is in none of the splits, so it gets None back.
+        # Rank 0 is in none of the splits, so it gets the non-member sentinel.
         new_pg = dist.split_group(split_ranks=[[1, 2, 3]])
-        self.assertIsNone(new_pg)
+        self.assertIs(new_pg, dist.GroupMember.NON_GROUP_MEMBER)
 
     @skipIfHpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")

@@ -6,7 +6,7 @@ import os
 import re
 import sys
 from itertools import count, zip_longest
-from typing import Any
+from typing import Any, cast
 from typing_extensions import Self
 
 import sympy
@@ -26,6 +26,7 @@ from ..ir import (
     TMADescriptorStable,
 )
 from ..runtime.hints import (
+    InductorMeta,
     TRITON_DEFAULT_BLOCK_SIZES,
     TRITON_DEFAULT_RSPLIT,
     TRITON_DEFAULT_RSPLIT_SIZE,
@@ -498,7 +499,9 @@ class DeferredTritonCallWrapper:
         else:
             from ..runtime.triton_heuristics import GridExpr
 
-            grid = GridExpr.from_meta_lazy(self.inductor_meta, kernel_name)
+            grid = GridExpr.from_meta_lazy(
+                cast("InductorMeta | None", self.inductor_meta), kernel_name
+            )
             for line in grid.prefix:
                 prefix.writeline(line)
 
@@ -818,7 +821,9 @@ class DeferredTritonCallWrapper:
     ):
         from ..runtime.triton_heuristics import GridExpr
 
-        grid = GridExpr.from_meta(inductor_meta, params["config"], mode="cpp")
+        grid = GridExpr.from_meta(
+            cast("InductorMeta", inductor_meta), params["config"], mode="cpp"
+        )
         for line in grid.prefix:
             prefix.writeline(line)
         prefix.splice(
@@ -1098,11 +1103,20 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def generate_debug_sync(self, buffer):
         if self.device == "cuda":
-            buffer.writeline(
-                maybe_hipify_code_wrapper(
-                    "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
+            # The fbcode JIT cpp_wrapper CUDA build links only the CUDA driver
+            # (libcuda), not libcudart, so the runtime cudaDeviceSynchronize symbol
+            # is undefined at dlopen -> use the driver-API cuCtxSynchronize there.
+            # On ROCm the driver-context sync hipCtxSynchronize returns
+            # hipErrorNotSupported at runtime, so keep the runtime cudaDeviceSynchronize
+            # (which hipifies to hipDeviceSynchronize and IS linked in the ROCm build).
+            if torch.version.hip is not None:
+                buffer.writeline(
+                    maybe_hipify_code_wrapper(
+                        "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
+                    )
                 )
-            )
+            else:
+                buffer.writeline("CUDA_DRIVER_CHECK(cuCtxSynchronize());")
             return
 
         raise NotImplementedError(

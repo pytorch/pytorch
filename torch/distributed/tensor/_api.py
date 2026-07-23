@@ -14,6 +14,7 @@ import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
+from torch._logging import LazyString
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import (
     _mesh_resources,
@@ -30,6 +31,7 @@ from torch.distributed.tensor._utils import (
     assert_no_mixed_partial_types,
     compute_global_tensor_info,
     compute_local_shape_and_global_offset,
+    ExplicitRedistributionContext,
     normalize_to_torch_size,
 )
 from torch.distributed.tensor.placement_types import (
@@ -329,6 +331,13 @@ class _FromTorchTensor(torch.autograd.Function):
                 normalized_placements,
                 tensor_meta=grad_output._spec.tensor_meta,
             )
+            ExplicitRedistributionContext.observe_redistribution(
+                current_spec,
+                target_spec,
+                LazyString(
+                    lambda: "Implicit redistribution occurred in DTensor.from_local backward"
+                ),
+            )
             local_tensor = grad_output._local_tensor
             output = redistribute_local_tensor(
                 local_tensor,
@@ -458,8 +467,11 @@ class DTensor(torch.Tensor):
         Return a stable hash for AOT autograd caching.
         [See note: Tensor subclass stable hashing for AOT autograd cache]
         """
-        # Combine spec's stable hash with requires_grad
-        cache_data = self._spec._stable_hash() + str(self.requires_grad)
+        # Include local tensor device so different ranks produce distinct keys.
+        # AOTAutogradCachePickler has no device_id_agnostic normalization (unlike
+        # FxGraphCachePickler), so ranks sharing a disk cache need separate entries.
+        device = str(self._local_tensor.device)
+        cache_data = self._spec._stable_hash() + str(self.requires_grad) + device
         return hashlib.blake2b(cache_data.encode(), digest_size=16).hexdigest()
 
     def __coerce_tangent_metadata__(self):
