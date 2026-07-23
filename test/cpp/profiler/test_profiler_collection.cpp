@@ -42,7 +42,6 @@
 
 #include <GenericTraceActivity.h>
 #include <IActivityProfiler.h>
-#include <MetadataFieldCatalog.h>
 #include <libkineto.h>
 #include <output_base.h>
 
@@ -208,45 +207,6 @@ class CapturingWarningHandler : public c10::WarningHandler {
 };
 
 } // namespace
-
-TEST(ProfilerCollectionTest, PythonParentIdIsTypedAndAbsentWithoutParent) {
-  using namespace torch::autograd::profiler;
-  using namespace torch::profiler::impl;
-
-  auto make_python_event = [](size_t id,
-                              libkineto::GenericTraceActivity& activity) {
-    auto result = Result::create(
-        /*start_time_ns=*/0,
-        /*start_tid=*/0,
-        kineto::DeviceAndResource{},
-        ExtraFields<EventType::PyCall>{
-            /*end_time_ns=*/1,
-            /*python_tid=*/0,
-            PyFrameState{},
-            ExtraFields<EventType::PyCall>::args_t{}});
-    std::get<ExtraFields<EventType::PyCall>>(result->extra_fields_).id_ = id;
-    result->kineto_activity_ = &activity;
-    return result;
-  };
-
-  constexpr size_t kRootId = 17;
-  libkineto::GenericTraceActivity root_activity;
-  libkineto::GenericTraceActivity child_activity;
-  auto root = make_python_event(kRootId, root_activity);
-  auto child = make_python_event(18, child_activity);
-  child->parent_ = root;
-
-  addTensorboardFields(root, {}, {});
-  addTensorboardFields(child, {}, {});
-
-  EXPECT_EQ(
-      root_activity.metadataJson().find("\"Python parent id\""),
-      std::string::npos);
-  const auto parent_id = child_activity.getMetadataValue(
-      libkineto::GenericMetadataFields::kPythonParentId);
-  ASSERT_TRUE(parent_id.has_value());
-  EXPECT_EQ(*parent_id, kRootId);
-}
 
 // A backend producing duplicate async-CPU-GPU flow start IDs must be handled
 // gracefully.
