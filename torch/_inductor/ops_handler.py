@@ -256,6 +256,16 @@ class OpsHandler(Generic[T]):
         """
         raise NotImplementedError
 
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: T,
+        mask: T,
+    ) -> None:
+        """Store ``value`` only where ``mask`` is true."""
+        raise NotImplementedError
+
     # TODO: Better explain how the "collective" semantics of these ops;
     # remember that the input value is a scalar, you can't reduce on it in the
     # traditional sense!
@@ -1209,6 +1219,9 @@ class SimpleCSEHandler(WrapperHandler):
         return super().indirect_indexing(*args, **kwargs)  # type: ignore[misc]
 
     def store(self, *args, **kwargs) -> None:
+        raise NotImplementedError("store not implemented")
+
+    def masked_store(self, *args, **kwargs) -> None:
         raise NotImplementedError("store not implemented")
 
     def store_reduction(self, *args, **kwargs) -> None:

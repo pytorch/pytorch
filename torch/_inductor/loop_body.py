@@ -37,6 +37,23 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+class _MaskStoresHandler(WrapperHandler):
+    def __init__(self, inner: OpsHandler[Any], mask: Any) -> None:
+        super().__init__(inner)
+        self.mask = mask
+
+    def store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: Any,
+        mode: Any = None,
+    ) -> None:
+        if mode is not None:
+            raise AssertionError("masked store expansion requires a plain store")
+        self._inner.masked_store(name, index, value, self.mask)
+
+
 class InterpreterShim(torch.fx.Interpreter):
     @staticmethod
     @functools.cache
@@ -274,7 +291,21 @@ class LoopBody:
         Expand node on `dimension` to `new_range` and rely on index modular to avoid
         out-of-boundary access.
         """
+        return self._expand_dimension_for_pointwise_node(
+            dimension, new_range, mask_stores=False
+        )
 
+    def expand_dimension_for_pointwise_node_with_masked_stores(
+        self, dimension: int, new_range: int
+    ) -> LoopBody:
+        """Expand a dimension while masking writes outside its original range."""
+        return self._expand_dimension_for_pointwise_node(
+            dimension, new_range, mask_stores=True
+        )
+
+    def _expand_dimension_for_pointwise_node(
+        self, dimension: int, new_range: int, *, mask_stores: bool
+    ) -> LoopBody:
         old_body = self
         old_sizes = self.sizes
 
@@ -300,8 +331,17 @@ class LoopBody:
             reduce_idx = index[len(iter_size) :]
 
             new_iter_idx = list(iter_idx)
-            new_iter_idx[dimension] = Mod(iter_idx[dimension], original_range)
 
+            if mask_stores:
+                handler = V.get_ops_handler()
+                mask = handler.lt(
+                    handler.index_expr(iter_idx[dimension], torch.int64),
+                    handler.index_expr(original_range, torch.int64),
+                )
+                with V.set_ops_handler(_MaskStoresHandler(handler, mask)):
+                    return old_body(new_iter_idx, reduce_idx)
+
+            new_iter_idx[dimension] = Mod(iter_idx[dimension], original_range)
             return old_body(new_iter_idx, reduce_idx)
 
         loop_body = LoopBody(
@@ -757,6 +797,13 @@ class CaptureIndexing(WrapperHandler):
             index, MemoryUsageType.STORE, buffer_name=name, mode=mode
         )
         return self._inner.store(name, index, value, mode)
+
+    def masked_store(self, name, index, value, mask):
+        index = self._simplify(index)
+        index = self._add_index(
+            index, MemoryUsageType.STORE, buffer_name=name, mode=None
+        )
+        return self._inner.masked_store(name, index, value, mask)
 
     def store_reduction(self, name, index, value):
         index = self._simplify(index)

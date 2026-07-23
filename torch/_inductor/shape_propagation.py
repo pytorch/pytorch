@@ -116,6 +116,15 @@ class ShapePropagationOpsHandler:
         return None
 
     @staticmethod
+    def masked_store(
+        name: str,
+        index: int,
+        value: ShapeArg,
+        mask: ShapeArg,
+    ) -> None:
+        return None
+
+    @staticmethod
     def to_dtype(
         value: ShapeVar,
         dtype: torch.dtype,
