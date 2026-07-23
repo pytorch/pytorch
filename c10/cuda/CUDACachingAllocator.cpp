@@ -78,6 +78,16 @@ namespace cuda::CUDACachingAllocator {
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
+#if defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
+static int get_self_pid() {
+#ifdef _WIN32
+  return _getpid();
+#else
+  return getpid();
+#endif // _WIN32
+}
+#endif // defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
+
 namespace Native {
 
 //
@@ -438,6 +448,11 @@ struct ExpandableSegment {
       return rangeFromHandles(begin, end);
     }
 
+#ifdef _WIN32
+    // No Win32 IPC handle type implemented; share() still errors clearly
+    // for cross-process use.
+    constexpr bool enable_ipc_handles = false;
+#else
     // In fbcode, IPC handle types for expandable segments are disabled by
     // default because some jobs were failing (see
     // https://github.com/pytorch/pytorch/pull/132890), but can be explicitly
@@ -452,6 +467,7 @@ struct ExpandableSegment {
     static const bool enable_ipc_handles =
         c10::utils::check_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC")
             .value_or(default_enable_ipc);
+#endif // _WIN32
 
     // Determine IPC handle type upfront based on config and device capability.
     // Resolve once per segment lifetime: fromShared() pre-sets handle_type_
@@ -584,11 +600,7 @@ struct ExpandableSegment {
     // thereby ensuring that the handle can be correctly matched in
     // ipcMemHandle_to_devptr.
     ShareHeader header{};
-#ifdef _WIN32
-    header.pid = _getpid();
-#else
-    header.pid = getpid();
-#endif
+    header.pid = get_self_pid();
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
     header.handle_type = handle_type_;
@@ -755,6 +767,9 @@ struct ExpandableSegment {
 #ifdef USE_ROCM
       TORCH_INTERNAL_ASSERT(
           false, "expandable segment with fabric handle not supported");
+#elif defined(_WIN32)
+      TORCH_CHECK(
+          false, "IPC expandable segments are not supported on Windows");
 #else
       for (auto i : c10::irange(header.num_handles)) {
         (void)i;
@@ -1354,7 +1369,7 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
          NVML_ERROR_INSUFFICIENT_SIZE) {
     procs.resize(size);
   }
-  unsigned int self_pid = getpid();
+  unsigned int self_pid = get_self_pid();
   std::stringstream ss;
   TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   ss << "";
