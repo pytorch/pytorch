@@ -398,7 +398,6 @@ _rocm_core_libs: list[str] = [
     "libamdhip64.so",
     "libhiprtc.so",
     "librocm-core.so",
-    "librocm_smi64.so",
     "libroctx64.so",
     "libroctracer64.so",
     "librocblas.so",
