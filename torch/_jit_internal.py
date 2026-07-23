@@ -550,7 +550,7 @@ def get_type_hint_captures(fn):
 
         # Insert {arg_annotation_str: type} into annotation_to_type if possible. One reason arg_name may not
         # be present in name_to_type is that the annotation itself is a string and not a type object
-        # (common for self-refential annotations in classes). Once again, let ScriptTypeParser handle this.
+        # (common for self-referential annotations in classes). Once again, let ScriptTypeParser handle this.
         arg_name = arg.arg
         if arg_name in name_to_type:
             annotation_to_type[arg_annotation_str] = name_to_type[arg_name]
@@ -673,7 +673,7 @@ class FunctionModifiers:
     UNUSED = "unused (ignored and replaced with raising of an exception)"
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
     EXPORT = "export (compile this function even if nothing calls it)"
-    DEFAULT = "default (compile if called from a exported function / forward)"
+    DEFAULT = "default (compile if called from an exported function / forward)"
     COPY_TO_SCRIPT_WRAPPER = (
         "if this method is not scripted, copy the python method onto the scripted model"
     )

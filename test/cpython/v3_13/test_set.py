@@ -1407,7 +1407,8 @@ class _TestSubsets:
         for case in "!=", "==", "<", "<=", ">", ">=":
             expected = case in self.cases
             # Test the binary infix spelling.
-            result = eval("x" + case + "y", locals())
+            with torch._dynamo.error_on_graph_break(False):
+                result = eval("x" + case + "y", locals())
             self.assertEqual(result, expected)
             # Test the "friendly" method-name spelling, if one exists.
             if case in _TestSubsets.case2method:
@@ -1417,7 +1418,8 @@ class _TestSubsets:
 
             # Now do the same for the operands reversed.
             rcase = _TestSubsets.reverse[case]
-            result = eval("y" + rcase + "x", locals())
+            with torch._dynamo.error_on_graph_break(False):
+                result = eval("y" + rcase + "x", locals())
             self.assertEqual(result, expected)
             if rcase in _TestSubsets.case2method:
                 method = getattr(y, _TestSubsets.case2method[rcase])

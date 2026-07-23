@@ -53,7 +53,7 @@ class _LazyProtocol(Protocol):
 class LazyModuleMixin:
     r"""A mixin for modules that lazily initialize parameters, also known as "lazy modules".
 
-    .. warning:
+    .. warning::
         Lazy modules are an experimental new feature under active development,
         and their API is likely to change.
 
@@ -220,7 +220,7 @@ class LazyModuleMixin:
             if key in state_dict and param is not None:
                 input_param = state_dict[key]
                 if is_lazy(param):
-                    # The current parameter is not initialized but the one being loaded one is
+                    # The current parameter is not initialized but the one being loaded is
                     # create a new parameter based on the uninitialized one
                     if not is_lazy(input_param):
                         with torch.no_grad():

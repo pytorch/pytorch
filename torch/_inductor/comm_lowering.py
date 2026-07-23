@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 # within these allocations.
 #
 # To support all different mechanisms with optimal results, we aim to satisfy
-# the strictest requirement for this family of optimizations - we ensures that
+# the strictest requirement for this family of optimizations - we ensure that
 # every collective op invocation is guaranteed to operate on the same
 # allocation, at the same offset, in every iteration.
 #
@@ -95,7 +95,8 @@ def realize_as_comm_buffer(
     """
     x.realize()
     buffer = _get_data(x)
-    assert isinstance(buffer, ir.Buffer)
+    if not isinstance(buffer, ir.Buffer):
+        raise AssertionError(f"expected an `ir.Buffer`, got {type(buffer)}")
 
     layout = buffer.get_output_spec()
     if isinstance(layout, ir.CommBufferLayout):
@@ -126,7 +127,10 @@ def _get_data(x: ir.TensorBox) -> ir.IRNode:
     if isinstance(x.data, ir.BaseView):
         # TensorBox -> *View -> StorageBox -> IRNode
         node = x.data.unwrap_view()
-        assert isinstance(node, (ir.BaseView, ir.MutableBox))
+        if not isinstance(node, (ir.BaseView, ir.MutableBox)):
+            raise AssertionError(
+                f"expected an `ir.BaseView` or `ir.MutableBox`, got {type(node)}"
+            )
         return node.data
     elif isinstance(x.data, ir.StorageBox):
         # TensorBox -> StorageBox -> IRNode
@@ -185,7 +189,8 @@ def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
 
 def _create_out_of_place(kernel, inputs, *args) -> ir.IRNode:
     node = ir._CollectiveKernel.create_out_of_place(kernel, inputs, *args)
-    assert isinstance(node, ir.IRNode)
+    if not isinstance(node, ir.IRNode):
+        raise AssertionError(f"expected an `ir.IRNode`, got {type(node)}")
     return ir.TensorBox.create(node)
 
 
@@ -421,13 +426,7 @@ def register_comm_lowerings():
         tensors = [ir.ExternKernel.require_contiguous(t) for t in tensors]
         kernel = c10d.batch_p2p_ops.default
         with V.graph.fake_mode:
-            (
-                example_output,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                unbacked_bindings,
-            ) = ir._CollectiveKernel.process_kernel(
+            result = ir._CollectiveKernel.process_kernel(
                 kernel,
                 op_list,
                 peer_list,
@@ -435,13 +434,18 @@ def register_comm_lowerings():
                 tensors,
                 group_name,
             )
-        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+        example_output = result.example_output
+        tensor_args = result.tensor_args
+        non_tensor_args = result.non_tensor_args
+        unflatten_args = result.unflatten_args
+        if result.unbacked_bindings:
+            raise AssertionError(f"{kernel} {result.unbacked_bindings}")
         for op, tensor_arg in zip(op_list, tensor_args):
             tensor_arg.realize()
             if op == "irecv":
                 V.graph.mark_buffer_mutated(tensor_arg.get_name())
 
-        device = tensor_args[0].get_device()
+        device = tensor_args[0].get_device_or_error()
         packed = ir._CollectiveKernel(
             ir.MultiOutputLayout(device=device),
             kernel,
@@ -544,6 +548,34 @@ def register_symm_mem_lowerings():
                 ir.CommBufferType.SYMM_MEM,
                 group_name,  # type: ignore[arg-type]
             )
+
+    def _create_low_contention_ag_out(
+        kernel: torch._ops.OpOverload,
+        inp: ir.TensorBox,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
+    ) -> ir.TensorBox:
+        from torch.distributed import distributed_c10d as c10d
+
+        inp.realize()
+        group_size = c10d._get_group_size_by_name(group_name)
+        out_size = [inp.get_size()[0] * group_size, *inp.get_size()[1:]]
+        layout = ir.CommBufferLayout(
+            ir.FixedLayout(
+                device=inp.get_device_or_error(),
+                dtype=inp.get_dtype(),
+                size=out_size,
+            ),
+            ir.CommBufferType.SYMM_MEM,
+            group_name,
+        )
+        return ir.TensorBox.create(
+            ir.ExternKernelOut(
+                layout=layout,
+                inputs=[inp],
+                constant_args=(group_name,),
+                op_overload=kernel,
+            )
+        )
 
     @register_lowering(symm_mem.one_shot_all_reduce)
     def _symm_mem_one_shot_all_reduce(
@@ -879,6 +911,42 @@ def register_symm_mem_lowerings():
             symm_mem._low_contention_all_gather.default,
             inp,
             group_name,
+        )
+
+    @register_lowering(symm_mem._low_contention_all_gather_ce_multicast)
+    def _symm_mem_low_contention_all_gather_ce_multicast(
+        inp: ir.TensorBox,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
+    ):
+        return _create_low_contention_ag_out(
+            symm_mem._low_contention_all_gather_ce_multicast_out.default,
+            inp,
+            group_name,
+        )
+
+    @register_lowering(symm_mem._low_contention_all_gather_ce_multicast_out)
+    def _symm_mem_low_contention_all_gather_ce_multicast_out(
+        inp: ir.TensorBox,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
+        out: ir.TensorBox,
+    ):
+        inp.realize()
+        if can_realize_as_comm_buffer(out, ir.CommBufferType.SYMM_MEM):
+            realize_as_comm_buffer(out, ir.CommBufferType.SYMM_MEM, group_name)
+        else:
+            raise RuntimeError(
+                "_low_contention_all_gather_ce_multicast_out requires an "
+                "Inductor-owned output buffer that can be realized as symmetric "
+                "memory; this indicates an invalid lowering."
+            )
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem._low_contention_all_gather_ce_multicast_out.default,
+                inp,
+                group_name,
+                out,
+            ),
         )
 
     @register_lowering(symm_mem._low_contention_reduce_scatter)
