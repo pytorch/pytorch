@@ -1461,6 +1461,17 @@ class DisableContext(_TorchDynamoContext):
         # The common (non-export) toggle-and-call is done entirely in C; the
         # rare export path falls back to _disable_wrapper_export_call below,
         # which does the fx_traceback.annotate wrapping.
+        #
+        # DisableWrapper does not carry a callback: the stance fallback
+        # (_disable_wrapper_stance_call) assumes disable == no callback and
+        # computes _callback_from_stance(None). Enforce that invariant here so a
+        # future DisableContext that carries a real callback fails loudly instead
+        # of silently applying the wrong stance callback.
+        if self.callback is not None:
+            raise AssertionError(
+                "DisableContext.callback must be None; DisableWrapper assumes "
+                "disable installs no callback"
+            )
         _fn = torch._C._dynamo.eval_frame.DisableWrapper(fn)
 
         # Under some circumstances (e.g. precompile) we can end up calling @disable
@@ -1512,6 +1523,35 @@ def _disable_wrapper_export_call(
                 }
             ):
                 return fn(*args, **kwargs)
+        return fn(*args, **kwargs)
+    finally:
+        if prior is not None:
+            set_eval_frame(prior)
+
+
+def _disable_wrapper_stance_call(
+    fn: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
+    # Fallback for DisableWrapper (torch._C._dynamo.eval_frame) when a non-default
+    # compile stance is active. The C tp_call handles the common default stance
+    # inline, where the disable callback always resolves to "off"; the rarer
+    # stances are routed here so the stance/disable contract is computed in one
+    # place rather than assumed in C. DisableWrapper carries no callback because
+    # disable installs none (DisableContext.callback is None by construction; see
+    # the assert in DisableContext.__call__), so the stance-derived callback is
+    # _callback_from_stance(None): most stances resolve it to None (off, nothing
+    # to install beyond the already-cleared callback), but e.g.
+    # eager_on_recompile resolves to False (run-only) and must be installed
+    # around the body.
+    prior = set_eval_frame(None)
+    try:
+        callback = _callback_from_stance(None)
+        if callback is not None:
+            _maybe_set_eval_frame(callback)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                set_eval_frame(None)
         return fn(*args, **kwargs)
     finally:
         if prior is not None:
