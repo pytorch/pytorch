@@ -1367,18 +1367,15 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   mkdir -p "$TEST_REPORTS_DIR"
 
   test_inductor_set_cpu_affinity
-  local models_perf_target=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu.csv
-  local perf_metric=speedup
-  if [[ -n "${USE_ARC:-}" ]]; then
-    models_perf_target=benchmarks/dynamo/expected_ci_abs_latency_inductor_torchbench_cpu_osdc.csv
-    perf_metric=abs_latency
-  fi
+  # This job always runs on linux.24xl.spr-metal, which ARC maps to the fixed
+  # c7i.metal-24xl instance type in .github/arc.yaml.
+  local models_perf_target=benchmarks/dynamo/expected_ci_abs_latency_inductor_torchbench_cpu_osdc.csv
 
   if [[ ! -r "$models_perf_target" ]]; then
     echo "Missing CPU TorchBench smoketest target file: $models_perf_target" >&2
     return 1
   fi
-  echo "Using CPU TorchBench smoketest $perf_metric targets from $models_perf_target"
+  echo "Using CPU TorchBench smoketest abs_latency targets from $models_perf_target"
   local validation_status=0
   while IFS=',' read -r -a model_cfg
   do
@@ -1412,7 +1409,7 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     # Some models can override this in the target CSV when a tighter band is flaky.
     # Fail on large improvements too so the baseline is updated promptly.
     python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$perf_target" -s "$threshold_scale" \
-      --metric "$perf_metric" --fail-on-improvement \
+      --metric abs_latency --fail-on-improvement \
       || validation_status=$?
   done < "$models_perf_target"
   return "$validation_status"

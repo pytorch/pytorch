@@ -79,6 +79,7 @@ def check_perf_csv(
 
     lower_bound, upper_bound = _target_bounds(threshold, threshold_scale)
     if metric == "speedup":
+        # Keep the legacy one-sided check's multiply-only scale semantics.
         regression_bound = (
             lower_bound if fail_on_improvement else threshold * threshold_scale
         )
