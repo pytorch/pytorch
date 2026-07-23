@@ -257,6 +257,12 @@ class FSDPParamGroup:
         # Holds the reshard-after-forward CUDA event when resharding to a
         # different world size, which should be waited on in the next unshard
         self._reshard_after_forward_event: torch.Event | None = None
+        # Tracks whether post_backward() has already reduced this iter's
+        # grads. Used to avoid a second reduce-scatter when the root's
+        # queued post_backward_final_callback fires after the AOT-compiled
+        # backward has already performed the reduce (see
+        # https://github.com/pytorch/pytorch/issues/142358 for context).
+        self._already_reduced_this_iter: bool = False
 
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
@@ -620,6 +626,13 @@ class FSDPParamGroup:
                 and self._training_state == TrainingState.FORWARD  # partial path taken
             )
             self._training_state = TrainingState.POST_BACKWARD
+            if self._already_reduced_this_iter:
+                # Guard against double-reduce: e.g. when a queued root
+                # callback fires post_backward after the AOT-compiled
+                # backward already reduced this iter (mixed eager-parent /
+                # compiled-child execution under module.compile()).
+                return
+            self._already_reduced_this_iter = True
             with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
                 for fsdp_param in self.fsdp_params:
                     fsdp_param.accumulate_unsharded_grad_if_needed()
@@ -806,6 +819,7 @@ class FSDPParamGroup:
                 work.wait()
             self._all_gather_result = None
         self._post_forward_indices.clear()
+        self._already_reduced_this_iter = False
 
     def _wait_for_post_backward(self):
         if self._post_reduce_event is not None:
