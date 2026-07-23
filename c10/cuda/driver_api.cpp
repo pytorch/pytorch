@@ -42,7 +42,7 @@ void* nvml_dlsym(void* handle, const char* name) {
 const char* nvml_dlerror() {
   return dlerror();
 }
-#endif
+#endif // _WIN32
 
 void* get_symbol(const char* name, int version);
 

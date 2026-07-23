@@ -84,9 +84,9 @@ static int get_self_pid() {
   return _getpid();
 #else
   return getpid();
-#endif
+#endif // _WIN32
 }
-#endif
+#endif // defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
 
 namespace Native {
 
@@ -467,7 +467,7 @@ struct ExpandableSegment {
     static const bool enable_ipc_handles =
         c10::utils::check_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC")
             .value_or(default_enable_ipc);
-#endif
+#endif // _WIN32
 
     // Determine IPC handle type upfront based on config and device capability.
     // Resolve once per segment lifetime: fromShared() pre-sets handle_type_
