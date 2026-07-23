@@ -7653,9 +7653,13 @@ def _div_rn(a, b):
 
 
 def _floor_div_floating(a, b):
-    nan = constant_like(float("nan"))(a)
-    neg_one = constant_like(-1.0)(a)
-    zero = constant_like(0.0)(a)
+    # Either operand may be a python scalar (e.g. torch.floor_divide(scalar,
+    # tensor)); constant_like needs a tensor for dtype/device/size, so seed the
+    # constants from whichever operand is a tensor.
+    ref = a if isinstance(a, (TensorBox, IRNode)) else b
+    nan = constant_like(float("nan"))(ref)
+    neg_one = constant_like(-1.0)(ref)
+    zero = constant_like(0.0)(ref)
 
     def fn(a, b, nan, neg_one, zero):
         quotient = ops.div_rn(a, b)
@@ -9006,7 +9010,22 @@ def cond(
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.Conditional.create(pred, true_fn, false_fn, operands)
+    # The branches are reordered to [false_fn, true_fn]
+    # because during codegen the pred is converted to an integer with True -> 1 and False -> 0.
+    # When iterating over the branches the false_fn is associated index 0.
+    result = ir.Switch.create(pred, [false_fn, true_fn], operands, is_cond=True)
+    return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
+
+
+@register_lowering(torch.ops.higher_order.switch, type_promotion_kind=None)
+def switch(index, branches, operands) -> list[ir.TensorBox | ir.ShapeAsConstantBuffer]:
+    # TODO: cudagraph support for torch.switch is not yet implemented; always disable.
+    msg = "control flow operator: torch.switch."
+    if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+        msg = f"{msg} Found from : \n {stack_trace}"
+    V.graph.disable_cudagraphs_reason = msg
+
+    result = ir.Switch.create(index, branches, operands)
     return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
 
 
@@ -9339,15 +9358,6 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
-    # An effectful op may retain its tensor inputs in state that inductor cannot
-    # see (e.g. pushing a tensor onto a torchbind queue), so those input buffers
-    # must outlive the op and must never be reused for another buffer.
-    if effect_type:
-        for arg in pytree.tree_leaves((args, kwargs)):
-            if isinstance(arg, TensorBox):
-                arg.realize()
-                V.graph.never_reuse_buffers.add(arg.get_name())
-
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9377,9 +9387,7 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = (
-                    new_op.get_operation_name()
-                )  # pyrefly: ignore[missing-attribute]
+                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (
