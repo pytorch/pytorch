@@ -1752,7 +1752,8 @@ def _build_dynamo_python_source(compiled: PrecompiledModule) -> str:
     parts.append("# " + "=" * 70)
     if capture.gm is None:
         # fn produced no tensor compute: the transformed bytecode is the whole artifact
-        # (it references no compiled subgraph), so there is nothing to inline here.
+        # (it references no compiled subgraph), so there is nothing to inline here; the
+        # driver rehydrates that bytecode below with BACKEND_ID None (no subgraph).
         parts.append("# 1. (no compiled subgraph: fn produced no tensor compute)")
         parts.append("# " + "=" * 70)
     elif compiled._backend == "inductor":
@@ -1896,7 +1897,8 @@ class PrecompiledModule:
 
     def _compile(self, args: tuple[object, ...]) -> None:
         # tracer selects the capture front-end (orthogonal to backend); dispatch here,
-        # the single capture-dispatch point, before running fn.
+        # the single capture-dispatch point, before running fn -- so a dynamo capture
+        # never falls through to the make_fx path below with the wrong front-end.
         if self._tracer == "dynamo":
             self._compile_dynamo(args)
             return
@@ -2425,7 +2427,8 @@ class _PrecompileApi:
         meta = _parse_artifact_metadata(python_code)
         backend = cast(str, meta["BACKEND"])
         # TRACER is absent on artifacts predating the dynamo tracer, so treat its absence
-        # as make_fx (matching _parse_artifact_metadata and the cache-envelope default).
+        # as make_fx (matching _parse_artifact_metadata and the cache-envelope default);
+        # this keeps the pairing check below correct for older make_fx python_code.
         tracer = cast(str, meta.get("TRACER", "make_fx"))
 
         # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
@@ -2458,7 +2461,8 @@ class _PrecompileApi:
                         "came from different precompile() calls."
                     )
                 # A tracer tag was added alongside the dynamo tracer; treat its absence as
-                # make_fx so an older make_fx cache still pairs with its python_code.
+                # make_fx so an older make_fx cache still pairs with its python_code. A
+                # differing tag means a wrong (code, cache) pairing, so hard-fail.
                 if blob.get("tracer", "make_fx") != tracer:
                     raise PrecompileError(
                         f"cache tracer {blob.get('tracer', 'make_fx')!r} does not match "

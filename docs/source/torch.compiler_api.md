@@ -145,8 +145,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        calling conventions are not supported.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
-       paired with a different ``python_code`` (mismatched ``backend`` tag or
-       ``code_hash``), or if a runtime call violates the precompile contract.
+       paired with a different ``python_code`` (mismatched ``backend`` tag, ``tracer``
+       tag, or ``code_hash``), or if a runtime call violates the precompile contract.
 
 .. autoexception:: torch.compiler.PrecompileError
 ```
