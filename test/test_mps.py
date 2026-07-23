@@ -908,6 +908,79 @@ class TestMPS(TestCaseMPS):
         kl_div = F.kl_div(q.log(), p, reduction='sum').item()
         self.assertLess(kl_div, 0.03)
 
+    def test_stream_base(self):
+        s1 = torch._C._MPSStreamBase()
+        s2 = torch._C._MPSStreamBase()
+        self.assertNotEqual(s1, s2)
+        self.assertNotEqual(s2.stream_id, s1.stream_id)
+        self.assertEqual(s1.device.type, 'mps')
+        self.assertEqual(s2.device.type, 'mps')
+
+        def concurrent_sine_loop(a1, a2, s1=None, s2=None, n=100):
+            r1 = a1
+            r2 = a2
+
+            for _ in range(n):
+                torch._C._mps_setStream(s1)
+                r1 = torch.sin(r1)
+                torch._C._mps_setStream(s2)
+                r2 = torch.sin(r2)
+
+            return r1, r2
+
+        try:
+            torch._C._mps_setStream(None)
+            a1 = torch.randn(100, device='mps')
+            a2 = torch.randn(100, device='mps')
+            torch.mps.synchronize()
+
+            r1, r2 = concurrent_sine_loop(a1, a2, s1, s2)
+            s1.synchronize()
+            s2.synchronize()
+            torch._C._mps_setStream(None)
+            r1_check, r2_check = concurrent_sine_loop(a1, a2, s1=None, s2=None)
+            torch.mps.synchronize()
+
+            self.assertEqual(r1, r1_check)
+            self.assertEqual(r2, r2_check)
+
+        finally:
+            torch._C._mps_setStream(None)
+            torch.mps.synchronize()
+            s1.synchronize()
+            s2.synchronize()
+            torch.mps.empty_cache()
+
+    def test_buffer_reuse_per_stream(self):
+        def make_and_free_get_ptr(stream):
+            torch._C._mps_setStream(stream)
+            t = torch.randn(1 << 16, device='mps')
+            stream.synchronize()
+            ptr = t.data_ptr()
+            del t
+            stream.synchronize()
+            return ptr
+
+        s1 = torch._C._MPSStreamBase()
+        s2 = torch._C._MPSStreamBase()
+
+        try:
+            # Same stream: the exact same buffer should be reused
+            ptr_s1_first = make_and_free_get_ptr(s1)
+            ptr_s1_second = make_and_free_get_ptr(s1)
+            self.assertEqual(ptr_s1_second, ptr_s1_first)
+
+            # Different stream: must not reuse s1's freed buffer
+            ptr_s2 = make_and_free_get_ptr(s2)
+            self.assertNotEqual(ptr_s2, ptr_s1_second)
+
+        finally:
+            torch._C._mps_setStream(None)
+            torch.mps.synchronize()
+            s1.synchronize()
+            s2.synchronize()
+            torch.mps.empty_cache()
+
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
