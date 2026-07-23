@@ -1,5 +1,5 @@
 diff --git a/gemm_act.py b/gemm_act.py
-index 8fb1d67..327fa63 100644
+index f6bbf7f..a4fee8f 100644
 --- a/gemm_act.py
 +++ b/gemm_act.py
 @@ -491,0 +492,85 @@ class GemmActSm120(GemmActMixin, GemmSm120):
@@ -141,7 +141,12 @@ index 8fb1d67..327fa63 100644
 +                "grouped_n_contract does not compose with auxiliary outputs"
 +            )
 +        gemm_cls_name = "grouped_n_contract"
-@@ -1034,0 +1162,10 @@ def gemm_act(
+@@ -957,0 +1085,4 @@ def gemm_act(
++    if main_output_transform_group is not None and any(
++        tensor.stride(-1) != 1 for tensor in postact_tensors
++    ):
++        raise NotImplementedError("grouped_n_contract requires PostAct to be n-major")
+@@ -1034,0 +1166,10 @@ def gemm_act(
 +    if main_output_transform_group is not None:
 +        if device_capacity[0] == 12:
 +            raise NotImplementedError(
@@ -152,5 +157,5 @@ index 8fb1d67..327fa63 100644
 +                "grouped_n_contract groups larger than 2 are currently validated "
 +                "only on SM100"
 +            )
-@@ -1158,0 +1296 @@ def gemm_act(
+@@ -1158,0 +1300 @@ def gemm_act(
 +        0 if main_output_transform_group is None else main_output_transform_group,

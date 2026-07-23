@@ -241,9 +241,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         name_fn=lambda case: case[0],
     )
     def test_fast_math_decompositions_preserve_type_promotion(self, case):
-        from torch._higher_order_ops.flex_gemm import (
-            flex_gemm_body_decomposition_table,
-        )
+        from torch._higher_order_ops.flex_gemm import flex_gemm_body_decomposition_table
         from torch._inductor.decomposition import decompositions
         from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -2969,6 +2967,30 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     if node in analysis.local_reduce.grouped_tensors
                 ]
                 self.assertEqual(registered, split_nodes if expected_transform else [])
+
+    def test_grouped_main_output_rejects_column_major_out(self):
+        """Reject layouts that the grouped tile-store descriptor cannot represent."""
+        from torch._vendor.quack.gemm_act import gemm_act
+
+        a = torch.empty(4, 8)
+        b = torch.empty(8, 16)
+        out = torch.empty_strided((4, 8), (1, 4))
+        with self.assertRaisesRegex(NotImplementedError, "PostAct to be n-major"):
+            gemm_act(
+                a,
+                b,
+                None,
+                None,
+                out,
+                None,
+                None,
+                128,
+                128,
+                1,
+                1,
+                tensor_epilogue_fn=lambda acc: acc,
+                main_output_transform_group=2,
+            )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
