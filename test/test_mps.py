@@ -9695,6 +9695,115 @@ class TestMPS(TestCaseMPS):
         print(f"Recommended Max Memory : {max_memory / 1024 ** 3} GB")
         self.assertGreater(max_memory, 0)
 
+    def _reset_solo_allocator(self):
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:0")
+        torch.mps.empty_cache()
+        self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
+        self.addCleanup(torch.mps.empty_cache)
+
+    def test_enable_reduces_pool_growth(self):
+        """Solo allocation should not trigger a 1 GB heap block."""
+        self._reset_solo_allocator()
+        baseline = torch.mps.driver_allocated_memory()
+
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
+        t = torch.zeros(50 * 1024 * 1024 // 4, device='mps')  # 50 MB
+        grow = torch.mps.driver_allocated_memory() - baseline
+
+        self.assertLess(grow, 200 * 1024 * 1024,
+            f"Expected < 200 MB pool growth, got {grow / 1024**2:.0f} MB")
+        del t
+
+    def test_reuse_on_same_size(self):
+        """Freed solo buffer should be recycled on next same-size request."""
+        self._reset_solo_allocator()
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
+        SIZE = 30 * 1024 * 1024 // 4  # 30 MB
+
+        t1 = torch.zeros(SIZE, device='mps')
+        del t1
+        gc.collect()
+
+        pool_after_free = torch.mps.driver_allocated_memory()
+        t2 = torch.zeros(SIZE, device='mps')
+        pool_after_reuse = torch.mps.driver_allocated_memory()
+
+        self.assertLess(abs(pool_after_reuse - pool_after_free), 10 * 1024 * 1024,
+            "Same-size second allocation should reuse cached solo buffer")
+        del t2
+
+    def test_empty_cache_releases_solo_buffers(self):
+        """empty_cache() should drain the solo free list."""
+        self._reset_solo_allocator()
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
+        torch.mps.empty_cache()
+        baseline = torch.mps.driver_allocated_memory()
+
+        t = torch.zeros(50 * 1024 * 1024 // 4, device='mps')
+        del t
+        gc.collect()
+        torch.mps.empty_cache()
+
+        after = torch.mps.driver_allocated_memory()
+        self.assertAlmostEqual(after, baseline, delta=10 * 1024 * 1024,
+            msg="Pool should return to baseline after empty_cache")
+
+    def test_tensor_is_functional(self):
+        """Solo-allocated tensor should work with all standard ops."""
+        self._reset_solo_allocator()
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
+        N = 30 * 1024 * 1024 // 4
+        t = torch.zeros(N, device='mps')
+        self.assertEqual(t.device.type, 'mps')
+        self.assertEqual(t.sum().item(), 0.0)
+
+        t.fill_(1.0)
+        self.assertAlmostEqual(t.sum().item(), float(N), delta=1.0)
+
+        t2 = torch.ones(N, device='mps', requires_grad=True)
+        loss = (t2 * 2).sum()
+        loss.backward()
+        self.assertAlmostEqual(t2.grad.sum().item(), float(N) * 2, delta=1.0)
+
+    def test_solo_respects_memory_limit(self):
+        """Solo allocation honors the high-watermark limit and raises a clean OOM
+        RuntimeError instead of returning a null buffer."""
+        self._reset_solo_allocator()
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
+        self.addCleanup(torch.mps.set_per_process_memory_fraction, 0.0)
+        torch.mps.set_per_process_memory_fraction(0.001)
+        # 10x the limit, and well above the 10 MB solo threshold, so the request
+        # exceeds the watermark regardless of device memory size.
+        n = int(0.01 * torch.mps.recommended_max_memory() / 4)
+        with self.assertRaisesRegex(RuntimeError, "out of memory"):
+            torch.zeros(n, device='mps')
+
+    def test_solo_buffer_is_shared(self):
+        """Solo large buffers are still unified/shared, so shared-buffer paths
+        (non_blocking host copies) work as on the heap path."""
+        self._reset_solo_allocator()
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
+        n = 30 * 1024 * 1024 // 4  # 30 MB, above the threshold
+        src = torch.arange(n, dtype=torch.float32)
+        d = src.to('mps', non_blocking=True)
+        back = d.to('cpu', non_blocking=True)
+        torch.mps.synchronize()
+        self.assertEqual(back, src)
+
+    def test_heap_mode_restored(self):
+        """Setting the threshold to 0 should revert to default 1 GB heap behaviour."""
+        self._reset_solo_allocator()
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:0")
+        torch.mps.empty_cache()
+        baseline = torch.mps.driver_allocated_memory()
+
+        t = torch.zeros(50 * 1024 * 1024 // 4, device='mps')  # 50 MB -> 1 GB heap
+        grow = torch.mps.driver_allocated_memory() - baseline
+        del t
+        self.assertGreater(grow, 900 * 1024 * 1024,
+            "heap mode should still use 1 GB block for large allocation")
+
     def test_host_alias_storage(self):
         n = 1024
         dtype = torch.float32
@@ -17217,6 +17326,7 @@ class TestCommon(TestCase):
             mps_tensor = ones(device)
             cpu_tensor = ones("cpu")
             self.assertEqual(mps_tensor.cpu(), cpu_tensor)
+
 
 class TestMetalLibrary(TestCaseMPS):
     def test_metal_arange(self):

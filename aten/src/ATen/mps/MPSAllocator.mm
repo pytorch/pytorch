@@ -4,6 +4,7 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/mps/MPSAllocator.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/Storage.h>
 #include <c10/util/Logging.h>
 #include <c10/util/env.h>
@@ -25,6 +26,65 @@ uint64_t HeapBlock::heap_counter = 0;
 // actually in use). Lets the registered c10 allocator report readiness via
 // DeviceAllocator::initialized() without forcing Metal initialization.
 static std::atomic<bool> s_mps_allocator_initialized{false};
+
+// MPS-specific allocator settings, parsed from the shared accelerator config
+// (PYTORCH_ALLOC_CONF, or torch._C._accelerator_setAllocatorSettings), the same
+// way CUDAAllocatorConfig registers a device parser hook. The only MPS key is
+// `mps_large_alloc_threshold_mb`: tensors at or above this size get a dedicated
+// MTLBuffer (the "solo" path) instead of MTLHeap sub-allocation. 0 (the default)
+// disables it.
+class MPSAllocatorConfig {
+ public:
+  static MPSAllocatorConfig& instance() {
+    static MPSAllocatorConfig* s_instance = ([]() {
+      auto* inst = new MPSAllocatorConfig();
+      auto env = c10::utils::get_env("PYTORCH_ALLOC_CONF");
+      if (env.has_value()) {
+        inst->parseArgs(env.value());
+      }
+      return inst;
+    })();
+    return *s_instance;
+  }
+
+  static const std::unordered_set<std::string>& getKeys() {
+    static std::unordered_set<std::string> keys{"mps_large_alloc_threshold_mb"};
+    return keys;
+  }
+
+  size_t solo_threshold_bytes() const {
+    return m_solo_threshold_bytes.load();
+  }
+
+  void parseArgs(const std::string& env) {
+    // Reset to the default (disabled) if the key is not present, matching the
+    // shared AcceleratorAllocatorConfig::parseArgs convention: each settings
+    // string is a full spec, so omitting the key reverts to default.
+    m_solo_threshold_bytes.store(0);
+    c10::CachingAllocator::ConfigTokenizer tokenizer(env);
+    for (size_t i = 0; i < tokenizer.size(); i++) {
+      const auto& key = tokenizer[i];
+      if (key == "mps_large_alloc_threshold_mb") {
+        tokenizer.checkToken(++i, ":");
+        m_solo_threshold_bytes.store(tokenizer.toSizeT(++i) * 1024ull * 1024ull);
+      } else {
+        const auto& shared_keys = c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
+        TORCH_CHECK(
+            shared_keys.find(key) != shared_keys.end(), "Unrecognized key '", key, "' in MPS allocator config.");
+        i = tokenizer.skipKey(i);
+      }
+      if (i + 1 < tokenizer.size()) {
+        tokenizer.checkToken(++i, ",");
+      }
+    }
+  }
+
+ private:
+  MPSAllocatorConfig() = default;
+  std::atomic<size_t> m_solo_threshold_bytes{0};
+};
+
+REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(MPSAllocatorConfig)
 
 void MPSHeapAllocatorImpl::init_allocator() {
   TORCH_CHECK(m_device.hasUnifiedMemory, "MPS backend is only supported on devices with unified memory");
@@ -415,6 +475,80 @@ size_t MPSHeapAllocatorImpl::release_free_heaps(BufferPool& pool, size_t target_
 BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usage, bool allow_in_flight_reuse) {
   TORCH_CHECK(size < m_max_buffer_size, "Invalid buffer size: ", format_size(size));
 
+  // Solo allocator: bypass the heap for large tensors. Sizes are bucketed the
+  // same way as the heap path (get_allocation_size) so a slowly growing
+  // allocation reuses the previous buffer, and the free list is keyed on that
+  // bucketed size.
+  const size_t solo_threshold = MPSAllocatorConfig::instance().solo_threshold_bytes();
+  if (solo_threshold > 0 && size >= solo_threshold) {
+    const size_t alloc_size = get_allocation_size(size, usage);
+    id<MTLBuffer> buf = nil;
+    {
+      std::lock_guard<std::mutex> solo_lock(m_solo_mutex);
+      auto it = m_solo_cache.find(alloc_size);
+      if (it != m_solo_cache.end()) {
+        buf = (id<MTLBuffer>)it->second;
+        m_solo_cache.erase(it);
+      }
+    }
+    if (!buf) {
+      const MTLResourceOptions options = HeapBlock::getOptions(usage);
+      // Honor the high-watermark limit and, on failure, free cached memory and
+      // retry, mirroring the heap path so solo allocations raise the same OOM
+      // error instead of silently returning a null buffer.
+      auto within_limit = [&]() {
+        return m_max_total_allowed_size == std::numeric_limits<size_t>::max() ||
+            current_allocated_size() + alloc_size <= m_max_total_allowed_size;
+      };
+      if (within_limit()) {
+        buf = [m_device newBufferWithLength:alloc_size options:options];
+      }
+      if (!buf) {
+        // release_cached_buffers() syncs the GPU (COMMIT_AND_WAIT), so draining
+        // the solo free list afterwards is safe.
+        release_cached_buffers();
+        release_cached_solo_buffers();
+        if (within_limit()) {
+          buf = [m_device newBufferWithLength:alloc_size options:options];
+        }
+      }
+      if (!buf) {
+        if (m_high_watermark_ratio > 0.0) {
+          TORCH_CHECK(
+              false,
+              "MPS backend out of memory (MPS allocated: ",
+              format_size(m_total_allocated_memory.current),
+              ", other allocations: ",
+              format_size(current_allocated_size() - m_total_allocated_memory.current),
+              ", max allowed: ",
+              format_size(m_max_total_allowed_size),
+              "). Tried to allocate ",
+              format_size(alloc_size),
+              " as a solo buffer. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).");
+        } else {
+          TORCH_CHECK(false,
+                      "MPS backend out of memory (MPS allocated: ",
+                      format_size(m_total_allocated_memory.current),
+                      ", other allocations: ",
+                      format_size(current_allocated_size() - m_total_allocated_memory.current),
+                      "). Tried to allocate ",
+                      format_size(alloc_size),
+                      " as a solo buffer.");
+        }
+      }
+      m_total_allocated_memory.increase(alloc_size);
+    }
+    BufferBlock* buffer_block = new BufferBlock(alloc_size, /*offset=*/0, /*heap=*/nullptr);
+    buffer_block->buffer = buf;
+    buffer_block->requested_size = size;
+    buffer_block->usage = usage;
+    m_allocated_buffers[buffer_block->buffer] = buffer_block;
+    buffer_block->in_use = true;
+    buffer_block->use_count++;
+    m_current_allocated_memory.increase(alloc_size);
+    return buffer_block;
+  }
+
   size_t alloc_size = get_allocation_size(size, usage);
   auto& pool = get_pool(size, alloc_size, usage);
   AllocParams params(alloc_size, size, &pool, allow_in_flight_reuse);
@@ -598,12 +732,23 @@ id<MTLBuffer> MPSHeapAllocatorImpl::malloc_host(size_t size, uint32_t usage) {
   return buffer_block ? buffer_block->buffer : nullptr;
 }
 
+// A heap-less "solo" buffer records its usage flags on the block itself; heap-
+// backed buffers carry them on their pool. Both let shared-buffer queries treat
+// a shared solo buffer (unified memory) as shared.
+static bool block_is_shared(const BufferBlock* buffer_block) {
+  if (!buffer_block) {
+    return false;
+  }
+  const uint32_t usage = buffer_block->heap ? buffer_block->heap->pool->usage : buffer_block->usage;
+  return usage & UsageFlags::SHARED;
+}
+
 bool MPSHeapAllocatorImpl::isSharedBuffer(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
   // it's OK for the buffer_block to not exist yet
-  return buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED);
+  return block_is_shared(buffer_block);
 }
 
 id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size_t size) {
@@ -629,7 +774,7 @@ std::pair<const void*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtr(const 
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
   // return if buffer was not allocated on MPSAllocator or isn't a Shared buffer
-  if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
+  if (!buffer_block || !block_is_shared(buffer_block)) {
     return {nullptr, 0};
   }
   if (!buffer_block->cpu_ptr) {
@@ -656,7 +801,7 @@ c10::Storage MPSHeapAllocatorImpl::getHostAliasStorage(const c10::Storage& mps_s
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
   BufferBlock* buffer_block = get_allocated_buffer_block(mps_storage.data());
   TORCH_CHECK(buffer_block, "getHostAliasStorage: storage was not allocated by the MPSAllocator");
-  TORCH_CHECK(buffer_block->heap->pool->usage & UsageFlags::SHARED,
+  TORCH_CHECK(block_is_shared(buffer_block),
               "getHostAliasStorage: storage is not backed by a shared (unified) MTLBuffer");
 
   if (!buffer_block->cpu_ptr) {
@@ -682,7 +827,7 @@ bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
   for (const auto& buffer : buffers) {
     BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
     // return if buffer was not allocated on MPSAllocator or isn't a Shared buffer
-    if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
+    if (block_is_shared(buffer_block)) {
       if (!buffer_block->event) {
         buffer_block->event = m_event_pool->acquireEvent(false, nullptr);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer_block->event);
@@ -702,8 +847,7 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
       BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
       // wait on event if "shared" buffer was allocated on MPSAllocator and
       // or actually needs waiting (based on retainCount)
-      if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED) && buffer_block->retainCount() > 1 &&
-          buffer_block->event) {
+      if (block_is_shared(buffer_block) && buffer_block->retainCount() > 1 && buffer_block->event) {
         buffer_blocks.push_back(buffer_block);
       }
     }
@@ -789,6 +933,16 @@ void MPSHeapAllocatorImpl::free(void* ptr) {
 
     buffer_block = get_allocated_buffer_block(ptr);
     TORCH_INTERNAL_ASSERT(buffer_block);
+    // Solo buffer: return to per-size free list instead of heap pool.
+    if (buffer_block->heap == nullptr) {
+      m_allocated_buffers.erase(ptr);
+      m_current_allocated_memory.decrease(buffer_block->size);
+      void* raw = (void*)buffer_block->buffer;
+      std::lock_guard<std::mutex> solo_lock(m_solo_mutex);
+      m_solo_cache.insert({buffer_block->size, raw});
+      delete buffer_block;
+      return;
+    }
     BufferPool& pool = *buffer_block->heap->pool;
     if (!(pool.usage & UsageFlags::SCALAR)) {
       // A buffer marked by recordEvents (used by the GPU in a context where a
@@ -833,9 +987,24 @@ void MPSHeapAllocatorImpl::freeInactiveBuffers() {
   }
 }
 
+void MPSHeapAllocatorImpl::release_cached_solo_buffers() {
+  std::lock_guard<std::mutex> solo_lock(m_solo_mutex);
+  for (auto& [sz, raw] : m_solo_cache) {
+    m_total_allocated_memory.decrease(sz);
+    id<MTLBuffer> buf = (id<MTLBuffer>)raw;
+    [buf setPurgeableState:MTLPurgeableStateEmpty];
+    [buf release];
+  }
+  m_solo_cache.clear();
+}
+
 void MPSHeapAllocatorImpl::emptyCache() {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  // Release heap pools first; the solo drain runs after the GPU is idle
+  // (release_cached_buffers does COMMIT_AND_WAIT) so Metal retainCounts have
+  // settled before we call [buf release].
   release_cached_buffers();
+  release_cached_solo_buffers();
 }
 
 ssize_t MPSHeapAllocatorImpl::getLowWatermarkValue() {

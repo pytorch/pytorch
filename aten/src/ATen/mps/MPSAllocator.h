@@ -9,8 +9,10 @@
 #include <c10/util/flat_hash_map.h>
 #include <mach/vm_page_size.h>
 #include <cstdio>
+#include <atomic>
 #include <mutex>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 
 // this implementation is based on CUDACachingAllocator.
@@ -76,6 +78,10 @@ struct BufferBlock {
   std::vector<int64_t> shape;
   bool in_use = false;
   HeapBlock* heap;
+  // For heap-less "solo" buffers, records the usage flags that a heap-backed
+  // buffer would carry on its pool, so shared-buffer queries can treat a shared
+  // solo buffer as shared. Unused (0) for heap-backed buffers.
+  uint32_t usage = 0;
   id_t buf_id = 0;
   uint32_t use_count = 0;
   // counter to assign unique ids to buffer blocks
@@ -430,6 +436,12 @@ class MPSHeapAllocatorImpl {
   size_t m_low_watermark_limit;
   // use "PYTORCH_DEBUG_MPS_ALLOCATOR" env-var to set debug verbosity
   uint32_t m_debug_verbosity;
+  // Solo allocator: direct per-buffer MTLBuffer for large tensors; bypasses MTLHeap
+  // sub-allocation. Threshold comes from the shared accelerator config
+  // (mps_large_alloc_threshold_mb, read via MPSAllocatorConfig on the alloc path).
+  // Per-size free list: size_bytes -> retained id<MTLBuffer> (as void* to avoid ObjC ARC in header)
+  std::mutex m_solo_mutex;
+  std::unordered_multimap<size_t, void*> m_solo_cache;
   // default MPS stream
   MPSStream* m_stream;
   // we hold a reference to MPSEventPool so it could get destroyed after MPSAllocator
@@ -449,6 +461,8 @@ class MPSHeapAllocatorImpl {
   // waits for buffers parked in-flight in the pool's pending-free list to finish
   // on the GPU and returns them to the pool; returns true if any were reclaimed
   bool wait_for_pending_free_buffers(BufferPool& pool);
+  // release all cached (freed) solo buffers back to the driver
+  void release_cached_solo_buffers();
   // release fully free heaps to reclaim GPU memory if memory pressure is high
   void garbage_collect_cached_buffers(AllocParams& params);
   // places a buffer on the block's range, or releases the one placed on it
