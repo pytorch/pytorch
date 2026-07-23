@@ -1584,6 +1584,89 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         result = fn(inp)
         self.assertTrue(result.isnan())
 
+    def test_ngb_suppress_propagates_through_intermediates(self):
+        """NGB suppression should propagate through intermediate inlined functions.
+
+        When a suppressed function causes a graph break, the exception should
+        propagate past NGB-enabled intermediate callers all the way to the
+        top-level frame, matching baseline (no NGB) behavior.
+
+        suppressed_fn is imported from a helper module so it has a different
+        co_filename from the intermediates. This ensures the intermediates
+        have NGB enabled, exercising the _ngb_suppress_propagate mechanism.
+        """
+        from unittest.mock import patch
+
+        suppressed_fn = _test_nested_graph_breaks_helper.ngb_suppressed_fn
+
+        def helper(x):
+            x = x + 10
+            y = suppressed_fn(x)
+            return y + 20
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def outer(x):
+            x = x + 100
+            y = helper(x)
+            return y + 3
+
+        inp = torch.randn(3)
+        suppressed_file = suppressed_fn.__code__.co_filename
+        with patch(
+            "torch._dynamo.trace_rules.is_ngb_suppressed_inline",
+            side_effect=lambda f: f == suppressed_file,
+        ):
+            result = outer(inp)
+
+        self.assertEqual(result, inp + 100 + 10 + 1 + 2 + 20 + 3)
+        # The graph break propagates to the top-level frame (matching baseline).
+        # Each function compiles as its own frame: outer (1+1), helper (1+1),
+        # suppressed_fn (1+1 split by graph_break) = 6 frames, 6 ops.
+        # Without propagation, helper's NGB would capture the ops inline,
+        # producing only 2 frames with a different graph shape.
+        self.assertEqual(cnts.frame_count, 6)
+        self.assertEqual(cnts.op_count, 6)
+
+    def test_ngb_suppress_propagates_through_deep_intermediates(self):
+        """NGB suppression propagates through 3+ levels of intermediates.
+
+        suppressed_fn is imported from a helper module so it has a different
+        co_filename from the intermediates, ensuring intermediates have NGB
+        enabled and _ngb_suppress_propagate is exercised at each level.
+        """
+        from unittest.mock import patch
+
+        suppressed_fn = _test_nested_graph_breaks_helper.ngb_suppressed_fn
+
+        def mid1(x):
+            return suppressed_fn(x + 10) + 20
+
+        def mid2(x):
+            return mid1(x + 100) + 200
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def outer(x):
+            return mid2(x + 1000) + 2000
+
+        inp = torch.randn(3)
+        suppressed_file = suppressed_fn.__code__.co_filename
+        with patch(
+            "torch._dynamo.trace_rules.is_ngb_suppressed_inline",
+            side_effect=lambda f: f == suppressed_file,
+        ):
+            result = outer(inp)
+
+        expected = inp + 1000 + 100 + 10 + 1 + 2 + 20 + 200 + 2000
+        self.assertEqual(result, expected)
+        # Each function compiles as its own frame (matching no-NGB baseline).
+        # outer(2), mid2(2), mid1(2), suppressed_fn(2) = 8 frames, 8 ops.
+        self.assertEqual(cnts.frame_count, 8)
+        self.assertEqual(cnts.op_count, 8)
+
     def test_fstring_graph_break_in_custom_str(self):
         """f-string formatting of an object whose __str__ causes a graph break.
 
