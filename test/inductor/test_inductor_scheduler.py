@@ -23,7 +23,11 @@ from torch._inductor.scheduler import (
     Scheduler,
 )
 from torch._inductor.sizevars import SizeVarAllocator
-from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
+from torch._inductor.utils import (
+    fresh_inductor_cache,
+    run_and_get_code,
+    snode_args_kwargs,
+)
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
@@ -986,6 +990,74 @@ class TestScheduler(TestCase):
 
         with inductor_config.patch(deterministic=True):
             check_realizes()
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    @parametrize(
+        "extra_cols,with_residual,expected_kernels",
+        ((1, False, 1), (1, True, 2), (16, False, 2)),
+    )
+    def test_cat_reduction_slice_fusion(
+        self, extra_cols, with_residual, expected_kernels
+    ):
+        def fn(x, bias, extra, residual):
+            scores = x[None] * 0.125 + bias
+            appended = extra.view(1, 8, 1, extra_cols).expand(
+                1, 8, 32, extra_cols
+            )
+            values = torch.cat((scores, appended), dim=-1)
+            shifted = (values - values.max(dim=-1, keepdim=True).values).float()
+            shifted = shifted - shifted.amax(dim=-1, keepdim=True)
+            exp = shifted.exp()
+            probs = exp / exp.sum(dim=-1, keepdim=True)
+            result = probs.bfloat16()[..., :32].clone().view(8, 32, 32)
+            return result + residual if with_residual else result
+
+        x = torch.randn(8, 32, 32, device="cuda", dtype=torch.bfloat16)
+        bias = torch.randn(1, 1, 32, 32, device="cuda", dtype=torch.bfloat16)
+        extra = torch.randn(8, extra_cols, device="cuda", dtype=torch.bfloat16)
+        residual = torch.randn_like(x)
+        expected = fn(x, bias, extra, residual)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x, bias, extra, residual
+            )
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        self.assertEqual(metrics.generated_kernel_count, expected_kernels)
+        if expected_kernels == 1:
+            source = "\n".join(code)
+            self.assertEqual(source.count("tl.load("), 3)
+            self.assertEqual(source.count("libdevice.exp("), 1)
+            load_lines = [line for line in source.splitlines() if "tl.load(" in line]
+            data_loads = [
+                line
+                for line in load_lines
+                if "in_ptr0" in line or "in_ptr1" in line
+            ]
+            self.assertEqual(len(data_loads), 2)
+            self.assertTrue(all("r0_mask" not in line for line in data_loads))
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_masked_expansion_requires_large_shared_read(self):
+        def fn(x):
+            row_sum = x.sum(dim=-1, keepdim=True)
+            return (row_sum.expand(8, 1000) + 1).clone()
+
+        x = torch.randn(8, 1001, device="cuda")
+        expected = fn(x)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(metrics.generated_kernel_count, 2)
 
 
 class TestScoreFusionMemory(TestCase):
