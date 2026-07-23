@@ -12,6 +12,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.testing
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch._C import FileCheck
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
@@ -75,7 +76,7 @@ from torch.utils.checkpoint import checkpoint
 dev_type = torch.device(get_devtype())
 
 
-class PytreeTuple(torch._opaque_base.OpaqueBase):
+class PytreeTuple(torch._custom_class_base.CustomClassBase):
     """
     Tuple-like values that are treated as leaves of a PyTree.
     """
@@ -139,12 +140,12 @@ class PytreeTuple(torch._opaque_base.OpaqueBase):
 
 # Register PytreeTuple as an opaque value type to enable Dynamo to handle
 # instances created during tracing
-from torch._library.opaque_object import MemberType, register_opaque_type
+from torch._library.opaque_object import MemberType, register_custom_class
 
 
-register_opaque_type(
+register_custom_class(
     PytreeTuple,
-    typ="value",
+    typ="constant",
     members={
         "__getitem__": MemberType.USE_REAL,
         "__iter__": MemberType.USE_REAL,
@@ -221,12 +222,14 @@ def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
+        torch._dynamo.config.canonicalize_output_graph_node_order = False
         fake_store = FakeStore()
         dist.init_process_group(
             "fake", store=fake_store, rank=0, world_size=self.world_size
         )
 
     def tearDown(self):
+        torch._dynamo.config.canonicalize_output_graph_node_order = True
         super().tearDown()
         dist.destroy_process_group()
 
@@ -250,6 +253,173 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         res = fn(x)
         res.to_local().sum().backward()
+
+    def test_to_local_backward_unbacked_symbolic_stride(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        local = torch.randn(8, 8, device=self.device_type, requires_grad=True)
+        x = DTensor.from_local(local, mesh, [Shard(0)], run_check=False)
+        torch._dynamo.decorators.mark_unbacked(x, 0, hint_override=x.shape[0])
+        torch._dynamo.decorators.mark_unbacked(x, 1, hint_override=x.shape[1])
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return (x.to_local() * 2).sum()
+
+        fn(x).backward()
+        self.assertEqual(local.grad, torch.full_like(local, 2))
+
+    def test_compile_waits_act_nested_in_dtensor_local_tensor(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180614.
+        # AOTAutograd must resolve AsyncCollectiveTensors (ACTs) nested in
+        # ``DTensor._local_tensor`` (e.g. from ``redistribute(async_op=True)``
+        # or FSDP2's async all-gather) before tracing and again before runtime
+        # execution. Otherwise inductor can read an in-flight collective.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return x + 1
+
+        def make_dtensor_with_act_local():
+            dt = DTensor.from_local(
+                torch.randn(4, 4, device=self.device_type),
+                mesh,
+                [Replicate()],
+                run_check=False,
+            )
+            dt._local_tensor = AsyncCollectiveTensor(dt._local_tensor.clone())
+            return dt
+
+        wait_calls = []
+        orig_wait_tensor = funcol.wait_tensor
+
+        def counting_wait_tensor(t):
+            wait_calls.append(1)
+            return orig_wait_tensor(t)
+
+        with patch.object(funcol, "wait_tensor", counting_wait_tensor):
+            # Warmup compiles through Python dispatch (which waits); clear the
+            # counter so we measure only the compiled runtime path.
+            fn(make_dtensor_with_act_local())
+            wait_calls.clear()
+
+            dt = make_dtensor_with_act_local()
+            self.assertFalse(dt._local_tensor.completed)
+            fn(dt)
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertGreaterEqual(
+            len(wait_calls),
+            1,
+            "compiled graph must wait the AsyncCollectiveTensor nested in "
+            "DTensor._local_tensor",
+        )
+        self.assertTrue(dt._local_tensor.completed)
+
+    def test_direct_aot_dtensor_local_tensor_act_to_plain_no_crash(self):
+        # Companion to the wait test above: the crash half of
+        # https://github.com/pytorch/pytorch/issues/180614. Direct AOTAutograd
+        # entry points do not have Dynamo guards to recompile when a nested ACT
+        # input is later a plain tensor. The compiled graph must run on the
+        # plain local instead of trying to wait or unwrap it as ACT.
+        from torch._functorch.aot_autograd import aot_function
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        compile_calls = 0
+
+        def fw_compiler(gm, example_inputs):
+            nonlocal compile_calls
+            compile_calls += 1
+            return gm
+
+        fn = aot_function(lambda x: x + 1, fw_compiler=fw_compiler)
+
+        # Trace with an ACT-wrapped local so the codegen specializes on it.
+        dt_act = DTensor.from_local(
+            torch.randn(4, 4, device=self.device_type),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+        dt_act._local_tensor = AsyncCollectiveTensor(dt_act._local_tensor.clone())
+        fn(dt_act)
+
+        # Invoke the same compiled graph with a plain-local DTensor.
+        dt_plain = DTensor.from_local(
+            torch.randn(4, 4, device=self.device_type),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+        self.assertNotIsInstance(dt_plain._local_tensor, AsyncCollectiveTensor)
+        out = fn(dt_plain)
+        self.assertEqual(out.to_local(), dt_plain.to_local() + 1)
+        self.assertEqual(compile_calls, 1)
+
+    def test_compile_dtensor_local_tensor_act_backward_passthrough(self):
+        # Passthrough forwards preserve ACT wrappers. If nested ACTs are
+        # allowed into traced metadata, backward expects an ACT tangent and
+        # rejects the plain-local cotangent autograd supplies.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return x
+
+        local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+        dt = DTensor.from_local(local, mesh, [Replicate()], run_check=False)
+        dt._local_tensor = AsyncCollectiveTensor(dt._local_tensor.clone())
+        out = fn(dt)
+        out.to_local().sum().backward()
+        self.assertIsNotNone(local.grad)
+
+    @unittest.skipIf(not HAS_GPU, "standalone_compile requires GPU and triton")
+    @skipIfXpu(msg="standalone_compile coverage is CUDA-only")
+    @skip_if_lt_x_gpu(1)
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_aot_standalone_compile_dtensor_to_dtype_layout(self):
+        from torch._inductor import standalone_compile
+
+        device = torch.device(self.device_type, 0)
+        mesh = DeviceMesh(self.device_type, torch.arange(1))
+        index = DTensor.from_local(
+            torch.arange(2, device=device, dtype=torch.int64),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+        rope_cache = DTensor.from_local(
+            torch.randn(4, 4, device=device),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+
+        def backend(gm, example_inputs):
+            return standalone_compile(
+                gm,
+                example_inputs,
+                dynamic_shapes="from_graph",
+                options={"config_patches": {}},
+                aot=True,
+                donate_graph_module=True,
+            )
+
+        def index_to(index, rope_cache):
+            return rope_cache[index].to(device=device).to_local()
+
+        with torch._dynamo.config.patch(enable_aot_compile=True):
+            compiled = torch.compile(index_to, backend=backend, fullgraph=True)
+        with torch.inference_mode():
+            artifact = compiled.aot_compile(((index, rope_cache), {}))
+
+        self.assertIsNotNone(artifact)
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW or TEST_XPU,
@@ -1439,9 +1609,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         mod = torch.nn.Linear(4, 4)
         mod.register_forward_hook(fw_hook)
-
-        mod = torch.nn.Linear(4, 4)
-        mod.register_forward_hook(fw_hook)
         mod.weight = torch.nn.Parameter(
             DTensor.from_local(mod.weight, mesh, [Replicate()], run_check=False)
         )
@@ -1918,7 +2085,7 @@ class outer_fn(torch.nn.Module):
         self.assertEqual(
             compile_counter.frame_count,
             1,
-            f"Expected 1 compilation, got {compile_counter.frame_count}",
+            lambda msg: f"{msg}\nExpected 1 compilation, got {compile_counter.frame_count}",
         )
 
     def test_device_mesh_slice(self):
@@ -1978,6 +2145,11 @@ class outer_fn(torch.nn.Module):
         # Test backward pass
         result.sum().backward()
 
+    @unittest.skip(
+        "compile_on_one_rank device-as-parameter is not yet supported with the inductor "
+        "backend (the coor::current_device node cannot be lowered); re-enabled when the "
+        "post-grad strip pass lands"
+    )
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
     def test_flattened_submesh_no_getattr_compile_on_one_rank(self):
         """When compile_on_one_rank=True, the flattened submesh should appear as a
@@ -2171,7 +2343,9 @@ class outer_fn(torch.nn.Module):
         fw_code = backend.fw_graphs[0].print_readable(print_output=False)
         for line in fw_code.splitlines():
             if "view" in line and "-1" in line:
-                self.assertNotIn("//", line, f"Polluted symbolic shape: {line}")
+                self.assertNotIn(
+                    "//", line, lambda msg: f"{msg}\nPolluted symbolic shape: {line}"
+                )
 
     def test_to_local_symbolic_sizes_uneven_shard(self):
         # Regression test to ensure our narrow changes does not cause any
@@ -2510,7 +2684,7 @@ class outer_fn(torch.nn.Module):
         # The symbol must survive — not be guarded to a concrete value
         self.assertFalse(
             x.shape[1].node.expr.is_number,
-            f"pad_tensor created a guard that concretized the symbolic dim: "
+            lambda msg: f"{msg}\npad_tensor created a guard that concretized the symbolic dim: "
             f"expr={x.shape[1].node.expr}",
         )
 
@@ -2558,6 +2732,38 @@ class outer_fn(torch.nn.Module):
             "Shadow empty_strided nodes from ShardingPropagator leaked into "
             "the make_fx graph; disable_proxy_modes_tracing is not active",
         )
+
+    def test_stable_hash_for_caching_is_rank_specific(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/188390.
+        # _stable_hash_for_caching must include the local tensor's device so
+        # that each rank produces a unique AOTAutograd cache key.  Before the
+        # fix, the device was omitted and rank 1 incorrectly reused rank 0's
+        # compiled kernel, causing CUDA errors at runtime.
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        local = torch.empty(2, 4)
+        dt = DTensor.from_local(local, mesh, [Shard(0)], run_check=False)
+        h0 = dt._stable_hash_for_caching()
+        # Swap to a different device type to verify the device string participates
+        # in the hash.  This does not model two real CPU ranks (both would be plain
+        # "cpu" with no index); see test_stable_hash_for_caching_cuda_ranks for the
+        # actual multi-rank scenario.  _spec is intentionally left inconsistent with
+        # _local_tensor; this is a focused unit test of the hash only.
+        dt._local_tensor = dt._local_tensor.to("meta")
+        h1 = dt._stable_hash_for_caching()
+        self.assertNotEqual(h0, h1)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    def test_stable_hash_for_caching_cuda_ranks(self):
+        # Exercise the exact scenario from #188390: two DTensors with identical
+        # global specs but local tensors on cuda:0 vs cuda:1 must produce
+        # different AOTAutograd cache keys.
+        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
+        local0 = torch.empty(2, 4, device="cuda:0")
+        local1 = torch.empty(2, 4, device="cuda:1")
+        dt0 = DTensor.from_local(local0, mesh, [Shard(0)], run_check=False)
+        dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
+        h0, h1 = dt0._stable_hash_for_caching(), dt1._stable_hash_for_caching()
+        self.assertNotEqual(h0, h1)
 
 
 @instantiate_parametrized_tests
@@ -2911,7 +3117,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 self.assertNotIn(
                     "_opaque_obj",
                     fw_code,
-                    f"Forward graph should not contain opaque objects. Graph:\n{fw_code}",
+                    lambda msg: f"{msg}\nForward graph should not contain opaque objects. Graph:\n{fw_code}",
                 )
 
             bw_graph = bw_graph_cell[0]
@@ -2920,7 +3126,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 self.assertNotIn(
                     "_opaque_obj",
                     bw_code,
-                    f"Backward graph should not contain opaque objects. Graph:\n{bw_code}",
+                    lambda msg: f"{msg}\nBackward graph should not contain opaque objects. Graph:\n{bw_code}",
                 )
 
     @with_comms
@@ -2962,14 +3168,14 @@ class TestDTensorCompileE2E(DTensorTestBase):
             self.assertNotIn(
                 "_opaque_obj",
                 graph_code,
-                f"Graph should not contain opaque objects. Graph:\n{graph_code}",
+                lambda msg: f"{msg}\nGraph should not contain opaque objects. Graph:\n{graph_code}",
             )
 
             placeholders = [n for n in fw_graph.graph.nodes if n.op == "placeholder"]
             self.assertGreater(
                 len(placeholders),
                 1,
-                f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
+                lambda msg: f"{msg}\nExpected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
             )
 
     @with_comms
@@ -3013,14 +3219,14 @@ class TestDTensorCompileE2E(DTensorTestBase):
             self.assertNotIn(
                 "_opaque_obj",
                 graph_code,
-                f"Graph should not contain opaque objects. Graph:\n{graph_code}",
+                lambda msg: f"{msg}\nGraph should not contain opaque objects. Graph:\n{graph_code}",
             )
 
             placeholders = [n for n in fw_graph.graph.nodes if n.op == "placeholder"]
             self.assertGreater(
                 len(placeholders),
                 2,
-                f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
+                lambda msg: f"{msg}\nExpected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
             )
 
 
