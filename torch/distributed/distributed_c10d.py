@@ -2971,10 +2971,19 @@ def destroy_process_group(
         _world.group_count = 0
     else:
         if _TORCHCOMM_AVAILABLE:
+            # A single comm may be shared across multiple device types (e.g. a
+            # gloo group reports both 'cuda' and 'cpu' device types backed by the
+            # same _BackendWrapper). Deduplicate by comm identity so we finalize
+            # each comm exactly once — finalize() is not idempotent and raises
+            # "already finalized" on a second call.
+            finalized_comm_ids: set[int] = set()
             for device_type in pg._device_types:
                 backend = pg._get_backend(device_type)
                 if isinstance(backend, _BackendWrapper):
-                    backend.get_comm().finalize()
+                    comm = backend.get_comm()
+                    if id(comm) not in finalized_comm_ids:
+                        comm.finalize()
+                        finalized_comm_ids.add(id(comm))
             _world.comms.clear()
         pg.shutdown()
         del _world.pg_map[pg]
