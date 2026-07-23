@@ -71,7 +71,11 @@ from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
-from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    DynamicOutputShapeException,
+    FakeTensorMode,
+    maybe_get_fake_mode,
+)
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.nn.attention.flex_attention import flex_attention
@@ -9642,6 +9646,58 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(inference_compile_calls[0], 1)
         self.assertIsNone(aot_config.inference_compiler)
 
+    @parametrize("leaf_kind", ["same_mode", "other_mode", "real"])
+    def test_process_inputs_nested_subclass_fakification(self, leaf_kind):
+        from torch._functorch._aot_autograd.frontend_utils import process_inputs
+        from torch._functorch.aot_autograd import AOTConfig
+
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions=None,
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=True,
+            enable_log=False,
+            dynamic_shapes=True,
+        )
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        if leaf_kind == "same_mode":
+            input_mode = fake_mode
+        elif leaf_kind == "other_mode":
+            input_mode = FakeTensorMode(shape_env=ShapeEnv())
+        else:
+            input_mode = nullcontext()
+
+        metadata_token = object()
+        with input_mode:
+            inner_tensors = [torch.ones(2, 3) for _ in range(4)]
+            if leaf_kind != "real":
+                inner_tensors = [input_mode.from_tensor(t) for t in inner_tensors]
+            inner_tensors[0]._issue_132896_metadata = metadata_token
+            nested_arg = TwoTensor(
+                TwoTensor(inner_tensors[0], inner_tensors[1]),
+                TwoTensor(inner_tensors[2], inner_tensors[3]),
+            )
+
+        fake_flat_args, _ = process_inputs(
+            [nested_arg], aot_config, fake_mode, fake_mode.shape_env
+        )
+        out = fake_flat_args[0]
+
+        if leaf_kind == "same_mode":
+            self.assertIs(out, nested_arg)
+            self.assertIs(out.a, nested_arg.a)
+            self.assertIs(out.a.a, inner_tensors[0])
+            self.assertIs(out.a.a._issue_132896_metadata, metadata_token)
+        else:
+            self.assertIsNot(out, nested_arg)
+            self.assertIsNot(out.a, nested_arg.a)
+            self.assertIsNot(out.a.a, inner_tensors[0])
+            self.assertIs(maybe_get_fake_mode(out.a.a), fake_mode)
+
     def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
             run_functionalized_fw_and_collect_metadata,
@@ -12396,6 +12452,7 @@ class TestEagerFusionModuleInfo(AOTTestCase):
 
 instantiate_parametrized_tests(TestAOTAutograd)
 instantiate_parametrized_tests(TestAOTModuleSimplified)
+instantiate_parametrized_tests(TestPartitioning)
 only_for = "cpu"
 instantiate_device_type_tests(
     TestPythonKey,
