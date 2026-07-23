@@ -422,10 +422,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     // Hand the kernel seqlen-padded *allocations* (the extra rows are mapped
     // scratch) while leaving seqlen_q/seqlen_k unchanged, so the kernel's logical
     // masking is identical and numerics are unchanged; the real rows are copied
-    // back into the caller-visible tensors below. Engages only for tile-unaligned
-    // seqlens on the non-swapped path; skipped when seqlenq_ngroups_swapped is
-    // active (that fast path reshapes seqlen_q into the batch/group dim, so the
-    // tile-tail over-read does not apply).
+    // back into the caller-visible tensors below. Engages on any tile-unaligned
+    // seqlen, including the seqlenq_ngroups_swapped (GQA decode) path.
     // Scope: covers Q/K/V (read) and O/LSE (write) only. attn_bias (bias_ptr,
     // seqlen_q x seqlen_k) and the dropout randval buffer (p / rand_val_ptr) are
     // touched by the same round_up(seqlen, tile) pattern but are left unpadded
@@ -438,12 +436,17 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     constexpr int kCkSeqTileLCM = 256; // >= every fwd kM0/kN0 in the generated set
     const int seqlen_q_pad = round_multiple(seqlen_q, kCkSeqTileLCM);
     const int seqlen_k_pad = round_multiple(seqlen_k, kCkSeqTileLCM);
-    const bool ck_oob_guard = !seqlenq_ngroups_swapped &&
-        ((seqlen_q_pad != seqlen_q) || (seqlen_k_pad != seqlen_k));
+    const bool ck_oob_guard =
+        (seqlen_q_pad != seqlen_q) || (seqlen_k_pad != seqlen_k);
     if (ck_oob_guard) {
         if (seqlen_q_pad != seqlen_q) {
             q_arg   = at::pad(q_padded, {0, 0, 0, 0, 0, seqlen_q_pad - seqlen_q});
-            out_arg = at::empty({out.size(0), seqlen_q_pad, out.size(2), out.size(3)}, out.options());
+            // Allocate O/LSE scratch from the logical kernel dims (post-swap
+            // num_heads/seqlen_q), not out.sizes(): on the seqlenq_ngroups_swapped
+            // path `out` is still [b, 1, num_heads*seqlen_q, d], so out.size(2)/(3)
+            // would be wrong here.
+            out_arg = at::empty(
+                {batch_size, seqlen_q_pad, num_heads, head_size_8x}, out.options());
             lse_arg = at::empty({batch_size, num_heads, seqlen_q_pad}, softmax_lse.options());
         }
         if (seqlen_k_pad != seqlen_k) {
@@ -491,9 +494,13 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         float t = fmha_fwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
         if (ck_oob_guard && seqlen_q_pad != seqlen_q) {
-            // copy the real rows out of the padded scratch into the caller tensors
-            out.copy_(out_arg.narrow(1, 0, seqlen_q));
-            softmax_lse.copy_(lse_arg.narrow(2, 0, seqlen_q));
+            // copy the real rows out of the padded scratch into the caller tensors.
+            // reshape() maps the [b, seqlen_q, num_heads, d] scratch back onto out's
+            // actual shape (same element count), covering the swapped layout where
+            // out is [b, 1, num_heads*seqlen_q, d].
+            out.copy_(out_arg.narrow(1, 0, seqlen_q).reshape(out.sizes()));
+            softmax_lse.copy_(
+                lse_arg.narrow(2, 0, seqlen_q).reshape(softmax_lse.sizes()));
         }
     }
     else {
