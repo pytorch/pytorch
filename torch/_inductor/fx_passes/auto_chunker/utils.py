@@ -68,7 +68,7 @@ def format_node_with_chunking_meta(
     """
     Print the node with chunking metadata for the current node if exists.
 
-    If include_args is True, also print chuning metadata for Node arguments.
+    If include_args is True, also print chunking metadata for Node arguments.
     """
     from torch._inductor.runtime.runtime_utils import green_text
 
@@ -142,7 +142,8 @@ def get_node_is_scalar(nodes: Sequence[Node]) -> dict[Node, bool]:
     node_is_scalar = {}
     for node in nodes:
         ft = get_fake_tensor_from_node_arg(node)
-        assert ft is not None
+        if ft is None:
+            raise AssertionError(f"expected a fake tensor for node {node}, got None")
         node_is_scalar[node] = ft.numel() == 1
     return node_is_scalar
 
@@ -154,7 +155,8 @@ def get_node_ndim(nodes: Sequence[Node]) -> dict[Node, int]:
     node_ndim = {}
     for node in nodes:
         ft = get_fake_tensor_from_node_arg(node)
-        assert ft is not None
+        if ft is None:
+            raise AssertionError(f"expected a fake tensor for node {node}, got None")
         node_ndim[node] = ft.ndim
     return node_ndim
 

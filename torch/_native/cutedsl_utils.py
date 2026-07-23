@@ -30,6 +30,7 @@ _CUTEDSL_REQUIRED_VERSIONS: set[Version] = {
     #                   but > v26 of packaging.
     Version(f"{4}.{4}.{1}"),
     Version(f"{4}.{4}.{2}"),
+    Version(f"{4}.{5}.{2}"),
 }
 
 
@@ -42,6 +43,14 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
     """
     # Skip all checks if running on CPU-only binary
     if not _cuda.is_built():
+        return (False, None)
+
+    # CuTeDSL kernels require genuine NVIDIA GPUs; on ROCm/HIP builds the
+    # CUDA compatibility layer reports is_built()=True but cuInit() will fail
+    # because no NVIDIA driver is present.
+    import torch
+
+    if torch.version.hip is not None:
         return (False, None)
 
     deps = [
