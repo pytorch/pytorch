@@ -18,7 +18,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
 // Wrap a Python torch.Tensor (PyObject* passed as void*) as a stable Tensor
 // that shares its underlying TensorImpl.
-inline Tensor from_pyobject(void* py_obj) {
+inline Tensor tensor_from_pyobject(void* py_obj) {
   AtenTensorHandle ath{};
   STABLE_TORCH_ERROR_CODE_CHECK(torch_tensor_from_pyobject(py_obj, &ath));
   return Tensor(ath);
@@ -27,7 +27,7 @@ inline Tensor from_pyobject(void* py_obj) {
 // Wrap a stable Tensor as a new-reference Python torch.Tensor. py_type is an
 // optional PyTypeObject* (passed as void*) used as the result's exact Python
 // type; nullptr means default torch.Tensor.
-inline void* to_pyobject(const Tensor& t, void* py_type = nullptr) {
+inline void* tensor_to_pyobject(const Tensor& t, void* py_type = nullptr) {
   void* raw = nullptr;
   STABLE_TORCH_ERROR_CODE_CHECK(
       torch_tensor_to_pyobject(t.get(), py_type, &raw));
