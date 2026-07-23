@@ -40,40 +40,27 @@ jobs:
 
   linux-noble-rocm-preview-py3_12-build:
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
-<<<<<<< HEAD:.github/workflows/rocm-nightly.yml
-    name: linux-noble-rocm-nightly-py3.12-mi350
-=======
     name: linux-noble-rocm-preview-py3.12-gfx942
->>>>>>> [ROCm][CI] Rename nightly tag to preview:.github/workflows/rocm-preview.yml
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-<<<<<<< HEAD
-<<<<<<< HEAD:.github/workflows/rocm-nightly.yml
-      build-environment: linux-noble-rocm-nightly-py3.12-mi350
-      docker-image-name: ci-image:pytorch-linux-noble-rocm-nightly-py3
-=======
-=======
-      use-arc: true
->>>>>>> [ROCm][CI] Normalize rocm-preview workflow newlines
       build-environment: linux-noble-rocm-preview-py3.12-gfx942
       docker-image-name: ci-image:pytorch-linux-noble-rocm-preview-py3
->>>>>>> [ROCm][CI] Rename nightly tag to preview:.github/workflows/rocm-preview.yml
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
         ]}
     secrets: inherit
 
@@ -81,11 +68,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-<<<<<<< HEAD:.github/workflows/rocm-nightly.yml
-    name: linux-noble-rocm-nightly-py3.12-mi350
-=======
     name: linux-noble-rocm-preview-py3.12-gfx942
->>>>>>> [ROCm][CI] Rename nightly tag to preview:.github/workflows/rocm-preview.yml
     uses: ./.github/workflows/_rocm-test.yml
     needs:
       - linux-noble-rocm-preview-py3_12-build
