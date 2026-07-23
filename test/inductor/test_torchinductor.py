@@ -83,7 +83,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM100OrLater,
     SM80OrLater,
     SM90OrLater,
     TEST_CUDNN,
@@ -119,6 +118,7 @@ from torch.testing._internal.common_utils import (
     MI350_ARCH,
     NAVI_ARCH,
     parametrize,
+    recover_orig_fp32_precision,
     serialTest,
     skipIfNoLapack,
     skipIfRocm,
@@ -3977,6 +3977,18 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
+    def test_div10(self):
+        # A Python-scalar dividend with floor rounding: the floor-division
+        # lowering seeds constants from an operand via get_dtype(), which fails
+        # when the dividend is a scalar (no get_dtype()) rather than a tensor.
+        def fn(x):
+            return (
+                torch.div(5.0, x, rounding_mode="floor"),
+                torch.floor_divide(5.0, x),
+            )
+
+        self.common(fn, (torch.randn(8),))
+
     @skip_if_triton_cpu  # divide by zero; cannot xfail because it crashes process
     def test_div_zero_dim(self):
         def fn(a, b):
@@ -5873,6 +5885,7 @@ for dtype in (torch.int32, torch.int64):
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
     @requires_multigpu()
+    @recover_orig_fp32_precision
     def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
 
@@ -9569,6 +9582,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         foo_opt = torch.compile(foo, backend="inductor")
         out = foo_opt(inp)
         self.assertEqual(inp.storage(), out.storage())
+
+    def test_empty_output_strides(self):
+        def fn(x):
+            return x.new_empty((2, 0, 0))
+
+        inp = torch.randn(1, device=self.device)
+        eager = fn(inp)
+        compiled = torch.compile(fn, backend="inductor")(inp)
+        self.assertEqual(compiled.stride(), eager.stride())
 
     def test_index_select(self):
         def fn(a, b):
@@ -18799,6 +18821,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager_result5, compiled_result5)
 
     @requires_cuda_and_triton
+    @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch({"triton.enable_pdl": True})
     def test_pdl_mutation(self):
@@ -18830,6 +18853,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ).run(code)
 
     @requires_cuda_and_triton
+    @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch(
         {
@@ -19499,11 +19523,6 @@ if RUN_GPU:
                 expected_divisible = {
                     # one kernel, with extra workspace/semaphore args
                     0: (0, 1, 2, 3, 5),
-                }
-            elif SM100OrLater:
-                self.assertEqual(len(kernels), 1)
-                expected_divisible = {
-                    0: (0, 1, 3),
                 }
             else:
                 self.assertEqual(len(kernels), 2)

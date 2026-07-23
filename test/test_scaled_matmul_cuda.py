@@ -2702,7 +2702,6 @@ class TestFP8Matmul(TestCase):
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
-    @skipXPU
     def test_blockwise_mxfp8_compile(self, device) -> None:
 
         M, K, N = 128, 128, 128
@@ -2732,7 +2731,6 @@ class TestFP8Matmul(TestCase):
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
-    @skipXPU
     def test_blockwise_nvfp4_compile(self, device) -> None:
 
         M, K, N = 128, 128, 128
