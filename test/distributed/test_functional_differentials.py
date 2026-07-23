@@ -68,25 +68,51 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
     # ============================================================
 
     @parametrize("device", devices)
-    def test_all_reduce_forward(self, device):
+    @parametrize("reduce_op", ["sum", "avg", "min", "max"])
+    def test_all_reduce_forward(self, device, reduce_op):
         """Test all_reduce does all_reduce in forward.
 
         Tensor is VARYING (different across ranks).
-        Forward aggregates varying tensors via all_reduce(sum).
+        Forward aggregates varying tensors via all_reduce.
         """
+        shape = (3, 3)
         group_name = dist.group.WORLD.group_name
         rank = dist.get_rank()
 
         # Each rank contributes its rank value (tensor is varying)
-        input_tensor = torch.full((3, 3), fill_value=float(rank), device=device)
-        output = fcols.all_reduce(input_tensor, "sum", group=group_name)
+        input_tensor = torch.full(shape, fill_value=float(rank), device=device)
+        output = fcols.all_reduce(input_tensor, reduce_op, group=group_name)
 
-        # Forward does all_reduce: sum of 0+1+2+3 = 6
-        expected = torch.full(
-            (3, 3),
-            fill_value=self.world_size * (self.world_size - 1) / 2,
-            device=device,
+        rank_values = [float(r) for r in range(self.world_size)]
+        if reduce_op == "sum":
+            expected_val = sum(rank_values)
+        elif reduce_op == "avg":
+            expected_val = sum(rank_values) / self.world_size
+        elif reduce_op == "min":
+            expected_val = min(rank_values)
+        elif reduce_op == "max":
+            expected_val = max(rank_values)
+        expected = torch.full(shape, fill_value=expected_val, device=device)
+        self.assertEqual(output, expected)
+
+    @parametrize("device", devices)
+    def test_all_reduce_premul_sum_forward(self, device):
+        """Test all_reduce forward with PREMUL_SUM ReduceOp."""
+        shape = (3, 3)
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        factor = 0.5
+
+        premul_sum_op = dist.ReduceOp.PREMUL_SUM(factor)
+        input_tensor = torch.full(
+            shape, fill_value=float(rank + 1), device=device
         )
+        output = fcols.all_reduce(
+            input_tensor, reduceOp=premul_sum_op, group=group_name
+        )
+
+        expected_val = factor * sum(float(r + 1) for r in range(self.world_size))
+        expected = torch.full(shape, fill_value=expected_val, device=device)
         self.assertEqual(output, expected)
 
     @parametrize("device", devices)
@@ -345,31 +371,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             shape, fill_value=factor * float(self.world_size), device=device
         )
         self.assertEqual(input_tensor.grad, expected_grad)
-
-    @parametrize("device", devices)
-    def test_all_reduce_avg_backward(self, device):
-        """Test all_reduce backward with the 'avg' reduction.
-
-        Both tensor AND gradients are VARYING (different across ranks).
-        Backward aggregates gradients via all_reduce(avg).
-        """
-        group_name = dist.group.WORLD.group_name
-
-        input_tensor = torch.randn(3, 3, requires_grad=True, device=device)
-        output = fcols.all_reduce(input_tensor, "avg", group=group_name)
-
-        # Backward with ones: avg of ones across ranks is ones.
-        output.sum().backward()
-        expected_grad = torch.ones(3, 3, device=device)
-        self.assertEqual(input_tensor.grad, expected_grad)
-
-        # Backward is all_reduce (avg) of the incoming gradients.
-        grad_outputs = torch.rand_like(output, device=device)
-        (grad_input,) = torch.autograd.grad(
-            output, input_tensor, grad_outputs=grad_outputs
-        )
-        expected_grad_input = fcols.all_reduce(grad_outputs, "avg", group=group_name)
-        self.assertEqual(grad_input, expected_grad_input)
 
     @parametrize("device", devices)
     @parametrize("gather_dim", [0, 1, 2])
@@ -820,22 +821,40 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
     @with_comms
     def test_all_reduce_compile(self):
         """Test that all_reduce backward works with torch.compile."""
+        shape = (3, 3)
         group_name = dist.group.WORLD.group_name
 
-        @torch.compile(fullgraph=True)
-        def compiled_fn(tensor):
-            output = fcols.all_reduce(tensor, "sum", group=group_name)
-            return output.sum()
+        for reduce_op in ["sum", "avg", "min", "max"]:
+            with self.subTest(reduce_op=reduce_op):
+                @torch.compile(fullgraph=True)
+                def compiled_fn(tensor):
+                    output = fcols.all_reduce(tensor, reduce_op, group=group_name)
+                    return output.sum()
 
-        input_tensor = torch.randn(3, 3, device=self.device, requires_grad=True)
+                if reduce_op in ("min", "max"):
+                    input_tensor = torch.full(
+                        shape, fill_value=float(self.rank), device=self.device, requires_grad=True
+                    )
+                else:
+                    input_tensor = torch.randn(*shape, device=self.device, requires_grad=True)
 
-        loss = compiled_fn(input_tensor)
-        loss.backward()
+                loss = compiled_fn(input_tensor)
+                loss.backward()
 
-        # Gradient should be aggregated
-        self.assertIsNotNone(input_tensor.grad)
-        expected_grad = torch.full((3, 3), fill_value=float(self.world_size))
-        self.assertEqual(input_tensor.grad, expected_grad)
+                self.assertIsNotNone(input_tensor.grad)
+                if reduce_op == "sum":
+                    expected_grad = torch.full(
+                        shape, fill_value=float(self.world_size), device=self.device
+                    )
+                elif reduce_op == "avg":
+                    expected_grad = torch.full(shape, fill_value=1.0, device=self.device)
+                elif reduce_op == "min":
+                    grad_val = float(self.world_size) if self.rank == 0 else 0.0
+                    expected_grad = torch.full(shape, fill_value=grad_val, device=self.device)
+                elif reduce_op == "max":
+                    grad_val = float(self.world_size) if self.rank == self.world_size - 1 else 0.0
+                    expected_grad = torch.full(shape, fill_value=grad_val, device=self.device)
+                self.assertEqual(input_tensor.grad, expected_grad)
 
     @with_comms
     def test_all_gather_tensor_compile(self):

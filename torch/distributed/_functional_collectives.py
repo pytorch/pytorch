@@ -678,7 +678,10 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
     )
     if _is_min_max(reduce_op):
         fwd_input, fwd_output = ctx.saved_tensors
-        output = torch.ops.aten.where.ScalarOther(fwd_input == fwd_output, output, 0)
+        output = torch.ops.aten.where.ScalarOther(
+            fwd_input == fwd_output, wait_tensor(output), 0
+        )
+        return output, None, None
     return wait_tensor(output), None, None
 
 
