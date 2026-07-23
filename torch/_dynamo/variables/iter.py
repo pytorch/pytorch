@@ -13,7 +13,9 @@ These classes integrate with Dynamo's variable tracking system to enable proper
 handling of iterator operations during code transformation and optimization.
 """
 
+import inspect
 import itertools
+import operator
 import sys
 from typing import Any, TYPE_CHECKING
 
@@ -27,10 +29,11 @@ from ..exc import (
     handle_observed_exception,
     ObservedUserStopIteration,
     raise_observed_exception,
+    raise_type_error,
     raise_value_error,
     unimplemented,
 )
-from ..utils import unpack_iterable
+from ..utils import raise_args_mismatch, tracked_repr, unpack_iterable
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker
@@ -41,6 +44,18 @@ from .object_protocol import generic_getiter, generic_iternext
 # attribute access (a is b → False). Capture once at import time for stable
 # identity comparisons in ItertoolsVariable.call_function.
 _CHAIN_FROM_ITERABLE = itertools.chain.from_iterable
+
+# repeat(object, times=-1); itertools.repeat has no introspectable signature, so
+# declare one to bind args/kwargs. `times` defaults to None to mark the unbounded
+# form (CPython's cnt == -1).
+_REPEAT_SIGNATURE = inspect.Signature(
+    [
+        inspect.Parameter("object", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+        inspect.Parameter(
+            "times", inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None
+        ),
+    ]
+)
 
 
 if TYPE_CHECKING:
@@ -83,12 +98,12 @@ class ItertoolsVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker":
         if self.value is itertools.chain and name == "from_iterable":
             return ItertoolsVariable(_CHAIN_FROM_ITERABLE)
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def call_function(
         self,
@@ -236,26 +251,47 @@ class ItertoolsVariable(VariableTracker):
                 mutation_type=ValueMutationNew(),
             )
         elif self.value is itertools.repeat:
-            if len(args) < 2:
-                return RepeatIteratorVariable(*args, mutation_type=ValueMutationNew())
-
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.repeat), args, kwargs
+            # ref: repeat_new in itertoolsmodule.c. A user-supplied negative
+            # `times` is clamped to 0; an absent `times` means unbounded.
+            try:
+                bound = _REPEAT_SIGNATURE.bind(*args, **kwargs)
+            except TypeError:
+                raise_args_mismatch(tx, "repeat")
+            item = bound.arguments["object"]
+            times = bound.arguments.get("times")
+            if times is None:
+                return RepeatIteratorVariable(item, mutation_type=ValueMutationNew())
+            if not times.is_python_constant():
+                return tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.repeat),
+                    [item, times],
+                    {},
+                )
+            times_val = times.as_python_constant()
+            if not isinstance(times_val, int):
+                raise_type_error(
+                    tx,
+                    f"'{times.python_type_name()}' object cannot be interpreted "
+                    "as an integer",
+                )
+            return RepeatIteratorVariable(
+                item, times=max(times_val, 0), mutation_type=ValueMutationNew()
             )
-        elif self.value is itertools.count and not kwargs:
-            if len(args) == 0:
-                return variables.CountIteratorVariable(mutation_type=ValueMutationNew())
-            if len(args) == 1:
-                return variables.CountIteratorVariable(
-                    item=args[0], mutation_type=ValueMutationNew()
-                )
-            if len(args) == 2:
-                return variables.CountIteratorVariable(
-                    item=args[0],
-                    step=args[1],
-                    mutation_type=ValueMutationNew(),
-                )
-            return super().call_function(tx, args, kwargs)
+        elif self.value is itertools.count:
+            # count(start=0, step=1): let Python's own argument binding validate
+            # the call. Anything it rejects (extra args, duplicate/unknown
+            # kwargs) falls through to a graph break so eager raises the
+            # CPython TypeError.
+            def count_sig(start: Any = 0, step: Any = 1) -> tuple[Any, Any]:
+                return start, step
+
+            try:
+                item, step = count_sig(*args, **kwargs)
+            except TypeError:
+                return super().call_function(tx, args, kwargs)
+            return variables.CountIteratorVariable(
+                item, step, mutation_type=ValueMutationNew()
+            )
         else:
             return super().call_function(tx, args, kwargs)
 
@@ -369,18 +405,63 @@ class ChainVariable(IteratorVariable):
 
 
 class RepeatIteratorVariable(IteratorVariable):
-    def __init__(self, item: VariableTracker, **kwargs: Any) -> None:
+    # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c
+    # repeat carries a `cnt` count: -1 means unbounded; CPython's repeat_new
+    # clamps a user-supplied negative `times` to 0. We model that with `times`
+    # (None == unbounded) and a `remaining` counter consumed by next().
+    _nonvar_fields = {
+        "times",
+        "remaining",
+        *IteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        item: VariableTracker,
+        times: int | None = None,
+        remaining: int | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.item = item
+        self.times = times
+        self.remaining = times if remaining is None else remaining
 
     def python_type(self) -> type:
         return itertools.repeat
 
-    # Repeat needs no mutation, clone self
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4332-L4340
-        # TODO(dynamo-team): Missing `times` argument handling
+        # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c repeat_next
+        if self.remaining is None:
+            return self.item
+        if not self.is_mutable():
+            raise AssertionError("bounded RepeatIteratorVariable must be mutable")
+        if self.remaining == 0:
+            raise_observed_exception(StopIteration, tx)
+        tx.output.side_effects.mutation(self)
+        self.remaining -= 1
         return self.item
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> VariableTracker:
+        # ref: repeat_len in itertoolsmodule.c (exposed as __length_hint__);
+        # raises TypeError for the unbounded form ("len() of unsized object").
+        if name == "__length_hint__":
+            if self.times is None:
+                raise_type_error(tx, "len() of unsized object")
+            return ConstantVariable.create(self.remaining)
+        return super().call_method(tx, name, args, kwargs)
+
+    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        item_repr = tracked_repr(tx, self.item)
+        if self.times is None:
+            return ConstantVariable.create(f"repeat({item_repr})")
+        return ConstantVariable.create(f"repeat({item_repr}, {self.remaining})")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -392,7 +473,11 @@ class RepeatIteratorVariable(IteratorVariable):
             )
         )
         codegen(self.item)
-        codegen.extend_output(create_call_function(1, False))
+        if self.times is None:
+            codegen.extend_output(create_call_function(1, False))
+        else:
+            codegen(ConstantVariable.create(self.remaining))
+            codegen.extend_output(create_call_function(2, False))
 
 
 class CountIteratorVariable(IteratorVariable):
@@ -431,6 +516,19 @@ class CountIteratorVariable(IteratorVariable):
         self.item = self.item.call_method(tx, "__add__", [self.step], {})
         self.advance_count += 1
         return old_item
+
+    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4218-L4243
+        if not (self.item.is_python_constant() and self.step.is_python_constant()):
+            return super().repr_impl(tx)
+        cnt = self.item.as_python_constant()
+        step = self.step.as_python_constant()
+        # Suppress step in the repr when it is an integer equal to 1.
+        if isinstance(step, int) and step == 1:
+            result = f"count({cnt!r})"
+        else:
+            result = f"count({cnt!r}, {step!r})"
+        return ConstantVariable.create(result)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -804,6 +902,21 @@ class DictViewIterator(IteratorVariable):
                 tx,
                 args=[VariableTracker.build(tx, a) for a in e.args],
             )
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> VariableTracker:
+        # dictiter_len/setiter_len: __length_hint__ returns the number of
+        # not-yet-consumed elements. self._iter is a live Python iterator over
+        # the captured items, so its own length hint already reflects any
+        # next() calls made during tracing.
+        if name == "__length_hint__":
+            return ConstantVariable.create(operator.length_hint(self._iter))
+        return super().call_method(tx, name, args, kwargs)
 
     def python_type(self) -> type:
         if self.view_type == "keys":

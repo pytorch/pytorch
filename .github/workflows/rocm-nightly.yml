@@ -45,7 +45,6 @@ jobs:
     with:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      use-arc: true
       build-environment: linux-noble-rocm-nightly-py3.12-gfx942
       docker-image-name: ci-image:pytorch-linux-noble-rocm-nightly-py3
       test-matrix: |
