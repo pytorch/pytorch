@@ -143,6 +143,8 @@ xfails = [
     NestedGraphBreaksDecoratorTests.test_torch_guards_stack_frame_register_inlining_disable_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksReproTests.test_udf_classes_reconstruction_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision,  # noqa: F821
+    # Cell collides with local var
+    NestedGraphBreaksComprehensionTests.test_store_nonlocal_nested_graph_breaks,  # noqa: F821
 ]
 
 case = None

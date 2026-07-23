@@ -1096,7 +1096,6 @@ main()
         self.assertNotEqual(grads[1], None)
         self.assertNotEqual(grads[2], None)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180661")
     def test_inputs_aliasing_bytecode_attr_mutations(self):
         # Freeze compiled autograd graph
         compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance(compiler_fn)
@@ -2444,7 +2443,7 @@ main()
                             node.target is auto_functionalize_func
                             for node in gm.graph.nodes
                         ),
-                        f"{auto_functionalize_func} op not found in {gm.graph}",
+                        lambda msg: f"{msg}\n{auto_functionalize_func} op not found in {gm.graph}",
                     )
                     return compiler_fn(gm)
 
@@ -5680,6 +5679,8 @@ skipped_tests.add("test_custom_function_boxed_grads_direct_apply")
 skipped_tests.add("test_custom_function_boxed_grads_single_list_arg")
 
 skipped_tests.add("test_pyobject_dispatch_normalizes_tensor_list_output")
+skipped_tests.add("test_needs_input_grad_setter_roundtrip_num_inputs_2")
+skipped_tests.add("test_needs_input_grad_setter_roundtrip_num_inputs_25")
 
 # DTensor backward calls a skipped global-shape helper under compiled autograd.
 skipped_tests.add("test_compile_dtensor_local_tensor_act_backward_passthrough")
@@ -5717,11 +5718,11 @@ hop_test_hops_in_bwd_failures = {
 
 class TestCompiledAutogradOpInfo(TestCase):
     def setUp(self) -> None:
-        super(TestCase, self).setUp()
+        super().setUp()
         reset()
 
     def tearDown(self) -> None:
-        super(TestCase, self).tearDown()
+        super().tearDown()
         reset()
 
     @ops(

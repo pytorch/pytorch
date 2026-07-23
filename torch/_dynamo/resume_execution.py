@@ -80,6 +80,13 @@ def _boxed_resume_local_argname_indexes(code: types.CodeType) -> dict[int, str]:
     return metadata.boxed_resume_local_argname_indexes
 
 
+def _boxed_resume_arg_indexes_to_clear(code: types.CodeType) -> tuple[int, ...]:
+    metadata = ContinueExecutionCache.generated_code_metadata.get(code)
+    if metadata is None:
+        return ()
+    return metadata.boxed_resume_arg_indexes_to_clear
+
+
 def _maybe_clear_tensor_resume_arg(resume_args: list[Any], idx: int) -> None:
     if idx < len(resume_args) and istensor(resume_args[idx]):
         resume_args[idx] = None
@@ -297,6 +304,7 @@ class ResumeFunctionMetadata:
     boxed_resume_local_argname_indexes: dict[int, str] = dataclasses.field(
         default_factory=dict
     )
+    boxed_resume_arg_indexes_to_clear: tuple[int, ...] = ()
     # Python 3.11+ fields
     # NOTE: Python 3.11 removed blocks, but for our purposes, a "block" consists
     # of instructions of all exception table entries that have the same target.
@@ -425,15 +433,15 @@ class ContinueExecutionCache:
             resume_arg_names.extend(v for v in argnames if v not in resume_arg_names)
             frame_value_names = set(argnames)
             frame_value_names.update(f"___stack{i}" for i in range(nstack))
-            boxed_resume = not nested_code_objs or any(
-                (
-                    inst.opname == "DELETE_FAST"
-                    and inst.argval in frame_value_names
-                    and inst.offset is not None
-                    and inst.offset >= resume_offset
-                )
+            future_deleted_fast_names = {
+                inst.argval
                 for inst in instructions
-            )
+                if inst.opname == "DELETE_FAST"
+                and inst.offset is not None
+                and inst.offset >= resume_offset
+            }
+            deleted_frame_value_names = future_deleted_fast_names & frame_value_names
+            boxed_resume = not nested_code_objs or bool(deleted_frame_value_names)
             resume_args_varname = RESUME_ARGS_VARNAME
             if boxed_resume:
                 unavailable_names = (
@@ -516,6 +524,22 @@ class ContinueExecutionCache:
             )
             target = next(i for i in instructions if i.offset == resume_offset)
 
+            resume_arg_indexes_to_clear = set(tensor_resume_arg_indexes)
+            resume_arg_indexes_to_clear.update(
+                idx
+                for idx, name in enumerate(resume_arg_names)
+                if name in deleted_frame_value_names
+            )
+            if (
+                target.opname == "STORE_FAST"
+                and target.argval in future_deleted_fast_names
+                and nstack
+            ):
+                resume_arg_indexes_to_clear.add(1 + nstack)
+            meta.boxed_resume_arg_indexes_to_clear = (
+                tuple(sorted(resume_arg_indexes_to_clear)) if boxed_resume else ()
+            )
+
             prefix = []
             if is_py311_plus:
                 if freevars:
@@ -545,7 +569,7 @@ class ContinueExecutionCache:
                             create_instruction("STORE_FAST", argval=name),
                         ]
                     )
-                for idx in tensor_resume_arg_indexes:
+                for idx in sorted(resume_arg_indexes_to_clear):
                     if idx >= 2 + nstack:
                         prefix.extend(create_clear_resume_arg(resume_args_varname, idx))
 

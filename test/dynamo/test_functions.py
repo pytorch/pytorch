@@ -3671,7 +3671,7 @@ class GraphModule(torch.nn.Module):
                 with self.subTest(seed_fn=f"{seed_fn.__module__}.{seed_fn.__name__}"):
                     torch._dynamo.reset()
 
-                    @torch.compile
+                    @torch.compile  # noqa: UNSPECIFIED_BACKEND
                     def foo():
                         seed_fn(3)
                         return torch.rand(4, device="cuda")
@@ -3947,7 +3947,7 @@ class GraphModule(torch.nn.Module):
                 def fn(a, b):
                     return operator.concat(a, b)
 
-                opt_fn = torch.compile(fn, fullgraph=True)
+                opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
                 a = seq_type([1, 2, 3])
                 b = seq_type([4, 5, 6])
                 self.assertEqual(opt_fn(a, b), fn(a, b))
@@ -3956,7 +3956,7 @@ class GraphModule(torch.nn.Module):
         def fn(a, b):
             return operator.iconcat(a, b)
 
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(opt_fn([1, 2, 3], [4, 5, 6]), [1, 2, 3, 4, 5, 6])
 
     def test_attrgetter(self):
@@ -4316,7 +4316,7 @@ class GraphModule(torch.nn.Module):
         t = torch.rand((2, 2)) * scale + zero_point
 
         result = fn(t, scale, zero_point)
-        compiled_fn = torch.compile(fn, fullgraph=True)
+        compiled_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         compiled_result = compiled_fn(t, scale, zero_point)
         self.assertEqual(compiled_result, result)
 

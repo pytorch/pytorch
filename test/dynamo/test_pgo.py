@@ -183,13 +183,8 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         # before/after graph break. Boxed resume frames record the same tensors
         # through the generated resume argument list.
         for code_state in torch._dynamo.pgo.get_code_state().values():
-            if "L['x']" in code_state.automatic_dynamic:
-                self.assertEqual(code_state.automatic_dynamic["L['x']"].size, (4, 4))
-                self.assertEqual(code_state.automatic_dynamic["L['y']"].size, (6, 8))
-            else:
-                sizes = {entry.size for entry in code_state.automatic_dynamic.values()}
-                self.assertIn((4, 4), sizes)
-                self.assertIn((6, 8), sizes)
+            self.assertEqual(code_state.automatic_dynamic["L['x']"].size, (4, 4))
+            self.assertEqual(code_state.automatic_dynamic["L['y']"].size, (6, 8))
 
     def test_whitelist_ints_floats(self):
         @torch.compile(backend="eager", fullgraph=True)
