@@ -529,7 +529,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     }
     FixupTraceScopeBlocks(graph, self);
     NormalizeOps(graph);
-    return {state, out_stack};
+    return {std::move(state), std::move(out_stack)};
   } catch (...) {
     tracer::abandon();
     throw;
@@ -1096,7 +1096,7 @@ void _do_warn(const char* _reason, const char* _kind) {
   std::string kind{_kind ? _kind : ""};
   std::ostringstream s;
   s << reason << kind;
-  warn_callback.load()(s.str());
+  warn_callback.load()(std::move(s).str());
 }
 
 void setWarn(warn_fn_type fn) {

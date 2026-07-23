@@ -1,3 +1,11 @@
+# Remove upstream custom-op registration from vendored RMSNorm kernels.
+#
+# PyTorch owns public operator registration itself; the vendored QuACK copy only
+# supplies implementation code. Keeping upstream quack:: registrations would leak
+# an external namespace from torch._vendor.quack and can collide with an installed
+# top-level quack package.
+#
+
 --- a/rmsnorm.py
 +++ b/rmsnorm.py
 @@ -19,7 +19,6 @@

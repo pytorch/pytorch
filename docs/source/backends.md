@@ -77,6 +77,13 @@ These backends include:
 ```
 
 ```{eval-rst}
+.. attribute::  prefer_cublaslt_grouped_gemm
+
+    A :class:`bool` that controls whether supported grouped GEMMs prefer the
+    cuBLASLt backend.
+```
+
+```{eval-rst}
 .. attribute::  allow_bf16_reduced_precision_reduction
 
     A :class:`bool` that controls whether reduced precision reductions are
