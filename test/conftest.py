@@ -429,32 +429,68 @@ def _probe_world_size(cls: type | None) -> int:
     return max(0, resolved)
 
 
+def _test_file_stem(item: Any) -> str:
+    """Basename (without ``.py``) of the test file that defines ``item``.
+
+    Resolved from the collected node (``path``/``fspath``/``nodeid``) rather than
+    ``item.module.__name__``: under run_test.py the module name is not the
+    test-file basename, so a module-name gate silently misses e.g.
+    test_c10d_gloo."""
+    for attr in ("path", "fspath"):
+        value = getattr(item, attr, None)
+        if value:
+            return os.path.basename(str(value)).removesuffix(".py").lower()
+    head = os.path.basename((getattr(item, "nodeid", "") or "").split("::", 1)[0])
+    return head.removesuffix(".py").lower()
+
+
 def _is_cpu_backed(item: Any) -> bool:
-    """A multi-process test whose dedicated module targets a CPU backend (e.g.
+    """A multi-process test whose dedicated file targets a CPU backend (e.g.
     test_c10d_gloo) spawns ranks, not GPUs, so a high world_size does not imply
-    a high GPU count."""
-    module = getattr(item, "module", None)
-    base = (getattr(module, "__name__", "") or "").rsplit(".", 1)[-1].lower()
-    return base.endswith("_cpu") or any(b in base for b in _cpu_backend_tokens())
+    a high GPU count. Match whole ``_``-delimited tokens so a backend name is not
+    matched as a substring of an unrelated word (e.g. "mpi" in "compile")."""
+    stem = _test_file_stem(item)
+    if stem.endswith("_cpu"):
+        return True
+    tokens = set(stem.split("_"))
+    return any(b in tokens for b in _cpu_backend_tokens())
+
+
+def _is_local_tensor_simulation(cls: type | None) -> bool:
+    """LocalTensor test classes (e.g. *WithLocalTensor) inherit a multi-process
+    base and a >1 ``world_size`` but run single-process under LocalTensorMode on
+    one GPU, so their ``world_size`` is a simulated mesh size, not a GPU count.
+    Such classes need neither the ``multigpu`` nor ``multigpu_extra`` marker."""
+    if cls is None:
+        return False
+    if "LocalTensor" in cls.__name__:
+        return True
+    try:
+        return bool(cls.__new__(cls).is_local_tensor_enabled)
+    except Exception:
+        return False
 
 
 def _needs_extra_gpus(item: Any, cls: type | None) -> bool:
     """Whether a process-spawning distributed test needs strictly more
-    accelerators than the standard 2-GPU distributed runner provides. An
-    explicit decorator wins; otherwise use the class world_size, gated so
-    CPU-backed tests never qualify. On any ambiguity favor coverage and route
-    the test to the larger runner."""
+    accelerators than the standard 2-GPU distributed runner provides.
+
+    CPU-backed tests spawn ranks rather than GPUs, so they never qualify
+    regardless of world_size. Otherwise combine the two GPU-count signals -- the
+    ``skip_if_lt_x_gpu``/``requires_world_size`` decorator and the class
+    ``world_size`` -- and select when the larger exceeds the standard runner:
+    a test decorated ``skip_if_lt_x_gpu(2)`` whose class hardcodes
+    ``world_size = 4`` still needs 4 GPUs. On any ambiguity (unresolvable
+    world_size) favor coverage and route the test to the larger runner."""
     from torch.testing._internal.common_distributed import STANDARD_DISTRIBUTED_GPUS
 
-    dec = _decorator_gpu_requirement(_safe_obj(item))
-    if dec:
-        return dec > STANDARD_DISTRIBUTED_GPUS
     if _is_cpu_backed(item):
         return False
     world_size = _probe_world_size(cls)
     if world_size == 0:
         return True
-    return world_size > STANDARD_DISTRIBUTED_GPUS
+    dec = _decorator_gpu_requirement(_safe_obj(item))
+    return max(dec, world_size) > STANDARD_DISTRIBUTED_GPUS
 
 
 def pytest_itemcollected(item: Any) -> None:
@@ -470,6 +506,8 @@ def pytest_itemcollected(item: Any) -> None:
     the 3-4 GPU tests with `--multigpu-filter multigpu-extra`.
     """
     cls = getattr(item, "cls", None)
+    if _is_local_tensor_simulation(cls):
+        return
     if _spawns_multiple_processes(cls):
         item.add_marker("multigpu")
         if _needs_extra_gpus(item, cls):
