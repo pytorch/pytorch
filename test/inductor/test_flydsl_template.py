@@ -65,105 +65,18 @@ class TestFlyDSLTemplate(TestCase):
             _func_exe=callback,
         )
         executor = SimpleNamespace(_call_state=state)
-        with mock.patch.object(
-            torch._C, "_FlyDSLMMFp16Bf16CWrapper", None, create=True
-        ):
-            launcher = make_flydsl_inductor_launcher(
-                executor,
-                *tensors,
-                m=8,
-                n=4096,
-                k=4096,
-                param=object(),
-            )
+        launcher = make_flydsl_inductor_launcher(
+            executor,
+            *tensors,
+            m=8,
+            n=4096,
+            k=4096,
+            param=object(),
+        )
         stream = 0x12345678
         launcher(*tensors, stream)
 
         self.assertTrue(hasattr(launcher, "_flydsl_keepalive"))
-        self.assertEqual(
-            observed,
-            [
-                tuple(tensor.data_ptr() for tensor in tensors)
-                + (8, 4096, 4096, stream)
-            ],
-        )
-
-    def test_inductor_launcher_prefers_native_c_wrapper(self):
-        from torch._inductor.runtime.flydsl_cache import (
-            make_flydsl_inductor_launcher,
-        )
-
-        callback_type = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
-        callback = callback_type(lambda packed: None)
-
-        def fill_value(value, storage):
-            storage.value = value
-
-        state = SimpleNamespace(
-            _spec=[
-                (0, ctypes.c_void_p, fill_value),
-                (1, ctypes.c_void_p, fill_value),
-                (2, ctypes.c_void_p, fill_value),
-                (3, ctypes.c_int32, fill_value),
-                (4, ctypes.c_int32, fill_value),
-                (5, ctypes.c_int32, fill_value),
-                (7, ctypes.c_void_p, fill_value),
-            ],
-            _func_exe=callback,
-        )
-        executor = SimpleNamespace(_call_state=state)
-        tensors = [torch.empty(1) for _ in range(3)]
-        native_launcher = object()
-        with mock.patch.object(
-            torch._C,
-            "_FlyDSLMMFp16Bf16CWrapper",
-            return_value=native_launcher,
-            create=True,
-        ) as c_wrapper:
-            result = make_flydsl_inductor_launcher(
-                executor,
-                *tensors,
-                m=8,
-                n=4096,
-                k=4096,
-                param=object(),
-            )
-
-        func_ptr = ctypes.cast(callback, ctypes.c_void_p).value
-        self.assertIs(result, native_launcher)
-        c_wrapper.assert_called_once_with(func_ptr, 8, 4096, 4096, executor)
-
-    @unittest.skipUnless(
-        hasattr(torch._C, "_FlyDSLMMFp16Bf16CWrapper"),
-        "requires _FlyDSLMMFp16Bf16CWrapper",
-    )
-    def test_native_c_wrapper_packs_flydsl_abi(self):
-        observed = []
-        callback_type = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
-
-        @callback_type
-        def callback(packed):
-            slots = ctypes.cast(packed, ctypes.POINTER(ctypes.c_void_p))
-            observed.append(
-                (
-                    ctypes.c_void_p.from_address(slots[0]).value,
-                    ctypes.c_void_p.from_address(slots[1]).value,
-                    ctypes.c_void_p.from_address(slots[2]).value,
-                    ctypes.c_int32.from_address(slots[3]).value,
-                    ctypes.c_int32.from_address(slots[4]).value,
-                    ctypes.c_int32.from_address(slots[5]).value,
-                    ctypes.c_void_p.from_address(slots[6]).value,
-                )
-            )
-
-        tensors = [torch.empty(1) for _ in range(3)]
-        stream = 0x12345678
-        func_ptr = ctypes.cast(callback, ctypes.c_void_p).value
-        launcher = torch._C._FlyDSLMMFp16Bf16CWrapper(
-            func_ptr, 8, 4096, 4096, callback
-        )
-        launcher(*tensors, stream)
-
         self.assertEqual(
             observed,
             [
