@@ -43,7 +43,6 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_cuda import CDNA2OrLater, CDNA5OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context
-from torch.testing._internal.common_quantized import _bfloat16_to_float4_e2m1fn_x2, ceil_div, to_blocked
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -125,6 +124,72 @@ def get_tunableop_untuned_filename():
     untuned_filename_base, _, _ = untuned_filename_env.rpartition('.')
     untuned_filename = f"{untuned_filename_base}{ordinal}.csv"
     return untuned_filename
+
+def parse_tunable_log(log):
+    # Parse the PYTORCH_TUNABLEOP_VERBOSE=3 output into a per-op dict keyed by
+    # (op_signature, param_signature). Each entry records how many candidates
+    # were considered, which ones were tried, their timings, and the winner.
+    tuned = {}
+    current_key = None
+
+    finding_re = re.compile(
+        r"finding fastest for ([^(]+)\(([^)]+)\) out of (\d+) candidates"
+    )
+    tuning_re = re.compile(
+        r"tuning using .* instance id=\d+, ([^(]+)\(([^)]+)\) (.+)$"
+    )
+    timing_re = re.compile(
+        r"found (?:better|slower) instance id=\d+\. ([0-9.e+-]+)ms\. (.+?) min "
+    )
+    fastest_re = re.compile(r"found fastest for ([^(]+)\(([^)]+)\) (.+)$")
+
+    for line in log.splitlines():
+        finding_match = finding_re.search(line)
+        if finding_match:
+            current_key = (finding_match.group(1), finding_match.group(2))
+            tuned[current_key] = {
+                "candidate_count": int(finding_match.group(3)),
+                "tried": set(),
+                "timings": {},
+                "winner": None,
+            }
+            continue
+
+        tuning_match = tuning_re.search(line)
+        if tuning_match:
+            key = (tuning_match.group(1), tuning_match.group(2))
+            tuned.setdefault(
+                key,
+                {
+                    "candidate_count": 0,
+                    "tried": set(),
+                    "timings": {},
+                    "winner": None,
+                },
+            )["tried"].add(tuning_match.group(3))
+            continue
+
+        timing_match = timing_re.search(line)
+        if timing_match and current_key is not None:
+            tuned[current_key]["timings"][timing_match.group(2)] = float(
+                timing_match.group(1)
+            )
+            continue
+
+        fastest_match = fastest_re.search(line)
+        if fastest_match:
+            key = (fastest_match.group(1), fastest_match.group(2))
+            tuned.setdefault(
+                key,
+                {
+                    "candidate_count": 0,
+                    "tried": set(),
+                    "timings": {},
+                    "winner": None,
+                },
+            )["winner"] = fastest_match.group(3)
+
+    return tuned
 
 
 class TestLinalg(TestCase):
@@ -9986,69 +10051,6 @@ class TestLinalgCudaOnly(TestCase):
         if not torch.cuda.is_bf16_supported():
             raise unittest.SkipTest("bfloat16 not supported on this CUDA device")
 
-        def parse_tunable_log(log):
-            tuned = {}
-            current_key = None
-
-            finding_re = re.compile(
-                r"finding fastest for ([^(]+)\(([^)]+)\) out of (\d+) candidates"
-            )
-            tuning_re = re.compile(
-                r"tuning using .* instance id=\d+, ([^(]+)\(([^)]+)\) (.+)$"
-            )
-            timing_re = re.compile(
-                r"found (?:better|slower) instance id=\d+\. ([0-9.e+-]+)ms\. (.+?) min "
-            )
-            fastest_re = re.compile(r"found fastest for ([^(]+)\(([^)]+)\) (.+)$")
-
-            for line in log.splitlines():
-                finding_match = finding_re.search(line)
-                if finding_match:
-                    current_key = (finding_match.group(1), finding_match.group(2))
-                    tuned[current_key] = {
-                        "candidate_count": int(finding_match.group(3)),
-                        "tried": set(),
-                        "timings": {},
-                        "winner": None,
-                    }
-                    continue
-
-                tuning_match = tuning_re.search(line)
-                if tuning_match:
-                    key = (tuning_match.group(1), tuning_match.group(2))
-                    tuned.setdefault(
-                        key,
-                        {
-                            "candidate_count": 0,
-                            "tried": set(),
-                            "timings": {},
-                            "winner": None,
-                        },
-                    )["tried"].add(tuning_match.group(3))
-                    continue
-
-                timing_match = timing_re.search(line)
-                if timing_match and current_key is not None:
-                    tuned[current_key]["timings"][timing_match.group(2)] = float(
-                        timing_match.group(1)
-                    )
-                    continue
-
-                fastest_match = fastest_re.search(line)
-                if fastest_match:
-                    key = (fastest_match.group(1), fastest_match.group(2))
-                    tuned.setdefault(
-                        key,
-                        {
-                            "candidate_count": 0,
-                            "tried": set(),
-                            "timings": {},
-                            "winner": None,
-                        },
-                    )["winner"] = fastest_match.group(3)
-
-            return tuned
-
         import os
         import shutil
         import subprocess
@@ -10434,60 +10436,128 @@ class TestLinalgCudaOnly(TestCase):
                 count = 6
             self.assertEqual((total_num_results - ref_num_results), count)
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_msg)
     def test_scaled_gemm_blockwise_tunableop(self, device):
         # Exercise the block-scaled scaled GEMM recipes (MXFP8 and NVFP4)
         # through TunableOp. Both recipes dispatch to _scaled_gemm, which
-        # routes to the ScaledGemm TunableOp when tuning is enabled.
-        m, n, k = 128, 64, 128
+        # routes to the ScaledGemm TunableOp when tuning is enabled. We parse
+        # the verbose tuning log to confirm that non-Default candidates are
+        # actually tried and timed, and that the fastest candidate wins.
+        import os
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
 
-        def mxfp8_gemm():
-            block = 32
-            matA = torch.ones((m, k), dtype=torch.bfloat16, device=device).to(e4m3_type)
-            matB = torch.ones((n, k), dtype=torch.bfloat16, device=device).to(e4m3_type)
-            scaleA = to_blocked(torch.ones((m, ceil_div(k, block)), dtype=torch.float8_e8m0fnu, device=device))
-            scaleB = to_blocked(torch.ones((n, ceil_div(k, block)), dtype=torch.float8_e8m0fnu, device=device))
-            torch.nn.functional.scaled_mm(
-                matA, matB.t(),
-                scale_a=scaleA, scale_recipe_a=torch.nn.functional.ScalingType.BlockWise1x32,
-                scale_b=scaleB, scale_recipe_b=torch.nn.functional.ScalingType.BlockWise1x32,
-                swizzle_a=torch.nn.functional.SwizzleType.SWIZZLE_32_4_4,
-                swizzle_b=torch.nn.functional.SwizzleType.SWIZZLE_32_4_4,
-                output_dtype=torch.bfloat16,
+        # Create the results file in the parent so we can always clean it up,
+        # even if the subprocess is killed before its own teardown runs.
+        results_dir = tempfile.mkdtemp(prefix="tunableop_scaled_gemm_blockwise_")
+        results_filename = os.path.join(results_dir, "results.csv")
+
+        script = textwrap.dedent(
+            """
+            import torch
+            from torch.testing._internal.common_device_type import e4m3_type
+            from torch.testing._internal.common_quantized import (
+                _bfloat16_to_float4_e2m1fn_x2, ceil_div, to_blocked,
             )
 
-        def nvfp4_gemm():
-            block = 16
-            # fp4 packs two elements per byte, so the k dimension is halved on-device.
-            matA = _bfloat16_to_float4_e2m1fn_x2(torch.ones((m, k), dtype=torch.bfloat16, device=device))
-            matB = _bfloat16_to_float4_e2m1fn_x2(torch.ones((n, k), dtype=torch.bfloat16, device=device))
-            scaleA = to_blocked(torch.ones((m, ceil_div(k, block)), dtype=e4m3_type, device=device))
-            scaleB = to_blocked(torch.ones((n, ceil_div(k, block)), dtype=e4m3_type, device=device))
-            global_scale = torch.ones((), dtype=torch.float32, device=device)
-            swizzle = [torch.nn.functional.SwizzleType.SWIZZLE_32_4_4, torch.nn.functional.SwizzleType.NO_SWIZZLE]
-            recipe = [torch.nn.functional.ScalingType.BlockWise1x16, torch.nn.functional.ScalingType.TensorWise]
-            torch.nn.functional.scaled_mm(
-                matA, matB.t(),
-                scale_a=[scaleA, global_scale], scale_recipe_a=recipe,
-                scale_b=[scaleB, global_scale], scale_recipe_b=recipe,
-                swizzle_a=swizzle, swizzle_b=swizzle,
-                output_dtype=torch.bfloat16,
+            results_filename = {results_filename!r}
+            device = {device!r}
+            m, n, k = 128, 64, 128
+
+            def mxfp8_gemm():
+                block = 32
+                matA = torch.ones((m, k), dtype=torch.bfloat16, device=device).to(e4m3_type)
+                matB = torch.ones((n, k), dtype=torch.bfloat16, device=device).to(e4m3_type)
+                scaleA = to_blocked(torch.ones((m, ceil_div(k, block)), dtype=torch.float8_e8m0fnu, device=device))
+                scaleB = to_blocked(torch.ones((n, ceil_div(k, block)), dtype=torch.float8_e8m0fnu, device=device))
+                torch.nn.functional.scaled_mm(
+                    matA, matB.t(),
+                    scale_a=scaleA, scale_recipe_a=torch.nn.functional.ScalingType.BlockWise1x32,
+                    scale_b=scaleB, scale_recipe_b=torch.nn.functional.ScalingType.BlockWise1x32,
+                    swizzle_a=torch.nn.functional.SwizzleType.SWIZZLE_32_4_4,
+                    swizzle_b=torch.nn.functional.SwizzleType.SWIZZLE_32_4_4,
+                    output_dtype=torch.bfloat16,
+                )
+
+            def nvfp4_gemm():
+                block = 16
+                # fp4 packs two elements per byte, so the k dimension is halved on-device.
+                matA = _bfloat16_to_float4_e2m1fn_x2(torch.ones((m, k), dtype=torch.bfloat16, device=device))
+                matB = _bfloat16_to_float4_e2m1fn_x2(torch.ones((n, k), dtype=torch.bfloat16, device=device))
+                scaleA = to_blocked(torch.ones((m, ceil_div(k, block)), dtype=e4m3_type, device=device))
+                scaleB = to_blocked(torch.ones((n, ceil_div(k, block)), dtype=e4m3_type, device=device))
+                global_scale = torch.ones((), dtype=torch.float32, device=device)
+                swizzle = [torch.nn.functional.SwizzleType.SWIZZLE_32_4_4, torch.nn.functional.SwizzleType.NO_SWIZZLE]
+                recipe = [torch.nn.functional.ScalingType.BlockWise1x16, torch.nn.functional.ScalingType.TensorWise]
+                torch.nn.functional.scaled_mm(
+                    matA, matB.t(),
+                    scale_a=[scaleA, global_scale], scale_recipe_a=recipe,
+                    scale_b=[scaleB, global_scale], scale_recipe_b=recipe,
+                    swizzle_a=swizzle, swizzle_b=swizzle,
+                    output_dtype=torch.bfloat16,
+                )
+
+            gemms = [mxfp8_gemm, nvfp4_gemm]
+            try:
+                torch.cuda.tunable.enable(False)
+                torch.cuda.tunable.record_untuned_enable(False)
+                torch.cuda.tunable.tuning_enable(True)
+                torch.cuda.tunable.set_max_tuning_duration(1)
+                torch.cuda.tunable.set_max_tuning_iterations(3)
+                torch.cuda.tunable.set_cublaslt_requested_algo_count(8)
+                torch.cuda.tunable.set_rotating_buffer_size(0)
+                torch.cuda.tunable.set_numerical_check_tolerances(False)
+                torch.cuda.tunable.set_filename(results_filename, False)
+                torch.cuda.tunable.enable(True)
+
+                for gemm in gemms:
+                    gemm()
+            finally:
+                torch.cuda.tunable.enable(False)
+            """
+        ).format(results_filename=results_filename, device=device)
+
+        env = os.environ.copy()
+        env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
+        env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=os.path.dirname(__file__),
+                check=True,
             )
+        finally:
+            shutil.rmtree(results_dir, ignore_errors=True)
 
-        # NVFP4 is not supported on ROCm.
-        gemms = [mxfp8_gemm] if TEST_WITH_ROCM else [mxfp8_gemm, nvfp4_gemm]
+        tuned = parse_tunable_log(result.stdout)
+        self.assertGreater(len(tuned), 0, result.stdout)
+        self.assertTrue(
+            any(key[0].startswith("ScaledGemmTunableOp") for key in tuned), tuned
+        )
+        self.assertTrue(
+            any(
+                info["candidate_count"] > 1
+                and any(c.startswith("Gemm_Cublaslt_") for c in info["tried"])
+                and len(info["timings"]) > 1
+                for info in tuned.values()
+            ),
+            (tuned, result.stdout),
+        )
 
-        with self._tunableop_ctx():
-            torch.cuda.tunable.set_rotating_buffer_size(0)
-            torch.cuda.tunable.set_max_tuning_iterations(1)
-
-            ref_num_results = len(torch.cuda.tunable.get_results())
-            for gemm in gemms:
-                gemm()
-            total_num_results = len(torch.cuda.tunable.get_results())
-
-            # Each recipe has a distinct problem signature, so each adds one result.
-            self.assertEqual((total_num_results - ref_num_results), len(gemms))
+        for key, info in tuned.items():
+            if not info["timings"]:
+                continue
+            self.assertIn(info["winner"], info["timings"], (key, info, result.stdout))
+            winner_time = info["timings"][info["winner"]]
+            fastest_time = min(info["timings"].values())
+            self.assertEqual(winner_time, fastest_time, (key, info))
 
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
