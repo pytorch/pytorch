@@ -15,7 +15,11 @@ from typing import Any, get_args, get_origin, Literal, TypeVar, Union
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
-from torch._inductor.custom_graph_pass import CustomGraphPass, CustomPartitionerFn
+from torch._inductor.custom_graph_pass import (
+    CustomGraphPass,
+    CustomPartitionerFn,
+    PadMMPolicy,
+)
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch.utils._config_module import _ConfigEntry, ConfigModule
 from torch.utils._ordered_set import OrderedSet
@@ -80,6 +84,18 @@ class DummyPartitionerFn(CustomPartitionerFn):
         return None
 
 
+class DummyPadMMPolicy(PadMMPolicy):
+    """
+    A Dummy pad_mm policy to be used by ConfigFuzzer
+    """
+
+    def __call__(self, ctx: Any) -> bool | None:
+        return None
+
+    def uuid(self) -> Any | None:
+        return None
+
+
 T = TypeVar("T")
 
 
@@ -91,6 +107,7 @@ class TypeExemplars:
     TYPE_EXEMPLARS: dict[str, Any] = {
         CustomGraphPass.__name__: DummyPass(),
         CustomPartitionerFn.__name__: DummyPartitionerFn(),
+        PadMMPolicy.__name__: DummyPadMMPolicy(),
         torch.fx.graph.Graph.__name__: torch.fx.graph.Graph(),
         BaseSchedulerNode.__name__: BaseSchedulerNode(None),  # type: ignore[arg-type]
     }
