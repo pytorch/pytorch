@@ -929,6 +929,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) override;
 
+  c10::intrusive_ptr<Work> gather_into_tensor(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      const GatherOptions& opts = GatherOptions()) override;
+
   c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,

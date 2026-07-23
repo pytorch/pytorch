@@ -1,6 +1,8 @@
+import io
 import itertools
 import logging
 import textwrap
+import tokenize
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,6 +11,8 @@ from typing import Any, cast, TYPE_CHECKING
 
 import sympy
 from sympy import Integer, Symbol
+
+import torch
 
 
 if TYPE_CHECKING:
@@ -42,12 +46,18 @@ from .common import (
     PythonPrinter,
     RemovedArg,
     SizeArg,
+    TensorArg,
     WorkspaceArg,
 )
 from .simd import NodeInfo, prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
 from .triton import TritonKernel
-from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
+from .triton_utils import (
+    config_of,
+    equal_1_arg_indices,
+    is_unaligned_buffer,
+    signature_to_meta,
+)
 
 
 # Default block sizes used when combo kernel autotuning is disabled.
@@ -57,7 +67,7 @@ DEFAULT_COMBO_BLOCK_SIZE_2D = 32
 
 log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
-LARGE_NUMELS = 512e5
+LARGE_NUMELS = 51_200_000
 BLOCK_UTILIZATION = 0.8
 
 
@@ -205,7 +215,7 @@ def _default_custom_combo_kernel_horizontal_partition(
             and V.graph.sizevars.optimization_hint(
                 node_info_map[n].tiling["x"], fallback=1
             )
-            > LARGE_NUMELS  # type: ignore[arg-type]
+            > LARGE_NUMELS
         ]
         if large_pointwise:
             companion_nodes = [n for n in not_reduction if n not in large_pointwise]
@@ -252,7 +262,7 @@ def set_custom_combo_kernel_horizontal_partition(
 ) -> None:
     """Sets the algorithm used to partition nodes into horizontal partitions. Nodes in different partitions
     are implemented in different combo kernels. Nodes in the same partition are likely to be implemented
-    in the same combo kernel, but subject to subsequent restricts like CUDA limits for number of args.
+    in the same combo kernel, but subject to subsequent restrictions like CUDA limits for number of args.
 
     The algorithm should take a list of nodes and return a list of list of nodes.
 
@@ -271,6 +281,27 @@ class PartitionState:
     def finalize(self) -> None:
         if self.cur_partition:
             self.partitions.append(self.cur_partition)
+
+
+@dataclass
+class SubKernelSetup:
+    uniquify_block_sizes: list[str]
+    lhs_names: list[str]
+
+
+@dataclass
+class SubKernelCode:
+    setup: IndentedBuffer
+    body: IndentedBuffer
+    setup_lhs_names: list[str]
+
+
+@dataclass
+class SharedBody:
+    body: IndentedBuffer
+    placeholder_names: list[str]
+    args_by_subkernel: list[list[str]]
+    setup_lhs_names: list[str]
 
 
 class ComboKernel(Kernel):
@@ -622,7 +653,7 @@ class ComboKernel(Kernel):
 
     def codegen_static_numels_sub_kernel(
         self, code: IndentedBuffer, sub_kernel: TritonKernel, num: int
-    ) -> list[str]:
+    ) -> SubKernelSetup:
         """
         We get a small speedup from hard coding numels if they are static.
 
@@ -640,11 +671,14 @@ class ComboKernel(Kernel):
         knows that its a static numel, as that you just plop a constant into the kernel.
         """
         grid = []
+        lhs_names: list[str] = []
         uniquify_block_sizes = []
         for tree in sub_kernel.range_trees:
             simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
             if isinstance(simplified_tree_numel, (Integer, int)):
-                code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
+                lhs_name = f"{tree.prefix}numel"
+                code.writeline(f"{lhs_name} = {int(simplified_tree_numel)}")
+                lhs_names.append(lhs_name)
             else:
                 if f"{tree.prefix}numel_{num}" not in self.dynamic_shape_args:
                     raise AssertionError(
@@ -661,11 +695,13 @@ class ComboKernel(Kernel):
 
             if tree.is_reduction and sub_kernel.persistent_reduction:
                 val = TritonKernel._get_persistent_RBLOCK(tree.numel)
+                lhs_names.append(f"{tree.prefix.upper()}BLOCK_{num}")
                 code.writeline(
                     f"{tree.prefix.upper()}BLOCK_{num}: tl.constexpr = {val}"
                 )
 
             if tree.prefix == "x" and sub_kernel.no_x_dim:
+                lhs_names.append(f"XBLOCK_{num}")
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
                 uniquify_block_sizes.append("XBLOCK")
             elif tree.prefix in ("x", "y") and self.per_subkernel_blocks:
@@ -674,7 +710,10 @@ class ComboKernel(Kernel):
                 if self.per_subkernel_blocks or sub_kernel.persistent_reduction:
                     uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
         self.grids.append(grid)
-        return uniquify_block_sizes
+        return SubKernelSetup(
+            uniquify_block_sizes=uniquify_block_sizes,
+            lhs_names=lhs_names,
+        )
 
     def min_x_blocks_sub_kernel(self, sub_kernel: TritonKernel, num: int) -> None:
         """
@@ -915,7 +954,9 @@ class ComboKernel(Kernel):
                 @triton.jit
             """
         elif sub_kernel.inside_reduction:
-            reduction_hint = sub_kernel.features.get_reduction_hint()
+            reduction_hint = sub_kernel.features.get_reduction_hint(
+                sub_kernel.tiling_scores
+            )
             heuristics_line = f"""
                 @triton_heuristics.{heuristics}(
                     size_hints={size_hints!r},
@@ -1041,6 +1082,343 @@ class ComboKernel(Kernel):
                     )
         return extra_args
 
+    def _can_share_body(
+        self,
+        heuristics_list: list[str],
+    ) -> bool:
+        if len(self.sub_kernels) < 2:
+            return False
+        if self.enable_autotune or self.per_subkernel_blocks:
+            return False
+        if torch.version.hip is not None:
+            # The shared-body form joins live pointer placeholders after a
+            # many-way dispatch branch. HIP/Triton currently has pathological
+            # compile times for that IR shape on large foreach lists, so keep
+            # ROCm on the existing per-branch body emission path.
+            return False
+        if self.dispatch_class not in (
+            ComboKernel.SequentialDispatch,
+            ComboKernel.RoundRobinDispatch,
+        ):
+            return False
+        if self.dynamic_shape_args or any(self.y_tree_list):
+            return False
+        if any(
+            sub_kernel.no_x_dim
+            or sub_kernel.inside_reduction
+            or sub_kernel.persistent_reduction
+            for sub_kernel in self.sub_kernels
+        ):
+            return False
+        return all(heuristic == "pointwise" for heuristic in heuristics_list)
+
+    @staticmethod
+    def _plain_lines(code: IndentedBuffer) -> list[str] | None:
+        lines: list[str] = []
+        for line in code._lines:
+            if isinstance(line, str):
+                lines.append(line)
+            elif isinstance(line, DeferredLineBase):
+                evaluated = line()
+                if evaluated is not None:
+                    lines.append(evaluated)
+            else:
+                return None
+        return lines
+
+    @staticmethod
+    def _replace_names_in_line(line: str, replacements: dict[str, str]) -> str | None:
+        if not replacements:
+            return line
+        try:
+            pieces: list[str] = []
+            cursor = 0
+            for token in tokenize.generate_tokens(io.StringIO(line).readline):
+                if token.type == tokenize.NAME and token.string in replacements:
+                    start, end = token.start[1], token.end[1]
+                    pieces.append(line[cursor:start])
+                    pieces.append(replacements[token.string])
+                    cursor = end
+            pieces.append(line[cursor:])
+            return "".join(pieces)
+        except tokenize.TokenError:
+            return None
+
+    @classmethod
+    def _replace_names(
+        cls, lines: list[str], replacements: dict[str, str]
+    ) -> list[str] | None:
+        replaced: list[str] = []
+        for line in lines:
+            new_line = cls._replace_names_in_line(line, replacements)
+            if new_line is None:
+                return None
+            replaced.append(new_line)
+        return replaced
+
+    @staticmethod
+    def _names_in_lines(lines: list[str]) -> OrderedSet[str] | None:
+        names: OrderedSet[str] = OrderedSet()
+        try:
+            for line in lines:
+                for token in tokenize.generate_tokens(io.StringIO(line).readline):
+                    if token.type == tokenize.NAME:
+                        names.add(token.string)
+        except tokenize.TokenError:
+            return None
+        return names
+
+    @staticmethod
+    def _range_tree_names(sub_kernel: TritonKernel) -> list[str]:
+        names: list[str] = []
+        for tree in sub_kernel.range_trees:
+            names.append(tree.name)
+            names.extend(entry.name for entry in tree.nodes.values())
+        return names
+
+    @classmethod
+    def _range_tree_name_replacements(
+        cls, first: TritonKernel, sub_kernel: TritonKernel
+    ) -> dict[str, str] | None:
+        if len(first.range_trees) != len(sub_kernel.range_trees):
+            return None
+
+        for first_tree, tree in zip(
+            first.range_trees, sub_kernel.range_trees, strict=True
+        ):
+            if (
+                first_tree.prefix != tree.prefix
+                or first_tree.tensor_dim != tree.tensor_dim
+                or first_tree.is_reduction != tree.is_reduction
+            ):
+                return None
+
+        first_names = cls._range_tree_names(first)
+        names = cls._range_tree_names(sub_kernel)
+        if len(first_names) != len(names):
+            return None
+        return {
+            name: first_name
+            for first_name, name in zip(first_names, names, strict=True)
+            if name != first_name
+        }
+
+    @classmethod
+    def _body_name_replacements(
+        cls,
+        first: TritonKernel,
+        sub_kernel: TritonKernel,
+        args: list[str],
+    ) -> dict[str, str] | None:
+        first_cse_names = {
+            canonical: name for name, canonical in first._op_trace_cse_names.items()
+        }
+        replacements: dict[str, str] = {}
+        for name, canonical in sub_kernel._op_trace_cse_names.items():
+            first_name = first_cse_names.get(canonical)
+            if first_name is None:
+                return None
+            if name != first_name:
+                replacements[name] = first_name
+
+        range_replacements = cls._range_tree_name_replacements(first, sub_kernel)
+        if range_replacements is None:
+            return None
+        replacements.update(range_replacements)
+
+        for i, arg in enumerate(args):
+            replacements[arg] = f"foreach_arg{i}"
+        return replacements
+
+    @staticmethod
+    def _compatible_shared_arg_properties(
+        args_by_subkernel: list[list[str]],
+        tensor_args: dict[str, TensorArg],
+    ) -> bool:
+        if not args_by_subkernel:
+            return False
+        num_args = len(args_by_subkernel[0])
+        if num_args == 0:
+            return False
+        if any(len(args) != num_args for args in args_by_subkernel):
+            return False
+        if any(arg not in tensor_args for args in args_by_subkernel for arg in args):
+            return False
+
+        for arg_index in range(num_args):
+            properties = OrderedSet(
+                [
+                    (
+                        tensor_args[args[arg_index]].dtype,
+                        is_unaligned_buffer(tensor_args[args[arg_index]]),
+                    )
+                    for args in args_by_subkernel
+                ]
+            )
+            if len(properties) != 1:
+                return False
+
+        return True
+
+    @classmethod
+    def _setup_lhs_names(cls, sub_kernel_codes: list[SubKernelCode]) -> list[str]:
+        names: list[str] = []
+        seen: OrderedSet[str] = OrderedSet()
+        for sub_kernel_code in sub_kernel_codes:
+            for name in sub_kernel_code.setup_lhs_names:
+                if name not in seen:
+                    seen.add(name)
+                    names.append(name)
+        return names
+
+    def _try_get_shared_body(
+        self,
+        sub_kernel_codes: list[SubKernelCode],
+        signature: list[Any],
+        heuristics_list: list[str],
+    ) -> SharedBody | None:
+        if not self._can_share_body(heuristics_list):
+            return None
+
+        tensor_args = {arg.name: arg for arg in signature if isinstance(arg, TensorArg)}
+        if not tensor_args:
+            return None
+        first_sub_kernel = self.sub_kernels[0]
+        first_trace = first_sub_kernel.op_trace
+        if not first_trace:
+            return None
+        if any(
+            sub_kernel.op_trace != first_trace for sub_kernel in self.sub_kernels[1:]
+        ):
+            return None
+
+        transformed_bodies: list[list[str]] = []
+        args_by_subkernel: list[list[str]] = []
+
+        for sub_kernel, sub_kernel_code in zip(
+            self.sub_kernels, sub_kernel_codes, strict=True
+        ):
+            lines = self._plain_lines(sub_kernel_code.body)
+            if lines is None:
+                return None
+            body_names = self._names_in_lines(lines)
+            if body_names is None:
+                return None
+            if any(
+                arg in body_names and arg not in tensor_args
+                for arg in sub_kernel.op_trace_buffer_arg_names
+            ):
+                return None
+            args = [
+                arg
+                for arg in sub_kernel.op_trace_buffer_arg_names
+                if arg in tensor_args and arg in body_names
+            ]
+            # Every live tensor pointer in the emitted body must come from the
+            # structured trace so placeholder substitution cannot miss it.
+            if any(arg in body_names and arg not in args for arg in tensor_args):
+                return None
+            args_by_subkernel.append(args)
+
+            replacements = self._body_name_replacements(
+                first_sub_kernel, sub_kernel, args
+            )
+            if replacements is None:
+                return None
+            transformed = self._replace_names(lines, replacements)
+            if transformed is None:
+                return None
+
+            transformed_bodies.append(transformed)
+
+        if any(body != transformed_bodies[0] for body in transformed_bodies[1:]):
+            return None
+        if not self._compatible_shared_arg_properties(args_by_subkernel, tensor_args):
+            return None
+
+        setup_lhs_names = self._setup_lhs_names(sub_kernel_codes)
+
+        body = IndentedBuffer()
+        body.writelines(transformed_bodies[0])
+        return SharedBody(
+            body=body,
+            placeholder_names=[
+                f"foreach_arg{i}" for i in range(len(args_by_subkernel[0]))
+            ],
+            args_by_subkernel=args_by_subkernel,
+            setup_lhs_names=setup_lhs_names,
+        )
+
+    def _codegen_sub_kernel_bodies(
+        self,
+    ) -> list[SubKernelCode]:
+        sub_kernel_codes: list[SubKernelCode] = []
+        for num, sub_kernel in enumerate(self.sub_kernels):
+            setup = IndentedBuffer()
+            sub_kernel_setup = self.codegen_static_numels_sub_kernel(
+                setup, sub_kernel, num
+            )
+            sub_kernel.codegen_prologue(sub_kernel.body)
+            sub_kernel.codegen_body()
+            sub_kernel._filter_pdl(sub_kernel.body)
+            body = self.uniquify_block_sizes(
+                sub_kernel.body, num, sub_kernel_setup.uniquify_block_sizes
+            )
+            sub_kernel_codes.append(
+                SubKernelCode(
+                    setup=setup,
+                    body=body,
+                    setup_lhs_names=sub_kernel_setup.lhs_names,
+                )
+            )
+        return sub_kernel_codes
+
+    def _codegen_branch(
+        self,
+        code: IndentedBuffer,
+        num: int,
+        sub_kernel_code: SubKernelCode,
+    ) -> None:
+        if self.dispatch_class is None:
+            raise AssertionError("dispatch_class must not be None")
+        self.dispatch_class.codegen_pid_range(self, num, code)
+        with code.indent():
+            code.splice(sub_kernel_code.setup)
+            code.splice(sub_kernel_code.body)
+
+    def _codegen_shared_branches(
+        self,
+        code: IndentedBuffer,
+        sub_kernel_codes: list[SubKernelCode],
+        shared_body: SharedBody,
+    ) -> None:
+        if self.dispatch_class is None:
+            raise AssertionError("dispatch_class must not be None")
+        for num, sub_kernel_code in enumerate(sub_kernel_codes):
+            self.dispatch_class.codegen_pid_range(self, num, code)
+            with code.indent():
+                code.splice(sub_kernel_code.setup)
+                for placeholder, arg in zip(
+                    shared_body.placeholder_names,
+                    shared_body.args_by_subkernel[num],
+                    strict=True,
+                ):
+                    code.writeline(f"{placeholder} = {arg}")
+
+        code.splice("else:")
+        with code.indent():
+            code.splice("pid_offset = 0")
+            for name in shared_body.setup_lhs_names:
+                code.writeline(f"{name} = 0")
+            for placeholder, arg in zip(
+                shared_body.placeholder_names,
+                shared_body.args_by_subkernel[0],
+                strict=True,
+            ):
+                code.writeline(f"{placeholder} = {arg}")
+
+        code.splice(shared_body.body)
+
     def codegen_kernel(self, name: str | None = None) -> str:
         """Generate the triton code for a combo kernel that fuses multiple sub-kernels."""
         # TODO: is it correct to use the first sub kernel's heuristics?
@@ -1102,25 +1480,19 @@ class ComboKernel(Kernel):
             if not self.enable_autotune:
                 self.codegen_blocks(code)
 
-            for num, sub_kernel in enumerate(self.sub_kernels):
-                if self.dispatch_class is None:
-                    raise AssertionError("dispatch_class must not be None")
-                self.dispatch_class.codegen_pid_range(self, num, code)
-                with code.indent():
-                    uniquify = self.codegen_static_numels_sub_kernel(
-                        code, sub_kernel, num
-                    )
-                    sub_kernel.codegen_prologue(sub_kernel.body)
-                    sub_kernel.codegen_body()
-                    sub_kernel._filter_pdl(sub_kernel.body)
-                    uniquified_body = self.uniquify_block_sizes(
-                        sub_kernel.body, num, uniquify
-                    )
-                    code.splice(uniquified_body)
+            sub_kernel_codes = self._codegen_sub_kernel_bodies()
+            shared_body = self._try_get_shared_body(
+                sub_kernel_codes, signature, heuristics_list
+            )
+            if shared_body is not None:
+                self._codegen_shared_branches(code, sub_kernel_codes, shared_body)
+            else:
+                for num, sub_kernel_code in enumerate(sub_kernel_codes):
+                    self._codegen_branch(code, num, sub_kernel_code)
 
-            code.splice("else:")
-            with code.indent():
-                code.splice("pass")
+                code.splice("else:")
+                with code.indent():
+                    code.splice("pass")
             if config.triton.proton_profiling:
                 code.writeline(f'pl.exit_scope("{kernel_name}")')
 
@@ -1235,13 +1607,15 @@ class ComboKernel(Kernel):
         return result
 
     def imports_for_benchmark_kernel(self) -> str:
+        # Dedent BEFORE substituting get_raw_stream: a multi-line override would
+        # otherwise collapse dedent's common prefix and misindent the imports.
         return textwrap.dedent(
             """
             from torch._dynamo.testing import rand_strided
             {}
             import torch
-        """.format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
-        )
+            """
+        ).format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
 
     def uniquify_block_sizes(
         self, code: IndentedBuffer, num_kernel: int, uniquify: list[str]
