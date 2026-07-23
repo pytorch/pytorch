@@ -186,6 +186,87 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             expected[reduction_type],
         )
 
+    @parametrize(
+        "case",
+        (
+            (
+                "sigmoid_fp16",
+                torch.ops.aten.sigmoid.default,
+                torch.float16,
+                (torch.float32, torch.float16),
+                torch.float16,
+            ),
+            (
+                "sigmoid_bf16",
+                torch.ops.aten.sigmoid.default,
+                torch.bfloat16,
+                (torch.float32, torch.bfloat16),
+                torch.bfloat16,
+            ),
+            (
+                "sigmoid_int",
+                torch.ops.aten.sigmoid.default,
+                torch.int32,
+                (torch.float32,),
+                torch.float32,
+            ),
+            (
+                "sigmoid_bool",
+                torch.ops.aten.sigmoid.default,
+                torch.bool,
+                (torch.float32,),
+                torch.float32,
+            ),
+            (
+                "silu_fp16",
+                torch.ops.aten.silu.default,
+                torch.float16,
+                (torch.float32, torch.float16),
+                torch.float16,
+            ),
+            (
+                "silu_bf16",
+                torch.ops.aten.silu.default,
+                torch.bfloat16,
+                (torch.float32, torch.bfloat16),
+                torch.bfloat16,
+            ),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_fast_math_decompositions_preserve_type_promotion(self, case):
+        from torch._higher_order_ops.flex_gemm import (
+            flex_gemm_body_decomposition_table,
+        )
+        from torch._inductor.decomposition import decompositions
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        _, op, input_dtype, conversion_dtypes, result_dtype = case
+        decomposition_table = flex_gemm_body_decomposition_table(
+            {"backend": "QUACK", "fast_math": True}, decompositions
+        )
+        graph_module = make_fx(
+            lambda x: op(x), decomposition_table=decomposition_table
+        )(torch.ones(4, dtype=input_dtype))
+
+        self.assertEqual(
+            tuple(
+                node.args[1]
+                for node in graph_module.graph.nodes
+                if node.target is torch.ops.prims.convert_element_type.default
+            ),
+            conversion_dtypes,
+        )
+        self.assertEqual(
+            graph_module(torch.ones(4, dtype=input_dtype)).dtype, result_dtype
+        )
+        self.assertTrue(
+            any(
+                node.target is torch.ops.aten.tanh.default
+                for node in graph_module.graph.nodes
+            )
+        )
+
     def test_dense_config_selection_is_explicit_and_sm110_reuses_sm100(self):
         from torch._inductor.heuristics.template import (
             flex_gemm as flex_gemm_heuristics,
