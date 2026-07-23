@@ -152,24 +152,25 @@ void SpatialSoftMax_getLaunchSizes(
     dim3& grid, dim3& block, uint32_t& smem_size) {
   block = SpatialSoftMax_getBlockSize(dim_size, inner_size);
   uint32_t block_threads = block.x * block.y;
-  // The 64-bit instantiations burn more registers, so the kernel's real
-  // maxThreadsPerBlock can fall below the nominal 1024. HIP fails the
-  // occupancy query outright in that case (CUDA just clamps), so ask the
-  // driver for the actual cap first and shrink the block to fit.
-  cudaFuncAttributes attr;
-#if defined(USE_ROCM)
-  AT_CUDA_CHECK(cudaFuncGetAttributes(&attr, (void*)k));
-#else
-  AT_CUDA_CHECK(cudaFuncGetAttributes(&attr, k));
-#endif
-  if (block_threads > static_cast<uint32_t>(attr.maxThreadsPerBlock)) {
-    block.y = std::max(1u, static_cast<uint32_t>(attr.maxThreadsPerBlock) / block.x);
-    block_threads = block.x * block.y;
-  }
   smem_size = block.x == 1 ? 0 : block_threads * sizeof(accscalar_t);
-  int max_active_blocks;
-  AT_CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_active_blocks,
-                                                              k, block_threads, smem_size));
+  // The 64-bit instantiations burn more registers, so the kernel's real block
+  // limit can fall below the nominal 1024, and the attribute query does not
+  // report it reliably on every backend (seen on gfx950). Probe the occupancy
+  // with progressively smaller blocks until the driver accepts the config.
+  int max_active_blocks = 0;
+  cudaError_t occupancy_err;
+  while ((occupancy_err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+              &max_active_blocks, k, block_threads, smem_size)) != cudaSuccess) {
+    if (block.y > 1) {
+      block.y = std::max(1u, block.y / 2);
+    } else if (block.x > 1) {
+      block.x = std::max(1u, block.x / 2);
+    } else {
+      AT_CUDA_CHECK(occupancy_err);
+    }
+    block_threads = block.x * block.y;
+    smem_size = block.x == 1 ? 0 : block_threads * sizeof(accscalar_t);
+  }
   max_active_blocks *= at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   grid = SpatialSoftMax_getGridSize(block, max_active_blocks, outer_size, inner_size);
 }
