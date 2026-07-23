@@ -83,6 +83,7 @@ except ImportError:
 # useful for fast python checks to reduce latency
 _is_profiler_enabled: bool = False
 
+
 def _set_is_profiler_enabled(enable: bool):
     global _is_profiler_enabled
     _is_profiler_enabled = enable
