@@ -192,6 +192,87 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             expected[reduction_type],
         )
 
+    @parametrize(
+        "case",
+        (
+            (
+                "sigmoid_fp16",
+                torch.ops.aten.sigmoid.default,
+                torch.float16,
+                (torch.float32, torch.float16),
+                torch.float16,
+            ),
+            (
+                "sigmoid_bf16",
+                torch.ops.aten.sigmoid.default,
+                torch.bfloat16,
+                (torch.float32, torch.bfloat16),
+                torch.bfloat16,
+            ),
+            (
+                "sigmoid_int",
+                torch.ops.aten.sigmoid.default,
+                torch.int32,
+                (torch.float32,),
+                torch.float32,
+            ),
+            (
+                "sigmoid_bool",
+                torch.ops.aten.sigmoid.default,
+                torch.bool,
+                (torch.float32,),
+                torch.float32,
+            ),
+            (
+                "silu_fp16",
+                torch.ops.aten.silu.default,
+                torch.float16,
+                (torch.float32, torch.float16),
+                torch.float16,
+            ),
+            (
+                "silu_bf16",
+                torch.ops.aten.silu.default,
+                torch.bfloat16,
+                (torch.float32, torch.bfloat16),
+                torch.bfloat16,
+            ),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_fast_math_decompositions_preserve_type_promotion(self, case):
+        from torch._higher_order_ops.flex_gemm import (
+            flex_gemm_body_decomposition_table,
+        )
+        from torch._inductor.decomposition import decompositions
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        _, op, input_dtype, conversion_dtypes, result_dtype = case
+        decomposition_table = flex_gemm_body_decomposition_table(
+            {"backend": "QUACK", "fast_math": True}, decompositions
+        )
+        graph_module = make_fx(
+            lambda x: op(x), decomposition_table=decomposition_table
+        )(torch.ones(4, dtype=input_dtype))
+
+        self.assertEqual(
+            tuple(
+                node.args[1]
+                for node in graph_module.graph.nodes
+                if node.target is torch.ops.prims.convert_element_type.default
+            ),
+            conversion_dtypes,
+        )
+        self.assertEqual(
+            graph_module(torch.ones(4, dtype=input_dtype)).dtype, result_dtype
+        )
+        self.assertTrue(
+            any(
+                node.target is torch.ops.aten.tanh.default
+                for node in graph_module.graph.nodes
+            )
+        )
+
     def test_dense_config_selection_is_explicit_and_sm110_reuses_sm100(self):
         from torch._inductor.heuristics.template import (
             flex_gemm as flex_gemm_heuristics,
@@ -396,7 +477,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 )
             with self.assertRaisesRegex(NotImplementedError, "not supported"):
                 flex_gemm_heuristics.explicit_gemm_configs_for_device(
-                    {**config, "cluster_m": True}, device
+                    {"cluster_m": True}, device
                 )
             with self.assertRaisesRegex(NotImplementedError, "not supported"):
                 flex_gemm_heuristics.explicit_gemm_configs_for_device(
@@ -6764,6 +6845,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
     def test_mm_tuple_aux_local_n_reduce_supports_clustered_tile_m256(
         self, device, group
     ):
+        from torch._inductor.heuristics.template.flex_gemm import gemm_config_key
         from torch._vendor.quack.gemm_config import GemmConfig
 
         m = n = 256
@@ -6772,16 +6854,16 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             x = acc.float().view(m, -1, group)
             return acc.relu(), x.sum(-1)
 
-        config = dataclasses.asdict(
-            GemmConfig(
-                tile_m=256,
-                tile_n=256,
-                pingpong=False,
-                cluster_m=2,
-                cluster_n=1,
-                device_capacity=10,
-            )
+        expected_config = GemmConfig(
+            tile_m=256,
+            tile_n=256,
+            pingpong=False,
+            cluster_m=2,
+            cluster_n=1,
+            device_capacity=10,
         )
+        config_key = gemm_config_key(expected_config)
+        config = dict(config_key)
 
         def fn(a, b):
             return flex_gemm(
@@ -6799,8 +6881,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
         self.assertLocalReduceAuxCode(code, group, callbacks=True)
-        self.assertIn("('tile_m', 256)", code)
-        self.assertIn("('cluster_m', 2)", code)
+        self.assertIn(f"config_key={config_key!r}", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_tuned_local_reduce_supports_max_autotune(self, device):
@@ -6915,6 +6996,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         name_fn=lambda case: case[0],
     )
     def test_mm_tuple_aux_local_reduce_supports_expanded_configs(self, device, case):
+        from torch._inductor.heuristics.template.flex_gemm import gemm_config_key
         from torch._vendor.quack.gemm_config import GemmConfig
 
         _, axis, group, tile_m, tile_n, cluster_m, cluster_n = case
@@ -6928,16 +7010,16 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 partial = acc.float().view(-1, group, n).sum(1)
             return acc.relu(), partial
 
-        config = dataclasses.asdict(
-            GemmConfig(
-                tile_m=tile_m,
-                tile_n=tile_n,
-                pingpong=False,
-                cluster_m=cluster_m,
-                cluster_n=cluster_n,
-                device_capacity=10,
-            )
+        expected_config = GemmConfig(
+            tile_m=tile_m,
+            tile_n=tile_n,
+            pingpong=False,
+            cluster_m=cluster_m,
+            cluster_n=cluster_n,
+            device_capacity=10,
         )
+        config_key = gemm_config_key(expected_config)
+        config = dict(config_key)
 
         def fn(a, b):
             return flex_gemm(
@@ -6959,10 +7041,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         else:
             self.assertIn(f"FlexGemmLocalReduceGeometry(group={group}, axis=0)", code)
             self.assertIn("FlexGemmLocalReduceCallbacks(", code)
-        self.assertIn(f"('tile_m', {tile_m})", code)
-        self.assertIn(f"('tile_n', {tile_n})", code)
-        self.assertIn(f"('cluster_m', {cluster_m})", code)
-        self.assertIn(f"('cluster_n', {cluster_n})", code)
+        self.assertIn(f"config_key={config_key!r}", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     @parametrize(
