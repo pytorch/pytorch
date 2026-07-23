@@ -28,6 +28,7 @@
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
+#include <torch/csrc/functorch/init.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -1409,6 +1410,67 @@ static PyObject* get_base_setup_context() {
   return setup_context;
 }
 
+static int is_setup_context_defined(PyObject* cls) {
+  auto cls_setup_context =
+      THPObjectPtr(PyObject_GetAttrString(cls, "setup_context"));
+  if (!cls_setup_context) {
+    return -1;
+  }
+  auto orig_setup_context = get_base_setup_context();
+  if (!orig_setup_context) {
+    return -1;
+  }
+  return cls_setup_context.get() != orig_setup_context;
+}
+
+static PyObject* get_autograd_function_attr(const char* name) {
+  auto module_ = THPObjectPtr(PyImport_ImportModule("torch.autograd.function"));
+  if (!module_) {
+    return nullptr;
+  }
+  return PyObject_GetAttrString(module_, name);
+}
+
+static int is_function_subclass(PyObject* cls) {
+  // This checks for subclasses of torch.autograd.Function, not its internal
+  // base torch.autograd.function._SingleLevelFunction.
+  THPObjectPtr function(get_autograd_function_attr("Function"));
+  if (!function) {
+    return -1;
+  }
+  return PyObject_IsSubclass(cls, function.get());
+}
+
+static PyObject* bind_default_args(
+    PyObject* cls,
+    PyObject* args,
+    PyObject* kwargs) {
+  THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
+  if (!forward_fn) {
+    return nullptr;
+  }
+  THPObjectPtr helper(get_autograd_function_attr("_bind_default_args"));
+  if (!helper) {
+    return nullptr;
+  }
+  auto* kwargs_arg = kwargs ? kwargs : Py_None;
+  return PyObject_CallFunctionObjArgs(
+      helper.get(), forward_fn.get(), args, kwargs_arg, nullptr);
+}
+
+static PyObject* call_custom_function_call(
+    PyObject* cls,
+    PyObject* args,
+    PyObject* kwargs) {
+  THPObjectPtr helper(get_autograd_function_attr("_call_custom_function_call"));
+  if (!helper) {
+    return nullptr;
+  }
+  auto* kwargs_arg = kwargs ? kwargs : Py_None;
+  return PyObject_CallFunctionObjArgs(
+      helper.get(), cls, args, kwargs_arg, nullptr);
+}
+
 // Given cls (a Function subclass), args, and kwargs, resolve kwargs into
 // positional arguments by inspecting the forward method's signature.
 // Returns a new reference to a tuple of positional args.
@@ -1562,12 +1624,76 @@ static PyObject* resolve_kwargs_to_positional(
   return result.release();
 }
 
-PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
+static bool are_functorch_transforms_active() {
+  auto include_set = c10::impl::tls_local_dispatch_key_set().included_;
+  return include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
+      include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
+}
+
+PyObject* THPFunction_apply(
+    PyObject* cls,
+    PyObject* orig_args,
+    PyObject* orig_kwargs) {
   HANDLE_TH_ERRORS
 
-  THPObjectPtr resolved_args(resolve_kwargs_to_positional(cls, args, kwargs));
+  auto is_setup_ctx_defined = is_setup_context_defined(cls);
+  if (is_setup_ctx_defined == -1) {
+    return nullptr;
+  }
+
+  THPObjectPtr args(Py_NewRef(orig_args));
+  THPObjectPtr kwargs(orig_kwargs ? Py_NewRef(orig_kwargs) : nullptr);
+  int function_subclass = -1;
+
+  if (is_setup_ctx_defined) {
+    function_subclass = is_function_subclass(cls);
+    if (function_subclass == -1) {
+      return nullptr;
+    }
+    if (function_subclass) {
+      THPObjectPtr bound_args_kwargs(
+          bind_default_args(cls, args.get(), kwargs.get()));
+      if (!bound_args_kwargs) {
+        return nullptr;
+      }
+      auto* bound_args = PyTuple_GET_ITEM(bound_args_kwargs.get(), 0);
+      auto* bound_kwargs = PyTuple_GET_ITEM(bound_args_kwargs.get(), 1);
+      args = Py_NewRef(bound_args);
+      kwargs = bound_kwargs == Py_None ? nullptr : Py_NewRef(bound_kwargs);
+    }
+  }
+
+  if (are_functorch_transforms_active()) {
+    if (function_subclass == -1) {
+      function_subclass = is_function_subclass(cls);
+      if (function_subclass == -1) {
+        return nullptr;
+      }
+    }
+    if (function_subclass && !is_setup_ctx_defined) {
+      PyErr_SetString(
+          PyExc_RuntimeError,
+          "In order to use an autograd.Function with functorch transforms "
+          "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
+          "staticmethod. For more details, please see "
+          "https://pytorch.org/docs/main/notes/extending.func.html");
+      return nullptr;
+    }
+    if (function_subclass) {
+      return call_custom_function_call(cls, args.get(), kwargs.get());
+    }
+  }
+
+  THPObjectPtr resolved_args(
+      resolve_kwargs_to_positional(cls, args.get(), kwargs.get()));
   if (!resolved_args)
     return nullptr;
+  auto* unwrapped_args =
+      torch::functorch::impl::unwrap_dead_wrappers(resolved_args.get());
+  resolved_args = THPObjectPtr(unwrapped_args);
+  if (!resolved_args) {
+    return nullptr;
+  }
   PyObject* inputs = resolved_args.get();
 
   // save a local copy of seq_id before it gets incremented
@@ -1641,20 +1767,6 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
       Py_TYPE(boxed_attr.get())->tp_name);
   ctx->boxed_grads_call = Py_IsTrue(boxed_attr.get());
 
-  // autograd.Function may optionally override a setup_context staticmethod.
-  // In this case, autograd.Function.forward does NOT accept a ctx object.
-  // Determine if this is the case.
-  auto cls_setup_context =
-      THPObjectPtr(PyObject_GetAttrString(cls, "setup_context"));
-  if (!cls_setup_context) {
-    return nullptr;
-  }
-  auto orig_setup_context = get_base_setup_context();
-  if (!orig_setup_context) {
-    return nullptr;
-  }
-  auto overridden_setup_context = cls_setup_context.get() != orig_setup_context;
-
   auto num_args = PyTuple_GET_SIZE(inputs);
 
   // Call forward
@@ -1665,7 +1777,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
     THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
     if (!forward_fn)
       return nullptr;
-    if (overridden_setup_context) {
+    if (is_setup_ctx_defined) {
       // call forward followed by setup_context
       output = PyObject_CallObject(forward_fn, unpacked_input.input_tuple);
       if (!output) {
@@ -1700,7 +1812,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
       std::move(output),
       is_executable,
       node,
-      overridden_setup_context);
+      is_setup_ctx_defined);
   END_HANDLE_TH_ERRORS
 }
 
