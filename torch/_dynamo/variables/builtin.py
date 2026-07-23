@@ -59,6 +59,7 @@ from ..source import (
     GetItemSource,
     GlobalSource,
     is_constant_source,
+    LocalSource,
     Source,
     TypeSource,
 )
@@ -87,6 +88,7 @@ from .dicts import (
     DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
+    OrderedItemsDictVariable,
 )
 from .hashable import is_hashable
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
@@ -96,15 +98,19 @@ from .object_protocol import (
     binary_iop,
     binary_op,
     generic_abs,
+    generic_add,
     generic_bool,
     generic_float,
     generic_getattr,
     generic_getiter,
     generic_hash,
+    generic_inplace_add,
+    generic_inplace_matmul,
     generic_inplace_multiply,
     generic_int,
     generic_invert,
     generic_len,
+    generic_matmul,
     generic_multiply,
     generic_neg,
     generic_pos,
@@ -112,15 +118,14 @@ from .object_protocol import (
     generic_str,
     maybe_get_python_type,
     pycallable_check,
+    pyiter_check,
     pysequence_check,
     ternary_iop,
     ternary_op,
     type_implements_mp_length,
     type_implements_sq_length,
-    vt_add,
     vt_getitem,
     vt_identity_compare,
-    vt_inplace_add,
 )
 from .sets import FrozensetVariable, SetVariable
 from .tensor import (
@@ -1153,6 +1158,12 @@ class BuiltinVariable(BaseBuiltinVariable):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
+                if fn is StopIteration:
+                    return variables.StopIterationVariable(fn, args, kwargs)
+                elif fn is AttributeError:
+                    return variables.AttributeErrorVariable(fn, args, kwargs)
+                elif fn is NameError:
+                    return variables.NameErrorVariable(fn, args, kwargs)
                 return variables.ExceptionVariable(fn, args, kwargs)
 
             return create_exception_class_object
@@ -1453,6 +1464,8 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     @staticmethod
     def _call_frame_locals_snapshot(tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .builder import VariableBuilder
+
         frame_local_names = set(tx.f_code.co_varnames) | set(tx.cell_and_freevars())
         cell_and_freevars = set(tx.cell_and_freevars())
         frame_locals = {}
@@ -1466,9 +1479,18 @@ class BuiltinVariable(BaseBuiltinVariable):
             ):
                 continue
             frame_locals[ConstantVariable.create(name)] = value
+        # Include locals pruned from symbolic_locals by the unused-input optimisation.
+        # locals()/vars() observes the entire namespace, so build VTs (installing
+        # guards) for any pruned entry that still has a runtime value.
+        for name in frame_local_names:
+            if name in frame_locals or name in cell_and_freevars:
+                continue
+            if name not in tx.f_locals:
+                continue
+            vt = VariableBuilder(tx, LocalSource(name))(tx.f_locals[name])
+            frame_locals[ConstantVariable.create(name)] = vt
         return ConstDictVariable(
             frame_locals,
-            dict,
             mutation_type=ValueMutationNew(),
         )
 
@@ -2165,17 +2187,19 @@ class BuiltinVariable(BaseBuiltinVariable):
         **kwargs: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/main/Objects/setobject.c#L2708-L2735
+        # CPython set_init rejects keywords before unpacking positional args, so
+        # set(a=1) and set().__init__(a=1) both raise regardless of arg count.
+        if kwargs:
+            raise_type_error(
+                tx,
+                "set() takes no keyword arguments",
+            )
         if len(args) == 0:
             return variables.SetVariable(set(), mutation_type=ValueMutationNew())
         elif len(args) > 1:
             raise_type_error(
                 tx,
                 f"set expected at most 1 argument, got {len(args)}",
-            )
-        elif kwargs:
-            raise_type_error(
-                tx,
-                "set() takes no keyword arguments",
             )
 
         s = SetVariable([], mutation_type=ValueMutationNew())
@@ -2188,17 +2212,17 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        if kwargs:
+            raise_type_error(
+                tx,
+                "frozenset() takes no keyword arguments",
+            )
         if len(args) == 0:
             return variables.FrozensetVariable(set(), mutation_type=ValueMutationNew())
         elif len(args) > 1:
             raise_type_error(
                 tx,
                 f"frozenset expected at most 1 argument, got {len(args)}",
-            )
-        elif kwargs:
-            raise_type_error(
-                tx,
-                "frozenset() takes no keyword arguments",
             )
 
         if istype(args[0], variables.FrozensetVariable):
@@ -2440,16 +2464,15 @@ class BuiltinVariable(BaseBuiltinVariable):
         if len(args) > 2:
             raise_type_error(tx, f"next expected at most 2 arguments, got {len(args)}")
         arg = args[0]
+        if not pyiter_check(maybe_get_python_type(arg)):
+            raise_type_error(
+                tx, f"'{arg.python_type_name()}' object is not an iterator"
+            )
         try:
             return arg.next_variable(tx)
         except ObservedUserStopIteration:
             if len(args) == 2:
                 return args[1]
-            raise
-        except Unsupported as ex:
-            if isinstance(arg, variables.BaseListVariable):
-                ex.remove_from_stats()
-                return arg.items[0]
             raise
 
     def call_map(
@@ -2782,6 +2805,16 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         return generic_inplace_multiply(tx, a, b)
 
+    def call_matmul(
+        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return generic_matmul(tx, a, b)
+
+    def call_imatmul(
+        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return generic_inplace_matmul(tx, a, b)
+
     def call_sub(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
@@ -2795,12 +2828,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_add(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return vt_add(tx, a, b)
+        return generic_add(tx, a, b)
 
     def call_iadd(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return vt_inplace_add(tx, a, b)
+        return generic_inplace_add(tx, a, b)
 
     def call_and_(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
@@ -2962,7 +2995,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 # arg (the type) matters.  Pass init_args=[] so reconstruction
                 # emits base_cls.__new__(cls) without extras.
                 # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4735-L4768
-                dict_vt = ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
+                dict_vt = ConstDictVariable({}, mutation_type=ValueMutationNew())
                 if isinstance(args[0], DictBuiltinVariable):
                     return dict_vt
                 return tx.output.side_effects.track_new_user_defined_object(
@@ -3074,9 +3107,8 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     raise AssertionError(
                         f"Expected OrderedDictVariable, got {type(result)}"
                     )
-                result._base_vt = ConstDictVariable(
+                result._base_vt = OrderedItemsDictVariable(
                     items,
-                    user_cls=OrderedDict,
                     mutation_type=ValueMutationNew(),
                 )
                 return result

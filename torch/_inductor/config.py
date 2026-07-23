@@ -641,7 +641,7 @@ multi_kernel_hints: list[int] = []
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
-# NVGEMM: NVIDIA Universal GEMM via cutlass_api (NVidia GPUs only).
+# NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.
@@ -651,10 +651,14 @@ max_autotune_gemm_backends = os.environ.get(
 
 
 # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
-# in max_autotune. By default it's 5, to keep compile time reasonable.
-# Set to 0, None, or env var "none"/"all" to tune all configs.
+# in max_autotune. Default 10: a sweep over GDN2/attn/MoE + FLUX shapes (bf16 and
+# nvfp4, M=1..4096) showed the heuristic's ranked winner sits in the top ~5 for
+# small/large M and for all nvfp4, but for mid-M (~512) bf16 the best config can
+# rank much deeper -- capping at 5 there lost up to ~11%, while cap 10 recovered
+# nearly all of it (diminishing returns beyond 10). Set to 0, None, or env var
+# "none"/"all" to tune all configs.
 def _nvgemm_max_profiling_configs_default() -> int | None:
-    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "5")
+    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "10")
     if env_val.lower() in ("none", "all"):
         return None
     return int(env_val)
@@ -669,6 +673,11 @@ nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default
 nvgemm_supplement_configs: bool = (
     os.environ.get("TORCHINDUCTOR_NVGEMM_SUPPLEMENT_CONFIGS", "0") == "1"
 )
+
+# When enabled, adds swap_ab NVGEMM choices that swap A/B operands so the
+# large N dimension goes on the M-axis. Improves tile utilization for
+# small-M decode shapes typical in LLM inference (M << N).
+nvgemm_swap_ab: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_SWAP_AB", "0") == "1"
 
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
@@ -878,6 +887,10 @@ cache_sdpa_constraint = (
 
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
+
+# Whether view outputs must match eager strides exactly instead of only matching
+# their stride order. Exact matching can introduce additional copy kernels.
+strict_output_strides = False
 
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging
@@ -1168,6 +1181,15 @@ worker_suppress_logging: bool = Config(
     default=True,
 )
 
+# The compile-worker sidecar runs a watchdog that, every N seconds, reports any
+# compile job still running after N seconds back to the parent, which emits it as
+# a structured-trace artifact (viewable in tlparse). This leaves a breadcrumb for
+# a stuck/slow worker that would otherwise wedge silently (the parent just blocks
+# reading the result pipe). Read in the sidecar. 0 disables the watchdog.
+compile_worker_watchdog_interval_seconds: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL", 60)
+)
+
 # Log per-operation runtime estimates for TLParse analysis.
 log_tlparse: bool = Config(
     env_name_force="LOG_TLPARSE",
@@ -1358,6 +1380,10 @@ class aten_distributed_optimizations:
     # Multiplier on the empirical saturation model's output.
     # With the empirical profiles this should be 1.0; kept for manual tuning.
     pre_bucketing_fsdp_collectives_saturation_calibration_multiplier: float = 1.0
+
+    # Direct-input NVLS multicast + Copy Engine variant. Requires NVSwitch /
+    # NVLink SHARP and uses cudaMemcpyAsync to the multicast pointer.
+    low_contention_all_gather_ce_multicast: bool = False
 
     # Decompose collective patterns when mathematically equivalent local
     # computation exists. See torch/_inductor/fx_passes/decomp_comms.py.
@@ -1849,16 +1875,28 @@ class cpp:
     use_two_step_variance_threshold = 1024
 
 
+def tlx_mode_from_env() -> Literal["allow", "force"] | None:
+    # Only the explicit values "allow"/"force" enable torchTLX. Any other
+    # value -- unset, empty, a typo, or a legacy "default" -- maps to None so
+    # TLX stays off. See the "Knob" section of the torchTLX README under
+    # third-party/triton/.../tlx/language/tlx/inductor/README.md.
+    mode = os.environ.get("TORCHINDUCTOR_TLX_MODE")
+    if mode in ("allow", "force"):
+        return cast("Literal['allow', 'force']", mode)
+    return None
+
+
 class triton:
     """
     Config specific to codegen/triton.py
     """
 
-    # No-op unless fbtriton (a Triton fork) is installed
-    tlx_mode: Literal["default", "allow", "force"] = cast(
-        Literal["default", "allow", "force"],
-        os.environ.get("TORCHINDUCTOR_TLX_MODE", "default"),
-    )
+    # torchTLX enablement. None (the default) means TLX is never considered
+    # (standard Inductor behavior); "allow" lets TLX compete via autotuning;
+    # "force" uses only TLX templates plus forced epilogue fusion. Also a
+    # no-op unless the active Triton is the fbtriton fork (the integration
+    # import in template_heuristics/tlx.py fails cleanly otherwise).
+    tlx_mode: Literal["allow", "force"] | None = tlx_mode_from_env()
 
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
@@ -1953,12 +1991,10 @@ class triton:
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
-    # TODO - enable by default
-    coalesce_tiling_analysis: bool = (
-        os.environ.get(
-            "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS", "1" if not is_fbcode() else "0"
-        )
-        == "1"
+    coalesce_tiling_analysis: bool = Config(
+        justknob="pytorch/inductor:coalesce_tiling_analysis",
+        env_name_force="TORCHINDUCTOR_COALESCE_TILING_ANALYSIS",
+        default=True,
     )
 
     # limit tiling dimensions
