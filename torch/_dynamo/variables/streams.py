@@ -11,6 +11,7 @@ from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
 from ..exc import TYPE_CHECKING, unimplemented
 from ..graph_bytecode_inputs import (
+    ambient_user_object_indices,
     CURRENT_STREAM_INDEX,
     get_external_object_by_index,
     register_graph_created_object,
@@ -284,6 +285,9 @@ class SymbolicStreamState:
                     f"Current stream must be registered at index {CURRENT_STREAM_INDEX}, "
                     f"got {index}"
                 )
+            # The ambient stream is registered unconditionally; the per-call
+            # reconstruction can be skipped unless the graph actually uses it.
+            ambient_user_object_indices.add(index)
             stream_var = LazyVariableTracker.create(stream, source=source)
             # Set user_object_index as an instance attribute so accessing it
             # does NOT trigger LazyVariableTracker realization.
