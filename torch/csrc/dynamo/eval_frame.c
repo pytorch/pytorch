@@ -689,13 +689,26 @@ static PyObject* eval_frame_module = NULL;
 // we re-read the live dict entry each call, so toggles are always observed.
 //
 // These lazy static caches (is_exporting_dict, is_exporting_key,
-// disable_wrapper_export_call) assume their first initialization happens under
-// the GIL / single-threaded; they are not yet free-threading (NoGIL) safe. A
-// race on first init would at worst leak a reference once, never corrupt state.
+// disable_wrapper_export_call, stance_module_dict, stance_key, stance_attr,
+// default_stance_str, disable_wrapper_stance_call) assume their first
+// initialization happens under the GIL / single-threaded; they are not yet
+// free-threading (NoGIL) safe. A race on first init would at worst leak a
+// reference once, never corrupt state.
 static PyObject* is_exporting_dict = NULL;
 static PyObject* is_exporting_key = NULL;
 // Cached torch._dynamo.eval_frame._disable_wrapper_export_call (lazy import).
 static PyObject* disable_wrapper_export_call = NULL;
+
+// Cached torch._dynamo.eval_frame.__dict__ + interned keys so the hot path can
+// read the current compile stance with a dict + attribute lookup (no per-call
+// import or string allocation). _stance is rebound (not mutated) by set_stance,
+// so we re-read the live dict entry each call.
+static PyObject* stance_module_dict = NULL;
+static PyObject* stance_key = NULL; // interned "_stance"
+static PyObject* stance_attr = NULL; // interned "stance"
+static PyObject* default_stance_str = NULL; // interned "default"
+// Cached torch._dynamo.eval_frame._disable_wrapper_stance_call (lazy import).
+static PyObject* disable_wrapper_stance_call = NULL;
 
 typedef struct {
   PyObject_HEAD
@@ -733,8 +746,33 @@ static int disable_wrapper_is_exporting(void) {
   return Py_IsTrue(flag);
 }
 
-// Delegate to the Python export fallback as _disable_wrapper_export_call(fn,
-// *args, **kwargs): build a new argument vector with fn prepended.
+// Call a Python fallback pyfn as pyfn(fn, *args, **kwargs): build a new argument
+// vector with fn prepended to the wrapper's incoming args.
+static PyObject* disable_wrapper_prepend_and_call(
+    PyObject* pyfn,
+    PyObject* fn,
+    PyObject* const* args,
+    size_t nargsf,
+    PyObject* kwnames) {
+  Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+  Py_ssize_t nkw = kwnames ? PyTuple_GET_SIZE(kwnames) : 0;
+  Py_ssize_t total = nargs + nkw;
+  PyObject** newargs =
+      (PyObject**)PyMem_Malloc((size_t)(total + 1) * sizeof(PyObject*));
+  if (newargs == NULL) {
+    return PyErr_NoMemory();
+  }
+  newargs[0] = fn;
+  for (Py_ssize_t i = 0; i < total; i++) {
+    newargs[i + 1] = args[i];
+  }
+  PyObject* result =
+      PyObject_Vectorcall(pyfn, newargs, (size_t)(nargs + 1), kwnames);
+  PyMem_Free(newargs);
+  return result;
+}
+
+// Delegate to the Python export fallback _disable_wrapper_export_call.
 static PyObject* disable_wrapper_export_vectorcall(
     PyObject* fn,
     PyObject* const* args,
@@ -752,22 +790,83 @@ static PyObject* disable_wrapper_export_vectorcall(
       return NULL;
     }
   }
-  Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
-  Py_ssize_t nkw = kwnames ? PyTuple_GET_SIZE(kwnames) : 0;
-  Py_ssize_t total = nargs + nkw;
-  PyObject** newargs =
-      (PyObject**)PyMem_Malloc((size_t)(total + 1) * sizeof(PyObject*));
-  if (newargs == NULL) {
-    return PyErr_NoMemory();
+  return disable_wrapper_prepend_and_call(
+      disable_wrapper_export_call, fn, args, nargsf, kwnames);
+}
+
+// Returns 1 if the current compile stance is "default" -- the common case in
+// which torch._dynamo.disable always toggles the callback fully off, so the C
+// hot path can clear it directly. Returns 0 for any non-default stance OR on
+// lookup failure, routing the call through the Python stance fallback which
+// computes _callback_from_stance and preserves stance semantics (e.g.
+// eager_on_recompile runs the disabled body in run-only mode).
+static int disable_wrapper_stance_is_default(void) {
+  if (unlikely(stance_module_dict == NULL)) {
+    PyObject* mod = PyImport_ImportModule("torch._dynamo.eval_frame");
+    if (mod == NULL) {
+      PyErr_Clear();
+      return 0;
+    }
+    stance_module_dict = PyModule_GetDict(mod); // borrowed
+    Py_XINCREF(stance_module_dict);
+    Py_DECREF(mod);
+    stance_key = PyUnicode_InternFromString("_stance");
+    stance_attr = PyUnicode_InternFromString("stance");
+    default_stance_str = PyUnicode_InternFromString("default");
+    if (stance_module_dict == NULL || stance_key == NULL ||
+        stance_attr == NULL || default_stance_str == NULL) {
+      PyErr_Clear();
+      Py_CLEAR(stance_module_dict);
+      Py_CLEAR(stance_key);
+      Py_CLEAR(stance_attr);
+      Py_CLEAR(default_stance_str);
+      return 0;
+    }
   }
-  newargs[0] = fn;
-  for (Py_ssize_t i = 0; i < total; i++) {
-    newargs[i + 1] = args[i];
+  PyObject* stance =
+      PyDict_GetItemWithError(stance_module_dict, stance_key); // borrowed
+  if (stance == NULL) {
+    if (PyErr_Occurred()) {
+      PyErr_Clear();
+    }
+    return 0;
   }
-  PyObject* result = PyObject_Vectorcall(
-      disable_wrapper_export_call, newargs, (size_t)(nargs + 1), kwnames);
-  PyMem_Free(newargs);
-  return result;
+  PyObject* name = PyObject_GetAttr(stance, stance_attr); // new ref
+  if (name == NULL) {
+    PyErr_Clear();
+    return 0;
+  }
+  int cmp = PyUnicode_Compare(name, default_stance_str);
+  Py_DECREF(name);
+  if (cmp != 0) {
+    if (PyErr_Occurred()) {
+      PyErr_Clear();
+    }
+    return 0;
+  }
+  return 1;
+}
+
+// Delegate to the Python stance fallback _disable_wrapper_stance_call.
+static PyObject* disable_wrapper_stance_vectorcall(
+    PyObject* fn,
+    PyObject* const* args,
+    size_t nargsf,
+    PyObject* kwnames) {
+  if (disable_wrapper_stance_call == NULL) {
+    PyObject* mod = PyImport_ImportModule("torch._dynamo.eval_frame");
+    if (mod == NULL) {
+      return NULL;
+    }
+    disable_wrapper_stance_call =
+        PyObject_GetAttrString(mod, "_disable_wrapper_stance_call");
+    Py_DECREF(mod);
+    if (disable_wrapper_stance_call == NULL) {
+      return NULL;
+    }
+  }
+  return disable_wrapper_prepend_and_call(
+      disable_wrapper_stance_call, fn, args, nargsf, kwnames);
 }
 
 static PyObject* THPDisableWrapper_vectorcall(
@@ -778,6 +877,12 @@ static PyObject* THPDisableWrapper_vectorcall(
   THPDisableWrapper* wrapper = (THPDisableWrapper*)self;
   if (unlikely(disable_wrapper_is_exporting())) {
     return disable_wrapper_export_vectorcall(
+        wrapper->fn, args, nargsf, kwnames);
+  }
+  if (unlikely(!disable_wrapper_stance_is_default())) {
+    // A non-default compile stance is active; let Python compute the
+    // stance-derived callback so disable honors e.g. eager_on_recompile.
+    return disable_wrapper_stance_vectorcall(
         wrapper->fn, args, nargsf, kwnames);
   }
   // Clear the callback; set_eval_frame returns a new reference to the prior one.
