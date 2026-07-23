@@ -804,5 +804,136 @@ class TestC10dGroupNameHashSalt(TestCase):
         self.assertNotEqual(first, second)
 
 
+class _FakeComm:
+    """Stand-in for a TorchComm whose ``finalize`` is not idempotent.
+
+    Mirrors the real comm: the second ``finalize`` raises, exactly the failure
+    ``destroy_process_group`` must avoid when a comm is shared across device
+    types.
+    """
+
+    def __init__(self):
+        self.finalize_calls = 0
+
+    def finalize(self):
+        self.finalize_calls += 1
+        if self.finalize_calls > 1:
+            raise RuntimeError("already finalized")
+
+
+class _FakeBackendWrapper:
+    def __init__(self, comm):
+        self._comm = comm
+
+    def get_comm(self):
+        return self._comm
+
+
+class _FakeOtherBackend:
+    """A c10d backend that is not a _BackendWrapper (must be left untouched)."""
+
+
+class TestC10dTorchCommsDestroyDedup(TestCase):
+    """Unit-test the comm-deduplication in ``destroy_process_group``.
+
+    A gloo subgroup reports both ``cuda`` and ``cpu`` device types backed by the
+    same _BackendWrapper/comm; the destroy loop must finalize each comm exactly
+    once because ``finalize()`` is not idempotent. Everything TorchComms-specific
+    is patched (``create=True``), so these run even when TorchComms is not
+    installed.
+    """
+
+    _WORLD_ATTRS = (
+        "pg_map",
+        "pg_names",
+        "pg_group_ranks",
+        "pg_backend_config",
+        "pg_to_tag",
+        "pg_coalesce_state",
+        "comms",
+    )
+
+    def setUp(self):
+        super().setUp()
+        self._saved_world = {
+            attr: getattr(c10d._world, attr).copy() for attr in self._WORLD_ATTRS
+        }
+
+    def tearDown(self):
+        for attr, value in self._saved_world.items():
+            container = getattr(c10d._world, attr)
+            container.clear()
+            if isinstance(value, dict):
+                container.update(value)
+            else:
+                container.extend(value)
+        super().tearDown()
+
+    def _drive_destroy(self, device_backends):
+        """Register a fake subgroup PG and run ``destroy_process_group`` on it.
+
+        ``device_backends`` maps device type -> backend object; the PG reports
+        those device types and returns the matching backend from
+        ``_get_backend``. Returns the PG mock so callers can assert on teardown.
+        """
+        pg = mock.MagicMock()
+        pg._device_types = list(device_backends)
+        pg._get_backend.side_effect = lambda dev: device_backends[dev]
+        name = c10d.GroupName(self.id())
+        pg.group_name = name
+
+        c10d._world.pg_map[pg] = (None, None)
+        c10d._world.pg_names[pg] = name
+        c10d._world.pg_group_ranks[pg] = {}
+        c10d._world.pg_backend_config[pg] = ""
+        c10d._world.pg_to_tag[pg] = None
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _unregister_process_group=lambda group_name: None,
+            create=True,
+        ):
+            c10d.destroy_process_group(pg)
+        return pg
+
+    def test_shared_comm_finalized_once(self):
+        # gloo scenario: one _BackendWrapper/comm shared across cuda and cpu.
+        comm = _FakeComm()
+        wrapper = _FakeBackendWrapper(comm)
+        pg = self._drive_destroy({"cuda": wrapper, "cpu": wrapper})
+        self.assertEqual(comm.finalize_calls, 1)
+        pg.shutdown.assert_called_once()
+        self.assertNotIn(pg, c10d._world.pg_map)
+
+    def test_same_comm_distinct_wrappers_finalized_once(self):
+        # Dedup keys on comm identity, not wrapper identity: two distinct
+        # _BackendWrapper objects sharing one comm still finalize it once.
+        comm = _FakeComm()
+        pg = self._drive_destroy(
+            {"cuda": _FakeBackendWrapper(comm), "cpu": _FakeBackendWrapper(comm)}
+        )
+        self.assertEqual(comm.finalize_calls, 1)
+        pg.shutdown.assert_called_once()
+
+    def test_distinct_comms_each_finalized_once(self):
+        comm_a, comm_b = _FakeComm(), _FakeComm()
+        self._drive_destroy(
+            {"cuda": _FakeBackendWrapper(comm_a), "cpu": _FakeBackendWrapper(comm_b)}
+        )
+        self.assertEqual(comm_a.finalize_calls, 1)
+        self.assertEqual(comm_b.finalize_calls, 1)
+
+    def test_non_backendwrapper_backend_is_skipped(self):
+        # A non-_BackendWrapper backend must not be finalized; the wrapped comm
+        # still finalizes exactly once.
+        comm = _FakeComm()
+        self._drive_destroy(
+            {"cuda": _FakeBackendWrapper(comm), "cpu": _FakeOtherBackend()}
+        )
+        self.assertEqual(comm.finalize_calls, 1)
+
+
 if __name__ == "__main__":
     run_tests()
