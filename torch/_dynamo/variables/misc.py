@@ -2364,6 +2364,11 @@ class LoggingLoggerVariable(VariableTracker):
         if method in ignore_set or function in ignore_set:
             return variables.ConstantVariable.create(None)
 
+        reorderable = torch._dynamo.config.reorderable_logging_functions
+        if self.source and (method in reorderable or function in reorderable):
+            fn_var = DebuggingVariable(method, source=AttrSource(self.source, name))
+            return fn_var.call_function(tx, args, kwargs)
+
         logger_cls = type(self.value)
         logger_cls_name = f"{logger_cls.__module__}.{logger_cls.__qualname__}"
         unimplemented(
@@ -2374,7 +2379,7 @@ class LoggingLoggerVariable(VariableTracker):
                 "If you do not need this logging side effect, add the exact method being called to `torch._dynamo.config.ignore_logging_functions`. Dynamo will skip the call and return `None`.",
                 f"For example, for `logger.{name}(...)`, use `torch._dynamo.config.ignore_logging_functions.add(logger.{name})`. If `{name}` is defined on the logger class, add the class method `{logger_cls_name}.{name}` to ignore this method for all instances of that class.",
                 f"Dynamo does not trace into logging.Logger method bodies, so only the method you call directly (`{name}`) is checked against the ignore set. Ignoring a method that `{name}` calls internally has no effect.",
-                "If you need the log side effect to run, then you can try one of (1) `torch._higher_order_ops.print(...)`, (2) wrap the logging call in a custom op (marked as mutable), or (3) preserve the logging contents and move the logging call outside the compiled region.",
+                f"If you need the log side effect to run, then you can try one of (1) add the method to `torch._dynamo.config.reorderable_logging_functions` (e.g. `torch._dynamo.config.reorderable_logging_functions.add(logger.{name})`) so that it runs after the compiled region, as long as its arguments are tensors, constants, or string formatters, (2) `torch._higher_order_ops.print(...)`, (3) wrap the logging call in a custom op (marked as mutable), or (4) preserve the logging contents and move the logging call outside the compiled region.",
             ],
         )
 
