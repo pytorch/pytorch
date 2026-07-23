@@ -1584,7 +1584,7 @@ force_shape_pad: bool = False
 #     def policy(ctx):
 #         return SHIPPED_TABLE.get((ctx.m, ctx.k, ctx.n, ctx.mat1_dtype))
 #     torch._inductor.config.pad_mm_policy = policy
-pad_mm_policy: "torch._inductor.custom_graph_pass.PadMMPolicyType" = None
+pad_mm_policy: torch._inductor.custom_graph_pass.PadMMPolicyType = None
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
