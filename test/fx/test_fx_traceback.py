@@ -170,10 +170,10 @@ class TestFXNodeSource(TestCase):
             if node.op not in {"placeholder", "output"}
         }
         same_ancestor_nodes = {
-            "permute": "addmm",
-            "addmm": "permute",
-            "permute_1": "addmm_1",
-            "addmm_1": "permute_1",
+            "permute_default": "addmm_default",
+            "addmm_default": "permute_default",
+            "permute_default_1": "addmm_default_1",
+            "addmm_default_1": "permute_default_1",
         }
 
         for node_name_1 in node_name_to_from_node:
@@ -209,11 +209,12 @@ class TestFXNodeSource(TestCase):
         gm = ep.module()
         provenance = get_graph_provenance_json(gm.graph)
         self.assertEqual(
-            set(provenance.keys()), {"relu", "linear", "sigmoid", "linear_1"}
+            set(provenance.keys()),
+            {"relu_default", "linear_default", "sigmoid_default", "linear_default_1"},
         )
 
-        # Check node "linear" is created from node "x" in PropagateUnbackedSymInts
-        key_provenance = provenance["linear"][0]["from_node"]
+        # Check node "linear_default" is created from node "x" in PropagateUnbackedSymInts
+        key_provenance = provenance["linear_default"][0]["from_node"]
         self.assertEqual(len(key_provenance), 1)
         key_provenance = key_provenance[0]
         check_node_source(
@@ -245,7 +246,7 @@ class TestFXNodeSource(TestCase):
         )
         for key in ["t", "addmm"]:
             # The node provenance hierarchy should be:
-            # t -> linear -> x -> x
+            # t -> linear_default -> x -> x
             #
             # x -> y means x is created from y
 
@@ -253,15 +254,15 @@ class TestFXNodeSource(TestCase):
             self.assertEqual(len(key_provenance), 1)
             key_provenance = key_provenance[0]
 
-            # Check node "t" and "addmm" is created from node "linear" in PropagateUnbackedSymInts
+            # Check node "t" and "addmm" is created from node "linear_default" in PropagateUnbackedSymInts
             check_node_source(
                 key_provenance,
-                "linear",
+                "linear_default",
                 "Interpreter_PropagateUnbackedSymInts",
                 CREATE_STR,
             )
 
-            # Check node "linear" is then created from node "x" in PropagateUnbackedSymInts
+            # Check node "linear_default" is then created from node "x" in PropagateUnbackedSymInts
             key_provenance = get_first_node_source_and_check(key_provenance)[
                 "from_node"
             ][0]

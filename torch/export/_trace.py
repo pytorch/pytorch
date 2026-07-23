@@ -722,6 +722,7 @@ def _canonicalize_export_graph(
                 _key,
                 _ExportSafeToReorder(),
                 skip_rename_ops=frozenset({"placeholder"}),
+                group_getitems=True,
             )
             if mod is gm and renamed:
                 _apply_renames_to_signature(signature, renamed)
