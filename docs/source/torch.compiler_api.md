@@ -98,16 +98,16 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        a retyped/reshaped weight) or a broadcast-compatible input-shape mismatch can
        silently miscompute where ``make_fx`` would raise; pass a model and inputs matching
        the example. The dynamo artifact inlines marshalled bytecode plus a pickled state
-       blob, so it is locked to the Python version that produced it AND (its import aliases
-       can reference private ``torch._dynamo`` modules) a compatible torch build, unlike
-       the portable ``make_fx`` source.
+       blob, so it is locked to the Python version that produced it AND, because its import
+       aliases can reference private ``torch._dynamo`` modules, to a compatible torch build,
+       unlike the portable ``make_fx`` source.
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
        decomposition function) forwarded to ``make_fx``; defaults to ``None``. Honored only
        by ``tracer="make_fx"``; passing it with ``tracer="dynamo"`` raises.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
        single source of truth for the calling convention) and a binary acceleration
        cache (no weights, no calling-convention metadata; it carries a small
-       format/version/backend/code_hash integrity tag that ``load`` verifies).
+       format/version/backend/tracer/code_hash integrity tag that ``load`` verifies).
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below).
 

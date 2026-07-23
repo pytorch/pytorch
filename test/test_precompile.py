@@ -1390,7 +1390,7 @@ class TestPrecompile(TestCase):
                 "changed -- update the docs and this test"
             )
         mf_code, mf_cache = torch.compiler.precompile(f, m, x, backend="eager")
-        with self.assertRaises(PrecompileError):
+        with self.assertRaisesRegex(PrecompileError, "shape"):
             torch.compiler.precompile.load(mf_code, mf_cache)(m, x2)
 
     def test_tracer_dynamo_pickle_state_corrupt_clean_error(self):
@@ -1413,6 +1413,109 @@ class TestPrecompile(TestCase):
         ns = {"__name__": "_p"}
         with self.assertRaisesRegex(PrecompileError, "captured state"):
             exec(compile(corrupted, "<p>", "exec"), ns)
+
+    def test_tracer_dynamo_import_source_unresolvable_clean_error(self):
+        # The third rehydrate diagnostic: an IMPORT_SOURCES alias that names a module not
+        # importable in this environment (the artifact can reference private torch._dynamo
+        # runtime modules, so it is locked to a compatible torch build) surfaces a clean
+        # PrecompileError about the torch-build lock, distinct from the Python-version and
+        # captured-state messages. Rewrite IMPORT_SOURCES to a bogus module and exec directly
+        # (load()'s code_hash check would otherwise fire first and mask the rehydrate path).
+        import re as _re
+
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        code, _cache = torch.compiler.precompile(
+            lambda model, xx: model(xx), m, x, tracer="dynamo"
+        )
+        corrupted = _re.sub(
+            r"IMPORT_SOURCES = \{[^}]*\}",
+            "IMPORT_SOURCES = {'x': 'no_such_module_precompile_xyz'}",
+            code,
+            count=1,
+        )
+        self.assertNotEqual(corrupted, code)
+        ns = {"__name__": "_i"}
+        with self.assertRaisesRegex(PrecompileError, "could not import a module"):
+            exec(compile(corrupted, "<i>", "exec"), ns)
+
+    def test_tracer_dynamo_wrong_type_blobs_clean_error(self):
+        # Hardening: marshal / pickle can SUCCEED yet return the wrong type (a corrupt blob
+        # that is valid marshal of an int, or valid pickle of a non-dict). The driver must
+        # still surface a clean PrecompileError -- not a raw TypeError from types.FunctionType
+        # or a KeyError from the state[...] accesses. Exec the doctored code directly.
+        import base64 as _b64
+        import marshal as _marshal
+        import pickle as _pickle
+        import re as _re
+
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        code, _cache = torch.compiler.precompile(
+            lambda model, xx: model(xx), m, x, tracer="dynamo"
+        )
+        non_code = _b64.b64encode(_marshal.dumps(0)).decode("ascii")
+        bad_code = _re.sub(
+            r"_DYNAMO_CODE = '[^']*'", f"_DYNAMO_CODE = {non_code!r}", code, count=1
+        )
+        self.assertNotEqual(bad_code, code)
+        with self.assertRaisesRegex(PrecompileError, "Python version"):
+            exec(compile(bad_code, "<c>", "exec"), {"__name__": "_c"})
+
+        non_dict = _b64.b64encode(_pickle.dumps([1, 2, 3])).decode("ascii")
+        bad_state = _re.sub(
+            r"_DYNAMO_STATE = '[^']*'", f"_DYNAMO_STATE = {non_dict!r}", code, count=1
+        )
+        self.assertNotEqual(bad_state, code)
+        with self.assertRaisesRegex(PrecompileError, "captured state"):
+            exec(compile(bad_state, "<s>", "exec"), {"__name__": "_s"})
+
+    def test_tracer_dynamo_unpicklable_state_clean_error(self):
+        # The build-side counterpart to the marshal/unmarshallable guard: fn's captured state
+        # (globals / closure / arg-kw defaults) is pickled into _DYNAMO_STATE, so an
+        # unpicklable NON-tensor value there (here a local lambda default, which invariant 1
+        # does not reject because it holds no tensor) must surface a clean PrecompileError
+        # rather than a raw PicklingError. The default is baked by value via argdefs.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+
+        def fn(model, xx, _cb=lambda z: z):
+            return model(xx)
+
+        with self.assertRaisesRegex(PrecompileError, "not picklable"):
+            torch.compiler.precompile(fn, m, x, tracer="dynamo", backend="eager")
+
+    def test_tracer_dynamo_static_under_dynamic_config(self):
+        # The dynamo tracer must capture STATIC shapes like the make_fx tracer (invariant 3)
+        # regardless of the ambient torch._dynamo config OR per-code-object shape history:
+        # precompile pins both assume_static_by_default and automatic_dynamic_shapes, so
+        # neither a globally flipped default (a) nor a prior precompile of the SAME fn at
+        # another shape (b, reachable with DEFAULT config) yields an out-of-contract dynamic
+        # artifact. Without the pins the eager subgraph would carry a SymInt dim.
+        m = torch.nn.Linear(4, 3).eval()
+        # (a) globally flipped assume_static_by_default.
+        x = torch.randn(5, 4)
+        with torch._dynamo.config.patch(assume_static_by_default=False):
+            code, cache = torch.compiler.precompile(
+                lambda model, xx: model(xx), m, x, tracer="dynamo", backend="eager"
+            )
+        self.assertNotIn("SymInt", code)
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(m, x), m(x))
+
+        # (b) automatic_dynamic (on by DEFAULT): precompiling the SAME fn (one code object)
+        # first at one shape then another would otherwise promote the batch dim to dynamic on
+        # the second capture. Reuse one fn across two shapes; both must stay static.
+        def f(model, xx):
+            return model(xx)
+
+        c1, _ = torch.compiler.precompile(
+            f, m, torch.randn(5, 4), tracer="dynamo", backend="eager"
+        )
+        c2, _ = torch.compiler.precompile(
+            f, m, torch.randn(7, 4), tracer="dynamo", backend="eager"
+        )
+        self.assertNotIn("SymInt", c1)
+        self.assertNotIn("SymInt", c2)
 
     def test_load_cache_without_tracer_key(self):
         # BC: a cache produced before the dynamo tracer existed carries no "tracer" key in

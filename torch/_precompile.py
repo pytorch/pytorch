@@ -1058,7 +1058,6 @@ def _baked_tensors(value: object) -> list[torch.Tensor]:
         def persistent_id(self, obj: object) -> object:
             if isinstance(obj, torch.Tensor):
                 found.append(obj)
-                # Any non-None id marks it external, so pickle skips its storage/reduce.
                 return len(found)
             return None
 
@@ -1157,7 +1156,7 @@ def _capture_dynamo(
     This is scoped to INFERENCE forward computations: a graph-breaking fn (e.g. one that
     runs ``.backward()``) raises a PrecompileError pointing at tracer="make_fx".
     """
-    from torch._dynamo import convert_frame
+    from torch._dynamo import config as dynamo_config, convert_frame
     from torch._dynamo.exc import UncapturedHigherOrderOpError, Unsupported, UserError
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
     from torch._dynamo.variables.torch_function import (
@@ -1167,6 +1166,16 @@ def _capture_dynamo(
     args = tuple(args)
     try:
         with (
+            # Pin static-shape capture so the dynamo tracer specializes to the example like
+            # the make_fx tracer (invariant 3), independent of the ambient torch._dynamo
+            # config AND of per-code-object shape history: assume_static_by_default guards the
+            # config default, and automatic_dynamic_shapes=False stops Dynamo promoting a dim
+            # to dynamic when the SAME fn was already precompiled at another shape this process
+            # (both otherwise yield an out-of-contract DYNAMIC artifact here; the mark_unbacked
+            # / mark_dynamic marks are separately rejected upstream).
+            dynamo_config.patch(
+                assume_static_by_default=True, automatic_dynamic_shapes=False
+            ),
             get_metrics_context(),
             dynamo_timed("precompile_dynamo_capture"),
             torch_function_mode_stack_state_mgr,
@@ -1388,8 +1397,10 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "python_code is not valid Python; it does not look like a "
             "torch.compiler.precompile artifact."
         ) from e
-    # Read TRACER first (a top-level literal assignment, absent => make_fx) to pick the
-    # required constant set below.
+    # Read TRACER first (a top-level literal assignment) to pick the required constant set
+    # below: the make_fx and dynamo drivers read different calling-convention literals, so
+    # the presence check has to know which set applies. TRACER is absent on artifacts
+    # predating the dynamo tracer, so its absence means make_fx.
     tracer = "make_fx"
     for node in tree.body:
         if (
@@ -1404,7 +1415,18 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
                 pass
             break
     if tracer == "dynamo":
-        wanted = {"BACKEND", "TRACER", "BACKEND_ID", "IMPORT_SOURCES"}
+        # Validate every top-level literal the dynamo driver reads, including the two opaque
+        # blobs, so a truncated / edited artifact missing one fails here with the clean
+        # "missing calling-convention metadata" error rather than surfacing a misleading
+        # Python-version error from _build_dynamo_forward at exec time.
+        wanted = {
+            "BACKEND",
+            "TRACER",
+            "BACKEND_ID",
+            "IMPORT_SOURCES",
+            "_DYNAMO_CODE",
+            "_DYNAMO_STATE",
+        }
     else:
         wanted = {
             "BACKEND",
@@ -1619,8 +1641,10 @@ def _build_dynamo_metadata_section(compiled: PrecompiledModule) -> list[str]:
             "collections.namedtuple or a custom class. Return a plain tuple / list / dict "
             f"of tensors, or use tracer='make_fx'. Underlying: {e}"
         ) from e
-    # Only the genuinely non-literal reconstruction state is pickled; a tensor here was
-    # already rejected at capture (invariant 1), so this is plain globals / defaults.
+    # Only the genuinely non-literal reconstruction state is pickled (the inspectable
+    # literals above stay as readable source). A tensor reachable from any of these was
+    # already rejected at capture (invariant 1), so what remains is plain globals / closure
+    # contents / arg-kw defaults.
     try:
         state_blob = base64.b64encode(
             pickle.dumps(
@@ -1632,7 +1656,12 @@ def _build_dynamo_metadata_section(compiled: PrecompiledModule) -> list[str]:
                 }
             )
         ).decode("ascii")
-    except (pickle.PicklingError, TypeError, AttributeError) as e:
+    except Exception as e:
+        # pickle invokes arbitrary user __reduce__ / __getstate__ code and can raise any
+        # exception type (RuntimeError, RecursionError on deep nesting, ...), so catch
+        # broadly and relabel -- matching _baked_tensors, which replays the same traversal
+        # under an equally broad except. Exception (not BaseException) still lets
+        # KeyboardInterrupt / SystemExit propagate.
         raise PrecompileError(
             "precompile tracer='dynamo' could not serialize fn's captured globals / "
             "closure into the artifact (they are not picklable). This fires when fn "
@@ -1666,8 +1695,11 @@ def _emit_dynamo_eager_subgraph(gm: torch.fx.GraphModule) -> list[str]:
 
     graph_src = gm.code.replace("def forward(", "def _graph_forward(", 1)
     parts = ["import torch as _torch"]
-    # gm.code relies on fx's custom builtins (torch, device, inf, nan, ...) being in
-    # scope; reproduce the full set so a graph that bakes such a constant runs standalone.
+    # gm.code relies on fx's custom builtins (torch, device, inf, nan, NoneType, fx_pytree,
+    # pytree) being in scope -- fx injects them when a real GraphModule runs. Reproduce the
+    # FULL set (not just torch) so a graph that bakes a device / inf / nan constant (e.g.
+    # BatchNorm, masked_fill to -inf) runs standalone instead of raising NameError. Sourced
+    # from fx so it stays correct.
     for _cb in _custom_builtins.values():
         parts.append(_cb.import_str)
     parts.append(graph_src)
@@ -1917,7 +1949,7 @@ class PrecompiledModule:
         # ShapeEnv through automatically, so there is no dynamic_shapes knob to pass and
         # no manual TracingContext to install: a static capture specializes to the
         # example shapes, an unbacked capture keeps the symbols.
-        options: dict[str, Any] = {"size_asserts": True}
+        options: dict[str, object] = {"size_asserts": True}
         if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
             options["scalar_asserts"] = True
         try:
@@ -2005,7 +2037,7 @@ class PrecompiledModule:
         from torch._inductor.exc import InductorError
         from torch._inductor.standalone_compile import NoRunnableInductorModuleError
 
-        options: dict[str, Any] = {"size_asserts": True}
+        options: dict[str, object] = {"size_asserts": True}
         try:
             self._graph_python, self._artifact_bytes = aot_autograd.compile_to_python(
                 capture.gm, capture.example_inputs, options=options
@@ -2342,8 +2374,8 @@ class _PrecompileApi:
 
         Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
         ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the
-        calling-convention metadata), if the cache's ``backend`` tag does not match
-        ``python_code``, or if the cache's ``code_hash`` does not match
+        calling-convention metadata), if the cache's ``backend`` or ``tracer`` tag does
+        not match ``python_code``, or if the cache's ``code_hash`` does not match
         ``sha256(python_code)`` -- i.e. the cache and python_code came from different
         ``precompile()`` calls. A cache whose ``format``/``version`` does not match (a
         foreign or different-build envelope) is NOT fatal: the cache is acceleration

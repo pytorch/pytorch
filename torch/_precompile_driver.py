@@ -414,6 +414,11 @@ def _build_dynamo_forward():
 
     try:
         code = marshal.loads(base64.b64decode(_DYNAMO_CODE))
+        if not isinstance(code, types.CodeType):
+            # marshal can successfully deserialize a non-code object (int, list, ...) from a
+            # corrupt blob; types.FunctionType below would then raise a raw TypeError. Turn
+            # that into the same clean diagnostic the decode/load failures below emit.
+            raise ValueError("marshalled blob is not a code object")
     except Exception as e:
         # The inlined bytecode is marshalled CPython bytecode, specific to the Python
         # version that produced it; loading it under a different CPython (or a corrupt
@@ -431,6 +436,12 @@ def _build_dynamo_forward():
         ) from e
     try:
         state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
+        required = {"used_globals", "closure", "argdefs", "kwdefaults"}
+        if not isinstance(state, dict) or not required <= state.keys():
+            # A corrupt blob can unpickle to a non-dict (or a dict missing a key); the
+            # state[...] accesses below would then raise a raw TypeError / KeyError. Turn
+            # that into the same clean captured-state diagnostic as an unpickle failure.
+            raise ValueError("captured-state blob is not the expected dict")
     except Exception as e:
         # The pickled state (the globals / closure / defaults fn referenced) failed to
         # unpickle. Unlike the marshalled bytecode this is NOT a Python-version lock: it
