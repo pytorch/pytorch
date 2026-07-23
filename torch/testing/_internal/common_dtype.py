@@ -1,0 +1,278 @@
+# mypy: ignore-errors
+
+
+import torch
+
+
+# Functions and classes for describing the dtypes a function supports
+# NOTE: these helpers should correspond to PyTorch's C++ dispatch macros
+
+
+# Verifies each given dtype is a torch.dtype
+def _validate_dtypes(*dtypes):
+    for dtype in dtypes:
+        if not isinstance(dtype, torch.dtype):
+            raise AssertionError(f"Expected dtype to be torch.dtype, got {type(dtype)}")
+    return dtypes
+
+
+# class for tuples corresponding to a PyTorch dispatch macro
+class _dispatch_dtypes(tuple):
+    __slots__ = ()
+
+    def __add__(self, other):
+        if not isinstance(other, tuple):
+            raise AssertionError(f"Expected other to be a tuple, got {type(other)}")
+        return _dispatch_dtypes(tuple.__add__(self, other))
+
+
+_empty_types = _dispatch_dtypes(())
+
+
+def empty_types():
+    return _empty_types
+
+
+_floating_types = _dispatch_dtypes((torch.float32, torch.float64))
+
+
+def floating_types():
+    return _floating_types
+
+
+_floating_types_and_half = _floating_types + (torch.half,)
+
+
+def floating_types_and_half():
+    return _floating_types_and_half
+
+
+def floating_types_and(*dtypes):
+    return _floating_types + _validate_dtypes(*dtypes)
+
+
+_floating_and_complex_types = _floating_types + (torch.cfloat, torch.cdouble)
+
+
+def floating_and_complex_types():
+    return _floating_and_complex_types
+
+
+def floating_and_complex_types_and(*dtypes):
+    return _floating_and_complex_types + _validate_dtypes(*dtypes)
+
+
+_double_types = _dispatch_dtypes((torch.float64, torch.complex128))
+
+
+def double_types():
+    return _double_types
+
+
+# NB: Does not contain uint16/uint32/uint64 for BC reasons
+_integral_types = _dispatch_dtypes(
+    (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+)
+
+
+def integral_types():
+    return _integral_types
+
+
+def integral_types_and(*dtypes):
+    return _integral_types + _validate_dtypes(*dtypes)
+
+
+_all_types = _floating_types + _integral_types
+
+
+def all_types():
+    return _all_types
+
+
+def all_types_and(*dtypes):
+    return _all_types + _validate_dtypes(*dtypes)
+
+
+_complex_types = _dispatch_dtypes((torch.cfloat, torch.cdouble))
+
+
+def complex_types():
+    return _complex_types
+
+
+def complex_types_and(*dtypes):
+    return _complex_types + _validate_dtypes(*dtypes)
+
+
+_all_types_and_complex = _all_types + _complex_types
+
+
+def all_types_and_complex():
+    return _all_types_and_complex
+
+
+def all_types_and_complex_and(*dtypes):
+    return _all_types_and_complex + _validate_dtypes(*dtypes)
+
+
+_all_types_and_half = _all_types + (torch.half,)
+
+
+def all_types_and_half():
+    return _all_types_and_half
+
+
+_all_mps_types = (
+    _dispatch_dtypes({torch.float, torch.half, torch.bfloat16}) + _integral_types
+)
+
+
+def all_mps_types():
+    return _all_mps_types
+
+
+def all_mps_types_and(*dtypes):
+    return _all_mps_types + _validate_dtypes(*dtypes)
+
+
+_float8_types = _dispatch_dtypes(
+    (
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2,
+        torch.float8_e5m2fnuz,
+    )
+)
+
+
+def float8_types():
+    return _float8_types
+
+
+def float8_types_and(*dtypes):
+    return _float8_types + _validate_dtypes(*dtypes)
+
+
+def all_types_complex_float8_and(*dtypes):
+    return _all_types + _complex_types + _float8_types + _validate_dtypes(*dtypes)
+
+
+_barebones_unsigned_types = _dispatch_dtypes((torch.uint16, torch.uint32, torch.uint64))
+
+
+# Passthru ops (copy, fill, index, gather, scatter, flip, take, put, where, eq, ne)
+# move or select data without dtype-specific arithmetic, so they support the
+# largest common set of dtypes across CPU and CUDA. Mirrors
+# AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kBool, kHalf, kBFloat16,
+# AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES) on the C++ side. complex32 (chalf) is
+# not included because the CPU dispatch for these ops does not list
+# kComplexHalf (scatter/gather additionally can't add it trivially because the
+# kernel reinterprets the destination through opmath_t = complex<float>, which
+# is twice the storage width). Callers that need chalf coverage on CUDA
+# should opt in with all_passthru_types_and(torch.chalf) under @dtypesIfCUDA.
+_all_passthru_types = (
+    _all_types_and_complex
+    + _dispatch_dtypes((torch.bool, torch.half, torch.bfloat16))
+    + _barebones_unsigned_types
+)
+
+
+def all_passthru_types():
+    return _all_passthru_types
+
+
+def all_passthru_types_and(*dtypes):
+    return _all_passthru_types + _validate_dtypes(*dtypes)
+
+
+def custom_types(*dtypes):
+    """Create a list of arbitrary dtypes"""
+    return _empty_types + _validate_dtypes(*dtypes)
+
+
+# The functions below are used for convenience in our test suite and thus have no corresponding C++ dispatch macro
+
+
+# See AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS.
+def get_all_dtypes(
+    include_half=True,
+    include_bfloat16=True,
+    include_bool=True,
+    include_complex=True,
+    include_complex32=False,
+    include_qint=False,
+    include_bcomplex32=False,
+) -> list[torch.dtype]:
+    dtypes = get_all_int_dtypes() + get_all_fp_dtypes(
+        include_half=include_half, include_bfloat16=include_bfloat16
+    )
+    if include_bool:
+        dtypes.append(torch.bool)
+    if include_complex:
+        dtypes += get_all_complex_dtypes(
+            include_complex32=include_complex32, include_bcomplex32=include_bcomplex32
+        )
+    if include_qint:
+        dtypes += get_all_qint_dtypes()
+    return dtypes
+
+
+def get_all_math_dtypes(device) -> list[torch.dtype]:
+    return (
+        get_all_int_dtypes()
+        + get_all_fp_dtypes(
+            include_half=device.startswith("cuda"), include_bfloat16=False
+        )
+        + get_all_complex_dtypes()
+    )
+
+
+def get_all_complex_dtypes(
+    *, include_complex32=False, include_bcomplex32=False
+) -> list[torch.dtype]:
+    dtypes = [torch.complex64, torch.complex128]
+    if include_bcomplex32:
+        dtypes.insert(0, torch.bcomplex32)
+    if include_complex32:
+        dtypes.insert(0, torch.complex32)
+    return dtypes
+
+
+def get_all_int_dtypes() -> list[torch.dtype]:
+    return [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
+
+
+def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> list[torch.dtype]:
+    dtypes = [torch.float32, torch.float64]
+    if include_half:
+        dtypes.append(torch.float16)
+    if include_bfloat16:
+        dtypes.append(torch.bfloat16)
+    return dtypes
+
+
+def get_all_qint_dtypes() -> list[torch.dtype]:
+    return [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2, torch.quint2x4]
+
+
+def highest_precision_float(device):
+    if torch.device(device).type == "mps":
+        return torch.float32
+    else:
+        return torch.float64
+
+
+def highest_precision_complex(device):
+    if torch.device(device).type == "mps":
+        return torch.complex64
+    else:
+        return torch.complex128
+
+
+float_to_corresponding_complex_type_map = {
+    torch.float16: torch.complex32,
+    torch.bfloat16: torch.bcomplex32,
+    torch.float32: torch.complex64,
+    torch.float64: torch.complex128,
+}

@@ -1,0 +1,34 @@
+name: Cleans up diskspace
+
+description: Cleans up diskspace if the root directory has used more than seventy percent of your diskspace.
+
+inputs:
+    diskspace-cutoff:
+        description: The absolute amount of docker diskspace required on the runner.
+        required: true
+        default: 200
+
+runs:
+  using: composite
+  steps:
+    - name: Cleans up diskspace
+      shell: bash
+      run: |
+        set -ex
+        diskspace_cutoff=${{ inputs.diskspace-cutoff }}
+        docker_root_dir=$(docker info -f '{{.DockerRootDir}}')
+        if [ ! -d "$docker_root_dir" ]; then
+            echo "Docker root directory ($docker_root_dir) does not exist. Skipping disk space check."
+            exit 0
+        fi
+        avail_gib=$(df -BG --output=avail "$docker_root_dir" | sed -n 2p | tr -d ' ' | sed 's/G$//')
+        msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+        if [[ "$avail_gib" -le "$diskspace_cutoff" ]] ; then
+            docker system prune -af
+            avail_gib=$(df -BG --output=avail "$docker_root_dir" | sed -n 2p | tr -d ' ' | sed 's/G$//')
+            if [[ "$avail_gib" -lt "$diskspace_cutoff" ]] ; then
+                echo "Error: Available diskspace is less than $diskspace-cutoff GiB. Not enough diskspace."
+                echo "$msg"
+                exit 1
+            fi
+        fi

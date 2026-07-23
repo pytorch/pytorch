@@ -1,0 +1,7 @@
+def if_test(a: Tensor,
+    b: Tensor) -> Tensor:
+  if bool(torch.lt(a, b)):
+    c = b
+  else:
+    c = a
+  return c
