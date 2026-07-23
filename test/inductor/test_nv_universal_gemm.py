@@ -897,6 +897,18 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "pointwise op was NOT fused into epilogue")
 
+    def test_matmul_multi_store_epilogue_fusion(self):
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = (a @ b).float()
+            return torch.relu(result), result + 1.0
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused)
+        self.assertIn("out_ptr1", code)
     def test_scaled_mm_pointwise_epilogue_fusion(self):
         """Unary pointwise op is fused into an NVFP4 scaled GEMM epilogue."""
         m, n, k = self.M, self.N, self.K
