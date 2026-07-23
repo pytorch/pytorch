@@ -991,7 +991,7 @@ score_fusion_memory_threshold = 10
 # Use Inductor's estimated scheduler memory timeline to skip fusions that
 # increase estimated peak memory. None disables these guards; otherwise the
 # value is the allowed estimated peak increase in megabytes.
-fusion_memory_timeline_peak_allowed_increase_mb = None
+fusion_memory_timeline_peak_allowed_increase_mb = 512
 
 # Supporting full memory timeline could increase compile time,
 # By default we do heuristically based fast path that minimally increases compile time
