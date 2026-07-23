@@ -966,6 +966,42 @@ def _gpu_panel_const_extra(gpu: np.ndarray) -> list[tuple[str, str]]:
     return out
 
 
+def _merge_annotation_metadata(annotation: Any, metadata: Any) -> str | None:
+    """Merge a row's graph annotation(s) and collective-metadata blob into one JSON object whose
+    top-level fields the native encoder spreads onto the render stage as extra_data -- the
+    pftrace analog of the chrome path's per-arg spread (``_annotation_to_args``). ``annotation``
+    is the resolved graph annotation (a list of dicts, a dict, or a str, from the graph
+    annotation registry); ``metadata`` is the collective-descriptor JSON blob (str, from the
+    eager external-metadata join). Returns None when neither contributes anything.
+
+    Without this the render stage carried only the collective ``metadata`` column, so
+    graph-node annotations (``mark_kernels`` regions, e.g. a collective's process-group name
+    recorded at capture) never reached the .pftrace GPU rows even though the chrome path spread
+    them -- a chrome/pftrace parity gap."""
+    merged: dict[str, Any] = {}
+    if annotation is not None:
+        items = annotation if isinstance(annotation, list) else [annotation]
+        for it in items:
+            if isinstance(it, dict):
+                for k, v in it.items():
+                    merged[str(k)] = v
+            elif isinstance(it, str):
+                merged.setdefault("annotation", it)
+    if metadata is not None:
+        try:
+            decoded = (
+                json.loads(metadata)
+                if isinstance(metadata, (str, bytes))
+                else metadata
+            )
+        except (json.JSONDecodeError, TypeError):
+            decoded = None
+        if isinstance(decoded, dict):
+            for k, v in decoded.items():
+                merged[str(k)] = v
+    return json.dumps(merged) if merged else None
+
+
 def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: list):
     """Build the GpuRenderStageEvent payload (gpu_specs, gfx_contexts, stage_cols, extra,
     launch, tables) for the native GPU Render Stages hardware-queue lanes, or None if there are
@@ -981,7 +1017,7 @@ def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: 
     dim_p: dict[str, list] = {k: [] for k in _LAUNCH_DIMS}
     arg_p: dict[int, list] = {iid: [] for iid, _n, _g in _COMPUTE_ARGS}
     extra_p: dict[str, list] = {k: [] for k, _g, _s in _RENDER_EXTRA}
-    meta_p: list = []  # per-row collective-descriptor JSON blob (str/bytes/None)
+    meta_p: list = []  # per-row spread blob (graph annotation + collective descriptor)
     stream_p: list = []
     lane_names_by_id: dict[int, str] = {}  # reassigned logical lane -> resolver name
     for ks, stage_iid, _name, _cat in _RENDER_STAGES:
@@ -1030,10 +1066,20 @@ def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: 
         for key, getter, _skip in _RENDER_EXTRA:
             v = getter(c)
             extra_p[key].append(z if v is None else np.ascontiguousarray(v, np.int64))
-        # Collective-descriptor blob per row (kernels only; memcpy/memset/annotation and
-        # eager kernels have none), spread onto the render stage as extra_data below.
+        # Per-row spread blob: the graph annotation (mark_kernels regions -- e.g. a collective's
+        # process-group name) merged with the collective-descriptor metadata, spread onto the
+        # render stage as extra_data below. Fast path when a kind has neither.
         mc = c.get("metadata")
-        meta_p.append([None] * n if mc is None else mc.tolist())
+        ac = c.get("annotation")
+        has_ann = ac is not None and bool(ac.astype(bool).any())
+        if mc is None and not has_ann:
+            meta_p.append([None] * n)
+        else:
+            ml = mc.tolist() if mc is not None else [None] * n
+            al = ac.tolist() if has_ann else [None] * n
+            meta_p.append(
+                [_merge_annotation_metadata(a, m) for a, m in zip(al, ml)]
+            )
     if not ts_p:
         return None
     ts, dur, gpu = np.concatenate(ts_p), np.concatenate(dur_p), np.concatenate(gpu_p)
@@ -1111,8 +1157,8 @@ def _build_render_stages(columns: dict, gfx_pid: int, iid_of: dict, name_table: 
     ]
     launch = (*dims, kernel_iid, launch_args)
     arg_names = [(iid, name) for iid, name, _g in _COMPUTE_ARGS]
-    # CSR of the per-row metadata blobs (offsets int32 length n+1 + concatenated bytes;
-    # empty slice = no metadata), mirroring the CPU json_anno column. The native encoder
+    # CSR of the per-row spread blobs (offsets int32 length n+1 + concatenated bytes;
+    # empty slice = nothing to spread), mirroring the CPU json_anno column. The native encoder
     # spreads each blob's top-level fields onto the render stage as extra_data.
     meta_l = [b for sub in meta_p for b in sub]
     meta_enc = [

@@ -1390,6 +1390,132 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(extra["dtype"], "bf16")
         self.assertEqual(extra["In msg nelems"], "1024")
 
+    def test_pftrace_render_stage_spreads_graph_annotation(self):
+        # A graph-node annotation (mark_kernels region -- e.g. a collective's process-group
+        # name recorded at capture via annotate_barrier) is spread onto the GPU render stage as
+        # extra_data, the same way the collective metadata column is -- closing the parity gap
+        # where chrome spread annotations but the .pftrace render stage dropped them. Also
+        # checks annotation + metadata merge. Runs the REAL native encoder, gunzips, decodes
+        # the protobuf. No CUDA. Field numbers: gpu_render_stage_event=53, extra_data=6,
+        # ExtraData.name=1, ExtraData.value=2.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            merge_trace_window_into_chrome_trace,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        # annotation column holds the graph annotation resolver's return: a list of dicts per
+        # row (as get_kernel_annotations()[node] yields). A second row also carries an eager
+        # metadata blob, to check the two channels merge onto one render stage.
+        ann = np.empty(2, dtype=object)
+        ann[0] = [{"Process Group Name": "5", "In msg nelems": 2048}]
+        ann[1] = [{"Process Group Name": "6"}]
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),
+                "correlation_id": i64(50, 51),
+                "graph_id": i64(1, 1),
+                "graph_node_id": i64((1 << 32) | 10, (1 << 32) | 11),
+                "name": np.array(["ar_a", "ar_b"], dtype=object),
+                "annotation": ann,
+                "metadata": np.array([None, json.dumps({"dtype": "bf16"})], dtype=object),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(32, 32),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+
+        def rv(b, i):
+            s = r = 0
+            while True:
+                x = b[i]
+                i += 1
+                r |= (x & 0x7F) << s
+                if not x & 0x80:
+                    return r, i
+                s += 7
+
+        def flds(b):
+            i = 0
+            o = []
+            while i < len(b):
+                k, i = rv(b, i)
+                fn, wt = k >> 3, k & 7
+                if wt == 0:
+                    v, i = rv(b, i)
+                    o.append((fn, 0, v))
+                elif wt == 2:
+                    n, i = rv(b, i)
+                    o.append((fn, 2, b[i : i + n]))
+                    i += n
+                elif wt == 5:
+                    i += 4
+                elif wt == 1:
+                    i += 8
+            return o
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps({"baseTimeNanoseconds": 0, "traceEvents": []}).encode()
+                )
+            out_path = os.path.join(d, "out.pftrace")
+            merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
+            with gzip.open(out_path, "rb") as f:
+                raw = f.read()
+
+        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
+
+        # Per render stage (keyed by event_id == correlation), collect its extra_data pairs.
+        per_stage: dict[int, dict] = {}
+        for pkt in packets:
+            for fn, _wt, v in flds(pkt):
+                if fn != 53:
+                    continue
+                event_id = 0
+                pairs: dict = {}
+                for sfn, _swt, sv in flds(v):
+                    if sfn == 1:
+                        event_id = sv
+                    elif sfn == 6:
+                        name = value = None
+                        for efn, _ewt, ev in flds(sv):
+                            if efn == 1:
+                                name = bytes(ev).decode()
+                            elif efn == 2:
+                                value = bytes(ev).decode()
+                        if name is not None:
+                            pairs[name] = value
+                per_stage[event_id] = pairs
+
+        # Row 0: annotation-only -> its fields spread (numbers stringified).
+        self.assertEqual(per_stage[50]["Process Group Name"], "5")
+        self.assertEqual(per_stage[50]["In msg nelems"], "2048")
+        # Row 1: annotation + metadata merge onto the one render stage.
+        self.assertEqual(per_stage[51]["Process Group Name"], "6")
+        self.assertEqual(per_stage[51]["dtype"], "bf16")
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuptiMonitorCUDA(TestCase):
