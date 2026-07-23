@@ -276,7 +276,7 @@ std::pair<IValue, IValue> getFunctionTuple(
         This part adds the argument's name, type and default_value in
         `bytecode.pkl` This has to be consistent with the `code/` directory
         which has annotated py code of the entire module. `type_printer` uses
-        `TypeNameUniquer` to get the managled name of the argument. This helps
+        `TypeNameUniquer` to get the mangled name of the argument. This helps
         in having the right object reference when a class method is called using
         the `self` argument.
 
@@ -872,7 +872,7 @@ void ExportModule(
     } else {
       message << "Error while opening file: " << errno << '\n';
     }
-    TORCH_CHECK(false, message.str());
+    TORCH_CHECK(false, std::move(message).str());
   }
   ExportModule(
       module,

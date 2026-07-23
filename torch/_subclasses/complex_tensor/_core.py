@@ -20,12 +20,14 @@ class ComplexTensor(Tensor):
     _re: Tensor
     _im: Tensor
 
-    def __new__(cls, real: Tensor, imag: Tensor) -> Self:
+    def __new__(
+        cls,
+        real: Tensor,
+        imag: Tensor,
+        /,
+    ) -> Self:
         """Initialize a ComplexTensor from its real and imaginary parts."""
         from ._ops.common import REAL_TO_COMPLEX
-
-        shape = real.shape
-        device = real.device
 
         # TODO (hameerabbasi): `torch.compile` sometimes fails here without making these
         # contiguous. Why?
@@ -58,21 +60,23 @@ class ComplexTensor(Tensor):
         layout = real.layout
         pin_memory = real.is_pinned()
 
-        if shape != imag.shape:
-            raise AssertionError(f"Expected imag shape {shape}, got {imag.shape}")
-        if device != imag.device:
-            raise AssertionError(f"Expected imag device {device}, got {imag.device}")
+        if real.shape != imag.shape:
+            raise AssertionError(f"Expected imag shape {real.shape}, got {imag.shape}")
+        if real.device != imag.device:
+            raise AssertionError(
+                f"Expected imag device {real.device}, got {imag.device}"
+            )
         if real.dtype != imag.dtype:
             raise AssertionError(f"Expected imag dtype {real.dtype}, got {imag.dtype}")
-        if pin_memory != imag.is_pinned():
+        if real.is_pinned() != imag.is_pinned():
             raise AssertionError(
-                f"Expected imag pinning {pin_memory}, got {imag.is_pinned()}"
+                f"Expected imag pinning {real.is_pinned()}, got {imag.is_pinned()}"
             )
 
         res = Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
-            shape,
-            device=device,
+            real.shape,
+            device=real.device,
             dtype=dtype,
             storage_offset=storage_offset,
             strides=strides,
@@ -80,10 +84,13 @@ class ComplexTensor(Tensor):
             layout=layout,
             requires_grad=False,
         )
-        res._re = real.clone().detach()
-        res._im = imag.clone().detach()
+        res._re = real.detach()
+        res._im = imag.detach()
 
         return res
+
+    def __init__(self, *a: Any, **kw: Any) -> None:
+        super().__init__()
 
     @property
     def re(self) -> Tensor:
@@ -130,12 +137,12 @@ class ComplexTensor(Tensor):
 
     @staticmethod
     def from_interleaved(t: Tensor) -> ComplexTensor:
-        t_real = torch.real(t)
-        t_imag = torch.imag(t) if t.dtype.is_complex else torch.zeros_like(t_real)
-        return Complex.apply(t_real, t_imag)
+        re = torch.real(t)
+        im = torch.imag(t) if t.dtype.is_complex else torch.zeros_like(t)
+        return Complex.apply(re, im)
 
     def as_interleaved(self) -> Tensor:
-        return torch.complex(self.real, self.imag)
+        return torch.complex(self.re, self.im)
 
     @staticmethod
     def __tensor_unflatten__(
@@ -144,24 +151,24 @@ class ComplexTensor(Tensor):
         outer_size: tuple[int, ...],
         outer_stride: tuple[int, ...],
     ) -> ComplexTensor:
-        if meta is not None:
-            raise AssertionError(f"meta must be None, got {meta}")
-        re, im = inner_tensors["re"], inner_tensors["im"]
+        re, im = inner_tensors["_re"], inner_tensors["_im"]
         return ComplexTensor(re, im)
 
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
-        return ["re", "im"], None
+        return ["_re", "_im"], None
 
     def __repr__(self, *, tensor_contents: object | None = None) -> str:
-        return f"ComplexTensor(real={self.re!r}, imag={self.im!r})"
+        return f"ComplexTensor({self._re!r}, {self._im!r})"
 
     def is_pinned(self, device: DeviceLikeType | None = None) -> bool:
-        return self.re.is_pinned(device)
+        return self._re.is_pinned(device)
 
 
 class Complex(Function):
     @staticmethod
-    def forward(ctx: FunctionCtx, real: Tensor, imag: Tensor) -> ComplexTensor:  # type: ignore[bad-override]
+    def forward(  # type: ignore[bad-override]
+        ctx: FunctionCtx, real: Tensor, imag: Tensor
+    ) -> ComplexTensor:
         return ComplexTensor(real, imag)
 
     @staticmethod

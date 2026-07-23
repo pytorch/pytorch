@@ -1886,7 +1886,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
       });
     }
     else {
-      grad_input_values = grad_values_expand;
+      grad_input_values = std::move(grad_values_expand);
     }
     bool grad_is_coalesced = input.is_coalesced();
     return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, grad.options(), grad_is_coalesced);

@@ -158,14 +158,14 @@ class MultiHeadSelfAttention(nn.Module):
         }
         compile_key = tuple(sorted(compile_spec.items()))
         if compile_key not in MultiHeadSelfAttention._flex_attention_cache:
-            MultiHeadSelfAttention._flex_attention_cache[compile_key] = torch.compile(
+            MultiHeadSelfAttention._flex_attention_cache[compile_key] = torch.compile(  # noqa: UNSPECIFIED_BACKEND
                 flex_attention, **compile_spec
             )
         self._flex_attention = MultiHeadSelfAttention._flex_attention_cache[compile_key]
 
         # Also compile create_block_mask
         if MultiHeadSelfAttention._create_block_mask_fn is None:
-            MultiHeadSelfAttention._create_block_mask_fn = torch.compile(
+            MultiHeadSelfAttention._create_block_mask_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
                 create_block_mask, dynamic=False, fullgraph=True
             )
 
@@ -404,7 +404,7 @@ def _subprocess_disable_guard_check():
         def fn(x, y):
             return x + y
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
             ((torch.randn(3, 4), torch.randn(3, 4)), {})
         )
         inputs = (torch.randn(3, 4), torch.randn(3, 4))
@@ -441,13 +441,13 @@ def _subprocess_grad_mode_after_prior_compile():
         def target_fn(x, y):
             return x - y
 
-        torch.compile(warmup_fn, fullgraph=True).aot_compile(
+        torch.compile(warmup_fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
             ((torch.randn(3, 4), torch.randn(3, 4)), {})
         )
         torch._dynamo.reset()
 
         with torch.no_grad():
-            compiled_fn = torch.compile(target_fn, fullgraph=True).aot_compile(
+            compiled_fn = torch.compile(target_fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
                 ((torch.randn(3, 4), torch.randn(3, 4)), {})
             )
 
@@ -607,6 +607,29 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
                 compiled_fn = torch.compiler.load_compiled_function(f)
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
+
+    def test_aot_compile_autocast_guard_reload(self):
+        def fn(x):
+            return x + 1 * x
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        x = torch.randn(3, 4)
+        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+            compiled_fn = torch.compile(
+                fn, fullgraph=True, backend=backend
+            ).aot_compile(((x,), {}))
+            expected = fn(x)
+            self.assertEqual(expected, compiled_fn(x))
+
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+            actual = compiled_fn(x)
+        self.assertEqual(expected, actual)
 
     def test_aot_compile_basic_forward(self):
         mod = SimpleLinearModule()
@@ -789,7 +812,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         def fn(x, y):
             return MY_LAMBDA(x) + y
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
             ((torch.randn(3, 4), torch.randn(3, 4)), {})
         )
 
@@ -845,7 +868,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
 
         self.assertExpectedInlineMunged(
             Unsupported,
-            lambda: torch.compile(foo, fullgraph=True).aot_compile(
+            lambda: torch.compile(foo, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
                 ((torch.ones(3), torch.ones(3)), {})
             ),
             """\
@@ -943,7 +966,7 @@ from user code:
         def fn(xy):
             return xy[0] + xy[1]
 
-        compiled_fn = torch.compile(
+        compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
             fn,
             fullgraph=True,
             options={"guard_filter_fn": torch.compiler.keep_portable_guards_unsafe},
@@ -1093,13 +1116,27 @@ from user code:
         )
         self.assertEqual(compiled_foo(inputs), foo(inputs))
 
+    def test_fullgraph_capture_schema_self_arg_no_collision(self):
+        """Regression: aten op schemas with `self` at non-first position
+        (e.g. `aten.where.self(Tensor condition, Tensor self, Tensor other)`)
+        must not produce `def forward(self, condition, self, other):` and
+        SyntaxError at `graph_module.recompile()`."""
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        cond = torch.tensor([True, False, True, False])
+        x = torch.tensor(0.0)
+        y = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        op = torch.ops.aten.where.self
+        compiled = dynamo_graph_capture_for_export(op)(cond, x, y)
+        self.assertEqual(compiled(cond, x, y), op(cond, x, y))
+
     def test_aot_compile_with_closure_save_and_load(self):
         tmp = 2
 
         def fn(x, y):
             return x + y + tmp
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
             ((torch.randn(3, 4), torch.randn(3, 4)), {})
         )
         inputs = (torch.randn(3, 4), torch.randn(3, 4))
@@ -1114,7 +1151,7 @@ from user code:
 
     def test_aot_compile_with_super_call(self):
         fn = TestVLLMModel()
-        compiled_fn = torch.compile(fn.forward, fullgraph=True).aot_compile(
+        compiled_fn = torch.compile(fn.forward, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
             ((torch.randn(3, 4),), {})
         )
         self.assertEqual(fn.forward.__code__.co_freevars, ("__class__",))
@@ -1135,7 +1172,7 @@ from user code:
         def make_inputs():
             return (torch.randn(3, 4), torch.randn(3, 4))
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile((make_inputs(), {}))
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile((make_inputs(), {}))  # noqa: UNSPECIFIED_BACKEND
 
         test_inputs = make_inputs()
         self.assertEqual(compiled_fn(*test_inputs), fn(*test_inputs))
@@ -1144,7 +1181,7 @@ from user code:
         def fn(x, y=1):
             return x + x
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
             ((torch.randn(3, 4),), {})
         )
         inputs = (torch.randn(3, 4),)
@@ -1229,7 +1266,7 @@ from user code:
             def make_inputs():
                 return (torch.randn(3, 4), torch.randn(3, 4))
 
-            compiled_fn = torch.compile(
+            compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
                 fn, fullgraph=True, options={"use_aoti": True}
             ).aot_compile((make_inputs(), {}))
             test_inputs = make_inputs()
@@ -1260,7 +1297,7 @@ from user code:
             d_input_tensor = DTensor.from_local(input_tensor, mesh, placements)
             mod = RedistributeModel()
 
-            compiled_fn = torch.compile(
+            compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
                 mod,
                 fullgraph=True,
             ).forward.aot_compile(((input_tensor, d_input_tensor, mesh), {}))
@@ -1291,7 +1328,7 @@ from user code:
         fn = wrap_forward_function(fn)
         mod.forward = fn
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
             ((torch.randn(4, 3),), {})
         )
         mod.forward = compiled_fn
@@ -1330,7 +1367,7 @@ from user code:
 
         fn = wrap_forward_function(fn)
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
             ((torch.randn(4, 3),), {})
         )
         mod.forward = compiled_fn
@@ -1366,7 +1403,7 @@ from user code:
 
             return checkpoint(compute, x, y, use_reentrant=False)
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
             ((torch.randn(3, 4), torch.randn(3, 4)), {})
         )
         inputs = (torch.randn(3, 4), torch.randn(3, 4))
@@ -1390,7 +1427,7 @@ from user code:
         def make_inputs():
             return (torch.randn(3, 4), torch.randn(3, 4))
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile((make_inputs(), {}))
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile((make_inputs(), {}))  # noqa: UNSPECIFIED_BACKEND
         test_inputs = make_inputs()
         expected = fn(*test_inputs)
         actual = compiled_fn(*test_inputs)
@@ -1415,7 +1452,7 @@ from user code:
             return x + 1, type
 
         x = torch.randn(4)
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(((x,), {}))
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(((x,), {}))  # noqa: UNSPECIFIED_BACKEND
 
         # Save and reload without f_globals
         compiled_fn.save_compiled_function(self.path())
@@ -1442,7 +1479,7 @@ from user code:
                 torch.randn(3, 4, device=GPU_TYPE, requires_grad=True),
                 torch.randn(3, 4, device=GPU_TYPE, requires_grad=True),
             )
-        compiled_fn = torch.compile(
+        compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
             fn,
             fullgraph=True,
         ).aot_compile((fake_inputs, {}))
@@ -1742,7 +1779,7 @@ from user code:
                     self.assertEqual(
                         compiled_grads[name],
                         eager_grads[name],
-                        msg=f"Gradients for {name} should be bitwise equivalent",
+                        msg=lambda msg: f"{msg}\nGradients for {name} should be bitwise equivalent",
                     )
         finally:
             c10d.destroy_process_group()

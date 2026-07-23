@@ -159,7 +159,6 @@ top_torch: list[tuple[str, int]] = [
     ("stft", 1487),
     ("get_num_threads", 1477),
     ("real", 1459),
-    ("cholesky", 1406),
     ("quantize_per_tensor", 1392),
     ("diag_embed", 1364),
     ("lerp", 1363),

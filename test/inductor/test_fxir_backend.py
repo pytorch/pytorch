@@ -15,8 +15,12 @@ import torch._inductor.codegen.common as common
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.utils import same
-from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._higher_order_ops.triton_kernel_wrap import (
+    kernel_side_table,
+    triton_kernel_wrapper_mutation,
+)
 from torch._inductor import config
+from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
@@ -26,6 +30,7 @@ from torch._inductor.codegen.wrapper_fxir import (
     WrapperFxCodegen,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import fresh_cache
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -37,16 +42,16 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     patch_custom_fallback_pass,
     requires_gpu,
-    TRITON_HAS_CPU,
 )
 from torch.utils._sympy.functions import FloorDiv
 
 
 try:
-    from .test_control_flow import CondModels
+    from .test_control_flow import CondModels, SwitchModels
 except ImportError:
     from test_control_flow import (
         CondModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
+        SwitchModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
     )
 
 if HAS_GPU:
@@ -147,6 +152,19 @@ class FxirTestCase(InductorTestCase):
     def test_basic(self):
         args = [torch.randn(8, device=self.device) for _ in range(2)]
         self._compile_and_check(torch.add, args)
+
+    def test_standard_kernel_omits_empty_launch_kwargs(self):
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(torch.add, args)
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+
+        # launch_kwargs is only needed when user Triton backend options must be
+        # replayed. Omitting the empty case keeps standard FXIR HOP calls
+        # compatible with downstream py_impls that have fixed keyword-only
+        # signatures matching the original HOP payload.
+        self.assertNotIn("launch_kwargs", triton_node.kwargs)
 
     def test_device_type(self):
         """
@@ -712,6 +730,30 @@ class FxirTestCase(InductorTestCase):
             target = subgm_getattr.name
             self.assertTrue(isinstance(getattr(gm, target), torch.fx.GraphModule))
 
+    @parametrize("idx", (0, 1, 2))
+    def test_switch_subgraph(self, idx: int):
+        x = torch.randn((2, 3), device=self.device)
+        idx_tensor = torch.tensor(idx, device=self.device)
+        model = SwitchModels.Simple()
+        gm = self._compile_and_check(
+            model, [idx_tensor, x], expected_num_triton_kernels=4
+        )[-1]
+
+        # The FX graph should call torch.ops.higher_order.switch (not cond).
+        switch_nodes = list(
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.switch
+            )
+        )
+        self.assertEqual(len(switch_nodes), 1)
+
+        # Each branch should be a subgraph GraphModule attached as an attribute.
+        subgm_getattrs = list(gm.graph.find_nodes(op="get_attr"))
+        self.assertEqual(len(subgm_getattrs), 3)
+        for subgm_getattr in subgm_getattrs:
+            target = subgm_getattr.name
+            self.assertTrue(isinstance(getattr(gm, target), torch.fx.GraphModule))
+
     @parametrize("pred", (False, True))
     def test_cond_no_operands(self, pred: bool):
         """
@@ -903,6 +945,54 @@ class AOTFxirTestCase(InductorTestCase):
         inp = (torch.ones(3, device=self.device), torch.ones(3, device=self.device))
         self.check(M(), inp)
 
+    @requires_gpu()
+    def test_aoti_fx_parallel_compile_reloads_triton_kernel(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        shutdown_compile_workers()
+        try:
+            with config.patch(worker_start_method="subprocess", compile_threads=4):
+                with fresh_cache():
+                    AsyncCompile.wait_pool_ready()
+                    self.assertTrue(AsyncCompile.use_process_pool())
+
+                    inp = (
+                        torch.ones(3, device=self.device),
+                        torch.ones(3, device=self.device),
+                    )
+                    with torch.no_grad():
+                        ep = torch.export.export(M(), inp)
+                        gm = torch._inductor.aot_compile(
+                            ep.module(),
+                            inp,
+                            options={
+                                "fx_wrapper": True,
+                                **test_config,
+                                "compile_threads": 4,
+                            },
+                        )
+
+                    triton_nodes = [
+                        node
+                        for node in gm.graph.nodes
+                        if (
+                            node.op == "call_function"
+                            and node.target == triton_kernel_wrapper_mutation
+                        )
+                    ]
+                    self.assertEqual(len(triton_nodes), 1)
+                    kernel = kernel_side_table.get_kernel(
+                        triton_nodes[0].kwargs["kernel_idx"]
+                    )
+                    self.assertIsNotNone(kernel.fn)
+
+                    flat_args, _ = pytree.tree_flatten(inp)
+                    self.assertTrue(same(M().to(self.device)(*inp), gm(*flat_args)))
+        finally:
+            shutdown_compile_workers()
+
     def test_aoti_fx_const(self):
         class M(torch.nn.Module):
             def __init__(self, device):
@@ -1067,8 +1157,8 @@ class AOTFxirTestCase(InductorTestCase):
             gm.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
+    true_graph_0 = self.true_graph_0
     cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
     buf1 = cond[0]
     buf2 = cond[1];  cond = None
@@ -1412,5 +1502,5 @@ class TestReplaceFloorDiv(InductorTestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU or TRITON_HAS_CPU:
+    if HAS_GPU:
         run_tests(needs="filelock")
