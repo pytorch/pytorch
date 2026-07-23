@@ -1459,35 +1459,44 @@ class DisableContext(_TorchDynamoContext):
             # This runs on hot paths (e.g. around custom operators), so keep it
             # minimal. set_eval_frame(None) clears Dynamo's frame callback for
             # the duration of fn and returns the prior callback.
-            #
-            # We call set_eval_frame directly rather than _maybe_set_eval_frame:
-            # the enable_compiler_set_eval_frame killswitch only has an effect
-            # when Dynamo would otherwise install a callback, and in that case
-            # prior is None here, so restoring prior is equivalent to leaving the
-            # callback cleared. Skipping the killswitch (and the stance callback,
-            # which for disable always resolves to "off") avoids a per-call
-            # justknobs_check.
             prior = set_eval_frame(None)
             try:
-                # Only export needs the fn_name / annotation work; skip it on the
-                # common non-export hot path.
-                if torch.compiler.is_exporting():
-                    fn_name = getattr(fn, "__name__", type(fn).__name__)
-                    # Skip annotation for __torch_dispatch__ to avoid polluting
-                    # node metadata during export. The disable on __torch_dispatch__
-                    # is an internal implementation detail, not user-facing.
-                    # TODO: Ideally we shouldn't need this check because nested
-                    # annotate() calls shouldn't override existing keys.
-                    if fn_name != "__torch_dispatch__":
-                        with fx_traceback.annotate(
-                            {
-                                "_torchdynamo_disable": True,
-                                "_torchdynamo_disable_recursive": True,
-                                "_torchdynamo_disable_method": fn_name,
-                            }
-                        ):
-                            return fn(*args, **kwargs)
-                return fn(*args, **kwargs)
+                # Install the stance-derived callback for the body. For disable
+                # self.callback is None, so _callback_from_stance(None) resolves
+                # to None ("off") in every stance except eager_on_recompile
+                # (run-only). We compute it rather than assuming "off" so a
+                # future stance is honored automatically, and install it only
+                # when it is not already the cleared callback -- skipping the
+                # justknob-guarded _maybe_set_eval_frame (and its inner restore)
+                # on the common path.
+                callback = _callback_from_stance(self.callback)
+                if callback is not None:
+                    _maybe_set_eval_frame(callback)
+                try:
+                    # Only export needs the fn_name / annotation work; skip it on
+                    # the common non-export hot path.
+                    if torch.compiler.is_exporting():
+                        fn_name = getattr(fn, "__name__", type(fn).__name__)
+                        # Skip annotation for __torch_dispatch__ to avoid
+                        # polluting node metadata during export. The disable on
+                        # __torch_dispatch__ is an internal implementation
+                        # detail, not user-facing.
+                        # TODO: Ideally we shouldn't need this check because
+                        # nested annotate() calls shouldn't override existing
+                        # keys.
+                        if fn_name != "__torch_dispatch__":
+                            with fx_traceback.annotate(
+                                {
+                                    "_torchdynamo_disable": True,
+                                    "_torchdynamo_disable_recursive": True,
+                                    "_torchdynamo_disable_method": fn_name,
+                                }
+                            ):
+                                return fn(*args, **kwargs)
+                    return fn(*args, **kwargs)
+                finally:
+                    if callback is not None:
+                        set_eval_frame(None)
             finally:
                 # When prior is None (Dynamo was not active -- the common
                 # custom-op case) there is nothing to restore.
