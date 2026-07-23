@@ -1127,6 +1127,9 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
                 "snapshot",  # the allocator generated a memory snapshot
                 # useful to correlate a previously taken
                 # snapshot with this trace
+                "annotate",  # metadata was attached to a live allocation
+                # via _annotate_tensor. 'addr' is the allocation's base
+                # address and 'user_metadata' holds the annotation
             ]
             addr: int  # not present for OOM
             frames: List[Frame]
@@ -1231,6 +1234,42 @@ def _get_memory_metadata() -> str:
     """
     # pyrefly: ignore [missing-attribute]
     return torch._C._cuda_getMemoryMetadata()
+
+
+def _annotate_tensor(tensor: torch.Tensor, metadata: str):
+    """
+    Attach metadata to the allocation backing ``tensor``, post facto.
+
+    Unlike :func:`_set_memory_metadata`, which stamps metadata onto trace
+    events as they are generated, this records a dedicated ``annotate`` trace
+    event for an allocation that already exists. This is useful when the
+    information only becomes available after the allocation happened, e.g.
+    noting that a tensor was packed into the autograd graph. Metadata recorded
+    at allocation time is not modified; annotations accumulate as separate
+    trace entries keyed to the allocation's address, each carrying the
+    annotation string as its ``user_metadata`` and a stack trace of the
+    annotation site (subject to the ``context`` setting of
+    :func:`_record_memory_history`). The pytorch.org/memory_viz visualizer
+    shows annotations alongside the allocation's own metadata.
+
+    The annotation is keyed to the base address of the tensor's untyped
+    storage, so it works for views and tensors with a nonzero
+    ``storage_offset``.
+
+    If memory history recording is not enabled (see
+    :func:`_record_memory_history`), this has no observable effect. It is only
+    supported by the native caching allocator; with other backends (e.g.
+    ``cudaMallocAsync`` or a pluggable allocator) it is silently ignored.
+
+    Args:
+        tensor (torch.Tensor): CUDA tensor whose backing allocation to
+                               annotate.
+        metadata (str): Annotation string to record.
+    """
+    if not tensor.is_cuda:
+        raise ValueError(f"expected a CUDA tensor, got device {tensor.device}")
+    # pyrefly: ignore [missing-attribute]
+    torch._C._cuda_annotateMemory(tensor.untyped_storage().data_ptr(), metadata)
 
 
 def _save_segment_usage(filename="output.svg", snapshot=None):
