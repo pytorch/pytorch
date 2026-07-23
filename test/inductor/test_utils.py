@@ -50,7 +50,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
-from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
 
 
