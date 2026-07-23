@@ -588,8 +588,7 @@ def nll_loss_backward(
     if total_weight.numel() != 1:
         raise AssertionError(
             f"nll_loss_backward: expected total_weight to be a single element tensor, "
-            f"got: {total_weight.shape} ({total_weight.numel()} elements). "
-            f"total_weight should typically be a scalar tensor with value 1.0."
+            f"got: {total_weight.shape} ({total_weight.numel()} elements)."
         )
 
     if weight is not None and weight.numel() != self.shape[-1]:
