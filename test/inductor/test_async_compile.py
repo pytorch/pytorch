@@ -132,6 +132,17 @@ def _forked_daemon_compile_worker(q):
 
 @instantiate_parametrized_tests
 class TestAsyncCompile(TestCase):
+    def test_flydsl_returns_direct_entry_point(self):
+        source = """
+def test_flydsl_loader_main(value, stream):
+    return value, stream
+"""
+        with config.patch(compile_threads=1), fresh_cache():
+            kernel_fn = AsyncCompile().flydsl("test_flydsl_loader", source)
+
+        self.assertTrue(callable(kernel_fn))
+        self.assertEqual(kernel_fn(41, 7), (41, 7))
+
     def _run_daemon_compile_worker(self, worker_start_method):
         ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
