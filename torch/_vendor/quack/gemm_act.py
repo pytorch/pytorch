@@ -1082,6 +1082,10 @@ def gemm_act(
         postact_tensors = PostAct
     else:
         postact_tensors = (PostAct,)
+    if main_output_transform_group is not None and any(
+        tensor.stride(-1) != 1 for tensor in postact_tensors
+    ):
+        raise NotImplementedError("grouped_n_contract requires PostAct to be n-major")
     varlen_m = cu_seqlens_m is not None
     gather_A = A_idx is not None
     if varlen_m:
