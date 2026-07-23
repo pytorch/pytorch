@@ -296,6 +296,19 @@ AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
 AOTI_TORCH_EXPORT AOTITorchError
 torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage);
 
+struct AOTIMetalKernelFunctionOpaque;
+using AOTIMetalKernelFunctionHandle = AOTIMetalKernelFunctionOpaque*;
+
+// Binds size bytes at ptr to buffer index idx of a Metal kernel, for
+// arguments that are neither tensors nor int64_t scalars. See
+// torch/csrc/inductor/aoti_torch/c/shim_mps.h for the other MPS set_arg
+// functions (aoti_torch_mps_set_arg_tensor, aoti_torch_mps_set_arg_int).
+AOTI_TORCH_EXPORT AOTITorchError torch_mps_set_arg_bytes(
+    AOTIMetalKernelFunctionHandle func,
+    unsigned idx,
+    const void* ptr,
+    uint64_t size);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 
 #ifdef __cplusplus

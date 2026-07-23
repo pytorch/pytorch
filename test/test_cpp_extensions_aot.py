@@ -110,6 +110,18 @@ class TestCppExtensionAOT(common.TestCase):
 
         self.assertEqual(cpu_output, mps_output.to("cpu"))
 
+    @unittest.skipIf(not torch.backends.mps.is_available(), "MPS not found")
+    def test_mps_set_arg_bytes(self):
+        # Exercises torch_mps_set_arg_bytes: float and bool scalars bound
+        # inline to a Metal kernel through the stable shim.
+        import torch_test_cpp_extension.mps as mps_extension
+
+        x = torch.randn(1000, device="mps", dtype=torch.float32)
+        for scale, negate in ((0.5, False), (2.0, True)):
+            out = mps_extension.get_mps_scale_negate_output(x, scale, negate)
+            expected = x * scale * (-1.0 if negate else 1.0)
+            self.assertEqual(out, expected)
+
     @unittest.skipIf(not TEST_XPU, "XPU not found")
     @unittest.skipIf(
         os.getenv("USE_NINJA", "0") == "0",

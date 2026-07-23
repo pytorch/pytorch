@@ -1,6 +1,7 @@
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
+#include <torch/csrc/stable/c/shim.h>
 
 using namespace torch::aot_inductor;
 
@@ -25,6 +26,18 @@ AOTITorchError aoti_torch_mps_set_arg_int(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     auto func = reinterpret_cast<at::native::mps::MetalKernelFunction*>(handle);
     func->setArg(idx, val);
+  });
+}
+
+AOTITorchError torch_mps_set_arg_bytes(
+    AOTIMetalKernelFunctionHandle handle,
+    unsigned idx,
+    const void* ptr,
+    uint64_t size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ptr != nullptr, "Pointer is null.");
+    auto func = reinterpret_cast<at::native::mps::MetalKernelFunction*>(handle);
+    func->setArg(idx, ptr, size);
   });
 }
 

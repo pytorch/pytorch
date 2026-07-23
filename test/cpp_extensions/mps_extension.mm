@@ -1,5 +1,7 @@
 #include <torch/extension.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
+#include <torch/csrc/inductor/aoti_torch/utils.h>
 
 // this sample custom kernel is taken from:
 // https://developer.apple.com/documentation/metal/performing_calculations_on_a_gpu
@@ -78,8 +80,75 @@ void mps_add_one_new_encoder(const at::Tensor& input) {
   }
 }
 
+// Exercises the stable shim's torch_mps_set_arg_bytes: binds a float
+// and a bool scalar inline (Metal setBytes) instead of smuggling them through
+// 1-element tensors.
+static const char* SCALE_NEGATE_SHADER = R"MPS_SCALE_NEGATE(
+#include <metal_stdlib>
+using namespace metal;
+kernel void scale_negate(device const float* input [[buffer(0)]],
+                         device float* output      [[buffer(1)]],
+                         constant float& scale     [[buffer(2)]],
+                         constant bool& negate     [[buffer(3)]],
+                         uint index [[thread_position_in_grid]]) {
+  float v = input[index] * scale;
+  output[index] = negate ? -v : v;
+}
+)MPS_SCALE_NEGATE";
+
+struct ScaleNegateArgs {
+  AtenTensorHandle input;
+  AtenTensorHandle output;
+  float scale;
+  bool negate;
+  uint64_t numel;
+};
+
+static void scale_negate_encode(AOTIMetalKernelFunctionHandle func, void* user_data) {
+  auto* args = static_cast<ScaleNegateArgs*>(user_data);
+  TORCH_CHECK(aoti_torch_mps_start_encoding(func) == AOTI_TORCH_SUCCESS);
+  TORCH_CHECK(aoti_torch_mps_set_arg_tensor(func, 0, args->input) == AOTI_TORCH_SUCCESS);
+  TORCH_CHECK(aoti_torch_mps_set_arg_tensor(func, 1, args->output) == AOTI_TORCH_SUCCESS);
+  TORCH_CHECK(torch_mps_set_arg_bytes(func, 2, &args->scale, sizeof(float)) == AOTI_TORCH_SUCCESS);
+  TORCH_CHECK(torch_mps_set_arg_bytes(func, 3, &args->negate, sizeof(bool)) == AOTI_TORCH_SUCCESS);
+  TORCH_CHECK(aoti_torch_mps_dispatch_single(func, args->numel) == AOTI_TORCH_SUCCESS);
+}
+
+at::Tensor get_mps_scale_negate_output(const at::Tensor& input, double scale, bool negate) {
+  TORCH_CHECK(input.is_mps());
+  TORCH_CHECK(input.scalar_type() == at::kFloat);
+  TORCH_CHECK(input.numel() > 0);
+
+  auto input_ = input.contiguous();
+  at::Tensor output = at::empty_like(input_);
+
+  static AOTIMetalShaderLibraryHandle lib_handle = []() {
+    AOTIMetalShaderLibraryHandle handle = nullptr;
+    TORCH_CHECK(
+        aoti_torch_mps_create_shader_library(SCALE_NEGATE_SHADER, &handle) ==
+        AOTI_TORCH_SUCCESS);
+    return handle;
+  }();
+  AOTIMetalKernelFunctionHandle func = nullptr;
+  TORCH_CHECK(
+      aoti_torch_mps_get_kernel_function(lib_handle, "scale_negate", &func) ==
+      AOTI_TORCH_SUCCESS);
+
+  ScaleNegateArgs args{
+      torch::aot_inductor::tensor_pointer_to_tensor_handle(&input_),
+      torch::aot_inductor::tensor_pointer_to_tensor_handle(&output),
+      static_cast<float>(scale),
+      negate,
+      static_cast<uint64_t>(input_.numel())};
+  TORCH_CHECK(
+      aoti_torch_mps_run_command_block(func, &scale_negate_encode, &args) ==
+      AOTI_TORCH_SUCCESS);
+  return output;
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("get_cpu_add_output", &get_cpu_add_output);
   m.def("get_mps_add_output", &get_mps_add_output);
   m.def("mps_add_one_new_context", &mps_add_one_new_encoder);
+  m.def("get_mps_scale_negate_output", &get_mps_scale_negate_output);
 }
