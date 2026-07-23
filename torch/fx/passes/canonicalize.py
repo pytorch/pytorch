@@ -14,134 +14,27 @@ import heapq
 import itertools
 from collections.abc import Callable
 
-import torch
 import torch.fx as fx
 
 
 __all__ = ["canonicalize_graph", "rename_nodes_to_canonical"]
 
 
-_IN_PLACE_OPERATORS = frozenset(
-    {
-        "iadd",
-        "iand",
-        "iconcat",
-        "ifloordiv",
-        "ilshift",
-        "imatmul",
-        "imod",
-        "imul",
-        "ior",
-        "ipow",
-        "irshift",
-        "isub",
-        "itruediv",
-        "ixor",
-    }
-)
-
-
-def _computation_node_key(
-    node: fx.Node, canonical_idx: dict[fx.Node, int]
-) -> tuple[int, str, tuple[int, ...]]:
-    """Canonical heap key for a computation node (call_function / call_method / call_module)."""
-    input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
-    return (2, node.graph._target_to_str(node.target), input_indices)
-
-
-def _canonical_node_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> object:
-    """Canonical heap key for get_attr, output, and computation nodes.
-
-    Callers must handle placeholder nodes themselves (the ordering strategy
-    differs between Dynamo and export) and never pass them here.
-    """
-    if node.op == "placeholder":
-        raise AssertionError("callers must handle placeholder nodes themselves")
-    if node.op == "get_attr":
-        return (1, str(node.target))
-    elif node.op == "output":
-        return (3,)
-    else:
-        return _computation_node_key(node, canonical_idx)
-
-
-def _is_safe_to_reorder(node: fx.Node) -> bool:
-    """Check if a node is safe to reorder during graph canonicalization.
-
-    Builds on Node.is_impure() (used by DCE) with two additional checks for
-    cases it doesn't cover: in-place call_method nodes and non-OpOverload
-    state-changing functions detected by a no-node-arguments heuristic.
-    """
-    if node.op == "call_method":
-        return not node.target.endswith("_")  # pyrefly: ignore[missing-attribute]
-    if node.op == "call_module":
-        return not node.is_impure()
-    if node.op != "call_function":
-        return True
-    if node.is_impure():
-        return False
-    if not isinstance(node.target, torch._ops.OpOverload):
-        name = getattr(node.target, "__name__", "")
-        if name.endswith("_"):
-            return False
-        if (
-            getattr(node.target, "__module__", "") == "_operator"
-            and name in _IN_PLACE_OPERATORS
-        ):
-            return False
-        if isinstance(node.kwargs.get("out"), fx.Node):
-            return False
-        # triton_kernel_wrapper_mutation mutates tensors via kwargs but
-        # is not detected by is_impure() or trailing-underscore checks.
-        if name == "triton_kernel_wrapper_mutation":
-            return False
-        # Non-OpOverload targets with no FX Node arguments are likely
-        # state-changing (e.g., _vmap_increment_nesting,
-        # _set_fwd_grad_enabled). This is intentionally conservative:
-        # pure constant-producing ops would also be treated as barriers,
-        # but those are rare in Dynamo output graphs (constants are
-        # typically lifted as placeholders or get_attr nodes).
-        if not node.all_input_nodes:
-            return False
-        # functorch batch dim ops modify the vmap interpreter stack.
-        if name in ("_add_batch_dim", "_remove_batch_dim"):
-            return False
-    return True
-
-
-def rename_nodes_to_canonical(
-    graph: fx.Graph,
-    skip_ops: frozenset[str] = frozenset(),
-) -> dict[str, str]:
+def rename_nodes_to_canonical(graph: fx.Graph) -> None:
     """Rename all nodes in the graph to canonical names based on their target.
 
     Uses the same naming scheme as FX ``Graph.create_node`` (auto-generated
     names from the target string). After renaming, replaces the graph's
     namespace so future node creation stays consistent.
-
-    Args:
-        graph: The FX graph whose nodes to rename.
-        skip_ops: Node ops to skip renaming (their names are reserved in the
-            new namespace but left unchanged).
-
-    Returns a mapping from old name to new name for nodes that were renamed.
     """
     from torch.fx.graph import _Namespace
 
-    renamed: dict[str, str] = {}
     ns = _Namespace()
     for node in graph.nodes:
-        if node.op in skip_ops:
-            ns.create_name(node.name, node)
-            continue
-        old_name = node.name
         candidate = graph._target_to_str(node.target)
         new_name = ns.create_name(candidate, node)
-        if new_name != old_name:
-            renamed[old_name] = new_name
         node.name = new_name
     graph._graph_namespace = ns
-    return renamed
 
 
 def _sink_get_attr_nodes(order: list[fx.Node]) -> None:
@@ -180,9 +73,7 @@ def canonicalize_graph(
     graph: fx.Graph,
     canonical_key_fn: Callable[[fx.Node, dict[fx.Node, int]], object],
     is_safe_to_reorder: Callable[[fx.Node], bool],
-    *,
-    skip_rename_ops: frozenset[str] = frozenset(),
-) -> dict[str, str]:
+) -> fx.Graph:
     """Reorder graph nodes into a canonical topological order and rename them.
 
     This ensures that structurally equivalent graphs produce identical node
@@ -201,12 +92,9 @@ def canonicalize_graph(
         is_safe_to_reorder: ``(node) -> bool``.  Nodes for which this returns
             ``False`` act as barriers: they are chained in original order, and
             pure nodes are confined to their barrier segment.
-        skip_rename_ops: Node ops to skip renaming. Skipped nodes keep their
-            original names.
 
     Returns:
-        A mapping from old node name to new node name for nodes that were
-        renamed.
+        The same ``graph`` object, reordered and renamed in-place.
     """
     indeg: dict[fx.Node, int] = {
         node: len(node.all_input_nodes) for node in graph.nodes
@@ -275,24 +163,12 @@ def canonicalize_graph(
 
     _sink_get_attr_nodes(canonical_order)
 
-    # Purge erased nodes that are still physically in the linked list.
-    # erase_node() sets _erased=True and unlinks the node, but stale
-    # _prev/_next pointers on the erased node can leave it reachable from
-    # neighbors that were inserted later.  If such a ghost node sits between
-    # `cursor` and the node being appended, cursor.append() (which goes via
-    # cursor._next._prepend()) corrupts the chain.
-    root = graph._root  # type: ignore[attr-defined]
-    node = root._next
-    while node is not root:
-        nxt = node._next
-        if node._erased:
-            node._remove_from_list()
-        node = nxt
-
     # Reorder nodes in-place to preserve node object identity.
-    cursor = root
+    cursor = graph._root  # type: ignore[attr-defined]
     for node in canonical_order:
         cursor.append(node)
         cursor = node
 
-    return rename_nodes_to_canonical(graph, skip_ops=skip_rename_ops)
+    rename_nodes_to_canonical(graph)
+
+    return graph

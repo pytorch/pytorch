@@ -250,10 +250,10 @@ with torch.no_grad():
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
-def forward(self, linear_default):
-    linear_default, = fx_pytree.tree_flatten_spec(([linear_default], {}), self._in_spec)
-    relu_default = torch.ops.aten.relu.default(linear_default);  linear_default = None
-    return pytree.tree_unflatten((relu_default,), self._out_spec)""",
+def forward(self, linear):
+    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
+    relu = torch.ops.aten.relu.default(linear);  linear = None
+    return pytree.tree_unflatten((relu,), self._out_spec)""",
         )
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
