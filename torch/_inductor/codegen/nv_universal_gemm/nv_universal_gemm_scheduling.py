@@ -35,6 +35,7 @@ from ...kernel.gemm_epilogue_ir import (
     centered_mean_consumer_type_unrolled_ir,
     GemmEpilogueIRAnalysis,
     grouped_reduction_ir,
+    is_absmax_scale_finalizer_ir,
     is_direct_bool_gt_zero_ir,
     is_logsumexp_ir,
     operation_names_ir,
@@ -1095,12 +1096,12 @@ class NVUniversalGemmScheduling(BaseScheduling):
         ):
             return False
         finalizer = cast(ComputedBuffer, finalizer_node.get_nodes()[0].node)
+        reduction = cast(ComputedBuffer, reduction_node.get_nodes()[0].node)
         store = GemmEpilogueIRAnalysis.from_buffers((finalizer,)).store(
             finalizer.get_name()
         )
-        operations = operation_names_ir(store) if store is not None else frozenset()
-        return bool(operations & frozenset(("mul", "truediv"))) and bool(
-            operations & frozenset(("clamp", "clamp_min", "maximum"))
+        return store is not None and is_absmax_scale_finalizer_ir(
+            store, reduction.get_name()
         )
 
     @classmethod

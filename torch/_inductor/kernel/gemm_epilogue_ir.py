@@ -247,6 +247,45 @@ def is_direct_bool_gt_zero_ir(store: GemmEpilogueIRStore, source_name: str) -> b
     )
 
 
+def is_absmax_scale_finalizer_ir(store: GemmEpilogueIRStore, source_name: str) -> bool:
+    """Match clamp(source, 1e-12) / 448 used by FP8 absmax scaling."""
+    expr = _strip_conversions(store.value)
+    if not isinstance(expr, GemmEpilogueIRExpression):
+        return False
+    if expr.op == "truediv" and _constant_value(expr.args[1]) == 448.0:
+        clamped = expr.args[0]
+    elif expr.op == "mul":
+        lhs, rhs = expr.args[:2]
+        if _constant_value(lhs) == 1.0 / 448.0:
+            clamped = rhs
+        elif _constant_value(rhs) == 1.0 / 448.0:
+            clamped = lhs
+        else:
+            return False
+    else:
+        return False
+
+    clamped = _strip_conversions(clamped)
+    if not isinstance(clamped, GemmEpilogueIRExpression):
+        return False
+    if clamped.op in ("maximum", "clamp_min"):
+        lhs, rhs = clamped.args[:2]
+        return (
+            _source_transform(lhs, source_name) == "identity"
+            and _constant_value(rhs) == 1e-12
+        ) or (
+            _source_transform(rhs, source_name) == "identity"
+            and _constant_value(lhs) == 1e-12
+        )
+    if clamped.op == "clamp" and len(clamped.args) >= 2:
+        return (
+            _source_transform(clamped.args[0], source_name) == "identity"
+            and _constant_value(clamped.args[1]) == 1e-12
+            and (len(clamped.args) < 3 or clamped.args[2] is None)
+        )
+    return False
+
+
 def _contains_reduction(expr: Any) -> bool:
     if not isinstance(expr, GemmEpilogueIRExpression):
         return False
