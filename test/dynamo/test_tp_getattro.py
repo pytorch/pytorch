@@ -909,11 +909,11 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
     def test_getset_descriptor_incompatible_type(self):
         class Borrower:
-            __class__ = int.__class__
+            denominator = int.denominator
 
         def fn(x, obj):
             try:
-                obj.__class__
+                obj.denominator
                 return x + 1
             except TypeError:
                 return x + 2
@@ -922,6 +922,18 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         b = Borrower()
         eager = fn(x, b).sum()
         compiled = torch.compile(fn, backend="eager", fullgraph=True)(x, b).sum()
+        self.assertEqual(eager, compiled)
+
+
+    def test_method_descriptor_compatible_type(self):
+        def fn(x):
+            l = [1, 2, 3]
+            l.append(4)
+            return x
+
+        x = torch.randn(4)
+        eager = fn(x).sum()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x).sum()
         self.assertEqual(eager, compiled)
 
 
