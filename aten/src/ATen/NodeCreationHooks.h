@@ -14,8 +14,8 @@ struct TORCH_API NodeCreationHooksTLS {
   // Hooks fire in registration order (outermost context manager first).
   std::vector<c10::SafePyObject> stack;
 
-  // True while hooks are running; suppresses firing for nodes created by the
-  // hooks themselves to avoid unbounded recursion.
+  // True while hooks are running; creating a new autograd node from inside a
+  // hook is an error (it would otherwise recurse unboundedly).
   bool is_firing = false;
 };
 

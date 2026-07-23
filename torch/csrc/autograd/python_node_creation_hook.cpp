@@ -24,6 +24,11 @@ void PyNodeCreationHook::operator()(const c10::intrusive_ptr<Node>& node) {
   if (!result) {
     throw python_error();
   }
+  // Reserve non-None returns for future semantics.
+  TORCH_CHECK(
+      result.get() == Py_None,
+      "node creation hook must return None, got ",
+      Py_TYPE(result.get())->tp_name);
 }
 
 std::vector<std::unique_ptr<NodeCreationHook>> PyDefaultNodeCreationHooks::

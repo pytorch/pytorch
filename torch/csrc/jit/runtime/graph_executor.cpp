@@ -459,6 +459,8 @@ struct DifferentiableGraphOp {
         grad_fn->addInputIValue(outputs[idx]);
       }
       captureOutputs(*grad_fn, outputs);
+      // grad_fn is fully populated now (edges wired, captures stored).
+      autograd::fire_node_creation_hooks(grad_fn);
       // drop the temporary outputs so that we return the same number of
       // outputs as if we were not also calculating gradient
       const size_t num_temporary_outputs = num_outputs - grad.f_real_outputs;

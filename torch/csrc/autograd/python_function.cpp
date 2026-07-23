@@ -663,7 +663,7 @@ static void _wrap_outputs(
     PyObject* outputs,
     bool is_executable,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
-    c10::intrusive_ptr<Node>* attached_node) {
+    c10::intrusive_ptr<Node>& attached_node) {
   auto cdata_if_executable = is_executable ? self->cdata : nullptr;
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (is_executable) {
@@ -1197,7 +1197,7 @@ PyObject* process_outputs(
       outputs,
       is_executable,
       to_save_if_setup_context,
-      &attached_node);
+      attached_node);
   _trace_post_record(
       node, op_obj, unpacked.input_vars, outputs, is_inplace, unpack_output);
 

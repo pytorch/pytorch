@@ -11542,19 +11542,55 @@ for shape in [(1,), ()]:
             with self.assertRaisesRegex(CustomError, "node creation hook failed"):
                 a * 2
 
-    def test_node_creation_hook_ops_in_hook_do_not_recurse(self):
-        nodes = []
-
+    def test_node_creation_hook_ops_in_hook_raise(self):
         def hook(node):
-            nodes.append(node)
-            # This op creates a node; it must not re-trigger hooks.
+            # This op would create a node inside the hook; that is an error.
             x = torch.randn(2, requires_grad=True)
             (x * 2).sum()
 
         a = torch.randn(2, requires_grad=True)
         with torch.autograd.graph.node_creation_hook(hook):
-            a * 2
+            with self.assertRaisesRegex(
+                RuntimeError, "from inside a node creation hook"
+            ):
+                a * 2
+
+    def test_node_creation_hook_must_return_none(self):
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(lambda node: node):
+            with self.assertRaisesRegex(RuntimeError, "must return None"):
+                a * 2
+
+    def test_node_creation_hook_foreach(self):
+        # Out-of-place foreach ops create one grad_fn shared by all outputs.
+        nodes = []
+        tensors = [torch.randn(2, requires_grad=True) for _ in range(3)]
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            outs = torch._foreach_mul(tensors, 2)
         self.assertEqual(len(nodes), 1)
+        for out in outs:
+            self.assertIs(nodes[0], out.grad_fn)
+
+    def test_node_creation_hook_foreach_inplace(self):
+        nodes = []
+        tensors = [torch.randn(2, requires_grad=True) + 0 for _ in range(3)]
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            torch._foreach_mul_(tensors, 2)
+        self.assertEqual(nodes, [t.grad_fn for t in tensors])
+
+    def test_node_creation_hook_delayed_error(self):
+        # DelayedError attaches its Error node via wrap_outputs
+        # (csrc/autograd/functions/utils.cpp), not through codegen.
+        nodes = []
+        a = torch.randn(2, requires_grad=True)
+        err_fn = torch._C._functions.DelayedError("boom", 1)
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            b = a * 2
+            c = err_fn(b)
+        self.assertEqual(
+            [n.name() for n in nodes], ["MulBackward0", "torch::autograd::Error"]
+        )
+        self.assertIs(nodes[1], c.grad_fn)
 
     def test_node_creation_hook_register_backward_hooks(self):
         # The motivating pattern: capture state at node creation, restore it

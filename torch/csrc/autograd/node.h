@@ -653,11 +653,12 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
   // children See NOTE [ Topological Number ] for why we need this.
   mutable bool has_parent_ = false;
 
+  // See node_creation_hooks_fired() above. Placed next to has_parent_ so it
+  // packs into the padding before thread_id_.
+  bool node_creation_hooks_fired_ = false;
+
   // Id of the thread that created the instance
   uint64_t thread_id_ = 0;
-
-  // See node_creation_hooks_fired() above.
-  bool node_creation_hooks_fired_ = false;
 
   // Note [Thread Safety on Autograd Node]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

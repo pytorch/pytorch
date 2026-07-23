@@ -40,20 +40,26 @@ c10::intrusive_ptr<Node> get_current_node() {
 }
 
 void fire_node_creation_hooks(const c10::intrusive_ptr<Node>& node) {
-  const auto& state = at::impl::NodeCreationHooks::get_tls_state();
-  if (C10_LIKELY(state.stack.empty())) {
-    return;
-  }
-  if (state.is_firing) {
-    return;
-  }
   // Every creation path fires a given node exactly once by construction;
-  // this asserts that invariant rather than deduping at runtime.
+  // this asserts that invariant rather than deduping at runtime. It runs
+  // before the empty-stack fast path so it is exercised even when no hooks
+  // are registered (i.e. in regular CI runs).
   TORCH_INTERNAL_ASSERT(
       !node->node_creation_hooks_fired(),
       "node creation hooks fired twice for ",
       node->name());
   node->set_node_creation_hooks_fired();
+  const auto& state = at::impl::NodeCreationHooks::get_tls_state();
+  if (C10_LIKELY(state.stack.empty())) {
+    return;
+  }
+  TORCH_CHECK(
+      !state.is_firing,
+      "Creating a new autograd node from inside a node creation hook is not supported. ",
+      "Node creation hooks should only observe the node (e.g. record it, stash metadata, ",
+      "or register backward hooks on it); got a new node of type ",
+      node->name(),
+      " while a hook was running.");
   at::impl::NodeCreationHooks::set_is_firing(true);
   auto guard = c10::make_scope_exit(
       [] { at::impl::NodeCreationHooks::set_is_firing(false); });

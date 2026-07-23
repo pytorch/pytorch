@@ -477,17 +477,15 @@ class node_creation_hook:
 
         hook(node: torch.autograd.graph.Node) -> None
 
-    The registration is thread-local. It is captured into
-    :class:`~torch.autograd.graph.saved_tensors_hooks`-style thread-local
-    state, so it propagates to any worker thread that autograd (or another
-    subsystem built on it) spins up: if backward is run under this context
-    (or graph nodes are created during backward, e.g. with
-    ``create_graph=True`` or inside checkpoint recomputation), the hook also
-    fires for those nodes.
+    The registration is thread-local and propagates like other autograd
+    thread-local state: it is active on autograd engine worker threads, so
+    nodes created during backward (e.g. with ``create_graph=True`` or inside
+    checkpoint recomputation) also fire the hook.
 
-    Nodes created by hooks themselves do not trigger hooks again. When
-    nesting this context-manager, all active hooks are called for each node,
-    outermost first.
+    When nesting this context-manager, every active hook is called for each
+    node, in registration order (outermost context-manager first). Creating
+    a new autograd node from inside a hook raises an error; hooks must only
+    observe the node they are given.
 
     One motivating use case is attributing work done during backward to the
     forward region that created the graph, by capturing state at node
@@ -513,10 +511,12 @@ class node_creation_hook:
         <MulBackward0 object at ...>
 
     .. note::
-        Hooks fire only for nodes attached to output tensors during the
-        context. In particular, gradient accumulation nodes for leaf tensors
-        (``AccumulateGrad``) are created lazily at their first use in
-        backward and do not trigger hooks.
+        ``AccumulateGrad`` nodes never trigger this hook. They are created
+        on demand and cached on the leaf tensor, so their creation time
+        depends on the tensor's usage history rather than on the code
+        running inside the context. Use
+        :meth:`~torch.Tensor.register_post_accumulate_grad_hook` for
+        per-leaf instrumentation instead.
     """
 
     def __init__(self, hook: Callable[[Node], None]) -> None:

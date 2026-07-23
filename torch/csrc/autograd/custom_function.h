@@ -16,10 +16,10 @@ using optional_variable_list = std::vector<std::optional<Variable>>;
 using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
 using _view_as_self_fn_t = std::function<at::Tensor(at::Tensor)>;
 
-// If attached_node is non-null, it is set to the node actually attached as
-// the outputs' history: cdata, or the CopySlices node wrapping cdata when a
-// dirty view input forced a rebase. Callers fire node creation hooks on it
-// once the node is fully populated (i.e. after saving variables).
+// attached_node is set to the node actually attached as the outputs'
+// history: cdata, or the CopySlices node wrapping cdata when a dirty view
+// input forced a rebase. Callers fire node creation hooks on it once the
+// node is fully populated (i.e. after saving variables).
 TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const variable_list& input_vars,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
@@ -30,7 +30,7 @@ TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
     bool pure_view,
-    c10::intrusive_ptr<Node>* attached_node = nullptr);
+    c10::intrusive_ptr<Node>& attached_node);
 
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
@@ -533,7 +533,7 @@ auto Function<T>::apply(Args&&... args)
       {},
       view_as_self_fn,
       false,
-      &attached_node);
+      attached_node);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {
