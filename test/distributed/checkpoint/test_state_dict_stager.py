@@ -22,6 +22,7 @@ from torch.distributed.checkpoint._state_dict_stager import StateDictStager
 from torch.distributed.checkpoint.staging import _ReplicationStager
 from torch.distributed.checkpoint.state_dict_saver import async_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import (
     HAS_ACCELERATOR,
     requires_accelerator_dist_backend,
@@ -209,7 +210,9 @@ class FrozenDataClass:
 
 
 class TestStateDictStager(TestCase):
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    @unittest.skipIf(
+        not TEST_CUDA, "This test verifies CUDA-only feature pin_memory"
+    )
     def test_views(self):
         test_configs = [
             (False, False),  # pin_memory=False, share_memory=False,
@@ -923,7 +926,12 @@ class TestReplicationStager(DTensorTestBase):
 
     @property
     def backend(self) -> str:
-        return "cpu:gloo,cuda:nccl"
+        # Device-agnostic composed backend matching the allow-list entry in
+        # common_dtensor.DTensorTestBase.init_pg:
+        #   f"cpu:gloo,{self.device_type}:{curr_backend}"
+        # where curr_backend = dist.get_default_backend_for_device(self.device_type).
+        curr_backend = dist.get_default_backend_for_device(self.device_type)
+        return f"cpu:gloo,{self.device_type}:{curr_backend}"
 
     def _create_simple_state_dict(self, rank: int) -> dict:
         """

@@ -83,7 +83,9 @@ logger.setLevel(logging.INFO)
 
 ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
 DDP_RANK_DEVICES = ["cuda", "xpu"]
-HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU
+# HAS_ACCELERATOR should check all supported accelerators, including out-of-tree backends,
+# hence replace TEST_CUDA, TEST_HPU and TEST_XPU with is_available call instead.
+HAS_ACCELERATOR = torch.accelerator.is_available()
 
 
 class TestSkip(NamedTuple):
