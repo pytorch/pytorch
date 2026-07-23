@@ -744,6 +744,72 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
         )
         self.assertEqual(tensor_result, "tensor_a")
 
+    def test_cutedsl_op_overrides_fast_math(self):
+        from torch._inductor.codegen.common import CSEVariable
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            CuteDSLOpOverrides,
+            use_cutedsl_fast_math,
+        )
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        mock_cse_a = MagicMock(spec=CSEVariable)
+        mock_cse_a.__str__.return_value = "tensor_a"
+        mock_cse_a.dtype = torch.float32
+        mock_cse_a.bounds = ValueRanges.unknown()
+        mock_cse_a.shape = (32, 64)
+
+        mock_cse_b = MagicMock(spec=CSEVariable)
+        mock_cse_b.__str__.return_value = "tensor_b"
+        mock_cse_b.dtype = torch.float32
+        mock_cse_b.bounds = ValueRanges.unknown()
+        mock_cse_b.shape = (32, 64)
+
+        def generate(fast_math):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_fast_math",
+                input_nodes=[],
+                output_node=None,
+            )
+            with (
+                V.set_kernel_handler(kernel),
+                use_cutedsl_fast_math(fast_math),
+            ):
+                for op_name in (
+                    "exp",
+                    "exp2",
+                    "sqrt",
+                    "rsqrt",
+                    "log",
+                    "log2",
+                    "log10",
+                    "cos",
+                    "sin",
+                    "tan",
+                    "acos",
+                    "asin",
+                    "atan",
+                    "erf",
+                    "floor",
+                    "tanh",
+                    "sigmoid",
+                ):
+                    result = getattr(CuteDSLOpOverrides, op_name)(mock_cse_a)
+                    self.assertIsInstance(result, CSEVariable)
+                result = CuteDSLOpOverrides.atan2(mock_cse_a, mock_cse_b)
+                self.assertIsInstance(result, CSEVariable)
+            return kernel.body.getvalue()
+
+        with V.set_graph_handler(MockGraphHandler()):
+            fast_math_body = generate(True)
+            precise_body = generate(False)
+
+        math_lines = [
+            line for line in fast_math_body.splitlines() if "cute.math." in line
+        ]
+        self.assertGreater(len(math_lines), 0)
+        self.assertTrue(all("fastmath=True" in line for line in math_lines))
+        self.assertNotIn("fastmath=True", precise_body)
+
     def test_cse_integration(self):
         """Test CSE (Common Subexpression Elimination) integration."""
         from torch._inductor.codegen.common import CSE
