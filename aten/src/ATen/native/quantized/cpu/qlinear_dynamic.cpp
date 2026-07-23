@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
@@ -440,10 +441,24 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
     }
   });
 
-  // Add bias term
+  // Add bias term via a fused parallel loop over rows: avoids the add_
+  // TensorIterator dispatch while preserving parallelism over the M*N output.
   if (bias_.has_value()) {
     TORCH_CHECK(bias_->dim() == 1);
-    output.add_(*bias_);
+    const at::Tensor bias_contig = bias_->contiguous();
+    TORCH_CHECK(bias_contig.numel() == N);
+    const float* const __restrict bias_ptr =
+        bias_contig.const_data_ptr<float>();
+    const int64_t grain =
+        std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(1, N));
+    at::parallel_for(0, M, grain, [&](int64_t begin, int64_t end) {
+      for (const auto row : c10::irange(begin, end)) {
+        float* const __restrict out_row = output_data + row * N;
+        for (const auto col : c10::irange(N)) {
+          out_row[col] += bias_ptr[col];
+        }
+      }
+    });
   }
 
   return output;
