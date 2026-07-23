@@ -6877,6 +6877,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "force_disable_caches": config.force_disable_caches,
             "dynamic_scale_rblock": config.dynamic_scale_rblock,
             "incremental_autotune": config.incremental_autotune,
+            # Captured at codegen time so it reflects the per-graph cudagraph
+            # decision, including override_cudagraphs annotations that patch
+            # config.triton.cudagraphs on only for this region's compilation
+            # (see cudagraph_annotation_context). The live global flag is back
+            # to its default by the time the kernel runs, so runtime checks of
+            # config.triton.cudagraphs miss per-region cudagraphs.
+            "cudagraphs": config.triton.cudagraphs,
             "max_autotune": config.max_autotune,
             "max_autotune_pointwise": config.max_autotune_pointwise,
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
