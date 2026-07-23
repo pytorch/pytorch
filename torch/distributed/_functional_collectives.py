@@ -158,7 +158,9 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     return _maybe_wrap_tensor(tensor)
 
 
-def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
+def all_reduce(
+    self: torch.Tensor, reduceOp: str | dist.ReduceOp, group: RANK_TYPES, tag: str = ""
+):
     """
     Reduces the tensor data across all machines in such a way that all get
     the final result.
@@ -176,8 +178,9 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     group = _resolve_group(group, tag)
+    reduce_op = reduceOp.lower() if isinstance(reduceOp, str) else reduceOp
     tensor = torch.ops._c10d_functional.all_reduce(
-        self, reduceOp.lower(), _group_or_group_name(group)
+        self, reduce_op, _group_or_group_name(group)
     )
     return _maybe_wrap_tensor(tensor)
 
@@ -641,24 +644,41 @@ torch.library.register_autograd(
 )
 
 
+def _is_min_max(op):
+    from torch.distributed import ReduceOp as _ReduceOp
+
+    if isinstance(op, _ReduceOp):
+        return op.op in (_ReduceOp.MIN, _ReduceOp.MAX)
+    return op in ("min", "max")
+
+
 def _is_reduceop_supported(op):
     from torch.distributed import ReduceOp as _ReduceOp
+
     if isinstance(op, _ReduceOp):
-        return op.op in (_ReduceOp.SUM, _ReduceOp.AVG, _ReduceOp.PREMUL_SUM, _ReduceOp.MAX, _ReduceOp.MIN)
+        return op.op in (
+            _ReduceOp.SUM,
+            _ReduceOp.AVG,
+            _ReduceOp.PREMUL_SUM,
+            _ReduceOp.MAX,
+            _ReduceOp.MIN,
+        )
     return op in ("sum", "avg", "premul_sum", "max", "min")
 
 
 def all_reduce_backward(ctx, grad_output: torch.Tensor):
-    from torch.distributed import ReduceOp as _ReduceOp
     reduce_op = ctx.reduce_op
     if not _is_reduceop_supported(reduce_op):
-        raise RuntimeError(f"all_reduce backward only supports sum-like reductions, got '{reduce_op}'")
+        raise RuntimeError(
+            f"all_reduce backward only supports sum-like reductions, got '{reduce_op}'"
+        )
+    grad_reduce_op = "sum" if _is_min_max(reduce_op) else reduce_op
     output = torch.ops._c10d_functional.all_reduce(
-        grad_output.contiguous(), reduce_op, ctx.group_name
+        grad_output.contiguous(), grad_reduce_op, ctx.group_name
     )
-    if reduce_op == "min" or reduce_op == "max" or reduce_op == _ReduceOp.MIN or reduce_op == _ReduceOp.MAX:
-        output = torch.ops.aten.where.ScalarOther(ctx.mask, output, 0)
-
+    if _is_min_max(reduce_op):
+        fwd_input, fwd_output = ctx.saved_tensors
+        output = torch.ops.aten.where.ScalarOther(fwd_input == fwd_output, output, 0)
     return wait_tensor(output), None, None
 
 
@@ -666,10 +686,9 @@ def all_reduce_setup_context(ctx, inputs, output):
     input, reduce_op, group_name = inputs
     ctx.group_name = group_name
     ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
-    if reduce_op == "min" or reduce_op == "max" or reduce_op == _ReduceOp.MIN or reduce_op == _ReduceOp.MAX:
-        # TODO: handle is_nan
-        print("input", input, "output", output)
-        ctx.mask = input == output
+    if _is_min_max(reduce_op):
+        ctx.save_for_backward(input, output)
+
 
 torch.library.register_autograd(
     "_c10d_functional::all_reduce",

@@ -266,7 +266,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
     # ============================================================
 
     @parametrize("device", devices)
-    @parametrize("reduce_op", ["sum", "avg"])
+    @parametrize("reduce_op", ["sum", "avg", "min", "max"])
     def test_all_reduce_backward(self, device, reduce_op):
         """Test all_reduce backward does all_reduce.
 
@@ -276,29 +276,75 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         shape = (3, 3)
         group_name = dist.group.WORLD.group_name
 
-        input_tensor = torch.randn(3, 3, requires_grad=True, device=device)
+        rank = dist.get_rank()
+
+        if reduce_op in ("min", "max"):
+            # Use distinct per-rank values so there's a unique extremum holder
+            input_tensor = torch.full(
+                shape, fill_value=float(rank), requires_grad=True, device=device
+            )
+        else:
+            input_tensor = torch.randn(*shape, requires_grad=True, device=device)
         output = fcols.all_reduce(input_tensor, reduce_op, group=group_name)
 
         # Backward with ones
         output.sum().backward()
 
-        # Gradient should be aggregated (backward is all_reduce)
         if reduce_op == "sum":
             expected_grad = torch.full(
                 shape, fill_value=float(self.world_size), device=device
             )
         elif reduce_op == "avg":
             expected_grad = torch.full(shape, fill_value=1.0, device=device)
+        elif reduce_op == "min":
+            # Grad flows only to the rank that held the min (rank 0)
+            grad_val = float(self.world_size) if rank == 0 else 0.0
+            expected_grad = torch.full(shape, fill_value=grad_val, device=device)
+        elif reduce_op == "max":
+            # Grad flows only to the rank that held the max (last rank)
+            grad_val = float(self.world_size) if rank == self.world_size - 1 else 0.0
+            expected_grad = torch.full(shape, fill_value=grad_val, device=device)
         self.assertEqual(input_tensor.grad, expected_grad)
 
-        grad_outputs = torch.rand_like(output, device=device)
-        (grad_input,) = torch.autograd.grad(
-            output, input_tensor, grad_outputs=grad_outputs
+        if reduce_op not in ("min", "max"):
+            grad_outputs = torch.rand_like(output, device=device)
+            (grad_input,) = torch.autograd.grad(
+                output, input_tensor, grad_outputs=grad_outputs
+            )
+            expected_grad_input = fcols.all_reduce(
+                grad_outputs, reduce_op, group=group_name
+            )
+            self.assertEqual(grad_input, expected_grad_input)
+
+    @parametrize("device", devices)
+    def test_all_reduce_premul_sum_backward(self, device):
+        """Test all_reduce backward with PREMUL_SUM ReduceOp."""
+        shape = (3, 3)
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        factor = 0.5
+
+        premul_sum_op = dist.ReduceOp.PREMUL_SUM(factor)
+
+        input_tensor = torch.full(
+            shape, fill_value=float(rank + 1), requires_grad=True, device=device
         )
-        expected_grad_input = fcols.all_reduce(
-            grad_outputs, reduce_op, group=group_name
+        output = fcols.all_reduce(
+            input_tensor, reduceOp=premul_sum_op, group=group_name
         )
-        self.assertEqual(grad_input, expected_grad_input)
+
+        # Forward: premul_sum(0.5) premultiplies then sums
+        expected_fwd = factor * sum(float(r + 1) for r in range(self.world_size))
+        self.assertEqual(
+            output, torch.full(shape, fill_value=expected_fwd, device=device)
+        )
+
+        output.sum().backward()
+        # Backward: all_reduce(1, premul_sum(0.5)) = 0.5 * world_size
+        expected_grad = torch.full(
+            shape, fill_value=factor * float(self.world_size), device=device
+        )
+        self.assertEqual(input_tensor.grad, expected_grad)
 
     @parametrize("device", devices)
     def test_all_reduce_avg_backward(self, device):
