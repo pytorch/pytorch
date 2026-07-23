@@ -1888,18 +1888,27 @@ def _gen_mingw_import_lib(dll_path: str, def_path: str, import_lib_path: str) ->
     log.info("Generated MinGW import library %s from %s", import_lib_path, dll_name)
 
 
-# MSVC /GS buffer security check stubs for MinGW cross-compilation.
-# CUDA 13.0+ cudart.lib contains MSVC-compiled static objects that reference
-# these symbols (__security_cookie, __security_check_cookie, __GSHandlerCheck).
-# When cross-compiling with MinGW, we provide no-op stubs so the linker can
-# resolve them. At runtime on Windows, the CUDA runtime DLL handles its own
-# security checks internally; the static loader code that references these
-# symbols is a thin shim whose /GS instrumentation is safe to stub out.
+# MSVC /GS and Control Flow Guard stubs for MinGW cross-compilation.
+# CUDA 13.0+ cudart.lib contains MSVC-compiled static objects that reference the
+# /GS symbols (__security_cookie, __security_check_cookie, __GSHandlerCheck); the
+# CUDA 13.2 cudart.lib is additionally built with Control Flow Guard (/guard:cf)
+# and references the CFG dispatch/check function pointers. When cross-compiling
+# with MinGW (no MSVC runtime), we provide stubs so the linker can resolve them.
+# At runtime on Windows the CUDA runtime DLL handles its own security/CFG checks;
+# the static loader code that references these symbols is a thin shim. The /GS
+# and CFG-check stubs are safe no-ops, but the CFG *dispatch* stub must tail-jump
+# to the real target (in rax on x86_64) -- a no-op would drop the indirect call.
 _MSVC_GS_STUBS_SOURCE = """\
 #include <stdint.h>
 uint64_t __security_cookie = 0x00002B992DDFA232ULL;
 void __security_check_cookie(uint64_t cookie) { (void)cookie; }
 void __GSHandlerCheck(void) {}
+void __guard_check_icall_nop(void *target) { (void)target; }
+void (*__guard_check_icall_fptr)(void *target) = __guard_check_icall_nop;
+__attribute__((naked)) void __guard_dispatch_icall_nop(void) {
+    __asm__ __volatile__("jmp *%rax");
+}
+void (*__guard_dispatch_icall_fptr)(void) = __guard_dispatch_icall_nop;
 """
 
 
