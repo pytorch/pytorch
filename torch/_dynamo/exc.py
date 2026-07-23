@@ -315,6 +315,7 @@ class Unsupported(TorchDynamoException):
         self.real_stack = real_stack
         self.msg = msg
         self.skip_frame = skip_frame
+        self._ngb_suppress_propagate = False
         self.category: str | None = None
         self.add_to_stats()
         self.gb_type: str | None = gb_type
@@ -385,6 +386,7 @@ class UserError(TorchDynamoException):
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.skip_frame = False
+        self._ngb_suppress_propagate = False
         self.logged = False
         self.error_type = error_type
         self.msg = msg

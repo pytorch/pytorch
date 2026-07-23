@@ -4524,6 +4524,16 @@
       ]
     }
   ],
+  "GB4532": [
+    {
+      "Gb_type": "hasattr on wrapper subclass raised in fake probe",
+      "Context": "hasattr({self}, {name})",
+      "Explanation": "Probing hasattr on the fake wrapper subclass for attribute '{name}' raised a non-AttributeError exception.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0288": [
     {
       "Gb_type": "Can't extract message from torch._check()",

@@ -1403,8 +1403,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
                 if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
-                    if self.source:
-                        hooks_source = AttrSource(self.source, name)
+                    hooks_source = (
+                        AttrSource(self.source, name) if self.source else None
+                    )
+                    if hooks_source:
                         install_guard(
                             hooks_source.make_guard(
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
@@ -1415,7 +1417,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         if isinstance(hooks_dict, collections.OrderedDict)
                         else variables.ConstDictVariable
                     )
-                    return hooks_vt_cls({})
+                    return hooks_vt_cls({}, source=hooks_source)
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
