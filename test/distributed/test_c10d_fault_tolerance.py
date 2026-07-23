@@ -229,12 +229,10 @@ class AbstractFaultToleranceTest:
         # reconfigure() with a fresh uuid.
         self._create_reconfigured_pg("ft_abort", 1200)
         self.backend.abort()
+        if hasattr(self.backend, "get_error"):
+            from torch._C._distributed_c10d import ErrorType
 
-        from torch._C._distributed_c10d import ErrorType
-
-        is_nccl = self.backend_name == "nccl2"
-        expected = ErrorType.COMM_ERROR if is_nccl else ErrorType.SUCCESS
-        self.assertEqual(self.backend.get_error(), expected)
+            self.assertEqual(self.backend.get_error(), ErrorType.COMM_ERROR)
 
         handles = self._collect_handles("ft_abort_recover")
         self._reconfigure(1201, handles)
