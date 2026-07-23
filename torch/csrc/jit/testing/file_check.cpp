@@ -23,6 +23,7 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 namespace torch::jit::testing {
@@ -99,7 +100,7 @@ struct PatternMatch {
   VariableMap captures;
 };
 
-bool isValidVariableName(const std::string& name) {
+bool isValidVariableName(std::string_view name) {
   if (name.empty()) {
     return false;
   }
@@ -110,12 +111,12 @@ bool isValidVariableName(const std::string& name) {
     return false;
   }
   return std::all_of(
-      name.begin() + static_cast<std::string::difference_type>(start + 1),
+      name.begin() + static_cast<std::string_view::difference_type>(start + 1),
       name.end(),
       [](unsigned char c) { return std::isalnum(c) || c == '_'; });
 }
 
-std::string escapeRegex(const std::string& str) {
+std::string escapeRegex(std::string_view str) {
   std::string escaped;
   escaped.reserve(str.size());
   for (const char c : str) {
@@ -144,7 +145,7 @@ std::string escapeRegex(const std::string& str) {
   return escaped;
 }
 
-size_t countCapturingGroups(const std::string& regex) {
+size_t countCapturingGroups(std::string_view regex) {
   size_t count = 0;
   bool escaped = false;
   bool in_character_class = false;
@@ -185,7 +186,8 @@ std::optional<PatternMatch> findPattern(
     return std::nullopt;
   }
 
-  if (pattern.find("[[") == std::string::npos) {
+  const std::string_view pattern_view(pattern);
+  if (pattern_view.find("[[") == std::string_view::npos) {
     const auto pos = text.find(pattern, search_range.start());
     if (pos == std::string::npos || pos + pattern.size() > search_end) {
       return std::nullopt;
@@ -198,28 +200,29 @@ std::optional<PatternMatch> findPattern(
   std::vector<std::pair<std::string, size_t>> captures;
   size_t capturing_groups = 0;
   size_t cursor = 0;
-  while (cursor < pattern.size()) {
-    const auto open = pattern.find("[[", cursor);
-    if (open == std::string::npos) {
-      regex += escapeRegex(pattern.substr(cursor));
+  while (cursor < pattern_view.size()) {
+    const auto open = pattern_view.find("[[", cursor);
+    if (open == std::string_view::npos) {
+      regex += escapeRegex(pattern_view.substr(cursor));
       break;
     }
-    regex += escapeRegex(pattern.substr(cursor, open - cursor));
-    const auto close = pattern.find("]]", open + 2);
-    if (close == std::string::npos) {
+    regex += escapeRegex(pattern_view.substr(cursor, open - cursor));
+    const auto close = pattern_view.find("]]", open + 2);
+    if (close == std::string_view::npos) {
       throw std::runtime_error(c10::str(
           "Unterminated FileCheck variable block in pattern: ", pattern));
     }
 
-    const auto block = pattern.substr(open + 2, close - open - 2);
+    const auto block = pattern_view.substr(open + 2, close - open - 2);
     const auto colon = block.find(':');
-    const auto name = block.substr(0, colon);
-    if (!isValidVariableName(name)) {
+    const auto name_view = block.substr(0, colon);
+    if (!isValidVariableName(name_view)) {
       throw std::runtime_error(
-          c10::str("Invalid FileCheck variable name: ", name));
+          c10::str("Invalid FileCheck variable name: ", name_view));
     }
+    const std::string name(name_view);
 
-    if (colon != std::string::npos) {
+    if (colon != std::string_view::npos) {
       if (!allow_definitions) {
         throw std::runtime_error(
             "FileCheck variable definitions are not allowed in CHECK-NOT");
