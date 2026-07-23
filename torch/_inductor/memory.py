@@ -517,7 +517,7 @@ def estimate_region_peak_memory(
     node_outputs: dict[BaseSchedulerNode, Sequence[SchedulerBuffer]] | None = None,
     node_steps: dict[BaseSchedulerNode, int] | None = None,
     max_peak: int | None = None,
-    include_live_memory: bool = True,
+    return_live_memory: bool = True,
 ) -> tuple[int, list[int], list[int]]:
     """Peak memory inside `[region_start, region_end]` for the
     hypothetical post-reorder schedule.
@@ -586,7 +586,7 @@ def estimate_region_peak_memory(
             return peak, [], []
         cur -= frees[i]
 
-    if not include_live_memory:
+    if not return_live_memory:
         return peak, [], []
 
     cur = cur_memory

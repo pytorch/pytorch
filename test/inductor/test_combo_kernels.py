@@ -2936,7 +2936,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             region_end=5,
             step_of=lambda n: steps[n],
             graph_outputs={"bufC"},
-            include_live_memory=False,
+            return_live_memory=False,
         )
         self.assertEqual(peak_only, (peak, [], []))
 

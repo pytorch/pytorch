@@ -6130,7 +6130,7 @@ class Scheduler:
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         fused_nodes: OrderedSet[BaseSchedulerNode],
-        node3: BaseSchedulerNode | None = None,
+        prebuilt_fused_node: BaseSchedulerNode | None = None,
     ) -> BaseSchedulerNode:
         fusion_log.debug("fusing %s with %s", node1.get_name(), node2.get_name())
 
@@ -6139,18 +6139,21 @@ class Scheduler:
             raise AssertionError(
                 f"expected node2 device to be {device}, got {node2.get_device()}"
             )
-        if node3 is None:
-            node3 = self.get_backend(device).fuse(node1, node2)
+        # prebuilt_fused_node: fused node the memory-timeline guard already built
+        # while simulating this fusion; reuse it to avoid fusing the pair twice.
+        fused = prebuilt_fused_node
+        if fused is None:
+            fused = self.get_backend(device).fuse(node1, node2)
         fused_nodes.remove(node1)
         fused_nodes.remove(node2)
-        fused_nodes.add(node3)
-        self.name_to_fused_node.update({n.get_name(): node3 for n in node3.get_nodes()})
+        fused_nodes.add(fused)
+        self.name_to_fused_node.update({n.get_name(): fused for n in fused.get_nodes()})
 
         # Propagate stream assignment to the fused node so that subsequent
         # fusion rounds still respect stream boundaries.
-        self.node_to_stream[node3] = self.get_node_stream(node1)
+        self.node_to_stream[fused] = self.get_node_stream(node1)
 
-        return node3
+        return fused
 
     def _fuse_two_nodes_memory_checked(
         self,
@@ -6163,15 +6166,15 @@ class Scheduler:
         if rejected:
             return None
 
-        node3 = self.fuse_two_nodes(
+        fused = self.fuse_two_nodes(
             node1,
             node2,
             fused_nodes,
             memory_update.candidate if memory_update is not None else None,
         )
         if ctx is not None and memory_update is not None:
-            ctx.apply_accepted_fusion(memory_update, node3)
-        return node3
+            ctx.apply_accepted_fusion(memory_update, fused)
+        return fused
 
     def fuse_if_speedup(
         self,
@@ -6775,7 +6778,7 @@ class Scheduler:
             step_of=step_of,
             graph_outputs=mem_ctx.graph_outputs,
             cur_memory=cur_memory,
-            include_live_memory=False,
+            return_live_memory=False,
         )
 
         # Compare against the *original* baseline peak (not the running
