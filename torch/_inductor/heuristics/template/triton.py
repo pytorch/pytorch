@@ -18,6 +18,7 @@ from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
+from ...autows_utils import has_meta_ws
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
@@ -32,7 +33,6 @@ from ...kernel.mm import (
 from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
-from ...runtime.triton_compat import HAS_META_WS
 from ...utils import (
     get_backend_num_stages,
     get_default_kpack,
@@ -63,14 +63,14 @@ def _origami_enabled() -> bool:
     return config.rocm.origami
 
 
-USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "1"
+USE_META_WS = has_meta_ws() and os.environ.get("TRITON_USE_META_WS", "0") == "1"
 
 
 def _use_template_autows() -> bool:
     """Expand the GEMM search space with Meta Triton autoWS knobs. Requires the
     opt-in flag, TRITON_USE_META_WS=1, and a meta-WS Triton build (the extra
     tl.range kwargs are a compile error otherwise)."""
-    return config.triton.enable_template_autows and USE_META_WS and HAS_META_WS
+    return config.triton.enable_template_autows and USE_META_WS
 
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
