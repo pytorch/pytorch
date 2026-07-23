@@ -160,7 +160,7 @@ class BroadcastOptions:
     asyncOp: bool
 
 class AllreduceOptions:
-    reduceOp: ReduceOp
+    reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
     sparseIndices: Tensor | None
@@ -168,7 +168,7 @@ class AllreduceOptions:
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
 class ReduceOptions:
-    reduceOp: ReduceOp
+    reduceOp: ReduceOp | ReduceOp.RedOpType
     rootRank: int
     rootTensor: int
     timeout: timedelta
@@ -189,7 +189,7 @@ class ScatterOptions:
     asyncOp: bool
 
 class ReduceScatterOptions:
-    reduceOp: ReduceOp
+    reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
 
@@ -307,6 +307,7 @@ class Store:
     def queue_push(self, key: str, value: bytes | str) -> None: ...
     def queue_len(self, key: str) -> int: ...
     def list_keys(self) -> list[str]: ...
+    def clone(self) -> Store: ...
 
 class FileStore(Store):
     def __init__(self, path: str, numWorkers: int = ...) -> None: ...
@@ -628,6 +629,12 @@ class ProcessGroup:
         input_tensor: Tensor,
         root: int,
         timeout: timedelta | None = None,
+    ) -> Work: ...
+    def gather_into_tensor(
+        self,
+        output: Tensor,
+        input: Tensor,
+        opts=...,
     ) -> Work: ...
     @overload
     def scatter(
@@ -1124,6 +1131,23 @@ class ProcessGroupNCCL2(Backend):
         size: int,
         options: Options,
     ) -> None: ...
+    def get_error(self) -> ErrorType: ...
+
+class ProcessGroupNCCLLazy(Backend):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        options: ProcessGroupNCCL2.Options,
+    ) -> None: ...
+    def get_error(self) -> ErrorType: ...
+    def _num_active_channels(self) -> int: ...
+
+class FlightRecorderHook:
+    @staticmethod
+    def attach(pg: ProcessGroup) -> FlightRecorderHook: ...
+    def remove(self) -> None: ...
 
 def _set_process_group(pg: ProcessGroup) -> None: ...
 def _current_process_group() -> ProcessGroup: ...
