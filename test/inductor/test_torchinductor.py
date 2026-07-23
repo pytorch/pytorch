@@ -2017,7 +2017,7 @@ class CommonTemplate:
     @unittest.skipIf(TEST_WITH_ASAN, "inf to int cast is UB under sanitizers")
     def test_index_propagation_to_dtype_inf(self):
         def fn():
-            x = torch.full((2,), 0.0)
+            x = torch.full((2,), 0.0, device=self.device)
             y = torch.log(x)
             return torch.sum(y, dtype=torch.int32).float()
 
