@@ -1309,7 +1309,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return leaf, leaf * 2
 
         f_compiled = torch.compile(f, backend="aot_eager")
-        x = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        x = torch.arange(4, dtype=torch.float32, device=device_type).reshape(2, 2)
 
         leaf, out = f(x)
         leaf_test, out_test = f_compiled(x)
@@ -1338,8 +1338,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             unpack_count += 1
             return x
 
-        x = torch.ones(4, requires_grad=True)
-        y = torch.ones(4, requires_grad=False)
+        x = torch.ones(4, requires_grad=True, device=device_type)
+        y = torch.ones(4, requires_grad=False, device=device_type)
         with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
             out_test = f_compiled(x, y)
             self.assertEqual(pack_count, 1)
@@ -1355,8 +1355,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         f_compiled = torch.compile(f, backend="aot_eager")
 
-        x = torch.ones(4, requires_grad=True)
-        y = torch.ones(4, requires_grad=False)
+        x = torch.ones(4, requires_grad=True, device=device_type)
+        y = torch.ones(4, requires_grad=False, device=device_type)
         with torch.autograd.graph.disable_saved_tensors_hooks("hooks are disabled"):
             out_test = f_compiled(x, y)
             out_test.sum().backward()
@@ -1373,8 +1373,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         f_compiled = torch.compile(f, backend="aot_eager")
 
-        x = torch.ones(4, requires_grad=True)
-        y = torch.ones(4, requires_grad=False)
+        x = torch.ones(4, requires_grad=True, device=device_type)
+        y = torch.ones(4, requires_grad=False, device=device_type)
         out_test = f_compiled(x, y)
         out_test.sum().backward()
 
@@ -1390,8 +1390,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             d_loss = fake_d_pred.mean()
             d_loss.backward()
 
-        a_ref = torch.randn(2, 2, requires_grad=True)
-        b_ref = torch.randn(2, 2, requires_grad=True)
+        a_ref = torch.randn(2, 2, requires_grad=True, device=device_type)
+        b_ref = torch.randn(2, 2, requires_grad=True, device=device_type)
         out_ref = f(a_ref, b_ref)
 
         a_test = a_ref.detach().clone().requires_grad_(True)
@@ -2042,7 +2042,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 c.sum().backward()
                 return x.grad
 
-        x = torch.randn(3, requires_grad=True)
+        x = torch.randn(3, requires_grad=True, device=device_type)
         x.grad = None
         with torch.no_grad():
             ref = fn(x)
@@ -2068,7 +2068,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                     c.sum().backward()
                     return x.grad
 
-        x = torch.randn(3, requires_grad=True)
+        x = torch.randn(3, requires_grad=True, device=device_type)
         x.grad = None
         with torch.no_grad():
             ref = fn(x)
@@ -3059,7 +3059,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 x += i
             return x
 
-        self.assertEqual(fn(torch.zeros(1)), torch.full([1], 6.0))
+        self.assertEqual(fn(torch.zeros(1, device=device_type)), torch.full([1], 6.0))
 
     def test_stop_iteration_reconstruct(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -3635,14 +3635,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         torch.manual_seed(1337)
 
-        m_ref = Repro()
+        m_ref = Repro().to(device_type)
         m_test = deepcopy(m_ref)
 
         @torch.compile(backend="aot_eager_decomp_partition")
         def compiled_fn(x):
             return m_test(x)
 
-        x_ref = torch.randn(2, 64, 32, 32, requires_grad=True)
+        x_ref = torch.randn(2, 64, 32, 32, requires_grad=True, device=device_type)
         x_test = x_ref.clone()
 
         # Loop multiple times: each iteration the running_mean/var on batchnorm will update,
@@ -4492,7 +4492,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 backend = CompileCounter()
             opt_fn = torch.compile(fn, backend=backend)
 
-            eager = torch.zeros(5)
+            eager = torch.zeros(5, device=device_type)
             compiled = eager.clone()
 
             out_eager = fn(eager)
@@ -4987,7 +4987,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f.add_(1.0)
             return a
 
-        a = torch.randn(2, 4)
+        a = torch.randn(2, 4, device=device_type)
         a_ref = a.clone()
         out_ref = foo(a_ref)
         f_compiled = torch.compile(foo, backend="aot_eager")
@@ -5614,10 +5614,10 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     drhs = torch.full_like(rhs, 1.0 if trans_b else 2.0)
                 return dlhs, drhs, None, None
 
-        x1 = torch.randn((8, 8), requires_grad=True)
-        y1 = torch.randn((8, 8)).transpose(0, 1).requires_grad_(True)
-        x2 = torch.randn((8, 8), requires_grad=True)
-        y2 = torch.randn((8, 8)).transpose(0, 1).requires_grad_(True)
+        x1 = torch.randn((8, 8), requires_grad=True, device=device_type)
+        y1 = torch.randn((8, 8), device=device_type).transpose(0, 1).requires_grad_(True)
+        x2 = torch.randn((8, 8), requires_grad=True, device=device_type)
+        y2 = torch.randn((8, 8), device=device_type).transpose(0, 1).requires_grad_(True)
 
         SDD.apply(x1, y1).sum().backward()
 
@@ -5910,8 +5910,8 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             y.grad = x + 2
             return x.grad.data, y._grad.data
 
-        x0 = torch.randn(4, requires_grad=True)
-        y0 = torch.randn(4, requires_grad=True)
+        x0 = torch.randn(4, requires_grad=True, device=device_type)
+        y0 = torch.randn(4, requires_grad=True, device=device_type)
         x1 = x0.clone()
         y1 = y0.clone()
         opt_fn = torch.compile(fn, backend="eager")
@@ -6076,7 +6076,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             x.data.mul_(2)
             return out
 
-        x = torch.randn(4, requires_grad=True)
+        x = torch.randn(4, requires_grad=True, device=device_type)
         x_test = x.detach().clone().requires_grad_(True)
 
         out = f(x)
@@ -6734,7 +6734,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         def f(x):
             return x.copy_(1)
 
-        t = torch.zeros(2)
+        t = torch.zeros(2, device=device_type)
         res = f(t)
         self.assertEqual(torch.ones_like(t), res)
 
@@ -7082,9 +7082,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         def f(x, out):
             torch.nanmean(x, out=out)
 
-        x = torch.randn(4)
-        out_ref = torch.tensor(0.0)
-        out_res = torch.tensor(0.0)
+        x = torch.randn(4, device=device_type)
+        out_ref = torch.tensor(0.0, device=device_type)
+        out_res = torch.tensor(0.0, device=device_type)
 
         f(x, out_ref)
         torch.compile(f, backend="eager", fullgraph=True)(x, out_res)
@@ -7205,8 +7205,8 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         def inputs():
             torch.manual_seed(123)
-            x = torch.randn(10, 10)
-            y = torch.randn(10, 10, requires_grad=True)
+            x = torch.randn(10, 10, device=device_type)
+            y = torch.randn(10, 10, requires_grad=True, device=device_type)
             return x, y
 
         x1, y1 = inputs()
