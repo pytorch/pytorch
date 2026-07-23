@@ -26,6 +26,7 @@ from torch._dynamo.utils import counters
 from torch._export.passes import ReplaceViewOpsWithViewCopyOpsPass
 from torch._inductor import config
 from torch._inductor.codecache import WritableTempFile
+from torch._inductor.compile_fx import _preserve_module_parameters_and_buffers
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -9208,6 +9209,25 @@ class AOTInductorLoggingTest(LoggingTestCase):
 
 
 class TestAOTInductorConfig(TestCase):
+    def test_preserve_module_parameters_and_buffers_on_error(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.parameter = torch.nn.Parameter(torch.randn(2))
+                self.register_buffer("temporary", torch.randn(2), persistent=False)
+
+        module = Module()
+        original = (module.parameter, module.temporary)
+        with self.assertRaisesRegex(RuntimeError, "expected"):
+            with _preserve_module_parameters_and_buffers(module):
+                module.parameter = torch.nn.Parameter(torch.randn(2))
+                module.temporary = torch.randn(2)
+                raise RuntimeError("expected")
+
+        self.assertIs(module.parameter, original[0])
+        self.assertIs(module.temporary, original[1])
+        self.assertNotIn("temporary", module.state_dict())
+
     def test_no_compile_standalone(self):
         with config.patch({"aot_inductor_mode.compile_standalone": False}):
             result = maybe_aoti_standalone_config({})

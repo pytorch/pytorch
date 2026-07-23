@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import ast
 import copy
 import inspect
 import math
@@ -19,7 +20,10 @@ from torch._export.non_strict_utils import (
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _convert_range_to_int,
 )
-from torch._export.utils import _check_input_constraints_for_graph
+from torch._export.utils import (
+    _check_input_constraints_for_graph,
+    _export_flat_arg_source_for_guard,
+)
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -174,22 +178,31 @@ def _convert_guards_code_to_fn(
     Because it is inconvenient :/, get used to AssertionError instead.
     """
 
-    import ast
-
     from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
+
+    source_replacements = []
+    for idx, path in enumerate(paths_of_placeholders):
+        shadow_source = str(getattr(path[0], "key", f"args[{idx}]")) + pytree.keystr(
+            path[1:]
+        )
+        try:
+            ast.parse(shadow_source, mode="eval")
+        except (SyntaxError, ValueError):
+            shadow_source = f"args[{idx}]"
+        for source in (
+            _export_flat_arg_source_for_guard(idx),
+            "L" + pytree.keystr(path),
+        ):
+            source_replacements.append((source, f"args[{idx}]", shadow_source))
+    source_replacements.sort(key=lambda replacement: len(replacement[0]), reverse=True)
 
     actual_guards_code = []
     shadow_guards_code = []
     for c in guards_code:
         a, s = c, c
-        for idx, path in enumerate(paths_of_placeholders):
-            # e.g., replace L['z']['k'] with args[2] for Python code (actual)
-            a = a.replace("L" + pytree.keystr(path), f"args[{idx}]")
-            # e.g., replace L['z']['k'] with z['k'] for error message (shadow)
-            s = s.replace(
-                "L" + pytree.keystr(path),
-                path[0].key + pytree.keystr(path[1:]),  # type: ignore[attr-defined]
-            )
+        for source, actual_source, shadow_source in source_replacements:
+            a = a.replace(source, actual_source)
+            s = s.replace(source, shadow_source)
         actual_guards_code.append(a)
         shadow_guards_code.append(s.replace("\n", ""))
 
@@ -680,8 +693,10 @@ def _get_input_guards_for_graph(
             if max_val < math.inf:
                 new_guards_code.append(f"{src} <= {max_val}")
 
-    for placeholder, path in zip(placeholders, paths_for_placeholders):
-        src = "L" + pytree.keystr(path)
+    for idx, (placeholder, path) in enumerate(
+        zip(placeholders, paths_for_placeholders)
+    ):
+        src = _export_flat_arg_source_for_guard(idx)
         meta = placeholder.meta["val"]
         # specializations
         if isinstance(meta, int):
@@ -702,7 +717,7 @@ def _get_input_guards_for_graph(
             handle_symint(meta.node.expr, src)
         elif isinstance(meta, torch.Tensor):
             for i, dim in enumerate(meta.shape):
-                src = "L" + pytree.keystr(path) + f".size()[{i}]"
+                src = _export_flat_arg_source_for_guard(idx) + f".size()[{i}]"
                 if isinstance(dim, int):
                     # specializations
                     new_guards_code.append(f"{src} == {dim}")
@@ -860,25 +875,16 @@ def _unlift_exported_program_lifted_states(
             ep.example_inputs,
             sig,
         )
-
-        # TODO (tmanlaibaatar)
-        # This is band-aid solution to export new tracer replacing
-        # shape env sources to flat_args. The real fix should be replacing
-        # shape env sources to original user sources but this is quite
-        # involved because you need to carefully construct new sources using
-        # dynamo and replace all instances of it inside shape env. But it is
-        # lot easier to manipulate after we turn them into strings and only
-        # time we use these guards is during retracing or running exported program,
-        # so it is probably ok to have "not useful" guards on ep for now.
-        ep_guards = []
-        for guard in ep._guards_code:
-            ep_guards.append(_replace_sources(guard, input_paths))
-
         guards_code = _get_input_guards_for_graph(
             placeholders, ep.range_constraints, input_paths
         )
 
-        ep_guards_code = _force_ep_signature_match(ep._guards_code, input_paths)
+        ep_guards_code = ep._guards_code
+        if (
+            "dynamo_source_to_public_source_name" not in ep.graph_module.meta
+            and not any("\x00export-flat-arg-" in guard for guard in ep_guards_code)
+        ):
+            ep_guards_code = _force_ep_signature_match(ep_guards_code, input_paths)
         ep_guards_code = _force_gm_signature_match(ep_guards_code, sig)
         guards_code.extend(ep_guards_code)
         unlift_gm._guards_fn = _convert_guards_code_to_fn(guards_code, input_paths)

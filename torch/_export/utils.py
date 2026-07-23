@@ -359,6 +359,12 @@ def get_keystr(key_path: KeyPath) -> str:
         return f"{name}{keystr(key_path[2:])}"
 
 
+def _export_flat_arg_source_for_guard(idx: int) -> str:
+    # This sentinel is serialized in ExportedProgram._guards_code and resolved
+    # to the corresponding flattened argument only when the program is unlifted.
+    return f"\x00export-flat-arg-{idx}\x00"
+
+
 def _check_symint(
     symint: int | torch.SymInt,
     arg: int,
@@ -1027,9 +1033,14 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
         used_names: set[str] = set()
         for i, node in enumerate(subgraph.graph.nodes):
             if i < len(hoo_phs):  # placeholder, retain name
-                name_map[node.name] = hoo_phs[i].name
-                node.name = node.target = hoo_phs[i].name
-                _build_cache(node.name, find_available, used_names)
+                node.name = node.target = _rename_without_collisions(
+                    name_map,
+                    find_available,
+                    used_names,
+                    node.name,
+                    hoo_phs[i].name,
+                    is_placeholder=True,
+                )
             else:  # non-placeholder, check for collisions
                 node.name = _rename_without_collisions(
                     name_map, find_available, used_names, node.name, node.name
@@ -1153,6 +1164,17 @@ def placeholder_naming_pass(
                 user_input_name,
                 placeholder_prefixes[InputKind.USER_INPUT]
                 + "_".join(_extract_pytree_key(x).lower() for x in arg_path),
+                is_placeholder=True,
+            )
+
+    for user_input_name in user_input_names:
+        if user_input_name and user_input_name not in name_map:
+            _rename_without_collisions(
+                name_map,
+                find_available,
+                used_names,
+                user_input_name,
+                user_input_name,
                 is_placeholder=True,
             )
 
