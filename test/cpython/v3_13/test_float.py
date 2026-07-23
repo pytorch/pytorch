@@ -851,6 +851,7 @@ class FormatTestCase(__TestCase):
         self.assertEqual(format(INF, 'F'), 'INF')
 
     @support.requires_IEEE_754
+    @torch._dynamo.error_on_graph_break(False)
     def test_format_testfile(self):
         with open(format_testfile, encoding="utf-8") as testfile:
             for line in testfile:
@@ -895,6 +896,7 @@ class FormatTestCase(__TestCase):
         self.assertEqual(format(-123.34, '00.10g'), '-123.34')
 
 class ReprTestCase(__TestCase):
+    @torch._dynamo.error_on_graph_break(False)
     def test_repr(self):
         with open(os.path.join(os.path.split(__file__)[0],
                   'mathdata',

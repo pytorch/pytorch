@@ -35,6 +35,12 @@ INCLUDE(CheckTypeSize)
 INCLUDE(CheckFunctionExists)
 
 # Set default value of INTEL_COMPILER_DIR and INTEL_MKL_DIR
+#
+# Detection order:
+#   1. Environment variables set by oneAPI setvars.sh / setvars.bat
+#      (MKLROOT, CMPLR_ROOT, ONEAPI_ROOT)
+#   2. Well-known oneAPI installation directory (/opt/intel/oneapi on Linux)
+#   3. Legacy Intel Compiler Suite directory (/opt/intel on Linux)
 IF (WIN32)
   IF(DEFINED ENV{MKLProductDir})
     SET(DEFAULT_INTEL_COMPILER_DIR $ENV{MKLProductDir})
@@ -46,18 +52,38 @@ IF (WIN32)
   if (EXISTS "${DEFAULT_INTEL_COMPILER_DIR}/mkl/latest")
     SET(DEFAULT_INTEL_MKL_DIR "${DEFAULT_INTEL_COMPILER_DIR}/mkl/latest")
   endif()
+  # oneAPI setvars.bat also sets MKLROOT
+  if (DEFINED ENV{MKLROOT} AND EXISTS "$ENV{MKLROOT}")
+    SET(DEFAULT_INTEL_MKL_DIR "$ENV{MKLROOT}")
+  endif()
 ELSE (WIN32)
-  SET(DEFAULT_INTEL_COMPILER_DIR "/opt/intel")
-  SET(DEFAULT_INTEL_MKL_DIR "/opt/intel/mkl")
-  SET(DEFAULT_INTEL_ONEAPI_DIR "/opt/intel/oneapi")
-  if (EXISTS "${DEFAULT_INTEL_ONEAPI_DIR}")
+  # Determine oneAPI root
+  if (DEFINED ENV{ONEAPI_ROOT} AND EXISTS "$ENV{ONEAPI_ROOT}")
+    SET(DEFAULT_INTEL_ONEAPI_DIR "$ENV{ONEAPI_ROOT}")
+  elseif (EXISTS "/opt/intel/oneapi")
+    SET(DEFAULT_INTEL_ONEAPI_DIR "/opt/intel/oneapi")
+  else()
+    SET(DEFAULT_INTEL_ONEAPI_DIR "")
+  endif()
+
+  # Determine compiler dir: CMPLR_ROOT > oneapi/compiler/latest > /opt/intel
+  if (DEFINED ENV{CMPLR_ROOT} AND EXISTS "$ENV{CMPLR_ROOT}")
+    SET(DEFAULT_INTEL_COMPILER_DIR "$ENV{CMPLR_ROOT}")
+  elseif (DEFAULT_INTEL_ONEAPI_DIR AND EXISTS "${DEFAULT_INTEL_ONEAPI_DIR}/compiler/latest")
+    SET(DEFAULT_INTEL_COMPILER_DIR "${DEFAULT_INTEL_ONEAPI_DIR}/compiler/latest")
+  elseif (DEFAULT_INTEL_ONEAPI_DIR)
     SET(DEFAULT_INTEL_COMPILER_DIR "${DEFAULT_INTEL_ONEAPI_DIR}")
-    if (EXISTS "${DEFAULT_INTEL_ONEAPI_DIR}/compiler/latest")
-      SET(DEFAULT_INTEL_COMPILER_DIR "${DEFAULT_INTEL_ONEAPI_DIR}/compiler/latest")
-    endif()
-    if (EXISTS "${DEFAULT_INTEL_ONEAPI_DIR}/mkl/latest")
-      SET(DEFAULT_INTEL_MKL_DIR "${DEFAULT_INTEL_ONEAPI_DIR}/mkl/latest")
-    endif()
+  else()
+    SET(DEFAULT_INTEL_COMPILER_DIR "/opt/intel")
+  endif()
+
+  # Determine MKL dir: MKLROOT > oneapi/mkl/latest > /opt/intel/mkl
+  if (DEFINED ENV{MKLROOT} AND EXISTS "$ENV{MKLROOT}")
+    SET(DEFAULT_INTEL_MKL_DIR "$ENV{MKLROOT}")
+  elseif (DEFAULT_INTEL_ONEAPI_DIR AND EXISTS "${DEFAULT_INTEL_ONEAPI_DIR}/mkl/latest")
+    SET(DEFAULT_INTEL_MKL_DIR "${DEFAULT_INTEL_ONEAPI_DIR}/mkl/latest")
+  else()
+    SET(DEFAULT_INTEL_MKL_DIR "/opt/intel/mkl")
   endif()
 ENDIF (WIN32)
 

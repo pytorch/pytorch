@@ -114,7 +114,7 @@ class TestReductions(TestCase):
         result = op(t, *args, **dim_keepdim, **kwargs)
         empty_dim_as_none = (op.name == "linalg.vector_norm" or op.name == "_refs.linalg.vector_norm")
         expected_shape = _reduced_shape(shape, empty_dim_as_none, **dim_keepdim)
-        self.assertEqual(result.shape, expected_shape, f"""
+        self.assertEqual(result.shape, expected_shape, lambda msg: f"""{msg}\n
         expected output shape to be {expected_shape} but got {list(result.shape)}
         for input shape {shape} and {dim_keepdim}
         """)
@@ -167,14 +167,12 @@ class TestReductions(TestCase):
         self._test_dim_keepdim(op, device, ndim=2, dim=-1, keepdim=True)
         self._test_dim_keepdim(op, device, ndim=3, dim=1, keepdim=True)
 
-    @skipIfMPS
     @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_empty(self, device, op: ReductionOpInfo):
         """Tests that dim=[] is a no-op"""
         self._test_dim_keepdim(op, device, ndim=0, dim=[])
         self._test_dim_keepdim(op, device, ndim=2, dim=[])
 
-    @skipIfMPS
     @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_empty_keepdim(self, device, op: ReductionOpInfo):
         """Tests that dim=[], when keepdim=True, is a no-op"""
@@ -214,14 +212,12 @@ class TestReductions(TestCase):
         with self.assertRaises(RuntimeError):
             self._test_dim_keepdim(op, device, ndim=3, dim=[0, 1, 1, 2])
 
-    @skipIfMPS
     @ops(filter(lambda op: not op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi_unsupported(self, device, op: ReductionOpInfo):
         """Tests that ops claiming to not support multi dim actually don't."""
         with self.assertRaises(TypeError):
             self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2])
 
-    @skipIfMPS
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_offbounds(self, device, op: ReductionOpInfo):
         """Tests that passing an off-bounds dim throws"""
@@ -237,7 +233,6 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
             op(t, dim=0)
 
-    @skipIfMPS
     @ops(filter(lambda op: op.identity is not None, reduction_ops), dtypes=OpDTypes.supported)
     def test_identity(self, device, dtype, op: ReductionOpInfo):
         """Tests that the identity value is an identity for the operator"""
@@ -527,7 +522,7 @@ class TestReductions(TestCase):
 
     @skipIfNoSciPy
     @dtypes(torch.float32, torch.double, torch.complex64, torch.complex128)
-    @skipIfMPS
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_logsumexp(self, device, dtype):
         from scipy.special import logsumexp
         a = torch.randn(5, 4, device=device, dtype=dtype)
@@ -548,7 +543,7 @@ class TestReductions(TestCase):
         self.assertEqual(expected, b[:, 0])
 
     @skipIfNoSciPy
-    @skipIfMPS
+    @skipIfMPS  # promotes to float64, unsupported on MPS
     def test_logsumexp_integral_promotion(self, device):
         from scipy.special import logsumexp
         # check integral inputs is promoted to floating point
@@ -560,7 +555,7 @@ class TestReductions(TestCase):
 
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
-    @skipIfMPS
+    @dtypesIfMPS(torch.complex64)
     def test_logcumsumexp_complex(self, device, dtype):
         # logcumsumexp is a more precise way to compute than ``log(cumsum(exp(a)))``
         # and faster than ``[log(sum(exp(a[:i]))) for i in range(a.shape[0])]``
@@ -2185,9 +2180,9 @@ class TestReductions(TestCase):
             a[2, 2] = nan
             actual = f(a.to(device)).cpu()
             expected = f(a).cpu()
-            self.assertEqual(torch.isnan(actual), torch.isnan(expected), msg=f'nans for {name}')
+            self.assertEqual(torch.isnan(actual), torch.isnan(expected), msg=lambda msg: f'{msg}\nnans for {name}')
             self.assertEqual(actual[~torch.isnan(actual)],
-                             expected[~torch.isnan(expected)], msg=f'nans for {name}')
+                             expected[~torch.isnan(expected)], msg=lambda msg: f'{msg}\nnans for {name}')
 
     # TODO: make this test generic using OpInfos
     @onlyOn(["cuda", "xpu"])
@@ -2298,14 +2293,10 @@ class TestReductions(TestCase):
             torch.int8: torch.int64,
         }
 
-        # prod is not supported for float16 & bfloat16 on CPU
-        if not (self.device_type == 'cpu' and dtype in [torch.float16, torch.bfloat16]):
-            x = torch.tensor(example, device=device, dtype=dtype)
-            self.assertEqual(x.prod().item(), -180)
-            self.assertEqual(x.prod(0), torch.tensor([-5, 6, 6], dtype=prod_dtype[dtype]))
-            self.assertEqual(x.prod(1), torch.tensor([-2, 90], dtype=prod_dtype[dtype]))
-
         x = torch.tensor(example, device=device, dtype=dtype)
+        self.assertEqual(x.prod().item(), -180)
+        self.assertEqual(x.prod(0), torch.tensor([-5, 6, 6], dtype=prod_dtype[dtype]))
+        self.assertEqual(x.prod(1), torch.tensor([-2, 90], dtype=prod_dtype[dtype]))
 
         self.assertEqual(x.min().item(), -1)
         self.assertEqual(x.argmin().item(), 0)
@@ -2449,16 +2440,16 @@ class TestReductions(TestCase):
             fn_tuple(y, 1, keepdim=False, out=(values[:, 1], indices[:, 1]))
             values_expected, indices_expected = fn_tuple(y, 1, keepdim=False)
             self.assertEqual(values[:, 1], values_expected,
-                             msg=f'{fn_name} values with out= kwarg')
+                             msg=lambda msg: f'{msg}\n{fn_name} values with out= kwarg')
             self.assertEqual(indices[:, 1], indices_expected,
-                             msg=f'{fn_name} indices with out= kwarg')
+                             msg=lambda msg: f'{msg}\n{fn_name} indices with out= kwarg')
             return
 
         x = torch.randn(5, 3, device=device)
         y = torch.randn(5, 3, device=device)
         fn(y, 1, keepdim=False, out=x[:, 1])
         expected = fn(y, 1, keepdim=False)
-        self.assertEqual(x[:, 1], expected, msg=f'{fn_name} with out= kwarg')
+        self.assertEqual(x[:, 1], expected, msg=lambda msg: f'{msg}\n{fn_name} with out= kwarg')
 
     @onlyOn(["cuda", "xpu"])
     @largeTensorTest('10GB')
@@ -2831,6 +2822,44 @@ class TestReductions(TestCase):
             with self.assertRaisesRegex(
                     RuntimeError, r'quantile\(\) out tensor must be on the same device as the input tensor'):
                 torch.quantile(torch.randn(1, device=device), 0.5, out=torch.scalar_tensor(1))
+
+    @skipIfMPS  # MPS caps float32 at 2^24 and has no float64, so >2^24 can't run there
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64)
+    def test_quantile_large_input(self, device, dtype):
+        # gh-64947: quantile must stay correct past the old 2^24 cap. float32
+        # works because ranks are computed in float64; float64 reaches 2^53.
+        # Oracle is numpy in float64 (the true value) for both, all modes + nan.
+        n = 17_000_000
+        torch.manual_seed(0)
+        a = torch.randn(n, dtype=dtype, device=device)
+        a_nan = a.clone()
+        a_nan[torch.randint(n, (32,), device=device)] = float('nan')
+        q = torch.tensor([0.0, 0.1, 0.5, 0.9, 1.0], dtype=dtype, device=device)
+        a_np = a.double().cpu().numpy()
+        a_nan_np = a_nan.double().cpu().numpy()
+        q_np = q.double().cpu().numpy()
+        for interpolation in ('linear', 'lower', 'higher', 'midpoint', 'nearest'):
+            res = torch.quantile(a, q, interpolation=interpolation)
+            expected = np.quantile(a_np, q_np, method=interpolation)
+            self.assertEqual(res.cpu(), torch.from_numpy(np.asarray(expected)).to(res))
+
+            res_nan = torch.nanquantile(a_nan, q, interpolation=interpolation)
+            expected_nan = np.nanquantile(a_nan_np, q_np, method=interpolation)
+            self.assertEqual(res_nan.cpu(), torch.from_numpy(np.asarray(expected_nan)).to(res_nan))
+
+    @onlyNativeDeviceTypes
+    def test_quantile_size_limit(self, device):
+        # float32 ranks are exact only to 2^24; computing them in float64 lifts
+        # the limit to 2^53. MPS has no float64, so it keeps the 2^24 cap and
+        # raises past it, while CPU/CUDA support larger float32 inputs.
+        over_cap = (1 << 24) + 1
+        if self.device_type == "mps":
+            torch.quantile(torch.empty(1 << 24, dtype=torch.float32, device=device), 0.5)
+            with self.assertRaisesRegex(RuntimeError, r'quantile\(\) input tensor is too large'):
+                torch.quantile(torch.empty(over_cap, dtype=torch.float32, device=device), 0.5)
+        else:
+            torch.quantile(torch.empty(over_cap, dtype=torch.float32, device=device), 0.5)
 
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
@@ -3854,7 +3883,6 @@ as the input tensor excluding its innermost dimension'):
         test_reduction(torch.cumprod, False)
         test_reduction(torch.logcumsumexp, False, takes_dtype=False)
 
-    @skipIfMPS
     @ops(reference_masked_ops)
     def test_reference_masked(self, device, dtype, op):
         """Test masked reduction operations on strided-only tensors using
