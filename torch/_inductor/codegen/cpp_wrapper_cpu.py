@@ -2056,6 +2056,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         inputs_wrapped = [str(x) for x in inputs]
+        # Wrap in AOTI_TORCH_ERROR_CODE_CHECK so a shim failure
+        # surfaces instead of being silently swallowed.
         line = f"{cpp_kernel_name}({output}, {','.join(inputs_wrapped)}"
 
         if python_kernel_name.startswith("aten.scatter_reduce"):
@@ -2069,8 +2071,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     raise AssertionError(
                         "Expect reduce to be None for aten.scatter_ with scalar src"
                     )
-        line += ");"
-        self.writeline(line)
+        line += ")"
+        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({line});")
 
     def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
@@ -2088,7 +2090,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             accumulate,
         ]
         args.insert(0, x)  # set x as the output tensor, this fallback mutates x.
-        self.writeline(self.wrap_kernel_call(kernel, args))
+        # Wrap in AOTI_TORCH_ERROR_CODE_CHECK so a shim failure surfaces instead
+        # of being silently swallowed.
+        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({kernel}({', '.join(args)}));")
 
     def add_benchmark_harness(self, output):
         if V.graph.aot_mode:
