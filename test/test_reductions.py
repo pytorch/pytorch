@@ -846,12 +846,14 @@ class TestReductions(TestCase):
                                   use_integral=use_integral, use_complex=use_complex), (0, 2, 1))
 
     @slowTest
+    @skipIfMPS
     def test_sum_dim(self, device):
         self._test_dim_ops(
             lambda t, d: t.sum(d),
             lambda n, d: n.sum(d), device,
             use_floating=True, use_integral=True, use_complex=True)
 
+    @skipIfMPS
     def test_mean_dim(self, device):
         self._test_dim_ops(
             lambda t, d: t.mean(d),
@@ -860,6 +862,7 @@ class TestReductions(TestCase):
             use_integral=False,
             use_complex=True)
 
+    @skipIfMPS
     def test_std_dim(self, device):
         for unbiased in [False, True]:
             self._test_dim_ops(
@@ -868,6 +871,7 @@ class TestReductions(TestCase):
                 device,
                 use_integral=False)
 
+    @skipIfMPS
     def test_var_dim(self, device):
         for unbiased in [False, True]:
             self._test_dim_ops(
