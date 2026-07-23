@@ -190,6 +190,40 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected)
 
+    def test_cudagraphs_intermediate_addmm(self):
+        """An NVGEMM addmm whose bias-epilogue output is an intermediate consumed
+        downstream must not leave that output retained by the cached EFC kernel,
+        or CUDA graph capture fails ("tensor(s) in the cudagraph pool not tracked
+        as outputs") and the tensor leaks. The cached kernel is built from
+        meta-device tensors, so runtime outputs flow only through the per-call
+        arguments.
+        """
+        dtype = torch.bfloat16
+        m, k = 512, 512
+        # Scaled down so the chained bf16 matmul stays well-conditioned.
+        bias = torch.randn(k, dtype=dtype, device="cuda") * 0.1
+        x = torch.randn(m, k, dtype=dtype, device="cuda") * 0.1
+        w = torch.randn(k, k, dtype=dtype, device="cuda") * 0.1
+
+        def chain(bias, x, w):
+            # h is an NVGEMM addmm output consumed downstream (not the graph's
+            # final output), which is what triggers the retention bug.
+            h = torch.addmm(bias, x, w.t())
+            return torch.addmm(bias, h, w.t())
+
+        expected = chain(bias.float(), x.float(), w.float()).to(dtype)
+
+        torch._dynamo.reset()
+
+        cfg = _nvgemm_config()
+        cfg["triton.cudagraphs"] = True
+        with config.patch(cfg):
+            compiled_fn = torch.compile(chain)
+            for _ in range(3):
+                result = compiled_fn(bias, x, w)
+
+        torch.testing.assert_close(result, expected, rtol=1.6e-2, atol=1e-1)
+
     def test_efc_epilogue_lookup_no_deadlock(self):
         """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
         kernel is not pre-resolved and misses the args cache, calls
