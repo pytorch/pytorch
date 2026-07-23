@@ -383,8 +383,19 @@ inline at::MemoryFormat miopen_conv_suggest_memory_format(const at::Tensor& inpu
       input.scalar_type() != at::kDouble && weight.scalar_type() != at::kDouble;
   // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen.
   // See https://github.com/pytorch/pytorch/issues/64427.
-  // Non-static read so tests can toggle the env var at runtime.
-  enabled &= c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(false);
+  // NHWC is the default on CDNA archs (gfx9xx) where MIOpen XDL kernels
+  // benefit from it; RDNA (gfx10/gfx11/gfx12) is excluded as NHWC is still
+  // experimental there. The env var PYTORCH_MIOPEN_SUGGEST_NHWC can opt in
+  // on any arch. isGPUArch is only safe to call when compiledWithMIOpen() is
+  // true, so the check is guarded by enabled.
+  if (enabled) {
+    static const std::vector<std::string> rdna_no_nhwc = {
+        "gfx10", "gfx11", "gfx12"};
+    bool suggest_nhwc =
+        c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(false) ||
+        !at::detail::getCUDAHooks().isGPUArch(rdna_no_nhwc);
+    enabled &= suggest_nhwc;
+  }
   return _conv_suggest_memory_format_impl(input, weight, enabled);
 }
 
