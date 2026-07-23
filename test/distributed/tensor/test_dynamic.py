@@ -7,6 +7,7 @@ import torch
 from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.distributed.tensor.placement_types import Replicate
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -21,6 +22,8 @@ from torch.testing._internal.triton_utils import requires_gpu
 
 
 class TestDynamic(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_gpu
     @with_comms
     @parametrize("fake_tensor_cache_enabled", [False, True])
