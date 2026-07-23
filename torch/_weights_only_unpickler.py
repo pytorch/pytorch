@@ -67,7 +67,7 @@ from pickle import (
     TUPLE3,
     UnpicklingError,
 )
-from struct import unpack
+from struct import error as _struct_error, unpack
 from sys import maxsize
 from typing import Any
 
@@ -316,7 +316,22 @@ class Unpickler:
         """Read a pickled object representation from the open file.
 
         Return the reconstituted object hierarchy specified in the file.
+
+        Structural corruption in the byte stream (stack underflow, truncated
+        fields, dangling memo references, or undecodable strings) is surfaced
+        as ``UnpicklingError`` instead of a bare ``IndexError`` /
+        ``struct.error`` / ``KeyError`` / ``UnicodeDecodeError``, so callers
+        loading untrusted checkpoints see a single, catchable error type.
         """
+        try:
+            return self._load()
+        except (IndexError, _struct_error, KeyError, UnicodeDecodeError) as e:
+            raise UnpicklingError(
+                f"Encountered malformed pickle data ({type(e).__name__}: {e}); "
+                "the input may be corrupted or truncated."
+            ) from e
+
+    def _load(self):
         self.metastack = []
         self.stack: list[Any] = []
         self.append = self.stack.append
