@@ -1196,7 +1196,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             test(op, (getter([B0, 2], device), getter([B0], device, torch.double)))
             test(op, (getter([B0], device, torch.double), getter([B0, 2], device)))
 
-            if not torch.cuda.is_available():
+            if not torch.accelerator.is_available():
                 continue
 
             # TODO(rzou): fix the following
