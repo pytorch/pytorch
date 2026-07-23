@@ -14,6 +14,7 @@ from torch._logging._internal import TorchLogsFormatter, trace_log
 from torch._native.instrumentation import (
     CompileEvent,
     instrument_cutedsl_compile,
+    instrument_helion_kernel,
     instrument_triton_kernel,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -89,6 +90,24 @@ class _FakeJitCache:
             maxsize=None,
             currsize=len(self._cache),
         )
+
+
+class _FakeHelionBoundKernel:
+    def __init__(self):
+        self._compile_cache = {"config": object()}
+
+
+class _FakeHelionKernel:
+    def __init__(self):
+        self._bound_kernels = {}
+        self.raise_on_call = False
+        self.cache_key = "helion-cache"
+
+    def __call__(self, variant="v0"):
+        if self.raise_on_call:
+            raise RuntimeError("helion boom")
+        self._bound_kernels.setdefault(variant, _FakeHelionBoundKernel())
+        return "launched"
 
 
 class _CapturingHandler(logging.Handler):
@@ -340,6 +359,46 @@ class TestTritonKernelInstrumentation(_LoggerCaptureTest):
         self.assertEqual(kernel.cache_key, "abc123")
 
 
+class TestHelionKernelInstrumentation(_LoggerCaptureTest):
+    def _kernel(self, op="aten::add", key_fn=None):
+        return instrument_helion_kernel(op, key_fn=key_fn)(_FakeHelionKernel())
+
+    def test_first_call_reports_compiled(self):
+        kernel = self._kernel()
+        self.assertEqual(kernel(), "launched")
+        self.assertIn("[helion]", self.messages[0])
+        self.assertIn("compiled", self.messages[0])
+        self.assertIn("misses=1", self.messages[0])
+
+    def test_repeated_call_reports_cache_hit(self):
+        kernel = self._kernel()
+        kernel("v0")
+        kernel("v0")
+        self.assertIn("compiled", self.messages[0])
+        self.assertIn("cache_hit", self.messages[1])
+
+    def test_new_variant_recompiles(self):
+        kernel = self._kernel()
+        kernel("v0")
+        kernel("v1")
+        self.assertIn("compiled", self.messages[1])
+        self.assertIn("misses=2", self.messages[1])
+
+    def test_error_is_reported_and_reraised(self):
+        fake = _FakeHelionKernel()
+        fake.raise_on_call = True
+        kernel = instrument_helion_kernel("aten::add")(fake)
+        with self.assertRaisesRegex(RuntimeError, "helion boom"):
+            kernel()
+        self.assertIn("error", self.messages[0])
+
+    def test_raw_kernel_and_attributes_are_exposed(self):
+        fake = _FakeHelionKernel()
+        kernel = instrument_helion_kernel("aten::add")(fake)
+        self.assertIs(kernel.helion_kernel, fake)
+        self.assertEqual(kernel.cache_key, "helion-cache")
+
+
 class TestTlparseOutput(TestCase):
     """The instrumentation's whole point on production jobs is tlparse-
     retrievable artifacts. Assert the structured-trace plumbing actually
@@ -498,13 +557,19 @@ def _decorator_names(fn_node):
 # (instrument names) / the DSL (jit name); test_required_decorators_exist
 # enforces the instrumentation ones.
 _DSL_INSTRUMENTATION_RULES = (
-    # (dsl, jit_decorator, instrument_decorator, combined_decorator)
+    # (dsl, jit_decorator(s), instrument_decorator, combined_decorator)
     ("triton", "triton.jit", "instrument_triton_kernel", "instrumented_triton_cache"),
     (
         "cutedsl",
         "jit_cache",
         "instrument_cutedsl_compile",
         "instrumented_cutedsl_cache",
+    ),
+    (
+        "helion",
+        ("helion.kernel", "helion.jit", "helion.experimental.aot_kernel"),
+        "instrument_helion_kernel",
+        "instrumented_helion_kernel",
     ),
 )
 
@@ -515,7 +580,10 @@ def _is_instrumented(decos, jit_deco, instrument_deco, combined_deco):
     Either the one-shot combined decorator, or the explicit jit + instrument
     stack.
     """
-    return combined_deco in decos or (jit_deco in decos and instrument_deco in decos)
+    jit_decos = (jit_deco,) if isinstance(jit_deco, str) else jit_deco
+    return combined_deco in decos or (
+        any(deco in decos for deco in jit_decos) and instrument_deco in decos
+    )
 
 
 def _scan_for_missing_instrumentation(source, label):
@@ -533,14 +601,16 @@ def _scan_for_missing_instrumentation(source, label):
         if not isinstance(node, ast.FunctionDef):
             continue
         decos = _decorator_names(node)
-        for _, jit_deco, instrument_deco, combined_deco in _DSL_INSTRUMENTATION_RULES:
-            if jit_deco in decos or combined_deco in decos:
+        for dsl, jit_deco, instrument_deco, combined_deco in _DSL_INSTRUMENTATION_RULES:
+            jit_decos = (jit_deco,) if isinstance(jit_deco, str) else jit_deco
+            if any(deco in decos for deco in jit_decos) or combined_deco in decos:
                 n_compile_sites += 1
                 if not _is_instrumented(
                     decos, jit_deco, instrument_deco, combined_deco
                 ):
                     violations.append(
-                        f"{label}:{node.lineno} {node.name} has @{jit_deco} but "
+                        f"{label}:{node.lineno} {node.name} has an uninstrumented "
+                        f"{dsl} decorator but "
                         f"is not instrumented (use @{combined_deco}, or add "
                         f"@{instrument_deco})"
                     )
@@ -674,6 +744,11 @@ class TestInstrumentationCoverage(TestCase):
                 "@instrument_cutedsl_compile('aten::x')\n@jit_cache\ndef c(): ...\n",
                 "@instrumented_cutedsl_cache('aten::x')\ndef c(): ...\n",
             ),
+            "helion": (
+                "@helion.kernel\ndef h(): ...\n",
+                "@instrument_helion_kernel('aten::x')\n@helion.kernel\ndef h(): ...\n",
+                "@instrumented_helion_kernel('aten::x')\ndef h(): ...\n",
+            ),
         }
         for dsl, (bad, explicit_ok, combined_ok) in templates.items():
             bad_v, bad_n = _scan_for_missing_instrumentation(bad, f"<{dsl}-bad>")
@@ -686,6 +761,18 @@ class TestInstrumentationCoverage(TestCase):
                 v, n = _scan_for_missing_instrumentation(src, f"<{dsl}-{form}>")
                 self.assertEqual(n, 1, f"{dsl}/{form}: scan missed the site")
                 self.assertEqual(v, [], f"{dsl}/{form}: wrongly flagged")
+
+        aot_v, aot_n = _scan_for_missing_instrumentation(
+            "@helion.experimental.aot_kernel\ndef h(): ...\n", "<helion-aot-bad>"
+        )
+        self.assertEqual(aot_n, 1)
+        self.assertEqual(len(aot_v), 1)
+
+        jit_v, jit_n = _scan_for_missing_instrumentation(
+            "@helion.jit\ndef h(): ...\n", "<helion-jit-bad>"
+        )
+        self.assertEqual(jit_n, 1)
+        self.assertEqual(len(jit_v), 1)
 
     def test_no_raw_cute_compile_calls(self):
         # Caching is compulsory for cutedsl compiles: every cute.compile() must

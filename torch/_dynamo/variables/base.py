@@ -23,7 +23,7 @@ import logging
 import textwrap
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
-from enum import Enum
+from enum import Enum, IntFlag
 from typing import Any, NoReturn, TYPE_CHECKING
 
 from .. import graph_break_hints, variables
@@ -274,6 +274,97 @@ class NO_SUCH_SUBOBJ:
     """Sentinel indicating no concrete Python object is available."""
 
 
+class MethodFlags(IntFlag):
+    """Calling convention for a `Method` handler, mirroring CPython's
+    PyMethodDef ml_flags. `call_method` enforces arity from these before
+    invoking the handler, centralizing the raise_args_mismatch boilerplate."""
+
+    VARARGS = 1  # any positional args; kwargs rejected unless KEYWORDS is set
+    KEYWORDS = 2  # kwargs allowed (combine with VARARGS)
+    NOARGS = 4  # exactly zero args and zero kwargs
+    O = 8  # exactly one positional arg, no kwargs
+
+
+def _check_method_arity(
+    vt: VariableTracker,
+    tx: InstructionTranslatorBase,
+    name: str,
+    flags: MethodFlags,
+    args: Any,
+    kwargs: Any,
+) -> None:
+    # Centralized arity check for a tp_methods handler, driven by MethodFlags,
+    # raising the same TypeErrors CPython raises for builtin methods. Shared by
+    # Method.invoke and callers that run the handler directly (e.g. tensor.py).
+    n = len(args)
+    qualname = f"{vt.python_type_name()}.{name}"
+    if kwargs and not (flags & MethodFlags.KEYWORDS):
+        raise_type_error(tx, f"{qualname}() takes no keyword arguments")
+    if flags & (MethodFlags.NOARGS | MethodFlags.O):
+        if flags & MethodFlags.NOARGS and args:
+            raise_type_error(tx, f"{qualname}() takes no arguments ({n} given)")
+        if flags & MethodFlags.O and n != 1:
+            raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
+
+
+@dataclasses.dataclass(slots=True)
+class Method:
+    """Declarative entry in a VariableTracker's `tp_methods` table, analogous
+    to CPython's PyMethodDef. `flags` drives centralized arity checking.
+
+    Handlers have signature `(self, tx, args, kwargs)` and return the result
+    VariableTracker, or None to decline the call (the equivalent of the old
+    `super().call_method` fall-through) so `call_method` continues to the
+    object-protocol dispatch below."""
+
+    handler: Callable[..., VariableTracker | None]
+    flags: MethodFlags = MethodFlags.VARARGS | MethodFlags.KEYWORDS
+
+    def invoke(
+        self,
+        vt: VariableTracker,
+        tx: InstructionTranslatorBase,
+        name: str,
+        args: Any,
+        kwargs: Any,
+    ) -> VariableTracker | None:
+        _check_method_arity(vt, tx, name, self.flags, args, kwargs)
+        return self.handler(vt, tx, args, kwargs)
+
+
+@dataclasses.dataclass(slots=True)
+class GetSet:
+    """`tp_getset` entry, analogous to CPython's PyGetSetDef. `getter`
+    `(self, tx) -> VT | None` (None declines); `setter`
+    `(self, tx, value) -> VT | None`, None for read-only."""
+
+    getter: Callable[..., VariableTracker | None]
+    setter: Callable[..., VariableTracker | None] | None = None
+
+
+@dataclasses.dataclass(slots=True)
+class Member:
+    """`tp_members` entry, analogous to CPython's PyMemberDef. Same shape as
+    GetSet; a distinct type so members and getsets never share a class."""
+
+    getter: Callable[..., VariableTracker | None]
+    setter: Callable[..., VariableTracker | None] | None = None
+
+
+def getset_read(
+    accessor: Callable[[Any], VariableTracker],
+) -> Callable[..., VariableTracker]:
+    """Getter for a GetSet/Member whose value is an already-built VT."""
+    return lambda self, tx: accessor(self)
+
+
+def getset_build(
+    accessor: Callable[[Any], Any],
+) -> Callable[..., VariableTracker]:
+    """Getter that builds a VT from the raw value returned by `accessor`."""
+    return lambda self, tx: VariableTracker.build(tx, accessor(self))
+
+
 # This helps users of `as_python_constant` to catch unimplemented error with
 # more information; it inherits `NotImplementedError` for backward
 # compatibility reasons.
@@ -337,6 +428,41 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     # Single type or tuple of types. None means no static CPython type mapping
     # (e.g., dynamic types like UserDefinedObjectVariable, or Dynamo-internal VTs).
     _cpython_type: type | tuple[type, ...] | None = None
+
+    # Declarative named-method table (analogous to CPython's tp_methods): maps a
+    # method name to a Method describing its handler and calling convention.
+    # `call_method` consults this before the object-protocol (tp_slot) dispatch.
+    # Lookup walks the class MRO (see `_lookup_tp_table`), so a subclass table
+    # adds to (rather than replaces) the entries it inherits, with the
+    # most-derived class winning on name collisions.
+    tp_methods: dict[str, Method] = {}
+    # Declarative attribute tables, split to match CPython: tp_getset holds the
+    # PyGetSetDef attributes, tp_members the PyMemberDef ones.
+    tp_getset: dict[str, GetSet] = {}
+    tp_members: dict[str, Member] = {}
+
+    def _lookup_tp_table(self, name: str, *table_attrs: str) -> Any:
+        """Resolve *name* in the given declarative tables across the class MRO.
+
+        Mirrors CPython method/getset/member inheritance: each class contributes
+        its own table entries into its own tp_dict, and lookup walks the MRO with
+        the most-derived class winning. A subclass table therefore *adds* to
+        (rather than replaces) the entries it inherits. Within a class the tables
+        are consulted in the order given.
+        """
+        for klass in type(self).__mro__:
+            d = klass.__dict__
+            for attr in table_attrs:
+                table = d.get(attr)
+                if table is not None and name in table:
+                    return table[name]
+        return None
+
+    def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
+        return self._lookup_tp_table(name, "tp_getset", "tp_members")
+
+    def lookup_tp_method(self, name: str) -> Method | None:
+        return self._lookup_tp_table(name, "tp_methods")
 
     # fields to leave unmodified in apply()
     _nonvar_fields = {
@@ -655,6 +781,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         falls back to const_getattr for VTs without a known python_type or
         when the descriptor protocol hits an unhandled type.
         """
+        # tp_getset/tp_members are data descriptors: resolve ahead of the
+        # object-protocol walk. A getter returning None declines.
+        getset = self.lookup_tp_getset_member(name)
+        if getset is not None:
+            result = getset.getter(self, tx)
+            if result is not None:
+                return result
+
+        # object.__class__: one shared getset on `object` rather than per-VT.
+        if name == "__class__":
+            return VariableTracker.build(tx, self.python_type())
+
         try:
             py_type = self.python_type()
         except NotImplementedError:
@@ -942,6 +1080,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Declarative named-method dispatch (tp_methods). A handler returning
+        # None declines the call and falls through to the object-protocol
+        # (tp_slot) dispatch below, mirroring the old super().call_method path.
+        method = self.lookup_tp_method(name)
+        if method is not None:
+            result = method.invoke(self, tx, name, args, kwargs)
+            if result is not None:
+                return result
+
         if name == "__getitem__":
             if len(args) == 1 and not kwargs:
                 from .object_protocol import vt_getitem
