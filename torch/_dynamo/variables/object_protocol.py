@@ -345,6 +345,20 @@ def maybe_get_python_type(obj: VariableTracker) -> type:
         )
 
 
+def pyiter_send(
+    tx: "InstructionTranslatorBase", iter_: VariableTracker, arg: VariableTracker
+) -> VariableTracker:
+    """Implements PyIter_Send semantics for VariableTracker objects.
+
+    ref: https://github.com/python/cpython/blob/51b511d7299f91a458e40d1ea997bd7e6cd3deef/Objects/abstract.c#L2930-L2953
+    """
+
+    if arg.is_constant_none() and pyiter_check(iter_.python_type()):
+        return iter_.tp_iternext_impl(tx)
+    else:
+        return iter_.call_method(tx, "send", [arg], {})
+
+
 def vt_mapping_size(
     tx: "InstructionTranslatorBase", obj: "VariableTracker"
 ) -> "VariableTracker":
@@ -628,7 +642,7 @@ def sequence_delitem(
             if idx < 0:
                 if type_implements_sq_length(s_type):
                     length = s.sq_length(tx)
-                    i = vt_add(tx, i, length)
+                    i = generic_add(tx, i, length)
         return s.sq_ass_item_impl(tx, i, None)
 
     if type_implements_mp_ass_subscript(s_type):
@@ -993,6 +1007,8 @@ NB_SLOT_MAPPING = {
     "nb_inplace_add": PyNumberSlots.NB_INPLACE_ADD,
     "nb_multiply": PyNumberSlots.NB_MULTIPLY,
     "nb_inplace_multiply": PyNumberSlots.NB_INPLACE_MULTIPLY,
+    "nb_matrix_multiply": PyNumberSlots.NB_MATRIX_MULTIPLY,
+    "nb_inplace_matrix_multiply": PyNumberSlots.NB_INPLACE_MATRIX_MULTIPLY,
     "nb_and": PyNumberSlots.NB_AND,
     "nb_inplace_and": PyNumberSlots.NB_INPLACE_AND,
     "nb_xor": PyNumberSlots.NB_XOR,
@@ -1259,7 +1275,7 @@ def binary_iop(
 
 
 # add / inplace add needs special handling
-def vt_add(
+def generic_add(
     tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
@@ -1276,7 +1292,7 @@ def vt_add(
     binop_type_error(tx, v, w, "+")
 
 
-def vt_inplace_add(
+def generic_inplace_add(
     tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
@@ -1428,6 +1444,31 @@ def generic_inplace_multiply(
     )
 
 
+def generic_matmul(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyNumber_MatrixMultiply."""
+    return binary_op(tx, v, w, "nb_matrix_multiply", "@")
+
+
+def generic_inplace_matmul(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyNumber_InPlaceMatrixMultiply."""
+    return binary_iop(
+        tx,
+        v,
+        w,
+        "nb_inplace_matrix_multiply",
+        "nb_matrix_multiply",
+        "@=",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Type-object slot wrappers for ``__mul__`` / ``__rmul__`` / ``__imul__``
 #
@@ -1505,6 +1546,58 @@ def slot_wrapper_imul(
     if type_implements_sq_inplace_repeat(self_type):
         return sequence_inplace_repeat(tx, self, other)
     return slot_wrapper_mul(tx, self, other)
+
+
+# ---------------------------------------------------------------------------
+# Type-object slot wrappers for ``__add__`` / ``__radd__`` / ``__iadd__``
+
+#   BINSLOT (__add__,  nb_add,      slot_nb_add, "+")           [typeobject.c L10915]
+#   RBINSLOT(__radd__, nb_add,      slot_nb_add, "+")           [L10917]
+#   SQSLOT  (__add__,  sq_concat,   NULL, wrap_binaryfunc)      [L11017]
+#   IBSLOT  (__iadd__, nb_inplace_add, ...)                     [L10960]
+#   SQSLOT  (__iadd__, sq_inplace_concat, NULL, ...)            [L11031]
+#
+# Distinct from ``generic_add`` / ``generic_inplace_add``, which mirror the
+# operator-level ``PyNumber_Add`` (cross-operand priority, sq_concat fallback).
+# ---------------------------------------------------------------------------
+
+
+def slot_wrapper_add(
+    tx: "InstructionTranslatorBase",
+    self: VariableTracker,
+    other: VariableTracker,
+    reverse: bool = False,
+) -> VariableTracker:
+    """``self.__add__(other)`` / ``self.__radd__(other)`` slot wrapper."""
+    self_type = maybe_get_python_type(self)
+    if type_implements_nb_add(self_type):
+        return self.nb_add_impl(tx, other, reverse=reverse)
+    # No SQSLOT(__radd__): sq_concat backs only the forward __add__.
+    if not reverse and type_implements_sq_concat(self_type):
+        return self.sq_concat_impl(tx, other)
+    raise_type_error(
+        tx,
+        f"unsupported operand type(s) for +: "
+        f"'{self.python_type_name()}' and '{other.python_type_name()}'",
+    )
+
+
+def slot_wrapper_iadd(
+    tx: "InstructionTranslatorBase",
+    self: VariableTracker,
+    other: VariableTracker,
+) -> VariableTracker:
+    """``self.__iadd__(other)`` slot wrapper.
+
+    Mirrors ``slot_wrapper_imul``: when neither ``nb_inplace_add`` nor
+    ``sq_inplace_concat`` is installed, fall back to the non-inplace slot.
+    """
+    self_type = maybe_get_python_type(self)
+    if type_implements_nb_inplace_add(self_type):
+        return self.nb_inplace_add_impl(tx, other)
+    if type_implements_sq_inplace_concat(self_type):
+        return self.sq_inplace_concat_impl(tx, other)
+    return slot_wrapper_add(tx, self, other)
 
 
 # ---------------------------------------------------------------------------
@@ -2060,12 +2153,16 @@ def object_generic_getattr(
 
     # Step 4: Non-data descriptor with __get__.
     if type_attr is not NO_SUCH_SUBOBJ and hasattr(type(type_attr), "__get__"):
-        # If the VT has custom call_method and this is a method, return a
-        # CallMethodVariable that dispatches through call_method instead of
-        # inlining the resolved method directly.  This preserves custom
-        # tracing logic (side effects, graph nodes, suppression) that
-        # MRO-based resolution via UserMethodVariable would bypass.
-        if _is_method_type(type_attr) and _has_custom_call_method(obj):
+        # If the VT dispatches this method through call_method (a hand-written
+        # override or a tp_methods entry), return a CallMethodVariable that
+        # dispatches through call_method instead of inlining the resolved
+        # method directly.  This preserves custom tracing logic (side effects,
+        # graph nodes, suppression) that MRO-based resolution via
+        # UserMethodVariable would bypass.
+        if _is_method_type(type_attr) and (
+            obj._lookup_tp_table(name, "tp_methods") is not None
+            or _has_custom_call_method(obj)
+        ):
             return variables.CallMethodVariable(obj, name, source=source)
 
         class_vt = VariableTracker.build(tx, py_type)
@@ -2133,6 +2230,14 @@ def generic_getattr(
             )
         if not hasattr_var.as_python_constant():
             return default  # type: ignore[return-value]
+
+    # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
+    # tp_getattro so a getattro_impl override need not repeat the consult.
+    getset = obj.lookup_tp_getset_member(name)
+    if getset is not None:
+        result = getset.getter(obj, tx)
+        if result is not None:
+            return result
 
     # Core dispatch: call the VT's getattro_impl (tp_getattro).
     source = obj.source and AttrSource(obj.source, name)

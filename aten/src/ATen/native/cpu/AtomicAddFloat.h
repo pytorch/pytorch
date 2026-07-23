@@ -19,8 +19,13 @@ static inline void cpu_atomic_add_float(float* dst, float fvalue)
   float old_value = atomic_dst.load();
   float new_value = old_value + fvalue;
   while (!atomic_dst.compare_exchange_weak(old_value, new_value)) {
-#ifdef __aarch64__
+#if defined(__aarch64__)
     __asm__ __volatile__("yield;" : : : "memory");
+#elif defined(__riscv)
+    // Zihintpause `pause` spin-loop hint, emitted as its raw encoding so it
+    // assembles regardless of -march (it is a no-op HINT on cores lacking the
+    // extension).
+    __asm__ __volatile__(".insn i 0x0F, 0, x0, x0, 0x010" : : : "memory");
 #else
     _mm_pause();
 #endif
