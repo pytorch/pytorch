@@ -2153,12 +2153,16 @@ def object_generic_getattr(
 
     # Step 4: Non-data descriptor with __get__.
     if type_attr is not NO_SUCH_SUBOBJ and hasattr(type(type_attr), "__get__"):
-        # If the VT has custom call_method and this is a method, return a
-        # CallMethodVariable that dispatches through call_method instead of
-        # inlining the resolved method directly.  This preserves custom
-        # tracing logic (side effects, graph nodes, suppression) that
-        # MRO-based resolution via UserMethodVariable would bypass.
-        if _is_method_type(type_attr) and _has_custom_call_method(obj):
+        # If the VT dispatches this method through call_method (a hand-written
+        # override or a tp_methods entry), return a CallMethodVariable that
+        # dispatches through call_method instead of inlining the resolved
+        # method directly.  This preserves custom tracing logic (side effects,
+        # graph nodes, suppression) that MRO-based resolution via
+        # UserMethodVariable would bypass.
+        if _is_method_type(type_attr) and (
+            obj._lookup_tp_table(name, "tp_methods") is not None
+            or _has_custom_call_method(obj)
+        ):
             return variables.CallMethodVariable(obj, name, source=source)
 
         class_vt = VariableTracker.build(tx, py_type)
@@ -2226,6 +2230,14 @@ def generic_getattr(
             )
         if not hasattr_var.as_python_constant():
             return default  # type: ignore[return-value]
+
+    # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
+    # tp_getattro so a getattro_impl override need not repeat the consult.
+    getset = obj.lookup_tp_getset_member(name)
+    if getset is not None:
+        result = getset.getter(obj, tx)
+        if result is not None:
+            return result
 
     # Core dispatch: call the VT's getattro_impl (tp_getattro).
     source = obj.source and AttrSource(obj.source, name)
