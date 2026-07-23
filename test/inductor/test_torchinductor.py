@@ -9583,6 +9583,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         out = foo_opt(inp)
         self.assertEqual(inp.storage(), out.storage())
 
+    def test_empty_output_strides(self):
+        def fn(x):
+            return x.new_empty((2, 0, 0))
+
+        inp = torch.randn(1, device=self.device)
+        eager = fn(inp)
+        compiled = torch.compile(fn, backend="inductor")(inp)
+        self.assertEqual(compiled.stride(), eager.stride())
+
     def test_index_select(self):
         def fn(a, b):
             return (
@@ -12706,9 +12715,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
-    # Keep this large-window decomposition case as explicit duck-sizing coverage;
-    # adjacent max-pool backward tests exercise the default no-duck path.
-    @torch.fx.experimental._config.patch(use_duck_shape=True)
     def test_max_pool2d_with_indices_backward5(self):
         # Large window size - decomposition handles via scatter_add
         def fn(a, b, c):

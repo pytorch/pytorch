@@ -292,8 +292,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(test, x)
 
         x = torch.randn(3)
-        # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = ifdynstaticdefault(3, 4)
+        # when testing with dynamic shape, symbols are lifted as inputs
+        arg_count = ifdynstaticdefault(3, 5)
         self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 2)
 
     def test_capture_untracked_global(self):

@@ -101,14 +101,7 @@ def _cached_or_uncached(
 ) -> _T:
     if not _op_schema_can_be_cached(op_schema):
         return uncached_fn(op_schema)
-    try:
-        return cached_fn(op_schema)
-    except TypeError:
-        # lru_cache hashes arguments before calling the wrapped function. If
-        # the schema is hashable, the TypeError came from the body and is real.
-        if _op_schema_can_be_cached(op_schema):
-            raise
-        return uncached_fn(op_schema)
+    return cached_fn(op_schema)
 
 
 def _propagate_use_strided_shard_flag(
