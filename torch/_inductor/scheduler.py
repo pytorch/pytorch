@@ -7352,23 +7352,22 @@ class Scheduler:
                     last_step = step
             candidate_last_use_steps[id(buf.mpi_buffer)] = last_step
 
-        ctx.node_outputs[candidate] = candidate_outputs
-        try:
-            region_peak, live_before, live_after = estimate_region_peak_memory(
-                local_nodes,
-                region_start=region_start,
-                region_end=region_end,
-                step_of=step_of,
-                graph_outputs=ctx.graph_outputs,
-                cur_memory=ctx.baseline_live_before[region_start],
-                last_use_step_cache=candidate_last_use_steps,
-                known_last_use_steps=ctx.last_use_steps,
-                node_outputs=ctx.node_outputs,
-                node_steps=new_step,
-                max_peak=ctx.baseline_peak + peak_allowed_increase,
-            )
-        finally:
-            del ctx.node_outputs[candidate]
+        node_outputs = collections.ChainMap(
+            {candidate: candidate_outputs}, ctx.node_outputs
+        )
+        region_peak, live_before, live_after = estimate_region_peak_memory(
+            local_nodes,
+            region_start=region_start,
+            region_end=region_end,
+            step_of=step_of,
+            graph_outputs=ctx.graph_outputs,
+            cur_memory=ctx.baseline_live_before[region_start],
+            last_use_step_cache=candidate_last_use_steps,
+            known_last_use_steps=ctx.last_use_steps,
+            node_outputs=node_outputs,
+            node_steps=new_step,
+            max_peak=ctx.baseline_peak + peak_allowed_increase,
+        )
         if not live_after:
             fusion_log.debug(
                 "memory-timeline fusion rejected %s with %s: estimated peak delta %d bytes",

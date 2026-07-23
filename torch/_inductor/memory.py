@@ -18,7 +18,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from .dependencies import Dep
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
@@ -263,6 +263,8 @@ def assign_memory_planning_info_for_scheduler_buffers(
             dep_name_to_succ_nodes_for_ordering[mutating_buf_name]
         )
 
+    # populate the MemoryPlanningInfoForBuffer attribute to each scheduler buffer
+    # note: there are scheduler buffers not in dep_name_to_succ_nodes (e.g., graph outputs)
     for buf_name in name_to_buf:
         name_to_buf[buf_name].mpi_buffer = MemoryPlanningInfoForBuffer(
             size_alloc=sched_buf_to_size[buf_name][0],
@@ -512,7 +514,7 @@ def estimate_region_peak_memory(
     cur_memory: int = 0,
     last_use_step_cache: dict[int, int | None] | None = None,
     known_last_use_steps: dict[int, int | None] | None = None,
-    node_outputs: dict[BaseSchedulerNode, Sequence[SchedulerBuffer]] | None = None,
+    node_outputs: Mapping[BaseSchedulerNode, Sequence[SchedulerBuffer]] | None = None,
     node_steps: dict[BaseSchedulerNode, int] | None = None,
     max_peak: int | None = None,
     return_live_memory: bool = True,
