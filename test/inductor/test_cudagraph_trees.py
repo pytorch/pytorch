@@ -6676,7 +6676,7 @@ if HAS_CUDA_AND_TRITON:
         @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
         def test_cudagraph_empty_partition_raises_error(self):
             """Verify RuntimeError is raised when partitions are empty and cudagraph_or_error=True"""
-            
+
             @torch.library.custom_op(
                 "test_cudagraph_empty_partition::unsafe_mul",
                 mutates_args=(),
@@ -6690,7 +6690,7 @@ if HAS_CUDA_AND_TRITON:
                 return torch.empty_like(x)
 
             from torch._inductor.lowering import make_fallback
-            
+
             make_fallback(torch.ops.test_cudagraph_empty_partition.unsafe_mul.default)
 
             def f(x: torch.Tensor) -> torch.Tensor:
