@@ -13,6 +13,7 @@ import hashlib
 import importlib
 import logging
 import re
+import threading
 from typing import Any, TYPE_CHECKING
 
 from torch._inductor.codegen.common import (
@@ -579,6 +580,79 @@ def _rewrap_efc_compiled_obj(compiled_fn, kernel, epilogue_args=None):
     return wrapped_launch
 
 
+def _update_reuse_args_tensors(
+    variant_name, args, input_tensors, out, epilogue_args
+) -> bool:
+    """Redirect the cached args at this call's runtime tensors.
+
+    A cache hit on ``mem_key`` guarantees identical shapes/strides/dtypes, so
+    only the data pointers change; mutating ``TensorWrapper._runtime_tensor`` in
+    place is sufficient and lets us skip the (expensive) _create_gemm_arguments
+    rebuild. Returns False for GROUPED_GEMM (unsupported), signalling the caller
+    to use the rebuild path.
+    """
+    if variant_name == "GROUPED_GEMM":
+        return False
+    if variant_name == "SCALED_GEMM":
+        a, b, scale_a, scale_b = input_tensors
+        args.A.quantized.tensor._runtime_tensor = a
+        args.A.scale.tensor._runtime_tensor = scale_a
+        args.B.quantized.tensor._runtime_tensor = b
+        args.B.scale.tensor._runtime_tensor = scale_b
+        args.out.tensor._runtime_tensor = out
+        return True
+    # GEMM: dense mm and the EFC bias/epilogue addmm path.
+    a, b = input_tensors
+    args.A.tensor._runtime_tensor = a
+    args.B.tensor._runtime_tensor = b
+    args.out.tensor._runtime_tensor = out
+    epilogue = getattr(args, "epilogue", None)
+    if epilogue is not None:
+        for name, wrapper in epilogue.tensors.items():
+            val = epilogue_args.tensors[name]
+            wrapper._runtime_tensor = getattr(val, "runtime_tensor", val)
+    return True
+
+
+def _clear_reuse_args_tensors(variant_name, args, epilogue_args):
+    """Drop the runtime tensors held by cached args after a launch.
+
+    kernel.run enqueues the launch synchronously and reads the pointers during
+    the call, and the caller keeps the tensors alive, so clearing our cached
+    references is safe. Required for cudagraph capture, which fails if a cached
+    object retains a tensor from the graph pool between iterations.
+    """
+    if variant_name == "SCALED_GEMM":
+        args.A.quantized.tensor._runtime_tensor = None
+        args.A.scale.tensor._runtime_tensor = None
+        args.B.quantized.tensor._runtime_tensor = None
+        args.B.scale.tensor._runtime_tensor = None
+        args.out.tensor._runtime_tensor = None
+        return
+    args.A.tensor._runtime_tensor = None
+    args.B.tensor._runtime_tensor = None
+    args.out.tensor._runtime_tensor = None
+    epilogue = getattr(args, "epilogue", None)
+    if epilogue is not None:
+        for wrapper in epilogue.tensors.values():
+            wrapper._runtime_tensor = None
+        # kernel.run traces the epilogue on first launch, and the trace retains
+        # the real output/aux tensors in example_inputs (used only for tracing,
+        # not the launch). Replace them with meta tensors so the cached args
+        # hold no real storage -- otherwise an intermediate output stays live
+        # and CUDA graph capture fails. Mirrors _meta_epilogue_metadata.
+        import torch
+
+        te = getattr(epilogue, "traced_epilogue", None)
+        example_inputs = getattr(te, "example_inputs", None) if te else None
+        if example_inputs:
+            for name, val in example_inputs.items():
+                if isinstance(val, torch.Tensor) and val.device.type != "meta":
+                    example_inputs[name] = torch.empty_strided(
+                        val.shape, val.stride(), dtype=val.dtype, device="meta"
+                    )
+
+
 def _nvgemm_run(
     variant_name: str,
     kernel_name: str,
@@ -625,6 +699,34 @@ def _nvgemm_run(
 
     if mem_key in compiled_cache:
         artifact = compiled_cache[mem_key]
+        # Fast path: reuse the previously-built args, redirecting only the
+        # runtime tensor pointers. Skips _create_gemm_arguments, whose cost
+        # (get_type_hints + deepcopy + full epilogue/layout reprocessing)
+        # depends solely on shapes/layout -- fixed for a given mem_key.
+        reuse = getattr(artifact, "_nvgemm_reuse", None)
+        if reuse is not None:
+            args, kernel, reuse_lock = reuse
+            # The cached args are shared mutable state. Serialize the
+            # redirect->launch->clear so concurrent launches on the same cached
+            # artifact (e.g. two graph executions sharing this kernel) don't
+            # stomp each other's runtime tensor pointers.
+            with reuse_lock:
+                if _update_reuse_args_tensors(
+                    variant_name, args, input_tensors, out, epilogue_args
+                ):
+                    try:
+                        kernel.run(
+                            args,
+                            artifact,
+                            stream=stream,
+                            workspace=workspace,
+                            assume_supported_args=True,
+                        )
+                    finally:
+                        _clear_reuse_args_tensors(variant_name, args, epilogue_args)
+                    return
+        # No reusable args (e.g. artifact loaded from disk by a subprocess
+        # precompile): build them once, then attach below for future calls.
         args = _create_gemm_arguments(
             variant_name,
             input_tensors,
@@ -680,13 +782,36 @@ def _nvgemm_run(
 
         compiled_cache[mem_key] = artifact
 
-    kernel.run(
-        args,
-        artifact,
-        stream=stream,
-        workspace=workspace,
-        assume_supported_args=True,
+    # Attach the built args for reuse on subsequent calls (skipped for
+    # GROUPED_GEMM, where _update_reuse_args_tensors returns False). This runs
+    # for both the disk-loaded rebuild branch and the fresh-compile branch.
+    reuse_supported = _update_reuse_args_tensors(
+        variant_name, args, input_tensors, out, epilogue_args
     )
+    if reuse_supported:
+        # Publish and launch under the lock so a concurrent reuse-path caller
+        # that picks up these args blocks until this launch has cleared them.
+        reuse_lock = threading.Lock()
+        with reuse_lock:
+            artifact._nvgemm_reuse = (args, kernel, reuse_lock)
+            try:
+                kernel.run(
+                    args,
+                    artifact,
+                    stream=stream,
+                    workspace=workspace,
+                    assume_supported_args=True,
+                )
+            finally:
+                _clear_reuse_args_tensors(variant_name, args, epilogue_args)
+    else:
+        kernel.run(
+            args,
+            artifact,
+            stream=stream,
+            workspace=workspace,
+            assume_supported_args=True,
+        )
 
 
 # Patch both the canonical definition (integration_utils.mma) for callers that
