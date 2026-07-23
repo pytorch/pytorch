@@ -9,6 +9,7 @@ import torch.fx.graph
 
 if TYPE_CHECKING:
     from torch._functorch.partitioners import NodeInfo
+    from torch._inductor.fx_passes.pad_mm import PadMMContext
     from torch._inductor.scheduler import BaseSchedulerNode
 
 
@@ -276,3 +277,33 @@ class CustomKnapsackSolver(CustomPassBase):
         """
         Implementation of the custom knapsack solver.
         """
+
+
+class PadMMPolicy(CustomPassBase):
+    """Implement this interface to override pad_mm's shape-padding decisions.
+
+    1) __call__() returns True to force padding a GEMM (mm/addmm/bmm), False to
+       force skipping it, or None to defer to Inductor's built-in decision.
+
+    2) See CustomPassBase.uuid() docstring for implementing the uuid() method.
+
+    EXAMPLE:
+
+    from torch._inductor.custom_graph_pass import get_hash_for_files
+
+    class MyPadMMPolicy(PadMMPolicy):
+        def __call__(self, ctx: "PadMMContext") -> Optional[bool]:
+            return TABLE.get((ctx.m, ctx.k, ctx.n, ctx.mat1_dtype))
+
+        def uuid(self) -> Optional[Any]:
+            return get_hash_for_files((__file__,))
+    """
+
+    @abstractmethod
+    def __call__(self, ctx: "PadMMContext") -> bool | None:
+        """Return True to pad, False to skip, or None to defer to the default."""
+
+
+PadMMPolicyType: TypeAlias = (
+    PadMMPolicy | Callable[["PadMMContext"], "bool | None"] | None
+)
