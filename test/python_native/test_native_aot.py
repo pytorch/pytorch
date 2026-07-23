@@ -18,11 +18,11 @@ profile can only come from the AOT hook. Values are checked against a
 sort-based reference (an independent aten path, immune to topk
 routing).
 
-Tests that require the AOT kernel library skip unless it was loaded at
-import (build it with tools/native_aot/{export.py,gen_aot_lib.py,
-build_aot_lib.sh}); correctness/fallback tests run everywhere --
-without the library, covered calls must still be correct via stock
-aten (null-hook degradation).
+Tests that require the AOT kernels skip unless they are embedded in
+this build (stage 2: tools/native_aot/export.py + gen_aot_lib.py, then
+relink); correctness/fallback tests run everywhere -- without
+artifacts, covered calls must still be correct via stock aten
+(null-hook degradation).
 """
 
 import json
@@ -37,14 +37,14 @@ from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, Tes
 
 
 def _aot_lib_loaded() -> bool:
-    from torch._native import _load_native_aot_lib
+    from torch._native import _native_aot_embedded
 
-    return _load_native_aot_lib() is not None
+    return _native_aot_embedded()
 
 
 def skipIfNoAotLib(fn):
     return unittest.skipUnless(
-        _aot_lib_loaded(), "libtorch_native_aot_cuda.so not loaded"
+        _aot_lib_loaded(), "AOT kernels not embedded in this build"
     )(fn)
 
 
