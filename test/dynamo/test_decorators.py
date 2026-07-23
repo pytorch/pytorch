@@ -103,11 +103,12 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_disable_under_eager_on_recompile_stance(self):
-        # DisableContext no longer sets the stance-derived callback while running
-        # the disabled body. Under set_stance("eager_on_recompile") the old code
-        # ran the body in run-only mode (callback False); now it runs fully eager
-        # (callback None), i.e. Dynamo is off for the body and its callees. Pin
-        # that a disabled function still returns correct results under the stance.
+        # A disabled function still honors the compile stance for its body:
+        # DisableContext computes _callback_from_stance(None), which under
+        # set_stance("eager_on_recompile") resolves to False (run-only) and is
+        # installed around the body, rather than assuming the callback is fully
+        # off. Pin that a disabled function returns correct results under the
+        # stance.
         @torch._dynamo.disable
         def inner(x):
             return x + 1
