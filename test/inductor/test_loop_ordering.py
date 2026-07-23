@@ -3,7 +3,7 @@
 import contextlib
 import os
 import unittest
-from unittest import skipUnless
+from unittest import mock, skipUnless
 
 import numpy as np
 import sympy
@@ -14,6 +14,7 @@ from torch import nn
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, ir, metrics
+from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
@@ -171,6 +172,94 @@ class ImplDetailTest(MockSchedulerTest):
         # we cache pointwise_read_writes result on a scheduler node
         # make sure new_var_ranges is refreshed by invalidating the cache.
         self.assertTrue(len(new_var_ranges) == 1)  # 2 dimensions get merged
+
+    def test_reorder_invalidates_tiling_cache(self):
+        buf = self._create_computed_buffer_ax2()
+        snode = SchedulerNode(V.graph.scheduler, buf)
+
+        with mock.patch.object(
+            SIMDScheduling,
+            "select_tiling",
+            wraps=SIMDScheduling.select_tiling,
+        ) as select_tiling:
+            tiling_before = snode.get_tiling(*snode.group[1])
+            self.assertIs(tiling_before, snode.get_tiling(*snode.group[1]))
+            self.assertEqual(select_tiling.call_count, 1)
+
+            snode.apply_new_loop_order([1, 0])
+            tiling_after = snode.get_tiling(*snode.group[1])
+            self.assertEqual(select_tiling.call_count, 2)
+            self.assertNotEqual(tiling_before, tiling_after)
+
+    def test_read_writes_invalidate_tiling_cache(self):
+        buf = self._create_computed_buffer_ax2()
+        snode = SchedulerNode(V.graph.scheduler, buf)
+
+        with mock.patch.object(
+            SIMDScheduling,
+            "select_tiling",
+            wraps=SIMDScheduling.select_tiling,
+        ) as select_tiling:
+            snode.get_tiling(*snode.group[1])
+            snode.get_tiling(*snode.group[1])
+            self.assertEqual(select_tiling.call_count, 1)
+
+            snode.set_read_writes(snode.read_writes)
+            snode.get_tiling(*snode.group[1])
+            self.assertEqual(select_tiling.call_count, 2)
+
+    def test_tiling_cache_is_per_node(self):
+        snode1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        snode2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        self.assertEqual(snode1.group, snode2.group)
+
+        with mock.patch.object(
+            SIMDScheduling,
+            "select_tiling",
+            wraps=SIMDScheduling.select_tiling,
+        ) as select_tiling:
+            snode1.get_tiling(*snode1.group[1])
+            snode2.get_tiling(*snode2.group[1])
+            snode1.get_tiling(*snode1.group[1])
+            snode2.get_tiling(*snode2.group[1])
+            self.assertEqual(select_tiling.call_count, 2)
+
+    def test_tiling_cache_does_not_require_direct_simd_backend(self):
+        snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+
+        with mock.patch.object(
+            MockScheduler,
+            "get_backend",
+            side_effect=AssertionError("unexpected backend lookup"),
+        ):
+            snode.get_tiling(*snode.group[1])
+
+    def test_tiling_cache_keys_iteration_extents(self):
+        snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+
+        with mock.patch.object(
+            SIMDScheduling, "select_tiling", return_value={}
+        ) as select_tiling:
+            snode.get_tiling(sympy.Integer(1), sympy.Integer(1))
+            snode.get_tiling(sympy.Integer(1), sympy.Integer(1))
+            snode.get_tiling(sympy.Integer(2), sympy.Integer(1))
+            self.assertEqual(select_tiling.call_count, 2)
+
+    def test_fusion_reuses_node_tiling_cache(self):
+        snode1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        snode2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        backend = TritonScheduling(V.graph.scheduler)
+
+        with mock.patch.object(
+            SIMDScheduling,
+            "select_tiling",
+            wraps=SIMDScheduling.select_tiling,
+        ) as select_tiling:
+            self.assertTrue(backend.can_fuse(snode1, snode2))
+            self.assertEqual(select_tiling.call_count, 3)
+
+            self.assertTrue(backend.can_fuse(snode1, snode2))
+            self.assertEqual(select_tiling.call_count, 4)
 
     def test_reorder_modular_indexing(self):
         """
