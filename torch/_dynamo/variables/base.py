@@ -2196,9 +2196,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         if slotdef is not None and hasattr(type(self), slotdef.impl):
             return slotdef.invoke(tx, self, args, kwargs)
 
-        if name == "__getitem__":
-            if len(args) == 1 and not kwargs:
-                from .object_protocol import vt_getitem
         if name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
