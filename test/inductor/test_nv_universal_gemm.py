@@ -242,6 +242,8 @@ class TestNVUniversalGemm(TestCase):
         a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
         scale = torch.randn(scale_shape, device="cuda")
+        if scale_shape == (16, 1):
+            scale = torch.randn(32, 1, device="cuda")[::2]
 
         torch._dynamo.reset()
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
@@ -1116,6 +1118,26 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, bias, a, b)
         expected = torch.addmm(bias, a, b, beta=0.5, alpha=1.5).relu()
+        self.assertEqual(result, expected, atol=2e-2, rtol=2e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+
+    def test_flex_gemm_addmm_beta_zero_ignores_bias(self):
+        m, n, k = 128, 128, 64
+        bias = torch.full((m, n), float("nan"), device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(bias, a, b):
+            return flex_gemm(
+                torch.addmm,
+                (bias, a, b),
+                torch.relu,
+                gemm_kwargs={"beta": 0, "alpha": 1.5},
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        result, code, _ = self._compile_and_check(fn, bias, a, b)
+        expected = torch.addmm(bias, a, b, beta=0, alpha=1.5).relu()
         self.assertEqual(result, expected, atol=2e-2, rtol=2e-2)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
 

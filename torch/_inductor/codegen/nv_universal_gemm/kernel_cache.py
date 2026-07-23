@@ -18,6 +18,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -215,7 +216,7 @@ def _replace_dense_efc_with_vendored(kernels: Any) -> list[Any]:
             continue
         design = kernel.metadata.design
         tile_m, tile_n, tile_k = design.tile_shape
-        for vendored_tile_n in (tile_n, 64, 128):
+        for vendored_tile_n in OrderedSet((tile_n, 64, 128)):
             if vendored_tile_n < tile_n:
                 continue
             operator_name = kernel.metadata.operator_name.replace(

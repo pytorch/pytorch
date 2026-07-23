@@ -55,9 +55,10 @@ def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
             result = graph.call_function(gemm_target, (mat1, mat2))
             if alpha != 1:
                 result = graph.call_function(torch.ops.aten.mul.Tensor, (result, alpha))
-            if beta != 1:
-                bias = graph.call_function(torch.ops.aten.mul.Tensor, (bias, beta))
-            result = graph.call_function(torch.ops.aten.add.Tensor, (result, bias))
+            if beta != 0:
+                if beta != 1:
+                    bias = graph.call_function(torch.ops.aten.mul.Tensor, (bias, beta))
+                result = graph.call_function(torch.ops.aten.add.Tensor, (result, bias))
         result.meta = node.meta
         node.replace_all_uses_with(result)
         graph.erase_node(node)
