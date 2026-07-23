@@ -388,7 +388,7 @@ std::vector<std::unique_ptr<FunctionPreHook>>& hooks(const Variable& self) {
 }
 
 void clear_hooks(const at::TensorBase& self) {
-  // This is a little goofy, but usually this should be a no oop
+  // This is a little goofy, but usually this should be a no op
   materialize_autograd_meta(self)->hooks_.clear();
 }
 

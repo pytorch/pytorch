@@ -1,6 +1,6 @@
 #pragma once
 
-// Defines the bloat16 type (brain floating-point). This representation uses
+// Defines the bfloat16 type (brain floating-point). This representation uses
 // 1 bit for the sign, 8 bits for the exponent and 7 bits for the mantissa.
 
 #include <torch/headeronly/macros/Macros.h>
