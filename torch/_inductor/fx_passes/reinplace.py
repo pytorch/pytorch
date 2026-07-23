@@ -19,7 +19,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
 )
 from torch._inductor import config, inductor_prims
-from torch._inductor.fx_utils import get_node_storage, is_node_realized
+from torch._inductor.fx_utils import get_node_storage, get_storage, is_node_realized
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
@@ -203,6 +203,18 @@ _ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
     ]
 )
 
+# Reinplacing with an uninitialized factory base does not cost missed fusions
+# or writes to the base during materialization.
+_UNINITIALIZED_FACTORY_OPS = OrderedSet(
+    [
+        aten.empty.memory_format,
+        aten.empty_strided.default,
+        aten.empty_like.default,
+        aten.new_empty.default,
+        aten.new_empty_strided.default,
+    ]
+)
+
 
 def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     _, _, view_ops = node.args
@@ -214,6 +226,116 @@ def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     )
 
 
+def scatter_has_factory_base(
+    node: torch.fx.Node,
+    factory_ops: OrderedSet,
+    scatter_ops: tuple[Callable[..., Any], ...],
+) -> bool:
+    node = _get_view_base(node)
+    while node.op == "call_function" and node.target in scatter_ops:
+        inp = node.args[0]
+        if not isinstance(inp, torch.fx.Node):
+            return False
+        node = _get_view_base(inp)
+
+    return node.op == "call_function" and node.target in factory_ops
+
+
+def scatter_has_uninitialized_factory_base(node: torch.fx.Node) -> bool:
+    return scatter_has_factory_base(
+        node,
+        _UNINITIALIZED_FACTORY_OPS,
+        (_generalized_scatter, _inplace_generalized_scatter),
+    )
+
+
+def scatter_base_has_no_functional_scatter(node: torch.fx.Node) -> bool:
+    node = _get_view_base(node)
+    while node.op == "call_function" and node.target in (
+        _generalized_scatter,
+        _inplace_generalized_scatter,
+    ):
+        if node.target is _generalized_scatter:
+            return False
+        inp = node.args[0]
+        if not isinstance(inp, torch.fx.Node):
+            return False
+        node = _get_view_base(inp)
+
+    return True
+
+
+def scatter_has_smaller_src(inp: torch.fx.Node, src: torch.fx.Node) -> bool:
+    inp_val = inp.meta.get("val", None)
+    src_val = src.meta.get("val", None)
+    if not isinstance(inp_val, torch.Tensor) or not isinstance(src_val, torch.Tensor):
+        return False
+
+    return statically_known_true(src_val.numel() < inp_val.numel())
+
+
+def scatter_has_smaller_realized_src(inp: torch.fx.Node, src: torch.fx.Node) -> bool:
+    if not scatter_has_smaller_src(inp, src):
+        return False
+
+    return is_node_realized(_get_view_base(src))
+
+
+def _same_tensor_storage_region(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    if not torch._C._has_storage(lhs) or not torch._C._has_storage(rhs):
+        return False
+
+    def same_value(lhs_value, rhs_value) -> bool:
+        return statically_known_true(sym_eq(lhs_value, rhs_value))
+
+    def same_sequence(lhs_values, rhs_values) -> bool:
+        return len(lhs_values) == len(rhs_values) and all(
+            same_value(lhs_value, rhs_value)
+            for lhs_value, rhs_value in zip(lhs_values, rhs_values)
+        )
+
+    return (
+        get_storage(lhs) == get_storage(rhs)
+        and same_sequence(lhs.size(), rhs.size())
+        and same_sequence(lhs.stride(), rhs.stride())
+        and same_value(lhs.storage_offset(), rhs.storage_offset())
+    )
+
+
+def scatter_src_has_partial_or_uncertain_overlap(node: torch.fx.Node) -> bool:
+    inp, src, view_ops = node.args
+    inp_val = inp.meta.get("val") if isinstance(inp, torch.fx.Node) else inp
+    src_val = src.meta.get("val") if isinstance(src, torch.fx.Node) else src
+    if not isinstance(inp_val, torch.Tensor) or not isinstance(src_val, torch.Tensor):
+        return True
+
+    dst_val = inp_val
+    for view in cast(Sequence[ViewOp], view_ops):
+        fake_args, fake_kwargs = pytree.tree_map(
+            lambda arg: arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg,
+            (view.args, view.kwargs),
+        )
+        fake_mode = detect_fake_mode((dst_val, fake_args, fake_kwargs))
+        with (
+            fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+            if fake_mode and fake_mode.shape_env
+            else nullcontext()
+        ):
+            dst_val = view.target(dst_val, *fake_args, **fake_kwargs)
+
+    if torch._C._has_storage(dst_val) and torch._C._has_storage(src_val):
+        if get_storage(dst_val) != get_storage(src_val):
+            return False
+
+    if _same_tensor_storage_region(dst_val, src_val):
+        return False
+
+    try:
+        return len(compute_overlapping_tensors([dst_val, src_val])) != 0
+    except GuardOnDataDependentSymNode:
+        return True
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -222,20 +344,55 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     input and output would have been realized anyway.
 
     """
-    inp, _src, _view_ops = node.args
+    inp, src, _view_ops = node.args
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
         return True
 
-    if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
+    src_has_unsafe_overlap: bool | None = None
+
+    def can_copy_without_overlap() -> bool:
+        nonlocal src_has_unsafe_overlap
+        if src_has_unsafe_overlap is None:
+            src_has_unsafe_overlap = scatter_src_has_partial_or_uncertain_overlap(node)
+        return not src_has_unsafe_overlap
+
+    if (
+        isinstance(inp, torch.fx.Node)
+        and scatter_has_uninitialized_factory_base(inp)
+        and can_copy_without_overlap()
+    ):
+        # When we have uninitialized base - we do not miss any fusion opportunities,
+        # by doing reinplacing of the scatter, the uninitialized factory does not cost any writes.
+        return True
+
+    if (
+        isinstance(inp, torch.fx.Node)
+        and isinstance(src, torch.fx.Node)
+        and scatter_base_has_no_functional_scatter(inp)
+        and scatter_has_smaller_realized_src(inp, src)
+        and can_copy_without_overlap()
+    ):
+        return True
+
+    if (
+        isinstance(inp, torch.fx.Node)
+        and is_node_realized(inp)
+        and is_node_realized(node)
+        and can_copy_without_overlap()
+    ):
         return True
 
     # If the output is copied back into the input, this forces both to be
     # realized as the output is a user of the input
-    if inp.op in ("placeholder", "get_attr") and any(  # type: ignore[union-attr]
+    output_copied_back_to_input = inp.op in (  # type: ignore[union-attr]
+        "placeholder",
+        "get_attr",
+    ) and any(
         user.target is aten.copy_.default and user.args[0] is inp for user in node.users
-    ):
+    )
+    if output_copied_back_to_input and can_copy_without_overlap():
         return True
 
     # Otherwise, assume fusions will make functional variants profitable

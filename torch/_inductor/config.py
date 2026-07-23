@@ -988,6 +988,17 @@ loop_index_inversion_in_fusion: bool = True
 # For the cases loop ordering after fusion does not help, we don't lose much.
 score_fusion_memory_threshold = 10
 
+# Use Inductor's estimated scheduler memory timeline to skip fusions that
+# increase estimated peak memory. None disables these guards; otherwise the
+# value is the allowed estimated peak increase in megabytes.
+fusion_memory_timeline_peak_allowed_increase_mb = None
+
+# Supporting full memory timeline could increase compile time,
+# By default we do heuristically based fast path that minimally increases compile time
+# at cost of not absolutely correct predictions.
+# Use True if not regressing peak memory is prioritized over compile time.
+fusion_memory_timeline_full_correctness = False
+
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (
     os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"

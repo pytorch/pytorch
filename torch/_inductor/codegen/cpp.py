@@ -5230,7 +5230,13 @@ class CppScheduling(BaseScheduling):
         _, (vars2, _) = node2.group
         return vars1 == vars2
 
-    def fuse(self, node1, node2):
+    def fuse(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        *,
+        dry_run: bool = False,
+    ) -> FusedSchedulerNode:
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.fuse(node1, node2)
         elif node1.is_template():

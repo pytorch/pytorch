@@ -7,12 +7,19 @@ import torch._inductor.config as inductor_config
 from functorch import make_fx
 from torch import Tensor
 from torch._dynamo.utils import ReinplaceCounters
+from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
-from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+from torch._inductor.fx_passes.reinplace import (
+    reinplace_inplaceable_ops,
+    reinplace_inplaceable_ops_core,
+)
+from torch._inductor.fx_utils import FakeTensorUpdater
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -97,6 +104,15 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         inp2 = (inp[0].clone(), inp[1].clone())
         self.assertEqual(f(*inp), nf(*inp2))
         self.assertEqual(inp, inp2)
+
+    def _run_reinplace_pass(self, f, *args):
+        gm = make_fx(f, tracing_mode="fake")(*args)
+        fake_mode = detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        return gm
 
     def test_dont_modify_live(self):
         def f(x, y):
@@ -523,6 +539,175 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         expected = fn(x)
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
         self.assertEqual(result, expected)
+
+    def test_generalized_scatter_reinplaces_uninitialized_factory_base(self):
+        def f(x):
+            base = torch.empty_like(x)
+            return aten.slice_scatter.default(base, x, 0, 0, x.shape[0])
+
+        x = torch.randn(4, 4, device=device)
+        gm = self._run_reinplace_pass(f, x)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.copy_.default, targets)
+        self.assertNotIn(aten.slice_scatter.default, targets)
+        self.assertEqual(gm(x), f(x))
+
+    def test_generalized_scatter_keeps_overlapping_src_from_factory_base(self):
+        def f(x):
+            out = aten.slice_scatter.default(torch.empty_like(x), x, 0, 0, x.shape[0])
+            src = out[1:3]
+            return aten.slice_scatter.default(out, src, 0, 0, 2)
+
+        x = torch.randn(4, 4, device=device)
+        gm = self._run_reinplace_pass(f, x)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertEqual(targets.count(aten.copy_.default), 1)
+        self.assertEqual(targets.count(aten.slice_scatter.default), 1)
+        self.assertEqual(gm(x), f(x))
+
+    def test_generalized_scatter_reinplaces_same_view_src_from_factory_base(self):
+        def f(x):
+            out = aten.slice_scatter.default(torch.empty_like(x), x, 0, 0, x.shape[0])
+            src = out[0:2]
+            return aten.slice_scatter.default(out, src, 0, 0, 2)
+
+        x = torch.randn(4, 4, device=device)
+        gm = self._run_reinplace_pass(f, x)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertEqual(targets.count(aten.copy_.default), 2)
+        self.assertNotIn(aten.slice_scatter.default, targets)
+        self.assertEqual(gm(x), f(x))
+
+    def test_generalized_scatter_reinplaces_initialized_factory_realized_src(self):
+        def f(x):
+            base = torch.zeros_like(x)
+            src = x[1:3]
+            return aten.slice_scatter.default(base, src, 0, 1, 3)
+
+        x = torch.randn(4, 4, device=device)
+        gm = self._run_reinplace_pass(f, x)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.copy_.default, targets)
+        self.assertNotIn(aten.slice_scatter.default, targets)
+        self.assertEqual(gm(x), f(x))
+
+    def test_generalized_scatter_reinplaces_non_factory_base_realized_src(self):
+        def f(x, src):
+            base = x.cos()
+            return aten.slice_scatter.default(base, src, 0, 1, 3)
+
+        x = torch.randn(4, 4, device=device)
+        src = torch.randn(2, 4, device=device)
+        gm = self._run_reinplace_pass(f, x, src)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.copy_.default, targets)
+        self.assertNotIn(aten.slice_scatter.default, targets)
+        self.assertEqual(gm(x, src), f(x, src))
+
+    def test_generalized_scatter_keeps_non_factory_base_generated_src(self):
+        # A smaller but non-realized (generated) src stays functional: reinplacing
+        # is chosen only for realized srcs, factory bases, or realize-anyway ends.
+        def f(x, src):
+            base = x.cos()
+            src_copy = aten.copy.default(base[1:3], src)
+            return aten.slice_scatter.default(base, src_copy, 0, 1, 3)
+
+        x = torch.randn(4, 4, device=device)
+        src = torch.randn(2, 4, device=device)
+        gm = self._run_reinplace_pass(f, x, src)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertNotIn(aten.copy_.default, targets)
+        self.assertIn(aten.slice_scatter.default, targets)
+        self.assertEqual(gm(x, src), f(x, src))
+
+    def test_generalized_scatter_keeps_alias_chained_generated_src(self):
+        # Chained scatters with generated (non-realized) srcs stay functional.
+        def f(x, src0, src1):
+            base = x.cos()
+            copy0 = aten.copy.default(base[0:2], src0)
+            out = aten.slice_scatter.default(base, copy0, 0, 0, 2)
+            out = aten.alias.default(aten.alias.default(out))
+            copy1 = aten.copy.default(out[2:4], src1)
+            return aten.slice_scatter.default(out, copy1, 0, 2, 4)
+
+        x = torch.randn(4, 4, device=device)
+        src0 = torch.randn(2, 4, device=device)
+        src1 = torch.randn(2, 4, device=device)
+        gm = self._run_reinplace_pass(f, x, src0, src1)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertNotIn(aten.copy_.default, targets)
+        self.assertEqual(targets.count(aten.slice_scatter.default), 2)
+        self.assertEqual(gm(x, src0, src1), f(x, src0, src1))
+
+    def test_generalized_scatter_deep_chain_no_recursion(self):
+        # Regression: the reinplace pass must handle deep scatter chains (e.g.
+        # Longformer sliding-window attention) without overflowing the Python stack.
+        def f(x):
+            acc = x.cos()
+            for _ in range(1500):
+                chunk = acc[0:2] + 1.0
+                acc = aten.slice_scatter.default(acc, chunk, 0, 0, 2)
+            return acc
+
+        x = torch.randn(4, 4, device=device)
+        gm = self._run_reinplace_pass(f, x)
+        self.assertEqual(gm(x), f(x))
+
+    def test_generalized_scatter_reinplaces_invoke_subgraph_src(self):
+        def subgraph(src):
+            return (src.sin(),)
+
+        subgm = make_fx(subgraph, tracing_mode="fake")(torch.randn(2, 4, device=device))
+
+        def f(x):
+            base = x.cos()
+            src = invoke_subgraph(subgm, "test_subgraph", x[1:3])[0]
+            return aten.slice_scatter.default(base, src, 0, 1, 3)
+
+        x = torch.randn(4, 4, device=device)
+        gm = self._run_reinplace_pass(f, x)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.copy_.default, targets)
+        self.assertNotIn(aten.slice_scatter.default, targets)
+        self.assertEqual(gm(x), f(x))
+
+    def test_generalized_scatter_keeps_initialized_factory_generated_src(self):
+        def f(x):
+            base = torch.zeros_like(x)
+            src = torch.full((2, x.shape[1]), 1.0, device=x.device)
+            return aten.slice_scatter.default(base, src, 0, 1, 3)
+
+        x = torch.randn(4, 4, device=device)
+        gm = self._run_reinplace_pass(f, x)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertNotIn(aten.copy_.default, targets)
+        self.assertIn(aten.slice_scatter.default, targets)
+        self.assertEqual(gm(x), f(x))
+
+    def test_generalized_scatter_does_not_cross_functional_scatter(self):
+        def f(x):
+            base = torch.zeros_like(x)
+            generated = torch.full((2, x.shape[1]), 1.0, device=x.device)
+            out = aten.slice_scatter.default(base, generated, 0, 0, 2)
+            realized = x[2:4]
+            return aten.slice_scatter.default(out, realized, 0, 2, 4)
+
+        x = torch.randn(4, 4, device=device)
+        gm = self._run_reinplace_pass(f, x)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertNotIn(aten.copy_.default, targets)
+        self.assertEqual(targets.count(aten.slice_scatter.default), 2)
+        self.assertEqual(gm(x), f(x))
 
     @parametrize(
         "factory_op",

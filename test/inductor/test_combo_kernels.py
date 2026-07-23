@@ -2564,12 +2564,17 @@ class _PeakMemFakeNode:
         self._outputs: list = []
         self.mpi_node = SimpleNamespace(pred_buffers=set())
         self.snodes: list | None = None
+        self.unmet_dependencies: set = set()
+        self.device = torch.device("cpu")
 
     def get_name(self) -> str:
         return self.name
 
     def get_first_name(self) -> str:
         return self.name
+
+    def get_device(self):
+        return self.device
 
     def get_outputs(self):
         if self.snodes is not None:
@@ -2578,6 +2583,12 @@ class _PeakMemFakeNode:
                 out.extend(s.get_outputs())
             return out
         return self._outputs
+
+    def get_nodes(self):
+        return self.snodes if self.snodes is not None else [self]
+
+    def get_buffer_names(self):
+        return {buf.get_name() for buf in self.get_outputs()}
 
 
 class _PeakMemFakeBuffer:
@@ -2604,6 +2615,7 @@ class _PeakMemFakeScheduler:
         return nodes
 
 
+@instantiate_parametrized_tests
 class ComboKernelPeakMemoryTests(InductorTestCase):
     """Coverage for memory-aware combo-kernel acceptance and commit logic."""
 
@@ -2881,7 +2893,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         steps = {a1: 1, a2: 2, a3: 3, a100: 100, b3: 3, b5: 5}
         nodes_in_window = [a1, a2, a3, b3, b5]
 
-        peak = mem_mod.estimate_region_peak_memory(
+        peak, live_before, live_after = mem_mod.estimate_region_peak_memory(
             nodes_in_window,
             region_start=0,
             region_end=5,
@@ -2898,6 +2910,261 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         # a100 (step 100) is outside the window, so bufD is never seen.
         # bufC is a graph output, so it is never freed.
         self.assertEqual(peak, 350)
+        self.assertEqual(live_before, [0, 0, 100, 300, 250, 250, 50])
+        self.assertEqual(live_after, [0, 100, 300, 350, 250, 250])
+
+        step_calls = 0
+
+        def cached_step_of(node):
+            nonlocal step_calls
+            step_calls += 1
+            return steps[node]
+
+        last_use_step_cache = {}
+        cached_result = mem_mod.estimate_region_peak_memory(
+            nodes_in_window,
+            region_start=0,
+            region_end=5,
+            step_of=cached_step_of,
+            graph_outputs={"bufC"},
+            last_use_step_cache=last_use_step_cache,
+            known_last_use_steps={
+                id(bufA.mpi_buffer): 3,
+                id(bufB.mpi_buffer): 5,
+            },
+            node_steps=steps,
+        )
+        self.assertEqual(cached_result, (peak, live_before, live_after))
+        self.assertEqual(step_calls, 0)
+        self.assertEqual(last_use_step_cache[id(bufA.mpi_buffer)], 3)
+        self.assertEqual(last_use_step_cache[id(bufB.mpi_buffer)], 5)
+
+        peak_only = mem_mod.estimate_region_peak_memory(
+            nodes_in_window,
+            region_start=0,
+            region_end=5,
+            step_of=lambda n: steps[n],
+            graph_outputs={"bufC"},
+            return_live_memory=False,
+        )
+        self.assertEqual(peak_only, (peak, [], []))
+
+        early_peak, early_before, early_after = mem_mod.estimate_region_peak_memory(
+            nodes_in_window,
+            region_start=0,
+            region_end=5,
+            step_of=lambda n: steps[n],
+            graph_outputs={"bufC"},
+            max_peak=299,
+        )
+        self.assertGreater(early_peak, 299)
+        self.assertEqual((early_before, early_after), ([], []))
+
+    def test_fusion_memory_update_splices_context(self):
+        from torch._inductor.scheduler import (
+            FusionMemoryContext,
+            FusionMemoryUpdate,
+            Scheduler,
+        )
+
+        a, b, c = (_PeakMemFakeNode(n) for n in ("a", "b", "c"))
+        candidate = _PeakMemFakeNode("candidate")
+        fused = _PeakMemFakeNode("fused")
+        fused.snodes = [a, b]
+        ctx = FusionMemoryContext(
+            nodes=[a, b, c],
+            tracked_nodes={a, b, c},
+            graph_outputs=set(),
+            node_to_idx={a: 0, b: 1, c: 2},
+            baseline_peak=30,
+            baseline_live_before=[0, 10, 20, 30],
+            baseline_live_after=[10, 20, 30, 30],
+            last_use_steps={1: 2},
+        )
+        update = FusionMemoryUpdate(
+            node1=a,
+            node2=b,
+            candidate=candidate,
+            candidate_step=0,
+            region_start=0,
+            region_end=1,
+            local_nodes=[candidate],
+            live_before=[1, 2, 3],
+            live_after=[4, 5],
+            last_use_steps={1: 0, 3: 4},
+            candidate_outputs=[],
+        )
+
+        scheduler = object.__new__(Scheduler)
+        scheduler._fusion_memory_context = ctx
+        with (
+            patch.object(
+                scheduler, "_check_fusion_memory", return_value=(False, update)
+            ),
+            patch.object(scheduler, "fuse_two_nodes", return_value=fused),
+        ):
+            self.assertIs(scheduler._fuse_two_nodes_memory_checked(a, b, set()), fused)
+
+        self.assertEqual(ctx.nodes, [fused, None, c])
+        self.assertEqual(ctx.baseline_live_before, [1, 2, 3, 30])
+        self.assertEqual(ctx.baseline_live_after, [4, 5, 30, 30])
+        self.assertEqual(ctx.baseline_peak, 30)
+        self.assertEqual(ctx.node_to_idx[fused], 0)
+        self.assertEqual(ctx.node_to_idx[a], 0)
+        self.assertEqual(ctx.node_to_idx[b], 0)
+        self.assertEqual(ctx.tracked_nodes, {fused, c})
+        self.assertEqual(ctx.last_use_steps, {1: 0, 3: 4})
+
+    def test_fusion_memory_update_filters_internal_candidate_outputs(self):
+        from torch._inductor.scheduler import Scheduler
+
+        producer = _PeakMemFakeNode("producer")
+        consumer = _PeakMemFakeNode("consumer")
+        external = _PeakMemFakeNode("external")
+        candidate = _PeakMemFakeNode("candidate")
+        candidate.snodes = [producer, consumer]
+
+        tmp = _PeakMemFakeBuffer("tmp", {consumer}, 100, 100)
+        out = _PeakMemFakeBuffer("out", {external}, 10, 10)
+        graph_out = _PeakMemFakeBuffer("graph_out", set(), 1, 1)
+
+        producer._outputs = [tmp]
+        consumer._outputs = [out, graph_out]
+        consumer.mpi_node.pred_buffers = {tmp}
+
+        scheduler = object.__new__(Scheduler)
+        candidate_outputs = Scheduler._assign_fusion_memory_planning_info(
+            scheduler,
+            producer,
+            consumer,
+            candidate,
+            {"graph_out"},
+        )
+
+        self.assertEqual(candidate_outputs, [out, graph_out])
+        self.assertEqual(candidate.mpi_node.size, 11)
+        self.assertEqual(candidate.mpi_node.pred_buffers, set())
+
+    def test_fusion_memory_update_modes(self):
+        from torch._inductor.scheduler import FusionMemoryContext, Scheduler
+
+        a, b, peak, far = (_PeakMemFakeNode(n) for n in ("a", "b", "peak", "far"))
+        ctx = FusionMemoryContext(
+            nodes=[a, b, peak, far],
+            tracked_nodes={a, b, peak, far},
+            graph_outputs=set(),
+            node_to_idx={a: 0, b: 1, peak: 2, far: 3},
+            baseline_peak=100,
+            baseline_live_before=[0, 10, 20, 100, 90],
+            baseline_live_after=[10, 20, 100, 90],
+        )
+        ctx.refresh_peak_range()
+        scheduler = object.__new__(Scheduler)
+        fast_update = object()
+        with (
+            torch._inductor.config.patch(
+                fusion_memory_timeline_peak_allowed_increase_mb=0,
+                fusion_memory_timeline_full_correctness=False,
+            ),
+            patch.object(
+                scheduler,
+                "_fusion_memory_update",
+                return_value=(False, fast_update),
+            ) as update_mock,
+        ):
+            self.assertEqual(
+                scheduler._check_fusion_memory(ctx, a, b),
+                (False, None),
+            )
+            update_mock.assert_not_called()
+            self.assertEqual(
+                scheduler._check_fusion_memory(ctx, a, far),
+                (False, fast_update),
+            )
+            update_mock.assert_called_once_with(ctx, a, far, 0)
+            fused = _PeakMemFakeNode("fused")
+            self.assertEqual(
+                scheduler._check_fusion_memory(ctx, fused, b),
+                (False, None),
+            )
+            update_mock.assert_called_once_with(ctx, a, far, 0)
+
+            ctx.decision_cache.clear()
+            update_mock.return_value = (True, None)
+            self.assertEqual(
+                scheduler._check_fusion_memory(ctx, a, far),
+                (True, None),
+            )
+            self.assertEqual(
+                scheduler._check_fusion_memory(None, a, far),
+                (False, None),
+            )
+
+        ctx.decision_cache.clear()
+        exact_update = object()
+        with (
+            torch._inductor.config.patch(
+                fusion_memory_timeline_peak_allowed_increase_mb=0,
+                fusion_memory_timeline_full_correctness=True,
+            ),
+            patch.object(
+                scheduler,
+                "_fusion_memory_update",
+                return_value=(False, exact_update),
+            ) as update_mock,
+        ):
+            self.assertEqual(
+                scheduler._check_fusion_memory(ctx, a, b),
+                (False, exact_update),
+            )
+            update_mock.assert_called_once_with(ctx, a, b, 0)
+
+    @parametrize("full_correctness", [False, True])
+    def test_fusion_memory_update_mode_runs_real_full_check(self, full_correctness):
+        from torch._inductor.scheduler import FusionMemoryContext, Scheduler
+
+        a, b, peak = (_PeakMemFakeNode(n) for n in ("a", "b", "peak"))
+        candidate = _PeakMemFakeNode("candidate")
+        candidate.snodes = [a, b]
+        out = _PeakMemFakeBuffer("out", set(), 100, 100)
+        b._outputs = [out]
+        ctx = FusionMemoryContext(
+            nodes=[a, b, peak],
+            tracked_nodes={a, b, peak},
+            graph_outputs={"out"},
+            node_to_idx={a: 0, b: 1, peak: 2},
+            baseline_peak=10,
+            baseline_live_before=[0, 0, 0, 10],
+            baseline_live_after=[0, 0, 10],
+        )
+        ctx.refresh_peak_range()
+
+        class FakeBackend:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.dry_run = False
+
+            def fuse(self, node1, node2, *, dry_run=False):
+                self.calls += 1
+                self.dry_run = dry_run
+                return candidate
+
+        backend = FakeBackend()
+        scheduler = object.__new__(Scheduler)
+        scheduler.get_backend = lambda device: backend
+        scheduler.name_to_buf = {}
+        scheduler.name_to_fused_node = {}
+
+        with torch._inductor.config.patch(
+            fusion_memory_timeline_peak_allowed_increase_mb=0,
+            fusion_memory_timeline_full_correctness=full_correctness,
+        ):
+            rejected, update = scheduler._check_fusion_memory(ctx, a, b)
+
+        self.assertEqual(rejected, full_correctness)
+        self.assertIsNone(update)
+        self.assertEqual(backend.calls, int(full_correctness))
+        self.assertEqual(backend.dry_run, full_correctness)
 
 
 if __name__ == "__main__":

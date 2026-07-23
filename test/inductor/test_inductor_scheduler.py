@@ -1,7 +1,8 @@
 # Owner(s): ["module: inductor"]
 
+from types import SimpleNamespace
 from unittest import skipIf
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import sympy
 
@@ -17,9 +18,13 @@ from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
+    BaseScheduling,
     ExternKernelSchedulerNode,
+    FusedExternTritonKernelSchedulerNode,
     NestedReduction,
+    NodeUser,
     Scheduler,
+    SchedulerNode,
 )
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
@@ -100,6 +105,22 @@ class TestScheduler(TestCase):
         snode.node = node
         return snode
 
+    def _extern_triton_epilogue_snodes(self):
+        kernel = object.__new__(ir.UserDefinedTritonKernel)
+        kernel.mutation_outputs = [SimpleNamespace(name="mutated")]
+        kernel.get_operation_name = lambda: "extern_kernel"
+        scheduler = SimpleNamespace(
+            mutation_real_name={"mutated": "real_mutated"},
+            name_to_buf={"real_mutated": SimpleNamespace(users=[])},
+        )
+        node1 = object.__new__(ExternKernelSchedulerNode)
+        node1.scheduler = scheduler
+        node1.node = kernel
+        node2 = object.__new__(SchedulerNode)
+        user = NodeUser(node1)
+        scheduler.name_to_buf["real_mutated"].users.append(user)
+        return node1, node2, user
+
     def test_get_benchmarkable_extern_fn_uses_op_overload(self):
         self.assertIsNone(_get_benchmarkable_extern_fn(Mock(spec=BaseSchedulerNode)))
         self.assertIs(
@@ -128,6 +149,76 @@ class TestScheduler(TestCase):
                 )
             )
         )
+
+    def test_epilogue_fuse_dry_run_defers_user_list_update(self):
+        node1, node2, user = self._extern_triton_epilogue_snodes()
+        users = node1.scheduler.name_to_buf["real_mutated"].users
+
+        with patch.object(
+            FusedExternTritonKernelSchedulerNode, "__init__", return_value=None
+        ):
+            FusedExternTritonKernelSchedulerNode.epilogue_fuse(
+                node1, node2, dry_run=True
+            )
+        self.assertEqual(users, [user])
+
+    def test_epilogue_fuse_default_commits_user_list_update(self):
+        node1, node2, _ = self._extern_triton_epilogue_snodes()
+        users = node1.scheduler.name_to_buf["real_mutated"].users
+
+        with patch.object(
+            FusedExternTritonKernelSchedulerNode, "__init__", return_value=None
+        ):
+            FusedExternTritonKernelSchedulerNode.epilogue_fuse(node1, node2)
+        self.assertEqual(users, [])
+
+    def test_base_scheduling_forwards_dry_run_to_epilogue_fusion(self):
+        node1, node2, _ = self._extern_triton_epilogue_snodes()
+        fused = object()
+
+        with (
+            patch.object(
+                NestedReduction, "_is_dependent_reduction_pair", return_value=False
+            ),
+            patch(
+                "torch._inductor.scheduler.MixOrderReduction.are_mix_order_reductions",
+                return_value=False,
+            ),
+            patch.object(
+                FusedExternTritonKernelSchedulerNode,
+                "epilogue_fuse",
+                return_value=fused,
+            ) as epilogue_fuse,
+        ):
+            self.assertIs(BaseScheduling(None).fuse(node1, node2, dry_run=True), fused)
+        epilogue_fuse.assert_called_once_with(node1, node2, dry_run=True)
+
+    def test_fuse_two_nodes_builds_fusion(self):
+        scheduler = object.__new__(Scheduler)
+        backend = Mock()
+        scheduler.get_backend = Mock(return_value=backend)
+        scheduler.name_to_fused_node = {}
+
+        device = torch.device("cpu")
+        node1 = Mock()
+        node1.get_name.return_value = "node1"
+        node1.get_device.return_value = device
+        node1.get_nodes.return_value = [node1]
+        node2 = Mock()
+        node2.get_name.return_value = "node2"
+        node2.get_device.return_value = device
+        node2.get_nodes.return_value = [node2]
+        fused = Mock()
+        fused.get_nodes.return_value = [node1, node2]
+        backend.fuse.return_value = fused
+        fused_nodes = OrderedSet([node1, node2])
+        scheduler.node_to_stream = {node1: 0}
+
+        self.assertIs(
+            Scheduler.fuse_two_nodes(scheduler, node1, node2, fused_nodes),
+            fused,
+        )
+        backend.fuse.assert_called_once_with(node1, node2)
 
     def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
         snode = Mock()
