@@ -4050,6 +4050,7 @@ def _subkernel_fingerprint(combo_meta: dict[str, Any], i: int) -> tuple[Any, ...
         combo_meta.get(f"reduction_hint_{i}"),
         combo_meta.get(f"tile_hint_{i}"),
         sub_meta.get("add_persistent_rblock", False),
+        sub_meta.get("add_heavy_reduction_rblock", False),
         sub_meta.get("has_loadstore_with_contiguous_rdim"),
         tuple(sorted(tma.items())),
         tuple(sorted(tiling_scores.items())),

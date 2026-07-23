@@ -43,6 +43,7 @@ from torch._inductor.runtime.hints import (
     HeuristicType,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
+    ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
@@ -183,6 +184,36 @@ class TestTritonHeuristics(TestCase):
         )[0]
         self.assertEqual(cfg.kwargs["XBLOCK"], 512)
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 128)
+
+    @parametrize(
+        "loads_and_reductions,expected_full_rblocks", ((8, 3), (9, 3), (10, 0))
+    )
+    def test_heavy_reduction_rblock_configs(
+        self, loads_and_reductions, expected_full_rblocks
+    ):
+        device = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=132,
+            cc=90,
+            major=9,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+        configs = _reduction_configs(
+            size_hints={"x": 1024, "r0_": 4096},
+            inductor_meta={
+                "add_heavy_reduction_rblock": True,
+                "num_load": loads_and_reductions - 1,
+                "num_reduction": 1,
+                "reduction_hint": ReductionHint.INNER,
+            },
+            triton_meta={"device": device},
+        )
+        full_rblocks = [
+            config for config in configs if config.kwargs["R0_BLOCK"] == 4096
+        ]
+        self.assertEqual(len(full_rblocks), expected_full_rblocks)
 
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):

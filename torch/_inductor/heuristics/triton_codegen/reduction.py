@@ -302,6 +302,17 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             )
             configs.append(c)
 
+        if inductor_meta.get("add_heavy_reduction_rblock") and loads_and_red <= 9:
+            for xblock, num_warps in ((1, 2), (1, 4), (2, 8)):
+                c = make_config(
+                    xblock,
+                    min(rnumel, 4096),
+                    num_warps=num_warps,
+                    register_intensive=True,
+                    dynamic_scale_rblock=False,
+                )
+                configs.append(c)
+
         # For 3d tiling, default to more autotuning initially
         if "y" in size_hints:
             pass

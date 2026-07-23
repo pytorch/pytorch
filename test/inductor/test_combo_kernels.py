@@ -2202,6 +2202,12 @@ class ComboKernelTestsMaxAutotune(TestCase):
                 {"x": 8, "r0_": 1},
                 2,
             ),
+            (
+                "different heavy reduction rblock",
+                ("inductor_meta_1", "add_heavy_reduction_rblock"),
+                True,
+                2,
+            ),
         ]
 
         for desc, path, value, expected_groups in cases:

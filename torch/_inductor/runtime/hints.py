@@ -327,6 +327,7 @@ class InductorMeta(typing.TypedDict, total=False):
     persistent_reduction: bool
     native_matmul_persistent_rblock: int
     add_persistent_rblock: bool
+    add_heavy_reduction_rblock: bool
     max_persistent_rblock: int
     kernel_num_gb: float
     kernel_flop: int
