@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     run_tests,
     TEST_WITH_ROCM,
-    TEST_XPU,
 )
 
 
@@ -86,11 +85,7 @@ class ReplicateTest(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        return "gloo"
-
-    @classmethod
-    def device_type(cls) -> str:
-        return "cpu"
+        return dist.get_default_backend_for_device(cls.device_type())
 
     def _compare_module(self, mod, replicate_mod):
         local_batch_size = 1
@@ -141,7 +136,6 @@ class ReplicateTest(MultiProcContinuousTest):
         IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/179948"
     )
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     def test_replicate_move_args_kwargs_to_device(self):
         class MyNet(nn.Module):
             def __init__(self) -> None:
@@ -162,7 +156,6 @@ class ReplicateTest(MultiProcContinuousTest):
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     def test_replicate_ignore_module(self):
         torch.accelerator.set_device_index(self.rank)
         # Seed ensures diff input and thus different local grads across ranks.
@@ -212,7 +205,6 @@ class ReplicateTest(MultiProcContinuousTest):
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179746")
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     def test_replicate_device_id(self):
         model = Net()
         model_cuda = deepcopy(model).to(device_type)
@@ -250,7 +242,6 @@ class ReplicateTest(MultiProcContinuousTest):
 class ReplicateFullyShardInit(ReplicateTest):
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179810")
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     def test_replicate_fully_shard_init(self):
         class ToyModel(nn.Module):
             def __init__(self, dim: int):
