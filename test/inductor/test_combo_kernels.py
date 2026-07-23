@@ -1233,6 +1233,10 @@ class ComboKernelTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_gpu_and_triton
+    @skipIfXpu(
+        msg="dynamic_scale_rblock requires GPU-specific device properties "
+        "(major, regs_per_multiprocessor, warp_size) not available on XPU"
+    )
     @torch._inductor.config.patch(
         {
             "combo_kernel_per_subkernel_blocks": True,
@@ -2777,7 +2781,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             ("abs_gb=1MB", self._thresholds(abs_thr_gb=1.0 / 1024)),
         ):
             combo, _ = run(thresholds)
-            self.assertIsNone(combo, f"{label} should reject")
+            self.assertIsNone(combo, lambda msg: f"{msg}\n{label} should reject")
 
         combo, combo_step = run(self._thresholds(abs_thr_gb=1.0))
         self.assertIsNotNone(combo)
@@ -2853,7 +2857,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertLess(
             peak_tight,
             peak_disabled,
-            f"tight threshold did not reduce runtime peak memory "
+            lambda msg: f"{msg}\ntight threshold did not reduce runtime peak memory "
             f"(tight={peak_tight}, disabled={peak_disabled})",
         )
 
