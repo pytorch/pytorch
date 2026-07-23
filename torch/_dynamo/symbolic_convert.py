@@ -1772,9 +1772,13 @@ class InstructionTranslatorBase(
                     )
                 raise
             # See Note [NGB suppress propagation]
-            # getattr needed: this catches StepUnsupported too, which
-            # doesn't declare _ngb_suppress_propagate.
-            if getattr(e, "_ngb_suppress_propagate", False) and self.parent is not None:
+            # isinstance narrow: only Unsupported/UserError carry the flag;
+            # StepUnsupported never sets it and lacks skip_frame.
+            if (
+                isinstance(e, (Unsupported, UserError))
+                and e._ngb_suppress_propagate
+                and self.parent is not None
+            ):
                 e.skip_frame = True
                 raise
             if self.current_speculation is None:
@@ -6376,9 +6380,16 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if not config.nested_graph_breaks or not self._allow_nested_graph_breaks:
             return False
-        if not isinstance(self.funcvar, variables.UserFunctionVariable):
+        if not isinstance(self.funcvar, variables.BaseUserFunctionVariable):
             return False
-        return is_ngb_suppressed_inline(self.funcvar.get_filename())
+        try:
+            filename = self.funcvar.get_filename()
+        except NotImplementedError:
+            # Some BaseUserFunctionVariable subclasses (e.g. the tree_map
+            # fast-path wrapper) have no backing code object, so no module
+            # filename and thus cannot be from a suppressed module.
+            return False
+        return is_ngb_suppressed_inline(filename)
 
     def should_compile_partial_graph(self) -> bool:
         if config.nested_graph_breaks:
