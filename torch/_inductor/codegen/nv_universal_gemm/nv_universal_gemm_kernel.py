@@ -692,10 +692,15 @@ def _update_reuse_args_tensors(
         for name, wrapper in epilogue.tensors.items():
             val = epilogue_args.tensors[name]
             wrapper._runtime_tensor = getattr(val, "runtime_tensor", val)
-    local_reduce = getattr(args, "local_reduce_out", None)
-    if local_reduce is not None:
-        assert isinstance(args_kwargs, dict)  # noqa: S101
-        local_reduce._runtime_tensor = args_kwargs["local_reduce_out"]
+    for name in (
+        "local_reduce_out",
+        "local_reduce_feed_out",
+        "local_reduce_secondary_feed_out",
+    ):
+        local_reduce = getattr(args, name, None)
+        if local_reduce is not None:
+            assert isinstance(args_kwargs, dict)  # noqa: S101
+            local_reduce._runtime_tensor = args_kwargs[name]
     return True
 
 
@@ -736,9 +741,14 @@ def _clear_reuse_args_tensors(variant_name, args, epilogue_args):
                     example_inputs[name] = torch.empty_strided(
                         val.shape, val.stride(), dtype=val.dtype, device="meta"
                     )
-    local_reduce = getattr(args, "local_reduce_out", None)
-    if local_reduce is not None:
-        local_reduce._runtime_tensor = None
+    for name in (
+        "local_reduce_out",
+        "local_reduce_feed_out",
+        "local_reduce_secondary_feed_out",
+    ):
+        local_reduce = getattr(args, name, None)
+        if local_reduce is not None:
+            local_reduce._runtime_tensor = None
 
 
 def _nvgemm_run(
@@ -778,9 +788,23 @@ def _nvgemm_run(
             for name, value in epilogue_args.tensors.items():
                 if isinstance(value, torch.Tensor) and value.ndim == 2:
                     transposed = value.t()
-                    if transposed.shape[0] == 1 or transposed.shape[1] == 1:
-                        transposed = transposed.as_strided(
-                            transposed.shape, (transposed.shape[1], 1)
+                    if transposed.shape[0] == 1:
+                        stride = transposed.stride(1)
+                        transposed = (
+                            transposed.contiguous()
+                            if stride != 1
+                            else transposed.as_strided(
+                                transposed.shape, (transposed.shape[1], 1)
+                            )
+                        )
+                    elif transposed.shape[1] == 1:
+                        stride = transposed.stride(0)
+                        transposed = (
+                            transposed.contiguous()
+                            if stride != 1
+                            else transposed.as_strided(
+                                transposed.shape, (1, transposed.shape[0])
+                            )
                         )
                     epilogue_args.tensors[name] = transposed
     from cutlass.operators.artifact import CompiledArtifact

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from cutlass.operators.arch import TargetSm  # noqa: TC002
 from cutlass.operators.arguments import GemmArguments
-from cutlass.operators.artifact import CompiledArtifact
-from cutlass.operators.arch import TargetSm
+from cutlass.operators.artifact import CompiledArtifact  # noqa: TC002
 from cutlass.operators.fusion.library import ActivationOp
 from cutlass.operators.providers.cutedsl.evt.converter import (
     EFCConverter,
@@ -20,14 +20,14 @@ from ..dense_gemm_efc import PersistentDenseGemmEFCKernel
 
 
 class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
+    """Dense EFC operator backed by Inductor's vendored SM100 implementation."""
+
     supported_args_type = GemmArguments
     designed_for_min_cc = 100
 
     def __init__(self, metadata):
         super().__init__(metadata)
-        OpToCuteImpl.setdefault(
-            ActivationOp.Identity, lambda efc_config, value: value
-        )
+        OpToCuteImpl.setdefault(ActivationOp.Identity, lambda efc_config, value: value)
         OpToCuteImplStr.setdefault(ActivationOp.Identity, lambda value: value)
         epilogue_op = (
             EFCConverter.convert(
@@ -80,10 +80,12 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
                 or (
                     feeds_main
                     and axis == 0
-                    and (
-                        secondary_type.startswith("sum_mul_affine:")
-                        or secondary_type.startswith("normalize_sum_affine:")
-                        or secondary_type.startswith("normalize_sum_reverse_affine:")
+                    and secondary_type.startswith(
+                        (
+                            "sum_mul_affine:",
+                            "normalize_sum_affine:",
+                            "normalize_sum_reverse_affine:",
+                        )
                     )
                 )
             )
@@ -103,10 +105,12 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
                 reduce_type.startswith("variance_affine:")
                 or (
                     feeds_main
-                    and (
-                        reduce_type.startswith("mean_linear:")
-                        or reduce_type.startswith("normalize_sum_affine:")
-                        or reduce_type.startswith("normalize_sum_reverse_affine:")
+                    and reduce_type.startswith(
+                        (
+                            "mean_linear:",
+                            "normalize_sum_affine:",
+                            "normalize_sum_reverse_affine:",
+                        )
                     )
                 )
             )
@@ -133,9 +137,7 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         max_active_clusters = get_max_active_clusters(self.impl.cluster_shape_mn)
         epilogue_params = (
             [
-                value.compile_time_tensor
-                if isinstance(value, TensorWrapper)
-                else value
+                value.compile_time_tensor if isinstance(value, TensorWrapper) else value
                 for value in args.epilogue.parameters
             ]
             if args.epilogue is not None
@@ -181,10 +183,10 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         epilogue_params = (
             args.epilogue.parameters if args.epilogue is not None else [args.out]
         )
-        epilogue_params = [
-            value.tensor if isinstance(value, Operand) else value
-            for value in epilogue_params
-        ]
+        for index, value in enumerate(epilogue_params):
+            if isinstance(value, Operand):
+                value = value.tensor
+            epilogue_params[index] = getattr(value, "runtime_tensor", value)
         local_reduce = getattr(args, "local_reduce_out", None)
         local_reduce_feed = getattr(args, "local_reduce_feed_out", None)
         secondary_feed = getattr(args, "local_reduce_secondary_feed_out", None)
