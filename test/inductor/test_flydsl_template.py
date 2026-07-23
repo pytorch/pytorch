@@ -1,6 +1,10 @@
 # Owner(s): ["module: inductor"]
+import ctypes
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
+from types import SimpleNamespace
 from unittest import mock
 
 import torch
@@ -21,6 +25,285 @@ if HAS_FLYDSL:
 
 
 class TestFlyDSLTemplate(TestCase):
+    def test_inductor_launcher_specializes_packed_abi(self):
+        from torch._inductor.runtime.flydsl_cache import (
+            make_flydsl_inductor_launcher,
+        )
+
+        observed = []
+        callback_type = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+
+        @callback_type
+        def callback(packed):
+            slots = ctypes.cast(packed, ctypes.POINTER(ctypes.c_void_p))
+            observed.append(
+                (
+                    ctypes.c_void_p.from_address(slots[0]).value,
+                    ctypes.c_void_p.from_address(slots[1]).value,
+                    ctypes.c_void_p.from_address(slots[2]).value,
+                    ctypes.c_int32.from_address(slots[3]).value,
+                    ctypes.c_int32.from_address(slots[4]).value,
+                    ctypes.c_int32.from_address(slots[5]).value,
+                    ctypes.c_void_p.from_address(slots[6]).value,
+                )
+            )
+
+        def fill_value(value, storage):
+            storage.value = value
+
+        tensors = [torch.empty(1) for _ in range(3)]
+        state = SimpleNamespace(
+            _spec=[
+                (0, ctypes.c_void_p, fill_value),
+                (1, ctypes.c_void_p, fill_value),
+                (2, ctypes.c_void_p, fill_value),
+                (3, ctypes.c_int32, fill_value),
+                (4, ctypes.c_int32, fill_value),
+                (5, ctypes.c_int32, fill_value),
+                (7, ctypes.c_void_p, fill_value),
+            ],
+            _func_exe=callback,
+        )
+        executor = SimpleNamespace(_call_state=state)
+        with mock.patch.object(
+            torch._C, "_FlyDSLMMFp16Bf16CWrapper", None, create=True
+        ):
+            launcher = make_flydsl_inductor_launcher(
+                executor,
+                *tensors,
+                m=8,
+                n=4096,
+                k=4096,
+                param=object(),
+            )
+        stream = 0x12345678
+        launcher(*tensors, stream)
+
+        self.assertTrue(hasattr(launcher, "_flydsl_keepalive"))
+        self.assertEqual(
+            observed,
+            [
+                tuple(tensor.data_ptr() for tensor in tensors)
+                + (8, 4096, 4096, stream)
+            ],
+        )
+
+    def test_inductor_launcher_prefers_native_c_wrapper(self):
+        from torch._inductor.runtime.flydsl_cache import (
+            make_flydsl_inductor_launcher,
+        )
+
+        callback_type = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+        callback = callback_type(lambda packed: None)
+
+        def fill_value(value, storage):
+            storage.value = value
+
+        state = SimpleNamespace(
+            _spec=[
+                (0, ctypes.c_void_p, fill_value),
+                (1, ctypes.c_void_p, fill_value),
+                (2, ctypes.c_void_p, fill_value),
+                (3, ctypes.c_int32, fill_value),
+                (4, ctypes.c_int32, fill_value),
+                (5, ctypes.c_int32, fill_value),
+                (7, ctypes.c_void_p, fill_value),
+            ],
+            _func_exe=callback,
+        )
+        executor = SimpleNamespace(_call_state=state)
+        tensors = [torch.empty(1) for _ in range(3)]
+        native_launcher = object()
+        with mock.patch.object(
+            torch._C,
+            "_FlyDSLMMFp16Bf16CWrapper",
+            return_value=native_launcher,
+            create=True,
+        ) as c_wrapper:
+            result = make_flydsl_inductor_launcher(
+                executor,
+                *tensors,
+                m=8,
+                n=4096,
+                k=4096,
+                param=object(),
+            )
+
+        func_ptr = ctypes.cast(callback, ctypes.c_void_p).value
+        self.assertIs(result, native_launcher)
+        c_wrapper.assert_called_once_with(func_ptr, 8, 4096, 4096, executor)
+
+    @unittest.skipUnless(
+        hasattr(torch._C, "_FlyDSLMMFp16Bf16CWrapper"),
+        "requires _FlyDSLMMFp16Bf16CWrapper",
+    )
+    def test_native_c_wrapper_packs_flydsl_abi(self):
+        observed = []
+        callback_type = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+
+        @callback_type
+        def callback(packed):
+            slots = ctypes.cast(packed, ctypes.POINTER(ctypes.c_void_p))
+            observed.append(
+                (
+                    ctypes.c_void_p.from_address(slots[0]).value,
+                    ctypes.c_void_p.from_address(slots[1]).value,
+                    ctypes.c_void_p.from_address(slots[2]).value,
+                    ctypes.c_int32.from_address(slots[3]).value,
+                    ctypes.c_int32.from_address(slots[4]).value,
+                    ctypes.c_int32.from_address(slots[5]).value,
+                    ctypes.c_void_p.from_address(slots[6]).value,
+                )
+            )
+
+        tensors = [torch.empty(1) for _ in range(3)]
+        stream = 0x12345678
+        func_ptr = ctypes.cast(callback, ctypes.c_void_p).value
+        launcher = torch._C._FlyDSLMMFp16Bf16CWrapper(
+            func_ptr, 8, 4096, 4096, callback
+        )
+        launcher(*tensors, stream)
+
+        self.assertEqual(
+            observed,
+            [
+                tuple(tensor.data_ptr() for tensor in tensors)
+                + (8, 4096, 4096, stream)
+            ],
+        )
+
+    def test_compiled_cache_keys_only_on_param(self):
+        from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
+
+        jit_func = SimpleNamespace()
+        compile_args = (object(),)
+        dispatch_args = (object(),)
+        compiled = mock.Mock()
+        compiler = mock.Mock(return_value=compiled)
+
+        class Param:
+            def __cache_signature__(self):
+                return ("param",)
+
+        first = run_cached_flydsl(
+            jit_func,
+            *compile_args,
+            constexpr_param=Param(),
+            compiler=compiler,
+            dispatch_args=dispatch_args,
+        )
+        second = run_cached_flydsl(
+            jit_func,
+            object(),
+            constexpr_param=Param(),
+            compiler=compiler,
+            dispatch_args=dispatch_args,
+        )
+
+        self.assertIs(first, compiled)
+        self.assertIs(second, compiled)
+        compiler.assert_called_once_with(jit_func, *compile_args)
+        compiled.assert_called_once_with(*dispatch_args)
+
+    def test_compiled_cache_serializes_same_param(self):
+        from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
+
+        jit_func = SimpleNamespace()
+        compile_started = threading.Event()
+        allow_compile = threading.Event()
+        compiled = mock.Mock()
+        compile_calls = 0
+
+        class Param:
+            def __cache_signature__(self):
+                return ("param",)
+
+        def compiler(*args):
+            nonlocal compile_calls
+            compile_calls += 1
+            compile_started.set()
+            self.assertTrue(allow_compile.wait(5))
+            return compiled
+
+        def invoke(value):
+            return run_cached_flydsl(
+                jit_func,
+                object(),
+                constexpr_param=Param(),
+                compiler=compiler,
+                dispatch_args=(value,),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(invoke, "first")
+            self.assertTrue(compile_started.wait(5))
+            second = pool.submit(invoke, "second")
+            allow_compile.set()
+            self.assertIs(first.result(), compiled)
+            self.assertIs(second.result(), compiled)
+
+        self.assertEqual(compile_calls, 1)
+        compiled.assert_called_once_with("second")
+
+    def test_compiled_cache_retries_after_failure(self):
+        from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
+
+        jit_func = SimpleNamespace()
+        compiled = mock.Mock()
+        compiler = mock.Mock(side_effect=[RuntimeError("compile failed"), compiled])
+
+        class Param:
+            def __cache_signature__(self):
+                return ("param",)
+
+        kwargs = {
+            "constexpr_param": Param(),
+            "compiler": compiler,
+            "dispatch_args": (),
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "compile failed"):
+            run_cached_flydsl(jit_func, **kwargs)
+        result = run_cached_flydsl(jit_func, **kwargs)
+
+        self.assertIs(result, compiled)
+        self.assertEqual(compiler.call_count, 2)
+        compiled.assert_not_called()
+
+    def test_inductor_launcher_falls_back_for_unknown_abi(self):
+        from torch._inductor.runtime.flydsl_cache import (
+            make_flydsl_inductor_launcher,
+        )
+
+        class Executor:
+            def __init__(self):
+                self._call_state = SimpleNamespace(
+                    _spec=[(0, ctypes.c_int32, lambda value, storage: None)],
+                    _func_exe=None,
+                )
+                self.calls = []
+
+            def __call__(self, *args):
+                self.calls.append(args)
+
+        tensors = [torch.empty(1) for _ in range(3)]
+        executor = Executor()
+        param = object()
+        launcher = make_flydsl_inductor_launcher(
+            executor,
+            *tensors,
+            m=8,
+            n=4096,
+            k=4096,
+            param=param,
+        )
+        launcher(*tensors, 123)
+
+        self.assertEqual(
+            executor.calls,
+            [(tensors[0], tensors[1], tensors[2], 8, 4096, 4096, param, 123)],
+        )
+
     def test_gen_imports(self):
         if not HAS_FLYDSL:
             self.skipTest("requires flydsl")
@@ -109,7 +392,7 @@ class TestFlyDSLTemplate(TestCase):
             compiled_fn = torch.compile(fn, backend="inductor")
             result, (code,) = run_and_get_code(compiled_fn, a, b)
 
-        self.assertIn("_flydsl_mm", code)
+        self.assertIn("async_compile.flydsl", code)
         self.assertTrue(torch.allclose(result, fn(a, b), atol=3e-2, rtol=3e-2))
 
 
