@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import ast
 import contextlib
 import dataclasses
 import functools
@@ -18,6 +17,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
@@ -688,9 +688,6 @@ class TritonTemplateKernel(TritonKernel):
         # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
         # by adding all inputs.
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
-        self._load_input_loop_invariant_code = IndentedBuffer()
-        self._load_input_loop_invariant_index_replacements: dict[str, str] = {}
-        self._load_input_loop_invariant_enabled = False
 
         # When always_freeze_layout is True, get_stride_and_maybe_freeze_layout will
         # always freeze the layout immediately, bypassing layout constraints.
@@ -836,9 +833,17 @@ class TritonTemplateKernel(TritonKernel):
         )
         contiguous_index = self.rename_indexing(contiguous_index)
         self.body.writeline(f"{xindex_name} = " + texpr(contiguous_index))
-        self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths)).set_name(
-            xindex_name
-        )
+        xindex_entry = self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths))
+        old_symbol = xindex_entry.symbol()
+        xindex_entry.set_name(xindex_name)
+        # Re-key only range_tree_nodes: get_block_shape resolves the renamed symbol
+        # via this dict. Unlike the TMA re-key, var_list/var_ranges are left alone --
+        # in the single-dim case old_symbol is the construct_entries-renamed name,
+        # not the auto symbol var_list holds, so a var_list.index() re-key would raise;
+        # the stale entries only cost codegen quality, not correctness.
+        if self.range_tree_nodes.get(old_symbol) is xindex_entry:
+            del self.range_tree_nodes[old_symbol]
+        self.range_tree_nodes[xindex_entry.symbol()] = xindex_entry
         self.template_mask = mask
         self.template_indices = indices
         return contiguous_index
@@ -1215,7 +1220,6 @@ class TritonTemplateKernel(TritonKernel):
         other: float | int | None = 0.0,
         indent_width: int = 4,
         index_shape: tuple[str] | None = None,
-        loop_varying_indices: Sequence[str] | None = None,
     ):
         """Loads an input and applies any necessary preprocessing or masking.
 
@@ -1226,9 +1230,6 @@ class TritonTemplateKernel(TritonKernel):
             mask (Optional[str]): An optional mask to use for the load operation.
             other (Optional[Union[float, int]]): The value to use for masked elements. Default is 0.0.
             indent_width (int): The number of spaces to use for indentation.
-            loop_varying_indices (Optional[Sequence[str]]): Template index names
-                that vary across the surrounding template loop.  Used to hoist
-                prologue loads that only depend on loop-invariant indices.
         """
 
         input_node = self.named_input_nodes[input_name]
@@ -1249,7 +1250,6 @@ class TritonTemplateKernel(TritonKernel):
             no_x_dim=False,
         )
         load_code = None
-        original_indices = tuple(indices)
 
         with self.create_subgraph_body(f"<LOAD_INPUT_{input_name}>"):
             if not isinstance(indices, (list, tuple)):
@@ -1386,209 +1386,11 @@ class TritonTemplateKernel(TritonKernel):
                     self.body.writeline(load_code)
 
                 result = self.body.getvalue()
-                if input_node.get_name() in self.prologue_fused_inputs:
-                    result = self._hoist_loop_invariant_load_input_code(
-                        input_name,
-                        result,
-                        original_indices,
-                        index_shape,
-                        loop_varying_indices,
-                    )
                 if indent_width:
                     result = textwrap.indent(result, " " * indent_width)
                 return result.strip()
 
         return self._register_hook(hook_key, hook)
-
-    def load_input_loop_invariant_code(self, **index_replacements: str):
-        """Hook point for loop-invariant prologue loads.
-
-        ``load_input`` hooks are finalized before this hook, so they can append
-        loads that are safe to compute before the template's inner loop.
-        """
-        if not all(
-            isinstance(name, str) and isinstance(expr, str)
-            for name, expr in index_replacements.items()
-        ):
-            raise AssertionError("index replacements must be string pairs")
-        hook_key = "<LOAD_INPUT_LOOP_INVARIANT>"
-        self._load_input_loop_invariant_enabled = True
-        self._load_input_loop_invariant_index_replacements = {
-            name: f"_loop_invariant_{name}" for name in index_replacements
-        }
-        preamble_lines = tuple(
-            f"{self._load_input_loop_invariant_index_replacements[name]} = {expr}"
-            for name, expr in index_replacements.items()
-        )
-        self._load_input_loop_invariant_code = IndentedBuffer()
-
-        def hook():
-            hoisted_code = self._load_input_loop_invariant_code.getvalue().rstrip()
-            self._load_input_loop_invariant_code = IndentedBuffer()
-            self._load_input_loop_invariant_enabled = False
-            self._load_input_loop_invariant_index_replacements = {}
-            if not hoisted_code:
-                return ""
-            if not preamble_lines:
-                return hoisted_code
-            return "\n".join(preamble_lines) + ("\n" + hoisted_code)
-
-        return self._register_hook(hook_key, hook)
-
-    @staticmethod
-    def _assignment_lhs_and_rhs_names(line: str) -> tuple[str | None, OrderedSet[str]]:
-        # This parser only sees assignment lines emitted by Inductor's own
-        # Triton codegen for prologue subgraphs.  Any line outside that narrow
-        # shape is treated as non-hoistable.
-        try:
-            parsed = ast.parse(line.strip())
-        except SyntaxError:
-            return None, OrderedSet()
-
-        if len(parsed.body) != 1 or not isinstance(parsed.body[0], ast.Assign):
-            return None, OrderedSet()
-
-        node = parsed.body[0]
-        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-            return None, OrderedSet()
-
-        rhs_names = OrderedSet(
-            name.id for name in ast.walk(node.value) if isinstance(name, ast.Name)
-        )
-        return node.targets[0].id, rhs_names
-
-    @staticmethod
-    def _is_generated_prologue_temp(name: str) -> bool:
-        # Keep this in sync with temporary names emitted by prologue pointwise
-        # codegen.  Unknown assigned temps still block hoisting via
-        # assigned_names, but recognizing the common forms keeps this helper
-        # conservative if a temp is referenced without a local assignment.
-        return (
-            re.fullmatch(r"tmp\d+", name) is not None
-            or re.fullmatch(r"_tmp_var\d+", name) is not None
-            or name in {"xindex", "xmask"}
-        )
-
-    @staticmethod
-    def _remove_loop_invariant_broadcast(
-        line: str,
-        invariant_indices: Sequence[str],
-        index_shape: tuple[str] | None,
-        index_replacements: dict[str, str],
-    ) -> str:
-        if not index_shape:
-            return line
-
-        shape_pattern = (
-            r"\[\s*" + r"\s*,\s*".join(re.escape(dim) for dim in index_shape) + r"\s*\]"
-        )
-        for index in invariant_indices:
-            index_pattern = re.escape(index)
-            replacement = index_replacements.get(index, index)
-            line = re.sub(
-                rf"tl\.broadcast_to\(\s*\(?\s*{index_pattern}\s*\)?\s*,\s*{shape_pattern}\s*\)",
-                replacement,
-                line,
-            )
-        return line
-
-    @staticmethod
-    def _rename_code_names(line: str, renames: dict[str, str]) -> str:
-        if not renames:
-            return line
-
-        pattern = re.compile(
-            r"\b(" + "|".join(re.escape(name) for name in renames) + r")\b"
-        )
-        return pattern.sub(lambda match: renames[match.group(0)], line)
-
-    def _hoist_loop_invariant_load_input_code(
-        self,
-        input_name: str,
-        code: str,
-        indices: Sequence[str],
-        index_shape: tuple[str] | None,
-        loop_varying_indices: Sequence[str] | None,
-    ) -> str:
-        if not (
-            self._load_input_loop_invariant_enabled
-            and loop_varying_indices
-            and code.strip()
-        ):
-            return code
-
-        loop_dependent_names = OrderedSet(["k_idx", "k", *loop_varying_indices])
-        index_names = OrderedSet(index for index in indices if isinstance(index, str))
-        removable_loop_masks = OrderedSet(loop_varying_indices) - index_names
-        invariant_indices = [
-            index
-            for index in indices
-            if isinstance(index, str) and index not in loop_dependent_names
-        ]
-        if not invariant_indices:
-            return code
-
-        lines = code.splitlines()
-        parsed_assignments = [
-            self._assignment_lhs_and_rhs_names(line) for line in lines
-        ]
-        assigned_names = OrderedSet(
-            lhs for lhs, _ in parsed_assignments if lhs is not None
-        )
-        assignment_counts: defaultdict[str, int] = defaultdict(int)
-        for lhs, _ in parsed_assignments:
-            if lhs is not None:
-                assignment_counts[lhs] += 1
-
-        kept_lines: list[str] = []
-        hoisted_lines: list[str] = []
-        renames: dict[str, str] = {}
-
-        for line, (lhs, rhs_names) in zip(lines, parsed_assignments):
-            loop_deps_in_rhs = rhs_names & loop_dependent_names
-            generated_temp_deps = OrderedSet(
-                name for name in rhs_names if self._is_generated_prologue_temp(name)
-            )
-            # Keep this intentionally narrow: only direct tl.load assignments
-            # whose RHS does not mention a symbol assigned in this generated
-            # prologue body are hoisted.  Loads needing an invariant temp stay
-            # in place rather than moving before their dependency.  K-tail
-            # masks are dropped only for otherwise-invariant loads; the data
-            # loads that actually depend on the K index remain masked in-loop.
-            should_hoist = (
-                lhs is not None
-                and assignment_counts[lhs] == 1
-                and "tl.load(" in line
-                and loop_deps_in_rhs <= removable_loop_masks
-                and not (rhs_names & assigned_names)
-                and not generated_temp_deps
-            )
-            if should_hoist:
-                new_lhs = f"_loop_invariant_{input_name}_{lhs}"
-                renames[lhs] = new_lhs
-                hoisted_line = self._remove_loop_invariant_broadcast(
-                    line.strip(),
-                    invariant_indices,
-                    index_shape,
-                    self._load_input_loop_invariant_index_replacements,
-                )
-                hoisted_line = self._rename_code_names(
-                    hoisted_line,
-                    self._load_input_loop_invariant_index_replacements,
-                )
-                hoisted_line = self._rename_code_names(
-                    hoisted_line,
-                    dict.fromkeys(loop_deps_in_rhs, "None"),
-                )
-                hoisted_line = self._rename_code_names(hoisted_line, {lhs: new_lhs})
-                hoisted_lines.append(hoisted_line)
-            else:
-                kept_lines.append(self._rename_code_names(line, renames))
-
-        for line in hoisted_lines:
-            self._load_input_loop_invariant_code.writeline(line)
-
-        return "\n".join(kept_lines)
 
     def _generate_index_from_tma_index(
         self,
@@ -1960,7 +1762,6 @@ class TritonTemplateKernel(TritonKernel):
                 self.stride,
                 self.store_output,
                 self.load_input,
-                self.load_input_loop_invariant_code,
                 self.make_load,
                 self.modification,
                 self.gen_argdefs,
@@ -4941,18 +4742,27 @@ class AlgorithmSelectorCache(PersistentCache):
         # skip a choice if it has the same hash as a previously seen choice
         seen_choices: OrderedSet[str] = OrderedSet()
 
-        # Count NVGEMM choices to decide whether subprocess precompile
-        # is worth the IPC overhead (break-even is ~20 NVGEMM choices).
-        _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD = 20
+        # Count NVGEMM choices to decide whether subprocess precompile is worth
+        # the pool-warmup/IPC overhead. Measured break-even is ~8: below ~4
+        # serial wins (~1.4s), from 8 up subprocess wins and the gap grows with
+        # count (e.g. 32 configs: 12.5s vs 22.0s serial). The break-even used to
+        # be ~20 because each worker rebuilt the ~14s kernel manifest; that
+        # overhead is gone now (workers reconstruct the one operator from
+        # metadata), so the threshold drops accordingly.
+        _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD = 8
         nvgemm_count = sum(
             1
             for c in choices
             if NVUniversalGemmCaller is not None
             and isinstance(c, NVUniversalGemmCaller)
         )
+        # Block for pool warmup when there are enough NVGEMM choices to justify
+        # it: the serial fallback (lazy compile at benchmark time) is ~15x
+        # slower, and the non-blocking use_process_pool() check can otherwise
+        # race the pool warmup when little other compilation precedes this point.
         use_nvgemm_subprocess = (
-            async_compile.use_process_pool()
-            and nvgemm_count >= _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD
+            nvgemm_count >= _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD
+            and async_compile.wait_process_pool_ready()
         )
 
         for c in choices:
@@ -4979,7 +4789,16 @@ class AlgorithmSelectorCache(PersistentCache):
                         kernel_name=c.bmreq.kernel_name, source_code=source_code
                     ).future
                     log.debug("Submitted triton async compile for choice: %s", c)
-                elif nvgemm_choice and use_nvgemm_subprocess:
+                elif (
+                    nvgemm_choice
+                    and use_nvgemm_subprocess
+                    # Scaled-GEMM enum args now pickle (see _register_enum_pickling
+                    # in nv_universal_gemm_utils), but the scaled precompile worker
+                    # still initializes CUDA and then forks -> "Cannot re-initialize
+                    # CUDA in forked subprocess". Keep scaled in-process until that
+                    # worker is made fork-safe (or the pool forced to spawn).
+                    and c.bmreq.variant.name != "SCALED_GEMM"
+                ):
                     from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
                         CUDAContextMetadata,
                     )
@@ -4987,18 +4806,34 @@ class AlgorithmSelectorCache(PersistentCache):
                     cuda_ctx = CUDAContextMetadata.from_kernel(
                         c.bmreq.kernel, c.bmreq.input_tensor_meta[0].device
                     )
-                    future = async_compile.nvgemm_precompile(
-                        kernel_name=c.bmreq.kernel.metadata.kernel_name,
-                        variant_name=c.bmreq.variant.name,
-                        accumulator_type=c.bmreq.accumulator_type,
-                        input_tensor_meta=c.bmreq.input_tensor_meta,
-                        output_tensor_meta=c.bmreq.output_tensor_meta,
-                        cuda_ctx=cuda_ctx,
-                        scale_type_a=c.bmreq.scale_type_a,
-                        scale_type_b=c.bmreq.scale_type_b,
-                        swizzle_type_a=c.bmreq.swizzle_type_a,
-                        swizzle_type_b=c.bmreq.swizzle_type_b,
-                    )
+                    try:
+                        future = async_compile.nvgemm_precompile(
+                            kernel_name=c.bmreq.kernel.metadata.operator_name,
+                            variant_name=c.bmreq.variant.name,
+                            accumulator_type=c.bmreq.accumulator_type,
+                            input_tensor_meta=c.bmreq.input_tensor_meta,
+                            output_tensor_meta=c.bmreq.output_tensor_meta,
+                            cuda_ctx=cuda_ctx,
+                            scale_type_a=c.bmreq.scale_type_a,
+                            scale_type_b=c.bmreq.scale_type_b,
+                            swizzle_type_a=c.bmreq.swizzle_type_a,
+                            swizzle_type_b=c.bmreq.swizzle_type_b,
+                            has_bias_epilogue=c.bmreq.has_bias_epilogue,
+                            swap_ab=c.bmreq.swap_ab,
+                            metadata=c.bmreq.kernel.metadata,
+                        )
+                    except (BrokenProcessPool, RuntimeError) as e:
+                        # A precompile worker crashed and closed the pool. Stop
+                        # using the subprocess pool and compile the remaining
+                        # choices lazily in-process rather than aborting the
+                        # whole compilation with a closed-pool error.
+                        log.warning(
+                            "NVGEMM subprocess precompile pool unusable (%s); "
+                            "falling back to lazy in-process compile",
+                            e,
+                        )
+                        use_nvgemm_subprocess = False
+                        continue
                     log.debug(
                         "Submitted nvgemm subprocess precompile for choice: %s", c
                     )

@@ -2465,6 +2465,23 @@ class TensorVariable(VariableTracker):
             ),
         )
 
+    def nb_matrix_multiply_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__matmul__(x)`` calls.
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.matmul, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
     def nb_floor_divide_impl(
         self,
         tx: "InstructionTranslatorBase",

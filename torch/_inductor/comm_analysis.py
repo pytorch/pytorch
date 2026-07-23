@@ -481,6 +481,8 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> float | None:  # t
         torch.ops._c10d_functional.wait_tensor.default(w)
 
     est_time_us = time_estimator.estimated_time
+    if est_time_us is None:
+        raise AssertionError("NCCL time estimator did not produce a result")
     # -1000 constant is NCCL return in case of error during estimations.
     # Observed it for all_to_all estimations.
     if est_time_us < 0:
@@ -901,6 +903,8 @@ def estimate_nccl_collective_runtime_from_fx_node(
             else:
                 torch.ops._c10d_functional.wait_tensor.default(w)
         est_time_us = time_estimator.estimated_time
+        if est_time_us is None:
+            raise AssertionError("NCCL time estimator did not produce a result")
         # -1000 constant is NCCL return in case of error during estimations.
         # Observed it for all_to_all estimations.
         if est_time_us < 0:
