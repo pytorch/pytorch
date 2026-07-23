@@ -327,7 +327,10 @@ class TestToolchainRegistry(unittest.TestCase):
             tc.validate_build_result({"prefix": "x", "fn": object(), "tensor_args": []})
 
     def test_cmake_globs_cover_all_toolchains(self):
-        cmake = open(os.path.join(TOOLS_DIR, "CMakeLists.txt")).read()
+        # The embedded link block in caffe2/CMakeLists.txt must glob every
+        # artifact pattern the toolchains emit (it cannot import this file).
+        cmake_path = os.path.join(TOOLS_DIR, "..", "..", "caffe2", "CMakeLists.txt")
+        cmake = open(cmake_path).read()
         for tc in toolchains.TOOLCHAINS.values():
             for pattern in tc.link_source_globs:
                 self.assertIn(pattern.split("/")[-1], cmake)
