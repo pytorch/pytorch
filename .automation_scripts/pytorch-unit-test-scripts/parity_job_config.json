@@ -65,9 +65,9 @@
       "checkrun_regex": "rocm.*navi31.*/ test [(]default,"
     },
     "nightly": {
-      "default": [{ "workflow": "rocm-nightly", "job_prefix": "linux-noble-rocm-nightly-py3.12-gfx942" }],
-      "distributed": [{ "workflow": "rocm-nightly", "job_prefix": "linux-noble-rocm-nightly-py3.12-gfx942" }],
-      "inductor": [{ "workflow": "rocm-nightly", "job_prefix": "linux-noble-rocm-nightly-py3.12-gfx942" }],
+      "default": [{ "workflow": "rocm-nightly", "job_prefix": "linux-noble-rocm-nightly-py3.12-mi350" }],
+      "distributed": [{ "workflow": "rocm-nightly", "job_prefix": "linux-noble-rocm-nightly-py3.12-mi350" }],
+      "inductor": [{ "workflow": "rocm-nightly", "job_prefix": "linux-noble-rocm-nightly-py3.12-mi350" }],
       "shard_counts": { "default": 6, "distributed": 3, "inductor": 2 },
       "checkrun_regex": "rocm-nightly.*/ test [(](default|distributed|inductor),"
     }
