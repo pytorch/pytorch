@@ -45,6 +45,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     OpDTypes,
     ops,
+    PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -54,6 +55,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     scoped_load_inline,
+    skipIfCrossRef,
     skipIfTorchDynamo,
     skipIfXpu,
     subtest,
@@ -66,6 +68,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.custom_op_db import numpy_nonzero
+from torch.testing._internal.optests.aot_autograd import _clone_input_for_aot_autograd
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -86,6 +89,54 @@ device_type = (
 def requires_compile(fun):
     fun = unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")(fun)
     return fun
+
+
+class AOTAutogradCopyNoIsPinnedWrapperSubclass(torch.Tensor):
+    @staticmethod
+    def __new__(cls, elem):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            elem.size(),
+            strides=elem.stride(),
+            storage_offset=elem.storage_offset(),
+            dtype=elem.dtype,
+            layout=elem.layout,
+            requires_grad=elem.requires_grad,
+            device=elem.device,
+        )
+
+    def __init__(self, elem):
+        self.elem = elem
+
+    def __tensor_flatten__(self):
+        return ["elem"], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+        if metadata is not None:
+            raise AssertionError("Expected metadata to be None")
+        return AOTAutogradCopyNoIsPinnedWrapperSubclass(
+            inner_tensors["elem"].as_strided(outer_size, outer_stride)
+        )
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if func is torch.ops.aten.is_pinned.default:
+            raise AssertionError(
+                "AOT input copying should not check pinning on wrapper subclasses"
+            )
+        if kwargs is None:
+            kwargs = {}
+        args = pytree.tree_map_only(
+            AOTAutogradCopyNoIsPinnedWrapperSubclass, lambda x: x.elem, args
+        )
+        kwargs = pytree.tree_map_only(
+            AOTAutogradCopyNoIsPinnedWrapperSubclass, lambda x: x.elem, kwargs
+        )
+        out = func(*args, **kwargs)
+        return pytree.tree_map_only(
+            torch.Tensor, AOTAutogradCopyNoIsPinnedWrapperSubclass, out
+        )
 
 
 class CustomOpTestCaseBase(TestCase):
@@ -621,6 +672,315 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 class TestCustomOp(CustomOpTestCaseBase):
     test_ns = "_test_custom_op"
 
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_library_impl_does_not_enable_pyobject_dispatch_by_default(self):
+        lib = self.lib()
+        lib.define("pyobject_dispatch_composite(Tensor x) -> Tensor")
+
+        calls = []
+
+        def composite_impl(x):
+            calls.append("composite")
+            return x + 1
+
+        lib.impl(
+            "pyobject_dispatch_composite",
+            composite_impl,
+            "CompositeImplicitAutograd",
+        )
+
+        op = self.ns().pyobject_dispatch_composite.default
+        x = torch.ones(2)
+        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+        self.assertEqual(op(x), x + 1)
+        self.assertTrue(calls)
+        self.assertTrue(all(call == "composite" for call in calls))
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_custom_op_enabled_by_default(self):
+        calls = []
+
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_custom_op", mutates_args=()
+        )
+        def f(x: Tensor) -> Tensor:
+            calls.append("custom")
+            return x + 1
+
+        op = self.ns().pyobject_dispatch_custom_op.default
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
+
+        x = torch.ones(2)
+        self.assertEqual(f(x), x + 1)
+        self.assertEqual(calls, ["custom"])
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_custom_op_autograd(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_custom_op_autograd",
+            mutates_args=(),
+        )
+        def f(x: Tensor) -> Tensor:
+            return x.sin()
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        backward_called = False
+
+        def backward(ctx, grad):
+            nonlocal backward_called
+            backward_called = True
+            (x,) = ctx.saved_tensors
+            return grad * x.cos()
+
+        f.register_autograd(backward, setup_context=setup_context)
+
+        op = self.ns().pyobject_dispatch_custom_op_autograd.default
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
+
+        x = torch.randn(3, requires_grad=True)
+        f(x).sum().backward()
+        self.assertTrue(backward_called)
+        self.assertEqual(x.grad, x.detach().cos())
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_tensor_list_output(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_tensor_list_output",
+            mutates_args=(),
+        )
+        def f(x: Tensor, sizes: Tensor) -> List[Tensor]:
+            return tuple(t.clone() for t in torch.split(x, sizes.tolist(), dim=0))  # type: ignore[return-value]
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        backward_called = False
+
+        def backward(ctx, grad_outputs):
+            nonlocal backward_called
+            backward_called = True
+            self.assertIsInstance(grad_outputs, list)
+            return torch.cat(grad_outputs, dim=0), None
+
+        f.register_autograd(backward, setup_context=setup_context)
+
+        op = self.ns().pyobject_dispatch_tensor_list_output.default
+        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+
+        x = torch.randn(6, 2, requires_grad=True)
+        sizes = torch.tensor([1, 2, 3])
+        y = f(x, sizes)
+        self.assertIsInstance(y, list)
+        self.assertEqual([part.shape[0] for part in y], sizes.tolist())
+
+        sum(part.sum() for part in y).backward()
+        self.assertTrue(backward_called)
+        self.assertEqual(x.grad, torch.ones_like(x))
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_tensor_list_output_for_module(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_module_tensor_list_output",
+            mutates_args=(),
+        )
+        def f(x: Tensor, sizes: Tensor) -> Tuple[List[Tensor], Tensor]:
+            splits = tuple(t.clone() for t in torch.split(x, sizes.tolist(), dim=0))
+            return typing.cast(List[Tensor], splits), x.clone()
+
+        class ModuleExpectingTensor(torch.nn.Module):
+            def forward(self, input: Tensor) -> Tensor:
+                return torch.empty(input.size(0))
+
+        class ListModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.module_expecting_tensor = ModuleExpectingTensor()
+                self.register_forward_pre_hook(self._forward_pre_hook)
+
+            def _forward_pre_hook(self, module, inputs):
+                self.module_expecting_tensor(input=inputs[0][0])
+                return inputs
+
+            def forward(self, input_embs: List[Tensor]) -> List[Tensor]:
+                return input_embs
+
+        class Consumer(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.list_module = ListModule()
+
+            def forward(self, input_embs: List[Tensor]) -> Tensor:
+                if not isinstance(input_embs, list):
+                    input_embs = [input_embs]
+                return self.list_module([input_embs[0]])[0]
+
+        op = self.ns().pyobject_dispatch_module_tensor_list_output.default
+        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+
+        x = torch.randn(6, 2)
+        sizes = torch.tensor([1, 2, 3])
+        y, passthrough = f(x, sizes)
+        self.assertIsInstance(y, list)
+        self.assertEqual(passthrough, x)
+        self.assertEqual(Consumer()(y), y[0])
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_tensor_list_input(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_tensor_list", mutates_args=()
+        )
+        def f(xs: list[Tensor]) -> Tensor:
+            xs.append(torch.ones(()))
+            return xs[0].clone()
+
+        xs = [torch.zeros(())]
+        f(xs)
+        self.assertEqual(len(xs), 1)
+
+        op = self.ns().pyobject_dispatch_tensor_list.default
+        op._enable_pyobj_dispatch(False)
+        xs = [torch.zeros(())]
+        f(xs)
+        self.assertEqual(len(xs), 1)
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_passes_keyset_to_python_kernel(self):
+        lib = self.lib()
+        lib.define("pyobject_dispatch_with_keyset(Tensor x) -> Tensor")
+
+        seen_keysets = []
+
+        def cpu_impl(keyset, x):
+            seen_keysets.append(keyset)
+            return x + 3
+
+        lib.impl("pyobject_dispatch_with_keyset", cpu_impl, "CPU", with_keyset=True)
+        lib.impl(
+            "pyobject_dispatch_with_keyset",
+            torch.library.fallthrough_kernel,
+            "Autograd",
+        )
+
+        op = self.ns().pyobject_dispatch_with_keyset.default
+        op._enable_pyobj_dispatch(True)
+
+        x = torch.ones(2)
+        self.assertEqual(op(x), torch.full((2,), 4.0))
+        self.assertEqual(len(seen_keysets), 1)
+        self.assertTrue(seen_keysets[0].has(torch._C.DispatchKey.CPU))
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    @skipIfCrossRef
+    def test_pyobject_redispatch_requires_keyset(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_redispatch_requires_keyset",
+            mutates_args=(),
+        )
+        def f(x: Tensor) -> Tensor:
+            return x
+
+        op = self.ns().pyobject_dispatch_redispatch_requires_keyset.default
+        with self.assertRaisesRegex(
+            TypeError,
+            "redispatch\\(\\) expected redispatch\\(keyset, \\*args, \\*\\*kwargs\\)",
+        ):
+            op._pyobj_dispatcher.redispatch()
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_respects_torch_function_mode(self):
+        import torch._refs
+        from torch._prims.context import TorchRefsMode
+
+        op = torch.ops.prims.abs.default
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
+
+        x = torch.randn(2)
+        expected = x.abs()
+        with TorchRefsMode():
+            self.assertEqual(torch._refs.abs(x), expected)
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_respects_torch_function_redispatch(self):
+        from torch.testing._internal.common_subclass import RedispatchTensor
+
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_torch_function_redispatch",
+            mutates_args=(),
+        )
+        def f(x: Tensor) -> Tensor:
+            return x + 1
+
+        x = RedispatchTensor(torch.ones(2))
+        y = f(x)
+        self.assertIsInstance(y, RedispatchTensor)
+        self.assertEqual(y, torch.full((2,), 2.0))
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    @scoped_load_inline
+    def test_pyobject_dispatch_falls_back_to_cpp_dispatcher(self, load_inline):
+        load_inline(
+            name="test_pyobject_dispatch_cpp_fallback",
+            cpp_sources="""
+#include <torch/extension.h>
+
+torch::Tensor pyobject_dispatch_cpp_fallback(const torch::Tensor& x) {
+  return x + 2;
+}
+
+TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback, m) {
+  m.def("foo(Tensor x) -> Tensor");
+  m.impl("foo", c10::DispatchKey::CPU, TORCH_FN(pyobject_dispatch_cpp_fallback));
+  m.impl("foo", c10::DispatchKey::Autograd, torch::CppFunction::makeFallthrough());
+}
+""",
+            is_python_module=False,
+            verbose=True,
+        )
+
+        op = torch.ops._test_pyobject_dispatch_cpp_fallback.foo.default
+        op._enable_pyobj_dispatch(True)
+
+        x = torch.ones(2)
+        self.assertEqual(op(x), torch.full((2,), 3.0))
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    @scoped_load_inline
+    def test_pyobject_dispatch_cpp_fallback_consumes_torch_function_skip(
+        self, load_inline
+    ):
+        load_inline(
+            name="test_pyobject_dispatch_cpp_fallback_torch_function",
+            cpp_sources="""
+#include <torch/extension.h>
+
+torch::Tensor pyobject_dispatch_cpp_fallback_torch_function(const torch::Tensor& x) {
+  return x + 2;
+}
+
+TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
+  m.def("foo(Tensor x) -> Tensor");
+  m.impl("foo", c10::DispatchKey::CPU, TORCH_FN(pyobject_dispatch_cpp_fallback_torch_function));
+  m.impl("foo", c10::DispatchKey::Autograd, torch::CppFunction::makeFallthrough());
+}
+""",
+            is_python_module=False,
+            verbose=True,
+        )
+
+        class RedispatchMode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return torch.overrides.redispatch_function(func, types, args, kwargs)
+
+        op = torch.ops._test_pyobject_dispatch_cpp_fallback_torch_function.foo.default
+        op._enable_pyobj_dispatch(True)
+
+        x = torch.ones(2)
+        with RedispatchMode():
+            self.assertEqual(op(x), torch.full((2,), 3.0))
+
     @requires_compile
     def test_functionalize_error(self):
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib:
@@ -1048,7 +1408,9 @@ class TestCustomOp(CustomOpTestCaseBase):
 
                     op = self.get_op(f"{self.test_ns}::foo")
                     result = op(torch.randn([]))
-                    self.assertEqual(result, example, msg=f"{typ} {example}")
+                    self.assertEqual(
+                        result, example, msg=lambda msg: f"{msg}\n{typ} {example}"
+                    )
                 finally:
                     custom_ops._destroy(f"{self.test_ns}::foo")
 
@@ -1068,7 +1430,9 @@ class TestCustomOp(CustomOpTestCaseBase):
                     op = self.get_op(f"{self.test_ns}::foo")
                     result = op(torch.randn([]))
                     expected = (example, example)
-                    self.assertEqual(result, expected, msg=f"{typ} {example}")
+                    self.assertEqual(
+                        result, expected, msg=lambda msg: f"{msg}\n{typ} {example}"
+                    )
                 finally:
                     custom_ops._destroy(f"{self.test_ns}::foo")
 
@@ -1091,7 +1455,9 @@ class TestCustomOp(CustomOpTestCaseBase):
                 for example in self._generate_examples(typ):
                     op = self.get_op(f"{self.test_ns}::foo")
                     op(torch.randn([]), example)
-                    self.assertEqual(yeet, example, msg=f"{typ} {example}")
+                    self.assertEqual(
+                        yeet, example, msg=lambda msg: f"{msg}\n{typ} {example}"
+                    )
                     yeet = None
             finally:
                 custom_ops._destroy(f"{TestCustomOp.test_ns}::foo")
@@ -5957,6 +6323,119 @@ opcheck(op, args, kwargs, test_utils="test_schema")
                 "test_faketensor": "SUCCESS",
             },
         )
+
+    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
+    @unittest.skipIf(
+        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
+    )
+    def test_opcheck_preserves_pinned_memory_for_schema_check(self):
+        lib = self.lib()
+        lib.define("requires_pinned(Tensor x) -> Tensor")
+        op = self.ns().requires_pinned.default
+
+        def requires_pinned_impl(x):
+            if not x.is_pinned():
+                raise RuntimeError("expected pinned input")
+            return x.clone()
+
+        lib.impl("requires_pinned", requires_pinned_impl, "CPU")
+
+        x = torch.arange(12, dtype=torch.float32, pin_memory=True).view(3, 4)
+        torch.library.opcheck(op, (x,), test_utils="test_schema")
+
+    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
+    @unittest.skipIf(
+        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
+    )
+    def test_opcheck_preserves_pinned_memory_by_default(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::requires_pinned_default", mutates_args=()
+        )
+        def requires_pinned_default(x: torch.Tensor) -> torch.Tensor:
+            if not x.is_pinned():
+                raise RuntimeError("expected pinned input")
+            return x + 1
+
+        @requires_pinned_default.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        x = torch.arange(12, dtype=torch.float32, pin_memory=True).view(3, 4)
+        result = torch.library.opcheck(requires_pinned_default, (x,))
+
+        self.assertEqual(
+            result,
+            {
+                "test_schema": "SUCCESS",
+                "test_autograd_registration": "SUCCESS",
+                "test_faketensor": "SUCCESS",
+                "test_aot_dispatch_dynamic": "SUCCESS",
+            },
+        )
+
+    @skipIfTorchDynamo("recursive dynamo")
+    def test_safe_aot_autograd_check_checks_gradients_for_non_leaf_inputs(self):
+        original_assert_close = torch.testing.assert_close
+        gradient_asserts = []
+
+        def assert_close(actual, expected, *args, **kwargs):
+            if isinstance(actual, tuple) and isinstance(expected, tuple):
+                gradient_asserts.append((actual, expected))
+            return original_assert_close(actual, expected, *args, **kwargs)
+
+        leaf = torch.randn(3, requires_grad=True)
+        non_leaf = leaf * 2
+        with patch("torch.testing.assert_close", assert_close):
+            optests.generate_tests.safe_aot_autograd_check(
+                torch.ops.aten.sin.default,
+                (non_leaf,),
+                {},
+                dynamic=True,
+            )
+
+        self.assertEqual(len(gradient_asserts), 1)
+
+    def test_aot_autograd_copy_does_not_check_pinned_memory_for_wrapper_subclass(
+        self,
+    ):
+        x = AOTAutogradCopyNoIsPinnedWrapperSubclass(torch.randn(4, 6))
+
+        cloned = _clone_input_for_aot_autograd(x)
+
+        self.assertIsInstance(cloned, AOTAutogradCopyNoIsPinnedWrapperSubclass)
+        self.assertEqual(cloned.elem, x.elem)
+        self.assertNotEqual(cloned.elem.data_ptr(), x.elem.data_ptr())
+
+    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
+    @unittest.skipIf(
+        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
+    )
+    def test_safe_schema_check_copy_inputs_preserves_pinned_memory_and_copies(self):
+        lib = self.lib()
+        lib.define("check_and_mutate(Tensor(a!) x) -> ()")
+        op = self.ns().check_and_mutate.default
+        seen_inputs = []
+
+        def check_and_mutate_impl(x):
+            seen_inputs.append((x.is_pinned(), x.data_ptr(), x.stride()))
+            x.add_(1)
+
+        lib.impl("check_and_mutate", check_and_mutate_impl, "CPU")
+
+        x = torch.zeros(4, 6, pin_memory=True)[:, ::2]
+        optests.generate_tests.safe_schema_check(op, (x,), {}, copy_inputs=True)
+
+        self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(len(seen_inputs), 1)
+        self.assertTrue(seen_inputs[-1][0])
+        self.assertNotEqual(seen_inputs[-1][1], x.data_ptr())
+        self.assertEqual(seen_inputs[-1][2], x.stride())
+
+        optests.generate_tests.safe_schema_check(op, (x,), {}, copy_inputs=False)
+
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(len(seen_inputs), 2)
+        self.assertEqual(seen_inputs[-1][1], x.data_ptr())
 
     def test_opcheck_customopdef(self):
         sample_inputs = [
