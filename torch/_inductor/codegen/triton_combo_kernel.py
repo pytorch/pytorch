@@ -67,7 +67,7 @@ DEFAULT_COMBO_BLOCK_SIZE_2D = 32
 
 log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
-LARGE_NUMELS = 512e5
+LARGE_NUMELS = 51_200_000
 BLOCK_UTILIZATION = 0.8
 
 
@@ -215,7 +215,7 @@ def _default_custom_combo_kernel_horizontal_partition(
             and V.graph.sizevars.optimization_hint(
                 node_info_map[n].tiling["x"], fallback=1
             )
-            > LARGE_NUMELS  # type: ignore[arg-type]
+            > LARGE_NUMELS
         ]
         if large_pointwise:
             companion_nodes = [n for n in not_reduction if n not in large_pointwise]
@@ -262,7 +262,7 @@ def set_custom_combo_kernel_horizontal_partition(
 ) -> None:
     """Sets the algorithm used to partition nodes into horizontal partitions. Nodes in different partitions
     are implemented in different combo kernels. Nodes in the same partition are likely to be implemented
-    in the same combo kernel, but subject to subsequent restricts like CUDA limits for number of args.
+    in the same combo kernel, but subject to subsequent restrictions like CUDA limits for number of args.
 
     The algorithm should take a list of nodes and return a list of list of nodes.
 
@@ -954,7 +954,9 @@ class ComboKernel(Kernel):
                 @triton.jit
             """
         elif sub_kernel.inside_reduction:
-            reduction_hint = sub_kernel.features.get_reduction_hint()
+            reduction_hint = sub_kernel.features.get_reduction_hint(
+                sub_kernel.tiling_scores
+            )
             heuristics_line = f"""
                 @triton_heuristics.{heuristics}(
                     size_hints={size_hints!r},
@@ -1605,13 +1607,15 @@ class ComboKernel(Kernel):
         return result
 
     def imports_for_benchmark_kernel(self) -> str:
+        # Dedent BEFORE substituting get_raw_stream: a multi-line override would
+        # otherwise collapse dedent's common prefix and misindent the imports.
         return textwrap.dedent(
             """
             from torch._dynamo.testing import rand_strided
             {}
             import torch
-        """.format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
-        )
+            """
+        ).format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
 
     def uniquify_block_sizes(
         self, code: IndentedBuffer, num_kernel: int, uniquify: list[str]
