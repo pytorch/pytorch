@@ -412,6 +412,29 @@ def add(x, y):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    def test_reset_clears_installed_package(self):
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        compiled_fn(torch.randn(3, 2))
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        package.install(backends)
+        self.assertGreater(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+        torch._dynamo.reset()
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_serialize(self, device):
