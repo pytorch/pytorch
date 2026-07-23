@@ -51,7 +51,9 @@ def _flydsl_runtime_unavailable_reason() -> str | None:
             return (
                 "unresolved FlyDSL runtime shared library dependencies: "
                 + "; ".join(
-                    line.strip() for line in ldd_output.splitlines() if "not found" in line
+                    line.strip()
+                    for line in ldd_output.splitlines()
+                    if "not found" in line
                 )
             )
 

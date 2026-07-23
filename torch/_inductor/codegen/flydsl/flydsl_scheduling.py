@@ -11,11 +11,7 @@ from torch.utils._ordered_set import OrderedSet
 from ... import config
 from ...codecache import code_hash, get_path
 from ...ir import FlyDSLTemplateBuffer
-from ...scheduler import (
-    BaseSchedulerNode,
-    BaseScheduling,
-    SchedulerNode,
-)
+from ...scheduler import BaseSchedulerNode, BaseScheduling, SchedulerNode
 from ...select_algorithm import PartialRender
 from ...utils import get_fused_kernel_name, get_kernel_metadata
 from ...virtualized import V

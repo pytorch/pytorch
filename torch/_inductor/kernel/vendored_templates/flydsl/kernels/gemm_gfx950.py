@@ -8,6 +8,7 @@ from flydsl._mlir.dialects import llvm
 from flydsl.expr import const_expr, range_constexpr, rocdl
 from flydsl.runtime.device import get_rocm_arch
 
+
 GFX950_DMA_BYTES = 16
 GFX950_WAVE_SIZE = 64
 GEMM_DTYPE_BF16 = 2
@@ -80,7 +81,9 @@ def make_gemm_gfx950_param(
                 "half-tile interleaved kernel requires m_waves=2 and n_waves>=2"
             )
         if half_block_m * 2 != block_m or half_block_n * 2 != block_n:
-            raise ValueError("half-tile interleaved kernel requires even block_m and block_n")
+            raise ValueError(
+                "half-tile interleaved kernel requires even block_m and block_n"
+            )
         mma_m_half_repeat = half_block_m // m_waves // mma_m
         mma_n_half_repeat = half_block_n // n_waves // mma_n
         if mma_m_half_repeat * m_waves * mma_m != half_block_m:
@@ -93,7 +96,9 @@ def make_gemm_gfx950_param(
                 "half_block_n / n_waves / mma_n == 2"
             )
         if half_block_n % cshuffle_vec_size != 0:
-            raise ValueError("half block_n must be divisible by the c-shuffle vector size")
+            raise ValueError(
+                "half block_n must be divisible by the c-shuffle vector size"
+            )
     elif block_n % cshuffle_vec_size != 0:
         raise ValueError("block_n must be divisible by the c-shuffle vector size")
 
@@ -138,9 +143,13 @@ def make_gemm_gfx950_param(
         half_ldg_a_iters = ((block_m // 2) * block_k) // load_elems_per_iter
         half_ldg_b_iters = ((block_n // 2) * block_k) // load_elems_per_iter
         if half_ldg_a_iters * load_elems_per_iter != (block_m // 2) * block_k:
-            raise ValueError("half-tile A load schedule must exactly cover the LDS tile")
+            raise ValueError(
+                "half-tile A load schedule must exactly cover the LDS tile"
+            )
         if half_ldg_b_iters * load_elems_per_iter != (block_n // 2) * block_k:
-            raise ValueError("half-tile B load schedule must exactly cover the LDS tile")
+            raise ValueError(
+                "half-tile B load schedule must exactly cover the LDS tile"
+            )
     if (stages - 2) * (ldg_a_iters + ldg_b_iters) >= 63:
         raise ValueError("staged pipeline wait count exceeds supported range")
 

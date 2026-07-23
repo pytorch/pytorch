@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import os
 import threading
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 _compiled_cache_lock = threading.RLock()

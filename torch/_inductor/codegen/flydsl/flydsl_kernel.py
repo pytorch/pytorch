@@ -1,16 +1,26 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import logging
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
-import torch
-
 from torch._inductor.codegen.common import IndentedBuffer, Kernel
-from torch._inductor.ir import BaseView, Buffer, ExternKernel, MutableBox, ReinterpretView
+from torch._inductor.ir import (
+    BaseView,
+    Buffer,
+    ExternKernel,
+    MutableBox,
+    ReinterpretView,
+)
 from torch._inductor.stream_constants import DEFAULT_STREAM_IDX
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 MAIN_SUFFIX = "main"
@@ -33,7 +43,7 @@ class FlyDSLTemplateKernel(Kernel):
         self.input_nodes = input_nodes
         self.output_node = output_node
         self.subgraphs = subgraphs
-        self.render_hooks: dict[str, Callable[[], str]] = {}
+        self.render_hooks: dict[str, Callable[[], str] | None] = {}
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
         self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
         self._template_input_args: list[tuple[str, Buffer]] = []
@@ -43,7 +53,7 @@ class FlyDSLTemplateKernel(Kernel):
     def _patch_get_dtype_for_args(self):
         original_get_dtype = V.graph.get_dtype
 
-        def get_dtype(name: str) -> torch.dtype:
+        def get_dtype(name: str):
             for arg_name, input_node in self._template_input_args:
                 if name == arg_name:
                     return input_node.get_dtype()

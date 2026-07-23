@@ -27,7 +27,7 @@ log = getArtifactLogger(__name__, "output_code")
 
 
 class FlyDSLTemplate(KernelTemplate):
-    """Template for generating FlyDSL kernels."""
+    """Template implementation for generating and compiling FlyDSL kernels."""
 
     kernel_type: type[Any] = FlyDSLTemplateKernel
     caller_type: type[Any] | None = None
@@ -169,9 +169,7 @@ class FlyDSLTemplateCaller(ChoiceCaller):
         self.mutated_inputs = mutated_inputs
 
     @staticmethod
-    def _build_description(
-        name: str, template_kwargs: dict[str, Any] | None
-    ) -> str:
+    def _build_description(name: str, template_kwargs: dict[str, Any] | None) -> str:
         if not template_kwargs:
             return f"FlyDSL template {name}"
         kwargs_desc = ", ".join(f"{k}={v}" for k, v in template_kwargs.items())

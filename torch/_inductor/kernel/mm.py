@@ -26,6 +26,7 @@ from ..codegen.flydsl.flydsl_template import FlyDSLTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
+from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import Buffer, ChoiceCaller, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
@@ -214,16 +215,6 @@ def check_supported_striding(mat_a, mat_b) -> None:
     )
 
 
-def _static_int_or_none(x) -> int | None:
-    try:
-        return int(x)
-    except (TypeError, ValueError):
-        try:
-            return int(V.graph.sizevars.size_hint(x))
-        except (TypeError, ValueError):
-            return None
-
-
 def get_flydsl_mm_template_kwargs(
     layout, mat1, mat2, static_shape, is_nonzero
 ) -> list[dict[str, Any]]:
@@ -260,9 +251,9 @@ def get_flydsl_mm_template_kwargs(
     m = mat1.get_size()[0]
     _, n = mat2.get_size()
     k = mat1.get_size()[1]
-    m_static = _static_int_or_none(m)
-    n_static = _static_int_or_none(n)
-    k_static = _static_int_or_none(k)
+    m_static = PythonWrapperCodegen.statically_known_int_or_none(m)
+    n_static = PythonWrapperCodegen.statically_known_int_or_none(n)
+    k_static = PythonWrapperCodegen.statically_known_int_or_none(k)
     if m_static is None or n_static is None or k_static is None:
         return []
     if n_static % 32 != 0 or k_static % 32 != 0:
@@ -273,10 +264,7 @@ def get_flydsl_mm_template_kwargs(
     # underlying B buffer and bake the guarded GEMM dimensions into the template
     # wrapper. FlyDSL itself receives m/n/k as runtime Int32 values, so the JIT
     # cache key remains tile-config based.
-    from .vendored_templates.flydsl.kernels import (
-        GEMM_DTYPE_BF16,
-        GEMM_DTYPE_FP16,
-    )
+    from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
 
     return [
         {

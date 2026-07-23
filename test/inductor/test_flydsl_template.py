@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from unittest import mock
 
 import torch
-
 from torch._inductor.test_case import TestCase
 
 

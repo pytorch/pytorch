@@ -19,6 +19,40 @@ class FlyDSLGemmConfig:
     USE_HALF_TILE_INTERLEAVED: bool = False
 
 
+def _config_from_mapping(values: dict[str, int | bool]) -> FlyDSLGemmConfig:
+    return FlyDSLGemmConfig(
+        TILE_M=int(values["TILE_M"]),
+        TILE_N=int(values["TILE_N"]),
+        TILE_K=int(values["TILE_K"]),
+        STAGES=int(values["STAGES"]),
+        SPLIT_K=int(values["SPLIT_K"]),
+        BLOCK_M_WARPS=int(values["BLOCK_M_WARPS"]),
+        BLOCK_N_WARPS=int(values["BLOCK_N_WARPS"]),
+        BLOCK_K_WARPS=int(values["BLOCK_K_WARPS"]),
+        GROUP_M=int(values["GROUP_M"]),
+        B_TO_LDS=bool(values["B_TO_LDS"]),
+        USE_HALF_TILE_INTERLEAVED=bool(values.get("USE_HALF_TILE_INTERLEAVED", False)),
+    )
+
+
+def _config_from_tuple(values: tuple[int | bool, ...]) -> FlyDSLGemmConfig:
+    if len(values) not in (10, 11):
+        raise ValueError(f"expected 10 or 11 FlyDSL config values, got {len(values)}")
+    return FlyDSLGemmConfig(
+        TILE_M=int(values[0]),
+        TILE_N=int(values[1]),
+        TILE_K=int(values[2]),
+        STAGES=int(values[3]),
+        SPLIT_K=int(values[4]),
+        BLOCK_M_WARPS=int(values[5]),
+        BLOCK_N_WARPS=int(values[6]),
+        BLOCK_K_WARPS=int(values[7]),
+        GROUP_M=int(values[8]),
+        B_TO_LDS=bool(values[9]),
+        USE_HALF_TILE_INTERLEAVED=bool(values[10]) if len(values) == 11 else False,
+    )
+
+
 def _make_gemm_param(gemm_config: dict[str, int | bool]):
     # Keep FlyDSL optional when this heuristics module is imported.
     from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
@@ -47,7 +81,7 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
         "TILE_M": [16, 32, 48, 64, 80, 96, 128, 256],
         "TILE_N": [16, 32, 64, 80, 96, 128, 256],
         "TILE_K": [64, 128, 256],
-        "STAGES": [i for i in range(2, 10)],
+        "STAGES": list(range(2, 10)),
         "BLOCK_M_WARPS": [1, 2, 4],
         "BLOCK_N_WARPS": [1, 2, 4],
         "SPLIT_K": [1],
@@ -62,17 +96,14 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     valid_configs: list[FlyDSLGemmConfig] = []
     for gemm_config in configs:
         if not gemm_config["USE_HALF_TILE_INTERLEAVED"]:
-            mma_m_iters = (
-                gemm_config["TILE_M"] // gemm_config["BLOCK_M_WARPS"] // 16
-            )
-            mma_n_iters = (
-                gemm_config["TILE_N"] // gemm_config["BLOCK_N_WARPS"] // 16
-            )
+            mma_m_iters = gemm_config["TILE_M"] // gemm_config["BLOCK_M_WARPS"] // 16
+            mma_n_iters = gemm_config["TILE_N"] // gemm_config["BLOCK_N_WARPS"] // 16
             if mma_m_iters > 4 or mma_n_iters > 4:
                 continue
         try:
-            _make_gemm_param(gemm_config)
-            valid_configs.append(FlyDSLGemmConfig(**gemm_config))
+            config = _config_from_mapping(gemm_config)
+            _make_gemm_param(asdict(config))
+            valid_configs.append(config)
         except Exception:
             pass
     return valid_configs
@@ -121,8 +152,8 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
         (256, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
         (256, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
     ]
-    configs = [FlyDSLGemmConfig(*args) for args in config_tuples]
-    valid_configs = []
+    configs = [_config_from_tuple(args) for args in config_tuples]
+    valid_configs: list[FlyDSLGemmConfig] = []
     for gemm_config in configs:
         try:
             _make_gemm_param(asdict(gemm_config))

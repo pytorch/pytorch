@@ -2234,7 +2234,9 @@ def use_flydsl_template(layout: Layout) -> bool:
     try:
         from .codegen.flydsl import flydsl_utils
     except Exception:
-        log.debug("Could not import flydsl_utils for Inductor FlyDSL gate", exc_info=True)
+        log.debug(
+            "Could not import flydsl_utils for Inductor FlyDSL gate", exc_info=True
+        )
         return False
     return flydsl_utils.runtime_available()
 
