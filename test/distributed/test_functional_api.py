@@ -411,6 +411,60 @@ class TestMetaCollectives(TestCase):
         self.assertEqual(x.size(), out.size())
 
 
+class TestInplaceRemapAsyncErrors(TestCase):
+    def _assert_async_error(self, fn, suggested_variant):
+        with self.assertRaises(AssertionError) as cm:
+            fn(async_op=True)
+        msg = str(cm.exception)
+        self.assertIn(
+            f"torch.distributed._functional_collectives.{suggested_variant}", msg
+        )
+        self.assertNotIn("all_gather_tensor`", msg)
+        self.assertNotIn("reduce_scatter_tensor`", msg)
+
+    def test_all_gather_tensor_inplace(self):
+        out, inp = torch.empty(4), torch.empty(2)
+        self._assert_async_error(
+            lambda async_op: ft_c.all_gather_tensor_inplace(out, inp, async_op=async_op),
+            "all_gather_single",
+        )
+
+    def test_reduce_scatter_tensor_inplace(self):
+        out, inp = torch.empty(2), torch.empty(4)
+        self._assert_async_error(
+            lambda async_op: ft_c.reduce_scatter_tensor_inplace(
+                out, inp, async_op=async_op
+            ),
+            "reduce_scatter_single",
+        )
+
+    def test_all_reduce_inplace(self):
+        x = torch.empty(4)
+        self._assert_async_error(
+            lambda async_op: ft_c.all_reduce_inplace(x, async_op=async_op),
+            "all_reduce",
+        )
+
+    def test_all_to_all_inplace(self):
+        out, inp = torch.empty(4), torch.empty(4)
+        self._assert_async_error(
+            lambda async_op: ft_c.all_to_all_inplace(out, inp, async_op=async_op),
+            "all_to_all_single",
+        )
+
+    def test_all_gather_inplace(self):
+        tensor_list, tensor = [torch.empty(2), torch.empty(2)], torch.empty(2)
+        self._assert_async_error(
+            lambda async_op: ft_c.all_gather_inplace(
+                tensor_list, tensor, async_op=async_op
+            ),
+            "all_gather_single",
+        )
+        with self.assertRaises(AssertionError) as cm:
+            ft_c.all_gather_inplace(tensor_list, tensor, async_op=True)
+        self.assertIn("split it back", str(cm.exception))
+
+
 @skipIfHpu
 class TestGradCollectives(MultiThreadedTestCase):
     @property

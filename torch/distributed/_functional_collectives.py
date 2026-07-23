@@ -1679,7 +1679,9 @@ These schemas intentionally match torch.distributed.distributed_c10d.* ops that 
 """
 
 
-def _assert_sync_collective(async_op: bool, functional_variant: str) -> None:
+def _assert_sync_collective(
+    async_op: bool, functional_variant: str, note: str = ""
+) -> None:
     if async_op:
         raise AssertionError(
             "torch.compile can't trace the async (async_op=True) version of this "
@@ -1688,6 +1690,7 @@ def _assert_sync_collective(async_op: bool, functional_variant: str) -> None:
             "rewrite it to call the functional collective "
             f"`torch.distributed._functional_collectives.{functional_variant}` directly, "
             "which returns a new tensor instead of mutating in place and needs no wait(). "
+            f"{note}"
             "To request torch.compile support for async work objects, see: "
             "https://github.com/pytorch/pytorch/issues/190853"
         )
@@ -1701,7 +1704,7 @@ def all_gather_tensor_inplace(
     tag: str = "",
     gather_dim: int = 0,
 ):
-    _assert_sync_collective(async_op, "all_gather_tensor")
+    _assert_sync_collective(async_op, "all_gather_single")
 
     group = group or dist.group.WORLD
     if group is None:
@@ -1719,7 +1722,7 @@ def reduce_scatter_tensor_inplace(
     scatter_dim: int = 0,
     tag: str = "",
 ):
-    _assert_sync_collective(async_op, "reduce_scatter_tensor")
+    _assert_sync_collective(async_op, "reduce_scatter_single")
 
     group = group or dist.group.WORLD
     if group is None:
@@ -1789,7 +1792,15 @@ def all_gather_inplace(
     async_op=False,
     tag: str = "",
 ):
-    _assert_sync_collective(async_op, "all_gather_tensor")
+    _assert_sync_collective(
+        async_op,
+        "all_gather_single",
+        note=(
+            "Note that all_gather_single returns a single concatenated tensor "
+            "rather than a list, so you must split it back into per-rank chunks "
+            "yourself (as this helper does internally). "
+        ),
+    )
     if tensor.dim() != 0 and not all(t.size(0) == tensor.size(0) for t in tensor_list):
         raise AssertionError("Remapping variable size all_gather is not yet supported")
 
