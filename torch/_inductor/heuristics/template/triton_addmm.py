@@ -21,10 +21,8 @@ class AddMMConfigMixin(TemplateConfigHeuristics):
         op_name: str,
     ) -> dict[str, Any]:
         kwargs = super().get_extra_kwargs(kernel_inputs, op_name)
-        assert op_name in [
-            "addmm",
-            "baddbmm",
-        ], f"op_name={op_name} invalid for AddMMConfigMixin"
+        if op_name not in ["addmm", "baddbmm"]:
+            raise AssertionError(f"op_name={op_name} invalid for AddMMConfigMixin")
         alpha = kernel_inputs.get_scalar("alpha")
         beta = kernel_inputs.get_scalar("beta")
         return {
