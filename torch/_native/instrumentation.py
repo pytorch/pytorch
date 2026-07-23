@@ -13,8 +13,8 @@ Two sinks, both fed by a single :class:`CompileEvent`:
 * ``trace_structured`` artifacts (tlparse): a JSON record per compile, for
   production jobs where only the structured trace is retrievable.
 
-Two DSLs compile through different machinery, so there are two entry points.
-Both reduce to the same shared core (:func:`_make_wrapper`): snapshot the
+The DSLs compile through different machinery, so each has an entry point.
+All reduce to the same shared core (:func:`_make_wrapper`): snapshot the
 cache, time the call, snapshot again, and flag ``compiled`` when the miss
 counter advanced. They differ only in how a snapshot is sampled:
 
@@ -40,7 +40,11 @@ counter advanced. They differ only in how a snapshot is sampled:
   fused, ``wall_ms`` on a miss is compile + host-launch latency (compile
   dominates); on a hit it is just host-launch latency.
 
-Both DSLs only expose miss-side signal directly (CuTeDSL's vendored cache
+* :func:`instrument_helion_kernel` -- for regular and AOT Helion kernels. It
+  tracks compiled configurations across the kernel's bound specialization
+  cache; a growing count means the call compiled a new configuration.
+
+The DSLs only expose miss-side signal directly (CuTeDSL's vendored cache
 reports aggregate counters; Triton's cache only grows), so finer reasons
 (disk-hit vs lock-timeout, Triton's on-disk cache) are not distinguished
 here -- the boolean ``compiled`` flag plus wall time covers the common case.
@@ -65,10 +69,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CompileEvent",
+    "InstrumentedHelionKernel",
     "InstrumentedTritonKernel",
     "instrument_cutedsl_compile",
+    "instrument_helion_kernel",
     "instrument_triton_kernel",
     "instrumented_cutedsl_cache",
+    "instrumented_helion_kernel",
     "instrumented_triton_cache",
 ]
 
@@ -389,6 +396,66 @@ def instrument_triton_kernel(
     return decorator
 
 
+def _helion_cache_size(kernel: Any) -> int | None:
+    """Compiled-config count across a Helion Kernel's bound specializations.
+
+    Helion stores compiled configs in ``Kernel._bound_kernels[*]._compile_cache``;
+    the total grows by one each time a new configuration compiles, so a delta
+    across a call tells us whether *this* kernel compiled. Returns None if the
+    object doesn't expose these private attributes (a future Helion that renames
+    them, or a non-kernel in tests).
+    """
+    bound_kernels = getattr(kernel, "_bound_kernels", None)
+    if bound_kernels is None:
+        return None
+    try:
+        return sum(
+            len(getattr(bound, "_compile_cache", ()))
+            for bound in bound_kernels.values()
+        )
+    except Exception:
+        return None
+
+
+class InstrumentedHelionKernel:
+    """Transparent proxy over a Helion ``Kernel`` compile cache."""
+
+    def __init__(
+        self,
+        kernel: Any,
+        op: str,
+        key_fn: Callable[..., str] | None,
+    ) -> None:
+        self._kernel = kernel
+        self._wrapped = _make_wrapper(kernel, op, "helion", key_fn, self._sample)
+
+    @property
+    def helion_kernel(self) -> Any:
+        return self._kernel
+
+    def _sample(self) -> tuple[int | None, int | None]:
+        return None, _helion_cache_size(self._kernel)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self._wrapped(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._kernel, name)
+
+
+def instrument_helion_kernel(
+    op: str,
+    *,
+    key_fn: Callable[..., str] | None = None,
+) -> Callable[[Any], InstrumentedHelionKernel]:
+    """Instrument a Helion ``Kernel`` without importing Helion eagerly."""
+
+    def decorator(kernel: Any) -> InstrumentedHelionKernel:
+        return InstrumentedHelionKernel(kernel, op, key_fn)
+
+    return decorator
+
+
 # ---------------------------------------------------------------------------
 # Combined decorators: the recommended one-decorator surface for native ops.
 # They apply the DSL's own cache/jit *and* the instrumentation, so the op
@@ -442,5 +509,26 @@ def instrumented_triton_cache(
 
     def decorator(fn: Callable[..., R]) -> InstrumentedTritonKernel:
         return instrument_triton_kernel(op, key_fn=key_fn)(triton.jit(fn))
+
+    return decorator
+
+
+def instrumented_helion_kernel(
+    op: str,
+    *,
+    aot: bool = False,
+    key_fn: Callable[..., str] | None = None,
+    **settings: object,
+) -> Callable[[Callable[..., R]], InstrumentedHelionKernel]:
+    """Create and instrument a regular or AOT Helion kernel."""
+    import helion  # pyrefly: ignore[missing-import]
+    import helion.experimental  # pyrefly: ignore[missing-import]
+
+    kernel_decorator = helion.experimental.aot_kernel if aot else helion.kernel
+
+    def decorator(fn: Callable[..., R]) -> InstrumentedHelionKernel:
+        return instrument_helion_kernel(op, key_fn=key_fn)(
+            kernel_decorator(**settings)(fn)
+        )
 
     return decorator
