@@ -4199,7 +4199,8 @@ def _get_fake_value_impl(
             raise_observed_exception,
         )
 
-        tx.output.graph.erase_node(node)
+        if not node.users:
+            tx.output.graph.erase_node(node)
         try:
             raise_observed_exception(RuntimeError, tx, args=[msg])
         except ObservedException as e:

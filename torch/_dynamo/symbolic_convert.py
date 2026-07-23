@@ -1722,9 +1722,6 @@ class InstructionTranslatorBase(
             return not self.output.should_exit
         except TensorifyScalarRestartAnalysis:
             raise
-        except FakeTensorObservedException as e:
-            self.exception_handler(e)
-            return True
         except exc.ObservedException as e:
             self.exception_handler(e)
             return True

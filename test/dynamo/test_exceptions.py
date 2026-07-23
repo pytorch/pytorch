@@ -789,13 +789,11 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return torch.linalg.inv(x)
 
-        try:
-            opt_m = torch.compile(fn, backend="cnt")
-            x = torch.randn(2, 3)
+        opt_m = torch.compile(fn, backend=cnt)
+        x = torch.randn(2, 3)
+        with self.assertRaises(RuntimeError):
             opt_m(x)
-        except RuntimeError:
-            # Graph Break occurred, no frames compiled.
-            self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.frame_count, 0)
 
     def test_raise_from_None(self):
         # Inspired from os.environ

@@ -496,7 +496,7 @@ class ObservedTypeError(ObservedException):
 
 
 class FakeTensorObservedException(ObservedException):
-    node: Any = None
+    pass
 
 
 observed_exception_map = {
@@ -554,18 +554,7 @@ def raise_observed_exception(
     exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
         tx, args_, kwargs or {}
     )
-    from .symbolic_convert import ExceptionVals
-
-    if not isinstance(exception_vt, ExceptionVals):
-        raise AssertionError(f"expected ExceptionVals, got {type(exception_vt)}")
-    tx._attach_traceback_to_exception(exception_vt)
-    tx.exn_vt_stack._set_context_and_break_context_reference_cycle(exception_vt)
-    tx.exn_vt_stack.set_raised_exception(exception_vt)  # type: ignore[arg-type]
-    raised_exc = get_dynamo_observed_exception(exc_type)
-    # Store the original exception arguments for better error messages
-    if args:
-        raise raised_exc(*args_)
-    raise raised_exc
+    tx.do_raise(exception_vt, None)
 
 
 def raise_type_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
