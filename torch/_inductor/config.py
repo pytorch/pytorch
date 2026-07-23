@@ -1574,6 +1574,18 @@ bw_outputs_user_visible = True
 # Whether to always use shape padding if it is enabled and possible
 force_shape_pad: bool = False
 
+# User-overridable policy for pad_mm's shape-padding decisions. Either a callable
+# or a PadMMPolicy taking a PadMMContext and returning True (pad this mm/addmm/bmm),
+# False (do not pad), or None (defer to Inductor's built-in decision). Consulted
+# before the built-in heuristics and the AutoHeuristic, so a returned bool is
+# honored even in deterministic mode. Use a PadMMPolicy (with uuid()) rather than a
+# bare callable to keep compiled-artifact caching enabled. Example:
+#
+#     def policy(ctx):
+#         return SHIPPED_TABLE.get((ctx.m, ctx.k, ctx.n, ctx.mat1_dtype))
+#     torch._inductor.config.pad_mm_policy = policy
+pad_mm_policy: torch._inductor.custom_graph_pass.PadMMPolicyType = None
+
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
@@ -2950,6 +2962,8 @@ _save_config_ignore: list[str] = [
     "post_grad_custom_post_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
+    # pad_mm_policy may be a callable/PadMMPolicy; hashed via its uuid() instead.
+    "pad_mm_policy",
     # CUDAGraphPolicy objects are not picklable and only affect
     # post_compile wrapping, not compiled code itself.
     "cudagraph_policy",
@@ -2973,6 +2987,8 @@ _cache_config_ignore_prefix: list[str] = [
     "pre_grad_custom_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
+    # see CustomPassBase; hashed specially via its uuid() in FxGraphHashDetails
+    "pad_mm_policy",
     # CUDAGraphPolicy only affects post_compile, not compiled output
     "cudagraph_policy",
     # tests assume that changes here don't invalidate cache

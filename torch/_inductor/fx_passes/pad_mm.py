@@ -3,6 +3,7 @@ import itertools
 import operator
 import typing
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import torch
@@ -44,6 +45,36 @@ aten = torch.ops.aten
 # Changing it to True will ignore comparing do_bench times
 # between original pattern and padded one.
 _skip_do_bench_times = False
+
+
+@dataclass(frozen=True)
+class PadMMContext:
+    """Inputs passed to the user-overridable pad_mm policy hook.
+
+    See ``torch._inductor.config.pad_mm_policy``. ``op`` is one of "mm", "addmm", "bmm".
+    ``m``/``k``/``n`` are the logical GEMM dims (concrete size hints). Each
+    ``*_padded_length`` is how many rows/cols would be appended to align that dim
+    (0 means that dim is already aligned). ``device_capability`` is the CUDA
+    (major, minor) tuple, or None on non-CUDA, so an offline-tuned policy can be
+    keyed per GPU.
+    """
+
+    op: str
+    m: int
+    k: int
+    n: int
+    m_padded_length: int
+    k_padded_length: int
+    n_padded_length: int
+    mat1_dtype: torch.dtype
+    mat2_dtype: torch.dtype
+    mat1_stride: tuple[int, ...]
+    mat2_stride: tuple[int, ...]
+    device_capability: tuple[int, int] | None
+
+
+# op -> PadMMContext.op name; op is guaranteed to be one of these by the callers.
+_PAD_MM_OP_NAMES = {aten.mm: "mm", aten.addmm: "addmm", aten.bmm: "bmm"}
 
 
 def fetch_fake_tensors(match: Match, kwarg_names: Sequence[str]) -> list[Tensor]:
@@ -159,12 +190,14 @@ def can_pad(
         if m_padded_length == k_padded_length == n_padded_length == 0:
             return False
 
-    # In deterministic mode, we can't safely benchmark - disallow padding
-    # Check this after other basic checks so force_shape_pad/autoheuristic can override
+    # In deterministic mode, we can't safely benchmark - disallow padding.
+    # Check this after other basic checks so force_shape_pad, the autoheuristic, or
+    # a user-provided pad_mm policy (config.pad_mm_policy) can override.
     if (
         torch._inductor.config.deterministic
         and not torch._inductor.config.force_shape_pad
         and not torch._inductor.config.use_autoheuristic("pad_mm")
+        and torch._inductor.config.pad_mm_policy is None
     ):
         return False
 
@@ -533,6 +566,33 @@ def _should_pad(
         # Resolve symbolic dims to concrete hints for heuristic checks below.
         # These are performance decisions, not correctness — optimization_hint is safe.
         m_concrete, k_concrete, n_concrete = hint_symbols((m, k, n))
+
+        # User-overridable pad_mm policy (torch._inductor.config.pad_mm_policy).
+        # Consulted before the built-in heuristics and the AutoHeuristic, and
+        # applied to mm/addmm/bmm alike, so a returned bool is honored even in
+        # deterministic mode. Skipped (no context built) unless a policy is set.
+        pad_mm_policy = torch._inductor.config.pad_mm_policy
+        if pad_mm_policy is not None:
+            pad_mm_override = pad_mm_policy(
+                PadMMContext(
+                    op=_PAD_MM_OP_NAMES[op],
+                    m=m_concrete,
+                    k=k_concrete,
+                    n=n_concrete,
+                    m_padded_length=m_padded_length,
+                    k_padded_length=k_padded_length,
+                    n_padded_length=n_padded_length,
+                    mat1_dtype=mat1.dtype,
+                    mat2_dtype=mat2.dtype,
+                    mat1_stride=tuple(hint_symbols(mat1.stride())),
+                    mat2_stride=tuple(hint_symbols(mat2.stride())),
+                    device_capability=(
+                        torch.cuda.get_device_capability() if mat1.is_cuda else None
+                    ),
+                )
+            )
+            if pad_mm_override is not None:
+                return pad_mm_override
 
         # Performance heuristic for bf16 large K scenarios
         if (
