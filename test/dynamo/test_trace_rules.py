@@ -546,6 +546,33 @@ if missing_polyfills:
             sys.modules.pop(module_name, None)
             trace_rules._lazy_module_init.pop(module_name, None)
 
+    def test_late_polyfill_invalidates_uninteresting_files(self):
+        from torch._dynamo import guards
+        from torch._dynamo.polyfills import loader
+
+        module_name = f"_dynamo_test_polyfill_{id(self)}"
+        module = types.ModuleType(module_name)
+        module.__file__ = f"/{module_name}.py"
+        original_modules = loader.POLYFILLED_MODULES
+        original_loaded_names = loader._loaded_polyfill_module_names.copy()
+
+        try:
+            loader._loaded_polyfill_module_names.discard("pytree")
+            guards.uninteresting_files.cache_clear()
+            self.assertNotIn(module.__file__, guards.uninteresting_files())
+
+            with unittest.mock.patch.object(
+                loader, "_load_polyfill_module", return_value=module
+            ):
+                loader._load_pytree_polyfill_module()
+
+            self.assertIn(module.__file__, guards.uninteresting_files())
+        finally:
+            loader.POLYFILLED_MODULES = original_modules
+            loader._loaded_polyfill_module_names.clear()
+            loader._loaded_polyfill_module_names.update(original_loaded_names)
+            guards.uninteresting_files.cache_clear()
+
     def test_no_special_handlers_for_torch_non_c_bindings(self):
         handlers = TorchInGraphFunctionVariable._get_handlers()
         # These handlers are manually audited to be safe

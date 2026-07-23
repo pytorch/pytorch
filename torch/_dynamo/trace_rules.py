@@ -3338,7 +3338,7 @@ _lazy_module_init: dict[str, list[Callable[[], None]]] = defaultdict(list)
 
 
 def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:
-    """Register a module without eagerly importing it"""
+    """Run init_func now if the root module is loaded, or when first encountered."""
     if "." in name:
         raise AssertionError(f"Expected a root module name, but got {name}")
     if name in sys.modules:

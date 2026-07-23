@@ -43,6 +43,10 @@ def _load_pytree_polyfill_module() -> None:
         return
     POLYFILLED_MODULES = (*POLYFILLED_MODULES, _load_polyfill_module("pytree"))
 
+    from ..guards import uninteresting_files
+
+    uninteresting_files.cache_clear()
+
 
 # See also the TYPE_CHECKING block in torch/_dynamo/polyfills/__init__.py
 POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
