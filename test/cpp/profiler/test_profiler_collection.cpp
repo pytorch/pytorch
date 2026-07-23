@@ -276,7 +276,8 @@ std::shared_ptr<Result> makePyCall(
     size_t python_tid) {
   PyFrameState frame{0, at::StringView("f.py"), at::StringView("fn")};
   PyFrameState caller{0, at::StringView("caller.py"), at::StringView("caller")};
-  ExtraFields<EventType::PyCall>::args_t args{frame, std::nullopt, std::nullopt};
+  ExtraFields<EventType::PyCall>::args_t args{
+      frame, std::nullopt, std::nullopt};
   return Result::create(
       start_ns,
       /*start_tid=*/7,
@@ -295,10 +296,7 @@ std::shared_ptr<Result> makePyCCall(
       /*start_tid=*/7,
       torch::profiler::impl::kineto::DeviceAndResource(),
       ExtraFields<EventType::PyCCall>(
-          end_ns,
-          python_tid,
-          caller,
-          at::StringView("<built-in method foo>")));
+          end_ns, python_tid, caller, at::StringView("<built-in method foo>")));
 }
 
 } // namespace
