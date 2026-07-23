@@ -17,6 +17,8 @@ namespace at::native {
 
 namespace {
 
+constexpr int kMaxGroupedGemmGroups = 1024;
+
 void check_cublaslt_grouped_alignment(
     bool a_is_2d,
     bool b_is_2d,
@@ -156,36 +158,49 @@ __global__ void populate_cublas_grouped_args_kernel(
   alphaPtr_out[i] = reinterpret_cast<int64_t>(alpha_ptr);
   betaPtr_out[i] = reinterpret_cast<int64_t>(beta_ptr);
 
-  if (scalePtrA_out != nullptr) {
-    if (scale_a_stride_bytes != 0) {
-      // Uniform stride (3D/3D or GroupWise)
-      scalePtrA_out[i] = base_scale_a + i * scale_a_stride_bytes;
-    } else {
-      // Variable-size groups: prefix-sum over per-group scale sizes.
-      // A 0 value in scale_inner or scale_a_outer means "use delta from offs".
-      int64_t offset = 0;
-      for (int j = 0; j < i; j++) {
-        int32_t dim_j = (j == 0) ? offs[j] : offs[j] - offs[j - 1];
-        int32_t inner = scale_inner ? scale_inner : dim_j;
-        int32_t outer = scale_a_outer ? scale_a_outer : dim_j;
-        offset += cublas_vec32_scale_size(inner, outer);
-      }
-      scalePtrA_out[i] = base_scale_a + offset;
+  // Variable-size scale offsets: exclusive prefix-sum over per-group scale
+  // sizes via parallel scan. A 0 value in scale_inner or scale_*_outer
+  // means "use delta (per-group extent) from offs".
+  const bool scan_a = (scalePtrA_out != nullptr) && (scale_a_stride_bytes == 0);
+  const bool scan_b = (scalePtrB_out != nullptr) && (scale_b_stride_bytes == 0);
+  if (scan_a || scan_b) {
+    __shared__ int64_t s_a[kMaxGroupedGemmGroups];
+    __shared__ int64_t s_b[kMaxGroupedGemmGroups];
+    const int32_t inner_a = scale_inner ? scale_inner : delta;
+    const int32_t inner_b = scale_inner ? scale_inner : delta;
+    const int32_t outer_a = scale_a_outer ? scale_a_outer : delta;
+    const int32_t outer_b = scale_b_outer ? scale_b_outer : delta;
+    const int64_t size_a = scan_a ? cublas_vec32_scale_size(inner_a, outer_a) : 0;
+    const int64_t size_b = scan_b ? cublas_vec32_scale_size(inner_b, outer_b) : 0;
+    s_a[i] = size_a;
+    s_b[i] = size_b;
+    __syncthreads();
+
+    // Hillis-Steele inclusive scan over both A and B sizes at once.
+    for (int stride = 1; stride < blockDim.x; stride <<= 1) {
+      int64_t add_a = (i >= stride) ? s_a[i - stride] : 0;
+      int64_t add_b = (i >= stride) ? s_b[i - stride] : 0;
+      __syncthreads();
+      s_a[i] += add_a;
+      s_b[i] += add_b;
+      __syncthreads();
+    }
+
+    // Convert inclusive scan to exclusive prefix by subtracting own value.
+    if (scan_a) {
+      scalePtrA_out[i] = base_scale_a + (s_a[i] - size_a);
+    }
+    if (scan_b) {
+      scalePtrB_out[i] = base_scale_b + (s_b[i] - size_b);
     }
   }
-  if (scalePtrB_out != nullptr) {
-    if (scale_b_stride_bytes != 0) {
-      scalePtrB_out[i] = base_scale_b + i * scale_b_stride_bytes;
-    } else {
-      int64_t offset = 0;
-      for (int j = 0; j < i; j++) {
-        int32_t dim_j = (j == 0) ? offs[j] : offs[j] - offs[j - 1];
-        int32_t inner = scale_inner ? scale_inner : dim_j;
-        int32_t outer = scale_b_outer ? scale_b_outer : dim_j;
-        offset += cublas_vec32_scale_size(inner, outer);
-      }
-      scalePtrB_out[i] = base_scale_b + offset;
-    }
+
+  // Uniform stride (3D/3D or GroupWise): direct indexed offset.
+  if (scalePtrA_out != nullptr && scale_a_stride_bytes != 0) {
+    scalePtrA_out[i] = base_scale_a + i * scale_a_stride_bytes;
+  }
+  if (scalePtrB_out != nullptr && scale_b_stride_bytes != 0) {
+    scalePtrB_out[i] = base_scale_b + i * scale_b_stride_bytes;
   }
 }
 

@@ -140,6 +140,17 @@ bool should_use_cublaslt_grouped_gemm(
   return bf16_grouped_gemm && at::globalContext().preferCublasltGroupedGemm();
 }
 
+int64_t cublas_vec32_scale_size_host(int64_t inner, int64_t outer) {
+  constexpr int64_t BLOCK_ROWS = 128;
+  constexpr int64_t BLOCK_COLS = 128;
+  constexpr int64_t S_VSCALE = 32;
+  int64_t s_rows = ((inner + BLOCK_ROWS - 1) / BLOCK_ROWS) * (BLOCK_ROWS / S_VSCALE);
+  int64_t s_cols = ((outer + BLOCK_COLS - 1) / BLOCK_COLS) * BLOCK_COLS;
+  return s_rows * s_cols;
+}
+
+// Needs to stay synced with is_cublaslt_grouped_scaling_type and
+// check_cublaslt_grouped_scale_recipe to support both v1 and v2 APIs
 std::optional<ScalingType> get_cublaslt_grouped_scaling_type(
     const Tensor& scale,
     int64_t batchCount) {
@@ -157,21 +168,16 @@ std::optional<ScalingType> get_cublaslt_grouped_scaling_type(
   return std::nullopt;
 }
 
-int64_t cublas_vec32_scale_size_host(int64_t inner, int64_t outer) {
-  constexpr int64_t BLOCK_ROWS = 128;
-  constexpr int64_t BLOCK_COLS = 128;
-  constexpr int64_t S_VSCALE = 32;
-  int64_t s_rows = ((inner + BLOCK_ROWS - 1) / BLOCK_ROWS) * (BLOCK_ROWS / S_VSCALE);
-  int64_t s_cols = ((outer + BLOCK_COLS - 1) / BLOCK_COLS) * BLOCK_COLS;
-  return s_rows * s_cols;
-}
-
+// Needs to stay synced with get_cublaslt_grouped_scaling_type and
+// check_cublaslt_grouped_scale_recipe to support both v1 and v2 APIs
 bool is_cublaslt_grouped_scaling_type(ScalingType scaling) {
   return scaling == ScalingType::TensorWise ||
       scaling == ScalingType::GroupWise ||
       scaling == ScalingType::BlockWise1x32;
 }
 
+// Needs to stay synced with get_cublaslt_grouped_scaling_type and
+// is_cublaslt_grouped_scaling_type to support both v1 and v2 APIs
 void check_cublaslt_grouped_scale_recipe(
     const Tensor& mat,
     const Tensor& scale,
@@ -245,6 +251,7 @@ void check_cublaslt_grouped_scale_recipe(
   }
 }
 
+// Mirrored by _should_use_scaled_cublaslt_grouped_gemm in torch/_meta_registrations.py
 bool should_use_scaled_cublaslt_grouped_gemm(
   const Tensor& mat_a,
   const Tensor& mat_b,

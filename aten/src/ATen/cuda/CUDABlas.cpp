@@ -2264,11 +2264,12 @@ void grouped_gemm(
         scales->use_fast_accum);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, scales->A_scale_ptr);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, scales->B_scale_ptr);
-    if (scales->D_scale_ptr != nullptr) {
-      computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, scales->D_scale_ptr);
-    }
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, a_scale_mode);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, b_scale_mode);
+    if (scales->D_scale_ptr != nullptr) {
+      // TODO: When D scaling support is added, update this and GroupedGemmScaleOptions to set D scale mode)
+      computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, scales->D_scale_ptr);
+    }
 
     const int8_t fastAccuMode = scales->use_fast_accum ? 1 : 0;
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);

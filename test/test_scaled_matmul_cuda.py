@@ -7,6 +7,7 @@ import re
 import itertools
 import tempfile
 import unittest
+import warnings
 
 import torch
 
@@ -55,6 +56,7 @@ from torch.testing._internal.common_utils import (
     random_matrix_with_scaled_reduction_dim,
     run_tests,
     runOnRocmArch,
+    set_warn_always_context,
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA,
@@ -2635,8 +2637,7 @@ class TestFP8Matmul(TestCase):
                 self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
 
 
-    def scaled_grouped_gemm_cublaslt_helper(self, op, a_dtype, b_dtype, scale_mode):
-        device = "cuda"
+    def scaled_grouped_gemm_cublaslt_helper(self, op, a_dtype, b_dtype, scale_mode, device):
         ngroups = 5
         # FP8 is 1 byte, so 16-byte alignment requires dims/offsets to be multiples of 16
 
@@ -2743,10 +2744,10 @@ class TestFP8Matmul(TestCase):
     @parametrize("out_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize("scale_mode", ["tensorwise", "groupwise"])
     @parametrize("fast_accum", [False, True])
-    def test_scaled_grouped_gemm_cublaslt(self, op, dtypes, out_dtype, scale_mode, fast_accum):
+    def test_scaled_grouped_gemm_cublaslt(self, op, dtypes, out_dtype, scale_mode, fast_accum, device):
         a_dtype, b_dtype = dtypes
         A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_helper(
-            op, a_dtype, b_dtype, scale_mode
+            op, a_dtype, b_dtype, scale_mode, device
         )
 
         with prefer_cublaslt_grouped_gemm():
@@ -2761,7 +2762,7 @@ class TestFP8Matmul(TestCase):
             )
 
         C_ref = self.cublaslt_grouped_gemm_ref(A, B_T, scale_a, scale_b, offs, out_dtype, fast_accum)
-        self.assertEqual(C, C_ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(C, C_ref)
 
 
     @onlyCUDA
@@ -2783,11 +2784,11 @@ class TestFP8Matmul(TestCase):
     @parametrize("scale_mode", ["tensorwise", "groupwise"])
     @parametrize("fast_accum", [False, True])
     @parametrize("mode", ["default", "reduce-overhead"])
-    def test_scaled_grouped_gemm_cublaslt_compiled(self, op, dtypes, out_dtype, scale_mode, fast_accum, mode):
+    def test_scaled_grouped_gemm_cublaslt_compiled(self, op, dtypes, out_dtype, scale_mode, fast_accum, mode, device):
         a_dtype, b_dtype = dtypes
         torch._dynamo.reset()  # each shape combination needs fresh compilation state
         A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_helper(
-            op, a_dtype, b_dtype, scale_mode
+            op, a_dtype, b_dtype, scale_mode, device
         )
 
         with prefer_cublaslt_grouped_gemm():
@@ -2806,8 +2807,7 @@ class TestFP8Matmul(TestCase):
             C = f(A, B_T.transpose(-2, -1), scale_a, scale_b, offs=offs, use_fast_accum=fast_accum, out_dtype=out_dtype)
             self.assertEqual(C, C_ref)
 
-    def scaled_grouped_gemm_cublaslt_mxfp8_helper(self, op):
-        device = "cuda"
+    def scaled_grouped_gemm_cublaslt_mxfp8_helper(self, op, device):
         ngroups = 4
         block_size = 32
 
@@ -2882,8 +2882,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("out_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize("fast_accum", [False, True])
-    def test_scaled_grouped_gemm_cublaslt_mxfp8(self, op, out_dtype, fast_accum):
-        A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_mxfp8_helper(op)
+    def test_scaled_grouped_gemm_cublaslt_mxfp8(self, op, out_dtype, fast_accum, device):
+        A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_mxfp8_helper(op, device)
 
         with prefer_cublaslt_grouped_gemm():
             C = torch._scaled_grouped_mm(
@@ -2897,7 +2897,7 @@ class TestFP8Matmul(TestCase):
             )
 
         C_ref = self.cublaslt_grouped_gemm_ref(A, B_T, scale_a, scale_b, offs, out_dtype, fast_accum)
-        self.assertEqual(C, C_ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(C, C_ref)
 
 
     @onlyCUDA
@@ -2909,9 +2909,9 @@ class TestFP8Matmul(TestCase):
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("fast_accum", [False, True])
     @parametrize("mode", ["default", "reduce-overhead"])
-    def test_scaled_grouped_gemm_cublaslt_mxfp8_compiled(self, op, fast_accum, mode):
+    def test_scaled_grouped_gemm_cublaslt_mxfp8_compiled(self, op, fast_accum, mode, device):
         out_dtype = torch.bfloat16
-        A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_mxfp8_helper(op)
+        A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_mxfp8_helper(op, device)
 
         torch._dynamo.reset()
         with prefer_cublaslt_grouped_gemm():
@@ -2928,6 +2928,100 @@ class TestFP8Matmul(TestCase):
             )
             self.assertEqual(C, C_ref)
 
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
+        cublaslt_grouped_mm_skip_msg
+    )
+    @parametrize("case", ["unsupported_input_dtype", "unsupported_out_dtype", "too_many_groups"])
+    def test_scaled_grouped_gemm_cublaslt_fallback_warns(self, case, device):
+        # Inputs that fail should_use_scaled_cublaslt_grouped_gemm must warn and
+        # fall back to the non-cuBLASLt path rather than erroring. On this device
+        # the fallback then rejects the inputs itself, so assert the fallback
+        # warning fires. set_warn_always_context forces the TORCH_WARN_ONCE to
+        # re-emit regardless of prior tests.
+        m, n, k = 16, 16, 64
+        offs = torch.tensor([0, 16, 32, 32, k], device=device, dtype=torch.int32)
+        scale_a = torch.rand(1, device=device, dtype=torch.float32)
+        scale_b = torch.rand(1, device=device, dtype=torch.float32)
+        if case == "unsupported_input_dtype":
+            a = torch.randn(m, k, device=device).to(torch.float8_e5m2)
+            b = torch.randn(n, k, device=device).to(torch.float8_e5m2)
+            out_dtype = torch.bfloat16
+            warn_regex = "inputs must both be FP8 and at least one input must be Float8_e4m3fn"
+        elif case == "unsupported_out_dtype":
+            a = torch.randn(m, k, device=device).to(e4m3_type)
+            b = torch.randn(n, k, device=device).to(e4m3_type)
+            out_dtype = torch.float64
+            warn_regex = "output dtype must be BFloat16, Float16, or Float32"
+        else:  # too_many_groups: batchCount above the cuBLASLt [1, 1024] limit
+            a = torch.randn(m, k, device=device).to(e4m3_type)
+            b = torch.randn(n, k, device=device).to(e4m3_type)
+            out_dtype = torch.bfloat16
+            offs = torch.arange(1, 1026, device=device, dtype=torch.int32)
+            warn_regex = r"batchCount must be in \[1, 1024\]"
+
+        with prefer_cublaslt_grouped_gemm():
+            with warnings.catch_warnings(record=True) as ws:
+                warnings.simplefilter("always")
+                with set_warn_always_context(True):
+                    with self.assertRaises(RuntimeError):
+                        torch._scaled_grouped_mm(
+                            a, b.t(), scale_a, scale_b, offs=offs, out_dtype=out_dtype
+                        )
+        self.assertTrue(
+            any(re.search(warn_regex, str(w.message)) for w in ws),
+            f"expected cuBLASLt fallback warning matching {warn_regex!r}, "
+            f"got {[str(w.message) for w in ws]}",
+        )
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
+        cublaslt_grouped_mm_skip_msg
+    )
+    @parametrize(
+        "case",
+        [
+            "groupwise_noncontiguous",
+            "blockwise_noncontiguous",
+            "blockwise_wrong_shape",
+            "blockwise_too_few_elements",
+        ]
+    )
+    def test_scaled_grouped_gemm_cublaslt_scale_recipe_errors(self, case, device):
+        # Scales whose recipe is recognized by should_use_scaled_cublaslt_grouped_gemm
+        # but that violate check_cublaslt_grouped_scale_recipe must raise once the
+        # cuBLASLt path is selected.
+        e8m0 = torch.float8_e8m0fnu
+        if case == "groupwise_noncontiguous":
+            A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_helper(
+                "2d/2d", e4m3_type, e4m3_type, "groupwise", device
+            )
+            # 1D float32 with one value per group, but non-contiguous.
+            scale_a = torch.rand(2 * scale_a.numel(), device=device, dtype=torch.float32)[::2]
+            regex = "scale_a groupwise scale must be a contiguous 1D float32 tensor"
+        elif case == "blockwise_too_few_elements":
+            A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_mxfp8_helper("2d/2d", device)
+            scale_a = torch.ones(1, device=device, dtype=e8m0)
+            regex = "scale_a blockwise scale for cuBLASLt grouped GEMM must have at least"
+        else:
+            A, B_T, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_mxfp8_helper("3d/3d", device)
+            if case == "blockwise_noncontiguous":
+                scale_a = torch.ones((A.shape[0], 2 * scale_a.shape[1]), device=device, dtype=e8m0)[:, ::2]
+                regex = "scale_a blockwise scale must be a contiguous float8_e8m0fnu tensor"
+            else:  # blockwise_wrong_shape
+                scale_a = torch.ones((A.shape[0], 1), device=device, dtype=e8m0)
+                regex = "scale_a blockwise scale for cuBLASLt grouped GEMM must have shape"
+
+        with prefer_cublaslt_grouped_gemm():
+            with self.assertRaisesRegex(RuntimeError, regex):
+                torch._scaled_grouped_mm(
+                    A, B_T.transpose(-2, -1), scale_a, scale_b, offs=offs, out_dtype=torch.bfloat16
+                )
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
