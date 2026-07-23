@@ -54,7 +54,7 @@ rendezvous is destroyed first.
 
 When a rendezvous is completed, all its members will agree on the job membership
 and everyone's role in it. This role is represented using an integer, called
-rank, that is between between 0 and world size.
+rank, that is between 0 and world size.
 
 Note that ranks are *not stable*, in the sense that the same node can be
 assigned a different rank in the next (re-)rendezvous.
@@ -66,7 +66,7 @@ during the rendezvous process. Should a process crash (or lose network
 connectivity, etc), between joining the rendezvous and it being completed, then
 a re-rendezvous with remaining healthy nodes will happen automatically.
 
-A node can also fail *after* it has completed (or *has been observered* by other
+A node can also fail *after* it has completed (or *has been observed* by other
 nodes to have completed) the rendezvous - this scenario will be handled by the
 Torch Distributed Elastic ``train_loop`` instead (where it will also trigger a
 re-rendezvous).
@@ -120,11 +120,7 @@ of the following implementations that come with PyTorch:
      backend = C10dRendezvousBackend(store, "my_run_id")
 
      rdzv_handler = DynamicRendezvousHandler.from_backend(
-         run_id="my_run_id",
-         store=store,
-         backend=backend,
-         min_nodes=2,
-         max_nodes=4
+         run_id="my_run_id", store=store, backend=backend, min_nodes=2, max_nodes=4
      )
 """
 

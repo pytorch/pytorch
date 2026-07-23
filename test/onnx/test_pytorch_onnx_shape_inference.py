@@ -10,8 +10,8 @@ from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
 
 import torch
 from torch.onnx import _constants, utils
-from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import jit_utils
+from torch.onnx._internal.torchscript_exporter import jit_utils
+from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 from torch.testing._internal import common_utils
 
 
@@ -367,7 +367,10 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         # Exporter will add "If" instead of raw "Squeeze" if it does not know
         # that if the dimension it is squeezing has size 1.
         squeezed = squeeze11(as_graphcontext(g), if_output, dim=0)
-        assert squeezed.node().kind() == "onnx::Squeeze"
+        if squeezed.node().kind() != "onnx::Squeeze":
+            raise AssertionError(
+                f"Expected 'onnx::Squeeze' but got {squeezed.node().kind()!r}"
+            )
         self.run_test(g, squeezed.node(), expect_tensor("Float", shape=(None, 5)))
 
 
@@ -396,12 +399,14 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             f,
             opset_version=self.opset_version,
             custom_opsets={"com.microsoft": 1},
+            dynamo=False,
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
         model_value_info = model_proto.graph.value_info
         self.assertIsNotNone(model_value_info)
-        assert model_value_info
+        if not model_value_info:
+            raise AssertionError("model_value_info is empty")
         dims = model_value_info[0].type.tensor_type.shape.dim
         for i in range(len(dims)):
             # If node output has shape info, it should have dim_value
@@ -430,12 +435,14 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             f,
             opset_version=self.opset_version,
             custom_opsets={"com.microsoft": 1},
+            dynamo=False,
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
         model_value_info = model_proto.graph.value_info
         self.assertIsNotNone(model_value_info)
-        assert model_value_info
+        if not model_value_info:
+            raise AssertionError("model_value_info is empty")
         dims = model_value_info[0].type.tensor_type.shape.dim
         for i in range(len(dims)):
             # If node output has shape info, it should have dim_value
@@ -468,12 +475,14 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             custom_opsets={"com.microsoft": 1},
             input_names=["x"],
             dynamic_axes={"x": {0: "batch"}},
+            dynamo=False,
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
         model_value_info = model_proto.graph.value_info
         self.assertIsNotNone(model_value_info)
-        assert model_value_info
+        if not model_value_info:
+            raise AssertionError("model_value_info is empty")
         dims = model_value_info[0].type.tensor_type.shape.dim
         # The first axe should be dynamic as we defined when exporting
         self.assertTrue(dims[0].HasField("dim_param"))
@@ -508,6 +517,7 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             f,
             opset_version=self.opset_version,
             custom_opsets={"com.microsoft": 1},
+            dynamo=False,
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
@@ -518,12 +528,15 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             if node.op_type == "Inverse":
                 output_name = node.output[0]
                 break
-        assert output_name
+        if not output_name:
+            raise AssertionError("output_name not found")
         model_value_info = model_proto.graph.value_info
         self.assertIsNotNone(model_value_info)
-        assert model_value_info
+        if not model_value_info:
+            raise AssertionError("model_value_info is empty")
         for value_info in model_value_info:
-            assert value_info.name
+            if not value_info.name:
+                raise AssertionError("value_info.name is empty")
             if value_info.name == output_name:
                 dims = value_info.type.tensor_type.shape.dim
                 for i in range(len(dims)):

@@ -32,7 +32,7 @@ def _batch_mahalanobis(bL, bx):
     for a factored :math:`\mathbf{M} = \mathbf{L}\mathbf{L}^\top`.
 
     Accepts batches for both bL and bx. They are not necessarily assumed to have the same batch
-    shape, but `bL` one should be able to broadcasted to `bx` one.
+    shape, but `bL` one should be able to be broadcasted to `bx` one.
     """
     n = bx.size(-1)
     bx_batch_shape = bx.shape[:-1]
@@ -121,6 +121,8 @@ class MultivariateNormal(Distribution):
         :attr:`precision_matrix` is passed instead, it is only used to compute
         the corresponding lower triangular matrices using a Cholesky decomposition.
     """
+
+    # pyrefly: ignore [bad-override]
     arg_constraints = {
         "loc": constraints.real_vector,
         "covariance_matrix": constraints.positive_definite,
@@ -132,12 +134,12 @@ class MultivariateNormal(Distribution):
 
     def __init__(
         self,
-        loc,
-        covariance_matrix=None,
-        precision_matrix=None,
-        scale_tril=None,
-        validate_args=None,
-    ):
+        loc: Tensor,
+        covariance_matrix: Tensor | None = None,
+        precision_matrix: Tensor | None = None,
+        scale_tril: Tensor | None = None,
+        validate_args: bool | None = None,
+    ) -> None:
         if loc.dim() < 1:
             raise ValueError("loc must be at least one-dimensional.")
         if (covariance_matrix is not None) + (scale_tril is not None) + (
@@ -154,6 +156,7 @@ class MultivariateNormal(Distribution):
                     "with optional leading batch dimensions"
                 )
             batch_shape = torch.broadcast_shapes(scale_tril.shape[:-2], loc.shape[:-1])
+            # pyrefly: ignore [read-only]
             self.scale_tril = scale_tril.expand(batch_shape + (-1, -1))
         elif covariance_matrix is not None:
             if covariance_matrix.dim() < 2:
@@ -164,8 +167,11 @@ class MultivariateNormal(Distribution):
             batch_shape = torch.broadcast_shapes(
                 covariance_matrix.shape[:-2], loc.shape[:-1]
             )
+            # pyrefly: ignore [read-only]
             self.covariance_matrix = covariance_matrix.expand(batch_shape + (-1, -1))
         else:
+            if precision_matrix is None:
+                raise AssertionError("precision_matrix is unexpectedly None")
             if precision_matrix.dim() < 2:
                 raise ValueError(
                     "precision_matrix must be at least two-dimensional, "
@@ -174,10 +180,12 @@ class MultivariateNormal(Distribution):
             batch_shape = torch.broadcast_shapes(
                 precision_matrix.shape[:-2], loc.shape[:-1]
             )
+            # pyrefly: ignore [read-only]
             self.precision_matrix = precision_matrix.expand(batch_shape + (-1, -1))
         self.loc = loc.expand(batch_shape + (-1,))
 
         event_shape = self.loc.shape[-1:]
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
         if scale_tril is not None:

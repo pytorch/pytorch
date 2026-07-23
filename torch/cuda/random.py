@@ -1,11 +1,10 @@
 # mypy: allow-untyped-defs
 from collections.abc import Iterable
-from typing import Union
 
 import torch
 from torch import Tensor
 
-from . import _lazy_call, _lazy_init, current_device, device_count
+from . import _lazy_call, _lazy_init, current_device, device_count, is_initialized
 
 
 __all__ = [
@@ -21,7 +20,7 @@ __all__ = [
 ]
 
 
-def get_rng_state(device: Union[int, str, torch.device] = "cuda") -> Tensor:
+def get_rng_state(device: int | str | torch.device = "cuda") -> Tensor:
     r"""Return the random number generator state of the specified GPU as a ByteTensor.
 
     Args:
@@ -49,9 +48,7 @@ def get_rng_state_all() -> list[Tensor]:
     return results
 
 
-def set_rng_state(
-    new_state: Tensor, device: Union[int, str, torch.device] = "cuda"
-) -> None:
+def set_rng_state(new_state: Tensor, device: int | str | torch.device = "cuda") -> None:
     r"""Set the random number generator state of the specified GPU.
 
     Args:
@@ -59,8 +56,11 @@ def set_rng_state(
         device (torch.device or int, optional): The device to set the RNG state.
             Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
     """
-    with torch._C._DisableFuncTorch():
-        new_state_copy = new_state.clone(memory_format=torch.contiguous_format)
+    if not is_initialized():
+        with torch._C._DisableFuncTorch():
+            # Clone the state because the callback will be triggered
+            # later when CUDA is lazy initialized.
+            new_state = new_state.clone(memory_format=torch.contiguous_format)
     if isinstance(device, str):
         device = torch.device(device)
     elif isinstance(device, int):
@@ -71,7 +71,7 @@ def set_rng_state(
         if idx is None:
             idx = current_device()
         default_generator = torch.cuda.default_generators[idx]
-        default_generator.set_state(new_state_copy)
+        default_generator.set_state(new_state)
 
     _lazy_call(cb)
 

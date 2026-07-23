@@ -2,6 +2,7 @@
 #include <ATen/div_rtn.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/DispatchStub.h>
+#include <c10/util/TypeCast.h>
 #include <c10/util/irange.h>
 
 #include <utility>
@@ -17,7 +18,7 @@ using max_pool2d_backward_fn = void(*)(const Tensor& grad_input, const Tensor& g
 DECLARE_DISPATCH(max_pool2d_fn, max_pool2d_kernel)
 DECLARE_DISPATCH(max_pool2d_backward_fn, max_pool2d_backward_kernel)
 
-// averge pooling has same signature for forward and backward
+// average pooling has same signature for forward and backward
 using avg_pool2d_fn = void(*)(const Tensor& output, const Tensor& input, int64_t kW, int64_t kH,
     int64_t dW, int64_t dH, int64_t padW, int64_t padH, bool count_include_pad, std::optional<int64_t> divisor_override);
 using avg_pool2d_backward_fn = void(*)(const Tensor& output, const Tensor& input, int kW, int kH,
@@ -26,7 +27,7 @@ using avg_pool2d_backward_fn = void(*)(const Tensor& output, const Tensor& input
 DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_kernel)
 DECLARE_DISPATCH(avg_pool2d_backward_fn, avg_pool2d_backward_kernel)
 
-// averge pooling has same signature for forward and backward
+// average pooling has same signature for forward and backward
 using avg_pool3d_fn = void(*)(const Tensor& output, const Tensor& input,
     int64_t kW, int64_t kH, int64_t kD, int64_t dW, int64_t dH, int64_t dD,
     int64_t padW, int64_t padH, int64_t padD, bool count_include_pad,
@@ -51,10 +52,7 @@ template <typename dest_t, typename src_t>
 inline dest_t
 safe_downcast(src_t v)
 {
-  TORCH_CHECK(std::numeric_limits<dest_t>::min() <= v && v <= std::numeric_limits<dest_t>::max(),
-              "integer out of range");
-
-  return static_cast<dest_t>(v);
+  return c10::checked_convert<dest_t>(v, "dest_t");
 }
 
 template<typename T>

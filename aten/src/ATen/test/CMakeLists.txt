@@ -6,9 +6,8 @@ endif(MSVC)
 
 list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/Dict_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/Dimname_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/MaybeOwned_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/NamedTensor_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/accelerator_graph_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/apply_utils_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/atest.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/basic.cpp
@@ -17,7 +16,6 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_generator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_profiling_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_key_set_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dlconvertor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/extension_backend_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/half_test.cpp
@@ -62,9 +60,12 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_complex_math_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_complex_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cub_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cublas_handle_pool_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_distributions_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_dlconvertor_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_event_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_exchange_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_generator_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_half_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu
@@ -122,6 +123,7 @@ list(APPEND ATen_XPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/xpu_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xpu_event_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xpu_generator_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_reportMemoryUsage_test.cpp
   )
 
 # ---[ Send the lists to the parent scope.

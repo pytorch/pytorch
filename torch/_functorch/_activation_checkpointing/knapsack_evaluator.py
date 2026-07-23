@@ -1,8 +1,8 @@
+import operator
 from collections import deque
-from typing import Callable
+from collections.abc import Callable
 
 import networkx as nx
-import numpy as np
 
 from torch._functorch._activation_checkpointing.graph_info_provider import (
     GraphInfoProvider,
@@ -40,9 +40,9 @@ class KnapsackEvaluator:
                 If full graph is defined then will sort the full graph and only process the subset
                 of nodes in the node_graph.
             3. Iterate through the sorted graph nodes.
-                If the node is saved then just drop it's memory from current memory.
-                If the node is not saved then add it's memory to current memory and then traverse it's
-                predecessors to simulate recomuptation chain. Will check if new peak memory after all
+                If the node is saved then just drop its memory from current memory.
+                If the node is not saved then add its memory to current memory and then traverse its
+                predecessors to simulate recomputation chain. Will check if new peak memory after all
                 predecessors are processed.
 
         Args:
@@ -78,6 +78,7 @@ class KnapsackEvaluator:
             predecessor_queue = deque(
                 [
                     dependency
+                    # pyrefly: ignore [bad-unpacking]
                     for dependency, v in node_graph.in_edges(node)
                     if dependency not in already_computed
                 ]
@@ -93,6 +94,7 @@ class KnapsackEvaluator:
                     )
                 )
                 # Add predecessors of the predecessor to the queue if they haven't been recomputed yet
+                # pyrefly: ignore [bad-unpacking]
                 for dependency_of_dependency, _ in node_graph.in_edges(dep):
                     if (
                         dependency_of_dependency in already_computed
@@ -121,14 +123,21 @@ class KnapsackEvaluator:
             range(len(self._graph_info_provider.all_recomputable_banned_nodes))
         )
         # Check that there are no overlaps between saved nodes and recomputable nodes
-        assert (
-            len(recomputable_node_idxs_set.intersection(saved_nodes_idxs_set)) == 0
-        ), "Saved nodes and recomputable nodes cannot have any overlaps"
+        if len(recomputable_node_idxs_set.intersection(saved_nodes_idxs_set)) != 0:
+            raise AssertionError(
+                f"Saved nodes and recomputable nodes cannot have any overlaps, "
+                f"but found overlap: {recomputable_node_idxs_set.intersection(saved_nodes_idxs_set)}"
+            )
         # Check that all candidate nodes are accounted for
-        assert (
+        if (
             recomputable_node_idxs_set.union(saved_nodes_idxs_set)
-            == all_candidate_nodes_idxs
-        ), "All candidate nodes must be accounted for in the provided output"
+            != all_candidate_nodes_idxs
+        ):
+            raise AssertionError(
+                f"All candidate nodes must be accounted for in the provided output, "
+                f"got union={recomputable_node_idxs_set.union(saved_nodes_idxs_set)}, "
+                f"expected={all_candidate_nodes_idxs}"
+            )
 
     def evaluate_knapsack_output(
         self,
@@ -166,7 +175,7 @@ class KnapsackEvaluator:
                     for i in saved_nodes_idxs
                 ),
             )
-            peak_memory = max(memory_list, key=lambda x: x[0])[0]
+            peak_memory = max(memory_list, key=operator.itemgetter(0))[0]
         else:
             peak_memory = sum(
                 self._graph_info_provider.all_node_memories[
@@ -198,7 +207,7 @@ class KnapsackEvaluator:
             knapsack_algo (Callable): The knapsack algorithm to use for evaluation.
             memory_budget_values (List[float]): A list of memory budgets to evaluate.
         """
-        results = list()
+        results = []
         for memory_budget in memory_budget_values:
             _, saved_nodes, recomputed_nodes = knapsack_algo(
                 self._graph_info_provider.get_knapsack_memory_input(),
@@ -239,22 +248,35 @@ class KnapsackEvaluator:
         """
         results = self.evaluate_distribution_of_results_for_knapsack_algo(
             knapsack_algo=knapsack_algo,
-            memory_budget_values=np.linspace(
-                min_mem_budget, max_mem_budget, iterations
-            ).tolist(),
+            memory_budget_values=[
+                min_mem_budget
+                + i * (max_mem_budget - min_mem_budget) / (iterations - 1)
+                for i in range(iterations)
+            ],
         )
-        runtime_values = np.array(
-            [result["percentage_of_theoretical_peak_runtime"] for result in results]
-        )
-        memory_values = np.array(
-            [result["percentage_of_theoretical_peak_memory"] for result in results]
-        )
-        runtime_range = np.ptp(runtime_values)
-        memory_range = np.ptp(memory_values)
+        runtime_values = [
+            result["percentage_of_theoretical_peak_runtime"] for result in results
+        ]
+        memory_values = [
+            result["percentage_of_theoretical_peak_memory"] for result in results
+        ]
+        runtime_range = max(runtime_values) - min(runtime_values)
+        memory_range = max(memory_values) - min(memory_values)
         if runtime_range == 0 or memory_range == 0:
             return max_mem_budget
-        runtime_norm = (runtime_values - runtime_values.min()) / runtime_range
-        memory_norm = (memory_values - memory_values.min()) / memory_range
-        distances = np.sqrt(runtime_norm**2 + memory_norm**2)
-        knee_index = np.argmin(distances)
+
+        # Normalize values
+        runtime_min = min(runtime_values)
+        memory_min = min(memory_values)
+        runtime_norm = [
+            (value - runtime_min) / runtime_range for value in runtime_values
+        ]
+        memory_norm = [(value - memory_min) / memory_range for value in memory_values]
+        # Calculate Euclidean distance
+        distances = [
+            (runtime_norm[i] ** 2 + memory_norm[i] ** 2) ** 0.5
+            for i in range(len(runtime_norm))
+        ]
+        # Find the knee point(shortest distance from the origin)
+        knee_index = distances.index(min(distances))
         return results[knee_index]["memory_budget"]

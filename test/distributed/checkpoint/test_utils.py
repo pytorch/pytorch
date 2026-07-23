@@ -2,8 +2,10 @@
 
 import io
 import sys
+import traceback
 
 import torch
+import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
@@ -12,13 +14,24 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed.c10d_logger import _c10d_logger
+from torch.distributed.checkpoint.api import _wrap_exception
 from torch.distributed.checkpoint.logger import _dcp_logger
 from torch.distributed.checkpoint.metadata import MetadataIndex
-from torch.distributed.checkpoint.utils import _create_file_view, find_state_dict_object
+from torch.distributed.checkpoint.utils import (
+    _create_file_view,
+    _DistWrapper,
+    find_state_dict_object,
+)
+from torch.distributed.distributed_c10d import _object_to_tensor, _tensor_to_object
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
+)
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    skip_if_lt_x_gpu,
+    with_comms,
 )
 from torch.testing._internal.distributed.distributed_utils import with_fake_comms
 
@@ -34,7 +47,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 def create_sharded_tensor(rank, world_size, shards_per_rank):
     shards_metadata = []
     local_shards = []
-    for idx in range(0, world_size * shards_per_rank):
+    for idx in range(world_size * shards_per_rank):
         shard_rank = idx // shards_per_rank
         shard_md = ShardMetadata(
             shard_offsets=[idx * 8], shard_sizes=[8], placement=f"rank:{shard_rank}/cpu"
@@ -129,8 +142,47 @@ class TestMedatadaIndex(TestCase):
         self.assertEqual(1, len(_c10d_logger.handlers))
 
 
+class TestWrapException(TestCase):
+    def test_wrap_exception_serializable_via_object_to_tensor(self):
+        """Verify _wrap_exception produces a result that _object_to_tensor can serialize.
+
+        Python 3.13+ adds a _code attribute to FrameSummary containing
+        bytecode objects that cannot be pickled. _wrap_exception must
+        clear these so that _object_to_tensor (used by gather_object and
+        scatter_object_list) succeeds instead of raising
+        "TypeError: cannot pickle code objects".
+        """
+        try:
+            raise ValueError("test error")
+        except ValueError as e:
+            wrapped = _wrap_exception(e)
+
+        # _object_to_tensor / _tensor_to_object are what gather_object
+        # and scatter_object_list use to serialize objects across ranks.
+        # This would raise "TypeError: cannot pickle code objects"
+        # on Python 3.13+ without the fix.
+        byte_tensor, size = _object_to_tensor(wrapped, torch.device("cpu"), None)
+        restored = _tensor_to_object(byte_tensor, size.item(), None)
+
+        self.assertIsInstance(restored[0], ValueError)
+        self.assertEqual(str(restored[0]), "test error")
+        self.assertIsInstance(restored[1], traceback.StackSummary)
+        self.assertGreater(len(restored[1]), 0)
+
+    def test_wrap_exception_preserves_traceback_formatting(self):
+        """Verify that clearing _code does not break traceback formatting."""
+        try:
+            raise RuntimeError("format test")
+        except RuntimeError as e:
+            wrapped = _wrap_exception(e)
+
+        formatted = "".join(traceback.format_list(wrapped[1]))
+        self.assertIn("raise RuntimeError", formatted)
+
+
 class TestReaderView(TestCase):
     def setUp(self):
+        super().setUp()
         buffer = io.BytesIO(bytearray(range(ord("A"), ord("Z") + 1)))
         self.front_view = _create_file_view(buffer, 0, 5)
 
@@ -183,6 +235,115 @@ class TestReaderView(TestCase):
         self.assertEqual(ba, b"VWXYZ\0\0\0")
         self.assertEqual(self.back_view.readinto(ba), 0)
         self.assertEqual(ba, b"VWXYZ\0\0\0")
+
+
+class TestDistWrapper(DTensorTestBase):
+    @property
+    def world_size(self):
+        return min(4, torch.accelerator.device_count())
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_gather_object(self):
+        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        torch.random.manual_seed(dist.get_rank())
+
+        dist_wrapper = _DistWrapper(
+            mesh_2d.get_group(1), use_dist=True, coordinator_rank=0
+        )
+
+        rank = mesh_2d.get_rank()
+        half_world_size = self.world_size // 2
+        gathered_objects = dist_wrapper.gather_object(rank)
+        expected_objects = (
+            list(range(rank, rank + half_world_size))
+            if rank % half_world_size == 0
+            else None
+        )
+        if gathered_objects != expected_objects:
+            raise AssertionError(f"Expected {expected_objects}, got {gathered_objects}")
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_scatter_object(self):
+        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        torch.random.manual_seed(dist.get_rank())
+
+        dist_wrapper = _DistWrapper(
+            mesh_2d.get_group(1), use_dist=True, coordinator_rank=0
+        )
+
+        rank = mesh_2d.get_rank()
+        half_world_size = self.world_size // 2
+
+        objects = (
+            list(range(rank, rank + half_world_size))
+            if rank % half_world_size == 0
+            else None
+        )
+        scattered_objects = dist_wrapper.scatter_object(objects)
+        expected_objects = rank
+        if scattered_objects != expected_objects:
+            raise AssertionError(
+                f"Expected {expected_objects}, got {scattered_objects}"
+            )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_broadcast_object_with_nonzero_coordinator(self):
+        # Everybody uses WORLD, but src is coordinator_rank=1
+        dist_wrapper = _DistWrapper(
+            group=dist.group.WORLD,
+            use_dist=True,
+            coordinator_rank=1,
+        )
+
+        rank = dist.get_rank()
+        # only local rank 1 supplies the payload
+        payload: int | None = rank if rank == 1 else None
+
+        result = dist_wrapper.broadcast_object(payload)
+        # every rank should receive the value from global rank 1
+        if result != 1:
+            raise AssertionError(f"Expected 1, got {result}")
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_broadcast_object_global_local_mismatch(self):
+        # reproduces issue 152310
+
+        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        dist_wrapper = _DistWrapper(
+            group=mesh_2d.get_group(1),
+            use_dist=True,
+            coordinator_rank=1,  # local coordinator index within the subgroup
+        )
+
+        rank = mesh_2d.get_rank()
+
+        # only the local coordinator in each subgroup provides payload
+        payload: int | None = rank if dist_wrapper.is_coordinator else None
+        got = dist_wrapper.broadcast_object(payload)
+
+        # ensure we broadcast from the *global* coordinator rank,
+        # not the local index.  For rows [0,1] this is global rank 1;
+        # for rows [2,3] this is global rank 3.
+        expected = dist_wrapper.global_coordinator_rank
+        if got != expected:
+            raise AssertionError(f"Expected {expected}, got {got}")
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_barrier(self):
+        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        torch.random.manual_seed(dist.get_rank())
+
+        dist_wrapper = _DistWrapper(
+            mesh_2d.get_group(1), use_dist=True, coordinator_rank=0
+        )
+
+        # No exception should be raised.
+        dist_wrapper.barrier()
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 #include <c10/macros/Macros.h>
 #include <c10/util/ScopeExit.h>
@@ -34,7 +35,7 @@ class WaitCounterBackendFactoryIf {
 };
 
 C10_API void registerWaitCounterBackend(
-    std::unique_ptr<WaitCounterBackendFactoryIf>);
+    std::unique_ptr<WaitCounterBackendFactoryIf> /*factory*/);
 
 C10_API std::vector<std::shared_ptr<WaitCounterBackendFactoryIf>>
 getRegisteredWaitCounterBackends();
@@ -95,3 +96,9 @@ class C10_API WaitCounterHandle {
 
 #define STATIC_SCOPED_WAIT_COUNTER(_name) \
   auto C10_ANONYMOUS_VARIABLE(SCOPE_GUARD) = STATIC_WAIT_COUNTER(_name).start();
+
+#define WITH_WAIT_COUNTER(_name, _expr) \
+  [&]() {                               \
+    STATIC_SCOPED_WAIT_COUNTER(_name);  \
+    return _expr;                       \
+  }();

@@ -18,7 +18,7 @@ inline std::string shapes_as_str(TensorList tensors) {
       first = false;
     }
   }
-  return os.str();
+  return std::move(os).str();
 }
 #endif
 } // anonymous namespace
@@ -35,7 +35,9 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
   auto self_device = self.device();
   for (const std::optional<Tensor>& i : indices) {
     if (!i.has_value() || !(*i).defined()) {
-      num_ind++;
+      if (!mask.defined()) {
+        num_ind++;
+      }
     } else {
       const Tensor& index = *i;
       if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
@@ -64,18 +66,18 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
        c10::irange(num_ind, self.ndimension())) {
     mask = mask.unsqueeze(-1);
   }
-  return std::make_tuple(true, mask);
+  return std::make_tuple(true, std::move(mask));
 }
 
 inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
   checkIndexTensorTypes(orig, /*allow_int*/ true);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more
   // LongTensors
-  auto indices = expandTensors(self, orig);
+  auto indices = expandTensors(self, orig, /*ensure_same_device=*/true);
   // next broadcast all index tensors together
   try {
     indices = expand_outplace(indices);
-  } catch (std::exception& e) {
+  } catch (std::exception&) {
     TORCH_CHECK_INDEX(
         false,
         "shape mismatch: indexing tensors could not be broadcast together"
@@ -83,6 +85,7 @@ inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
         shapes_as_str(indices));
   }
   // add missing null Tensors so that it matches self.dim()
+  indices.reserve(self.dim());
   while (indices.size() < (size_t)self.dim()) {
     indices.emplace_back();
   }
@@ -90,12 +93,6 @@ inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
   // together so that they're adjacent at the front
   if (!hasContiguousSubspace(indices)) {
     std::tie(self, indices) = transposeToFront(self, indices);
-  }
-  // Ensure indices are on the same device as self
-  for (auto& indice : indices) {
-    if (indice.defined() && indice.device() != self.device()) {
-      indice = indice.to(self.device());
-    }
   }
   for (auto& indice : indices) {
     if (indice.defined() && indice.dtype() == at::kInt) {

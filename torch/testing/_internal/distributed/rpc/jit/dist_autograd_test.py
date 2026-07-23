@@ -19,7 +19,7 @@ def local_add(t1, t2):
 
 
 @torch.jit.script
-def remote_add(t1, t2, dst: str):  # noqa: E999
+def remote_add(t1, t2, dst: str):
     return rpc_async(dst, local_add, (t1, t2)).wait()
 
 
@@ -32,9 +32,8 @@ def fork_add(t1, t2, dst: str):
 class JitDistAutogradTest(RpcAgentTestFixture):
     @dist_init
     def test_get_gradients(self):
-
         @torch.jit.script
-        def dist_get_gradients(context_id: int) -> (dict[Tensor, Tensor]):
+        def dist_get_gradients(context_id: int) -> dict[Tensor, Tensor]:
             return dist_autograd.get_gradients(context_id)
 
         FileCheck().check("get_gradients").run(str(dist_get_gradients.graph))

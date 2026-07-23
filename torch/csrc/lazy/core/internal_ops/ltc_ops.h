@@ -4,7 +4,6 @@
 
 #include <c10/util/CallOnce.h>
 
-#include <mutex>
 #include <string>
 
 namespace torch::lazy {

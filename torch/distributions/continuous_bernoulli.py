@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from numbers import Number
 
 import torch
 from torch import Tensor
@@ -14,7 +13,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch.types import _size
+from torch.types import _Number, _size, Number
 
 
 __all__ = ["ContinuousBernoulli"]
@@ -46,29 +45,40 @@ class ContinuousBernoulli(ExponentialFamily):
     autoencoders, Loaiza-Ganem G and Cunningham JP, NeurIPS 2019.
     https://arxiv.org/abs/1907.06845
     """
+
+    # pyrefly: ignore [bad-override]
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.unit_interval
     _mean_carrier_measure = 0
     has_rsample = True
 
     def __init__(
-        self, probs=None, logits=None, lims=(0.499, 0.501), validate_args=None
+        self,
+        probs: Tensor | Number | None = None,
+        logits: Tensor | Number | None = None,
+        lims: tuple[float, float] = (0.499, 0.501),
+        validate_args: bool | None = None,
     ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            is_scalar = isinstance(probs, Number)
+            is_scalar = isinstance(probs, _Number)
+            # pyrefly: ignore [read-only]
             (self.probs,) = broadcast_all(probs)
             # validate 'probs' here if necessary as it is later clamped for numerical stability
             # close to 0 and 1, later on; otherwise the clamped 'probs' would always pass
             if validate_args is not None:
                 if not self.arg_constraints["probs"].check(self.probs).all():
                     raise ValueError("The parameter probs has invalid values")
+            # pyrefly: ignore [read-only]
             self.probs = clamp_probs(self.probs)
         else:
-            is_scalar = isinstance(logits, Number)
+            if logits is None:
+                raise AssertionError("logits is unexpectedly None")
+            is_scalar = isinstance(logits, _Number)
+            # pyrefly: ignore [read-only]
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
@@ -224,6 +234,7 @@ class ContinuousBernoulli(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor]:
         return (self.logits,)
 
+    # pyrefly: ignore [bad-override]
     def _log_normalizer(self, x):
         """computes the log normalizing constant as a function of the natural parameter"""
         out_unst_reg = torch.max(

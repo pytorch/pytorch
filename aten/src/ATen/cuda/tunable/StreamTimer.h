@@ -1,6 +1,6 @@
 // Original TunableOp is from onnxruntime.
 // https://github.com/microsoft/onnxruntime/blob/main/onnxruntime/core/framework/tunable.h
-// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/rocm/tunable
+// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/cuda/tunable
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 //
@@ -19,6 +19,22 @@ class StreamTimer : public ITimer {
   public:
     StreamTimer();
     ~StreamTimer() override;
+
+    void Start() override;
+
+    void End() override;
+
+    float Duration() override;
+
+  private:
+    cudaEvent_t start_{};
+    cudaEvent_t end_{};
+};
+
+class StreamTimerNoSync : public ITimer {
+  public:
+    StreamTimerNoSync();
+    ~StreamTimerNoSync() override;
 
     void Start() override;
 

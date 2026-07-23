@@ -25,6 +25,8 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, TestCase
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 DEFAULT_WORLD_SIZE = 4
 
 
@@ -309,7 +311,10 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
                 result = rank * 2
 
                 ctx.save_for_backward(result, rank)
-                assert int(rank.item()) == dist.get_rank()
+                if int(rank.item()) != dist.get_rank():
+                    raise AssertionError(
+                        f"Expected rank.item() == dist.get_rank(), got {int(rank.item())} vs {dist.get_rank()}"
+                    )
                 return result
 
             @staticmethod
@@ -320,7 +325,7 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
                 self.assertEqual(
                     fwd_tid,
                     bwd_tid,
-                    f"bwd not running in the same thread a fwd for rank {rank.item()}",
+                    lambda msg: f"{msg}\nbwd not running in the same thread a fwd for rank {rank.item()}",
                 )
                 self.assertTrue(dist.is_initialized())
                 self.assertEqual(int(rank.item()), dist.get_rank())
@@ -330,7 +335,7 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
                 return grad_output * result
 
         x = torch.tensor(
-            [dist.get_rank()], dtype=torch.float, device="cuda", requires_grad=True
+            [dist.get_rank()], dtype=torch.float, device=device_type, requires_grad=True
         )
         x = MyFunc.apply(x)
         x.sum().backward()

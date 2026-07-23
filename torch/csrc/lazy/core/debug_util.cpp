@@ -1,3 +1,4 @@
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 
@@ -5,7 +6,6 @@
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
-#include <torch/csrc/lazy/core/ir_util.h>
 #include <torch/csrc/lazy/core/unique.h>
 
 #include <fstream>
@@ -17,8 +17,8 @@ namespace torch::lazy {
 namespace {
 
 std::string GetEnvString(const char* name, const std::string& defval) {
-  const char* env = std::getenv(name);
-  return env != nullptr ? env : defval;
+  const auto env = c10::utils::get_env(name);
+  return env.value_or(defval);
 }
 
 DebugUtil::GraphFormat DefaultGraphFormat() {
@@ -76,8 +76,8 @@ std::string GetFirstUserFrameInPython() {
     auto& loc = frames[i - 1];
     if (loc.file.find("site-packages") == std::string::npos) {
       std::stringstream ss;
-      ss << loc.file << " " << loc.function << " " << loc.line;
-      return ss.str();
+      ss << loc.file << ' ' << loc.function << ' ' << loc.line;
+      return std::move(ss).str();
     }
   }
   return empty;
@@ -114,12 +114,12 @@ std::string DebugUtil::GetTensorsGraphInfo(
     }
   }
   std::stringstream ss;
-  // Call into a function pointer that may backed by python or empty depending
-  // on runtime
+  // Call into a function pointer that may be backed by python or empty
+  // depending on runtime
   std::vector<SourceLocation> frames = GetPythonFramesFunction()();
   ss << "Python Stacktrace:\n";
   for (auto& location : frames) {
-    ss << "  " << location.function << " (" << location.file << ":"
+    ss << "  " << location.function << " (" << location.file << ':'
        << location.line << ")\n";
   }
   ss << "\nHashes: (";
@@ -144,7 +144,7 @@ std::string DebugUtil::GetTensorsGraphInfo(
     LOG(ERROR) << "Invalid graph format: " << format;
   }
   ss << "\n## BEGIN_GRAPH\n" << graph_str << "\n## END_GRAPH\n\n";
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void DebugUtil::SaveTensorsGraphInfo(
@@ -159,7 +159,7 @@ void DebugUtil::SaveTensorsGraphInfo(
     std::string info = GetTensorsGraphInfo(tensors, indices, format);
     std::lock_guard<std::mutex> guard(lock);
     std::ofstream graph_file(save_file, std::ios_base::app);
-    graph_file << "[" << name << "]\n" << info << "\n";
+    graph_file << '[' << name << "]\n" << info << '\n';
   }
 }
 

@@ -32,7 +32,7 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
 
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
   //   fn_ptr is set to the appropriate function based on the vec size and GPU used
-  // TODO: Memory use can probably be optimized by re-using kernels across GPUs with
+  // TODO: Memory use can probably be optimized by reusing kernels across GPUs with
   //   the same compute capability
 
   std::string f_inputs_type_str = at::cuda::jit::typeName(common_dtype);
@@ -42,14 +42,14 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
 
   // The cache key includes all the parameters to generate_code + vec_size + dev_idx
   std::stringstream ss;
-  ss << nInputs << "_" << nOutputs << f;
+  ss << nInputs << '_' << nOutputs << f;
   ss << f_inputs_type_str << compute_type_str << result_type_str;
   ss << static_cast<int>(at::cuda::jit::BinaryFuncVariant::NoScalar);
   ss << extra_args_types;
   ss << vec_size;
 // DeviceIndex, e.g. int8_t, is not treated as a number by the stream, cast to int as a workaround
   ss << static_cast<int>(dev_idx);
-  const std::string cache_key = ss.str();
+  const std::string cache_key = std::move(ss).str();
 
   static std::mutex _jiterator_mutex;
   static std::unordered_map<std::string, at::cuda::jit::NvrtcFunction> fns;
@@ -144,13 +144,13 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
 
   // The cache key includes all the parameters to generate_code + dev_idx
   std::stringstream ss;
-  ss << nInputs << "_" << nOutputs << f;
+  ss << nInputs << '_' << nOutputs << f;
   ss << f_inputs_type_str << compute_type_str << result_type_str;
   ss << contiguous << dynamic_casting;
   ss << static_cast<int>(at::cuda::jit::BinaryFuncVariant::NoScalar);
   ss << extra_args_types;
   ss << dev_idx;
-  const std::string cache_key = ss.str();
+  const std::string cache_key = std::move(ss).str();
 
   static std::mutex _jiterator_mutex;
   static std::unordered_map<std::string, at::cuda::jit::NvrtcFunction> fns;
@@ -356,6 +356,9 @@ c10::SmallVector<at::Tensor> CompileAndLaunchKernel(
   at::native::jitted_gpu_kernel_dynamic(kernel_name, iter, code_string, extra_args, return_by_ref);
 
   c10::SmallVector<at::Tensor> outputs;
+  if (num_outputs > 0) {
+    outputs.reserve(num_outputs);
+  }
   for (int i = 0; i < num_outputs; ++i) {
     outputs.emplace_back(iter.output(i));
   }

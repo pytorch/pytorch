@@ -3,9 +3,10 @@
 import torch._C
 
 
-def format_time(time_us=None, time_ms=None, time_s=None):
+def format_time(time_us=None, time_ms=None, time_s=None) -> str:
     """Define time formatting."""
-    assert sum([time_us is not None, time_ms is not None, time_s is not None]) == 1
+    if sum([time_us is not None, time_ms is not None, time_s is not None]) != 1:
+        raise AssertionError("Expected only one of time_us, time_ms, time_s is given.")
 
     US_IN_SECOND = 1e6
     US_IN_MS = 1e3
@@ -26,7 +27,7 @@ def format_time(time_us=None, time_ms=None, time_s=None):
 
 
 class ExecutionStats:
-    def __init__(self, c_stats, benchmark_config):
+    def __init__(self, c_stats, benchmark_config) -> None:
         self._c_stats = c_stats
         self.benchmark_config = benchmark_config
 
@@ -48,7 +49,7 @@ class ExecutionStats:
         return self.num_iters * (
             self.latency_avg_ms / 1000.0) / self.benchmark_config.num_calling_threads
 
-    def __str__(self):
+    def __str__(self) -> str:
         return '\n'.join([
             "Average latency per example: " + format_time(time_ms=self.latency_avg_ms),
             f"Total number of iterations: {self.num_iters}",
@@ -92,7 +93,7 @@ class ThroughputBenchmark:
         >>> print("Number of iterations: {}".format(stats.num_iters))
     """
 
-    def __init__(self, module):
+    def __init__(self, module) -> None:
         if isinstance(module, torch.jit.ScriptModule):
             self._benchmark = torch._C.ThroughputBenchmark(module._c)
         else:
@@ -108,12 +109,12 @@ class ThroughputBenchmark:
         """
         return self._benchmark.run_once(*args, **kwargs)
 
-    def add_input(self, *args, **kwargs):
+    def add_input(self, *args, **kwargs) -> None:
         """
         Store a single input to a module into the benchmark memory and keep it there.
 
         During the benchmark execution every thread is going to pick up a
-        random input from the all the inputs ever supplied to the benchmark via
+        random input from all the inputs ever supplied to the benchmark via
         this function.
         """
         self._benchmark.add_input(*args, **kwargs)
@@ -131,7 +132,7 @@ class ThroughputBenchmark:
             num_warmup_iters (int): Warmup iters are used to make sure we run a module
                 a few times before actually measuring things. This way we avoid cold
                 caches and any other similar problems. This is the number of warmup
-                iterations for each of the thread in separate
+                iterations for each of the threads separately
 
             num_iters (int): Number of iterations the benchmark should run with.
                 This number is separate from the warmup iterations. Also the number is

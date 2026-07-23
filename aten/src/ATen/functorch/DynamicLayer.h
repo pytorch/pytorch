@@ -37,7 +37,7 @@ namespace at::functorch  {
 // how to perform the transform.
 //
 // TODO: we can excise DynamicLayer in favor of Interpreter,
-// But I am going to leave it for now as a compatiblity shim to avoid
+// But I am going to leave it for now as a compatibility shim to avoid
 // needing to refactor a lot of callsites...
 struct TORCH_API DynamicLayer {
   explicit DynamicLayer(
@@ -47,7 +47,8 @@ struct TORCH_API DynamicLayer {
       std::optional<RandomnessType> randomness = std::nullopt,
       std::optional<bool> prev_grad_mode = std::nullopt,
       std::optional<bool> pre_fwd_grad_mode = std::nullopt,
-      std::optional<bool> functionalize_add_back_views = std::nullopt);
+      std::optional<bool> functionalize_add_back_views = std::nullopt,
+      std::optional<bool> prev_inference_mode = std::nullopt);
 
   TransformType key() const;
   int64_t layerId() const;
@@ -69,7 +70,8 @@ TORCH_API int64_t initAndPushDynamicLayer(
     std::optional<RandomnessType> randomness = std::nullopt,
     std::optional<bool> prev_grad_mode = std::nullopt,
     std::optional<bool> prev_fwd_grad_mode = std::nullopt,
-    std::optional<bool> functionalize_add_back_views = std::nullopt);
+    std::optional<bool> functionalize_add_back_views = std::nullopt,
+    std::optional<bool> prev_inference_mode = std::nullopt);
 TORCH_API DynamicLayer popDynamicLayerAndDeleteMetadata();
 TORCH_API std::optional<DynamicLayer> maybeCurrentDynamicLayer();
 TORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();

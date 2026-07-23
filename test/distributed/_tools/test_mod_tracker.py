@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["oncall: distributed"]
 
 from copy import copy
 
@@ -154,7 +154,8 @@ class TestModTracker(TestCase):
                         )
                     else:
                         x = block(x)
-                    assert x is not None
+                    if x is None:
+                        raise AssertionError("Expected x to not be None")
                     x = torch.nn.functional.relu(x)
                 return x
 
@@ -192,6 +193,8 @@ class TestModTracker(TestCase):
             ("post_fw", "Foo.linears.1", True, True),
             ("post_bw", "Foo.linears.1", True, True),
             ("pre_bw", "Foo.linears.0", True, True),
+            ("post_bw", "Foo.linears.0", True, True),
+            ("post_bw", "Foo", True, True),
         ]
         self.assertEqual(test_op, expected_op)
 

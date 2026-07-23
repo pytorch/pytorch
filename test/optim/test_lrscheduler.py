@@ -7,6 +7,7 @@ import tempfile
 import types
 import warnings
 from functools import partial
+from unittest import expectedFailure
 
 import torch
 import torch.nn.functional as F
@@ -43,7 +44,7 @@ from torch.testing._internal.common_utils import (
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 
 class TestLRScheduler(TestCase):
@@ -77,7 +78,7 @@ class TestLRScheduler(TestCase):
         self.opt = SGD(
             [
                 {"params": self.net.conv1.parameters()},
-                {"params": self.net.conv2.parameters(), "lr": 0.5},
+                {"params": self.net.conv2.parameters(), "lr": torch.tensor(0.5)},
             ],
             lr=0.05,
         )
@@ -107,9 +108,7 @@ class TestLRScheduler(TestCase):
                     [0]
                     + [i + 1 for i, m in enumerate(self.milestones) if global_step >= m]
                 )[-1]
-                return [
-                    init_lr * (self.gamma**gamma_power) for init_lr in self.init_lr
-                ]
+                return [init_lr * (self.gamma**gamma_power) for init_lr in self.init_lr]
 
         optimizer = SGD([torch.rand(1)], lr=1)
 
@@ -161,7 +160,8 @@ class TestLRScheduler(TestCase):
         gc.disable()
         ref = run()
 
-        assert ref() is None
+        if ref() is not None:
+            raise AssertionError("Expected scheduler to be garbage collected")
         gc.enable()  # restore
 
     def test_old_pattern_warning(self):
@@ -194,7 +194,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_resuming(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group["initial_lr"] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -211,7 +211,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_resuming_with_arg(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group["initial_lr"] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -228,7 +228,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_with_overridden_optim_step(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group["initial_lr"] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -301,7 +301,7 @@ class TestLRScheduler(TestCase):
         self.opt.step = types.MethodType(new_step, self.opt)
 
         def new_pattern():
-            for e in range(epochs):
+            for _ in range(epochs):
                 self.opt.step()
                 scheduler.step()
 
@@ -370,6 +370,16 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test_get_last_lr(scheduler, targets, epochs)
+
+    def test_raise_error_when_last_epoch_is_greater_than_0_and_initial_lr_is_not_specified(
+        self,
+    ):
+        optimizer = SGD([Parameter(torch.randn(2, 2, requires_grad=True))], 0.1)
+        with self.assertRaisesRegex(
+            KeyError,
+            r"param \'initial_lr\' is not specified in param_groups\[0\] when resuming scheduler with last_epoch >= 0",
+        ):
+            StepLR(optimizer, step_size=3, gamma=0.1, last_epoch=1)
 
     def test_multi_step_lr(self):
         # lr = 0.05     if epoch < 2
@@ -702,6 +712,15 @@ class TestLRScheduler(TestCase):
             scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups]
         )
 
+    def test_reduce_lr_on_plateau_preserves_lr_type(self):
+        # Ensures that tensor lrs are preserved, preventing recompilations.
+        types = [type(group["lr"]) for group in self.opt.param_groups]
+        scheduler = ReduceLROnPlateau(self.opt, mode="min", patience=0)
+        scheduler.step(1.0)
+        scheduler.step(2.0)  # Triggers scheduler._reduce_lr
+        for group, type_ in zip(self.opt.param_groups, types):
+            self.assertEqual(type(group["lr"]), type_)
+
     def test_sequentiallr1(self):
         epochs = 19
         schedulers = [None] * 2
@@ -786,6 +805,19 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
+    def test_sequentiallr_no_warnings(self):
+        scheduler1 = LinearLR(self.opt, start_factor=0.5, end_factor=0.1, total_iters=5)
+        scheduler2 = ExponentialLR(self.opt, gamma=0.9)
+        scheduler = SequentialLR(
+            self.opt, schedulers=[scheduler1, scheduler2], milestones=[5]
+        )
+
+        for _ in range(10):
+            self.opt.step()
+            with warnings.catch_warnings(record=True) as ws:
+                scheduler.step()
+                self.assertTrue(len(ws) == 0, "No warning should be raised")
+
     def test_get_last_lr_sequentiallr(self):
         epochs = 12
         milestones = [3, 6]
@@ -800,6 +832,41 @@ class TestLRScheduler(TestCase):
         single_targets = constant_lr_target + exponential_lr_target + step_lr_target
         targets = [single_targets, [x * 10 for x in single_targets]]
         self._test_get_last_lr(scheduler, targets, epochs)
+
+    def test_sequentiallr_does_not_alias_lr_and_initial_lr(self):
+        # The TestLRScheduler object uses self.opt to avoid instantiating a new optimizer for each test.
+        # self.opt has a float lr, and we need to use a Tensor lr to ensure that a former SequentialLR bug is fixed.
+        # For more context, see https://github.com/pytorch/pytorch/issues/162359
+        old_opt = self.opt
+        lr = torch.tensor(2.0)
+        self.opt = SGD(self.net.parameters(), lr=lr)
+        milestone = 4
+        epochs = 8
+        start, end = 0.1, 0.8
+
+        schedulers = [
+            LinearLR(self.opt, start, end, total_iters=milestone),
+            LinearLR(self.opt, end, start, total_iters=epochs - milestone),
+        ]
+        targets = [[0.2, 0.55, 0.9, 1.25, 1.6, 1.25, 0.9, 0.55]]
+
+        scheduler = SequentialLR(self.opt, schedulers, milestones=[milestone])
+        self._test(scheduler, targets, epochs)
+        self.opt = old_opt
+
+    def test_sequentiallr_skips_preceding_schedulers_with_zero_milestone(self):
+        old_opt = self.opt
+        self.opt = SGD(self.net.parameters(), lr=1.0)
+        schedulers = [
+            LinearLR(self.opt, start_factor=0.1, end_factor=0.1, total_iters=10),
+            LinearLR(self.opt, start_factor=0.2, end_factor=0.2, total_iters=10),
+            LinearLR(self.opt, start_factor=0.3, end_factor=0.3, total_iters=10),
+            LinearLR(self.opt, start_factor=0.4, end_factor=0.4, total_iters=10),
+        ]
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=[0, 0, 1])
+        targets = [[0.3, 0.4]]
+        self._test(scheduler, targets, epochs=2)
+        self.opt = old_opt
 
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
@@ -1458,7 +1525,7 @@ class TestLRScheduler(TestCase):
             14.0 / 3,
             29.0 / 6,
         ]
-        deltas = [2 * i for i in range(0, 2)]
+        deltas = [2 * i for i in range(2)]
         base_lrs = [1 + delta for delta in deltas]
         max_lrs = [5 + delta for delta in deltas]
         lr_targets = [[x + delta for x in lr_base_target] for delta in deltas]
@@ -1571,7 +1638,8 @@ class TestLRScheduler(TestCase):
             return weakref.ref(scheduler)
 
         ref = test()
-        assert ref() is None
+        if ref() is not None:
+            raise AssertionError("Expected scheduler to be garbage collected")
         gc.enable()
 
     def test_cycle_lr_state_dict_picklable(self):
@@ -1837,6 +1905,15 @@ class TestLRScheduler(TestCase):
         )
         self._test(scheduler, targets, epochs)
 
+    def test_multiplicative_lr_with_lr_lambda(self):
+        lr_lambda = 0.95
+        with self.assertRaisesRegex(TypeError, "lr_lambda should be a function"):
+            MultiplicativeLR(self.opt, lr_lambda)
+
+        lr_lambda2 = 0.95
+        with self.assertRaisesRegex(TypeError, "lr_lambda should be a function"):
+            MultiplicativeLR(self.opt, [lr_lambda, lr_lambda2])
+
     @parametrize("T_mult", [1, 2, 4])
     def test_CosineAnnealingWarmRestarts_lr1(self, T_mult):
         iters = 100
@@ -1924,6 +2001,14 @@ class TestLRScheduler(TestCase):
                 scheduler, targets, epochs
             )
 
+    def test_CosineAnnealingWarmRestarts_T_cur_reset(self):
+        sch = CosineAnnealingWarmRestarts(self.opt, T_0=4)
+        for epoch in [7, 8, 9]:
+            sch.T_cur = epoch
+            sch.step()
+            expect_T_cur = (epoch + 1) % sch.T_0
+            self.assertEqual(sch.T_cur, expect_T_cur)
+
     def test_swalr_no_anneal(self):
         epochs, swa_start, swa_lr = 10, 5, 0.01
         initial_lrs = [group["lr"] for group in self.opt.param_groups]
@@ -2001,8 +2086,11 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[epoch],
                     param_group["lr"],
-                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
-                        epoch, target[epoch], param_group["lr"]
+                    msg=lambda msg: f"{msg}\n"
+                    + (
+                        "LR is wrong in epoch {}: expected {}, got {}".format(
+                            epoch, target[epoch], param_group["lr"]
+                        )
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2061,7 +2149,7 @@ class TestLRScheduler(TestCase):
             self.opt, mode="max", factor=0.5, patience=10
         )
         scheduler_copy.load_state_dict(scheduler.state_dict())
-        for key in scheduler.__dict__.keys():
+        for key in scheduler.__dict__:
             if key not in {"optimizer", "is_better"}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
@@ -2072,7 +2160,7 @@ class TestLRScheduler(TestCase):
 
         scheduler_copy = LambdaLR(self.opt, lr_lambda=lambda x: x)
         scheduler_copy.load_state_dict(state)
-        for key in scheduler.__dict__.keys():
+        for key in scheduler.__dict__:
             if key not in {"optimizer", "lr_lambdas"}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
@@ -2083,8 +2171,8 @@ class TestLRScheduler(TestCase):
 
         scheduler_copy = LambdaLR(self.opt, lr_lambda=self.LambdaLRTestObject(-1))
         scheduler_copy.load_state_dict(state)
-        for key in scheduler.__dict__.keys():
-            if key not in {"optimizer"}:
+        for key in scheduler.__dict__:
+            if key != "optimizer":
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
     def test_CosineAnnealingWarmRestarts_lr_state_dict(self):
@@ -2108,7 +2196,7 @@ class TestLRScheduler(TestCase):
             scheduler.step()
         scheduler_copy = constr2()
         scheduler_copy.load_state_dict(scheduler.state_dict())
-        for key in scheduler.__dict__.keys():
+        for key in scheduler.__dict__:
             if key != "optimizer":
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
         self.assertEqual(scheduler.get_last_lr(), scheduler_copy.get_last_lr())
@@ -2126,7 +2214,7 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     t,
                     r,
-                    msg=f"LR is wrong in epoch {epoch}: expected {t}, got {r}",
+                    msg=lambda msg: f"{msg}\nLR is wrong in epoch {epoch}: expected {t}, got {r}",
                     atol=1e-5,
                     rtol=0,
                 )
@@ -2148,8 +2236,11 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[epoch],
                     param_group["lr"],
-                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
-                        epoch, target[epoch], param_group["lr"]
+                    msg=lambda msg: f"{msg}\n"
+                    + (
+                        "LR is wrong in epoch {}: expected {}, got {}".format(
+                            epoch, target[epoch], param_group["lr"]
+                        )
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2163,8 +2254,11 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[epoch],
                     param_group["lr"],
-                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
-                        epoch, target[epoch], param_group["lr"]
+                    msg=lambda msg: f"{msg}\n"
+                    + (
+                        "LR is wrong in epoch {}: expected {}, got {}".format(
+                            epoch, target[epoch], param_group["lr"]
+                        )
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2179,8 +2273,11 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[index],
                     param_group["lr"],
-                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
-                        epoch, target[index], param_group["lr"]
+                    msg=lambda msg: f"{msg}\n"
+                    + (
+                        "LR is wrong in epoch {}: expected {}, got {}".format(
+                            epoch, target[index], param_group["lr"]
+                        )
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2193,8 +2290,11 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[index],
                     param_group["lr"],
-                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
-                        epoch, target[index], param_group["lr"]
+                    msg=lambda msg: f"{msg}\n"
+                    + (
+                        "LR is wrong in epoch {}: expected {}, got {}".format(
+                            epoch, target[index], param_group["lr"]
+                        )
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2217,8 +2317,11 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     targets[epoch][i],
                     param_group["lr"],
-                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
-                        epoch, targets[epoch][i], param_group["lr"]
+                    msg=lambda msg: f"{msg}\n"
+                    + (
+                        "LR is wrong in epoch {}: expected {}, got {}".format(
+                            epoch, targets[epoch][i], param_group["lr"]
+                        )
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2242,8 +2345,11 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[epoch],
                     param_group["lr"],
-                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
-                        epoch, target[epoch], param_group["lr"]
+                    msg=lambda msg: f"{msg}\n"
+                    + (
+                        "LR is wrong in epoch {}: expected {}, got {}".format(
+                            epoch, target[epoch], param_group["lr"]
+                        )
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2260,7 +2366,7 @@ class TestLRScheduler(TestCase):
     ):
         for batch_num in range(batch_iterations):
             if verbose:
-                if "momentum" in self.opt.param_groups[0].keys():
+                if "momentum" in self.opt.param_groups[0]:
                     print(
                         "batch{}:\tlr={},momentum={}".format(
                             batch_num,
@@ -2268,7 +2374,7 @@ class TestLRScheduler(TestCase):
                             self.opt.param_groups[0]["momentum"],
                         )
                     )
-                elif use_beta1 and "betas" in self.opt.param_groups[0].keys():
+                elif use_beta1 and "betas" in self.opt.param_groups[0]:
                     print(
                         "batch{}:\tlr={},beta1={}".format(
                             batch_num,
@@ -2289,33 +2395,42 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     lr_target[batch_num],
                     param_group["lr"],
-                    msg="LR is wrong in batch_num {}: expected {}, got {}".format(
-                        batch_num, lr_target[batch_num], param_group["lr"]
+                    msg=lambda msg: f"{msg}\n"
+                    + (
+                        "LR is wrong in batch_num {}: expected {}, got {}".format(
+                            batch_num, lr_target[batch_num], param_group["lr"]
+                        )
                     ),
                     atol=1e-5,
                     rtol=0,
                 )
 
-                if use_beta1 and "betas" in param_group.keys():
+                if use_beta1 and "betas" in param_group:
                     self.assertEqual(
                         momentum_target[batch_num],
                         param_group["betas"][0],
-                        msg="Beta1 is wrong in batch_num {}: expected {}, got {}".format(
-                            batch_num,
-                            momentum_target[batch_num],
-                            param_group["betas"][0],
+                        msg=lambda msg: f"{msg}\n"
+                        + (
+                            "Beta1 is wrong in batch_num {}: expected {}, got {}".format(
+                                batch_num,
+                                momentum_target[batch_num],
+                                param_group["betas"][0],
+                            )
                         ),
                         atol=1e-5,
                         rtol=0,
                     )
-                elif "momentum" in param_group.keys():
+                elif "momentum" in param_group:
                     self.assertEqual(
                         momentum_target[batch_num],
                         param_group["momentum"],
-                        msg="Momentum is wrong in batch_num {}: expected {}, got {}".format(
-                            batch_num,
-                            momentum_target[batch_num],
-                            param_group["momentum"],
+                        msg=lambda msg: f"{msg}\n"
+                        + (
+                            "Momentum is wrong in batch_num {}: expected {}, got {}".format(
+                                batch_num,
+                                momentum_target[batch_num],
+                                param_group["momentum"],
+                            )
                         ),
                         atol=1e-5,
                         rtol=0,
@@ -2359,47 +2474,6 @@ class TestLRScheduler(TestCase):
             ConstantLR,
             LinearLR,
             partial(ExponentialLR, gamma=0.9),
-            lambda opt, **kwargs: SequentialLR(
-                opt,
-                schedulers=[ConstantLR(opt), ConstantLR(opt)],
-                milestones=[2],
-                **kwargs,
-            ),
-            PolynomialLR,
-            partial(CosineAnnealingLR, T_max=10),
-            ReduceLROnPlateau,
-            partial(CyclicLR, base_lr=0.01, max_lr=0.1),
-            partial(CosineAnnealingWarmRestarts, T_0=20),
-            partial(OneCycleLR, max_lr=0.01, total_steps=10),
-        ],
-    )
-    def test_lr_scheduler_verbose_deprecation_warning(self, LRClass):
-        """Check that a deprecating warning with verbose parameter."""
-        with self.assertWarnsOnceRegex(
-            UserWarning, "The verbose parameter is deprecated"
-        ):
-            LRClass(self.opt, verbose=True)
-
-        with self.assertWarnsOnceRegex(
-            UserWarning, "The verbose parameter is deprecated"
-        ):
-            LRClass(self.opt, verbose=False)
-
-        # No warning is raised when verbose is the default value.
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", UserWarning)
-            LRClass(self.opt)
-
-    @parametrize(
-        "LRClass",
-        [
-            partial(LambdaLR, lr_lambda=lambda e: e // 10),
-            partial(MultiplicativeLR, lr_lambda=lambda: 0.95),
-            partial(StepLR, step_size=30),
-            partial(MultiStepLR, milestones=[30, 80]),
-            ConstantLR,
-            LinearLR,
-            partial(ExponentialLR, gamma=0.9),
             PolynomialLR,
             partial(CosineAnnealingLR, T_max=10),
             lambda opt, **kwargs: ChainedScheduler(
@@ -2415,6 +2489,7 @@ class TestLRScheduler(TestCase):
             partial(CyclicLR, base_lr=0.01, max_lr=0.1),
             partial(OneCycleLR, max_lr=0.01, total_steps=10, anneal_strategy="linear"),
             partial(CosineAnnealingWarmRestarts, T_0=20),
+            partial(SWALR, swa_lr=0.01),
         ],
     )
     @parametrize("weights_only", [True, False])
@@ -2461,8 +2536,11 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target[epoch],
                     param_group["lr"],
-                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
-                        epoch, target[epoch], param_group["lr"]
+                    msg=lambda msg: f"{msg}\n"
+                    + (
+                        "LR is wrong in epoch {}: expected {}, got {}".format(
+                            epoch, target[epoch], param_group["lr"]
+                        )
                     ),
                     atol=1e-5,
                     rtol=0,
@@ -2502,7 +2580,7 @@ class TestLRScheduler(TestCase):
         ],
     )
     def test_constant_initial_lr(self, LRClass):
-        # Test that the initial learning rate is constant
+        # Test that the initial learning rate is constant and that it does not alias base_lrs
         lr = torch.as_tensor(0.1)
         opt = SGD([torch.nn.Parameter(torch.randn(1))], lr=lr)
         sch = LRClass(opt)
@@ -2516,6 +2594,7 @@ class TestLRScheduler(TestCase):
             for group, ori_group in zip(opt.param_groups, ori_param_groups):
                 self.assertEqual(group["initial_lr"], ori_group["initial_lr"])
                 self.assertEqual(sch.base_lrs, [0.1])
+                self.assertIsNot(sch.base_lrs[0], group["initial_lr"])
 
     def test_constant_initial_params_cyclelr(self):
         # Test that the initial learning rate is constant
@@ -2588,7 +2667,7 @@ class TestLRScheduler(TestCase):
         sch = SWALR(opt, swa_lr=swa_lr)
         ori_param_groups = copy.deepcopy(opt.param_groups)
 
-        for i in range(2):
+        for _ in range(2):
             lr.multiply_(0.5)
             swa_lr.multiply_(0.5)
             opt.step()
@@ -2598,6 +2677,145 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(group["swa_lr"], ori_group["swa_lr"])
                 self.assertEqual(group["swa_lr"], 0.05)
                 self.assertEqual(sch.base_lrs, [0.1])
+
+    @parametrize(
+        "LRClass",
+        [
+            partial(ExponentialLR, gamma=0.999),
+            partial(LambdaLR, lr_lambda=lambda epoch: epoch // 30),
+            partial(MultiplicativeLR, lr_lambda=lambda epoch: 0.95),
+            partial(StepLR, step_size=30),
+            partial(MultiStepLR, milestones=[30, 80]),
+            ConstantLR,
+            LinearLR,
+            PolynomialLR,
+            partial(CosineAnnealingLR, T_max=10),
+            partial(CosineAnnealingWarmRestarts, T_0=20),
+            partial(CyclicLR, base_lr=0.01, max_lr=0.1),
+            partial(OneCycleLR, max_lr=0.01, total_steps=10),
+            partial(SWALR, swa_lr=0.01),
+        ],
+    )
+    def test_lr_scheduler_checkpoint(self, LRClass):
+        model = torch.nn.Linear(3, 3)
+        optim = torch.optim.AdamW(model.parameters())
+        sch = LRClass(optim)
+        optim.step()
+        sch.step()
+        optim2 = torch.optim.AdamW(model.parameters())
+        optim2.load_state_dict(optim.state_dict())
+        sch2 = LRClass(optim2, last_epoch=0)
+        self.assertEqual(
+            sch2._get_closed_form_lr()[0]
+            if hasattr(self, "_get_closed_form_lr")
+            else sch2.get_last_lr()[0],
+            optim.param_groups[0]["lr"],
+        )
+
+    def test_lr_scheduler_checkpoint_on_plateau(self):
+        model = torch.nn.Linear(3, 3)
+        optim = torch.optim.AdamW(model.parameters())
+        sch = ReduceLROnPlateau(optim, mode="min")
+        optim.step()
+        sch.step(1)
+        optim2 = torch.optim.AdamW(model.parameters())
+        optim2.load_state_dict(optim.state_dict())
+        sch2 = ReduceLROnPlateau(optim2, mode="min")
+        self.assertEqual(
+            sch2._get_closed_form_lr()[0]
+            if hasattr(self, "_get_closed_form_lr")
+            else sch2.get_last_lr()[0],
+            optim.param_groups[0]["lr"],
+        )
+
+    # NOTE: Expected-failure tests for known scheduler issues.
+    #
+    # These tests should be converted to normal regression tests once
+    # the underlying behavior is fixed.
+
+    @expectedFailure
+    def test_sequentiallr_resume_reproducibility(self):
+        # Note: Saving and restoring both the optimizer and SequentialLR
+        # state mid training should reproduce the same LR sequence as a
+        # continuous uninterrupted run.
+        #
+        # This currently fails around scheduler transition boundaries after
+        # restoring from checkpoint state.
+        #
+        # The problematic state transition comes from SequentialLR's restore
+        # model:
+        # 1. SequentialLR.__init__() sets last_epoch, resets each param group
+        #    lr back to initial_lr, calls recursive_undo(), and then replays
+        #    _schedulers[0]._initial_step().
+        # 2. At this resume point, that constructor path leaves the optimizer
+        #    lr at 0.05 even though the saved scheduler state corresponds to
+        #    an effective lr of 0.08.
+        # 3. SequentialLR.load_state_dict() restores scheduler fields like
+        #    last_epoch and _last_lr, but it does not re-synchronize the
+        #    optimizer param-group lr with that loaded scheduler state.
+        # 4. LinearLR.get_lr() is recursive: it multiplies the current
+        #    optimizer lr, so the next resumed step advances
+        #    0.05 -> 0.05625 instead of the uninterrupted run's 0.08 -> 0.09.
+
+        base_lr = 0.1
+        milestone = 5
+        total_steps = 8
+        resume_step = 3
+
+        def make_scheduler(optim):
+            return SequentialLR(
+                optim,
+                [
+                    LinearLR(optim, start_factor=0.5, total_iters=milestone),
+                    ExponentialLR(optim, gamma=0.5),
+                ],
+                milestones=[milestone],
+            )
+
+        # run the full schedule and record the LR.
+        model = torch.nn.Linear(1, 1)
+        optim = torch.optim.SGD(model.parameters(), lr=base_lr)
+        sched = make_scheduler(optim)
+
+        reference_lrs = []
+        for _ in range(total_steps):
+            optim.step()
+            sched.step()
+            reference_lrs.append(sched.get_last_lr()[0])
+
+        # run a fresh optimizer/scheduler pair up to an intermediate step
+        model2 = torch.nn.Linear(1, 1)
+        optim2 = torch.optim.SGD(model2.parameters(), lr=base_lr)
+        sched2 = make_scheduler(optim2)
+
+        for _ in range(resume_step):
+            optim2.step()
+            sched2.step()
+
+        # save state to simulate checkpointing.
+        optim_state = optim2.state_dict()
+        sched_state = sched2.state_dict()
+
+        # restore into a new optimizer/scheduler pair
+        model3 = torch.nn.Linear(1, 1)
+        optim3 = torch.optim.SGD(model3.parameters(), lr=base_lr)
+        optim3.load_state_dict(optim_state)
+
+        sched3 = make_scheduler(optim3)
+        sched3.load_state_dict(sched_state)
+
+        loaded_optimizer_lr = optim3.param_groups[0]["lr"]
+        loaded_scheduler_lr = sched3.get_last_lr()[0]
+
+        resumed_lrs = []
+        for _ in range(resume_step, total_steps):
+            optim3.step()
+            sched3.step()
+            resumed_lrs.append(sched3.get_last_lr()[0])
+
+        self.assertEqual(loaded_optimizer_lr, loaded_scheduler_lr)
+        self.assertEqual(resumed_lrs[0], reference_lrs[resume_step])
+        self.assertEqual(resumed_lrs, reference_lrs[resume_step:])
 
 
 instantiate_parametrized_tests(TestLRScheduler)

@@ -6,7 +6,6 @@
 
 namespace c10 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other)
     // Non-mutables can be accessed outside the mutex
     : sizes_(other.sizes_),
@@ -23,7 +22,10 @@ SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other)
   is_channels_last_ = other.is_channels_last_;
   is_channels_last_3d_ = other.is_channels_last_3d_;
   is_non_overlapping_and_dense_ = other.is_non_overlapping_and_dense_;
-  available_.store(other.available_.load());
+  // clear cache bits so copy rematerializes them lazily
+  available_.store(
+      other.available_.load() &
+      ~(sizes_materialized_avail | strides_materialized_avail));
   // NOLINTEND(cppcoreguidelines-prefer-member-initializer)
 }
 
@@ -72,6 +74,27 @@ normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
   return std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>(
       std::move(base), std::move(size_nodes), std::move(stride_nodes));
 }
+namespace {
+bool all_hinted(
+    const c10::SymIntArrayRef& sizes,
+    const c10::SymIntArrayRef& strides) {
+  auto all_hinted = true;
+  for (const auto& s : sizes) {
+    if (!s.has_hint()) {
+      return false;
+    }
+  }
+
+  if (all_hinted) {
+    for (const auto& s : strides) {
+      if (!s.has_hint()) {
+        return false;
+      }
+    }
+  }
+  return all_hinted;
+}
+} // namespace
 
 // Special treatment because of numel
 SymBool SymbolicShapeMeta::compute_contiguous() const {
@@ -80,18 +103,84 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   }
   c10::SymIntArrayRef sizes(sizes_);
   c10::SymIntArrayRef strides(strides_);
-  return _compute_contiguous(sizes, strides, numel());
+
+  auto result = _compute_contiguous_sym(sizes, strides, numel());
+
+  // If the result is already determined without guarding, just return it.
+  auto maybe_as_bool = result.maybe_as_bool();
+  if (maybe_as_bool.has_value()) {
+    return maybe_as_bool.value();
+  }
+
+  if (all_hinted(sizes, strides)) {
+    // We avoid going through the slow path if everything is hinted,
+    // because evaluating a large SymPy expression can be expensive.
+    // TODO exclude backed_size_oblivious from this path.
+    return _compute_contiguous<SymInt>(sizes_, strides_, numel());
+  }
+
+  return result;
+}
+
+SymBool SymbolicShapeMeta::compute_channels_last_contiguous_2d() const {
+  if (!strides_valid_) {
+    return false;
+  }
+  c10::SymIntArrayRef sizes(sizes_);
+  c10::SymIntArrayRef strides(strides_);
+
+  auto result = _compute_channels_last_contiguous_2d_sym(sizes, strides);
+
+  // If the result is already determined without guarding, just return it.
+  auto maybe_as_bool = result.maybe_as_bool();
+  if (maybe_as_bool.has_value()) {
+    return maybe_as_bool.value();
+  }
+
+  if (all_hinted(sizes, strides)) {
+    // We avoid going through the slow path if everything is hinted,
+    // because evaluating a large SymPy expression can be expensive.
+    // TODO exclude backed_size_oblivious from this path.
+    return _compute_channels_last_contiguous_2d<SymInt>(sizes_, strides_);
+  }
+
+  return result;
+}
+
+SymBool SymbolicShapeMeta::compute_channels_last_contiguous_3d() const {
+  if (!strides_valid_) {
+    return false;
+  }
+  c10::SymIntArrayRef sizes(sizes_);
+  c10::SymIntArrayRef strides(strides_);
+
+  auto result = _compute_channels_last_contiguous_3d_sym(sizes, strides);
+
+  // If the result is already determined without guarding, just return it.
+  auto maybe_as_bool = result.maybe_as_bool();
+  if (maybe_as_bool.has_value()) {
+    return maybe_as_bool.value();
+  }
+
+  if (all_hinted(sizes, strides)) {
+    // We avoid going through the slow path if everything is hinted,
+    // because evaluating a large SymPy expression can be expensive.
+    // TODO exclude backed_size_oblivious from this path.
+    return _compute_channels_last_contiguous_3d<SymInt>(sizes_, strides_);
+  }
+
+  return result;
 }
 
 // The rest of them
-#define DEFINE_EAGER_SYMBOOL_COMPUTE(name, nodeimpl, fallback) \
-  SymBool SymbolicShapeMeta::name() const {                    \
-    if (!strides_valid_) {                                     \
-      return false;                                            \
-    }                                                          \
-    c10::SymIntArrayRef sizes(sizes_);                         \
-    c10::SymIntArrayRef strides(strides_);                     \
-    return fallback(sizes, strides);                           \
+#define DEFINE_EAGER_SYMBOOL_COMPUTE(name, fallback) \
+  SymBool SymbolicShapeMeta::name() const {          \
+    if (!strides_valid_) {                           \
+      return false;                                  \
+    }                                                \
+    c10::SymIntArrayRef sizes(sizes_);               \
+    c10::SymIntArrayRef strides(strides_);           \
+    return fallback(sizes, strides);                 \
   }
 
 #define DEFINE_SYMBOOL_COMPUTE(name, nodeimpl, fallback)        \
@@ -111,11 +200,11 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   }
 
 // clang-format off
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_channels_last_contiguous_2d, is_channels_last_contiguous_2d, _compute_channels_last_contiguous_2d)
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_channels_last_contiguous_3d, is_channels_last_contiguous_3d, _compute_channels_last_contiguous_3d)
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_strides_like_channels_last_2d, is_channels_last_strides_2d, is_channels_last_strides_2d)
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_strides_like_channels_last_3d, is_channels_last_strides_3d, is_channels_last_strides_3d)
+DEFINE_EAGER_SYMBOOL_COMPUTE(compute_strides_like_channels_last_2d, is_channels_last_strides_2d)
+DEFINE_EAGER_SYMBOOL_COMPUTE(compute_strides_like_channels_last_3d, is_channels_last_strides_3d)
+
 DEFINE_SYMBOOL_COMPUTE(compute_non_overlapping_and_dense, is_non_overlapping_and_dense, _compute_non_overlapping_and_dense)
+
 // clang-format on
 
 #undef DEFINE_SYMBOOL_COMPUTE
@@ -129,11 +218,11 @@ DEFINE_SYMBOOL_COMPUTE(compute_non_overlapping_and_dense, is_non_overlapping_and
 
 SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim4() const {
   init_is_contiguous();
-  if (definitely_true(is_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_contiguous(), __FILE__, __LINE__)) {
     return true;
   }
   init_is_channels_last_contiguous();
-  if (definitely_true(is_channels_last_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_channels_last_contiguous(), __FILE__, __LINE__)) {
     return true;
   }
   return is_contiguous() | is_channels_last_contiguous() |
@@ -142,7 +231,7 @@ SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim4() const {
 
 SymBool SymbolicShapeMeta::compute_channels_last_contiguous_3d_dim5() const {
   init_is_channels_last_contiguous();
-  if (definitely_true(is_channels_last_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_channels_last_contiguous(), __FILE__, __LINE__)) {
     return false;
   }
   return ~is_channels_last_contiguous() & compute_channels_last_contiguous_3d();
@@ -150,7 +239,7 @@ SymBool SymbolicShapeMeta::compute_channels_last_contiguous_3d_dim5() const {
 
 SymBool SymbolicShapeMeta::compute_channels_last_2d_dim5() const {
   init_is_channels_last_3d_contiguous();
-  if (definitely_true(is_channels_last_3d_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_channels_last_3d_contiguous(), __FILE__, __LINE__)) {
     return false;
   }
   return ~is_channels_last_3d_contiguous() &
@@ -158,20 +247,20 @@ SymBool SymbolicShapeMeta::compute_channels_last_2d_dim5() const {
 }
 
 SymBool SymbolicShapeMeta::compute_channels_last_3d_dim5() const {
-  if (definitely_true(is_channels_last(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_channels_last(), __FILE__, __LINE__)) {
     return false;
   }
   return ~is_channels_last() & compute_strides_like_channels_last_3d();
 }
 
 SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim5() const {
-  if (definitely_true(is_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_contiguous(), __FILE__, __LINE__)) {
     return true;
   }
-  if (definitely_true(is_channels_last_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_channels_last_contiguous(), __FILE__, __LINE__)) {
     return true;
   }
-  if (definitely_true(is_channels_last_3d_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_channels_last_3d_contiguous(), __FILE__, __LINE__)) {
     return true;
   }
   return is_contiguous() | is_channels_last_contiguous() |
@@ -179,7 +268,7 @@ SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim5() const {
 }
 
 SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_anydim() const {
-  if (definitely_true(is_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_contiguous(), __FILE__, __LINE__)) {
     return true;
   }
   return is_contiguous() | compute_non_overlapping_and_dense();
@@ -193,6 +282,7 @@ void SymbolicShapeMeta::set_numel(SymInt val) const {
   numel_ = std::move(val);
   available_.fetch_or(numel_avail);
 }
+
 void SymbolicShapeMeta::set_is_contiguous(SymBool val) const {
   std::scoped_lock lock(mutables_);
   if (has_is_contiguous()) {
@@ -201,6 +291,7 @@ void SymbolicShapeMeta::set_is_contiguous(SymBool val) const {
   is_contiguous_ = std::move(val);
   available_.fetch_or(is_contiguous_avail);
 }
+
 void SymbolicShapeMeta::set_is_channels_last_contiguous(SymBool val) const {
   std::scoped_lock lock(mutables_);
   if (has_is_channels_last_contiguous()) {
@@ -209,6 +300,7 @@ void SymbolicShapeMeta::set_is_channels_last_contiguous(SymBool val) const {
   is_channels_last_contiguous_ = std::move(val);
   available_.fetch_or(is_channels_last_contiguous_avail);
 }
+
 void SymbolicShapeMeta::set_is_channels_last_3d_contiguous(SymBool val) const {
   std::scoped_lock lock(mutables_);
   if (has_is_channels_last_3d_contiguous()) {
@@ -217,6 +309,7 @@ void SymbolicShapeMeta::set_is_channels_last_3d_contiguous(SymBool val) const {
   is_channels_last_3d_contiguous_ = std::move(val);
   available_.fetch_or(is_channels_last_3d_contiguous_avail);
 }
+
 void SymbolicShapeMeta::set_is_channels_last(SymBool val) const {
   std::scoped_lock lock(mutables_);
   if (has_is_channels_last()) {
@@ -225,6 +318,7 @@ void SymbolicShapeMeta::set_is_channels_last(SymBool val) const {
   is_channels_last_ = std::move(val);
   available_.fetch_or(is_channels_last_avail);
 }
+
 void SymbolicShapeMeta::set_is_channels_last_3d(SymBool val) const {
   std::scoped_lock lock(mutables_);
   if (has_is_channels_last_3d()) {
@@ -310,6 +404,46 @@ void SymbolicShapeMeta::init_is_non_overlapping_and_dense() const {
         return compute_is_non_overlapping_and_dense_anydim();
     }
   }());
+}
+
+void SymbolicShapeMeta::set_materialized_sizes() const {
+  if (has_materialized_sizes()) {
+    return;
+  }
+  SmallVector<int64_t, 5> materialized(sizes_.size());
+  for (size_t i = 0; i < sizes_.size(); i++) {
+    materialized[i] = sizes_[i].guard_int(__FILE__, __LINE__);
+  }
+  std::scoped_lock lock(mutables_);
+  if (has_materialized_sizes()) {
+    return;
+  }
+  materialized_sizes_ = std::move(materialized);
+  available_.fetch_or(sizes_materialized_avail);
+}
+
+void SymbolicShapeMeta::set_materialized_strides() const {
+  if (has_materialized_strides()) {
+    return;
+  }
+  SmallVector<int64_t, 5> materialized(strides_.size());
+  for (size_t i = 0; i < strides_.size(); i++) {
+    materialized[i] = strides_[i].guard_int(__FILE__, __LINE__);
+  }
+  std::scoped_lock lock(mutables_);
+  if (has_materialized_strides()) {
+    return;
+  }
+  materialized_strides_ = std::move(materialized);
+  available_.fetch_or(strides_materialized_avail);
+}
+
+void SymbolicShapeMeta::init_materialized_sizes() const {
+  set_materialized_sizes();
+}
+
+void SymbolicShapeMeta::init_materialized_strides() const {
+  set_materialized_strides();
 }
 
 } // namespace c10

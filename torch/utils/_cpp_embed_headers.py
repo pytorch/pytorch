@@ -1,17 +1,21 @@
+from collections.abc import Sequence
 from pathlib import Path
 from re import match as _match
-from typing import List, Optional, Sequence, Set, Union
 
 
-def read_file(fname: Union[Path, str]) -> List[str]:
+def read_file(fname: Path | str) -> list[str]:
     with open(fname, encoding="utf-8") as f:
         return f.readlines()
 
 
 def _embed_headers(
-    content: List[str], include_dirs: List[Path], processed_files: Set[str]
+    content: list[str], include_dirs: list[Path], processed_files: set[str]
 ) -> str:
     for line_idx, cur_line in enumerate(content):
+        # Eliminate warning: `#pragma once in main file`
+        if cur_line.startswith("#pragma once"):
+            content[line_idx] = ""
+            continue
         m = _match('^\\s*#include\\s*[<"]([^>"]+)[>"]', cur_line)
         if m is None:
             continue
@@ -31,10 +35,11 @@ def _embed_headers(
 
 
 def embed_headers(
-    fname: str, include_dirs: Optional[Union[Sequence[str], Sequence[Path], str]] = None
+    fname: str, include_dirs: Sequence[str] | Sequence[Path] | str | None = None
 ) -> str:
     if include_dirs is None:
-        include_dirs = [Path(__file__).parent.parent.parent]
+        base_dir = Path(__file__).parent.parent.parent
+        include_dirs = [base_dir, base_dir / "aten" / "src"]
     elif isinstance(include_dirs, str):
         include_dirs = [Path(include_dirs)]
     else:
@@ -47,6 +52,6 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Usage:\n {sys.argv[0]} filename")
+        print(f"Usage:\n {sys.argv[0]} filename")
         sys.exit(1)
     print(embed_headers(sys.argv[1]))

@@ -5,6 +5,12 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter, EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import TEST_XPU
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 class PythonDispatcherTests(torch._dynamo.test_case.TestCase):
@@ -71,10 +77,10 @@ class GraphModule(torch.nn.Module):
         sub: "f32[2, 3]" = l_x_ - 1;  l_x_ = None
         sin: "f32[2, 3]" = torch.sin(sub);  sub = None
         return (sin,)
-""",  # NOQA: B950
+""",
         )
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")
     def test_dispatch_key_set_guard(self):
         counter = CompileCounter()
 
@@ -96,7 +102,7 @@ class GraphModule(torch.nn.Module):
         # No recompile since the dispatch key set is the same though the tensor is different.
         self.assertEqual(counter.frame_count, 1)
 
-        x3 = torch.randn(2, 3, device="cuda")
+        x3 = torch.randn(2, 3, device=device_type)
         dks3 = torch._C._dispatch_keys(x3)
         self.assertEqual(fn(x3, dks3), torch.sin(x3 - 1))
         # Re-compile since the dispatch key set is different.
@@ -129,6 +135,35 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(fn(x, y), torch.tensor([11, 24, 39, 11]))
         # No recompile
         self.assertEqual(counter.frame_count, 1)
+
+    def test_graph_break_recovers_missing_python_tls_snapshot(self):
+        @torch.compile(backend="eager_noexcept")
+        def fn(x):
+            torch._C._dispatch_tls_set_dispatch_key_included(
+                torch._C.DispatchKey.Python, True
+            )
+            torch._C._dispatch_tls_set_dispatch_key_included(
+                torch._C.DispatchKey.PythonTLSSnapshot, False
+            )
+            torch._dynamo.graph_break()
+            return torch.sin(x)
+
+        saved_python = torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.Python
+        )
+        saved_python_tls_snapshot = torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.PythonTLSSnapshot
+        )
+        try:
+            x = torch.randn(3)
+            self.assertEqual(fn(x), x.sin())
+        finally:
+            torch._C._dispatch_tls_set_dispatch_key_included(
+                torch._C.DispatchKey.Python, saved_python
+            )
+            torch._C._dispatch_tls_set_dispatch_key_included(
+                torch._C.DispatchKey.PythonTLSSnapshot, saved_python_tls_snapshot
+            )
 
 
 if __name__ == "__main__":

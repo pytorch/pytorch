@@ -8,7 +8,8 @@ import os
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal, TYPE_CHECKING, TypeVar
+from typing import Any, Literal, TYPE_CHECKING, TypeVar
+from typing_extensions import assert_never
 
 import yaml
 
@@ -17,7 +18,6 @@ import torchgen.api.meta as meta
 import torchgen.api.native as native
 import torchgen.api.structured as structured
 import torchgen.dest as dest
-from torchgen.aoti.fallback_ops import inductor_fallback_ops
 from torchgen.api import cpp
 from torchgen.api.translate import translate
 from torchgen.api.types import (
@@ -36,15 +36,15 @@ from torchgen.context import (
     with_native_function_and_indices,
 )
 from torchgen.gen_aoti_c_shim import (
-    gen_aoti_c_shim,
+    gen_aoti_c_shim_files,
     gen_static_dispatch_backend_call_signature,
-    get_fallback_op_name,
-    get_header_for_aoti,
 )
 from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
+    gen_functionalization_view_meta_classes_decl,
+    gen_functionalization_view_meta_classes_impl,
     GenCompositeViewCopyKernel,
 )
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
@@ -84,7 +84,6 @@ from torchgen.native_function_generation import (
 )
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import (
-    assert_never,
     concatMap,
     context,
     FileManager,
@@ -97,7 +96,7 @@ from torchgen.yaml_utils import YamlDumper, YamlLoader
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 T = TypeVar("T")
@@ -175,15 +174,19 @@ def parse_native_yaml_struct(
     path: str = "<stdin>",
     skip_native_fns_gen: bool = False,
 ) -> ParsedYaml:
-    assert isinstance(es, list)
+    if not isinstance(es, list):
+        raise AssertionError(f"Expected 'es' to be a list, but got {type(es)}")
     rs: list[NativeFunction] = []
     bs: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = defaultdict(dict)
     for e in es:
-        assert isinstance(e, dict), f"expected to be dict: {e}"
-        assert isinstance(e.get("__line__"), int), e
+        if not isinstance(e, dict):
+            raise AssertionError(f"Expected to be dict: {e}")
+        if not isinstance(e.get("__line__"), int):
+            raise AssertionError(f"Expected '__line__' to be int: {e}")
         loc = Location(path, e["__line__"])
         funcs = e.get("func")
-        assert funcs is not None, f"missed 'func' in {e}"
+        if funcs is None:
+            raise AssertionError(f"Missed 'func' in {e}")
         with context(lambda: f"in {loc}:\n  {funcs}"):
             func, m = NativeFunction.from_yaml(e, loc, valid_tags, ignore_keys)
             rs.append(func)
@@ -217,10 +220,12 @@ def parse_native_yaml_struct(
 
 
 def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> set[str]:
-    assert isinstance(es, list)
+    if not isinstance(es, list):
+        raise AssertionError(f"Expected 'es' to be a list, but got {type(es)}")
     rs: set[str] = set()
     for e in es:
-        assert isinstance(e.get("__line__"), int), e
+        if not isinstance(e.get("__line__"), int):
+            raise AssertionError(f"Expected '__line__' to be int: {e}")
         loc = Location(path, e["__line__"])
         tags = e.get("tag")
         with context(lambda: f"in {loc}:\n  {tags}"):
@@ -228,7 +233,8 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> set[str]:
             name = e_i.pop("tag")
             desc = e_i.pop("desc", "")
             # ensure that each tag has a non-empty description
-            assert desc != ""
+            if desc == "":
+                raise AssertionError(f"Tag '{name}' must have a non-empty description")
             rs.add(name)
     return rs
 
@@ -285,15 +291,17 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
     for f in funcs:
         if f.structured_delegate is not None:
             delegate_func = func_map.get(f.structured_delegate)
-            assert delegate_func is not None, (
-                f"{f.func.name} is marked as a structured_delegate pointing to "
-                f"{f.structured_delegate}, but {f.structured_delegate} is missing."
-            )
-            assert delegate_func.structured, (
-                f"{f.func.name} is marked as a structured_delegate pointing to "
-                f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. "
-                f"Consider adding 'structured=True' to the delegated operator"
-            )
+            if delegate_func is None:
+                raise AssertionError(
+                    f"{f.func.name} is marked as a structured_delegate pointing to "
+                    f"{f.structured_delegate}, but {f.structured_delegate} is missing."
+                )
+            if not delegate_func.structured:
+                raise AssertionError(
+                    f"{f.func.name} is marked as a structured_delegate pointing to "
+                    f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. "
+                    f"Consider adding 'structured=True' to the delegated operator"
+                )
 
         # Check for reserved Python keywords
         PYTHON_RESERVED_KEYWORDS = set(keyword.kwlist)
@@ -323,17 +331,19 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             and str(f.func.name.name) != "set_"
         ):
             base_name = f.func.name.name
-            assert base_name.inplace, (
-                f"{f.func.name} is marked with tag: inplace_view, but it doesn't follow the naming "
-                "convention for inplace ops - the codegen expects the base name to have a trailing underscore. "
-            )
+            if not base_name.inplace:
+                raise AssertionError(
+                    f"{f.func.name} is marked with tag: inplace_view, but it doesn't follow the naming "
+                    "convention for inplace ops - the codegen expects the base name to have a trailing underscore."
+                )
             out_of_place_base_name = BaseOperatorName(
                 base_name.base, False, base_name.dunder_method
             )
-            assert len(base_func_map[out_of_place_base_name]) > 0, (
-                f"{f.func.name} is marked with tag: inplace_view. The codegen expects there to be a corresponding "
-                f"out-of-place view op with the name '{base_name}' and matching schema, but it didn't find one. "
-            )
+            if len(base_func_map[out_of_place_base_name]) == 0:
+                raise AssertionError(
+                    f"{f.func.name} is marked with tag: inplace_view. The codegen expects there to be a corresponding "
+                    f"out-of-place view op with the name '{base_name}' and matching schema, but it didn't find one."
+                )
 
 
 def cpp_string(s: str) -> str:
@@ -460,7 +470,7 @@ def generate_static_dispatch_backend_call(
     f: NativeFunction,
     backend_index: BackendIndex,
 ) -> str:
-    cpp_sig = gen_static_dispatch_backend_call_signature(sig, f)
+    cpp_sig = gen_static_dispatch_backend_call_signature(f)
     name = cpp_sig.name()
     exprs = translate_args(sig, cpp_sig)
     backend_metadata = backend_index.get_kernel(f)
@@ -485,7 +495,8 @@ def generate_static_dispatch_fallback_call(
         cpp_sig = cpp_sigs.symint_signature
     else:
         cpp_sig = cpp_sigs.signature
-    assert cpp_sig is not None
+    if cpp_sig is None:
+        raise AssertionError("Expected cpp_sig to be non-None")
     name = cpp_sig.name()
     exprs = translate_args(sig, cpp_sig)
     ns = DEFAULT_KERNEL_NAMESPACE.replace("::native", "")
@@ -499,7 +510,7 @@ def generate_static_dispatch_fallback_call(
         return f"return {ns}::{DispatchKey.CompositeImplicitAutogradNestedTensor.lower()}::{name}({exprs});"
     else:
         return f"""TORCH_CHECK(false, "Static dispatch does not support {name} for\
-{', '.join([str(index.dispatch_key)for index in backend_indices])} ");"""
+{", ".join([str(index.dispatch_key) for index in backend_indices])} ");"""
 
 
 def static_dispatch(
@@ -509,7 +520,7 @@ def static_dispatch(
 ) -> str:
     """
     For a given `NativeFunction`, find out the corresponding backend and dispatch to it. If more than one
-    backends exsit, fallback to static dispatch by determining dispatch key from inputs.
+    backends exist, fallback to static dispatch by determining dispatch key from inputs.
     Arguments:
         sig: A CppSignature or DispatcherSignature for this native function we want to use.
         f: NativeFunction to generate static dispatch.
@@ -552,7 +563,7 @@ def static_dispatch(
         )
     if tensor_args != "":
         subexprs.append(f"c10::detail::multi_dispatch_key_set({tensor_args})")
-    stmts.append(f"""DispatchKeySet _dk_set = {' | '.join(subexprs)};""")
+    stmts.append(f"""DispatchKeySet _dk_set = {" | ".join(subexprs)};""")
     stmts.append("DispatchKey _dk = c10::highestPriorityBackendTypeId(_dk_set);")
 
     dispatch_code = []
@@ -754,8 +765,10 @@ class ComputeTensorMethod:
         if Variant.method not in f.variants:
             return None
 
-        assert not f.func.is_out_fn()
-        assert f.func.arguments.self_arg is not None
+        if f.func.is_out_fn():
+            raise AssertionError(f"Method variant cannot be an out function: {f.func}")
+        if f.func.arguments.self_arg is None:
+            raise AssertionError(f"Method variant must have self_arg: {f.func}")
 
         sig_group = CppSignatureGroup.from_native_function(
             f, method=True, fallback_binding=f.manual_cpp_binding
@@ -999,14 +1012,20 @@ class ComputeBackendSelect:
             # The first case could probably be improved though- it calls computeDispatchKeySet(),
             # which looks at TLS dispatch keys- there should not be any by the time we reach backend select.
             if native_tensor_args:
-                assert f.func.arguments.has_tensor_arg()
+                if not f.func.arguments.has_tensor_arg():
+                    raise AssertionError(
+                        f"Expected function to have tensor args: {f.func}"
+                    )
                 tensor_args = ", ".join(a.name for a in native_tensor_args)
                 compute_dk = f"""\
 DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::multi_dispatch_key_set({tensor_args});
 DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
 DispatchKeySet _dk = c10::impl::computeDispatchKeySet(_dk_set, _dk_mask);"""
             else:
-                assert not f.func.arguments.has_tensor_arg()
+                if f.func.arguments.has_tensor_arg():
+                    raise AssertionError(
+                        f"Expected function to not have tensor args: {f.func}"
+                    )
                 compute_dk = (
                     f"DispatchKeySet _dk = c10::DispatchKeySet({dispatch_key});"
                 )
@@ -1016,7 +1035,7 @@ C10_ALWAYS_INLINE
 {sig.defn(name)} {{
   {compute_dk}
   return at::_ops::{f.func.name.unambiguous_name()}::redispatch(
-      _dk, {', '.join(a.expr for a in dispatcher_exprs)});
+      _dk, {", ".join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif self.target is Target.REGISTRATION:
@@ -1367,14 +1386,14 @@ def get_custom_build_selector(
     provided_op_registration_allowlist: list[str] | None,
     op_selection_yaml_path: str | None,
 ) -> SelectiveBuilder:
-    assert not (
+    if (
         provided_op_registration_allowlist is not None
         and op_selection_yaml_path is not None
-    ), (
-        "Both provided_op_registration_allowlist and "
-        + "op_selection_yaml_path can NOT be provided at the "
-        + "same time."
-    )
+    ):
+        raise AssertionError(
+            "Both provided_op_registration_allowlist and op_selection_yaml_path "
+            "can NOT be provided at the same time."
+        )
 
     op_registration_allowlist: set[str] | None = None
     if provided_op_registration_allowlist is not None:
@@ -1430,12 +1449,16 @@ def get_grouped_by_view_native_functions(
         # view_copy op (SchemaKind.functional)
         if view_kind == ViewSchemaKind.non_aliasing:
             kind = f.func.kind()
-            assert kind not in grouped_by_views[schema]
+            if kind in grouped_by_views[schema]:
+                raise AssertionError(
+                    f"Duplicate schema kind {kind} in {grouped_by_views[schema].keys()}"
+                )
             grouped_by_views[schema][kind] = f
         else:
-            assert (
-                view_kind not in grouped_by_views[schema]
-            ), f"{view_kind} already in {grouped_by_views[schema].keys()}"
+            if view_kind in grouped_by_views[schema]:
+                raise AssertionError(
+                    f"{view_kind} already in {grouped_by_views[schema].keys()}"
+                )
             grouped_by_views[schema][view_kind] = f
 
     return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
@@ -1451,7 +1474,11 @@ def get_grouped_native_functions(
         if r is None:
             # Invariant: any NativeFunctions that are code-generated
             # should have been grouped into NativeFunctionsGroup objects
-            assert not any("generated" in f.tags for f in d.values())
+            if any("generated" in f.tags for f in d.values()):
+                raise AssertionError(
+                    "Generated NativeFunctions should have been grouped into "
+                    f"NativeFunctionsGroup objects: {list(d.values())}"
+                )
             return list(d.values())
         else:
             return [r]
@@ -1483,9 +1510,11 @@ def get_ns_grouped_kernels(
                 native_function_namespaces.add(namespace)
             else:
                 namespace = DEFAULT_KERNEL_NAMESPACE
-            assert (
-                len(native_function_namespaces) <= 1
-            ), f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
+            if len(native_function_namespaces) > 1:
+                raise AssertionError(
+                    f"Codegen only supports one namespace per operator, "
+                    f"got {native_function_namespaces} from {dispatch_keys}"
+                )
             ns_grouped_kernels[namespace].extend(
                 native_function_decl_gen(f, backend_idx)
             )
@@ -1548,11 +1577,15 @@ def get_kernel_namespace(
     *, f: NativeFunction | NativeFunctionsGroup, backend_idx: BackendIndex
 ) -> str:
     backend_metadata = backend_idx.get_kernel(f)
-    assert not backend_metadata or "::native" in backend_metadata.cpp_namespace, (
-        f"The kernel for function {f.func.name if isinstance(f, NativeFunction) else f.functional.func.name} "
-        f"with dispatch key {backend_idx.dispatch_key}"
-        f" has a namespace {backend_metadata.cpp_namespace} and it's not ending with '::native'."
-    )
+    if backend_metadata and "::native" not in backend_metadata.cpp_namespace:
+        func_name = (
+            f.func.name if isinstance(f, NativeFunction) else f.functional.func.name
+        )
+        raise AssertionError(
+            f"The kernel for function {func_name} "
+            f"with dispatch key {backend_idx.dispatch_key} "
+            f"has a namespace {backend_metadata.cpp_namespace} and it's not ending with '::native'."
+        )
     return (
         backend_metadata.cpp_namespace if backend_metadata else DEFAULT_KERNEL_NAMESPACE
     )
@@ -2068,6 +2101,7 @@ def gen_headers(
     static_dispatch_idx: list[BackendIndex],
     selector: SelectiveBuilder,
     backend_indices: dict[DispatchKey, BackendIndex],
+    headeronly_fm: FileManager,
     core_fm: FileManager,
     cpu_fm: FileManager,
     device_fms: dict[str, FileManager],
@@ -2194,7 +2228,7 @@ def gen_headers(
     def gen_tags_enum() -> dict[str, str]:
         return {"enum_of_valid_tags": (",\n".join(sorted(valid_tags)))}
 
-    core_fm.write("enum_tag.h", gen_tags_enum)
+    headeronly_fm.write("enum_tag.h", gen_tags_enum)
 
 
 def gen_source_files(
@@ -2218,7 +2252,7 @@ def gen_source_files(
     per_operator_headers: bool,
     skip_dispatcher_op_registration: bool,
     update_aoti_c_shim: bool,
-    aoti_backends: set[DispatchKey],
+    aoti_backends: set[DispatchKey | None],
     extend_aoti_c_shim: bool,
 ) -> None:
     extra_cuda_headers = """\
@@ -2228,7 +2262,7 @@ def gen_source_files(
 #include <ATen/cuda/CUDAContext.h>"""
     if rocm:
         extra_cuda_headers = """\
-#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
+#include <c10/hip/HIPGuard.h>
 #include <ATen/hip/ATenHIPGeneral.h>
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>"""
@@ -2355,7 +2389,8 @@ def gen_source_files(
                 continue
             name = g.functional.func.name.name
             if dispatch_key is DispatchKey.CPU:
-                assert fm is cpu_fm
+                if fm is not cpu_fm:
+                    raise AssertionError("Expected fm to be cpu_fm for DispatchKey.CPU")
                 fm.write_with_template(
                     f"UfuncCPU_{name}.cpp",
                     "UfuncCPU.cpp",
@@ -2395,100 +2430,18 @@ def gen_source_files(
             else:
                 raise AssertionError(f"unrecognized {dispatch_key} for ufunc")
 
-        structured_func_group_dict = {}
-        for func_group in structured_native_functions:
-            for func in func_group.functions():
-                if func.structured_delegate is not None:
-                    structured_func_group_dict[func.structured_delegate] = func_group
-                    break
-
-        if dispatch_key in aoti_backends:
-            fallbacks = {}
-            for func in native_functions:
-                op_name = get_fallback_op_name(func)
-                if op_name in inductor_fallback_ops:
-                    fallbacks[op_name] = func
-            fallback_native_functions = tuple(
-                value for _, value in sorted(fallbacks.items())
-            )
-
-            # header files were checked in for ABI-compatiblilty checking
-            header_file_name = f"c_shim_{dispatch_key.lower()}.h"
-            new_header = gen_aoti_c_shim(
-                fallback_native_functions,
-                structured_func_group_dict,
-                dispatch_key,
-                backend_indices,
-                header=True,
-                extend_aoti_c_shim=extend_aoti_c_shim,
-                includes="",
-            )
-            if update_aoti_c_shim:
-                aoti_fm.write(
-                    header_file_name,
-                    lambda: new_header,
-                )
-            else:
-                try:
-                    with open(
-                        os.path.join(aoti_fm.install_dir, header_file_name)
-                    ) as old_file:
-                        old_header = old_file.read()
-                        assert old_header == new_header, """
-
-WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
-indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!
-Only in a limited number of situations, this is allowed:
-
-1. You added a fallback op to the inductor_fallback_ops list in torchgen/aoti/fallback_ops.py.
-If that's the case, run `python torchgen/gen.py --update-aoti-c-shim` to update the existing
-C shim header files.
-
-2. You added a new default argument to an existing fallback op. This is clearly a BC breaking
-change in the AOTInductor land. In this case, you need to keep a manual copy of that existing
-fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/c/shim.h, bump up the version
-number of that fallback op in the newly generated C shim files, and update the cpp wrapper
-codegen to generate the correct cpp call for this op. Contact AOTInductor team for assistance.
-
-                        """
-                except FileNotFoundError:
-                    print(
-                        f"{os.path.join(aoti_fm.install_dir, header_file_name)} not found"
-                    )
-
-            # cpp files are always generated on-the-fly
-            def headers_for_aoti() -> str:
-                headers = []
-                for func in fallback_native_functions:
-                    header = get_header_for_aoti(
-                        func,
-                        structured_func_group_dict,
-                        dispatch_key,
-                        backend_indices,
-                        extend_aoti_c_shim=extend_aoti_c_shim,
-                    )
-                    if header is not None:
-                        headers.append(header)
-                return "\n".join(sorted(set(headers)))
-
-            extra_headers = (
-                extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
-            )
-
-            aoti_fm.write(
-                f"c_shim_{dispatch_key.lower()}.cpp",
-                lambda: gen_aoti_c_shim(
-                    fallback_native_functions,
-                    structured_func_group_dict,
-                    dispatch_key,
-                    backend_indices,
-                    header=False,
-                    extend_aoti_c_shim=extend_aoti_c_shim,
-                    includes=headers_for_aoti() + "\n" + extra_headers,
-                ),
-            )
-
         del fm
+
+    gen_aoti_c_shim_files(
+        aoti_fm=aoti_fm,
+        aoti_backends=aoti_backends,
+        native_functions=native_functions,
+        backend_indices=backend_indices,
+        structured_native_functions=structured_native_functions,
+        extra_cuda_headers=extra_cuda_headers,
+        update_aoti_c_shim=update_aoti_c_shim,
+        extend_aoti_c_shim=extend_aoti_c_shim,
+    )
 
     # BackendSelect is generated specially
     def gen_backend_select() -> dict[str, list[str]]:
@@ -2577,48 +2530,48 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
         },
     )
 
+    def gen_op_headers(
+        g: NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup,
+    ) -> list[str]:
+        if isinstance(g, NativeFunctionsViewGroup):
+            # view ops always get a functionalization kernel
+            headers = [
+                f"#include <ATen/ops/{g.view.root_name}_native.h>",
+                f"#include <ATen/ops/{g.view.root_name}_ops.h>",
+            ]
+            if g.view_copy is not None:
+                headers += [
+                    f"#include <ATen/ops/{g.view_copy.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.view_copy.root_name}_ops.h>",
+                ]
+            return headers
+        elif isinstance(g, NativeFunctionsGroup):
+            headers = [
+                f"#include <ATen/ops/{g.functional.root_name}_native.h>",
+                f"#include <ATen/ops/{g.functional.root_name}_ops.h>",
+                f"#include <ATen/ops/{g.out.root_name}_native.h>",
+                f"#include <ATen/ops/{g.out.root_name}_ops.h>",
+            ]
+            if g.inplace is not None:
+                headers += [
+                    f"#include <ATen/ops/{g.inplace.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.inplace.root_name}_ops.h>",
+                ]
+            if g.mutable is not None:
+                headers += [
+                    f"#include <ATen/ops/{g.mutable.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.mutable.root_name}_ops.h>",
+                ]
+            return headers
+        else:
+            return [
+                f"#include <ATen/ops/{g.root_name}_native.h>",
+                f"#include <ATen/ops/{g.root_name}_ops.h>",
+            ]
+
     def functionalization_env_callable(
         g: NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup,
     ) -> dict[str, list[str]]:
-        def gen_op_headers(
-            g: NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup,
-        ) -> list[str]:
-            if isinstance(g, NativeFunctionsViewGroup):
-                # view ops always get a functionalization kernel
-                headers = [
-                    f"#include <ATen/ops/{g.view.root_name}_native.h>",
-                    f"#include <ATen/ops/{g.view.root_name}_ops.h>",
-                ]
-                if g.view_copy is not None:
-                    headers += [
-                        f"#include <ATen/ops/{g.view_copy.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.view_copy.root_name}_ops.h>",
-                    ]
-                return headers
-            elif isinstance(g, NativeFunctionsGroup):
-                headers = [
-                    f"#include <ATen/ops/{g.functional.root_name}_native.h>",
-                    f"#include <ATen/ops/{g.functional.root_name}_ops.h>",
-                    f"#include <ATen/ops/{g.out.root_name}_native.h>",
-                    f"#include <ATen/ops/{g.out.root_name}_ops.h>",
-                ]
-                if g.inplace is not None:
-                    headers += [
-                        f"#include <ATen/ops/{g.inplace.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.inplace.root_name}_ops.h>",
-                    ]
-                if g.mutable is not None:
-                    headers += [
-                        f"#include <ATen/ops/{g.mutable.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.mutable.root_name}_ops.h>",
-                    ]
-                return headers
-            else:
-                return [
-                    f"#include <ATen/ops/{g.root_name}_native.h>",
-                    f"#include <ATen/ops/{g.root_name}_ops.h>",
-                ]
-
         return {
             "ops_headers": gen_op_headers(g),
             "func_definitions": gen_functionalization_definition(
@@ -2684,6 +2637,31 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
         },
     )
 
+    cpu_fm.write(
+        "ViewMetaClasses.h",
+        lambda: {
+            "view_meta_declarations": list(
+                concatMap(
+                    lambda g: gen_functionalization_view_meta_classes_decl(selector, g),
+                    view_groups,
+                )
+            )
+        },
+    )
+
+    cpu_fm.write(
+        "ViewMetaClasses.cpp",
+        lambda: {
+            "view_meta_implementations": list(
+                concatMap(
+                    lambda g: gen_functionalization_view_meta_classes_impl(selector, g),
+                    view_groups,
+                )
+            ),
+            "op_headers": list(concatMap(gen_op_headers, view_groups)),
+        },
+    )
+
     # Note [view_copy NativeFunctions]
     # Every view operator in native_functions.yaml that is not CompositeImplicitAutograd
     # needs to have a corresponding non-aliasing {view}_copy variant.
@@ -2696,7 +2674,7 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
     #     but they could theoretically be called from user code (I added these kernels for completeness,
     #     since the ops are part of the public API).
     # (2) A derivative formula for every {view}_copy operator
-    #     {view}_copy operators can re-use the same derivative formulas as their {view} op counterparts,
+    #     {view}_copy operators can reuse the same derivative formulas as their {view} op counterparts,
     #     so rather than stamping all of the entries out in derivatives.yaml,
     #     we codegen them in.
     #     This is similar to how autograd codegen doesn't require inplace ops to have a derivatives.yaml entry.
@@ -2806,6 +2784,14 @@ def main() -> None:
         default="torch/csrc/inductor/aoti_torch/generated",
     )
     parser.add_argument(
+        "--headeronly-install-dir",
+        "--headeronly_install_dir",
+        help="output directory for header-only generated files (e.g. enum_tag.h). "
+        "Defaults to `<install-dir>/core` when --install-dir is set, otherwise "
+        "`build/torch/headeronly/core`.",
+        default=None,
+    )
+    parser.add_argument(
         "--rocm",
         action="store_true",
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
@@ -2819,6 +2805,11 @@ def main() -> None:
         "--xpu",
         action="store_true",
         help="Generate XPU registration code when set",
+    )
+    parser.add_argument(
+        "--mtia",
+        action="store_true",
+        help="Generate MTIA registration code when set",
     )
 
     # TODO: --op-registration-whitelist will be removed when all call-sites
@@ -2904,19 +2895,63 @@ def main() -> None:
 
     from torchgen.model import dispatch_keys
 
+    # Only a limited set of dispatch keys get CPUFunctions.h headers generated
+    # for them; this is the set
+    functions_keys = {
+        DispatchKey.CPU,
+        DispatchKey.CUDA,
+        DispatchKey.CompositeImplicitAutograd,
+        DispatchKey.CompositeImplicitAutogradNestedTensor,
+        DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.CompositeExplicitAutogradNonFunctional,
+        DispatchKey.Meta,
+        DispatchKey.MTIA,
+    }
+
+    aoti_backends = {
+        DispatchKey.CPU,
+        DispatchKey.CUDA,
+        # None will generate the aten shim based on aten_shimified_ops
+        # which does not bypass the dispatcher
+        None,
+    }
+
     # TODO: stop generating CUDA kernels for non-CUDA builds
     ignore_keys = set()
-    if not options.mps:
-        ignore_keys.add(DispatchKey.MPS)
 
-        if DispatchKey.MPS in dispatch_keys:
-            del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
+    MPS_KEYS = {DispatchKey.MPS, DispatchKey.SparseMPS, DispatchKey.SparseCsrMPS}
+    if options.mps or options.update_aoti_c_shim:
+        functions_keys.update(MPS_KEYS)
+        aoti_backends.add(DispatchKey.MPS)
+    else:
+        ignore_keys.update(MPS_KEYS)
+        dispatch_keys[:] = [k for k in dispatch_keys if k not in MPS_KEYS]
 
-    if not options.xpu:
-        ignore_keys.add(DispatchKey.XPU)
+    XPU_KEYS = {
+        DispatchKey.XPU,
+        DispatchKey.SparseXPU,
+        DispatchKey.SparseCsrXPU,
+        DispatchKey.NestedTensorXPU,
+    }
+    if options.xpu or options.update_aoti_c_shim:
+        functions_keys.add(DispatchKey.XPU)
+        aoti_backends.add(DispatchKey.XPU)
+    else:
+        ignore_keys.update(XPU_KEYS)
+        dispatch_keys[:] = [k for k in dispatch_keys if k not in XPU_KEYS]
 
-        if DispatchKey.XPU in dispatch_keys:
-            del dispatch_keys[dispatch_keys.index(DispatchKey.XPU)]
+    if not options.mtia:
+        ignore_keys.add(DispatchKey.MTIA)
+
+        if DispatchKey.MTIA in dispatch_keys:
+            del dispatch_keys[dispatch_keys.index(DispatchKey.MTIA)]
+
+    if options.backend_whitelist:
+        dispatch_keys = [
+            k
+            for k in dispatch_keys
+            if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
+        ]
 
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
@@ -2957,46 +2992,26 @@ def main() -> None:
     aoti_install_dir = f"{options.aoti_install_dir}"
     Path(aoti_install_dir).mkdir(parents=True, exist_ok=True)
 
+    if options.headeronly_install_dir is not None:
+        headeronly_install_dir = options.headeronly_install_dir
+    elif options.install_dir is not None:
+        headeronly_install_dir = f"{options.install_dir}/core"
+    else:
+        headeronly_install_dir = "build/torch/headeronly/core"
+    Path(headeronly_install_dir).mkdir(parents=True, exist_ok=True)
+
     core_fm = make_file_manager(options=options, install_dir=core_install_dir)
     cpu_fm = make_file_manager(options=options)
     cpu_vec_fm = make_file_manager(options=options)
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
     aoti_fm = make_file_manager(options=options, install_dir=aoti_install_dir)
+    headeronly_fm = make_file_manager(
+        options=options, install_dir=headeronly_install_dir
+    )
     device_fms = {"cuda": cuda_fm}
     if options.xpu:
         device_fms["xpu"] = make_file_manager(options=options)
-
-    # Only a limited set of dispatch keys get CPUFunctions.h headers generated
-    # for them; this is the set
-    functions_keys = {
-        DispatchKey.CPU,
-        DispatchKey.CUDA,
-        DispatchKey.CompositeImplicitAutograd,
-        DispatchKey.CompositeImplicitAutogradNestedTensor,
-        DispatchKey.CompositeExplicitAutograd,
-        DispatchKey.CompositeExplicitAutogradNonFunctional,
-        DispatchKey.Meta,
-    }
-
-    aoti_backends = {
-        DispatchKey.CPU,
-        DispatchKey.CUDA,
-    }
-
-    if options.mps:
-        functions_keys.add(DispatchKey.MPS)
-
-    if options.xpu:
-        functions_keys.add(DispatchKey.XPU)
-        aoti_backends.add(DispatchKey.XPU)
-
-    if options.backend_whitelist:
-        dispatch_keys = [
-            k
-            for k in dispatch_keys
-            if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
-        ]
 
     static_dispatch_idx: list[BackendIndex] = []
     if options.static_dispatch_backend:
@@ -3043,6 +3058,7 @@ def main() -> None:
             static_dispatch_idx=static_dispatch_idx,
             selector=selector,
             backend_indices=backend_indices,
+            headeronly_fm=headeronly_fm,
             core_fm=core_fm,
             cpu_fm=cpu_fm,
             device_fms=device_fms,

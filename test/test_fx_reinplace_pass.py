@@ -43,7 +43,7 @@ def forward(self, x_1):
         def f(x):
             a = x.clone()
             a_view = a.view(-1)
-            # We shouldn't re-inplace the first add(), because an alias of a is re-used later in the program
+            # We shouldn't re-inplace the first add(), because an alias of a is reused later in the program
             b = a.add(1)  # noqa: F841
 
             # Second add() is fine to re-inplace
@@ -188,14 +188,11 @@ def forward(self, a__1):
 
 def forward(self, a__1):
     clone = torch.ops.aten.clone.default(a__1);  a__1 = None
-    slice_1 = torch.ops.aten.slice.Tensor(clone, 0, 0, 9223372036854775807)
-    select = torch.ops.aten.select.int(slice_1, 1, 1);  slice_1 = None
+    select = torch.ops.aten.select.int(clone, 1, 1)
     select_1 = torch.ops.aten.select.int(select, 0, 1);  select = None
     add = torch.ops.aten.add_.Tensor(select_1, 1);  select_1 = add = None
-    slice_2 = torch.ops.aten.slice.Tensor(clone, 0, 0, 9223372036854775807)
-    select_2 = torch.ops.aten.select.int(slice_2, 1, 1);  slice_2 = select_2 = None
-    slice_3 = torch.ops.aten.slice.Tensor(clone, 0, 0, 9223372036854775807)
-    select_3 = torch.ops.aten.select.int(slice_3, 1, 1);  slice_3 = None
+    select_2 = torch.ops.aten.select.int(clone, 1, 1);  select_2 = None
+    select_3 = torch.ops.aten.select.int(clone, 1, 1)
     select_4 = torch.ops.aten.select.int(select_3, 0, 1);  select_3 = select_4 = None
     return clone
     """)
@@ -228,8 +225,7 @@ def forward(self, a__1):
 
 def forward(self, a__1):
     clone = torch.ops.aten.clone.default(a__1);  a__1 = None
-    slice_1 = torch.ops.aten.slice.Tensor(clone, 0, 0, 9223372036854775807)
-    select = torch.ops.aten.select.int(slice_1, 1, 1);  slice_1 = None
+    select = torch.ops.aten.select.int(clone, 1, 1)
     select_1 = torch.ops.aten.select.int(select, 0, 1);  select = None
     add = torch.ops.aten.add_.Tensor(select_1, 1);  select_1 = add = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [4], 1);  clone = None
@@ -264,15 +260,14 @@ def forward(self, a__1):
 
 def forward(self, a__1):
     clone = torch.ops.aten.clone.default(a__1);  a__1 = None
-    slice_1 = torch.ops.aten.slice.Tensor(clone, 0, 0, 9223372036854775807)
-    select = torch.ops.aten.select.int(slice_1, 1, 1);  slice_1 = None
+    select = torch.ops.aten.select.int(clone, 1, 1)
     select_1 = torch.ops.aten.select.int(select, 0, 1);  select = None
     add = torch.ops.aten.add.Tensor(select_1, 1);  select_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [4], 1);  clone = None
     select_int = torch.ops.aten.select.int(as_strided, 0, 0)
     copy__default = torch.ops.aten.copy_.default(select_int, add);  select_int = add = copy__default = None
     return as_strided
-    """)  # noqa: B950
+    """)
 
     def test_reinplace_scatter_twice_with_different_view_op_invalid2(self):
         def f(a_):
@@ -297,15 +292,14 @@ def forward(self, a__1):
 
 def forward(self, a__1):
     clone = torch.ops.aten.clone.default(a__1);  a__1 = None
-    slice_1 = torch.ops.aten.slice.Tensor(clone, 0, 0, 9223372036854775807)
-    select = torch.ops.aten.select.int(slice_1, 1, 1);  slice_1 = None
+    select = torch.ops.aten.select.int(clone, 1, 1)
     select_1 = torch.ops.aten.select.int(select, 0, 1);  select = None
     add = torch.ops.aten.add.Tensor(select_1, 1);  select_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [4], 0);  clone = None
     select_int = torch.ops.aten.select.int(as_strided, 0, 1)
     copy__default = torch.ops.aten.copy_.default(select_int, add);  select_int = add = copy__default = None
     return as_strided
-    """)  # noqa: B950
+    """)
 
 
     def test_out_node_updated(self):
@@ -353,12 +347,9 @@ def forward(self):
 def forward(self):
     zeros = torch.ops.aten.zeros.default([4, 4, 4], device = device(type='cpu'), pin_memory = False)
     ones = torch.ops.aten.ones.default([4, 2, 4], device = device(type='cpu'), pin_memory = False)
-    slice_1 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
-    slice_2 = torch.ops.aten.slice.Tensor(slice_1, 1, 2, 9223372036854775807);  slice_1 = None
-    copy = torch.ops.aten.copy_.default(slice_2, ones);  slice_2 = ones = copy = None
-    slice_3 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807);  slice_3 = None
-    slice_4 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
-    slice_5 = torch.ops.aten.slice.Tensor(slice_4, 1, 2, 9223372036854775807);  slice_4 = slice_5 = None
+    slice_1 = torch.ops.aten.slice.Tensor(zeros, 1, 2, 9223372036854775807)
+    copy = torch.ops.aten.copy_.default(slice_1, ones);  slice_1 = ones = copy = None
+    slice_2 = torch.ops.aten.slice.Tensor(zeros, 1, 2, 9223372036854775807);  slice_2 = None
     return zeros
     """)
 
@@ -375,7 +366,7 @@ def forward(self):
         index = 2
         shape_env = ShapeEnv()
         symbol = shape_env.create_symbol(index, source=ConstantSource(
-            f"__testing_only{len(shape_env.var_to_val)}"))
+            f"__testing_only{len(shape_env.backed_var_to_val)}"))
         sym_index = torch.SymInt(SymNode(symbol, shape_env, int, hint=index))
 
         inpt = [x, sym_index]

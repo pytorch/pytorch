@@ -1,16 +1,15 @@
-# mypy: allow-untyped-defs
+from collections.abc import Callable, Sequence
 from functools import update_wrapper
-from numbers import Number
-from typing import Any, Callable, Generic, overload, Union
-from typing_extensions import TypeVar
+from typing import Any, Final, Generic, overload, TypeVar
 
 import torch
 import torch.nn.functional as F
-from torch import Tensor
+from torch import SymInt, Tensor
 from torch.overrides import is_tensor_like
+from torch.types import _dtype, _Number, Device, Number
 
 
-euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
+euler_constant: Final[float] = 0.57721566490153286060  # Euler Mascheroni Constant
 
 __all__ = [
     "broadcast_all",
@@ -23,25 +22,28 @@ __all__ = [
 ]
 
 
-def broadcast_all(*values):
+# FIXME: Use (*values: *Ts) -> tuple[Tensor for T in Ts] if Mapping-Type is ever added.
+#   See https://github.com/python/typing/issues/1216#issuecomment-2126153831
+def broadcast_all(*values: Tensor | Number) -> tuple[Tensor, ...]:
     r"""
     Given a list of values (possibly containing numbers), returns a list where each
     value is broadcasted based on the following rules:
-      - `torch.*Tensor` instances are broadcasted as per :ref:`_broadcasting-semantics`.
-      - numbers.Number instances (scalars) are upcast to tensors having
-        the same size and type as the first tensor passed to `values`.  If all the
-        values are scalars, then they are upcasted to scalar Tensors.
+
+    - `torch.*Tensor` instances are broadcasted as per :ref:`broadcasting-semantics`.
+    - Number instances (scalars) are upcast to tensors having
+      the same size and type as the first tensor passed to `values`.  If all the
+      values are scalars, then they are upcasted to scalar Tensors.
 
     Args:
-        values (list of `numbers.Number`, `torch.*Tensor` or objects implementing __torch_function__)
+        values (list of `Number`, `torch.*Tensor` or objects implementing __torch_function__)
 
     Raises:
-        ValueError: if any of the values is not a `numbers.Number` instance,
+        ValueError: if any of the values is not a `Number` instance,
             a `torch.*Tensor` instance, or an instance implementing __torch_function__
     """
-    if not all(is_tensor_like(v) or isinstance(v, Number) for v in values):
+    if not all(is_tensor_like(v) or isinstance(v, _Number) for v in values):
         raise ValueError(
-            "Input arguments must all be instances of numbers.Number, "
+            "Input arguments must all be instances of Number, "
             "torch.Tensor or objects implementing __torch_function__."
         )
     if not all(is_tensor_like(v) for v in values):
@@ -57,7 +59,11 @@ def broadcast_all(*values):
     return torch.broadcast_tensors(*values)
 
 
-def _standard_normal(shape, dtype, device):
+def _standard_normal(
+    shape: Sequence[int | SymInt],
+    dtype: _dtype | None,
+    device: Device | None,
+) -> Tensor:
     if torch._C._get_tracing_state():
         # [JIT WORKAROUND] lack of support for .normal_()
         return torch.normal(
@@ -67,7 +73,7 @@ def _standard_normal(shape, dtype, device):
     return torch.empty(shape, dtype=dtype, device=device).normal_()
 
 
-def _sum_rightmost(value, dim):
+def _sum_rightmost(value: Tensor, dim: int) -> Tensor:
     r"""
     Sum out ``dim`` many rightmost dimensions of a given tensor.
 
@@ -81,7 +87,7 @@ def _sum_rightmost(value, dim):
     return value.reshape(required_shape).sum(-1)
 
 
-def logits_to_probs(logits, is_binary=False):
+def logits_to_probs(logits: Tensor, is_binary: bool = False) -> Tensor:
     r"""
     Converts a tensor of logits into probabilities. Note that for the
     binary case, each value denotes log odds, whereas for the
@@ -93,7 +99,7 @@ def logits_to_probs(logits, is_binary=False):
     return F.softmax(logits, dim=-1)
 
 
-def clamp_probs(probs):
+def clamp_probs(probs: Tensor) -> Tensor:
     """Clamps the probabilities to be in the open interval `(0, 1)`.
 
     The probabilities would be clamped between `eps` and `1 - eps`,
@@ -119,7 +125,7 @@ def clamp_probs(probs):
     return probs.clamp(min=eps, max=1 - eps)
 
 
-def probs_to_logits(probs, is_binary=False):
+def probs_to_logits(probs: Tensor, is_binary: bool = False) -> Tensor:
     r"""
     Converts a tensor of probabilities into logits. For the binary case,
     this denotes the probability of occurrence of the event indexed by `1`.
@@ -151,15 +157,13 @@ class lazy_property(Generic[T, R]):
     @overload
     def __get__(
         self, instance: None, obj_type: Any = None
-    ) -> "_lazy_property_and_property[T, R]":
-        ...
+    ) -> "_lazy_property_and_property[T, R]": ...
 
     @overload
-    def __get__(self, instance: T, obj_type: Any = None) -> R:
-        ...
+    def __get__(self, instance: T, obj_type: Any = None) -> R: ...
 
     def __get__(
-        self, instance: Union[T, None], obj_type: Any = None
+        self, instance: T | None, obj_type: Any = None
     ) -> "R | _lazy_property_and_property[T, R]":
         if instance is None:
             return _lazy_property_and_property(self.wrapped)

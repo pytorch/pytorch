@@ -90,7 +90,7 @@ struct KeyValueCompDesc {
 };
 
 #ifdef USE_FBGEMM
-static bool can_use_radix_sort(const TensorBase& values, const bool descending) {
+bool can_use_radix_sort(const TensorBase& values, const bool descending) {
   // radix_sort can be used only for 1D data
   if (values.dim() != 1) return false;
   // radix_sort sorts in ascending order
@@ -106,7 +106,7 @@ static bool can_use_radix_sort(const TensorBase& values, const bool descending) 
   return true;
 }
 
-static void parallel_sort1d_kernel(
+void parallel_sort1d_kernel(
     const TensorBase& values,
     const TensorBase& indices) {
   AT_DISPATCH_INTEGRAL_TYPES(values.scalar_type(), "parallel_sort1d_kernel", [&] {
@@ -140,7 +140,7 @@ static void parallel_sort1d_kernel(
 #endif
 
 template <typename scalar_t, typename value_accessor_t, typename indices_accessor_t>
-static inline void sort_kernel_impl(const value_accessor_t& value_accessor,
+inline void sort_kernel_impl(const value_accessor_t& value_accessor,
             const indices_accessor_t& indices_accessor,
             int64_t dim_size, bool descending, bool stable) {
   auto composite_accessor = CompositeRandomAccessorCPU<
@@ -165,7 +165,7 @@ static inline void sort_kernel_impl(const value_accessor_t& value_accessor,
   }
 }
 
-static void sort_kernel(
+void sort_kernel(
     const TensorBase& self,
     const TensorBase& values,
     const TensorBase& indices,
@@ -222,7 +222,7 @@ static void sort_kernel(
   );
 }
 
-static void topk_kernel(
+void topk_kernel(
     const TensorBase &values,
     const TensorBase &indices,
     const TensorBase &self,

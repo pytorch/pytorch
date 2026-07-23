@@ -158,7 +158,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm_input(
   x = x.reshape({batch_size, seq_length, x.size(1)});
   h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
   c_n = c_n.reshape({c_n.size(0) * c_n.size(1), c_n.size(2), c_n.size(3)});
-  return std::tuple<Tensor, Tensor, Tensor>(x, h_n, c_n);
+  return std::tuple<Tensor, Tensor, Tensor>(
+      std::move(x), std::move(h_n), std::move(c_n));
 }
 
 #ifdef USE_VULKAN_API
@@ -282,7 +283,7 @@ const c10::impl::GenericList LstmPackedContext::unpack() const {
         packed_linear_context.toCustomClass<LinearPackedContext>()->unpack();
 
     TORCH_CHECK(
-        unpacked_linear_context.size() > 0u,
+        !unpacked_linear_context.empty(),
         "unpacked_linear_context does not have any elements!");
 
     params_cpu.emplace_back(
@@ -419,7 +420,8 @@ std::tuple<Tensor, Tensor, Tensor> run_lstm_context(
   x = x.reshape({batch_size, seq_length, x.size(1)});
   h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
   c_n = c_n.reshape({c_n.size(0) * c_n.size(1), c_n.size(2), c_n.size(3)});
-  return std::tuple<Tensor, Tensor, Tensor>(x, h_n, c_n);
+  return std::tuple<Tensor, Tensor, Tensor>(
+      std::move(x), std::move(h_n), std::move(c_n));
 }
 
 } // namespace ops

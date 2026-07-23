@@ -1,13 +1,15 @@
-# mypy: ignore-errors
+from __future__ import annotations
+
 
 """
 From https://docs.google.com/spreadsheets/d/12R3nCOLskxPYjjiNkdqy4OdQ65eQp_htebXGODsjSeA/edit#gid=0
 Try to keep this list in sync with that.
 """
+
 import operator
 
 
-top_torch = [
+top_torch: list[tuple[str, int]] = [
     ("t", 6837449),
     ("tensor", 585786),
     ("mode", 462182),
@@ -157,7 +159,6 @@ top_torch = [
     ("stft", 1487),
     ("get_num_threads", 1477),
     ("real", 1459),
-    ("cholesky", 1406),
     ("quantize_per_tensor", 1392),
     ("diag_embed", 1364),
     ("lerp", 1363),
@@ -262,7 +263,7 @@ top_torch = [
     ("neg", 2),
 ]
 
-top_nn_functional = [
+top_nn_functional: list[tuple[str, int]] = [
     ("nn.functional.softmax", 10522),
     ("nn.functional.relu", 8572),
     ("nn.functional.interpolate", 7277),
@@ -396,7 +397,7 @@ top_nn_functional = [
     ("nn.functional.math", 1),
 ]
 
-top_nn_module = [
+top_nn_module: list[tuple[str, int, str | None]] = [
     ("nn.Module", 927129, None),
     ("nn.Linear", 530688, "nn.functional.linear"),
     ("nn.Sequential", 384968, None),
@@ -558,7 +559,7 @@ top_nn_module = [
 ]
 
 # No rankings because these are a little hard to get rankings for
-method_only_ops = [
+method_only_ops: list[str] = [
     "bfloat16",
     "bool",
     "byte",
@@ -608,8 +609,8 @@ method_only_ops = [
 ]
 
 
-def get_nn_functional_top_list():
-    top_nn_functional_ = dict(top_nn_functional)
+def get_nn_functional_top_list() -> list[tuple[str, int]]:
+    top_nn_functional_: dict[str, int] = dict(top_nn_functional)
     for _, count, functional_name in top_nn_module:
         if functional_name is None:
             continue
@@ -620,13 +621,10 @@ def get_nn_functional_top_list():
         else:
             top_nn_functional_[functional_name] += count
 
-    top_nn_functional_ = list(top_nn_functional_.items())
-    top_nn_functional_.sort(key=operator.itemgetter(1), reverse=True)
-    return top_nn_functional_
+    top_nn_functional_list = list(top_nn_functional_.items())
+    top_nn_functional_list.sort(key=operator.itemgetter(1), reverse=True)
+    return top_nn_functional_list
 
 
-usage_count = {}
-for k, v in get_nn_functional_top_list():
-    usage_count[k] = v
-for k, v in top_torch:
-    usage_count[k] = v
+usage_count: dict[str, int] = dict(get_nn_functional_top_list())
+usage_count.update(top_torch)

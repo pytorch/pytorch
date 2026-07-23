@@ -1,7 +1,5 @@
-# mypy: allow-untyped-defs
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from io import IOBase
-from typing import Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -33,8 +31,12 @@ class FileOpenerIterDataPipe(IterDataPipe[tuple[str, IOBase]]):
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> from torchdata.datapipes.iter import FileLister, FileOpener, StreamReader
-        >>> dp = FileLister(root=".").filter(lambda fname: fname.endswith('.txt'))
+        >>> from torchdata.datapipes.iter import (
+        ...     FileLister,
+        ...     FileOpener,
+        ...     StreamReader,
+        ... )
+        >>> dp = FileLister(root=".").filter(lambda fname: fname.endswith(".txt"))
         >>> dp = FileOpener(dp)
         >>> dp = StreamReader(dp)
         >>> list(dp)
@@ -45,13 +47,13 @@ class FileOpenerIterDataPipe(IterDataPipe[tuple[str, IOBase]]):
         self,
         datapipe: Iterable[str],
         mode: str = "r",
-        encoding: Optional[str] = None,
+        encoding: str | None = None,
         length: int = -1,
-    ):
+    ) -> None:
         super().__init__()
-        self.datapipe: Iterable = datapipe
+        self.datapipe: Iterable[str] = datapipe
         self.mode: str = mode
-        self.encoding: Optional[str] = encoding
+        self.encoding: str | None = encoding
 
         if self.mode not in ("b", "t", "rb", "rt", "r"):
             raise ValueError(f"Invalid mode {mode}")
@@ -66,12 +68,12 @@ class FileOpenerIterDataPipe(IterDataPipe[tuple[str, IOBase]]):
     # Remove annotation due to 'IOBase' is a general type and true type
     # is determined at runtime based on mode. Some `DataPipe` requiring
     # a subtype would cause mypy error.
-    def __iter__(self):
+    def __iter__(self) -> Iterator[tuple[str, IOBase]]:
         yield from get_file_binaries_from_pathnames(
             self.datapipe, self.mode, self.encoding
         )
 
-    def __len__(self):
+    def __len__(self) -> int:
         if self.length == -1:
             raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
         return self.length

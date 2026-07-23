@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -35,17 +36,26 @@ class ExpRelaxedCategorical(Distribution):
     [2] Categorical Reparametrization with Gumbel-Softmax
     (Jang et al., 2017)
     """
+
+    # pyrefly: ignore [bad-override]
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = (
         constraints.real_vector
     )  # The true support is actually a submanifold of this.
     has_rsample = True
 
-    def __init__(self, temperature, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        temperature: Tensor,
+        probs: Tensor | None = None,
+        logits: Tensor | None = None,
+        validate_args: bool | None = None,
+    ) -> None:
         self._categorical = Categorical(probs, logits)
         self.temperature = temperature
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -116,11 +126,21 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         probs (Tensor): event probabilities
         logits (Tensor): unnormalized log probability for each event
     """
+
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
+    # pyrefly: ignore [bad-override]
     support = constraints.simplex
     has_rsample = True
+    # pyrefly: ignore [bad-override]
+    base_dist: ExpRelaxedCategorical
 
-    def __init__(self, temperature, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        temperature: Tensor,
+        probs: Tensor | None = None,
+        logits: Tensor | None = None,
+        validate_args: bool | None = None,
+    ) -> None:
         base_dist = ExpRelaxedCategorical(
             temperature, probs, logits, validate_args=validate_args
         )

@@ -1,13 +1,18 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/LossOps.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_ctc_loss_backward_native.h>
+#include <ATen/ops/_ctc_loss_native.h>
 #include <ATen/ops/binary_cross_entropy_backward_native.h>
 #include <ATen/ops/binary_cross_entropy_native.h>
+#include <ATen/ops/full_like.h>
 #include <ATen/ops/huber_loss_backward_native.h>
 #include <ATen/ops/huber_loss_native.h>
 #include <ATen/ops/mse_loss_backward_native.h>
@@ -18,12 +23,19 @@
 #include <ATen/ops/nll_loss_forward_native.h>
 #include <ATen/ops/smooth_l1_loss_backward_native.h>
 #include <ATen/ops/smooth_l1_loss_native.h>
+#include <ATen/ops/tensor.h>
 #endif
 
 namespace at::native {
 namespace mps {
 
-static string reductionToString(int64_t reduction) {
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/LossOps_metallib.h>
+#endif
+
+static std::string reductionToString(int64_t reduction) {
   switch (reduction) {
     case Reduction::Mean:
       return "Mean";
@@ -58,10 +70,14 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
                                           const Tensor& target,
                                           int64_t reduction,
                                           Tensor& grad_input,
-                                          const string op_name) {
+                                          const std::string& op_name) {
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
   auto norm = reduction == Reduction::Mean ? 2. / static_cast<double>(input.numel()) : 2.;
 
+  if ((input.numel() == 0) || (target.numel() == 0) || (grad_output.numel() == 0)) {
+    reduction == Reduction::Mean ? grad_input.fill_(std::numeric_limits<float>::quiet_NaN()) : grad_input.zero_();
+    return grad_input;
+  }
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor *inputTensor = nil, *targetTensor = nil;
@@ -69,7 +85,7 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
   };
 
   @autoreleasepool {
-    string key = op_name + reductionToString(reduction) + ":" + std::to_string(grad_input.sizes()[1]) +
+    std::string key = op_name + reductionToString(reduction) + ":" + std::to_string(grad_input.sizes()[1]) +
         getTensorsStringKey({input, target, grad_output});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
@@ -196,7 +212,7 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
                                  int64_t reduction,
                                  Tensor& loss,
                                  const std::optional<Tensor>& grad_output_opt,
-                                 const string op_name) {
+                                 const std::string& op_name) {
   // TODO: add sanity check for the elements of input tensor to be within [0..1]
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
 
@@ -208,17 +224,12 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
   loss.resize_((reduction == Reduction::None || grad_output.defined()) ? target.sizes() : IntArrayRef({}));
   TORCH_CHECK(loss.is_mps());
 
-  Tensor loss_squeezed = loss.squeeze();
-  Tensor input_squeezed = input.squeeze();
-  Tensor target_squeezed = target.squeeze();
-
   @autoreleasepool {
-    string key =
-        op_name + reductionToString(reduction) + getTensorsStringKey({input_squeezed, target_squeezed, weight});
+    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target, weight});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_squeezed);
-      newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target_squeezed);
+      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
+      newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
 
       MPSGraphTensor* bceLossUnweighted = nil;
       // if grad_output is defined, then it's a backward pass
@@ -248,12 +259,12 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
           newCachedGraph->gradInputTensor = bceLoss;
         }
       } else {
-        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input_squeezed.sizes().size());
+        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input.sizes().size());
       }
     });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input_squeezed);
-    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target_squeezed);
-    Placeholder lossPlaceholder = Placeholder(cachedGraph->lossTensor, loss_squeezed);
+    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
+    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
+    Placeholder lossPlaceholder = Placeholder(cachedGraph->lossTensor, loss);
 
     NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
 
@@ -328,7 +339,7 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
     grad_output = grad_output_arg.unsqueeze(channel_dim);
   }
   @autoreleasepool {
-    string key = "nllnd_loss_backward" + getTensorsStringKey({input, grad_output, target, weight, total_weight}) +
+    std::string key = "nllnd_loss_backward" + getTensorsStringKey({input, grad_output, target, weight, total_weight}) +
         std::to_string(numClasses) + ":" + std::to_string(ignore_index) + ":" + std::to_string(isWeightsArrayValid) +
         ":" + std::to_string(isTargetCasted) + ":" + reductionToString(reduction);
 
@@ -366,7 +377,7 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                                                      onValue:-1.0f
                                                     offValue:0.0f
                                                         name:nil];
-      oneHotTensor = castMPSTensor(mpsGraph, oneHotTensor, inputTensor.dataType);
+      oneHotTensor = castMPSTensor(mpsGraph, oneHotTensor, [inputTensor dataType]);
       if (isWeightsArrayValid) {
         oneHotTensor = [mpsGraph multiplicationWithPrimaryTensor:oneHotTensor
                                                  secondaryTensor:weightTensor
@@ -417,6 +428,15 @@ static void nllnd_loss_forward_impl(Tensor& output,
                                     int64_t reduction,
                                     int64_t ignore_index,
                                     bool is2D) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(output.scalar_type()),
+                              "nlld_loss for complex is not supported for MPS");
+  if (weight.defined()) {
+    TORCH_CHECK(input_arg.scalar_type() == weight.scalar_type(),
+                "expected scalar type ",
+                input_arg.scalar_type(),
+                " but found ",
+                weight.scalar_type());
+  }
   std::vector<long long> reshapedTarget(target_arg.sizes().begin(), target_arg.sizes().end());
   reshapedTarget.push_back(1);
 
@@ -479,9 +499,10 @@ static void nllnd_loss_forward_impl(Tensor& output,
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
     // TODO: Make the key
-    string key = "nllnd_loss_forward_impl:" + std::to_string(ignore_index) + ":" + std::to_string(isWeightsArrayValid) +
-        ":" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] + ":" + getMPSTypeString(input) + ":" +
-        getMPSTypeString(target) + ":" + std::to_string(isTargetCasted) + ":" + getMPSTypeString(weight);
+    std::string key = "nllnd_loss_forward_impl:" + std::to_string(ignore_index) + ":" +
+        std::to_string(isWeightsArrayValid) + ":" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] +
+        ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target) + ":" + std::to_string(isTargetCasted) + ":" +
+        getMPSTypeString(weight);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input), input_shape);
       MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(target), target_shape);
@@ -619,7 +640,7 @@ static void smooth_l1_loss_impl(const Tensor& input,
     MPSShape* input_shape = getMPSShape(input);
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    string key = "smooth_l1_loss_impl:" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] + ":" +
+    std::string key = "smooth_l1_loss_impl:" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] + ":" +
         std::to_string(beta) + ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       // smooth_l1_loss_mps:
@@ -700,7 +721,11 @@ static void smooth_l1_loss_template(const Tensor& input,
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.");
   TORCH_CHECK(input.is_mps());
   TORCH_CHECK(target.is_mps());
-
+  TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() != kLong, "MPS doesn't know how to do square_i64");
+  if ((input.numel() == 0) || (target.numel() == 0)) {
+    reduction == Reduction::Mean ? output.fill_(std::numeric_limits<float>::quiet_NaN()) : output.zero_();
+    return;
+  }
   MPSShape* mpsInputShape = nil;
   MPSShape* mpsOutputShape = nil;
 
@@ -755,7 +780,7 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
   };
 
   @autoreleasepool {
-    string key = "smooth_l1_loss_backward" + getTensorsStringKey({input, grad_output, grad_input, target}) + ":" +
+    std::string key = "smooth_l1_loss_backward" + getTensorsStringKey({input, grad_output, grad_input, target}) + ":" +
         reductionToString(reduction) + ":" + std::to_string(beta);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -763,7 +788,7 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
       MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
       MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
 
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta dataType:MPSDataTypeFloat32];
+      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta dataType:[inputTensor dataType]];
       // xn - yn
       MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
                                                           secondaryTensor:targetTensor
@@ -789,7 +814,8 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
                                                                   name:@"lossTensor"];
       MPSGraphTensor* outputTensor = lossTensor;
       if (reduction == Reduction::Mean) {
-        MPSGraphTensor* numelTensor = [mpsGraph constantWithScalar:(double)input.numel() dataType:MPSDataTypeFloat32];
+        MPSGraphTensor* numelTensor = [mpsGraph constantWithScalar:(double)input.numel()
+                                                          dataType:[lossTensor dataType]];
         outputTensor = [mpsGraph divisionWithPrimaryTensor:lossTensor secondaryTensor:numelTensor name:nil];
       }
       MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:outputTensor
@@ -817,8 +843,11 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
 // HuberLoss
 
 Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& output) {
-  string op_name = __func__;
+  std::string op_name = __func__;
   using namespace mps;
+  TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() != kLong, "MPS doesn't know how to do square_i64");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "huber_loss for complex is not supported for MPS");
   TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
   TORCH_CHECK(output.is_mps());
@@ -838,7 +867,7 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
   };
 
   @autoreleasepool {
-    string key = op_name + ":" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" +
+    std::string key = op_name + ":" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" +
         getTensorsStringKey({input, target});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
@@ -903,8 +932,6 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
   auto is_mean_reduction = reduction == Reduction::Mean;
   auto input_numel = input.numel();
 
-  auto new_grad_output = grad_output.contiguous();
-
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* gradOutputTensor_ = nil;
@@ -919,18 +946,17 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
     MPSShape* input_shape = getMPSShape(input);
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    string key = "huber_loss_backward_out_mps:" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" +
-        [ns_shape_key UTF8String] + ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target);
+    std::string key = "huber_loss_backward_out_mps:" + reductionToString(reduction) + ":" + std::to_string(delta) +
+        ":" + [ns_shape_key UTF8String] + ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* gradOutputTensor =
-          mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(new_grad_output), getMPSShape(new_grad_output));
+          mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad_output), getMPSShape(grad_output));
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input), input_shape);
       MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(target), getMPSShape(target));
       MPSGraphTensor* isMeanReductionTensor =
           [mpsGraph constantWithScalar:is_mean_reduction
                               dataType:MPSDataTypeInt64]; // constant does not support MPSDataTypeBool
-      MPSGraphTensor* inputNumelTensor = [mpsGraph constantWithScalar:input_numel
-                                                             dataType:getMPSDataType(new_grad_output)];
+      MPSGraphTensor* inputNumelTensor = [mpsGraph constantWithScalar:input_numel dataType:getMPSDataType(grad_output)];
 
       MPSGraphTensor* normGradOutputTensor =
           [mpsGraph selectWithPredicateTensor:isMeanReductionTensor
@@ -984,7 +1010,7 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, new_grad_output);
+    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
     Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, grad_input);
@@ -997,8 +1023,12 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
 
 // MSELoss
 TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output_) {
-  string op_name = "mse_loss_out_mps";
+  std::string op_name = "mse_loss_out_mps";
   using namespace mps;
+  if ((input.numel() == 0) || (target.numel() == 0)) {
+    reduction == Reduction::Mean ? output_.fill_(std::numeric_limits<float>::quiet_NaN()) : output_.zero_();
+    return;
+  }
   bool contiguousOutput = !needsGather(output_);
   Tensor output = output_;
   if (!contiguousOutput) {
@@ -1018,7 +1048,7 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
   };
 
   @autoreleasepool {
-    string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target});
+    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
       newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
@@ -1266,6 +1296,356 @@ Tensor nll_loss2d_backward_mps(const Tensor& grad_output,
   auto grad_input = at::zeros_like(self);
   nll_loss2d_backward_out_mps(grad_output, self, target, weight, reduction, ignore_index, total_weight, grad_input);
   return grad_input;
+}
+
+template <typename index_t>
+std::string_view get_index_type_str() {
+  if constexpr (std::is_same_v<index_t, int32_t>) {
+    return "int32_t";
+  } else if constexpr (std::is_same_v<index_t, int64_t>) {
+    return "int64_t";
+  } else {
+    static_assert(false);
+  }
+}
+
+template <typename index_t, bool beta = false>
+static void ctc_loss_mps_kernel(const std::optional<Tensor>& loss,
+                                Tensor& log_alpha,
+                                const Tensor& log_probs,
+                                const Tensor& targets,
+                                const Tensor& input_lengths_t,
+                                const Tensor& target_lengths_t,
+                                const Tensor& target_batch_offsets_t,
+                                int64_t BLANK,
+                                int64_t max_input_length,
+                                int64_t max_target_length,
+                                int64_t batch_size,
+                                int64_t tg_target_stride) {
+  using namespace mps;
+  MPSStream* mpsStream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      id<MTLComputePipelineState> pso = mps::lib.getPipelineStateForFunc(fmt::format("ctc_loss{}_{}_{}_{}",
+                                                                                     beta ? "_backward_log_beta" : "",
+                                                                                     scalarToMetalTypeString(log_probs),
+                                                                                     scalarToMetalTypeString(targets),
+                                                                                     get_index_type_str<index_t>()));
+      const uint32_t TG_SIZE = std::min<int64_t>([pso maxTotalThreadsPerThreadgroup], 2 * max_target_length + 1);
+      [computeEncoder setComputePipelineState:pso];
+
+      CTCLossParams<index_t> params;
+
+      params.max_input_length = max_input_length;
+      params.max_target_length = max_target_length;
+      params.batch_size = batch_size;
+      params.BLANK = BLANK;
+      params.tg_target_stride = tg_target_stride;
+      params.log_probs_time_stride = log_probs.stride(0);
+      params.log_probs_batch_stride = log_probs.stride(1);
+      params.log_probs_token_stride = log_probs.stride(2);
+      params.log_alpha_batch_stride = log_alpha.stride(0);
+      params.log_alpha_time_stride = log_alpha.stride(1);
+      params.log_alpha_target_stride = log_alpha.stride(2);
+
+      if constexpr (beta) {
+        mtl_setArgs(computeEncoder,
+                    log_alpha,
+                    log_probs,
+                    targets,
+                    input_lengths_t,
+                    target_lengths_t,
+                    target_batch_offsets_t,
+                    params);
+
+      } else {
+        TORCH_INTERNAL_ASSERT(loss.has_value(), "loss tensor must have a value when beta=false");
+        mtl_setArgs(computeEncoder,
+                    *loss,
+                    log_alpha,
+                    log_probs,
+                    targets,
+                    input_lengths_t,
+                    target_lengths_t,
+                    target_batch_offsets_t,
+                    params);
+      }
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
+                     threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
+    }
+  });
+}
+
+static void ctc_loss_mps_check(const Tensor& log_probs,
+                               const Tensor& targets,
+                               IntArrayRef input_lengths,
+                               IntArrayRef target_lengths,
+                               int64_t BLANK) {
+  TORCH_CHECK(log_probs.dim() == 3, "log_probs must be 3-D (T, N, C)");
+  TORCH_CHECK(targets.dim() >= 1 && targets.dim() <= 2, "targets must have 1 or 2 dims");
+  int64_t batch_size = log_probs.size(1);
+  int64_t num_labels = log_probs.size(2);
+  TORCH_CHECK((0 <= BLANK) && (BLANK < num_labels), "blank must be in label range");
+  TORCH_CHECK((int64_t)input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
+  TORCH_CHECK((int64_t)target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
+  TORCH_CHECK(log_probs.numel() > 0, "log_probs tensor must not be empty");
+}
+
+std::tuple<Tensor, Tensor> ctc_loss_mps(const Tensor& log_probs,
+                                        const Tensor& targets,
+                                        IntArrayRef input_lengths,
+                                        IntArrayRef target_lengths,
+                                        int64_t BLANK,
+                                        bool zero_infinity) {
+  using namespace mps;
+  ctc_loss_mps_check(log_probs, targets, input_lengths, target_lengths, BLANK);
+
+  int64_t batch_size = log_probs.size(1);
+
+  // Compute per-batch target offsets and max target length
+  int64_t tg_target_stride = (targets.dim() == 1) ? targets.stride(0) : targets.stride(1);
+  int64_t max_target_length = 0;
+  int64_t max_input_length = log_probs.size(0);
+  std::vector<int64_t> target_batch_offsets(batch_size);
+
+  int64_t pos = 0;
+  int64_t tg_batch_stride = targets.stride(0);
+  for (int64_t i = 0; i < batch_size; i++) {
+    TORCH_CHECK(target_lengths[i] >= 0,
+                "Expected target_lengths to have value at least 0, but got value ",
+                target_lengths[i],
+                " (while checking arguments for ctc_loss_mps)");
+    TORCH_CHECK(input_lengths[i] >= 0 && input_lengths[i] <= max_input_length,
+                "Expected input_lengths to be in [0, ",
+                max_input_length,
+                "], but got value ",
+                input_lengths[i],
+                " (while checking arguments for ctc_loss_mps)");
+    if (targets.dim() == 1) {
+      target_batch_offsets[i] = pos;
+      pos += target_lengths[i];
+    } else {
+      target_batch_offsets[i] = i * tg_batch_stride;
+    }
+    max_target_length = std::max(max_target_length, target_lengths[i]);
+  }
+  if (targets.dim() == 2) {
+    TORCH_CHECK(targets.size(1) >= max_target_length,
+                "Expected targets to have size at least ",
+                max_target_length,
+                " at dimension 1, but got size ",
+                targets.size(1),
+                " (while checking arguments for ctc_loss_mps)");
+  }
+
+  Tensor loss = at::empty({batch_size}, log_probs.options());
+  Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2 * max_target_length + 1}, log_probs.options());
+
+  if (batch_size == 0) {
+    return {loss, log_alpha};
+  }
+
+  bool can_use_32bit_index_math = at::native::canUse32BitIndexMath(log_probs) &&
+      at::native::canUse32BitIndexMath(targets) && at::native::canUse32BitIndexMath(log_alpha);
+  // NOTE: Used signed types because if we attempt to use unsigned, the
+  // `at::tensor` calls below raise the error: "Exception: "tensor_cpu" not
+  // implemented for 'UInt32'"
+  auto metadata_dtype = can_use_32bit_index_math ? kInt : kLong;
+
+  // Move metadata to MPS device
+  Tensor input_lengths_t = at::tensor(input_lengths, log_probs.options().dtype(metadata_dtype));
+  Tensor target_lengths_t = at::tensor(target_lengths, log_probs.options().dtype(metadata_dtype));
+  Tensor target_batch_offsets_t = at::tensor(target_batch_offsets, log_probs.options().dtype(metadata_dtype));
+
+  if (can_use_32bit_index_math) {
+    ctc_loss_mps_kernel<int32_t>(loss,
+                                 log_alpha,
+                                 log_probs,
+                                 targets,
+                                 input_lengths_t,
+                                 target_lengths_t,
+                                 target_batch_offsets_t,
+                                 BLANK,
+                                 max_input_length,
+                                 max_target_length,
+                                 batch_size,
+                                 tg_target_stride);
+  } else {
+    ctc_loss_mps_kernel<int64_t>(loss,
+                                 log_alpha,
+                                 log_probs,
+                                 targets,
+                                 input_lengths_t,
+                                 target_lengths_t,
+                                 target_batch_offsets_t,
+                                 BLANK,
+                                 max_input_length,
+                                 max_target_length,
+                                 batch_size,
+                                 tg_target_stride);
+  }
+
+  return {std::move(loss), std::move(log_alpha)};
+}
+
+template <typename index_t>
+static void ctc_loss_backward_mps_kernel(Tensor& grad,
+                                         const Tensor& grad_out,
+                                         const Tensor& log_alpha,
+                                         const Tensor& log_probs,
+                                         const Tensor& targets,
+                                         const Tensor& input_lengths_t,
+                                         const Tensor& target_lengths_t,
+                                         const Tensor& loss,
+                                         const Tensor& target_batch_offsets_t,
+                                         int64_t BLANK,
+                                         int64_t max_input_length,
+                                         int64_t batch_size,
+                                         bool zero_infinity) {
+  using namespace mps;
+  // Derive max_target_length from log_alpha shape (same as CUDA backward).
+  int64_t max_target_length = log_alpha.size(2) / 2;
+  int64_t tg_target_stride = (targets.dim() == 1) ? targets.stride(0) : targets.stride(1);
+
+  Tensor log_beta = at::empty_like(log_alpha, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  ctc_loss_mps_kernel<index_t, /*beta=*/true>(/*loss=*/std::nullopt,
+                                              log_beta,
+                                              log_probs,
+                                              targets,
+                                              input_lengths_t,
+                                              target_lengths_t,
+                                              target_batch_offsets_t,
+                                              BLANK,
+                                              max_input_length,
+                                              max_target_length,
+                                              batch_size,
+                                              tg_target_stride);
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      id<MTLComputePipelineState> pso =
+          mps::lib.getPipelineStateForFunc(fmt::format("ctc_loss_backward_collect_{}_{}_{}",
+                                                       scalarToMetalTypeString(log_probs),
+                                                       scalarToMetalTypeString(targets),
+                                                       get_index_type_str<index_t>()));
+      [computeEncoder setComputePipelineState:pso];
+
+      CTCLossBackwardCollectParams<index_t> params;
+      params.BLANK = BLANK;
+      params.max_input_length = max_input_length;
+      params.max_target_length = max_target_length;
+      params.num_labels = log_probs.size(2);
+      params.tg_target_stride = tg_target_stride;
+      params.log_probs_time_stride = log_probs.stride(0);
+      params.log_probs_batch_stride = log_probs.stride(1);
+      params.log_probs_token_stride = log_probs.stride(2);
+      params.log_alpha_beta_batch_stride = log_alpha.stride(0);
+      params.log_alpha_beta_time_stride = log_alpha.stride(1);
+      params.log_alpha_beta_target_stride = log_alpha.stride(2);
+      params.grad_time_stride = grad.stride(0);
+      params.grad_batch_stride = grad.stride(1);
+      params.grad_token_stride = grad.stride(2);
+      params.grad_out_batch_stride = grad_out.stride(0);
+      params.zero_infinity = zero_infinity;
+
+      mtl_setArgs(computeEncoder,
+                  grad,
+                  grad_out,
+                  log_alpha,
+                  log_beta,
+                  log_probs,
+                  targets,
+                  input_lengths_t,
+                  target_lengths_t,
+                  loss,
+                  target_batch_offsets_t,
+                  params);
+      [computeEncoder
+                dispatchThreads:MTLSizeMake(max_input_length, batch_size, 1)
+          threadsPerThreadgroup:MTLSizeMake(
+                                    std::min<int64_t>([pso maxTotalThreadsPerThreadgroup], max_input_length), 1, 1)];
+    }
+  });
+}
+
+Tensor ctc_loss_backward_mps(const Tensor& grad_out,
+                             const Tensor& log_probs,
+                             const Tensor& targets,
+                             IntArrayRef input_lengths,
+                             IntArrayRef target_lengths,
+                             const Tensor& loss,
+                             const Tensor& log_alpha,
+                             int64_t BLANK,
+                             bool zero_infinity) {
+  using namespace mps;
+
+  int64_t batch_size = log_probs.size(1);
+  int64_t max_input_length = log_probs.size(0);
+
+  std::vector<int64_t> target_batch_offsets(batch_size);
+
+  int64_t pos = 0;
+  int64_t tg_batch_stride = targets.stride(0);
+  for (int64_t i = 0; i < batch_size; i++) {
+    if (targets.dim() == 1) {
+      target_batch_offsets[i] = pos;
+      pos += target_lengths[i];
+    } else {
+      target_batch_offsets[i] = i * tg_batch_stride;
+    }
+  }
+
+  // grad initialized to neginf (log-domain zero) for the scatter-logsumexp in kernel 2.
+  Tensor grad = at::full_like(log_probs, -std::numeric_limits<double>::infinity(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  if (batch_size == 0 || max_input_length == 0) {
+    return grad;
+  }
+
+  bool can_use_32bit_index_math = at::native::canUse32BitIndexMath(log_probs) &&
+      at::native::canUse32BitIndexMath(targets) && at::native::canUse32BitIndexMath(log_alpha);
+  auto metadata_dtype = can_use_32bit_index_math ? kInt : kLong;
+
+  Tensor input_lengths_t = at::tensor(input_lengths, log_probs.options().dtype(metadata_dtype));
+  Tensor target_lengths_t = at::tensor(target_lengths, log_probs.options().dtype(metadata_dtype));
+  Tensor target_batch_offsets_t = at::tensor(target_batch_offsets, log_probs.options().dtype(metadata_dtype));
+
+  if (can_use_32bit_index_math) {
+    ctc_loss_backward_mps_kernel<int32_t>(grad,
+                                          grad_out,
+                                          log_alpha,
+                                          log_probs,
+                                          targets,
+                                          input_lengths_t,
+                                          target_lengths_t,
+                                          loss,
+                                          target_batch_offsets_t,
+                                          BLANK,
+                                          max_input_length,
+                                          batch_size,
+                                          zero_infinity);
+  } else {
+    ctc_loss_backward_mps_kernel<int64_t>(grad,
+                                          grad_out,
+                                          log_alpha,
+                                          log_probs,
+                                          targets,
+                                          input_lengths_t,
+                                          target_lengths_t,
+                                          loss,
+                                          target_batch_offsets_t,
+                                          BLANK,
+                                          max_input_length,
+                                          batch_size,
+                                          zero_infinity);
+  }
+
+  return grad;
 }
 
 } // namespace at::native

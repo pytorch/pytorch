@@ -18,10 +18,10 @@ class KernelFunction;
 // implementation notes; notably, this does NOT actually go through the
 // boxing/unboxing codepath.
 TORCH_API void fallthrough_kernel(
-    OperatorKernel*,
-    const OperatorHandle&,
-    DispatchKeySet,
-    Stack*);
+    OperatorKernel* /*unused*/,
+    const OperatorHandle& /*unused*/,
+    DispatchKeySet /*unused*/,
+    Stack* /*unused*/);
 
 // Note [Ambiguity in AutogradOther kernel]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -62,23 +62,10 @@ TORCH_API void fallthrough_kernel(
 // than arbitrarily pick one or the other, we just register a kernel that raises
 // an error and let the user decide how to proceed.
 TORCH_API void ambiguous_autogradother_kernel(
-    OperatorKernel*,
-    const OperatorHandle&,
-    DispatchKeySet,
-    Stack*);
-
-// Note [named_not_supported_kernel]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// This kernel implements reporting an error message saying that named tensor is
-// not supported.  This kernel doesn't rely on the Stack, and so it is special
-// cased in the dispatcher to be triggered before we attempt boxing (so we can
-// give a good error message in cases when boxing is not supported).  When
-// boxing is universally supported this can be removed.
-[[noreturn]] TORCH_API void named_not_supported_kernel(
-    OperatorKernel*,
-    const OperatorHandle&,
-    DispatchKeySet,
-    Stack*);
+    OperatorKernel* /*unused*/,
+    const OperatorHandle& /*op*/,
+    DispatchKeySet /*unused*/,
+    Stack* /*unused*/);
 
 /**
  * BoxedKernel is similar to a std::function storing a boxed kernel.
@@ -178,23 +165,29 @@ class TORCH_API BoxedKernel final {
 
   static BoxedKernel makeFallthrough();
   static BoxedKernel makeAmbiguousAutogradOther();
-  static BoxedKernel makeNamedNotSupported();
 
  private:
   friend class KernelFunction;
 
   template <BoxedKernelFunction* func>
   static void make_boxed_function(
-      OperatorKernel*,
+      OperatorKernel* /*unused*/,
       const OperatorHandle& opHandle,
-      DispatchKeySet,
+      DispatchKeySet /*unused*/,
       Stack* stack);
 
   template <BoxedKernelFunction_withDispatchKeys* func>
   static void make_boxed_function(
-      OperatorKernel*,
+      OperatorKernel* /*unused*/,
       const OperatorHandle& opHandle,
-      DispatchKeySet,
+      DispatchKeySet /*ks*/,
+      Stack* stack);
+
+  template <class KernelFunctor>
+  static void make_boxed_functor(
+      OperatorKernel* kernel,
+      const OperatorHandle& op,
+      DispatchKeySet ks,
       Stack* stack);
 
   explicit BoxedKernel(
@@ -202,6 +195,8 @@ class TORCH_API BoxedKernel final {
       InternalBoxedKernelFunction* boxed_kernel_func);
 
   OperatorKernel* getFunctor() const;
+  template <class KernelFunctor>
+  const KernelFunctor* getFunctor() const;
   InternalBoxedKernelFunction* getFnPtr() const;
 
   c10::intrusive_ptr<OperatorKernel> functor_;

@@ -1,8 +1,7 @@
-# mypy: allow-untyped-defs
-
 import hashlib
 from itertools import chain
-from typing import Any, Optional, TYPE_CHECKING
+from types import ModuleType
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -13,13 +12,19 @@ from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.shape_prop import TensorMetadata
 
 
-try:
+if TYPE_CHECKING:
     import pydot
 
     HAS_PYDOT = True
-except ModuleNotFoundError:
-    HAS_PYDOT = False
-    pydot = None
+else:
+    pydot: ModuleType | None
+    try:
+        import pydot
+
+        HAS_PYDOT = True
+    except ModuleNotFoundError:
+        HAS_PYDOT = False
+        pydot = None
 
 
 __all__ = ["FxGraphDrawer"]
@@ -76,9 +81,9 @@ if HAS_PYDOT:
             ignore_parameters_and_buffers: bool = False,
             skip_node_names_in_args: bool = True,
             parse_stack_trace: bool = False,
-            dot_graph_shape: Optional[str] = None,
+            dot_graph_shape: str | None = None,
             normalize_args: bool = False,
-        ):
+        ) -> None:
             self._name = name
             self.dot_graph_shape = (
                 dot_graph_shape if dot_graph_shape is not None else "record"
@@ -115,7 +120,7 @@ if HAS_PYDOT:
                     parse_stack_trace,
                 )
 
-        def get_dot_graph(self, submod_name=None) -> pydot.Dot:
+        def get_dot_graph(self, submod_name: str | None = None) -> pydot.Dot:
             """
             Visualize a torch.fx.Graph with graphviz
             Example:
@@ -147,7 +152,7 @@ if HAS_PYDOT:
         def get_main_dot_graph(self) -> pydot.Dot:
             return self._dot_graphs[self._name]
 
-        def get_submod_dot_graph(self, submod_name) -> pydot.Dot:
+        def get_submod_dot_graph(self, submod_name: str) -> pydot.Dot:
             return self._dot_graphs[f"{self._name}_{submod_name}"]
 
         def get_all_dot_graphs(self) -> dict[str, pydot.Dot]:
@@ -165,7 +170,12 @@ if HAS_PYDOT:
             else:
                 # Use a random color for each node; based on its name so it's stable.
                 target_name = node._pretty_print_target(node.target)
-                target_hash = int(hashlib.md5(target_name.encode()).hexdigest()[:8], 16)
+                target_hash = int(
+                    hashlib.md5(
+                        target_name.encode(), usedforsecurity=False
+                    ).hexdigest()[:8],
+                    16,
+                )
                 template["fillcolor"] = _HASH_COLOR_MAP[
                     target_hash % len(_HASH_COLOR_MAP)
                 ]
@@ -175,7 +185,8 @@ if HAS_PYDOT:
             self, module: torch.nn.Module, node: torch.fx.Node
         ) -> torch.nn.Module:
             py_obj = module
-            assert isinstance(node.target, str)
+            if not isinstance(node.target, str):
+                raise AssertionError(f"Expected str target, got {type(node.target)}")
             atoms = node.target.split(".")
             for atom in atoms:
                 if not hasattr(py_obj, atom):
@@ -185,7 +196,7 @@ if HAS_PYDOT:
                 py_obj = getattr(py_obj, atom)
             return py_obj
 
-        def _typename(self, target: Any) -> str:
+        def _typename(self, target: torch.fx.node.Target | torch.nn.Module) -> str:
             if isinstance(target, torch.nn.Module):
                 ret = torch.typename(target)
             elif isinstance(target, str):
@@ -205,7 +216,7 @@ if HAS_PYDOT:
             self,
             full_file_name: str,
             truncate_to_last_n: int = 2,
-        ):
+        ) -> str:
             splits = full_file_name.split("/")
             if len(splits) >= truncate_to_last_n:
                 return "/".join(splits[-truncate_to_last_n:])
@@ -218,7 +229,7 @@ if HAS_PYDOT:
             skip_node_names_in_args: bool,
             parse_stack_trace: bool,
         ) -> str:
-            def _get_str_for_args_kwargs(arg):
+            def _get_str_for_args_kwargs(arg: tuple[Any, ...] | dict[str, Any]) -> str:
                 if isinstance(arg, tuple):
                     prefix, suffix = r"|args=(\l", r",\n)\l"
                     arg_strs_list = [_format_arg(a, max_list_len=8) for a in arg]
@@ -290,15 +301,16 @@ if HAS_PYDOT:
             # print file:lineno code
             if parse_stack_trace and node.stack_trace is not None:
                 parsed_stack_trace = _parse_stack_trace(node.stack_trace)
-                fname = self._shorten_file_name(parsed_stack_trace.file)
-                label += (
-                    f"|file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}"
-                    + r"\n"
-                )
+                if parsed_stack_trace is not None:
+                    fname = self._shorten_file_name(parsed_stack_trace.file)
+                    label += (
+                        f"|file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}"
+                        + r"\n"
+                    )
 
             return label + "}"
 
-        def _tensor_meta_to_label(self, tm) -> str:
+        def _tensor_meta_to_label(self, tm: object) -> str:
             if tm is None:
                 return ""
             elif isinstance(tm, TensorMetadata):
@@ -330,8 +342,10 @@ if HAS_PYDOT:
             result += "|" + "requires_grad" + "=" + str(tm.requires_grad) + r"\n"
             result += "|" + "stride" + "=" + str(tm.stride) + r"\n"
             if tm.is_quantized:
-                assert tm.qparams is not None
-                assert "qscheme" in tm.qparams
+                if tm.qparams is None:
+                    raise AssertionError("qparams is None for quantized tensor")
+                if "qscheme" not in tm.qparams:
+                    raise AssertionError("qscheme not in qparams")
                 qscheme = tm.qparams["qscheme"]
                 if qscheme in {
                     torch.per_tensor_affine,
@@ -399,7 +413,7 @@ if HAS_PYDOT:
             # "TB" means top-to-bottom rank direction in layout
             dot_graph = pydot.Dot(name, rankdir="TB")
 
-            buf_name_to_subgraph = {}
+            buf_name_to_subgraph: dict[str, pydot.Cluster] = {}
 
             for node in graph_module.graph.nodes:
                 if ignore_getattr and node.op == "get_attr":
@@ -411,7 +425,7 @@ if HAS_PYDOT:
                     label=self._get_node_label(
                         graph_module, node, skip_node_names_in_args, parse_stack_trace
                     ),
-                    **style,
+                    **style,  # type: ignore[arg-type]
                 )
 
                 current_graph = dot_graph
@@ -423,13 +437,16 @@ if HAS_PYDOT:
                         buf_name_to_subgraph[buf_name] = pydot.Cluster(
                             buf_name, label=buf_name
                         )
-                    current_graph = buf_name_to_subgraph.get(buf_name)
+                    current_graph = buf_name_to_subgraph.get(buf_name)  # type: ignore[assignment]
 
+                # pyrefly: ignore [missing-attribute]
                 current_graph.add_node(dot_node)
 
-                def get_module_params_or_buffers():
+                def get_module_params_or_buffers() -> None:
                     for pname, ptensor in chain(
-                        leaf_module.named_parameters(), leaf_module.named_buffers()
+                        leaf_module.named_parameters(),
+                        # pyrefly: ignore [bad-argument-type]
+                        leaf_module.named_buffers(),
                     ):
                         pname1 = node.name + "." + pname
                         label1 = (
@@ -440,7 +457,7 @@ if HAS_PYDOT:
                         dot_w_node = pydot.Node(
                             pname1,
                             label="{" + label1 + self._get_tensor_label(ptensor) + "}",
-                            **_WEIGHT_TEMPLATE,
+                            **_WEIGHT_TEMPLATE,  # type: ignore[arg-type]
                         )
                         dot_graph.add_node(dot_w_node)
                         dot_graph.add_edge(pydot.Edge(pname1, node.name))
@@ -456,7 +473,7 @@ if HAS_PYDOT:
             for subgraph in buf_name_to_subgraph.values():
                 subgraph.set("color", "royalblue")
                 subgraph.set("penwidth", "2")
-                dot_graph.add_subgraph(subgraph)
+                dot_graph.add_subgraph(subgraph)  # type: ignore[arg-type]
 
             for node in graph_module.graph.nodes:
                 if ignore_getattr and node.op == "get_attr":
@@ -480,7 +497,7 @@ else:
                 ignore_parameters_and_buffers: bool = False,
                 skip_node_names_in_args: bool = True,
                 parse_stack_trace: bool = False,
-                dot_graph_shape: Optional[str] = None,
+                dot_graph_shape: str | None = None,
                 normalize_args: bool = False,
             ):
                 raise RuntimeError(

@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, no_type_check
+from typing import Any, no_type_check
 
 import torch
 import torch.distributed as dist
@@ -107,7 +108,7 @@ def _apply_optim_in_backward_hook(
                 if hasattr(param, "_in_backward_optimizers"):
                     param.grad = None
 
-            # reset for the next backwards pass
+            # reset for the next backward pass
             optim_stream_state.wait_for_optim_stream_enqueued = False
 
         if not optim_stream_state.wait_for_optim_stream_enqueued:

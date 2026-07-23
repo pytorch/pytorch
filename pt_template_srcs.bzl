@@ -123,6 +123,11 @@ def get_generate_code_bin_outs():
         "autograd/generated/TraceType_2.cpp": ["autograd/generated/TraceType_2.cpp"],
         "autograd/generated/TraceType_3.cpp": ["autograd/generated/TraceType_3.cpp"],
         "autograd/generated/TraceType_4.cpp": ["autograd/generated/TraceType_4.cpp"],
+        "autograd/generated/TraceType_5.cpp": ["autograd/generated/TraceType_5.cpp"],
+        "autograd/generated/TraceType_6.cpp": ["autograd/generated/TraceType_6.cpp"],
+        "autograd/generated/TraceType_7.cpp": ["autograd/generated/TraceType_7.cpp"],
+        "autograd/generated/TraceType_8.cpp": ["autograd/generated/TraceType_8.cpp"],
+        "autograd/generated/TraceType_9.cpp": ["autograd/generated/TraceType_9.cpp"],
         "autograd/generated/VariableType.h": ["autograd/generated/VariableType.h"],
         "autograd/generated/VariableTypeEverything.cpp": ["autograd/generated/VariableTypeEverything.cpp"],
         "autograd/generated/VariableType_0.cpp": ["autograd/generated/VariableType_0.cpp"],
@@ -130,6 +135,11 @@ def get_generate_code_bin_outs():
         "autograd/generated/VariableType_2.cpp": ["autograd/generated/VariableType_2.cpp"],
         "autograd/generated/VariableType_3.cpp": ["autograd/generated/VariableType_3.cpp"],
         "autograd/generated/VariableType_4.cpp": ["autograd/generated/VariableType_4.cpp"],
+        "autograd/generated/VariableType_5.cpp": ["autograd/generated/VariableType_5.cpp"],
+        "autograd/generated/VariableType_6.cpp": ["autograd/generated/VariableType_6.cpp"],
+        "autograd/generated/VariableType_7.cpp": ["autograd/generated/VariableType_7.cpp"],
+        "autograd/generated/VariableType_8.cpp": ["autograd/generated/VariableType_8.cpp"],
+        "autograd/generated/VariableType_9.cpp": ["autograd/generated/VariableType_9.cpp"],
         "autograd/generated/variable_factories.h": ["autograd/generated/variable_factories.h"],
         "autograd/generated/ViewFuncs.cpp": ["autograd/generated/ViewFuncs.cpp"],
         "autograd/generated/ViewFuncs.h": ["autograd/generated/ViewFuncs.h"],
@@ -156,6 +166,7 @@ def get_generate_code_bin_outs():
             "autograd/generated/python_torch_functions_1.cpp": ["autograd/generated/python_torch_functions_1.cpp"],
             "autograd/generated/python_torch_functions_2.cpp": ["autograd/generated/python_torch_functions_2.cpp"],
             "autograd/generated/python_variable_methods.cpp": ["autograd/generated/python_variable_methods.cpp"],
+            "functionalization/generated/ViewMetaClassesPythonBinding.cpp": ["functionalization/generated/ViewMetaClassesPythonBinding.cpp"],
         })
     return outs
 
@@ -210,7 +221,7 @@ def get_metal_registration_files_outs():
 
 # There is a really weird issue with the arvr windows builds where
 # the custom op files are breaking them. See https://fburl.com/za87443c
-# The hack is just to not build them for that platform and pray they arent needed.
+# The hack is just to not build them for that platform and pray they aren't needed.
 def get_metal_registration_files_outs_windows():
     outs = {}
     for file_path in METAL_SOURCE_LIST:

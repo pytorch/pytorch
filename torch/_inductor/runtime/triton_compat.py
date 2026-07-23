@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Union
+import inspect
+from typing import Any
 
 import torch
 
@@ -16,7 +17,7 @@ if triton is not None:
     from triton import Config
     from triton.compiler import CompiledKernel
     from triton.runtime.autotuner import OutOfResources
-    from triton.runtime.jit import KernelInterface
+    from triton.runtime.jit import JITFunction, KernelInterface
 
     try:
         from triton.runtime.autotuner import PTXASError
@@ -36,7 +37,7 @@ if triton is not None:
 
         def GPUTarget(
             backend: str,
-            arch: Union[int, str],
+            arch: int | str,
             warp_size: int,
         ) -> Any:
             if torch.version.hip:
@@ -44,7 +45,7 @@ if triton is not None:
             return (backend, arch)
 
     # In the latest triton, math functions were shuffled around into different modules:
-    # https://github.com/openai/triton/pull/3172
+    # https://github.com/triton-lang/triton/pull/3172
     try:
         from triton.language.extra import libdevice
 
@@ -68,6 +69,39 @@ if triton is not None:
         def _log2(x: Any) -> Any:
             raise NotImplementedError
 
+    def _triton_config_has(param_name: str) -> bool:
+        if not hasattr(triton, "Config"):
+            return False
+        if not hasattr(triton.Config, "__init__"):
+            return False
+        return param_name in inspect.signature(triton.Config.__init__).parameters
+
+    # Drop the legacy support of autoWS
+    HAS_WARP_SPEC = False
+
+    try:
+        from triton import knobs
+    except ImportError:
+        knobs = None
+
+    try:
+        from triton.runtime.cache import triton_key  # type: ignore[attr-defined]
+    except ImportError:
+        from triton.compiler.compiler import (
+            triton_key,  # type: ignore[attr-defined,no-redef]
+        )
+
+    try:
+        from triton.runtime.errors import IntelGPUError
+    except ImportError:
+
+        class IntelGPUError(Exception):  # type: ignore[no-redef]
+            pass
+
+    builtins_use_semantic_kwarg = (
+        "_semantic" in inspect.signature(triton.language.core.view).parameters
+    )
+    HAS_TRITON = True
 else:
 
     def _raise_error(*args: Any, **kwargs: Any) -> Any:
@@ -79,6 +113,9 @@ else:
     class PTXASError(Exception):  # type: ignore[no-redef]
         pass
 
+    class IntelGPUError(Exception):  # type: ignore[no-redef]
+        pass
+
     Config = object
     CompiledKernel = object
     KernelInterface = object
@@ -87,6 +124,8 @@ else:
     _log2 = _raise_error
     libdevice = None
     math = None
+    knobs = None
+    builtins_use_semantic_kwarg = False
 
     class triton:  # type: ignore[no-redef]
         @staticmethod
@@ -101,16 +140,12 @@ else:
         tensor = Any
         dtype = Any
 
+    class JITFunction:  # type: ignore[no-redef]
+        pass
 
-def cc_warp_size(cc: Union[str, int]) -> int:
-    if torch.version.hip:
-        cc_str = str(cc)
-        if "gfx10" in cc_str or "gfx11" in cc_str:
-            return 32
-        else:
-            return 64
-    else:
-        return 32
+    HAS_WARP_SPEC = False
+    triton_key = _raise_error
+    HAS_TRITON = False
 
 
 try:
@@ -127,6 +162,7 @@ __all__ = [
     "OutOfResources",
     "KernelInterface",
     "PTXASError",
+    "IntelGPUError",
     "ASTSource",
     "GPUTarget",
     "tl",
@@ -134,5 +170,6 @@ __all__ = [
     "libdevice",
     "math",
     "triton",
-    "cc_warp_size",
+    "knobs",
+    "triton_key",
 ]

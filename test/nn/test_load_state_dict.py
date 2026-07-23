@@ -62,6 +62,29 @@ class TestLoadStateDict(NNTestCase):
 
     @swap([True, False])
     @skipIfTorchDynamo("dynamo installs weakrefs on some params")
+    def test_scalar_param_1d_tensor_raises(self):
+        class SimpleModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.threshold = nn.Parameter(torch.tensor(0.0))
+
+            def forward(self, x):
+                return x
+
+        m = SimpleModule()
+
+        # Test that [3] -> scalar raises error
+        sd = {"threshold": torch.randn(3)}
+        with self.assertRaisesRegex(RuntimeError, "size mismatch for threshold"):
+            m.load_state_dict(sd)
+
+        # Test that [1] -> scalar is allowed (backward compatibility)
+        sd = {"threshold": torch.tensor([1.0])}
+        m.load_state_dict(sd)
+        self.assertEqual(m.threshold.item(), 1.0)
+
+    @swap([True, False])
+    @skipIfTorchDynamo("dynamo installs weakrefs on some params")
     def test_load_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
@@ -182,6 +205,7 @@ class TestLoadStateDict(NNTestCase):
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180632")
     @swap([True, False])
     def test_load_state_dict_child(self):
         base_module = nn.Linear(1, 1)
@@ -287,7 +311,7 @@ class TestLoadStateDict(NNTestCase):
 
         # Make sure parameters and persistent buffers were assigned
         net_meta_state_dict = net_meta.state_dict(keep_vars=True)
-        for key in state_dict.keys():
+        for key in state_dict:
             if key in net_meta._parameters:
                 if keep_vars and not swap:
                     # state_dict[key] is an nn.Parameter
@@ -470,14 +494,18 @@ def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
                         return cls(src._data)
                     return cls(src)
         else:
-            assert isinstance(
-                src, cls
-            ), f"Expected isinstance(src, {cls}) but got {type(src)}"
-            assert (
-                type(dest) == torch.Tensor
-                or type(dest) == torch.nn.Parameter
+            if not isinstance(src, cls):
+                raise AssertionError(
+                    f"Expected isinstance(src, {cls}) but got {type(src)}"
+                )
+            if not (
+                type(dest) is torch.Tensor
+                or type(dest) is torch.nn.Parameter
                 or issubclass(cls, type(dest))
-            )
+            ):
+                raise AssertionError(
+                    f"Expected dest to be Tensor, Parameter, or subclass of {cls}, got {type(dest)}"
+                )
             if assign:
                 return src.detach()
             else:

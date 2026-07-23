@@ -16,6 +16,6 @@ with warnings.catch_warnings():
         stacklevel=2,
     )
 
-sys.modules[
-    "torch.distributed._sharded_tensor"
-] = torch.distributed._shard.sharded_tensor
+sys.modules["torch.distributed._sharded_tensor"] = (
+    torch.distributed._shard.sharded_tensor
+)

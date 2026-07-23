@@ -7,7 +7,7 @@
 
 namespace at::native::xnnpack {
 
-inline std::vector<size_t> get_mem_format_aware_shape(const at::Tensor& in) {
+static inline std::vector<size_t> get_mem_format_aware_shape(const at::Tensor& in) {
   const auto mem_format = in.suggest_memory_format();
   const auto& sizes = in.sizes();
   std::vector<size_t> ret(sizes.begin(), sizes.end());
@@ -49,8 +49,7 @@ Tensor global_average_pool(const Tensor& input) {
           1,
       },
       input_padded_contig_nhwc.options().dtype(),
-      MemoryFormat::ChannelsLast,
-      input_padded_contig_nhwc.opt_names());
+      MemoryFormat::ChannelsLast);
 
   // Create XNNPACK Subgraph
   xnn_subgraph_t subgraph_ptr = nullptr;

@@ -1,7 +1,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/six.h>
+#include <torch/csrc/utils/structseq.h>
 
 #include <torch/csrc/autograd/grad_mode.h>
 
@@ -29,7 +29,7 @@ static constexpr char NoneType = 'n';
 namespace {
 
 inline bool PyNone_Check(PyObject* o) {
-  return o == Py_None;
+  return Py_IsNone(o);
 }
 
 template <typename T>
@@ -44,7 +44,7 @@ py::object cast_handle_sequence(std::vector<py::handle> objs) {
 
 void flatten_rec(PyObject* obj, ParsedArgs& args) {
   auto& structure = args.desc.structure;
-  if (six::isTuple(obj)) {
+  if (PyTuple_Check(obj)) {
     structure.push_back(D::TupleOpen);
     for (auto item : py::reinterpret_borrow<py::tuple>(obj))
       flatten_rec(item.ptr(), args);
@@ -63,8 +63,7 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     structure.push_back(D::DictClose);
     Py_DECREF(dict_items);
   } else if (THPUtils_checkString(obj)) {
-    string str = THPUtils_unpackString(obj);
-    args.desc.strings.emplace_back(str);
+    args.desc.strings.emplace_back(THPUtils_unpackString(obj));
     args.desc.structure.push_back(D::String);
   } else if (THPVariable_Check(obj)) {
     auto& var = THPVariable_Unpack(obj);
@@ -79,8 +78,7 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Bool);
   } else if (PyLong_Check(obj)) { // Wrap longs in Long tensors
-    at::Tensor var = scalar_to_tensor(
-        at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(obj))));
+    at::Tensor var = scalar_to_tensor(at::Scalar(THPUtils_unpackLong(obj)));
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Long);
@@ -117,7 +115,11 @@ py::object cast_sequence(std::vector<py::object> objs) {
   for (const auto i : c10::irange(num_objs)) {
     sequence[i] = std::move(objs[i]);
   }
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
   return std::move(sequence);
+#else
+  return sequence;
+#endif
 }
 
 py::object cast_dict(std::vector<py::object> objs) {
@@ -127,15 +129,19 @@ py::object cast_dict(std::vector<py::object> objs) {
     py::tuple obj = py::reinterpret_borrow<py::tuple>(objs[i]);
     sequence[obj[0]] = obj[1];
   }
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
   return std::move(sequence);
+#else
+  return sequence;
+#endif
 }
 
 py::object unflatten_rec(
     ArrayRef<Variable>::iterator& var_it,
     ArrayRef<Variable>::iterator& var_it_end,
     std::string::const_iterator& desc_it,
-    std::vector<string>::const_iterator& str_it,
-    std::vector<string>::const_iterator& str_it_end) {
+    std::vector<std::string>::const_iterator& str_it,
+    std::vector<std::string>::const_iterator& str_it_end) {
   char type = *desc_it++;
   if (type == D::TupleOpen) {
     std::vector<py::object> objs;

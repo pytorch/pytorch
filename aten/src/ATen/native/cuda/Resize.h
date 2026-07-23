@@ -5,9 +5,13 @@
 
 #include <c10/cuda/CUDAGuard.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 TORCH_CUDA_CPP_API void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes);
+TORCH_CUDA_CPP_API void resize_bytes_cuda_with_addr(
+    StorageImpl* storage,
+    size_t size_bytes,
+    void* addr);
 
 static inline void maybe_resize_storage_cuda(TensorImpl* self, size_t new_size_bytes) {
   // It does not make sense to try to resize a storage
@@ -50,4 +54,4 @@ inline TensorImpl* resize_impl_cuda_(
   return self;
 }
 
-}}
+}

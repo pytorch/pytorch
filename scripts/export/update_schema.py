@@ -23,13 +23,14 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    assert os.path.exists(
-        args.prefix
-    ), f"Assuming path {args.prefix} is the root of pytorch directory, but it doesn't exist."
+    assert os.path.exists(args.prefix), (
+        f"Assuming path {args.prefix} is the root of pytorch directory, but it doesn't exist."
+    )
 
     commit = schema_check.update_schema()
 
-    if os.path.exists(args.prefix + commit.yaml_path):
+    abs_yaml_path = os.path.join(args.prefix, commit.yaml_path)
+    if os.path.exists(abs_yaml_path):
         if commit.result["SCHEMA_VERSION"] < commit.base["SCHEMA_VERSION"]:
             raise RuntimeError(
                 f"Schema version downgraded from {commit.base['SCHEMA_VERSION']} to {commit.result['SCHEMA_VERSION']}."
@@ -40,7 +41,9 @@ if __name__ == "__main__":
                 f"Treespec version downgraded from {commit.base['TREESPEC_VERSION']} to {commit.result['TREESPEC_VERSION']}."
             )
     else:
-        assert args.force_unsafe, "Existing schema yaml file not found, please use --force-unsafe to try again."
+        assert args.force_unsafe, (
+            f"Existing schema yaml file not found in {abs_yaml_path}, please check if you provided correct prefix path, or use --force-unsafe to try again."
+        )
 
     next_version, reason = schema_check.check(commit, args.force_unsafe)
 
@@ -70,6 +73,12 @@ if __name__ == "__main__":
     cpp_header += "\n// clang-format on"
     cpp_header += "\n"
 
+    enum_converter_header = "// " + first_line
+    enum_converter_header += "\n// clang-format off"
+    enum_converter_header += "\n" + commit.enum_converter_header
+    enum_converter_header += "\n// clang-format on"
+    enum_converter_header += "\n"
+
     yaml_content = yaml_header + "\n" + yaml_payload
 
     thrift_schema = "// " + first_line
@@ -84,5 +93,9 @@ if __name__ == "__main__":
             f.write(yaml_content)
         with open(os.path.join(args.prefix, commit.cpp_header_path), "w") as f:
             f.write(cpp_header)
+        with open(
+            os.path.join(args.prefix, commit.enum_converter_header_path), "w"
+        ) as f:
+            f.write(enum_converter_header)
         with open(os.path.join(args.prefix, commit.thrift_schema_path), "w") as f:
             f.write(thrift_schema)

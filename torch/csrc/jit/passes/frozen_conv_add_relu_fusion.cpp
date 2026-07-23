@@ -1,14 +1,8 @@
-#include <ATen/Utils.h>
 
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
-#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
-#include <torch/csrc/jit/passes/remove_mutation.h>
-#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #ifdef USE_CUDA
-#include <ATen/cuda/CUDAConfig.h>
 #endif
 
 namespace torch::jit {

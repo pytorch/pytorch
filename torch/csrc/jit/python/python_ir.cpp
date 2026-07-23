@@ -12,11 +12,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/python/pybind.h>
-#include <torch/csrc/jit/python/python_tracer.h>
-#include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/jit/serialization/python_print.h>
-#include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <iostream>
@@ -26,22 +22,22 @@
 namespace torch::jit {
 
 // Controls whether graph source ranges are printed by default
-bool global_print_source_ranges = true;
+static bool global_print_source_ranges = true;
 
 Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
 using c10::Type;
 
-std::string getPythonName(const PyObject* obj_) {
+static std::string getPythonName(const PyObject* obj_) {
   pybind11::gil_scoped_acquire gil;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   PyObject* obj = const_cast<PyObject*>(obj_);
   auto v = py::getattr(obj, "__name__", py::str("<python_value>"));
-  // if this was a autograd.Function recover the name of the class
+  // if this was an autograd.Function recover the name of the class
   return py::str(v);
 }
 
-std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
+static std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
   pybind11::gil_scoped_acquire gil;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto pyobj = py::handle(const_cast<PyObject*>(obj.get()));
@@ -61,7 +57,7 @@ std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
     // tuple.__str__; this doesn't work because Python doesn't allow
     // monkeypatching methods of built-in types.
     auto pytuple = pyobj.cast<py::tuple>();
-    out << "(";
+    out << '(';
     size_t i = 0;
     for (const auto& o : pytuple) {
       if (i > 0) {
@@ -72,16 +68,16 @@ std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
       i++;
     }
     if (i == 1) {
-      out << ",";
+      out << ',';
     }
-    out << ")";
+    out << ')';
     return out;
   } else {
     return out << THPUtils_unpackString(py::str(pyobj).ptr());
   }
 }
 
-Node* findNode(
+static Node* findNode(
     c10::ArrayRef<torch::jit::Block*> blocks,
     Symbol kind,
     bool recurse = true) {
@@ -101,7 +97,7 @@ Node* findNode(
   return nullptr;
 }
 
-Node* findNode(Block* block, Symbol kind, bool recurse = true) {
+static Node* findNode(Block* block, Symbol kind, bool recurse = true) {
   std::vector<Block*> blocks = {block};
   return findNode(blocks, kind, recurse);
 }
@@ -154,14 +150,14 @@ std::optional<THPObjectPtr> ConcretePythonOp::autogradFunction() const {
 }
 
 void ConcretePythonOp::writeScalars(std::ostream& out) const {
-  out << "(";
+  out << '(';
   int i = 0;
   for (auto& scalar : scalar_args) {
     if (i++ > 0)
       out << ", ";
     printPyObject(out, scalar);
   }
-  out << ")";
+  out << ')';
 }
 
 void ConcretePythonOp::lint_python() const {
@@ -506,8 +502,8 @@ void initPythonIRBindings(PyObject* module_) {
           "__repr__",
           [](Value& n) {
             std::stringstream ss;
-            ss << n.debugName() << " defined in (" << *n.node() << ")";
-            return ss.str();
+            ss << n.debugName() << " defined in (" << *n.node() << ')';
+            return std::move(ss).str();
           })
       .VS(type)
       .VS(setType)
@@ -518,7 +514,7 @@ void initPythonIRBindings(PyObject* module_) {
           "inferTypeFrom",
           py::overload_cast<const c10::intrusive_ptr<c10::ivalue::Object>&>(
               &Value::inferTypeFrom))
-      // skip owningGraph because it returns a raw pointer to a otherwise
+      // skip owningGraph because it returns a raw pointer to an otherwise
       // std::shared_ptr stored graph object, and would cause a double free
       .VS(unique)
       .VS(debugName)
@@ -598,7 +594,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](Node& n) {
             std::stringstream ss;
             ss << n;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def("sourceRange", [](Node& n) { return n.sourceRange().str(); })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
@@ -623,7 +619,7 @@ void initPythonIRBindings(PyObject* module_) {
             } else {
               ss << "(no schema)";
             }
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(
           "outputs",
@@ -756,8 +752,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](Node& n, const char* name, const at::Tensor& v) {
             return n.t_(
                 Symbol::attr(name),
-                autograd::Variable(v.view(std::vector<int64_t>{}))
-                    .set_requires_grad(false));
+                v.view(std::vector<int64_t>{}).set_requires_grad(false));
           })
       .def(
           "z",
@@ -782,8 +777,7 @@ void initPythonIRBindings(PyObject* module_) {
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {
             for (auto& i : v) {
-              i = autograd::Variable(i.view(std::vector<int64_t>{}))
-                      .set_requires_grad(false);
+              i = i.view(std::vector<int64_t>{}).set_requires_grad(false);
             }
             return n.ts_(Symbol::attr(name), std::move(v));
           })
@@ -818,7 +812,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](Type& t) {
             std::ostringstream s;
             s << t;
-            return s.str();
+            return std::move(s).str();
           })
       .def(
           "containedTypes",
@@ -908,7 +902,7 @@ void initPythonIRBindings(PyObject* module_) {
           "scalarType",
           [](Type& t) {
             auto scalar_type = t.expectRef<TensorType>().scalarType();
-            return (scalar_type) ? toString(*scalar_type) : nullptr;
+            return scalar_type ? toString(*scalar_type) : nullptr;
           })
       .def(
           "device",

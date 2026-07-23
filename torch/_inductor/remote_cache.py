@@ -10,12 +10,16 @@ import os
 import sys
 import typing
 from abc import abstractmethod
-from typing import Any, Callable, Generic, Optional, TypeVar, Union
-from typing_extensions import override, TypeAlias
+from typing import Any, Generic, TypeAlias, TypeVar, Union
+from typing_extensions import override
 
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config
 from torch.monitor import _WaitCounter
+
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 try:
@@ -61,22 +65,23 @@ remote_fx_cache_put_timed = functools.partial(
 
 class RemoteCacheBackend(Generic[_T]):
     """
-    A backend implementation for accessing a remote/distributed cache.  Only
-    works with bytes in/out.  For structured data use a RemoteCache.
+    A backend implementation for cache storage. Most backends are remote, but
+    local filesystem backends use the same bytes-oriented interface. For
+    structured data use a RemoteCache.
     """
 
     def __init__(self) -> None:
         self._name = f"backend:{type(self).__name__}"
 
     @abstractmethod
-    def _get(self, key: str) -> Optional[_T]:
+    def _get(self, key: str) -> _T | None:
         pass
 
     @abstractmethod
     def _put(self, key: str, data: _T) -> None:
         pass
 
-    def get(self, key: str) -> Optional[_T]:
+    def get(self, key: str) -> _T | None:
         try:
             value = self._get(key)
             cache_stats.get(self._name, value)
@@ -105,8 +110,8 @@ class RemoteCacheSerde(Generic[_T, _U]):
         pass
 
 
-JsonDataTy = Optional[
-    Union[int, float, str, bool, dict[str, "JsonDataTy"], list["JsonDataTy"]]
+JsonDataTy: TypeAlias = Union[  # noqa: UP007
+    int, float, str, bool, dict[str, "JsonDataTy"], list["JsonDataTy"], None
 ]
 
 
@@ -126,6 +131,27 @@ class RemoteCachePassthroughSerde(RemoteCacheSerde[_T, _T]):
         return data
 
 
+class LocalCacheBackend(RemoteCacheBackend[bytes]):
+    """
+    A local filesystem implementation of the cache backend interface.
+    """
+
+    @override
+    def _get(self, key: str) -> bytes | None:
+        try:
+            with open(key, "rb") as fd:
+                return fd.read()
+        except FileNotFoundError:
+            return None
+
+    @override
+    def _put(self, key: str, data: bytes) -> None:
+        os.makedirs(os.path.dirname(key), exist_ok=True)
+        from torch._inductor import codecache
+
+        codecache.write_atomic(key, data)
+
+
 # This class is the top of a RemoteCache. A RemoteCache is fundamentally made of
 # three parts:
 #
@@ -136,7 +162,7 @@ class RemoteCachePassthroughSerde(RemoteCacheSerde[_T, _T]):
 # To write (`put`), the RemoteCache takes data, uses the RemoteCacheSerde to
 # convert it for the backend and passes it to the backend.
 #
-# Conversly when reading (`get`), the RemoteCache takes data from the backend,
+# Conversely when reading (`get`), the RemoteCache takes data from the backend,
 # uses the RemoteCacheSerde to convert it and returns it.
 #
 # The RemoteCacheBackend is generic on _U - which is the type of data the
@@ -150,7 +176,7 @@ class RemoteCachePassthroughSerde(RemoteCacheSerde[_T, _T]):
 # use the concrete type of the RemoteCache as the reported cache. See
 # RemoteFxGraphCache below as an example.
 class RemoteCache(Generic[_T]):
-    backend_override_cls: Optional[Callable[[], RemoteCacheBackend[Any]]] = None
+    backend_override_cls: Callable[[], RemoteCacheBackend[Any]] | None = None
 
     def __init__(
         self, backend: RemoteCacheBackend[_U], serde: RemoteCacheSerde[_T, _U]
@@ -160,20 +186,24 @@ class RemoteCache(Generic[_T]):
             self.backend = override_cls()
         else:
             self.backend = backend
+        # pyrefly: ignore [invalid-type-var]
         self.serde = serde
 
     # See if the cache contains `key`. Returns `None` if the value is not
     # present in the cache.
-    def get(self, key: str) -> Optional[_T]:
+    def get(self, key: str) -> _T | None:
         with _WaitCounter("pytorch.remote_cache.get").guard():
             sample = self._create_sample()
             try:
                 result = self._get(key, sample)
                 cache_stats.get(type(self).__name__, result)
-            except Exception:
+            except Exception as e:
                 cache_stats.exception(type(self).__name__)
+                if sample:
+                    sample.fail_reason = str(e)
                 raise
-            self._log_sample(sample)
+            finally:
+                self._log_sample(sample)
             return result
 
     # Add `value` to the cache with the key `key`. Note that `None` is not a
@@ -181,27 +211,31 @@ class RemoteCache(Generic[_T]):
     # between `None` and a missing cache entry).
     def put(self, key: str, value: _T) -> None:
         with _WaitCounter("pytorch.remote_cache.put").guard():
-            assert value is not None
+            if value is None:
+                raise AssertionError("cannot put None into the cache")
             sample = self._create_sample()
             try:
                 self._put(key, value, sample)
                 cache_stats.put(type(self).__name__)
-            except Exception:
+            except Exception as e:
                 cache_stats.exception(type(self).__name__)
+                if sample:
+                    sample.fail_reason = str(e)
                 raise
-            self._log_sample(sample)
+            finally:
+                self._log_sample(sample)
 
     # Used to convert data from the cache into structured data.
-    def _decode(self, data: _U, sample: Optional[Sample]) -> _T:  # type: ignore[override]
+    def _decode(self, data: _U, sample: Sample | None) -> _T:  # type: ignore[override]
         return self.serde.decode(data)  # type: ignore[arg-type]
 
     # Used to convert structured data into data for the cache.
-    def _encode(self, value: _T, sample: Optional[Sample]) -> object:  # returns _U
+    def _encode(self, value: _T, sample: Sample | None) -> object:  # returns _U
         return self.serde.encode(value)
 
     # Get structured data from the cache.
     # Separate from `get` so that it can be overridden.
-    def _get(self, key: str, sample: Optional[Sample]) -> Optional[_T]:
+    def _get(self, key: str, sample: Sample | None) -> _T | None:
         if data := self._backend_get(key):
             return self._decode(data, sample)
         return None
@@ -214,7 +248,7 @@ class RemoteCache(Generic[_T]):
 
     # Put structured data into the cache.
     # Separate from `put` so that it can be overridden.
-    def _put(self, key: str, value: _T, sample: Optional[Sample]) -> None:
+    def _put(self, key: str, value: _T, sample: Sample | None) -> None:
         data = self._encode(value, sample)
         self._backend_put(key, data)
 
@@ -226,11 +260,11 @@ class RemoteCache(Generic[_T]):
 
     # Create a logging Sample - used with internal loggers to monitor cache
     # effectiveness.
-    def _create_sample(self) -> Optional[Sample]:
+    def _create_sample(self) -> Sample | None:
         return None
 
     # Write the logging Sample to the logger.
-    def _log_sample(self, sample: Optional[Sample]) -> None:
+    def _log_sample(self, sample: Sample | None) -> None:
         pass
 
 
@@ -239,13 +273,13 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
     A Redis implementation of a remote/distributed cache.
     """
 
-    _redis: Optional[redis.Redis] = None
+    # pyrefly: ignore [missing-attribute]
+    _redis: redis.Redis | None = None
 
     def __init__(self, cache_id: str) -> None:
         super().__init__()
         if not redis:
-            # We had trouble importing redis - just skip init.
-            return
+            raise RuntimeError("redis not available but required for remote cache")
 
         if "TORCHINDUCTOR_REDIS_URL" in os.environ:
             self._redis = redis.Redis.from_url(os.environ["TORCHINDUCTOR_REDIS_URL"])
@@ -256,13 +290,15 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             )
 
     @override
-    def _get(self, key: str) -> Optional[bytes]:
+    def _get(self, key: str) -> bytes | None:
         if not self._redis:
             # Either redis wasn't found or we already had some trouble...
             return None
 
         try:
+            # pyrefly: ignore [missing-attribute]
             value = self._redis.get(key)
+        # pyrefly: ignore [missing-attribute]
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
             # first use. Mark is as unavailable now.
@@ -270,7 +306,8 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return None
 
         # In theory redis.get() can return an Awaitable as well...
-        assert value is None or isinstance(value, bytes)
+        if not (value is None or isinstance(value, bytes)):
+            raise AssertionError(f"expected bytes or None, got {type(value)}")
         return value
 
     @override
@@ -280,7 +317,9 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return
 
         try:
+            # pyrefly: ignore [missing-attribute]
             self._redis.set(key, data)
+        # pyrefly: ignore [missing-attribute]
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
             # first use. Mark is as unavailable now.
@@ -305,14 +344,42 @@ class RedisRemoteCache(RemoteCache[JsonDataTy]):
         return self._key_fmt.format(key=key)
 
     @override
-    def _get(self, key: str, sample: Optional[Sample]) -> Optional[JsonDataTy]:
+    def _get(self, key: str, sample: Sample | None) -> JsonDataTy | None:
         key = self._get_key(key)
         return super()._get(key, sample)
 
     @override
-    def _put(self, key: str, value: JsonDataTy, sample: Optional[Sample]) -> None:
+    def _put(self, key: str, value: JsonDataTy, sample: Sample | None) -> None:
         key = self._get_key(key)
         super()._put(key, value, sample)
+
+
+class LocalCache(RemoteCache[JsonDataTy]):
+    def __init__(self, cache_id: str) -> None:
+        # Local caches use the per-operation key as the filesystem path. Accept
+        # cache_id so they can be constructed through create_cache like remote
+        # caches.
+        backend = LocalCacheBackend()
+        serde = RemoteCacheJsonSerde()
+        super().__init__(backend, serde)
+
+    @override
+    def _get(self, key: str, sample: Sample | None) -> JsonDataTy | None:
+        try:
+            return super()._get(key, sample)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            log.warning(
+                "Ignoring corrupt local cache entry %s: %s: %s",
+                key,
+                type(exc).__name__,
+                exc,
+            )
+            return None
+
+
+class LocalAutotuneCache(LocalCache):
+    # Keep a distinct cache type for cache stats and test backend overrides.
+    pass
 
 
 class RemoteAutotuneCache(RedisRemoteCache):
@@ -337,24 +404,32 @@ class RemoteDynamoPGOCache(RedisRemoteCache):
 
 def create_cache(
     key: str,
-    is_fbcode: bool,
-    fb_cache_cls: str,
-    oss_cache_cls: str,
-) -> Optional[RemoteCache[JsonDataTy]]:
+    is_fbcode: bool = False,
+    fb_cache_cls: str | None = None,
+    oss_cache_cls: str | None = None,
+    *,
+    local_cache_cls: str | None = None,
+) -> RemoteCache[JsonDataTy] | None:
     try:
-        if is_fbcode:
+        this_module = sys.modules[__name__]
+        if local_cache_cls is not None:
+            cache_cls = getattr(this_module, local_cache_cls)
+            return cache_cls(key)
+        elif is_fbcode:
+            if fb_cache_cls is None:
+                raise AssertionError("fb_cache_cls must not be None in fbcode")
             import torch._inductor.fb.remote_cache
 
             cache_cls = getattr(torch._inductor.fb.remote_cache, fb_cache_cls)
             return cache_cls(key)
         else:
-            this_module = sys.modules[__name__]
-
+            if oss_cache_cls is None:
+                raise AssertionError("oss_cache_cls must not be None")
             cache_cls = getattr(this_module, oss_cache_cls)
             return cache_cls(key)
 
     except Exception:
-        log.warning("Unable to create a remote cache", exc_info=True)
+        log.warning("Unable to create cache", exc_info=True)
         return None
 
 
@@ -382,7 +457,7 @@ class _CacheStats:
     def hit(self, name: str, count: int = 1) -> None:
         self._stats[name].hit += count
 
-    def get(self, name: str, value: Optional[object]) -> None:
+    def get(self, name: str, value: object | None) -> None:
         if value is None:
             self.miss(name)
         else:

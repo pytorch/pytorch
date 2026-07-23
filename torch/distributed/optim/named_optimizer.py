@@ -1,9 +1,8 @@
-# mypy: allow-untyped-defs
 import logging
 import warnings
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from copy import deepcopy
-from typing import Any, Callable, Optional, overload, Union
+from typing import Any, overload
 
 import torch
 import torch.nn as nn
@@ -35,7 +34,7 @@ class _NamedOptimizer(optim.Optimizer):
             `param_groups` to pass to optimizer if specified.
             The key of the inner map needs to be FQNs.
             Default: None
-        module (nn.Module): the module whose parameters to updated
+        module (nn.Module): the module whose parameters to be updated
             by the optimizer.
         args: arguments to pass to the optimizer constructor.
         kwargs: arguments to pass to the optimizer constructor.
@@ -51,7 +50,7 @@ class _NamedOptimizer(optim.Optimizer):
         >>> # Forward pass + backward pass.
         >>> named_optim.step()
         >>> ...
-        >>> # Call state_dict for the named optimizer returns a FQN state_dict.
+        >>> # Call state_dict for the named optimizer returns an FQN state_dict.
         >>> named_optim.state_dict()
 
     Warning: This API is still in development and subject to change.
@@ -63,12 +62,12 @@ class _NamedOptimizer(optim.Optimizer):
 
     def __init__(
         self,
-        named_parameters: Mapping[str, Union[torch.Tensor, ShardedTensor]],
+        named_parameters: Mapping[str, torch.Tensor | ShardedTensor],
         optimizer_class: optim.Optimizer,
-        param_groups: Optional[Collection[Mapping[str, Any]]] = None,
-        module: Optional[nn.Module] = None,
-        *args,
-        **kwargs,
+        param_groups: Collection[Mapping[str, Any]] | None = None,
+        module: nn.Module | None = None,
+        *args: tuple[Any, ...],
+        **kwargs: dict[str, Any],
     ) -> None:
         torch._C._log_api_usage_once("torch.distributed.optim._NamedOptimizer")
         self.param_groups: Collection[Mapping[str, Any]] = param_groups  # type: ignore[assignment]
@@ -88,7 +87,8 @@ class _NamedOptimizer(optim.Optimizer):
         else:
             warnings.warn(
                 "Since we pass in param_groups, we will use param_groups to "
-                "initialize the optimizer, not all parameters of the module."
+                "initialize the optimizer, not all parameters of the module.",
+                stacklevel=2,
             )
             param_to_key = {param: key for key, param in self.named_parameters.items()}  # type: ignore[misc, has-type]
             ordered_param_keys = []
@@ -103,11 +103,13 @@ class _NamedOptimizer(optim.Optimizer):
         # Update param_groups from optimizer.
         self.param_groups = self._optimizer.param_groups
 
-    def _param_groups_check(self):
+    def _param_groups_check(self) -> None:
         if self.param_groups is not None:
             for param_group in self.param_groups:
-                assert isinstance(param_group, dict), "param group must be a dict"
-                assert "params" in param_group, "param group must contain key params"
+                if not isinstance(param_group, dict):
+                    raise AssertionError("param group must be a dict")
+                if "params" not in param_group:
+                    raise AssertionError("param group must contain key params")
                 params = param_group["params"]
                 if isinstance(params, torch.Tensor):
                     params = [params]
@@ -147,14 +149,12 @@ class _NamedOptimizer(optim.Optimizer):
         return self._post_state_dict({"state": ret_state, "param_groups": ret_groups})
 
     @overload
-    def step(self, closure: None = ...) -> None:
-        ...
+    def step(self, closure: None = None) -> None: ...
 
     @overload
-    def step(self, closure: Callable[[], float]) -> float:
-        ...
+    def step(self, closure: Callable[[], float]) -> float: ...
 
-    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+    def step(self, closure: Callable[[], float] | None = None) -> float | None:
         """
         Perform a single optimization step.
 
@@ -167,7 +167,7 @@ class _NamedOptimizer(optim.Optimizer):
     def state(self) -> Mapping[torch.Tensor, Any]:  # type: ignore[override]
         return self._optimizer.state
 
-    def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """
         Define the default behavior to load a state_dict for ``_NamedOptimizer``.
 
@@ -185,7 +185,7 @@ class _NamedOptimizer(optim.Optimizer):
             ...
         ```
         Args:
-            state_dict (Dict[str, Any]) : A ``state_dict`` to load into the optimizer.
+            state_dict (dict[str, Any]) : A ``state_dict`` to load into the optimizer.
                 Note that this state dict update is performed in place.
 
         .. note:: PyTorch is using lazy init to initialize the optim states.
@@ -205,7 +205,7 @@ class _NamedOptimizer(optim.Optimizer):
 
         for idx, param_key in enumerate(self.ordered_param_keys):
             # When the conditional training is performed, not all parameters are updated in the optim.
-            if param_key not in state.keys():
+            if param_key not in state:
                 continue
             if len(state[param_key]) != len(new_state[idx]):
                 raise ValueError(
@@ -220,7 +220,8 @@ class _NamedOptimizer(optim.Optimizer):
 
                 src_state_val = state[param_key][state_key]
                 if isinstance(state_val, ShardedTensor):
-                    assert isinstance(src_state_val, ShardedTensor)
+                    if not isinstance(src_state_val, ShardedTensor):
+                        raise AssertionError
                     num_shards = len(state_val.local_shards())
                     num_new_shards = len(src_state_val.local_shards())
                     if num_shards != num_new_shards:
@@ -232,7 +233,8 @@ class _NamedOptimizer(optim.Optimizer):
                     ):
                         shard.tensor.detach().copy_(src_shard.tensor)
                 elif isinstance(state_val, torch.Tensor):
-                    assert isinstance(src_state_val, torch.Tensor)
+                    if not isinstance(src_state_val, torch.Tensor):
+                        raise AssertionError
                     state_val.detach().copy_(src_state_val)
                 else:
                     new_state[idx][state_key] = deepcopy(src_state_val)
@@ -277,7 +279,8 @@ class _NamedOptimizer(optim.Optimizer):
 
         Warning: This API is still in development and subject to change.
         """
-        assert isinstance(param_group, dict), "param group must be a dict"
+        if not isinstance(param_group, dict):
+            raise AssertionError("param group must be a dict")
 
         params = param_group["params"]
         if isinstance(params, torch.Tensor):
@@ -297,7 +300,7 @@ class _NamedOptimizer(optim.Optimizer):
 
     def init_state(self) -> None:
         """
-        Run a dummy optimizer step, which allows to initialize optimizer state because we do lazy init for most optimizers.
+        Run a dummy optimizer step, which allows us to initialize optimizer state because we do lazy init for most optimizers.
 
         This allows doing in-place loading of optimizer state from a checkpoint.
         """
@@ -308,7 +311,7 @@ class _NamedOptimizer(optim.Optimizer):
         # Calling ``step`` will load the initial state for optimizer states.
         self.step(closure=None)
 
-    def _pre_load_state_dict(self, state_dict) -> dict[str, Any]:
+    def _pre_load_state_dict(self, state_dict: dict[str, Any]) -> dict[str, Any]:
         # TODO(chienchin): This API should be FSDP agnostic and should support
         # general user hooks.
         if isinstance(self.module, FSDP):
@@ -317,7 +320,7 @@ class _NamedOptimizer(optim.Optimizer):
             )
         return state_dict
 
-    def _post_state_dict(self, state_dict) -> dict[str, Any]:
+    def _post_state_dict(self, state_dict: dict[str, Any]) -> dict[str, Any]:
         # TODO(chienchin): This API should be FSDP agnostic and should support
         # general user hooks.
         if isinstance(self.module, FSDP):
@@ -326,5 +329,5 @@ class _NamedOptimizer(optim.Optimizer):
 
 
 def _gen_param_group_key(param_keys: list[str]) -> str:
-    """Concatenate all param keys as a unique indentifier for one param group."""
+    """Concatenate all param keys as a unique identifier for one param group."""
     return "/".join(sorted(param_keys))

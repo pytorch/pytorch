@@ -1,4 +1,4 @@
-from typing import Optional
+import operator
 
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
@@ -22,9 +22,7 @@ class LearnedHeuristic:
     ) -> bool:
         return True
 
-    def get_decision(
-        self, context: AHContext, choices: list[Choice]
-    ) -> Optional[Choice]:
+    def get_decision(self, context: AHContext, choices: list[Choice]) -> Choice | None:
         return None
 
     def get_confidence_threshold(self) -> float:
@@ -33,25 +31,22 @@ class LearnedHeuristic:
     def get_name(self) -> str:
         return ""
 
-    def get_decisions_ranked(self, context: AHContext) -> Optional[list[str]]:
+    def get_decisions_ranked(self, context: AHContext) -> list[str] | None:
         return None
 
 
 class LearnedHeuristicRegression(LearnedHeuristic):
-    def __init__(self) -> None:
-        super().__init__()
-
     def get_feedback(self, context: AHContext, choice: Choice) -> float:
         return 1.0
 
-    def get_decision(
-        self, context: AHContext, choices: list[Choice]
-    ) -> Optional[Choice]:
+    def get_decision(self, context: AHContext, choices: list[Choice]) -> Choice | None:
         choice2feedback = {}
         for choice in choices:
             predicted_feedback = self.get_feedback(context, choice)
             choice2feedback[choice] = predicted_feedback
-        sorted_choices_feedback = sorted(choice2feedback.items(), key=lambda t: t[1])
+        sorted_choices_feedback = sorted(
+            choice2feedback.items(), key=operator.itemgetter(1)
+        )
         highest_feedback = sorted_choices_feedback[-1][1]
         second_highest_feedback = sorted_choices_feedback[-2][1]
         if highest_feedback / second_highest_feedback > self.get_confidence_threshold():
@@ -61,15 +56,10 @@ class LearnedHeuristicRegression(LearnedHeuristic):
 
 
 class LearnedHeuristicDecision(LearnedHeuristic):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def get_choice(self, idx: int) -> Optional[str]:
+    def get_choice(self, idx: int) -> str | None:
         return None
 
-    def get_decision(
-        self, context: AHContext, choices: list[Choice]
-    ) -> Optional[Choice]:
+    def get_decision(self, context: AHContext, choices: list[Choice]) -> Choice | None:
         best_choices = self.get_best_choices(context)
         if not best_choices:
             return None
@@ -78,7 +68,7 @@ class LearnedHeuristicDecision(LearnedHeuristic):
             return None
         return self.get_choice(best_choice_idx)
 
-    def get_decisions_ranked(self, context: AHContext) -> Optional[list[str]]:
+    def get_decisions_ranked(self, context: AHContext) -> list[str] | None:
         feedback_idx_list = self.get_best_choices(context)
         if feedback_idx_list is None:
             return None
@@ -88,5 +78,5 @@ class LearnedHeuristicDecision(LearnedHeuristic):
         choices = [choice for choice in choices if choice is not None]
         return choices
 
-    def get_best_choices(self, context: AHContext) -> Optional[list[tuple[float, int]]]:
+    def get_best_choices(self, context: AHContext) -> list[tuple[float, int]] | None:
         return []

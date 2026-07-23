@@ -4,7 +4,7 @@ import operator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import reduce
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch.distributed.checkpoint.metadata import (
@@ -20,6 +20,7 @@ from torch.distributed.checkpoint.metadata import (
 __all__ = [
     "WriteItemType",
     "LoadItemType",
+    "BytesIOWriteData",
     "TensorWriteData",
     "WriteItem",
     "ReadItem",
@@ -42,6 +43,11 @@ class LoadItemType(Enum):
 
 
 @dataclass(frozen=True)
+class BytesIOWriteData:
+    nbytes: int
+
+
+@dataclass(frozen=True)
 class TensorWriteData:
     chunk: ChunkStorageMetadata
     properties: TensorProperties
@@ -55,10 +61,13 @@ class WriteItem:
     index: MetadataIndex
     type: WriteItemType
 
-    # Value present if it's a tensor write
-    tensor_data: Optional[TensorWriteData] = None
+    # Size of bytesIO data to be written.
+    bytes_io_data: BytesIOWriteData | None = None
 
-    def tensor_storage_size(self) -> Optional[int]:
+    # Value present if it's a tensor write
+    tensor_data: TensorWriteData | None = None
+
+    def tensor_storage_size(self) -> int | None:
         """
         Calculates the storage size of the underlying tensor, or None if this is not a tensor write.
 
@@ -97,6 +106,9 @@ class SavePlan:
     items: list[WriteItem]
     storage_data: Any = None
     planner_data: Any = None
+    # This is used to indicate that the ranks should
+    # use the cached plans to write data instead.
+    usable: bool = True
 
 
 @dataclass
@@ -138,7 +150,7 @@ class SavePlanner(abc.ABC):
     There are 3 usual patterns of extension:
 
     Rewriting state_dict. This is the simplest way to extend the save process as it
-    doesn't requite understanding the intrincacies of how SavePlan works:
+    doesn't require understanding the intricacies of how SavePlan works:
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultSavePlanner):
@@ -148,7 +160,7 @@ class SavePlanner(abc.ABC):
     >>>         storage_meta: Optional[StorageMeta],
     >>>         is_coordinator: bool,
     >>>     ) -> None:
-    >>>         # prefix all keys with `foo_``
+    >>> # prefix all keys with `foo_``
     >>>         super().set_up_planner({"foo_" + k: v for k, v in state_dict.items()}, storage_meta, is_coordinator)
 
     Modifying local plan and lookup in tandem. This is useful when fine control of how data is persisted
@@ -172,8 +184,8 @@ class SavePlanner(abc.ABC):
     >>> from itertools import zip_longest
     >>> from dataclasses import replace
     >>> class DDPLoadBalancingPlanner(DefaultSavePlanner):
-    >>>     # This uses the default local plan behavior of having all non-sharded writes in rank 0
-    >>>     # This sample doesn't handle ShardedTensors
+    >>> # This uses the default local plan behavior of having all non-sharded writes in rank 0
+    >>> # This sample doesn't handle ShardedTensors
     >>>     def create_global_plan(self, all_plans):
     >>>         iters = [iter(all_plans[0].items)] * len(all_plans)
     >>>         items_per_rank = [
@@ -203,17 +215,38 @@ class SavePlanner(abc.ABC):
     >>>         return global_plan, metadata
     """
 
+    # Save plan for the current rank as computed by `create_local_plan` API
+    # Cached on the local rank.
+    _cached_save_plan: dict[str, SavePlan] = {}
+    # Final save plan for the current rank.
+    # This is created by merging the plan created by `create_local_plan` API
+    # and the result of `create_global_plan` for the given rank.
+    # This is the final plan computed by the `finish_plan` API that gets
+    # sent to the `write_data`.
+    # Cached on the local rank.
+    _cached_final_save_plan: dict[str, SavePlan] = {}
+    # Collection of all the local plans from all the ranks.
+    # This is the input to the `create_global_plan` API.
+    # Cached on the coordinator rank.
+    _cached_all_plans: dict[str, list[SavePlan]] = {}
+    # Global checkpoint plan as computed by `create_global_plan` API.
+    # Cached on the coordinator rank.
+    _cached_global_plan: dict[str, list[SavePlan]] = {}
+    # Metadata for the global checkpoint plan as computed by `create_global_plan` API.
+    # Cached on the coordinator rank.
+    _cached_metadata: dict[str, Metadata] = {}
+
     @abc.abstractmethod
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        storage_meta: Optional[StorageMeta] = None,
+        storage_meta: StorageMeta | None = None,
         is_coordinator: bool = False,
     ) -> None:
         """
         Initialize this planner to save ``state_dict``.
 
-        Implementations should save those values as they won't be provided lated in the save process.
+        Implementations should save those values as they won't be provided later in the save process.
 
         This is called on all ranks.
         """
@@ -248,7 +281,7 @@ class SavePlanner(abc.ABC):
         """
 
     @abc.abstractmethod
-    def resolve_data(self, write_item: WriteItem) -> Union[torch.Tensor, io.BytesIO]:
+    def resolve_data(self, write_item: WriteItem) -> torch.Tensor | io.BytesIO:
         """
         Transform and prepare ``write_item`` from ``state_dict`` for storage, ensuring idempotency and thread-safety.
 
@@ -300,7 +333,7 @@ class LoadPlanner:
     There are two usual patterns of extension:
 
     Rewriting state_dict. This is the simplest way to extend the load process as it
-    doesn't requite understanding the intrincacies of how LoadPlan works. We need
+    doesn't require understanding the intricacies of how LoadPlan works. We need
     to keep a reference to the original state_dict as load happens in place so
     we need to be able to perform it in place
 
@@ -326,7 +359,7 @@ class LoadPlanner:
     >>>         self.is_coordinator = is_coordinator
     >>>
     >>>     def load_bytes(self, read_item, value):
-    >>>         # Remove the "foo_" prefix
+    >>> # Remove the "foo_" prefix
     >>>         self.original_state_dict[read_item.dest_index.fqn[4:]] = torch.load(value, weights_only=False)
 
 
@@ -346,7 +379,7 @@ class LoadPlanner:
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Optional[Metadata] = None,
+        metadata: Metadata | None = None,
         is_coordinator: bool = False,
     ) -> None:
         """

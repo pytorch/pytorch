@@ -6,7 +6,7 @@
 import math
 
 import torch
-from functorch.dim import cat, dimlists, dims, softmax
+from functorch.dim import cat, dimlists, dims
 from torch import nn
 
 
@@ -47,7 +47,11 @@ class BertSelfAttention(nn.Module):
         self.position_embedding_type = position_embedding_type
 
         if self.position_embedding_type is not None:
-            assert max_position_embeddings is not None
+            if max_position_embeddings is None:
+                raise AssertionError(
+                    "max_position_embeddings must not be None when "
+                    f"position_embedding_type is {self.position_embedding_type}"
+                )
             self.max_position_embeddings = max_position_embeddings
             self.distance_embedding = nn.Embedding(
                 2 * max_position_embeddings - 1, self.attention_head_size
@@ -111,11 +115,15 @@ class BertSelfAttention(nn.Module):
             # with the distance between them
             distance = query_sequence - key_sequence
 
-            assert key_sequence.size <= self.max_position_embeddings
+            if not (key_sequence.size <= self.max_position_embeddings):
+                raise AssertionError(
+                    f"key_sequence.size ({key_sequence.size}) exceeds "
+                    f"max_position_embeddings ({self.max_position_embeddings})"
+                )
 
             # we can then use that as an indirect index into the embedding table values to look up the features for that index
             # this is just a `gather` primitive op. The resulting tensor will
-            # have all the dimensions of embeddeding_idx (query_sequence x key_sequence),
+            # have all the dimensions of embedding_idx (query_sequence x key_sequence),
             # plus all the dimensions of `embed` that were not indirectly accessed (`embedding_range`).
             # this form of indirect indexing is more straightforward than either advanced indexing or torch.gather which both
             # have a lot of dependencies on the positions of indexing tensors.
@@ -126,7 +134,7 @@ class BertSelfAttention(nn.Module):
 
             if self.position_embedding_type == "relative_key":
                 # these were einsum ops in the positional code because they are not easy to fit to existing matmul operators
-                # eventhough they are degenerate matmuls
+                # even though they are degenerate matmuls
                 relative_position_scores = (q * positional_embedding).sum(features)
                 attention_scores = attention_scores + relative_position_scores
             elif self.position_embedding_type == "relative_key_query":
@@ -142,7 +150,7 @@ class BertSelfAttention(nn.Module):
 
         attention_probs = attention_scores
         # Normalize the attention scores to probabilities.
-        attention_probs = softmax(attention_scores, dim=key_sequence)
+        attention_probs = torch.softmax(attention_scores, dim=key_sequence)
         # # This is actually dropping out entire tokens to attend to, which might
         # # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = torch.nn.functional.dropout(

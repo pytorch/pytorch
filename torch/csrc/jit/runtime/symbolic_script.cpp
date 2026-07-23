@@ -936,8 +936,8 @@ const std::vector<std::string> functions = {
         def hardswish(self):
             result = torch.hardswish(self)
             def backward(grad_output):
-                m = (self > 3.).type_as(result)
-                m = torch.where((self >= -3.) & (self <= 3.),  self / 3. + .5, m)
+                m = (self >= 3.).type_as(result)
+                m = torch.where((self > -3.) & (self < 3.),  self / 3. + .5, m)
                 return grad_output * m
             return result, backward
 
@@ -1541,7 +1541,7 @@ static std::string overloadedSchemaString(const FunctionSchema& schema) {
 
 static bool isHelperFunction(const std::string& method_name) {
   std::string helper_prefix = "AD_";
-  return method_name.compare(0, helper_prefix.length(), helper_prefix) == 0;
+  return method_name.starts_with(helper_prefix);
 }
 
 static void loadModule(const CompilationUnit& module) {

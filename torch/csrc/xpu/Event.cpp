@@ -1,12 +1,12 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
+#include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/xpu/Event.h>
 #include <torch/csrc/xpu/Module.h>
-#include <torch/csrc/xpu/Stream.h>
 
 #include <structmember.h>
 
@@ -49,7 +49,7 @@ static void THXPEvent_dealloc(THXPEvent* self) {
     pybind11::gil_scoped_release no_gil{};
     self->xpu_event.~XPUEvent();
   }
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  THPEvent_dealloc_common(reinterpret_cast<THPEvent*>(self));
 }
 
 static PyObject* THXPEvent_get_sycl_event(THXPEvent* self, void* unused) {
@@ -71,8 +71,15 @@ static PyObject* THXPEvent_get_device(THXPEvent* self, void* unused) {
 static PyObject* THXPEvent_record(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS
   auto* self = (THXPEvent*)_self;
-  auto* stream = (THXPStream*)_stream;
-  self->xpu_event.record(stream->xpu_stream);
+  TORCH_CHECK(
+      THPStream_Check(_stream),
+      "expected stream to be a torch.Stream or torch.xpu.Stream object");
+  auto* stream = (THPStream*)_stream;
+  c10::xpu::XPUStream xpu_stream = c10::xpu::XPUStream(c10::Stream::unpack3(
+      stream->stream_id,
+      static_cast<c10::DeviceIndex>(stream->device_index),
+      static_cast<c10::DeviceType>(stream->device_type)));
+  self->xpu_event.record(xpu_stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -80,8 +87,15 @@ static PyObject* THXPEvent_record(PyObject* _self, PyObject* _stream) {
 static PyObject* THXPEvent_wait(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS
   auto* self = (THXPEvent*)_self;
-  auto* stream = (THXPStream*)_stream;
-  self->xpu_event.block(stream->xpu_stream);
+  TORCH_CHECK(
+      THPStream_Check(_stream),
+      "expected stream to be a torch.Stream or torch.xpu.Stream object");
+  auto* stream = (THPStream*)_stream;
+  c10::xpu::XPUStream xpu_stream = c10::xpu::XPUStream(c10::Stream::unpack3(
+      stream->stream_id,
+      static_cast<c10::DeviceIndex>(stream->device_index),
+      static_cast<c10::DeviceType>(stream->device_type)));
+  self->xpu_event.block(xpu_stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -96,6 +110,8 @@ static PyObject* THXPEvent_query(PyObject* _self, PyObject* noargs) {
 static PyObject* THXPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
   auto* self = (THXPEvent*)_self;
+  TORCH_CHECK(
+      THXPEvent_Check(_other), "expected other to be a torch.xpu.Event object");
   auto* other = (THXPEvent*)_other;
   return PyFloat_FromDouble(self->xpu_event.elapsed_time(other->xpu_event));
   END_HANDLE_TH_ERRORS
@@ -115,6 +131,7 @@ static PyObject* THXPEvent_synchronize(PyObject* _self, PyObject* noargs) {
 static struct PyGetSetDef THXPEvent_properties[] = {
     {"device", (getter)THXPEvent_get_device, nullptr, nullptr, nullptr},
     {"sycl_event", (getter)THXPEvent_get_sycl_event, nullptr, nullptr, nullptr},
+    {"event_id", (getter)THXPEvent_get_sycl_event, nullptr, nullptr, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(*c-arrays*, *global-variables)
@@ -126,7 +143,7 @@ static PyMethodDef THXPEvent_methods[] = {
     {(char*)"synchronize", THXPEvent_synchronize, METH_NOARGS, nullptr},
     {nullptr}};
 
-PyTypeObject THXPEventType = {
+static PyTypeObject THXPEventType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._XpuEventBase", /* tp_name */
     sizeof(THXPEvent), /* tp_basicsize */
@@ -151,7 +168,7 @@ PyTypeObject THXPEventType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    0, /* tp_weaklistoffset (inherited from THPEventType via tp_base) */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THXPEvent_methods, /* tp_methods */

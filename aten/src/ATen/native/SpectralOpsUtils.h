@@ -21,7 +21,7 @@ enum class fft_norm_mode {
 // NOTE [ Fourier Transform Conjugate Symmetry ]
 //
 // Real-to-complex Fourier transform satisfies the conjugate symmetry. That is,
-// assuming X is the transformed K-dimensionsal signal, we have
+// assuming X is the transformed K-dimensional signal, we have
 //
 //     X[i_1, ..., i_K] = X[j_i, ..., j_K]*,
 //
@@ -63,7 +63,7 @@ inline int64_t infer_ft_complex_to_real_onesided_size(int64_t complex_size,
     std::ostringstream ss;
     ss << "expected real signal size " << expected_size << " is incompatible "
        << "with onesided complex frequency size " << complex_size;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
 }
 

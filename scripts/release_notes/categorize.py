@@ -4,20 +4,8 @@ import textwrap
 from pathlib import Path
 
 import common
-
-# Imports for working with classi
-from classifier import (
-    CategoryConfig,
-    CommitClassifier,
-    CommitClassifierInputs,
-    get_author_map,
-    get_file_map,
-    XLMR_BASE,
-)
 from commitlist import CommitList
 from common import get_commit_data_cache, topics
-
-import torch
 
 
 class Categorizer:
@@ -25,6 +13,16 @@ class Categorizer:
         self.cache = get_commit_data_cache()
         self.commits = CommitList.from_existing(path)
         if use_classifier:
+            from classifier import (
+                CategoryConfig,
+                CommitClassifier,
+                get_author_map,
+                get_file_map,
+                XLMR_BASE,
+            )
+
+            import torch
+
             print("Using a classifier to aid with categorization.")
             device = "cuda" if torch.cuda.is_available() else "cpu"
             classifier_config = CategoryConfig(common.categories)
@@ -108,6 +106,8 @@ class Categorizer:
 
         features = self.features(commit)
         if self.classifier is not None:
+            from classifier import CommitClassifierInputs
+
             # Some commits don't have authors:
             author = features.author if features.author else "Unknown"
             files = " ".join(features.files_changed)
@@ -145,7 +145,7 @@ Labels: {features.labels}
 
 Current category: {commit.category}
 
-Select from: {', '.join(common.categories)}
+Select from: {", ".join(common.categories)}
 
         """
         )
@@ -165,7 +165,7 @@ Select from: {', '.join(common.categories)}
             cat_choice = choices[0]
         print(f"\nSelected: {cat_choice}")
         print(f"\nCurrent topic: {commit.topic}")
-        print(f"""Select from: {', '.join(topics)}""")
+        print(f"""Select from: {", ".join(topics)}""")
         topic_choice = None
         while topic_choice is None:
             value = input("topic> ").strip()

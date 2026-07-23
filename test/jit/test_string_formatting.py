@@ -10,15 +10,8 @@ import torch
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestStringFormatting(JitTestCase):
@@ -191,7 +184,7 @@ class TestStringFormatting(JitTestCase):
     def test_string_interpolation_with_unknown_format_specifier(self):
         @torch.jit.script
         def fn(arg1: str) -> str:
-            return "%a in template" % arg1  # noqa: F501
+            return "%a in template" % arg1
 
         with self.assertRaisesRegexWithHighlight(
             RuntimeError,
@@ -199,3 +192,7 @@ class TestStringFormatting(JitTestCase):
             '"%a in template" % arg1',
         ):
             fn("foo")
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

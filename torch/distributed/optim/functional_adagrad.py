@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.optim._functional as F
@@ -12,7 +11,7 @@ from torch.distributed.optim._deprecation_warning import (
 __all__: list[str] = []
 
 
-# Define a TorchScript compatible Functional Adagrad Optimizer
+# Define a Functional Adagrad Optimizer
 # where we use these optimizer in a functional way.
 # Instead of using the `param.grad` when updating parameters,
 # we explicitly let the user pass gradients to the `step` function
@@ -21,7 +20,6 @@ __all__: list[str] = []
 # without data traces on accumulating to the same .grad.
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
-@torch.jit.script
 class _FunctionalAdagrad:
     def __init__(
         self,
@@ -70,7 +68,7 @@ class _FunctionalAdagrad:
                 "step": torch.tensor(0.0),
             }
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Tensor | None]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []

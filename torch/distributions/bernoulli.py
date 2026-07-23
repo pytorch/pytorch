@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from numbers import Number
 
 import torch
 from torch import nan, Tensor
@@ -12,6 +11,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.types import _Number, Number
 
 
 __all__ = ["Bernoulli"]
@@ -35,22 +35,34 @@ class Bernoulli(ExponentialFamily):
     Args:
         probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
+        validate_args (bool, optional): whether to validate arguments, None by default
     """
+
+    # pyrefly: ignore [bad-override]
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.boolean
     has_enumerate_support = True
     _mean_carrier_measure = 0
 
-    def __init__(self, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        probs: Tensor | Number | None = None,
+        logits: Tensor | Number | None = None,
+        validate_args: bool | None = None,
+    ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            is_scalar = isinstance(probs, Number)
+            is_scalar = isinstance(probs, _Number)
+            # pyrefly: ignore [read-only]
             (self.probs,) = broadcast_all(probs)
         else:
-            is_scalar = isinstance(logits, Number)
+            if logits is None:
+                raise AssertionError("logits is unexpectedly None")
+            is_scalar = isinstance(logits, _Number)
+            # pyrefly: ignore [read-only]
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
@@ -128,5 +140,6 @@ class Bernoulli(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor]:
         return (torch.logit(self.probs),)
 
+    # pyrefly: ignore [bad-override]
     def _log_normalizer(self, x):
         return torch.log1p(torch.exp(x))

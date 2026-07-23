@@ -1,7 +1,5 @@
-#include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 
-#include <ATen/core/functional.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
@@ -70,7 +68,7 @@ Operator LlgaGraphHelper::makeBinaryOp(Node* node, opkind kind) {
 // third_party/ideep/mkl-dnn/src/interface/op_def.hpp.
 Operator LlgaGraphHelper::createOperator(Node* node) {
   auto nodeKind = node->kind();
-  // we're using an if-else clause instead of a switch staement
+  // we're using an if-else clause instead of a switch statement
   // because we would soon be adding custom ops with function schemas.
   // We would have to use Symbol::fromQualString at that time anyway,
   // but we are okay with this choice, since this code is not in the hot-path.
@@ -243,7 +241,7 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
             dnnl::graph::op::attr::rounding_type, std::string(rounding_type))
         .setAttr(dnnl::graph::op::attr::data_format, std::string("NCX"));
   } else if (nodeKind == Symbol::fromQualString("aten::avg_pool2d")) {
-    // TODO: do we need add checks for all Constants?
+    // TODO: do we need to add checks for all Constants?
     REQUIRE(node->namedInput("kernel_size")->node()->kind() == prim::Constant);
     auto rounding_type =
         toIValue(node->namedInput("ceil_mode"))->toBool() ? "ceil" : "floor";
@@ -352,9 +350,9 @@ static void mayAddListConstructIntoConcatPartition(
   // We emphasize on 'virtually' because get_num_ops() for cat's partition
   // would still return 1.
   if (n->kind() == aten::cat && opToOwningPartition.has(n)) {
-    auto listConstrcut = n->namedInput("tensors")->node();
+    auto listConstruct = n->namedInput("tensors")->node();
     auto partitionId = opToOwningPartition.get(n);
-    opToOwningPartition.add(listConstrcut, partitionId);
+    opToOwningPartition.add(listConstruct, partitionId);
   }
 }
 

@@ -84,7 +84,8 @@ def main():
                 noise_margin=float(row[3]),
             )
             key = (entry.benchmark_name, entry.metric_name)
-            assert key not in expected_data, f"Duplicate entry for {key}"
+            if key in expected_data:
+                raise AssertionError(f"Duplicate entry for {key}")
             expected_data[key] = entry
 
     # Read result data file.
@@ -100,7 +101,8 @@ def main():
             )
 
             key = (entry.benchmark_name, entry.metric_name)
-            assert key not in result_data, f"Duplicate entry for {key}"
+            if key in result_data:
+                raise AssertionError(f"Duplicate entry for {key}")
             result_data[key] = entry
 
     fail = False
@@ -132,10 +134,10 @@ def main():
             )
 
         new_entry = copy.deepcopy(entry)
-        # only change if abs(ratio) > entry.noise_margin /3.
+        # only change if abs(ratio) > entry.noise_margin /5.
         new_entry.expected_value = (
             replace_with_zeros(result)
-            if abs(ratio) > entry.noise_margin * 100 / 3
+            if abs(ratio) > entry.noise_margin * 100 / 5
             else entry.expected_value
         )
         new_expected[key] = new_entry
@@ -159,7 +161,7 @@ def main():
             print(
                 f"WIN: benchmark {key} failed, actual result {result} is {ratio:+.2f}% lower than "
                 f"expected {entry.expected_value} ±{entry.noise_margin * 100:.2f}% "
-                f"please update the expected results. \n"
+                f"please OPEN THE TEST RESULTS update ALL BENCHMARKS RESULT with the new printed expected results. ALL ALL ALL\n"
             )
             print(
                 "please update all results that changed significantly, and not only the failed ones"
@@ -210,9 +212,19 @@ def main():
             writer.writerow([])
             writer.writerow([])
 
-    print("new expected results file content if needed:")
+    print("=" * 80)
+    print("=" * 80)
+    print("=" * 80)
+    print("To update expected results, run the following command:")
+    print()
+    print("cat > benchmarks/dynamo/pr_time_benchmarks/expected_results.csv << EOF")
     with open(reference_expected_results_path) as f:
-        print(f.read())
+        print(f.read().rstrip())
+    print("EOF")
+    print()
+    print("=" * 80)
+    print("=" * 80)
+    print("=" * 80)
 
     if fail:
         print(

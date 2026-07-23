@@ -3,12 +3,18 @@
 # Test to ensure sparsity information propagates properly into traced graph.
 #
 
-import sys
 import unittest
 
 import torch
-from torch._dynamo.config import is_fbcode
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._dynamo.source import LocalSource
+from torch._environment import is_fbcode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import (
+    DimDynamic,
+    RelaxedUnspecConstraint,
+    ShapeEnv,
+    StatelessSymbolicContext,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -91,12 +97,9 @@ class SparseActivationCSR(torch.nn.Module):
 
 
 @unittest.skipIf(is_fbcode(), "See torch._dynamo.config")
-@unittest.skipIf(
-    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-)
 class TestSparseProp(TestCase):
     def setUp(self):
-        TestCase.setUp(self)
+        super().setUp()
 
     def assertEqualMeta(self, x, y):
         self.assertIsInstance(x, FakeTensor)
@@ -124,7 +127,7 @@ class TestSparseProp(TestCase):
                 x_meta1, y_meta1 = (x.ccol_indices(), y.ccol_indices())
                 x_meta2, y_meta2 = (x.row_indices(), y.row_indices())
             else:
-                assert 0  # unreachable
+                raise AssertionError(f"Unexpected layout: {x.layout}")
             self.assertEqual(x_meta1, y_meta1, exact_layout=True)
             self.assertEqual(x_meta2, y_meta2, exact_layout=True)
             self.assertEqual(x.values(), y.values(), exact_layout=True)
@@ -219,6 +222,83 @@ class TestSparseProp(TestCase):
                     self.assertEqualMeta(meta, result)
                 else:
                     self.assertEqual(meta, None)
+
+    @parametrize("strict", (False, True))
+    def test_sparse_coo_dynamic_size_to_dense(self, strict):
+        net = ToDenseNet()
+        x = torch.tensor(
+            [
+                [[0.0, 0.0, 1.0], [2.0, 0.0, 1.0]],
+                [[0.0, 0.0, 1.0], [2.0, 0.0, 1.0]],
+            ]
+        ).to_sparse()
+        y = torch.tensor(
+            [
+                [[1.0, 0.0, 1.0], [2.0, 0.0, 1.0]],
+                [[0.0, 0.0, 1.0], [4.0, 1.0, 1.0]],
+                [[0.0, 0.0, 1.0], [2.0, 6.0, 1.0]],
+            ]
+        ).to_sparse()
+
+        prog = torch.export.export(
+            net,
+            (x,),
+            dynamic_shapes={"x": {0: torch.export.Dim.DYNAMIC}},
+            strict=strict,
+        )
+
+        self.assertEqual(prog.module()(y), net(y))
+
+    def test_sparse_coo_fake_to_dense_dtype_error(self):
+        x = torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse()
+        mode = FakeTensorMode(
+            shape_env=ShapeEnv(tracked_fakes=[]),
+            allow_non_fake_inputs=True,
+            export=True,
+        )
+
+        with mode:
+            fake_x = mode.from_tensor(x)
+            with self.assertRaisesRegex(
+                RuntimeError, "dtype argument is not supported by sparse_to_dense"
+            ):
+                fake_x.to_dense(dtype=torch.float64)
+
+    def test_sparse_coo_fake_symbolic_size_transfer(self):
+        x = torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse()
+        symbolic_context = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
+            constraint_sizes=[RelaxedUnspecConstraint(warn_only=False), None],
+        )
+        shape_env1 = ShapeEnv(tracked_fakes=[])
+        mode1 = FakeTensorMode(
+            shape_env=shape_env1,
+            allow_non_fake_inputs=True,
+            export=True,
+        )
+        with mode1:
+            fake_x1 = mode1.from_tensor(
+                x,
+                source=LocalSource("x"),
+                symbolic_context=symbolic_context,
+            )
+
+        shape_env2 = ShapeEnv(tracked_fakes=[])
+        mode2 = FakeTensorMode(
+            shape_env=shape_env2,
+            allow_non_fake_inputs=True,
+            export=True,
+        )
+        with mode2:
+            fake_x2 = mode2.from_tensor(
+                fake_x1,
+                source=LocalSource("x"),
+                symbolic_context=symbolic_context,
+            )
+            dense_x2 = fake_x2.to_dense()
+
+        self.assertEqual(dense_x2.layout, torch.strided)
+        self.assertEqual(dense_x2.size(1), 2)
 
     def test_add(self):
         net = AddNet()

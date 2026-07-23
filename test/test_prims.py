@@ -142,7 +142,7 @@ class TestPrims(TestCase):
             self.assertTrue(view._is_view())
 
         t_discontig = t.transpose(0, 1)
-        with self.assertRaises(ValueError, msg="no such view exists"):
+        with self.assertRaises(RuntimeError, msg="Attempting to view a collapsed tensor, but no such view exists!"):
             view = prims.collapse_view(t_discontig, 0, 2)
 
         copy = prims.collapse(t_discontig, 0, 1)
@@ -321,6 +321,17 @@ class TestPrims(TestCase):
         self.assertEqual(ref1, res3)
         self.assertEqual(ref2, res4)
 
+    def test_functional_rng_wrapper_with_positional_device(self):
+        import torch._inductor.inductor_prims
+
+        rng_state, result = torch._prims.rng_prims.run_and_save_rng_state(
+            torch.ops.prims.inductor_seeds.default, 1, torch.device("cpu")
+        )
+
+        self.assertEqual(rng_state.device.type, "cpu")
+        self.assertEqual(result.device.type, "cpu")
+        self.assertEqual(result.shape, (1,))
+
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
@@ -341,6 +352,16 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
         with torch._dispatch.python.enable_python_dispatcher():
             x = torch.randn(4, dtype=torch.complex64, device='meta').conj()
             x + 1
+
+    def test_clone_meta_stride_preservation_dense(self):
+        tensor = torch.randn(1, 5).t()
+        meta_clone = prims._clone_meta(tensor, memory_format=torch.preserve_format)
+        self.assertEqual(tensor.stride(), meta_clone.stride())
+
+    def test_clone_meta_stride_preservation_sparse(self):
+        tensor = torch.arange(12).float().view(3, 4)[1:, ::2]
+        meta_clone = prims._clone_meta(tensor, memory_format=torch.preserve_format)
+        self.assertEqual(tensor.contiguous().stride(), meta_clone.stride())
 
     def test_check_deprecation_warning(self):
         with self.assertWarnsRegex(FutureWarning, 'will be removed in the future'):

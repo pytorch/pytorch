@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/quantized/QTensorImpl.h>
@@ -78,11 +79,12 @@ std::vector<Tensor> quantize_per_tensor_list_cpu(
     const Tensor& zero_points,
     ScalarType dtype) {
   std::vector<Tensor> quantized_tensors;
+  quantized_tensors.reserve(tensors.size());
   for (const auto i : c10::irange(tensors.size())) {
     quantized_tensors.push_back(at::quantize_per_tensor(
         tensors[i],
-        scales[i].item<double>(),
-        zero_points[i].item<int64_t>(),
+        scales[static_cast<int64_t>(i)].item<double>(),
+        zero_points[static_cast<int64_t>(i)].item<int64_t>(),
         dtype));
   }
   return quantized_tensors;
@@ -108,6 +110,7 @@ Tensor dequantize_quantized(const Tensor& self) {
 
 std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
   std::vector<Tensor> dequantized_tensors;
+  dequantized_tensors.reserve(tensors.size());
   for (const auto & tensor : tensors) {
     dequantized_tensors.push_back(tensor.dequantize());
   }
@@ -174,8 +177,10 @@ Tensor& set_storage_quantized_(
     int64_t storage_offset,
     IntArrayRef sizes,
     IntArrayRef strides) {
+  checkSetStorage(self, std::move(storage), storage_offset, sizes, strides);
+  checkInBoundsForStorage(
+      sizes, strides, storage_offset, self.dtype(), self.storage());
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_storage_keep_dtype(std::move(storage));
   self_->set_storage_offset(storage_offset);
   self_->set_sizes_and_strides(sizes, strides);
   return self;
@@ -255,8 +260,8 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   auto self_contig = self.contiguous();
   auto other_contig = other.contiguous();
 
-  void* self_data = self_contig.data_ptr();
-  void* other_data = other_contig.data_ptr();
+  const void* self_data = self_contig.const_data_ptr();
+  const void* other_data = other_contig.const_data_ptr();
   auto data_size = self.numel() * self.element_size();
   // For QUint4x2 and QUInt2x4, two elements are packed in one byte
   if (self.scalar_type() == kQUInt4x2 || self.scalar_type() == kQUInt2x4) {
@@ -293,18 +298,16 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
 
 static float calculate_quant_loss(
     const float* input,
-    int numel,
+    int64_t numel,
     float xmin,
     float xmax,
     float* q_input,
-    int bit_width) {
+    int64_t bit_width) {
   xmin = static_cast<at::Half>(xmin);
   float data_range = xmax - xmin;
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  float qmax = (1 << bit_width) - 1;
+  float qmax = static_cast<float>((1 << bit_width) - 1);
   float scale = data_range == 0
-      ? 1.0
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+      ? 1.0f
       : static_cast<float>(static_cast<at::Half>(data_range / qmax));
   float inverse_scale = scale == 0 ? 1.0f : 1.0f / scale;
 
@@ -337,6 +340,8 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
     const int64_t n_bins,
     const double ratio,
     int64_t bit_width) {
+  const float* input_row = input_tensor.const_data_ptr<float>();
+  TORCH_CHECK_VALUE(input_row != nullptr, "input tensor is empty and has no data");
 
   if (numel < 0 || numel > input_tensor.numel()) {
     TORCH_CHECK(false, "numel is out of the bound of input tensor");
@@ -344,13 +349,13 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
 
   TORCH_CHECK(numel <= input_tensor.numel(), "numel ", numel,
       " greater than input_tensor.numel() ", input_tensor.numel());
-  const float* input_row = input_tensor.const_data_ptr<float>();
+
   float xmin = *std::min_element(input_row, input_row + numel);
   float xmax = *std::max_element(input_row, input_row + numel);
+  float n_bins_float = static_cast<float>(n_bins);
 
-  float stepsize = (xmax - xmin) / n_bins;
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  int min_bins = n_bins * (1.0 - (float) ratio);
+  float stepsize = (xmax - xmin) / n_bins_float;
+  float min_bins = static_cast<float>(n_bins_float* (1.0 - ratio));
   Tensor input_tensor_contig = input_tensor.contiguous();
   const float* input = input_tensor_contig.const_data_ptr<float>();
   std::vector<float> q_input(numel);
@@ -363,7 +368,6 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   float cur_max = xmax;
   float cur_loss = loss;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float thr = min_bins * stepsize;
   while (cur_min + thr < cur_max) {
     // move left
@@ -391,6 +395,6 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   at::Tensor xmin_tensor = at::empty({1});
   xmax_tensor[0] = xmax;
   xmin_tensor[0] = xmin;
-  return std::make_tuple(xmax_tensor, xmin_tensor);
+  return std::make_tuple(std::move(xmax_tensor), std::move(xmin_tensor));
 }
 } // namespace at::native

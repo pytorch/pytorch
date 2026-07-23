@@ -1,0 +1,331 @@
+name: vllm-benchmark
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
+        description: The runner to use.
+      docker_image:
+        required: true
+        type: string
+        description: The name of the base docker image to use.
+      build_environment:
+        required: true
+        type: string
+        description: The build environment name, e.g. linux-jammy-cuda13.0-py3.12-gcc11
+      pytorch_branch:
+        required: false
+        type: string
+        description: The PyTorch branch to checkout. Default to the current checkout.
+      pytorch_commit:
+        required: false
+        type: string
+        description: The PyTorch commit to checkout. Default to the current checkout.
+      models:
+        required: false
+        type: string
+        description: The list of models to benchmark. Default to all models.
+        default: ''
+      compilation_config:
+        required: false
+        type: string
+        description: A JSON string for vLLM --compilation-config, applied to all benchmark tests.
+        default: ''
+      refresh_hf_cache:
+        required: false
+        type: boolean
+        description: When true, download from HF (online) and refresh the cache; otherwise read the offline cache.
+        default: false
+
+jobs:
+  benchmark:
+    runs-on: ${{ inputs.runner }}
+    # Heavy models (e.g. int4 27B) can run ~8h+; raise well above the 6h default.
+    timeout-minutes: 600
+    permissions:
+      id-token: write
+      contents: read
+    container:
+      image: ${{ inputs.docker_image }}
+      # OSDC runners (h100 and OSDC b200) get /mnt/hf_cache injected by the runner
+      # hook — a bind mount here would break the hook's mount check. Only non-OSDC
+      # DGX (linux.dgx.*) has no injection, so bind-mount its writable host cache dir
+      # via -v. Discriminate on 'dgx', not 'b200' (OSDC b200 behaves like h100). Set
+      # on options (a scalar) not volumes (a sequence) so the expression is valid YAML.
+      options: ${{ contains(inputs.runner, 'dgx') && '--gpus all --ipc=host --tty -v /mnt/hf_cache:/mnt/hf_cache' || '--gpus all --ipc=host --tty' }}
+    steps:
+      - name: Install system dependencies
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y git unzip
+
+      # OSDC runner pods reuse the workspace across jobs, leaving root-owned
+      # content that actions/checkout can't delete (uid mismatch: GH hook 1001 vs
+      # CI image 1000). Same fix as setup-linux's "Fix workspace permissions".
+      - name: Fix workspace permissions
+        if: ${{ !contains(inputs.runner, 'dgx') }}
+        shell: bash
+        run: |
+          sudo chmod -R 777 "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.pytorch_commit || inputs.pytorch_branch }}
+          submodules: recursive
+          show-progress: false
+
+      - name: Get vLLM pinned commit
+        id: vllm-pinned-commit
+        run: |
+          VLLM_PINNED_COMMIT=$(cat .github/ci_commit_pins/vllm.txt)
+          echo "commit=${VLLM_PINNED_COMMIT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout vLLM
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: vllm-project/vllm
+          path: vllm-project/vllm
+          ref: ${{ steps.vllm-pinned-commit.outputs.commit }}
+          submodules: recursive
+          show-progress: false
+
+      - name: Authenticate with AWS
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          role-duration-seconds: 18000
+          aws-region: us-east-1
+
+      - name: Download build artifacts
+        # Full repo path, not ./ — local actions don't resolve on the OSDC ARC runner.
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        with:
+          name: ${{ inputs.build_environment }}
+          s3-bucket: gha-artifacts
+
+      - uses: pytorch/test-infra/.github/actions/setup-uv@main
+        with:
+          python-version: "3.12"
+          activate-environment: "true"
+
+      - name: Install build artifacts
+        shell: bash
+        run: |
+          set -eux
+          ls -laR dist
+
+          # Need to install pip because there might be parts that are not using
+          # uv yet
+          uv pip install pip==25.3
+
+          uv pip install \
+            dist/torch-*.whl \
+            dist/vision/torchvision-*.whl \
+            dist/audio/torchaudio-*.whl \
+            dist/ao/torchao-*.whl \
+            dist/vllm/vllm-*.whl \
+            dist/deepgemm/deep_gemm-*.whl \
+            --extra-index-url https://download.pytorch.org/whl/cu130 \
+            --index-strategy unsafe-best-match
+
+      - name: Print some debug information
+        env:
+          VLLM_PINNED_COMMIT: ${{ steps.vllm-pinned-commit.outputs.commit }}
+        run: |
+          uv pip list
+
+          PYTORCH_WHL=$(uv pip list | grep torch)
+          VLLM_WHL=$(uv pip list | grep vllm)
+
+          {
+            echo "### Run vLLM benchmark with the following packages:"
+            echo "PyTorch:"
+            echo "${PYTORCH_WHL}"
+            echo "vLLM: ${VLLM_WHL}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Checkout pytorch-integration-testing repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: pytorch/pytorch-integration-testing
+          path: pytorch/pytorch-integration-testing
+          ref: main
+
+      - name: Check if the device is supported
+        run: |
+          set -eux
+
+          if command -v nvidia-smi; then
+            DEVICE_NAME=cuda
+            nvidia-smi
+          elif command -v rocm-smi; then
+            DEVICE_NAME=rocm
+            rocm-smi
+          elif command -v hl-smi; then
+            DEVICE_NAME=hpu
+            hl-smi
+          else
+            lscpu
+            arch=$(uname -m)
+
+            case "$arch" in
+              aarch64|arm64)
+                DEVICE_NAME=arm64-cpu
+                ;;
+              *)
+                DEVICE_NAME=cpu
+                ;;
+            esac
+          fi
+          echo "DEVICE_NAME=$DEVICE_NAME" >> "${GITHUB_ENV}"
+
+      - name: Setup benchmark tests
+        env:
+          MODELS: ${{ inputs.models }}
+          COMPILATION_CONFIG: ${{ inputs.compilation_config }}
+        shell: bash
+        run: |
+          set -eux
+
+          pushd vllm-project/vllm
+          rm .buildkite/performance-benchmarks/tests/*.json || true
+          popd
+
+          pushd pytorch/pytorch-integration-testing
+          # Set the list of benchmarks we want to cover in this runner
+          python .github/scripts/setup_vllm_benchmark.py \
+            --from-benchmark-configs-dir vllm-benchmarks/benchmarks \
+            --to-benchmark-configs-dir ../../vllm-project/vllm/.buildkite/performance-benchmarks/tests \
+            --models "${MODELS}" \
+            --device "${DEVICE_NAME}" \
+            --include-eager-mode \
+            --include-inductor-graph-partition \
+            --compilation-config "${COMPILATION_CONFIG}"
+          popd
+
+          pushd vllm-project/vllm
+          ls -lah .buildkite/performance-benchmarks/tests
+          find .buildkite/performance-benchmarks/tests -type f -exec cat {} \;
+          popd
+
+      - name: Resolve HF cache mode
+        shell: bash
+        run: |
+          OFFLINE=1
+          if [[ "${{ inputs.refresh_hf_cache }}" == "true" ]]; then
+            OFFLINE=0
+          fi
+          {
+            echo "TRANSFORMERS_OFFLINE=${OFFLINE}"
+            echo "HF_DATASETS_OFFLINE=${OFFLINE}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Run vLLM benchmark
+        id: run-benchmark
+        working-directory: vllm-project/vllm
+        env:
+          HF_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
+          ENGINE_VERSION: v1
+          SAVE_TO_PYTORCH_BENCHMARK_FORMAT: 1
+        shell: bash
+        run: |
+          set -eux
+
+          # HF model cache: offline reads /mnt/hf_cache in place (read-only on OSDC,
+          # writable host dir on B200); online (nightly) downloads into a writable dir.
+          if [[ "${TRANSFORMERS_OFFLINE}" == "1" && -d /mnt/hf_cache ]]; then
+            export HF_HOME=/mnt/hf_cache
+          elif [[ -w /mnt/hf_cache ]]; then
+            export HF_HOME=/mnt/hf_cache
+          else
+            export HF_HOME="${RUNNER_TEMP}/hf_cache"
+            mkdir -p "${HF_HOME}"
+            export TRANSFORMERS_OFFLINE=0
+            export HF_DATASETS_OFFLINE=0
+          fi
+
+          # FlashInfer JIT-compiles into its workspace, so it always needs a writable
+          # dir (never the read-only OSDC mount). B200: compile in place on the host
+          # mount. OSDC: compile in a local dir warmed from the cached kernels, which
+          # the refresh step syncs back to S3 on nightly. A cold cache just recompiles.
+          if [[ -w /mnt/hf_cache ]]; then
+            export FLASHINFER_WORKSPACE_BASE=/mnt/hf_cache/flashinfer
+            mkdir -p "${FLASHINFER_WORKSPACE_BASE}"
+          else
+            export FLASHINFER_WORKSPACE_BASE="${RUNNER_TEMP}/hf_cache/flashinfer"
+            mkdir -p "${FLASHINFER_WORKSPACE_BASE}"
+            if [[ -d /mnt/hf_cache/flashinfer ]]; then
+              cp -a /mnt/hf_cache/flashinfer/. "${FLASHINFER_WORKSPACE_BASE}/" 2>/dev/null || true
+            fi
+          fi
+
+          bash .buildkite/performance-benchmarks/scripts/run-performance-benchmarks.sh
+
+      - name: Check the benchmark results
+        env:
+          BENCHMARK_RESULTS: vllm-project/vllm/benchmarks/results
+        run: |
+          set -eux
+
+          # Fail when there is no result or if the metrics are all zero
+          python3 pytorch/pytorch-integration-testing/.github/scripts/check_benchmark_results.py \
+            --benchmark-results "${BENCHMARK_RESULTS}" \
+            --strict
+
+      - name: Authenticate with AWS
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
+          # The max duration enforced by the server side
+          role-duration-seconds: 18000
+          aws-region: us-east-1
+
+      - name: Upload the benchmark results to OSS benchmark database for the dashboard
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        with:
+          benchmark-results-dir: vllm-project/vllm/benchmarks/results
+          benchmark-name: 'PyTorch x vLLM benchmark'
+          dry-run: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          if-no-files-found: error
+
+      - name: Authenticate to refresh the HF cache in S3
+        if: always() && steps.run-benchmark.conclusion && env.TRANSFORMERS_OFFLINE == '0'
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_hf-cache-write
+          aws-region: us-east-1
+
+      - name: Refresh the HF cache in S3
+        if: always() && steps.run-benchmark.conclusion && env.TRANSFORMERS_OFFLINE == '0'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -x
+          HF_CACHE="${RUNNER_TEMP}/hf_cache"
+          if [[ -z "${HF_CACHE_S3_BUCKET:-}" || -z "${HF_CACHE_S3_REGION:-}" ]]; then
+            echo "HF_CACHE_S3_BUCKET/REGION unset (not an hf-cache runner) - skipping sync"
+            exit 0
+          fi
+          # The benchmark image may not ship the AWS CLI, so fall back to a
+          # throwaway venv when it's absent.
+          AWS=aws
+          if ! command -v aws >/dev/null 2>&1; then
+            python3 -m venv /tmp/awscli-venv
+            /tmp/awscli-venv/bin/pip install --quiet awscli==1.45.39
+            AWS=/tmp/awscli-venv/bin/aws
+          fi
+          for sub in hub flashinfer; do
+            if [[ -d "${HF_CACHE}/${sub}" ]]; then
+              "${AWS}" s3 sync "${HF_CACHE}/${sub}" "s3://${HF_CACHE_S3_BUCKET}/${sub}" \
+                --region "${HF_CACHE_S3_REGION}" --no-progress
+            else
+              echo "No ${HF_CACHE}/${sub} to sync - skipping"
+            fi
+          done

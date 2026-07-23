@@ -67,6 +67,9 @@ class Dropout(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.dropout(input, self.p, self.training, self.inplace)
 
 
@@ -112,6 +115,9 @@ class Dropout1d(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.dropout1d(input, self.p, self.training, self.inplace)
 
 
@@ -164,6 +170,9 @@ class Dropout2d(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.dropout2d(input, self.p, self.training, self.inplace)
 
 
@@ -209,6 +218,9 @@ class Dropout3d(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.dropout3d(input, self.p, self.training, self.inplace)
 
 
@@ -225,7 +237,7 @@ class AlphaDropout(_DropoutNd):
 
     During training, it randomly masks some of the elements of the input
     tensor with probability *p* using samples from a bernoulli distribution.
-    The elements to masked are randomized on every forward call, and scaled
+    The elements to be masked are randomized on every forward call, and scaled
     and shifted to maintain zero mean and unit standard deviation.
 
     During evaluation the module simply computes an identity function.
@@ -251,6 +263,9 @@ class AlphaDropout(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.alpha_dropout(input, self.p, self.training)
 
 
@@ -302,4 +317,7 @@ class FeatureAlphaDropout(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.feature_alpha_dropout(input, self.p, self.training)

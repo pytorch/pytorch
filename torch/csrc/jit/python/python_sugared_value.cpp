@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/python/python_sugared_value.h>
 
 #include <ATen/core/interned_strings.h>
-#include <c10/core/ScalarType.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -9,19 +8,16 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/utils/pybind.h>
-#include <climits>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
 
-#include <Python.h>
-
 namespace torch::jit {
 
 std::string typeString(py::handle h) {
-  return py::str(h.get_type().attr("__name__"));
+  return py::str(py::type::handle_of(h).attr("__name__"));
 }
 
 std::optional<StrongFunctionPtr> as_function(const py::object& obj) {
@@ -131,7 +127,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
   MatchedSchema matched_schema =
       matchSchema(schema, loc, *m.graph(), argsWithSelf, kwargs);
 
-  // If if a function is marked as dropped,
+  // If a function is marked as dropped,
   // we throw an exception if it is invoked.
   if (py::cast<bool>(py::module::import("torch._jit_internal")
                          .attr("should_drop")(self))) {
@@ -163,8 +159,8 @@ std::shared_ptr<SugaredValue> PythonValue::call(
 
 std::string PythonValue::kind() const {
   std::stringstream ss;
-  ss << "python value of type '" << typeString(self) << "'";
-  return ss.str();
+  ss << "python value of type '" << typeString(self) << '\'';
+  return std::move(ss).str();
 }
 
 std::vector<std::shared_ptr<SugaredValue>> PythonValue::asTuple(
@@ -174,7 +170,7 @@ std::vector<std::shared_ptr<SugaredValue>> PythonValue::asTuple(
   std::stringstream ss;
   ss << kind() << " cannot be used as a tuple";
   checkForAddToConstantsError(ss);
-  throw(ErrorReport(loc) << ss.str());
+  throw(ErrorReport(loc) << std::move(ss).str());
 }
 
 std::shared_ptr<SugaredValue> PythonValue::attr(
@@ -184,7 +180,7 @@ std::shared_ptr<SugaredValue> PythonValue::attr(
   std::stringstream ss;
   ss << "attribute lookup is not defined on " << kind();
   checkForAddToConstantsError(ss);
-  throw(ErrorReport(loc) << ss.str());
+  throw(ErrorReport(loc) << std::move(ss).str());
 }
 
 py::object PythonValue::getattr(
@@ -192,7 +188,7 @@ py::object PythonValue::getattr(
     const std::string& name) {
   try {
     return py::getattr(self, name.c_str());
-  } catch (py::error_already_set& e) {
+  } catch (py::error_already_set&) {
     throw(ErrorReport(loc) << "object has no attribute " << name);
   }
 }
@@ -287,7 +283,7 @@ bool ModuleValue::areAllSubmodulesSubtypeOf(
         if (why_not) {
           *why_not << "Attribute " << self_type->getAttributeName(i)
                    << " is not of annotated type " << ty->annotation_str()
-                   << ": " << ss.str();
+                   << ": " << std::move(ss).str();
         }
 
         return false;
@@ -308,7 +304,7 @@ SugaredValuePtr ModuleValue::getitem(
       // Check that all submodules comply with the type hint.
       std::stringstream ss;
       if (!areAllSubmodulesSubtypeOf(type_hint, &ss)) {
-        throw(ErrorReport(loc) << ss.str());
+        throw(ErrorReport(loc) << std::move(ss).str());
       }
 
       // Emit a prim::ModuleContainerIndex operator. This is needed because
@@ -355,7 +351,7 @@ SugaredValuePtr ModuleValue::getitem(
       // Check that all submodules comply with the type hint.
       std::stringstream ss;
       if (!areAllSubmodulesSubtypeOf(type_hint, &ss)) {
-        throw(ErrorReport(loc) << ss.str());
+        throw(ErrorReport(loc) << std::move(ss).str());
       }
 
       // Emit a prim::ModuleContainerIndex operator. This is needed because
@@ -381,7 +377,7 @@ SugaredValuePtr ModuleValue::getitem(
       << "ParameterList, and ParameterDict modules are subscriptable");
 }
 
-void checkInterface(
+static void checkInterface(
     const SourceRange& loc,
     GraphFunction& m,
     const std::shared_ptr<ModuleValue>& self,
@@ -582,7 +578,7 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
+static std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
     const py::object& obj,
     GraphFunction& m,
     const SourceRange& loc) {
@@ -595,7 +591,7 @@ std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
 }
 
 // helper function for instantiating a SugaredValue from an IValue
-std::shared_ptr<SugaredValue> toSugaredValue(
+static std::shared_ptr<SugaredValue> toSugaredValue(
     const IValue& v,
     GraphFunction& m,
     const SourceRange& loc) {
@@ -860,8 +856,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       ErrorReport(loc)
       << "Module '"
       << concreteType_->getJitType()->expectRef<ClassType>().name()->name()
-      << "'"
-      << " has no attribute '" << field << "' " << hint);
+      << '\'' << " has no attribute '" << field << "' " << hint);
 }
 
 SugaredValuePtr ModuleValue::iter(const SourceRange& loc, GraphFunction& m) {
@@ -911,7 +906,7 @@ bool PythonClassValue::hasAttr(
   try {
     py::getattr(py_type_, field.c_str());
     return true;
-  } catch (py::error_already_set& e) {
+  } catch (py::error_already_set&) {
     return false;
   }
 }
@@ -1057,7 +1052,7 @@ TypePtr registerNamedTuple(
   return tt;
 }
 
-bool isEnumClass(py::object obj) {
+static bool isEnumClass(py::object obj) {
   auto enum_type_obj =
       py::cast<py::object>(py::module::import("enum").attr("Enum"));
   int ret = PyObject_IsSubclass(obj.ptr(), enum_type_obj.ptr());
@@ -1068,7 +1063,7 @@ bool isEnumClass(py::object obj) {
   return ret == 1;
 }
 
-std::shared_ptr<SugaredValue> createSimpleEnumValue(
+static std::shared_ptr<SugaredValue> createSimpleEnumValue(
     const py::object& obj,
     GraphFunction& m,
     const SourceRange& loc) {
@@ -1222,8 +1217,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("isinstance").ptr()) {
     return SpecialFormValue::create(prim::isinstance);
+  } else if (obj.ptr() == py::module::import("torch").attr("_check").ptr()) {
+    return std::make_shared<TorchCheckValue>();
 #ifdef USE_RPC
-    // RPC module is only avaialble when build flag "USE_DISTRIBUTED" is on.
+    // RPC module is only available when build flag "USE_DISTRIBUTED" is on.
   } else if (
       isRpcAvailable &&
       obj.ptr() ==
@@ -1236,7 +1233,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return SpecialFormValue::create(prim::rpc_sync);
   } else if (
       isRpcAvailable &&
-      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
+      // RPC module is only available  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
           py::module::import("torch.distributed.rpc").attr("remote").ptr()) {
     return SpecialFormValue::create(prim::rpc_remote);

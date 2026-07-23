@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -23,6 +23,7 @@ __all__ = [
     "SequenceParallel",
     "ColwiseParallel",
     "PrepareModuleInput",
+    "PrepareModuleInputOutput",
     "PrepareModuleOutput",
 ]
 
@@ -35,11 +36,10 @@ class ParallelStyle(ABC):
     flexibility for different kind of style implementations.
     """
 
-    src_data_rank: Optional[int] = 0
+    src_data_rank: int | None = 0
 
     @abstractmethod
-    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        ...
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module: ...
 
 
 class ColwiseParallel(ParallelStyle):
@@ -82,8 +82,8 @@ class ColwiseParallel(ParallelStyle):
     def __init__(
         self,
         *,
-        input_layouts: Optional[Placement] = None,
-        output_layouts: Optional[Placement] = None,
+        input_layouts: Placement | None = None,
+        output_layouts: Placement | None = None,
         use_local_output: bool = True,
     ):
         super().__init__()
@@ -105,7 +105,10 @@ class ColwiseParallel(ParallelStyle):
         input_tensor = inputs[0]
         if not isinstance(input_tensor, DTensor):
             input_tensor = DTensor.from_local(
-                input_tensor, device_mesh, input_layouts, run_check=False
+                input_tensor,
+                device_mesh,
+                input_layouts,
+                run_check=False,
             )
 
         # transform the input layouts to the desired layouts of ColwiseParallel
@@ -123,7 +126,8 @@ class ColwiseParallel(ParallelStyle):
             dist_param = nn.Parameter(
                 distribute_tensor(
                     param, device_mesh, [Shard(0)], src_data_rank=self.src_data_rank
-                )
+                ),
+                requires_grad=param.requires_grad,
             )
             module.register_parameter(name, dist_param)
 
@@ -133,7 +137,8 @@ class ColwiseParallel(ParallelStyle):
             dist_param = nn.Parameter(
                 distribute_tensor(
                     param, device_mesh, [Shard(1)], src_data_rank=self.src_data_rank
-                )
+                ),
+                requires_grad=param.requires_grad,
             )
             module.register_parameter(name, dist_param)
 
@@ -160,12 +165,22 @@ class ColwiseParallel(ParallelStyle):
             device_mesh,
             partition_fn,
             partial(
-                self._prepare_input_fn, self.input_layouts, self.desired_input_layouts
+                self._prepare_input_fn,
+                self.input_layouts,
+                self.desired_input_layouts,
             ),
             partial(
                 self._prepare_output_fn, self.output_layouts, self.use_local_output
             ),
         )
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
 
 
 class RowwiseParallel(ParallelStyle):
@@ -204,8 +219,8 @@ class RowwiseParallel(ParallelStyle):
     def __init__(
         self,
         *,
-        input_layouts: Optional[Placement] = None,
-        output_layouts: Optional[Placement] = None,
+        input_layouts: Placement | None = None,
+        output_layouts: Placement | None = None,
         use_local_output: bool = True,
     ):
         super().__init__()
@@ -220,7 +235,10 @@ class RowwiseParallel(ParallelStyle):
         input_tensor = inputs[0]
         if not isinstance(input_tensor, DTensor):
             input_tensor = DTensor.from_local(
-                input_tensor, device_mesh, input_layouts, run_check=False
+                input_tensor,
+                device_mesh,
+                input_layouts,
+                run_check=False,
             )
 
         if input_layouts != desired_input_layouts:
@@ -241,7 +259,8 @@ class RowwiseParallel(ParallelStyle):
                     device_mesh,
                     [Shard(1)],
                     src_data_rank=self.src_data_rank,
-                )
+                ),
+                requires_grad=module.weight.requires_grad,
             ),
         )
         if getattr(module, "bias", None) is not None:
@@ -254,7 +273,8 @@ class RowwiseParallel(ParallelStyle):
                         device_mesh,
                         [Replicate()],
                         src_data_rank=self.src_data_rank,
-                    )
+                    ),
+                    requires_grad=module.bias.requires_grad,
                 ),
             )
 
@@ -264,7 +284,8 @@ class RowwiseParallel(ParallelStyle):
             dist_param = nn.Parameter(
                 distribute_tensor(
                     param, device_mesh, [Shard(0)], src_data_rank=self.src_data_rank
-                )
+                ),
+                requires_grad=param.requires_grad,
             )
             module.register_parameter(name, dist_param)
 
@@ -297,12 +318,22 @@ class RowwiseParallel(ParallelStyle):
             device_mesh,
             partition_fn,
             partial(
-                self._prepare_input_fn, self.input_layouts, self.desired_input_layouts
+                self._prepare_input_fn,
+                self.input_layouts,
+                self.desired_input_layouts,
             ),
             partial(
                 self._prepare_output_fn, self.output_layouts, self.use_local_output
             ),
         )
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
 
 
 class SequenceParallel(ParallelStyle):
@@ -399,6 +430,14 @@ class SequenceParallel(ParallelStyle):
             partial(self._prepare_output_fn, self.use_local_output),
         )
 
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        if len(self.sequence_sharding) == 1:
+            tmpstr += f"sequence_dim={self.sequence_sharding[0].dim}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
+
 
 class PrepareModuleInput(ParallelStyle):
     """
@@ -449,12 +488,10 @@ class PrepareModuleInput(ParallelStyle):
     def __init__(
         self,
         *,
-        input_layouts: Optional[Union[Placement, tuple[Optional[Placement]]]] = None,
-        desired_input_layouts: Optional[
-            Union[Placement, tuple[Optional[Placement]]]
-        ] = None,
-        input_kwarg_layouts: Optional[dict[str, Placement]] = None,
-        desired_input_kwarg_layouts: Optional[dict[str, Placement]] = None,
+        input_layouts: Placement | tuple[Placement | None, ...] | None = None,
+        desired_input_layouts: Placement | tuple[Placement | None, ...] | None = None,
+        input_kwarg_layouts: dict[str, Placement] | None = None,
+        desired_input_kwarg_layouts: dict[str, Placement] | None = None,
         use_local_output: bool = False,
     ):
         self.input_layouts = (
@@ -467,26 +504,27 @@ class PrepareModuleInput(ParallelStyle):
         )
         self.use_local_output = use_local_output
         if self.input_layouts is not None:
-            assert (
-                self.desired_input_layouts is not None
-            ), "desired module inputs should not be None!"
-            assert len(self.input_layouts) == len(
-                self.desired_input_layouts
-            ), "input_layouts and desired_input_layouts should have same length!"
+            if self.desired_input_layouts is None:
+                raise AssertionError("desired module inputs should not be None!")
+            if len(self.input_layouts) != len(self.desired_input_layouts):
+                raise AssertionError(
+                    "input_layouts and desired_input_layouts should have same length!"
+                )
         self.with_kwargs = input_kwarg_layouts is not None
         self.input_kwarg_layouts = input_kwarg_layouts or {}
         self.desired_input_kwarg_layouts = desired_input_kwarg_layouts or {}
         if self.with_kwargs:
-            assert len(self.input_kwarg_layouts) == len(
-                self.desired_input_kwarg_layouts
-            ), "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
+            if len(self.input_kwarg_layouts) != len(self.desired_input_kwarg_layouts):
+                raise AssertionError(
+                    "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
+                )
 
     def _prepare_input_arg(
         self,
         input: Any,
         mesh: DeviceMesh,
-        input_layout: Optional[Placement],
-        desired_layout: Optional[Placement],
+        input_layout: Placement | None,
+        desired_layout: Placement | None,
     ):
         if input_layout is not None:
             if isinstance(input, DTensor):
@@ -494,9 +532,8 @@ class PrepareModuleInput(ParallelStyle):
                 # assert inp.placements[0] == input_layout
                 dt_inp = input
             else:
-                assert isinstance(
-                    input, torch.Tensor
-                ), "expecting input to be a torch.Tensor!"
+                if not isinstance(input, torch.Tensor):
+                    raise AssertionError("expecting input to be a torch.Tensor!")
                 dt_inp = DTensor.from_local(
                     input, mesh, (input_layout,), run_check=False
                 )
@@ -517,9 +554,9 @@ class PrepareModuleInput(ParallelStyle):
         if len(inputs) != len(self.input_layouts):
             raise ValueError("module inputs and input_layouts should have same length!")
 
-        assert (
-            self.desired_input_layouts is not None
-        ), "desired module inputs should not be None!"
+        if self.desired_input_layouts is None:
+            raise AssertionError("desired module inputs should not be None!")
+
         for inp, input_layout, desired_layout in zip(
             inputs, self.input_layouts, self.desired_input_layouts
         ):
@@ -531,7 +568,7 @@ class PrepareModuleInput(ParallelStyle):
     def _prepare_input_kwarg_fn(self, inputs, kwarg_inputs, device_mesh):
         prepared_arg_inputs = self._prepare_input_fn(inputs, device_mesh)
         prepared_kwarg_inputs = {}
-        for kwarg_key in kwarg_inputs.keys():
+        for kwarg_key in kwarg_inputs:
             kwarg_val = kwarg_inputs[kwarg_key]
             input_layout = self.input_kwarg_layouts.get(kwarg_key)
             desired_input_layout = self.desired_input_kwarg_layouts.get(kwarg_key)
@@ -551,8 +588,20 @@ class PrepareModuleInput(ParallelStyle):
                 with_kwargs=True,
             )  # type: ignore[misc]
         else:
-            module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
+            module.register_forward_pre_hook(
+                lambda _, inputs: self._prepare_input_fn(inputs, device_mesh)
+            )  # type: ignore[misc, call-arg]
         return module
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"desired_input_layouts={self.desired_input_layouts}, "
+        tmpstr += f"input_kwarg_layouts={self.input_kwarg_layouts}, "
+        tmpstr += f"desired_input_kwarg_layouts={self.desired_input_kwarg_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
 
 
 class PrepareModuleOutput(ParallelStyle):
@@ -596,8 +645,8 @@ class PrepareModuleOutput(ParallelStyle):
     def __init__(
         self,
         *,
-        output_layouts: Union[Placement, tuple[Placement]],
-        desired_output_layouts: Union[Placement, tuple[Placement]],
+        output_layouts: Placement | tuple[Placement | None, ...],
+        desired_output_layouts: Placement | tuple[Placement, ...],
         use_local_output: bool = True,
     ):
         self.output_layouts = (
@@ -611,9 +660,10 @@ class PrepareModuleOutput(ParallelStyle):
             else desired_output_layouts
         )
         self.use_local_output = use_local_output
-        assert len(self.output_layouts) == len(
-            self.desired_output_layouts
-        ), "output_layouts and desired_output_layouts should have same length!"
+        if len(self.output_layouts) != len(self.desired_output_layouts):
+            raise AssertionError(
+                "output_layouts and desired_output_layouts should have same length!"
+            )
 
     def _prepare_out_fn(self, outputs, device_mesh):
         prepared_outputs = []
@@ -623,6 +673,7 @@ class PrepareModuleOutput(ParallelStyle):
             raise ValueError(
                 "module outputs and output_layouts should have same length!"
             )
+
         for out, out_layout, desired_out_layout in zip(
             outputs, self.output_layouts, self.desired_output_layouts
         ):
@@ -649,5 +700,124 @@ class PrepareModuleOutput(ParallelStyle):
             return tuple(prepared_outputs)
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        module.register_forward_hook(lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh))  # type: ignore[misc, call-arg]
+        module.register_forward_hook(
+            lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh)
+        )  # type: ignore[misc, call-arg]
         return module
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"desired_output_layouts={self.desired_output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
+
+
+class PrepareModuleInputOutput(ParallelStyle):
+    """
+    Configure the nn.Module's inputs (and outputs) to convert the input tensors (and output tensors, respectively) of the nn.Module
+    to DTensors at runtime according to ``input_layouts`` (and output_layouts, respectively), and perform layout redistribution
+    according to the ``desired_input_layouts`` (and ``desired_output_layouts``, respectively). This is a combination of
+    :class:`PrepareModuleInput` and :class:`PrepareModuleOutput`.
+
+    Keyword Args:
+        input_layouts (Union[Placement, Tuple[Optional[Placement]]]):
+            The DTensor layouts of input tensors for the nn.Module, this is used to convert the input tensors to
+            DTensors. If some inputs are not torch.Tensor or no need to convert to DTensors, ``None`` need to be specified
+            as a placeholder. default: None.
+        desired_input_layouts (Union[Placement, Tuple[Optional[Placement]]]):
+            The desired DTensor layout of input tensors for the nn.Module, this is used to ensure the inputs of the nn.Module
+            have the desired DTensor layouts. This argument needs to have the same length with ``input_layouts``. default: None.
+        input_kwarg_layouts (Dict[str, Placement]):
+            The DTensor layouts of input kwargs for the nn.Module, this is used to convert the input kwarg tensors to DTensors.
+            default: None
+        desired_input_kwarg_layouts: (Dict[str, Placement]):
+            The desired DTensor layout of input kwargs for the nn.Module, this is used to ensure the inputs of the nn.Module
+            have the desired DTensor layouts. default: None.
+        use_local_input (bool, optional):
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module inputs, default: False.
+        output_layouts (Union[Placement, Tuple[Placement]]):
+            The DTensor layouts of output tensors for the nn.Module, this is used to convert the output tensors to
+            DTensors if they are :class:`torch.Tensor`. If some outputs are not torch.Tensor or no need to convert to DTensors,
+            ``None`` need to be specified as a placeholder.
+        desired_output_layouts (Union[Placement, Tuple[Placement]]):
+            The desired DTensor layouts of output tensors for the nn.Module, this is used to ensure the outputs of the nn.Module
+            have the desired DTensor layouts.
+        use_local_output (bool, optional):
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: True.
+    Returns:
+        A :class:`ParallelStyle` object that prepares the sharding layouts of the nn.Module's inputs and outputs.
+
+    Example::
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInputOutput
+        >>> from torch.distributed.device_mesh import init_device_mesh
+        >>> ...
+        >>> block = TransformerBlock(...)  # block is a nn.Module that contains an "attn" Attention submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # According to the style specified below, the first input of attn will be annotated as Sharded DTensor
+        >>> # and then redistributed to Replicated DTensor, and the output of the TransformerBlock will be annotated
+        >>> # as Replicated DTensor and then redistributed to Sharded DTensor.
+        >>> parallelize_module(
+        >>>     block, # this can be a submodule or module
+        >>>     tp_mesh,
+        >>>     parallelize_plan={
+        >>>         "attn": PrepareModuleInputOutput(
+        >>>             input_layouts=(Shard(0), None, None, ...),
+        >>>             desired_input_layouts=(Replicate(), None, None, ...),
+        >>>             output_layouts=Replicate(),
+        >>>             desired_output_layouts=Shard(0),
+        >>>         ),
+        >>>     }
+        >>> )
+    """
+
+    def __init__(
+        self,
+        *,
+        input_layouts: Placement | tuple[Placement | None, ...] | None = None,
+        desired_input_layouts: Placement | tuple[Placement | None, ...] | None = None,
+        input_kwarg_layouts: dict[str, Placement] | None = None,
+        desired_input_kwarg_layouts: dict[str, Placement] | None = None,
+        use_local_input: bool = False,
+        output_layouts: Placement | tuple[Placement | None, ...],
+        desired_output_layouts: Placement | tuple[Placement, ...],
+        use_local_output: bool = True,
+    ):
+        self.prepare_module_input = PrepareModuleInput(
+            input_layouts=input_layouts,
+            desired_input_layouts=desired_input_layouts,
+            input_kwarg_layouts=input_kwarg_layouts,
+            desired_input_kwarg_layouts=desired_input_kwarg_layouts,
+            use_local_output=use_local_input,
+        )
+        self.prepare_module_output = PrepareModuleOutput(
+            output_layouts=output_layouts,
+            desired_output_layouts=desired_output_layouts,
+            use_local_output=use_local_output,
+        )
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        self.prepare_module_input._apply(module, device_mesh)
+        self.prepare_module_output._apply(module, device_mesh)
+
+        return module
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"input_layouts={self.prepare_module_input.input_layouts}, "
+        tmpstr += (
+            f"desired_input_layouts={self.prepare_module_input.desired_input_layouts}, "
+        )
+        tmpstr += (
+            f"input_kwarg_layouts={self.prepare_module_input.input_kwarg_layouts}, "
+        )
+        tmpstr += f"desired_input_kwarg_layouts={self.prepare_module_input.desired_input_kwarg_layouts}, "
+        tmpstr += f"use_local_input={self.prepare_module_input.use_local_output}, "
+        tmpstr += f"output_layouts={self.prepare_module_output.output_layouts}, "
+        tmpstr += f"desired_output_layouts={self.prepare_module_output.desired_output_layouts}, "
+        tmpstr += f"use_local_output={self.prepare_module_output.use_local_output}"
+        tmpstr += ")"
+        return tmpstr

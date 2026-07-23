@@ -3,11 +3,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import io
+import logging
 import os
 import shutil
 import tempfile
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, cast, IO, Optional
+from typing import Any, cast, IO
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
@@ -62,7 +64,7 @@ class Rot13Example(StreamTransformExtension):
             def writeable(self) -> bool:
                 return True
 
-            def write(self, b: Buffer) -> Optional[int]:
+            def write(self, b: Buffer) -> int | None:
                 # Don't mutate the input
                 chunk = bytearray(b)
                 Rot13Example._rot13bytes(chunk, len(chunk))
@@ -81,16 +83,14 @@ class Rot13Example(StreamTransformExtension):
             def readable(self) -> bool:
                 return True
 
-            def readinto(self, b: Buffer) -> Optional[int]:
+            def readinto(self, b: Buffer) -> int | None:
                 if hasattr(self.input, "readinto"):
                     count = self.input.readinto(b)
                 else:
                     # It's possible self.input is an IO[bytes] with no readinto method.
                     # In that case, we emulate with a read and copy.  In practice,
                     # all of the current concrete extensions have readinto.
-                    # 0 as a flags value is janky, but the flag values aren't available
-                    # in python until 3.12.
-                    view = b.__buffer__(0)
+                    view = memoryview(b)
                     r = self.input.read(len(view))
                     if r is None:
                         count = None
@@ -122,12 +122,13 @@ def get_test_extension_registry() -> ExtensionRegistry:
 
 
 def with_temp_dir(
-    func: Optional[Callable] = None,
-) -> Optional[Callable]:
+    func: Callable | None = None,
+) -> Callable | None:
     """
     Wrapper to initialize temp directory for distributed checkpoint.
     """
-    assert func is not None
+    if func is None:
+        raise AssertionError("Expected func to not be None")
 
     @wraps(func)
     def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:
@@ -157,5 +158,39 @@ def with_temp_dir(
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
             else:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    return wrapper
+
+
+def with_checkpoint_logging(
+    func: Callable | None = None,
+    logger_name: str = "torch.distributed.checkpoint",
+    level: int = logging.INFO,
+) -> Callable | None:
+    """
+    Wrapper to configure checkpoint logging for distributed tests.
+
+    Args:
+        func: The test function to wrap
+        logger_name: Name of the logger to configure (default: 'torch.distributed.checkpoint')
+        level: Logging level to set (default: logging.INFO)
+    """
+    if func is None:
+        raise AssertionError("Expected func to not be None")
+
+    @wraps(func)
+    def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:
+        # Get the logger and store original level
+        target_logger = logging.getLogger(logger_name)
+        original_level = target_logger.level
+
+        # Set the desired logging level
+        target_logger.setLevel(level)
+
+        try:
+            func(self, *args, **kwargs)
+        finally:
+            # Restore original logging level
+            target_logger.setLevel(original_level)
 
     return wrapper

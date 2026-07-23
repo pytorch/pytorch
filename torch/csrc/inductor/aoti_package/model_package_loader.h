@@ -2,15 +2,18 @@
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <c10/core/Device.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 
 namespace torch::inductor {
 class TORCH_API AOTIModelPackageLoader {
  public:
-  AOTIModelPackageLoader(const std::string& model_package_path);
   AOTIModelPackageLoader(
       const std::string& model_package_path,
-      const std::string& model_name);
+      const std::string& model_name = "model",
+      const bool run_single_threaded = false,
+      const size_t num_runners = 1,
+      const c10::DeviceIndex device_index = -1);
   ~AOTIModelPackageLoader();
 
   AOTIModelContainerRunner* get_runner();
@@ -26,16 +29,46 @@ class TORCH_API AOTIModelPackageLoader {
       void* stream_handle = nullptr);
 
   std::vector<std::string> get_call_spec();
+  // When allow_h2d_copy is true, CPU tensors in constants_map are silently
+  // copied to the model's device. allow_h2d_copy is incompatible with
+  // user_managed.
   void load_constants(
       std::unordered_map<std::string, at::Tensor>& constants_map,
       bool use_inactive,
-      bool check_full_update);
+      bool check_full_update,
+      bool user_managed = false,
+      bool allow_h2d_copy = false);
   std::vector<std::string> get_constant_fqns();
+
+  // Returns the torchbind custom-class constants embedded in this model
+  // package. The IValue payloads alias the live entries inside the runner's
+  // proxy executor: downcasting to a CustomClassHolder subclass and mutating
+  // its state will affect subsequent run() invocations. Returns empty when
+  // the model has no torchbind constants.
+  std::unordered_map<std::string, c10::IValue> get_custom_objs() const {
+    return runner_ ? runner_->get_custom_objs()
+                   : std::unordered_map<std::string, c10::IValue>{};
+  }
+
+  void update_constant_buffer(
+      std::unordered_map<std::string, at::Tensor>& tensor_map,
+      bool use_inactive,
+      bool validate_full_updates,
+      bool user_managed = false);
+
+  // Static function to load metadata directly from a model package
+  static std::unordered_map<std::string, std::string> load_metadata_from_package(
+      const std::string& model_package_path,
+      const std::string& model_name);
 
  private:
   std::string temp_dir_;
   std::unique_ptr<AOTIModelContainerRunner> runner_;
   std::unordered_map<std::string, std::string> metadata_;
+  // True when loading from a user-provided unpacked package directory. In this
+  // mode temp_dir_ points to that directory and must not be removed by the
+  // loader. False when temp_dir_ is an owned extraction directory.
+  bool is_directory_ = false;
 
   void load_metadata(const std::string& cpp_filename);
 };

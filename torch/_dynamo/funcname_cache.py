@@ -1,5 +1,22 @@
+"""
+This module provides functionality for caching and looking up fully qualified function
+and class names from Python source files by line number.
+
+It uses Python's tokenize module to parse source files and tracks function/class
+definitions along with their nesting to build fully qualified names (e.g. 'class.method'
+or 'module.function'). The results are cached in a two-level dictionary mapping:
+
+    filename -> (line_number -> fully_qualified_name)
+
+Example usage:
+    name = get_funcname("myfile.py", 42)  # Returns name of function/class at line 42
+    clearcache()  # Clear the cache if file contents have changed
+
+The parsing is done lazily when a file is first accessed. Invalid Python files or
+IO errors are handled gracefully by returning empty cache entries.
+"""
+
 import tokenize
-from typing import Optional
 
 
 cache: dict[str, dict[int, str]] = {}
@@ -13,7 +30,7 @@ def _add_file(filename: str) -> None:
     try:
         with tokenize.open(filename) as f:
             tokens = list(tokenize.generate_tokens(f.readline))
-    except OSError:
+    except (OSError, tokenize.TokenError):
         cache[filename] = {}
         return
 
@@ -51,7 +68,7 @@ def _add_file(filename: str) -> None:
     cache[filename] = result
 
 
-def get_funcname(filename: str, lineno: int) -> Optional[str]:
+def get_funcname(filename: str, lineno: int) -> str | None:
     if filename not in cache:
         _add_file(filename)
     return cache[filename].get(lineno, None)

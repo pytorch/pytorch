@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/cuda/ThrustAllocator.h>
@@ -12,6 +13,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -30,10 +32,12 @@
 
 #include <thrust/binary_search.h>
 #include <thrust/device_ptr.h>
+#include <thrust/distance.h>
+#include <thrust/for_each.h>
+#include <thrust/scan.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
-#include <thrust/system/cuda/execution_policy.h>
-#include <thrust/iterator/constant_iterator.h>
+#include <thrust/transform.h>
 
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
@@ -45,21 +49,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 
 #include <c10/macros/Macros.h>
-#include <thrust/copy.h>
-#include <thrust/device_ptr.h>
-#include <thrust/for_each.h>
-#include <thrust/functional.h>
-#include <thrust/gather.h>
-#include <thrust/generate.h>
-#include <thrust/iterator/discard_iterator.h>
-#include <thrust/reduce.h>
-#include <thrust/scan.h>
-#include <thrust/sequence.h>
-#include <thrust/sort.h>
-#include <thrust/transform.h>
-#include <thrust/unique.h>
-
-#include <c10/cuda/CUDAMathCompat.h>
 
 namespace at::native {
 namespace {
@@ -263,8 +252,8 @@ Tensor get_offsets(
 
   thrust::transform(
       policy,
-      thrust::make_counting_iterator(int64_t(0)),
-      thrust::make_counting_iterator(int64_t(nnz)),
+      cccl_counting_iterator<int64_t>{0ll},
+      cccl_counting_iterator<int64_t>{nnz},
       thrust::device_ptr<int64_t>(offsets.data_ptr<int64_t>()),
       [indices_accessor, strides_ptr, dim, ndim] __device__(int64_t x) {
         int64_t pool_index = 0;
@@ -304,7 +293,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
   int64_t* offsets_ptr = offsets.data_ptr<int64_t>();
 
   auto sorted_indices = at::empty({nnz}, indices.options());
-  thrust_ptr sorted_indices_thrust_ptr(sorted_indices.data_ptr<int64_t>());
+  thrust_ptr sorted_indices_thrust_ptr(sorted_indices.template data_ptr<int64_t>());
   thrust::sequence(
       policy, sorted_indices_thrust_ptr, sorted_indices_thrust_ptr + nnz, 0);
 
@@ -321,19 +310,24 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
       policy,
       sorted_indices_thrust_ptr,
       sorted_indices_thrust_ptr + nnz,
-      thrust::make_constant_iterator(int64_t(1)),
-      thrust::make_discard_iterator(),
-      thrust_ptr(pool_sizes.data_ptr<int64_t>()),
+      cccl_constant_iterator<int64_t>{1ll},
+      cccl_discard_iterator(),
+      thrust_ptr(pool_sizes.template data_ptr<int64_t>()),
       [offsets_ptr] __device__(int64_t x, int64_t y) {
         return offsets_ptr[x] == offsets_ptr[y];
       });
+#if !defined(USE_ROCM)
+  auto new_sz = ::cuda::std::distance(
+      thrust_ptr(pool_sizes.template data_ptr<int64_t>()), new_end.second);
+#else
   auto new_sz = thrust::distance(
-      thrust_ptr(pool_sizes.data_ptr<int64_t>()), new_end.second);
+      thrust_ptr(pool_sizes.template data_ptr<int64_t>()), new_end.second);
+#endif
   pool_sizes.resize_({new_sz});
 
   auto pool_offsets = pool_sizes.clone();
   thrust_ptr pool_offsets_thrust_ptr(
-      pool_offsets.data_ptr<int64_t>());
+      pool_offsets.template data_ptr<int64_t>());
   thrust::exclusive_scan(
       policy,
       pool_offsets_thrust_ptr,
@@ -350,14 +344,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
 
     auto mx_buffer_ptr = mx_buffer.data_ptr<scalar_t>();
 
-    auto pool_sizes_ptr = pool_sizes.data_ptr<int64_t>();
-    auto sorted_indices_ptr = sorted_indices.data_ptr<int64_t>();
-    auto pool_offsets_ptr = pool_offsets.data_ptr<int64_t>();
+    auto pool_sizes_ptr = pool_sizes.template data_ptr<int64_t>();
+    auto sorted_indices_ptr = sorted_indices.template data_ptr<int64_t>();
+    auto pool_offsets_ptr = pool_offsets.template data_ptr<int64_t>();
 
     thrust::for_each(
         policy,
-        thrust::make_counting_iterator(int64_t(0)),
-        thrust::make_counting_iterator(int64_t(new_sz)),
+        cccl_counting_iterator<int64_t>{0ll},
+        cccl_counting_iterator<int64_t>{new_sz},
         [values_accessor,
          sorted_indices_ptr,
          pool_sizes_ptr,
@@ -377,7 +371,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
         });
   }
   return std::make_tuple(
-      sorted_indices, pool_offsets, pool_sizes, mx_buffer);
+      std::move(sorted_indices),
+      std::move(pool_offsets),
+      std::move(pool_sizes),
+      std::move(mx_buffer));
 }
 
 template <typename scalar_t, bool LogSoftMax>

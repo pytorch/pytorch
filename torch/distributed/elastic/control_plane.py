@@ -23,14 +23,14 @@ def _worker_server(socket_path: str) -> Generator[None, None, None]:
         server.shutdown()
 
 
-@contextmanager
 @record
+@contextmanager
 def worker_main() -> Generator[None, None, None]:
     """
     This is a context manager that wraps your main entry function. This combines
     the existing ``errors.record`` logic as well as a new ``_WorkerServer`` that
     exposes handlers via a unix socket specified by
-    ``Torch_WORKER_SERVER_SOCKET``.
+    ``TORCH_WORKER_SERVER_SOCKET``.
 
     Example
 
@@ -40,8 +40,9 @@ def worker_main() -> Generator[None, None, None]:
      def main():
          pass
 
-     if __name__=="__main__":
-        main()
+
+     if __name__ == "__main__":
+         main()
 
     """
     with ExitStack() as stack:

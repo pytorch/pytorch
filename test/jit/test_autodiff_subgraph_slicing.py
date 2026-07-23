@@ -20,18 +20,15 @@ sys.path.append(pytorch_test_dir)
 from typing import List, Optional, Tuple
 
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import (
     disable_autodiff_subgraph_inlining,
     JitTestCase,
 )
 
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
+if GRAPH_EXECUTOR is None:
+    raise AssertionError("GRAPH_EXECUTOR is not set")
 
 
 @unittest.skipIf(
@@ -227,9 +224,21 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             output_ref = func(input0, input1)
             for _ in range(2):
                 output = jit_f(input0, input1)
-                assert output_ref[0].requires_grad == output[0].requires_grad
-                assert output_ref[1][0].requires_grad == output[1][0].requires_grad
-                assert output_ref[1][1].requires_grad == output[1][1].requires_grad
+                if output_ref[0].requires_grad != output[0].requires_grad:
+                    raise AssertionError(
+                        f"requires_grad mismatch for output[0]: "
+                        f"{output_ref[0].requires_grad} vs {output[0].requires_grad}"
+                    )
+                if output_ref[1][0].requires_grad != output[1][0].requires_grad:
+                    raise AssertionError(
+                        f"requires_grad mismatch for output[1][0]: "
+                        f"{output_ref[1][0].requires_grad} vs {output[1][0].requires_grad}"
+                    )
+                if output_ref[1][1].requires_grad != output[1][1].requires_grad:
+                    raise AssertionError(
+                        f"requires_grad mismatch for output[1][1]: "
+                        f"{output_ref[1][1].requires_grad} vs {output[1][1].requires_grad}"
+                    )
 
     @unittest.skip(
         "disable until we property handle tensor lists with undefined gradients"
@@ -589,3 +598,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         FileCheck().check("= prim::DifferentiableGraph").check(
             "with prim::DifferentiableGraph"
         ).check(" = aten::relu").check("requires_grad=0").check("aten::relu").run(graph)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

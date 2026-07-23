@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import json
 import os
 import re
-from typing import Any, cast, Dict, List, Optional
+from typing import Any, cast
 from urllib.error import HTTPError
 
 from github_utils import gh_fetch_url, gh_post_pr_comment, gh_query_issues_by_labels
@@ -48,7 +50,7 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def get_merge_commit_sha(repo: GitRepo, pr: GitHubPR) -> Optional[str]:
+def get_merge_commit_sha(repo: GitRepo, pr: GitHubPR) -> str | None:
     """
     Return the merge commit SHA iff the PR has been merged. For simplicity, we
     will only cherry pick PRs that have been merged into main
@@ -57,7 +59,7 @@ def get_merge_commit_sha(repo: GitRepo, pr: GitHubPR) -> Optional[str]:
     return commit_sha if pr.is_closed() else None
 
 
-def get_release_version(onto_branch: str) -> Optional[str]:
+def get_release_version(onto_branch: str) -> str | None:
     """
     Return the release version if the target branch is a release branch
     """
@@ -67,7 +69,7 @@ def get_release_version(onto_branch: str) -> Optional[str]:
 
 def get_tracker_issues(
     org: str, project: str, onto_branch: str
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Find the tracker issue from the repo. The tracker issue needs to have the title
     like [VERSION] Release Tracker following the convention on PyTorch
@@ -117,7 +119,7 @@ def cherry_pick(
                 continue
 
             res = cast(
-                Dict[str, Any],
+                dict[str, Any],
                 post_tracker_issue_comment(
                     org,
                     project,
@@ -220,7 +222,7 @@ def submit_pr(
 
 def post_pr_comment(
     org: str, project: str, pr_num: int, msg: str, dry_run: bool = False
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Post a comment on the PR itself to point to the cherry picking PR when success
     or print the error when failure
@@ -255,7 +257,7 @@ def post_tracker_issue_comment(
     classification: str,
     fixes: str,
     dry_run: bool = False,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Post a comment on the tracker issue (if any) to record the cherry pick
     """

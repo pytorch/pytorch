@@ -1,6 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Collection, Mapping, MutableMapping
-from typing import Callable, cast, Optional, TypeVar, Union
+# ruff: noqa: F821
+# flake8: noqa: F821
+from collections.abc import Callable, Collection, Mapping, MutableMapping
+from typing import cast, TypeVar
+from typing_extensions import TypeIs
 
 import torch
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
@@ -8,7 +11,7 @@ from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.distributed.tensor import DTensor
 
 
-PATH_ITEM = Union[str, int]
+PATH_ITEM = str | int
 OBJ_PATH = tuple[PATH_ITEM, ...]
 T = TypeVar("T")
 
@@ -18,7 +21,7 @@ CONTAINER_TYPE = MutableMapping[PATH_ITEM, STATE_DICT_ITEM]
 __all__ = ["traverse_state_dict", "set_element", "get_element", "print_tensor"]
 
 
-def _keep_visiting_tensors(value: STATE_DICT_ITEM) -> bool:
+def _keep_visiting_tensors(value: STATE_DICT_ITEM) -> TypeIs[torch.Tensor]:
     return isinstance(value, torch.Tensor)
 
 
@@ -64,6 +67,9 @@ def traverse_state_dict(
     for key, value in state_dict.items():
         _traverse_obj((str(key),), value)
 
+    # release reference cycle to prevent memory leaks in async_save
+    del _traverse_obj, _is_terminal
+
 
 def traverse_state_dict_v_2_3(
     state_dict: STATE_DICT_TYPE,
@@ -71,7 +77,7 @@ def traverse_state_dict_v_2_3(
     keep_traversing: Callable[[STATE_DICT_ITEM], bool] = _keep_visiting_tensors,
 ) -> None:
     """
-    Traversal is short-circuited when if finds a collection for which ``keep_visiting_tensors`` evaluates
+    Traversal is short-circuited when it finds a collection for which ``keep_visiting_tensors`` evaluates
     to false for all elements.
     By default, all collections with at least one ``torch.Tensor`` element are traversed.
     Visitor takes a path argument that is a tuple of the keys used to reach it.
@@ -107,6 +113,9 @@ def traverse_state_dict_v_2_3(
     for key, value in state_dict.items():
         _traverse_obj((str(key),), value)
 
+    # release reference cycle to prevent memory leaks in async_save
+    del _traverse_obj, _is_terminal
+
 
 def set_element(
     root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: STATE_DICT_ITEM
@@ -121,20 +130,21 @@ def set_element(
     for i in range(1, len(path)):
         prev_key = path[i - 1]
         key = path[i]
-        def_val = cast(STATE_DICT_ITEM, {} if type(key) == str else [])
+        def_val = cast(STATE_DICT_ITEM, {} if type(key) is str else [])
 
         if isinstance(cur_container, Mapping):
             cur_container = cast(
                 CONTAINER_TYPE, cur_container.setdefault(prev_key, def_val)
             )
         else:
+            # pyrefly: ignore [bad-argument-type]
             extend_list(cur_container, prev_key)
             if cur_container[prev_key] is None:
                 cur_container[prev_key] = def_val
             cur_container = cur_container[prev_key]
 
     key = path[-1]
-    if type(key) == int:
+    if type(key) is int:
         extend_list(cast(list[STATE_DICT_ITEM], cur_container), key)
 
     cur_container[key] = value
@@ -143,8 +153,8 @@ def set_element(
 def get_element(
     root_dict: STATE_DICT_TYPE,
     path: OBJ_PATH,
-    default_value: Optional[T] = None,
-) -> Optional[T]:
+    default_value: T | None = None,
+) -> T | None:
     """Retrieve the value at ``path``from ``root_dict``, returning ``default_value`` if not found."""
     cur_value = cast(CONTAINER_TYPE, root_dict)
     for part in path:
@@ -155,7 +165,7 @@ def get_element(
             return default_value
 
         cur_value = cast(CONTAINER_TYPE, cur_value[part])
-    return cast(Optional[T], cur_value)
+    return cast(T | None, cur_value)
 
 
 def _print_nested(
@@ -193,6 +203,6 @@ def print_tensor(
     Use this callback with traverse_state_dict to print its content.
 
     By default the content is printed using the builtin ``print`` but this can
-    be change by passing a different ``print_fun` callable.
+    be changed by passing a different ``print_fun`` callable.
     """
     _print_nested(value, prefix=str(path), print_fun=print_fun)

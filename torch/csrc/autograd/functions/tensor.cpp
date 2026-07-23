@@ -60,7 +60,7 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
       src_options);
 }
 
-void CopyBackwards::compiled_args(CompiledNodeArgs& args) {
+void CopyBackwards::compiled_args(CompiledNodeArgs& args) const {
   args.collect(src_options);
 }
 
@@ -69,8 +69,7 @@ variable_list CopyBackwards::apply_with_saved(
     SwapSavedVariables& saved) {
   saved.before(src_options);
 
-  static c10::once_flag flag;
-  c10::call_once(flag, [&]() {
+  static bool flag [[maybe_unused]] = [&]() {
     std::vector<at::TypePtr> schema = {
         IValuePacker<std::array<bool, 2>>::packed_type(),
         IValuePacker<c10::TensorOptions>::packed_type()};
@@ -80,7 +79,8 @@ variable_list CopyBackwards::apply_with_saved(
         name(),
         CopyBackwards_apply_functional_ivalue,
         schema);
-  });
+    return true;
+  }();
 
   PackedArgs packed_args;
   packed_args.pack<std::array<bool, 2>>(
@@ -108,7 +108,7 @@ CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
     std::unique_ptr<ViewFunc> view_fn_,
-    std::shared_ptr<Node> fn_)
+    c10::intrusive_ptr<Node> fn_)
     : base(base_var),
       view(std::move(view_)),
       view_fn(std::move(view_fn_)),
@@ -184,9 +184,7 @@ inline variable_list CopySlices::apply_impl(
   // see Note [Thread Safety on Autograd Node]
   std::lock_guard<std::mutex> lock(mutex_);
 
-  if (!fn) {
-    throw std::runtime_error(ERR_BACKWARD_TWICE);
-  }
+  TORCH_CHECK(fn, ERR_BACKWARD_TWICE);
 
   auto result =
       grad.new_empty_strided_symint(base.sym_sizes(), base.sym_strides());
@@ -235,7 +233,7 @@ void CopySlices::release_variables() {
   fn = nullptr;
 }
 
-void CopySlices::compiled_args(CompiledNodeArgs& args) {
+void CopySlices::compiled_args(CompiledNodeArgs& args) const {
   TORCH_CHECK(!view_fn, "view_fn not supported by compiled autograd")
   TORCH_INTERNAL_ASSERT((bool)fn);
   args.collect(base);
@@ -252,12 +250,11 @@ variable_list CopySlices::apply_with_saved(
 
   auto results = variable_list(num_outputs());
   if (grads[0].defined()) {
-    if (!fn) {
-      throw std::runtime_error(ERR_BACKWARD_TWICE);
-    }
+    TORCH_CHECK(fn, ERR_BACKWARD_TWICE);
     update_exec_info();
 
     std::vector<bool> needs_input_grad;
+    needs_input_grad.reserve(num_outputs());
     for (const auto i : c10::irange(num_outputs())) {
       needs_input_grad.emplace_back(task_should_compute_output(i));
     }
@@ -270,9 +267,9 @@ variable_list CopySlices::apply_with_saved(
     TORCH_INTERNAL_ASSERT(stuff.size() == 3);
     // These variables are named the same as in CopySlices::apply_impl.
     // Follow along there.
-    auto result = stuff[0];
-    auto grad_slice = stuff[1];
-    auto grad_slice_clone = stuff[2];
+    const auto& result = stuff[0];
+    const auto& grad_slice = stuff[1];
+    const auto& grad_slice_clone = stuff[2];
     auto res = fn->apply_with_saved({grad_slice_clone}, saved);
     results = interface->call_copy_slices_epilogue(
         saved.get_py_compiler(), needs_input_grad, result, res, grad_slice);

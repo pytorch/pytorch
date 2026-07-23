@@ -2,6 +2,6 @@
 
 namespace c10::cuda::impl {
 
-C10_REGISTER_GUARD_IMPL(CUDA, CUDAGuardImpl);
+C10_REGISTER_GUARD_IMPL(CUDA, CUDAGuardImpl)
 
 } // namespace c10::cuda::impl

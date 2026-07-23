@@ -1,4 +1,7 @@
 # mypy: allow-untyped-defs
+# pylint: disable=useless-parent-delegation
+from __future__ import annotations
+
 import ctypes
 
 import torch
@@ -32,6 +35,9 @@ class Stream(torch._C._CudaStreamBase):
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
+        # Check CUDA availability
+        if not torch.backends.cuda.is_built():
+            raise RuntimeError("torch.cuda.Stream requires CUDA support")
         # setting device manager is expensive, so we avoid it unless necessary
         if device is None or ("stream_id" in kwargs and "device_index" in kwargs):
             return super().__new__(cls, priority=priority, **kwargs)
@@ -39,11 +45,11 @@ class Stream(torch._C._CudaStreamBase):
             with torch.cuda.device(device):
                 return super().__new__(cls, priority=priority, **kwargs)
 
-    def wait_event(self, event) -> None:
+    def wait_event(self, event: Event | torch.Event) -> None:
         r"""Make all future work submitted to the stream wait for an event.
 
         Args:
-            event (torch.cuda.Event): an event to wait for.
+            event (Event, torch.Event): an event to wait for.
 
         .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
            `CUDA Stream documentation`_ for more info.
@@ -56,25 +62,25 @@ class Stream(torch._C._CudaStreamBase):
         """
         event.wait(self)
 
-    def wait_stream(self, stream) -> None:
+    def wait_stream(self, stream: Stream | torch.Stream) -> None:
         r"""Synchronize with another stream.
 
         All future work submitted to this stream will wait until all kernels
         submitted to a given stream at the time of call complete.
 
         Args:
-            stream (Stream): a stream to synchronize.
+            stream (Stream, torch.Stream): a stream to synchronize.
 
         .. note:: This function returns without waiting for currently enqueued
            kernels in :attr:`stream`: only future operations are affected.
         """
         self.wait_event(stream.record_event())
 
-    def record_event(self, event=None):
+    def record_event(self, event: Event | torch.Event | None = None):
         r"""Record an event.
 
         Args:
-            event (torch.cuda.Event, optional): event to record. If not given, a new one
+            event (Event, torch.Event, optional): event to record. If not given, a new one
                 will be allocated.
 
         Returns:
@@ -115,6 +121,16 @@ class Stream(torch._C._CudaStreamBase):
 
     def __repr__(self):
         return f"<torch.cuda.Stream device={self.device} cuda_stream={self.cuda_stream:#x}>"
+
+    def __cuda_stream__(self):
+        """Implements the CUDA Stream Protocol:
+        https://nvidia.github.io/cuda-python/cuda-core/latest/interoperability.html#cuda-stream-protocol
+
+        Returns:
+            tuple: A 2-tuple of (version, handle) where version is the protocol version
+                   and handle is the address of cudaStream_t (CUDA) or hipStream_t (ROCm) as a Python int.
+        """
+        return (0, self.cuda_stream)
 
 
 class ExternalStream(Stream):
@@ -158,17 +174,21 @@ class Event(torch._C._CudaEventBase):
         blocking (bool, optional): if ``True``, :meth:`wait` will be blocking (default: ``False``)
         interprocess (bool): if ``True``, the event can be shared between processes
             (default: ``False``)
+        external (bool, optional): indicates whether this event should create event record and event wait nodes, or create an internal cross-stream dependency, when captured in a cuda graph. See `cross-stream dependencies <https://docs.nvidia.com/cuda/archive/12.9.0/cuda-c-programming-guide/index.html#cross-stream-dependencies-and-events>`_, `cudaEventRecordExternal <https://docs.nvidia.com/cuda/archive/12.9.0/cuda-runtime-api/group__CUDART__TYPES.html#group__CUDART__TYPES_1g3457b81d1d32c6a00f6132fbc2693d47>`_, and `cudaEventWaitExternal <https://docs.nvidia.com/cuda/archive/12.9.0/cuda-runtime-api/group__CUDART__TYPES.html#group__CUDART__TYPES_1g0c23426b7252eaa9cef695859991304e>`_ for more information about internal vs. external events. (default: ``False``)
 
     .. _CUDA Event Documentation:
        https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
     """
 
-    def __new__(cls, enable_timing=False, blocking=False, interprocess=False):
+    def __new__(
+        cls, enable_timing=False, blocking=False, interprocess=False, external=False
+    ):
         return super().__new__(
             cls,
             enable_timing=enable_timing,
             blocking=blocking,
             interprocess=interprocess,
+            external=external,
         )
 
     @classmethod
@@ -176,26 +196,30 @@ class Event(torch._C._CudaEventBase):
         r"""Reconstruct an event from an IPC handle on the given device."""
         return super().from_ipc_handle(device, handle)
 
-    def record(self, stream=None):
+    def record(self, stream: Stream | torch.Stream | None = None):
         r"""Record the event in a given stream.
 
-        Uses ``torch.cuda.current_stream()`` if no stream is specified. The
-        stream's device must match the event's device.
+        Args:
+            stream (Stream, torch.Stream, optional): Uses ``torch.cuda.current_stream()`` if no stream is specified.
+                The stream's device must match the event's device.
         """
         if stream is None:
             stream = torch.cuda.current_stream()
+        # pyrefly: ignore [bad-argument-type]
         super().record(stream)
 
-    def wait(self, stream=None) -> None:
+    def wait(self, stream: Stream | torch.Stream | None = None) -> None:
         r"""Make all future work submitted to the given stream wait for this event.
 
-        Use ``torch.cuda.current_stream()`` if no stream is specified.
+        Args:
+            stream (Stream, torch.Stream, optional): Uses ``torch.cuda.current_stream()`` if no stream is specified.
 
         .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
             `CUDA Event documentation`_ for more info.
         """
         if stream is None:
             stream = torch.cuda.current_stream()
+        # pyrefly: ignore [bad-argument-type]
         super().wait(stream)
 
     def query(self):
@@ -207,11 +231,14 @@ class Event(torch._C._CudaEventBase):
         """
         return super().query()
 
-    def elapsed_time(self, end_event):
+    def elapsed_time(self, end_event: Event):
         r"""Return the time elapsed.
 
         Time reported in milliseconds after the event was recorded and
         before the end_event was recorded.
+
+        Args:
+            end_event (Event): the end event.
         """
         return super().elapsed_time(end_event)
 

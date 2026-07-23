@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -77,8 +78,8 @@ def get_root_module_to_quantized_reference_module(
 
 def get_fuser_method_mapping(
     backend_config: BackendConfig,
-) -> dict[Pattern, Union[nn.Sequential, Callable]]:
-    fuser_method_mapping: dict[Pattern, Union[nn.Sequential, Callable]] = {}
+) -> dict[Pattern, nn.Sequential | Callable]:
+    fuser_method_mapping: dict[Pattern, nn.Sequential | Callable] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config.fuser_method is not None:
             # Note: both the fuser method and the pattern are specified in forward order in the
@@ -103,13 +104,15 @@ def get_fusion_pattern_to_root_node_getter(
     backend_config: BackendConfig,
 ) -> dict[Pattern, Callable]:
     """Get a map from fusion pattern to a function that returns the root node
-    from the fusion pattern, e.g. the most common one is:
-    def get_root_node(node_pattern):
-        while not isinstance(node_pattern[-1], Node):
-            node_pattern = node_pattern[-1]
-        return node_pattern[-1]
+    from the fusion pattern, e.g. the most common one is::
+
+        def get_root_node(node_pattern):
+            while not isinstance(node_pattern[-1], Node):
+                node_pattern = node_pattern[-1]
+            return node_pattern[-1]
+
     This can work for all patterns whose root node is the "last node" in the pattern,
-    e.g. (torch.add, MatchAllNode, (torch.ReLU, torch.Conv2d))
+    e.g. ``(torch.add, MatchAllNode, (torch.ReLU, torch.Conv2d))``.
     """
     root_node_getter_mapping: dict[Pattern, Callable] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
@@ -124,15 +127,17 @@ def get_fusion_pattern_to_extra_inputs_getter(
     """Get a map from fusion pattern to a function that returns extra input nodes
     from the fusion pattern, in the order required by the root node. This is optional,
     if not specified, we will not copy over any extra inputs for the root node.
-    Example:
-    # Let's say we have the pattern (torch.add, MatchAllNode, (torch.nn.BatchNorm2d, torch.nn.Conv2d))
-    # and root node is torch.nn.Conv2d, and the node in MatchAllNode would be an extra
-    # argument to the fused module, we can unpack the pattern and return the node at
-    # MatchAllNode here
-    # we can implement extra_inputs_getter as follows:
-    def extra_inputs_getter(pattern) -> List[Any]:
-        add, extra_input, conv_pattern = pattern
-        return [extra_input]
+
+    Example::
+
+        # Let's say we have the pattern (torch.add, MatchAllNode, (torch.nn.BatchNorm2d, torch.nn.Conv2d))
+        # and root node is torch.nn.Conv2d, and the node in MatchAllNode would be an extra
+        # argument to the fused module, we can unpack the pattern and return the node at
+        # MatchAllNode here
+        # we can implement extra_inputs_getter as follows:
+        def extra_inputs_getter(pattern) -> List[Any]:
+            add, extra_input, conv_pattern = pattern
+            return [extra_input]
     """
     extra_inputs_getter_mapping: dict[Pattern, Callable] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
@@ -163,10 +168,11 @@ def remove_boolean_dispatch_from_name(p) -> Any:
         return "torch.nn.functional.adaptive_max_pool2d"
     elif p is F.adaptive_max_pool3d:
         return "torch.nn.functional.adaptive_max_pool3d"
-    assert "boolean_dispatch" not in str(p), (
-        f"{p} does not have a human readable representation in "
-        + "quantization documentation"
-    )
+    if "boolean_dispatch" in str(p):
+        raise AssertionError(
+            f"{p} does not have a human readable representation in "
+            + "quantization documentation"
+        )
     return p
 
 
@@ -278,7 +284,9 @@ def _get_pattern_in_reversed_nested_tuple_format(
         (a, b, c) = config.pattern
         return (c, (b, a))
     else:
-        raise ValueError("Expected a tuple with 2 or 3 elements, got: ", config.pattern)
+        raise ValueError(
+            f"Expected a tuple with 2 or 3 elements, got: {config.pattern}"
+        )
 
 
 def _get_fuser_method_in_reversed_nested_tuple_format(
@@ -299,11 +307,12 @@ def _get_fuser_method_in_reversed_nested_tuple_format(
     The first argument of a fuser method is always `is_qat` and is not affected
     in the conversion. We currently only support functions with 3 or 4 arguments.
     """
-    assert config.fuser_method is not None
+    if config.fuser_method is None:
+        raise AssertionError("config.fuser_method must be provided")
     if config._pattern_complex_format is not None:
         return config.fuser_method
     if not isinstance(config.pattern, tuple):
-        raise ValueError("Expected pattern to be a tuple, got: ", config.pattern)
+        raise ValueError(f"Expected pattern to be a tuple, got: {config.pattern}")
 
     # Pattern is specified in the simple tuple format, need to convert
     if len(config.pattern) == 2:
@@ -311,4 +320,6 @@ def _get_fuser_method_in_reversed_nested_tuple_format(
     elif len(config.pattern) == 3:
         return _reverse3(config.fuser_method)
     else:
-        raise ValueError("Expected a tuple with 2 or 3 elements, got: ", config.pattern)
+        raise ValueError(
+            f"Expected a tuple with 2 or 3 elements, got: {config.pattern}"
+        )

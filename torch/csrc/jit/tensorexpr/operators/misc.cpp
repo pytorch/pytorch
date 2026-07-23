@@ -152,8 +152,6 @@ ExprHandle demoteOutput(
     default:
       throw unsupported_dtype();
   }
-
-  return e;
 }
 
 std::optional<TensorInfo> getTensorInfo(const BufHandle& b) {

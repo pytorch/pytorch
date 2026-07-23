@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 """Spectral Normalization from https://arxiv.org/abs/1802.05957."""
-from typing import Any, Optional, TypeVar
+
+from typing import Any, TypeVar
 
 import torch
 import torch.nn.functional as F
@@ -84,7 +85,7 @@ class SpectralNorm:
         #
         #    However, after we update `u` and `v` in-place, we need to **clone**
         #    them before using them to normalize the weight. This is to support
-        #    backproping through two forward passes, e.g., the common pattern in
+        #    backpropagating through two forward passes, e.g., the common pattern in
         #    GAN training: loss = D(real) - D(fake). Otherwise, engine will
         #    complain that variables needed to do backward for the first forward
         #    (i.e., the `u` and `v` vectors) are changed in the second forward.
@@ -129,7 +130,7 @@ class SpectralNorm:
         )
 
     def _solve_v_and_rescale(self, weight_mat, u, target_sigma):
-        # Tries to returns a vector `v` s.t. `u = F.normalize(W @ v)`
+        # Tries to return a vector `v` s.t. `u = F.normalize(W @ v)`
         # (the invariant at top of this class) and `u @ W @ v = sigma`.
         # This uses pinverse in case W^T W is not invertible.
         v = torch.linalg.multi_dot(
@@ -184,8 +185,6 @@ class SpectralNorm:
         return fn
 
 
-# This is a top level class because Py2 pickle doesn't like inner class nor an
-# instancemethod.
 class SpectralNormLoadStateDictPreHook:
     # See docstring of SpectralNorm._version on the changes to spectral_norm.
     def __init__(self, fn) -> None:
@@ -243,8 +242,6 @@ class SpectralNormLoadStateDictPreHook:
                 state_dict[weight_key + "_v"] = v
 
 
-# This is a top level class because Py2 pickle doesn't like inner class nor an
-# instancemethod.
 class SpectralNormStateDictHook:
     # See docstring of SpectralNorm._version on the changes to spectral_norm.
     def __init__(self, fn) -> None:
@@ -267,7 +264,7 @@ def spectral_norm(
     name: str = "weight",
     n_power_iterations: int = 1,
     eps: float = 1e-12,
-    dim: Optional[int] = None,
+    dim: int | None = None,
 ) -> T_module:
     r"""Apply spectral normalization to a parameter in the given module.
 
@@ -331,6 +328,7 @@ def spectral_norm(
         else:
             dim = 0
     SpectralNorm.apply(module, name, n_power_iterations, dim, eps)
+
     return module
 
 

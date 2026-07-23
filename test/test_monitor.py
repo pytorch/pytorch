@@ -1,9 +1,7 @@
 # Owner(s): ["oncall: r2p"]
 
-import sys
 import tempfile
 import time
-import unittest
 
 from datetime import datetime, timedelta
 
@@ -111,6 +109,7 @@ class TestMonitor(TestCase):
 @skipIfTorchDynamo("Really weird error")
 class TestMonitorTensorboard(TestCase):
     def setUp(self):
+        super().setUp()
         global SummaryWriter, event_multiplexer
         try:
             from tensorboard.backend.event_processing import (
@@ -131,10 +130,6 @@ class TestMonitorTensorboard(TestCase):
         for temp_dir in self.temp_dirs:
             temp_dir.cleanup()
 
-    @unittest.skipIf(
-        sys.version_info >= (3, 13),
-        "numpy failure, likely caused by old tensorboard version",
-    )
     def test_event_handler(self):
         with self.create_summary_writer() as w:
             handle = register_event_handler(TensorboardEventHandler(w))

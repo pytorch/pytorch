@@ -64,7 +64,7 @@ def run(initializer):
 
 def main():
     initializer_parameter_map = {}
-    for initializer in INITIALIZERS.keys():
+    for initializer in INITIALIZERS:
         sys.stderr.write(f"Evaluating {initializer} ...\n")
         initializer_parameter_map[initializer] = run(initializer)
 

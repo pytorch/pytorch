@@ -5,14 +5,12 @@
 
 #include <atomic>
 #include <deque>
-#include <mutex>
 #include <vector>
 
 namespace c10::xpu {
 namespace {
 
 // Global stream state and constants
-c10::once_flag init_flag;
 DeviceIndex num_gpus = -1;
 constexpr int kStreamsPerPoolBits = 5;
 constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
@@ -31,6 +29,7 @@ std::deque<
     std::array<std::atomic<uint32_t>, max_compile_time_stream_priorities>>
     priority_counters;
 
+// NOLINTNEXTLINE(*c-arrays)
 thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 
 /*
@@ -163,7 +162,10 @@ void initDeviceStreamState(DeviceIndex device) {
 }
 
 void initXPUStreamsOnce() {
-  c10::call_once(init_flag, initGlobalStreamState);
+  auto static init_flag [[maybe_unused]] = [] {
+    initGlobalStreamState();
+    return true;
+  }();
 
   if (current_streams) {
     return;
@@ -172,6 +174,7 @@ void initXPUStreamsOnce() {
   // Inits current streams (thread local) to the last queue in the "normal
   // priority" queue pool. Note: the queue pool have not been initialized yet.
   // It will be initialized in initDeviceStreamState for the specified device.
+  // NOLINTNEXTLINE(*c-arrays)
   current_streams = std::make_unique<StreamId[]>(num_gpus);
   for (const auto i : c10::irange(num_gpus)) {
     // Assigning the current stream to the last one in the pool can be
@@ -236,9 +239,11 @@ sycl::queue& XPUStream::queue() const {
   switch (st) {
     case StreamIdType::NORMAL:
     case StreamIdType::HIGH:
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       return *streams[device_index][static_cast<uint8_t>(st)][si];
     // See Note [External XPU Stream]
     case StreamIdType::EXT:
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       return *(reinterpret_cast<sycl::queue*>(stream_id));
     default:
       TORCH_CHECK(
@@ -356,38 +361,41 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
 /*
  * Note [Synchronize Streams on Device]
  *
- * There are two stream pools per device to manage our reserved SYCL queues.
- * When syncStreamsOnDevice is called, all reserved SYCL queues in the pools of
- * the specified device will be blocked, and wait for their synchronizations. We
- * realize the semantics via a loop through the stream pools of the specified
- * device and make each command queue synchronization sequentially.
+ * syncStreamsOnDevice waits for all work previously submitted to the SYCL
+ * queues we manage on `device`. It walks every reserved queue in each priority
+ * pool and calls `wait()` on it; only queues we own are drained, SYCL queues
+ * created outside our pools are unaffected.
  *
- * There is a semantic gap with device synchronization because only the SYCL
- * queues we have reserved (in our pools) will be synchronized, rather than
- * synchronizing all SYCL queues on the specified device.
+ * A true device-wide wait via `ext_oneapi_wait_and_throw()` (available with
+ * SYCL >= 2026.0 on devices exposing `ext_oneapi_device_wait`) would be more
+ * efficient, but it does not currently interoperate with XPUGraph. We will
+ * switch to that path once the XPUGraph interaction is resolved.
  */
 
-// Note: The stream pools will be initialized if needed, at the first invocation
-// to this function.
+// Note: The stream pools are lazily initialized on first call.
 void syncStreamsOnDevice(DeviceIndex device) {
-  initXPUStreamsOnce();
   if (device == -1) {
     device = c10::xpu::current_device();
   }
   check_device_index(device);
-  // Initializes the stream pools (once)
-  initDeviceStreamOnce(device);
 
-  // For each device, we have kStreamsPerPool (32) reserved queues per priority.
-  for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
-    for (const auto i : c10::irange(kStreamsPerPool)) {
-      streams[device][p][i]->wait();
+  auto legacy_sync = [device]() {
+    initXPUStreamsOnce();
+    // Initializes the stream pools (once)
+    initDeviceStreamOnce(device);
+    // kStreamsPerPool (32) reserved queues per priority for each device.
+    for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
+      for (const auto i : c10::irange(kStreamsPerPool)) {
+        streams[device][p][i]->wait();
+      }
     }
-  }
-  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_device_synchronization(c10::kXPU);
-  }
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_device_synchronization(c10::kXPU);
+    }
+  };
+
+  legacy_sync();
 }
 
 } // namespace c10::xpu

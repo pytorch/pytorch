@@ -14,7 +14,7 @@ DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 
 namespace {
 
-void checkRoundingMode(const std::string& fn_name) {
+void checkRoundingMode(const char* fn_name) {
   // Disabling this warning message for now as it is printed incorrectly. Need
   // to fix
 
@@ -27,14 +27,14 @@ void checkRoundingMode(const std::string& fn_name) {
   return;
 }
 
-void checkFloatTensor(const std::string& fn_name, const Tensor& t) {
+void checkFloatTensor(const char* fn_name, const Tensor& t) {
   TORCH_CHECK(
       t.scalar_type() == kFloat, fn_name, " expects a Float Tensor, got ",
       t.scalar_type());
 }
 
 void checkSameDevice(
-    const std::string& fn_name,
+    const char* fn_name,
     const Tensor& t1,
     const Tensor& t2) {
   TORCH_CHECK(
@@ -44,7 +44,7 @@ void checkSameDevice(
 }
 
 template <typename T>
-void checkQuantizedTensor(const std::string& fn_name, const Tensor& t) {
+void checkQuantizedTensor(const char* fn_name, const Tensor& t) {
   TORCH_CHECK(t.is_quantized(), fn_name, " expects a quantized Tensor.");
   TORCH_CHECK(
       t.scalar_type() == caffe2::TypeMeta::Make<T>(),
@@ -56,7 +56,7 @@ void checkQuantizedTensor(const std::string& fn_name, const Tensor& t) {
 }
 
 template <typename T>
-void checkZeroPoint(const std::string& fn_name, int64_t zero_point) {
+void checkZeroPoint(const char* fn_name, int64_t zero_point) {
   TORCH_CHECK(
       zero_point <= std::numeric_limits<T>::max(),
       fn_name,
@@ -72,15 +72,15 @@ void checkZeroPoint(const std::string& fn_name, int64_t zero_point) {
 }
 
 template <typename T>
-void checkZeroPoints(const std::string& fn_name, const Tensor& zero_points) {
-  auto zero_points_data = zero_points.data_ptr<int64_t>();
+void checkZeroPoints(const char* fn_name, const Tensor& zero_points) {
+  auto zero_points_data = zero_points.const_data_ptr<int64_t>();
   for (const auto i : c10::irange(zero_points.numel())) {
     checkZeroPoint<T>(fn_name, zero_points_data[i]);
   }
 }
 
 void checkSameSize(
-    const std::string& fn_name,
+    const char* fn_name,
     const Tensor& qt,
     const Tensor& rt) {
   TORCH_CHECK(
@@ -151,6 +151,7 @@ Tensor& quantize_tensor_per_channel_affine(
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     if (qtensor.device().type() != c10::DeviceType::CUDA &&
+        qtensor.device().type() != c10::DeviceType::XPU &&
         qtensor.device().type() != c10::DeviceType::PrivateUse1) {
       checkZeroPoints<underlying_t>(fn_name, zero_points);
     }  // for cuda and privateuse1, this check will occur in the actual device function
@@ -242,6 +243,7 @@ Tensor& dequantize_tensor_per_channel_affine(
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     if(qtensor.device().type() != c10::DeviceType::CUDA &&
+       qtensor.device().type() != c10::DeviceType::XPU &&
        qtensor.device().type() != c10::DeviceType::PrivateUse1){
       checkZeroPoints<underlying_t>(fn_name, zero_points);
     }  // for cuda and privateuse1, this check will occur in the actual device function
@@ -267,7 +269,7 @@ Tensor& dequantize_tensor_per_channel_float_qparams(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis) {
-  static constexpr auto fn_name = "dequantize_tensor_per_channel_affine";
+  static constexpr auto fn_name = "dequantize_tensor_per_channel_float_qparams";
 
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);

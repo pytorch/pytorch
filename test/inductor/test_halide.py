@@ -7,7 +7,8 @@ import textwrap
 import unittest
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
+from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor import config
 from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
@@ -40,13 +41,31 @@ except ImportError:
     import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 
 
-make_halide = config.patch(
-    {
-        "halide.scan_kernels": True,
-        "cpu_backend": "halide",
-        "cuda_backend": "halide",
-    }
-)
+test_classes = {}
+
+
+def make_halide(cls):
+    suffix = "_halide"
+
+    cls_prefix = "Halide"
+
+    test_class = make_test_cls_with_patches(
+        cls,
+        cls_prefix,
+        suffix,
+        (config, "halide.scan_kernels", True),
+        (config, "cpu_backend", "halide"),
+        (config, "cuda_backend", "halide"),
+        (config, "test_configs.runtime_triton_dtype_assert", False),
+        (config, "test_configs.runtime_triton_shape_assert", False),
+        xfail_prop="_expected_failure_halide",
+    )
+
+    test_classes[test_class.__name__] = test_class
+    # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
+    globals()[test_class.__name__] = test_class
+    test_class.__module__ = __name__
+    return test_class
 
 
 @unittest.skipUnless(HAS_HALIDE, "requires halide")
@@ -113,7 +132,7 @@ class HalideTests(TestCase):
                         out_ptr0.set_estimates([hl.Range(1024, 1024)])
 
                 __name__ == '__main__' and hl.main()
-                """
+                """,
             ),
         )
         a = torch.randn(1024)
@@ -187,7 +206,7 @@ class HalideTests(TestCase):
                         tmp1.compute_inline()
 
                 __name__ == '__main__' and hl.main()
-                """
+                """,
             ),
         )
         a = torch.randn(1024)
@@ -258,18 +277,33 @@ class HalideTests(TestCase):
             )
             self.assertIn("@hl.generator", code)
 
+    def test_inplace_add_broadcast_input_alias(self):
+        @torch.compile(backend="inductor", options={"cpu_backend": "halide"})
+        def fn(x, y):
+            return x.add_(y)
+
+        x = torch.ones([2, 12, 13, 17]).transpose(1, 2)
+        y = torch.ones([2, 13, 1, 17])
+        expected = x.clone()
+        expected.add_(y)
+
+        result = fn(x, y)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(x, expected)
+
 
 if test_torchinductor.HAS_CPU and HAS_HALIDE:
-    SweepInputsCpuHalideTest = make_halide(test_torchinductor.SweepInputsCpuTest)
-    CpuHalideTests = make_halide(test_torchinductor.CpuTests)
+    make_halide(test_torchinductor.SweepInputsCpuTest)
+    make_halide(test_torchinductor.CpuTests)
 
 if (
     test_torchinductor.HAS_GPU
     and HAS_HALIDE
     and os.environ.get("TEST_HALIDE_GPU") == "1"
 ):
-    SweepInputsGPUHalideTest = make_halide(test_torchinductor.SweepInputsGPUTest)
-    GPUHalideTests = make_halide(test_torchinductor.GPUTests)
+    make_halide(test_torchinductor.SweepInputsGPUTest)
+    make_halide(test_torchinductor.GPUTests)
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS and HAS_HALIDE:

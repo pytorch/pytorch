@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This module is one of the analysis modules - it takes as input a function or graph
 and some preexisting properties, and returns some data that is useful for deciding
@@ -12,7 +11,7 @@ In particular, the following analyses are provided:
 
 import contextlib
 import itertools
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -24,10 +23,13 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
+from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
 from .schemas import (
+    AOTConfig,
     BackwardSignature,
     GraphSignature,
     InputAliasInfo,
+    MemoryFormatMeta,
     OutputAliasInfo,
     OutputType,
     ViewAndMutationMeta,
@@ -43,25 +45,44 @@ def remove_dupe_metadata(
     keep_arg_mask: list[bool],
     add_dupe_map: list[int],
 ) -> ViewAndMutationMeta:
-    assert len(m.input_info) == len(keep_arg_mask)
+    if len(m.input_info) != len(keep_arg_mask):
+        raise AssertionError(
+            f"len(m.input_info)={len(m.input_info)} != len(keep_arg_mask)={len(keep_arg_mask)}"
+        )
     # Easy invariant: the first argument should never be a dupe (it will be kept)
-    assert len(keep_arg_mask) > 0 and keep_arg_mask[0]
+    if len(keep_arg_mask) == 0 or not keep_arg_mask[0]:
+        raise AssertionError(
+            "keep_arg_mask must be non-empty and keep_arg_mask[0] must be True"
+        )
 
     # Filter dupe'd mutated inputs out of traced_tangents
     num_data_mutations = len([x for x in m.input_info if x.mutates_data])
     other_traced_tangents = m.traced_tangents[num_data_mutations:]
     inp_traced_tangents = m.traced_tangents[:num_data_mutations]
+    other_traced_tangents_descs = m.traced_tangents_descs[num_data_mutations:]
+    inp_traced_tangents_descs = m.traced_tangents_descs[:num_data_mutations]
     filtered_inp_traced_tangents = [
         # See Note [Tangents memory format]
         x
         for i, x in enumerate(inp_traced_tangents)
         if keep_arg_mask[m.mutated_inp_runtime_indices[i]]
     ]
+    filtered_inp_traced_tangents_descs = [
+        x_desc
+        for i, x_desc in enumerate(inp_traced_tangents_descs)
+        if keep_arg_mask[m.mutated_inp_runtime_indices[i]]
+    ]
     traced_tangents = filtered_inp_traced_tangents + other_traced_tangents
+    traced_tangents_descs = (
+        filtered_inp_traced_tangents_descs + other_traced_tangents_descs
+    )
 
-    assert m.subclass_tangent_meta is not None
+    if m.subclass_tangent_meta is None:
+        raise AssertionError("m.subclass_tangent_meta must not be None")
     subclass_tangent_meta = [
-        PlainTensorMeta(0, memory_format=torch.contiguous_format)
+        PlainTensorMeta(
+            0, memory_format=MemoryFormatMeta(memory_format=torch.contiguous_format)
+        )
     ] * len(filtered_inp_traced_tangents) + m.subclass_tangent_meta[num_data_mutations:]
 
     return ViewAndMutationMeta(
@@ -75,18 +96,19 @@ def remove_dupe_metadata(
                 dynamic_dims=o.dynamic_dims,
                 base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx],
                 requires_grad=o.requires_grad,
-                functional_tensor=o.functional_tensor,
+                requires_grad_for_backward=o.requires_grad_for_backward,
+                view_meta_sequence=o.view_meta_sequence,
             )
             for o in m.output_info
         ],
         num_intermediate_bases=m.num_intermediate_bases,
         keep_input_mutations=m.keep_input_mutations,
         traced_tangents=traced_tangents,
+        traced_tangents_descs=traced_tangents_descs,
         # We are guaranteed not to get here, since dupes are not supported today with subclass inputs.
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=subclass_tangent_meta,
-        is_train=m.is_train,
     )
 
 
@@ -104,9 +126,10 @@ def create_synthetic_base_metadata(
     m: ViewAndMutationMeta,
     # Maps each outer argument idx to its inner idx (or, if this outer arg is generated from a
     # synthetic base, you get a tuple of (i, TensorMeta), telling you the base tensor idx, and view metadata)
-    synthetic_base_info: list[Union[int, tuple[int, torch.Tensor]]],
+    synthetic_base_info: list[int | tuple[int, torch.Tensor]],
     outer_args: list[Any],
     inner_args: list[Any],
+    inner_args_desc: list[AOTInput],
 ) -> tuple[ViewAndMutationMeta, list[int]]:
     # maps inner arg indices to outer arg indices
     synthetic_base_to_indices: dict[int, list[int]] = {}
@@ -124,13 +147,17 @@ def create_synthetic_base_metadata(
 
     # given the requires_grad info on mutated inputs,
     # generate the requires_grad info on those same mutated inputs, but after constructing synthetic bases.
+    # pyrefly: ignore [implicit-any]
     input_infos = []
     for outer_indices in synthetic_base_to_indices.values():
         # leaf-ness should be all-or-nothing for aliased tensor.
         # (aka if "a" and "b" are views, then a.is_leaf == b.is_leaf)
         any_leaf = any(m.input_info[x].is_leaf for x in outer_indices)
         all_leaf = all(m.input_info[x].is_leaf for x in outer_indices)
-        assert any_leaf == all_leaf
+        if any_leaf != all_leaf:
+            raise AssertionError(
+                f"any_leaf={any_leaf} != all_leaf={all_leaf} for outer_indices={outer_indices}"
+            )
 
         mutates_data = (
             True
@@ -167,6 +194,11 @@ def create_synthetic_base_metadata(
                 if len(outer_indices) > 1
                 else m.input_info[outer_indices[0]].mutates_storage_metadata
             ),
+            mutation_is_shallow_copy_data=(
+                False
+                if len(outer_indices) > 1
+                else m.input_info[outer_indices[0]].mutation_is_shallow_copy_data
+            ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
@@ -197,25 +229,33 @@ def create_synthetic_base_metadata(
                 if not is_concrete_int(s)
             },
             base_idx=synthetic_base_info[outer_idx][0],  # type: ignore[index]
-            requires_grad=outer_args[outer_idx].requires_grad,
+            requires_grad=(requires_grad := outer_args[outer_idx].requires_grad),
+            requires_grad_for_backward=requires_grad,
         )
         for outer_idx in outer_aliased_arg_idx_with_metadata_mutations
     ]
     existing_output_infos = []
     for o in m.output_info:
+        synthetic_base_info_for_output = (
+            None if o.base_idx is None else synthetic_base_info[o.base_idx]
+        )
         new_base_idx = (
             None
             if o.base_idx is None
             else (
-                synthetic_base_info[o.base_idx]
-                if isinstance(synthetic_base_info[o.base_idx], int)
-                else synthetic_base_info[o.base_idx][0]  # type: ignore[index]
+                synthetic_base_info_for_output
+                if isinstance(synthetic_base_info_for_output, int)
+                else synthetic_base_info_for_output[0]  # type: ignore[index]
             )
         )
-        # If base_idx is changed for OutputType.is_input, we need to update the output type to reflect the change
+        # If the original input was merged into a synthetic base, then an
+        # output that was literally that input is now a view of the base.
+        input_merged = o.base_idx is not None and isinstance(
+            synthetic_base_info[o.base_idx], tuple
+        )
         new_output_type = (
             OutputType.alias_of_input
-            if o.output_type == OutputType.is_input and o.base_idx != new_base_idx
+            if o.output_type == OutputType.is_input and input_merged
             else o.output_type
         )
         existing_output_infos.append(
@@ -226,19 +266,28 @@ def create_synthetic_base_metadata(
                 # Map the input idx pre-synthetic-bases to the new idx post-synthetic-bases
                 base_idx=new_base_idx,  # type: ignore[arg-type]
                 requires_grad=o.requires_grad,
-                functional_tensor=o.functional_tensor,
+                requires_grad_for_backward=o.requires_grad_for_backward,
+                view_meta_sequence=o.view_meta_sequence,
             )
         )
 
     inner_mutated_tangents_and_memory_formats = [
         # See Note [Tangents memory format]
-        coerce_tangent_and_suggest_memory_format(x)
-        for inner_idx, x in enumerate(inner_args)
+        (
+            coerce_tangent_and_suggest_memory_format(x),
+            TangentAOTInput(InputMutationAOTOutput(x_desc)),
+        )
+        for inner_idx, (x, x_desc) in enumerate(zip(inner_args, inner_args_desc))
         if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad
     ]
-    inner_mutated_tangents = [x[0] for x in inner_mutated_tangents_and_memory_formats]
-    inner_mutated_tangents_memory_formats = [
+    inner_mutated_tangents = [
+        x[0][0] for x in inner_mutated_tangents_and_memory_formats
+    ]
+    inner_mutated_tangents_descs = [
         x[1] for x in inner_mutated_tangents_and_memory_formats
+    ]
+    inner_mutated_tangents_memory_formats = [
+        x[0][1] for x in inner_mutated_tangents_and_memory_formats
     ]
 
     output_info = existing_output_infos + input_metadata_output_info
@@ -246,8 +295,14 @@ def create_synthetic_base_metadata(
     traced_tangents = (
         inner_mutated_tangents + m.traced_tangents[len(inner_mutated_tangents) :]
     )
-    assert m.subclass_tangent_meta is not None
+    traced_tangents_descs = (
+        inner_mutated_tangents_descs
+        + m.traced_tangents_descs[len(inner_mutated_tangents) :]
+    )
+    if m.subclass_tangent_meta is None:
+        raise AssertionError("m.subclass_tangent_meta must not be None")
     subclass_tangent_meta = [
+        # pyrefly: ignore[bad-argument-type]
         PlainTensorMeta(0, memory_format=x)
         for x in inner_mutated_tangents_memory_formats
     ] + m.subclass_tangent_meta[len(inner_mutated_tangents) :]
@@ -259,17 +314,19 @@ def create_synthetic_base_metadata(
             num_intermediate_bases=m.num_intermediate_bases,
             keep_input_mutations=m.keep_input_mutations,
             traced_tangents=traced_tangents,
+            traced_tangents_descs=traced_tangents_descs,
             # We are guaranteed not to get here, since synthetic_base codepaths are not supported today with subclass inputs.
             subclass_inp_meta=[],
             subclass_fw_graph_out_meta=[],
             subclass_tangent_meta=subclass_tangent_meta,
-            is_train=m.is_train,
         ),
         outer_aliased_arg_idx_with_metadata_mutations,
     )
 
 
-def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
+def compute_overlapping_inputs(
+    aot_config: AOTConfig, fwd_inputs: list[Any], aliased_input_indices: list[int]
+) -> set[int]:
     num_aliases = len(aliased_input_indices)
 
     shape_env = None
@@ -277,11 +334,13 @@ def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
     tracing_context = torch._guards.TracingContext.try_get()
 
     if tracing_context is not None:
+        if tracing_context.fake_mode is None:
+            raise AssertionError("tracing_context.fake_mode must not be None")
         shape_env = tracing_context.fake_mode.shape_env
 
         # Check whether we can actually get the dynamo sources from within AOTAutograd.
         if aot_config.aot_autograd_arg_pos_to_source and shape_env is not None:
-            maybe_suppress_guards = shape_env.suppress_guards
+            maybe_suppress_guards = shape_env.suppress_guards  # type: ignore[assignment]
 
     # Check whether there are any symbolic values being used.
     # We do this for 2 reasons:
@@ -296,6 +355,21 @@ def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
             fwd_inputs[i].storage_offset(),
         ]
     )
+
+    if torch._inductor.config.is_fbcode():
+        if symbolic and num_aliases > 400:
+            from torch._subclasses.fake_tensor import (
+                UnsupportedMutationAliasingException,
+            )
+            from torch._utils_internal import justknobs_check
+
+            msg = f"Encountered {num_aliases} dynamic, aliased/mutated inputs, consider setting dynamic=False"
+
+            if justknobs_check(
+                "pytorch/compiler:aliased_inputs_with_mutation_and_dyn_shapes_killswitch",
+                False,
+            ):
+                raise UnsupportedMutationAliasingException(msg)
 
     with maybe_suppress_guards():
         aliased_fwd_inputs = [fwd_inputs[i] for i in aliased_input_indices]
@@ -331,13 +405,16 @@ def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
     return actual_aliased_indices
 
 
-def _graph_input_names(gm):
+def _graph_input_names(gm: torch.fx.GraphModule) -> list[str]:
     return [node.name for node in gm.graph.find_nodes(op="placeholder")]
 
 
-def _graph_output_names(gm):
+def _graph_output_names(gm: torch.fx.GraphModule) -> list[Any]:
     output_node = next(iter(reversed(gm.graph.nodes)))
-    assert output_node.op == "output" and len(output_node.args) == 1
+    if output_node.op != "output" or len(output_node.args) != 1:
+        raise AssertionError(
+            f"expected output node with 1 arg, got op={output_node.op}, args={len(output_node.args)}"
+        )
     return_args = output_node.args[0]
     return [getattr(return_arg, "name", None) for return_arg in return_args]
 
@@ -353,8 +430,8 @@ def create_graph_signature(
     param_names: list[str],
     buffer_names: list[str],
     trace_joint: bool,
-    num_user_fw_outs: Optional[int],
-    loss_index: Optional[int],
+    num_user_fw_outs: int | None,
+    loss_index: int | None,
 ) -> GraphSignature:
     # Retrieve graph input names
     graph_input_names = _graph_input_names(fx_g)
@@ -368,7 +445,10 @@ def create_graph_signature(
     num_user_args = len(graph_input_names) - num_params_buffers - num_tokens
 
     if trace_joint:
-        assert num_user_fw_outs is not None
+        if num_user_fw_outs is None:
+            raise AssertionError(
+                "num_user_fw_outs must not be None when trace_joint=True"
+            )
         num_fw_outs = num_user_fw_outs + fw_metadata.num_mutated_inp_runtime_indices
         backward_output_names = graph_output_names[num_fw_outs:]
 
@@ -387,11 +467,18 @@ def create_graph_signature(
             if user_input.requires_grad
         }
 
-        assert len(gradients_to_parameters) + len(gradients_to_user_inputs) == len(
+        if len(gradients_to_parameters) + len(gradients_to_user_inputs) != len(
             backward_output_names
-        )
+        ):
+            raise AssertionError(
+                f"len(gradients_to_parameters)={len(gradients_to_parameters)} + "
+                f"len(gradients_to_user_inputs)={len(gradients_to_user_inputs)} != "
+                f"len(backward_output_names)={len(backward_output_names)}"
+            )
 
         # Check that we have fully accounted for all graph outputs
+        if loss_index is None:
+            raise AssertionError("loss_index must not be None")
         backward_signature = BackwardSignature(
             gradients_to_parameters,
             gradients_to_user_inputs,
@@ -415,6 +502,7 @@ def create_graph_signature(
         named_buffers=buffer_names,
         num_user_inputs=num_user_args,
         num_user_outputs=num_user_fw_outs,
+        trace_joint=trace_joint,
         loss_index=loss_index,
         backward_signature=backward_signature,
     )

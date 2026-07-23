@@ -2,7 +2,7 @@
 #
 
 # You can set these variables from the command line.
-SPHINXOPTS    ?= -j auto -WT --keep-going
+SPHINXOPTS    ?= -j $(shell nproc) -WT --keep-going
 SPHINXBUILD   ?= sphinx-build
 SPHINXPROJ    ?= PyTorch
 SOURCEDIR     ?= source
@@ -15,10 +15,7 @@ help:
 
 figures:
 	@$(PYCMD) source/scripts/build_activation_images.py
-	@$(PYCMD) source/scripts/build_quantization_configs.py
-
-onnx:
-	@$(PYCMD) source/scripts/onnx/build_onnx_torchscript_supported_aten_op_csv_table.py
+	@$(PYCMD) source/scripts/build_lr_scheduler_images.py
 
 opset:
 	@$(PYCMD) source/scripts/build_opsets.py

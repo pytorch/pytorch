@@ -21,10 +21,22 @@ TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
-    const std::shared_ptr<Node>& cdata,
+    const c10::intrusive_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
-    const _view_as_self_fn_t& view_as_self_fn);
+    const _view_as_self_fn_t& view_as_self_fn,
+    bool pure_view);
+
+TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
+    at::ArrayRef<const Variable*> input_vars,
+    const std::unordered_set<at::TensorImpl*>& non_differentiable,
+    const std::unordered_set<at::TensorImpl*>& dirty_inputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
+    const c10::intrusive_ptr<Node>& cdata,
+    const _jvp_fn_t& jvp_user_function,
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    const _view_as_self_fn_t& view_as_self_fn,
+    bool pure_view);
 
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
@@ -168,7 +180,7 @@ struct TORCH_API AutogradContext {
   // The CppNode in the autograd graph that owns this AutogradContext. We need a
   // weak_ptr to avoid a refcycle. Since grad_fn_ owns this AutogradContext, it
   // will always be alive when we want to use it.
-  std::weak_ptr<Node> grad_fn_;
+  c10::weak_intrusive_ptr<Node> grad_fn_{c10::intrusive_ptr<Node>()};
   bool has_freed_buffers_{false};
 
   // Compiled autograd overrides saved_variables() and needs_input_grad().
@@ -228,30 +240,32 @@ inline variable_list CppNode_apply_functional(
     }
   }
 
-  if (num_outputs != num_forward_inputs) {
-    std::string msg("function ");
-    msg += name + " returned an incorrect number of gradients (expected ";
-    msg += std::to_string(num_forward_inputs) + ", got ";
-    msg += std::to_string(num_outputs) + ")";
-    throw std::runtime_error(msg);
-  }
+  TORCH_CHECK(
+      num_outputs == num_forward_inputs,
+      "function ",
+      name,
+      " returned an incorrect number of gradients (expected ",
+      num_forward_inputs,
+      ", got ",
+      num_outputs,
+      ")");
 
   variable_list results;
   results.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {
     if (!is_variable_input_[i]) {
-      if (outputs[i].defined()) {
-        std::string msg("function ");
-        msg += name +
-            " returned a gradient different that is defined at position ";
-        msg += std::to_string(i + 1) +
-            ", std the corresponding forward input was not a Variable";
-        throw std::runtime_error(msg);
-      }
+      TORCH_CHECK(
+          outputs[i].defined() == false,
+          "function ",
+          name,
+          " returned a gradient different that is defined at position ",
+          i + 1,
+          ", std the corresponding forward input was not a Variable");
       continue;
     }
     results.emplace_back(outputs[i]);
   }
+
   return results;
 }
 
@@ -280,21 +294,12 @@ struct CppNode : public Node {
   std::vector<VariableInfo> output_info_;
 
   void release_variables() override;
+  void release_resources() override;
 
-  void set_ctx_grad_fn(const std::shared_ptr<Node>& node);
+  void set_ctx_grad_fn(c10::intrusive_ptr<Node> node);
   void save_variables_to_ctx();
 
-  void compiled_args(CompiledNodeArgs& args) override {
-    static_assert(
-        std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
-    if (!T::is_traceable) {
-      throw std::runtime_error(
-          std::string(
-              "Attempting to trace a potentially unsafe C++ autograd function: ") +
-          name() +
-          ". It may be possible to trace it safely, please refer to the instructions in: https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/.");
-    }
-
+  void compiled_args(CompiledNodeArgs& args) const override {
     // although neither of the 2 methods below have uniqueness guarantees
     // it is unlikely for them to collide at the same time
     args.collect(static_cast<uint64_t>(typeid(T).hash_code()));
@@ -352,7 +357,7 @@ struct CppNode : public Node {
         IValuePacker<std::vector<std::optional<InputMetadata>>>::pack(
             torch::dynamo::autograd::get_input_metadata(next_edges()));
 
-    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+    const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
 
     // Each time apply_with_saved is called, we bind a new function to Python.
     // This is because the schema might be different on compiled autograd cache
@@ -368,14 +373,17 @@ struct CppNode : public Node {
         schema.emplace_back(ivalue.type());
       }
     }
-    auto fn_name = interface->bind_function(
+    static_assert(
+        std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
+    auto fn_name = pyinterface->bind_function(
         saved.get_py_compiler(),
         std::string(typeid(T).name()),
         CppNode_apply_functional_ivalue<T>,
         schema,
-        /*is_custom_function*/ true);
+        /*is_custom_function*/ true,
+        /*is_traceable*/ T::is_traceable);
 
-    auto results = interface->call_function(
+    auto results = pyinterface->call_function(
         saved.get_py_compiler(),
         "apply_functional",
         fn_name,
@@ -479,7 +487,7 @@ auto Function<T>::apply(Args&&... args)
     functorch_tls->checkSupportsCppAutogradFunction();
   }
 
-  std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
+  auto node = c10::make_intrusive<CppNode<T>>();
   variable_list input_vars;
 
   const size_t num_inputs = sizeof...(Args);
@@ -528,7 +536,8 @@ auto Function<T>::apply(Args&&... args)
       is_executable ? node : nullptr,
       jvp_fn,
       {},
-      view_as_self_fn);
+      view_as_self_fn,
+      false);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {
@@ -571,13 +580,22 @@ void CppNode<T>::release_variables() {
 }
 
 template <class T>
+void CppNode<T>::release_resources() {
+  Node::release_resources();
+
+  // AutogradContext deletes copy/move, so destroy and reconstruct in place.
+  ctx_.~AutogradContext();
+  new (&ctx_) AutogradContext();
+}
+
+template <class T>
 void CppNode<T>::save_variables_to_ctx() {
   ctx_.save_variables();
 }
 
 template <class T>
-void CppNode<T>::set_ctx_grad_fn(const std::shared_ptr<Node>& node) {
-  ctx_.grad_fn_ = node;
+void CppNode<T>::set_ctx_grad_fn(c10::intrusive_ptr<Node> node) {
+  ctx_.grad_fn_ = std::move(node);
 }
 
 } // namespace torch::autograd

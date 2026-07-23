@@ -47,7 +47,7 @@ List<T>::List(TypePtr elementType)
 : List(make_intrusive<c10::detail::ListImpl>(
     typename c10::detail::ListImpl::list_type(),
     std::move(elementType))) {
-  static_assert(std::is_same_v<T, IValue> || std::is_same<T, c10::intrusive_ptr<ivalue::Future>>::value,
+  static_assert(std::is_same_v<T, IValue> || std::is_same_v<T, c10::intrusive_ptr<ivalue::Future>>,
                 "This constructor is only valid for c10::impl::GenericList or List<Future>.");
 }
 
@@ -198,7 +198,7 @@ typename List<T>::internal_const_reference_type List<T>::operator[](size_type po
 template<class T>
 typename List<T>::internal_reference_type List<T>::operator[](size_type pos) {
   static_cast<void>(impl_->list.at(pos)); // Throw the exception if it is out of range.
-  return {impl_->list.begin() + static_cast<typename decltype(impl_->list)::difference_type>(pos)};
+  return {impl_->list.begin() + static_cast<typename c10::detail::ListImpl::list_type::difference_type>(pos)};
 }
 
 template<class T>

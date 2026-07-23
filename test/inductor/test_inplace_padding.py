@@ -9,7 +9,12 @@ from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_utils import serialTest
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    requires_gpu_with_enough_memory,
+)
 
 
 # Make the helper files in test/ importable
@@ -98,15 +103,16 @@ class InplacePaddingTest(TestCase):
         # . This will allocate an extra item for the last row so that
         # inplace padding would be safe without accessing out of bound
         # memory.
-        FileCheck().check(
-            "empty_strided_cuda((2048, 2048), (2048, 1), torch.float32)."
-            + "as_strided((2048, 2047), (2048, 1))"
+        FileCheck().check_regex(
+            r"empty_strided.*\(\(2048, 2048\), \(2048, 1\), torch.float32\)."
+            r"as_strided\(\(2048, 2047\), \(2048, 1\)\)"
         ).run(code)
 
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
         self.assertEqual(num_inplace_padding(), 1)
 
     @inductor_config.patch(cpp_wrapper=True)
+    @inductor_config.patch("triton.autotune_at_compile_time", True)
     def test_pad_non_zero_cpp_wrapper(self):
         def f(x):
             x = x + 1
@@ -118,10 +124,39 @@ class InplacePaddingTest(TestCase):
         x = torch.randn(2048, 2047, device=GPU_TYPE)
 
         ref = f(x)
-        act, (code,) = run_and_get_code(torch.compile(f), x)
+        from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
+
+        orig_generate_and_run_autotune_block = (
+            CppWrapperGpu.generate_and_run_autotune_block
+        )
+        compile_time_autotune_called = False
+
+        def mock_generate_and_run_autotune_block(wrapper):
+            nonlocal compile_time_autotune_called
+            compile_time_autotune_called = True
+            out = orig_generate_and_run_autotune_block(wrapper)
+            call_code = wrapper.kernel_autotune_calls.getvalue()
+            FileCheck().check(
+                f"buf0 = generate_example_value((2048, 2047), (2048, 1), '{GPU_TYPE}:0', torch.float32, 0, (2048, 2048))"
+            ).run(call_code)
+            return out
+
+        with unittest.mock.patch.object(
+            CppWrapperGpu,
+            "generate_and_run_autotune_block",
+            mock_generate_and_run_autotune_block,
+        ):
+            act, (code,) = run_and_get_code(torch.compile(f), x)
+
+        # Buf0 should be over-allocated and then strided.
+        FileCheck().check_regex(
+            r"aoti_torch_as_strided\(buf0_handle, .*, &buf0_handle_restrided\)"
+        ).run(code)
 
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
-        self.assertEqual(num_inplace_padding(), 0)
+
+        self.assertEqual(num_inplace_padding(), 1)
+        self.assertTrue(compile_time_autotune_called)
 
     def test_pad_too_large(self):
         def f(x, y):
@@ -176,12 +211,9 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    @unittest.skipIf(
-        not torch.cuda.is_available()
-        or torch.cuda.get_device_properties().total_memory < 2e10,
-        "Only if the GPU has at least 20GB memory to be safe",
-    )
+    @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
+    @serialTest()
     def test_linear_and_cel(self):
         # Use nan for torch.empty
         torch.use_deterministic_algorithms(True)
@@ -202,15 +234,16 @@ class InplacePaddingTest(TestCase):
             loss.backward()
             return loss
 
-        x = torch.randn(B * T, C, requires_grad=True).cuda().bfloat16()
+        x = torch.randn(B * T, C, requires_grad=True).to(GPU_TYPE).bfloat16()
         x.retain_grad()
-        y = torch.randint(0, V, (B * T,)).cuda()
+        y = torch.randint(0, V, (B * T,)).to(GPU_TYPE)
 
         opt_f = torch.compile(f)
 
         expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
         actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
-        assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
+        if not same(expect, actual, tol=1e-2):
+            raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
         # We may disable inplace_padding via env-var to test perf.
         self.assertEqual(num_inplace_padding(), int(inductor_config.inplace_padding))
@@ -223,7 +256,9 @@ class InplacePaddingTest(TestCase):
 
     # Enable Max-Autotune to repro this test failure:
     #   https://github.com/pytorch/pytorch/pull/140249#issuecomment-2556079406
+    @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(max_autotune=True)
+    @serialTest()
     def test_linear_and_cel_max_autotune(self):
         self.test_linear_and_cel()
 

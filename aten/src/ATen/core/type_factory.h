@@ -44,7 +44,7 @@ struct TORCH_API TypeFactoryBase<c10::DynamicType> {
         c10::DynamicType::Arguments{});
   }
   template <typename T>
-  C10_ERASE static c10::DynamicTypePtr get() {
+  C10_ERASE static decltype(auto) get() {
     return DynamicTypeTrait<T>::getBaseType();
   }
   static const std::unordered_map<std::string, c10::TypePtr>& basePythonTypes();

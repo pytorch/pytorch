@@ -5,7 +5,7 @@ First off, what are batching rules and why do we need so many of them? Well, to 
 ### How does vmap work?
 Vmap is a function transform (pioneered by Jax) that allows one to batch functions. That is, given a function `f(x: [N]) -> [N]`, `vmap(f)` now transforms the signature to be `f(x: [B, N]) -> [B, N]`. That is - it adds a batch dimension to both the input and the output of the function.
 
-This guide will gloss over all the cool things you can do this (there are many!), so let's focus on how we actually implement this.
+This guide will gloss over all the cool things you can do with this (there are many!), so let's focus on how we actually implement this.
 
 One misconception is that this is some magic compiler voodoo, or that it is inherently some function transform. It is not - and there's another framing of it that might make it more clear.
 

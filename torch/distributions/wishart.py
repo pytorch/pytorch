@@ -1,8 +1,6 @@
 # mypy: allow-untyped-defs
 import math
 import warnings
-from numbers import Number
-from typing import Optional, Union
 
 import torch
 from torch import nan, Tensor
@@ -10,7 +8,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 from torch.distributions.utils import lazy_property
-from torch.types import _size
+from torch.types import _Number, _size, Number
 
 
 __all__ = ["Wishart"]
@@ -19,7 +17,8 @@ _log_2 = math.log(2)
 
 
 def _mvdigamma(x: Tensor, p: int) -> Tensor:
-    assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
+    if not x.gt((p - 1) / 2).all():
+        raise AssertionError("Wrong domain for multivariate digamma function.")
     return torch.digamma(
         x.unsqueeze(-1)
         - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
@@ -40,7 +39,7 @@ class Wishart(ExponentialFamily):
         >>> # xdoctest: +SKIP("FIXME: scale_tril must be at least two-dimensional")
         >>> m = Wishart(torch.Tensor([2]), covariance_matrix=torch.eye(2))
         >>> m.sample()  # Wishart distributed with mean=`df * I` and
-        >>>             # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
+        >>> # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
 
     Args:
         df (float or Tensor): real-valued parameter larger than the (dimension of Square matrix) - 1
@@ -61,30 +60,39 @@ class Wishart(ExponentialFamily):
     [1] Wang, Z., Wu, Y. and Chu, H., 2018. `On equivalence of the LKJ distribution and the restricted Wishart distribution`.
     [2] Sawyer, S., 2007. `Wishart Distributions and Inverse-Wishart Sampling`.
     [3] Anderson, T. W., 2003. `An Introduction to Multivariate Statistical Analysis (3rd ed.)`.
-    [4] Odell, P. L. & Feiveson, A. H., 1966. `A Numerical Procedure to Generate a SampleCovariance Matrix`. JASA, 61(313):199-203.
+    [4] Odell, P. L. & Feiveson, A. H., 1966. `A Numerical Procedure to Generate a Sample Covariance Matrix`. JASA, 61(313):199-203.
     [5] Ku, Y.-C. & Bloomfield, P., 2010. `Generating Random Wishart Matrices with Fractional Degrees of Freedom in OX`.
     """
-    arg_constraints = {
-        "covariance_matrix": constraints.positive_definite,
-        "precision_matrix": constraints.positive_definite,
-        "scale_tril": constraints.lower_cholesky,
-        "df": constraints.greater_than(0),
-    }
+
     support = constraints.positive_definite
     has_rsample = True
     _mean_carrier_measure = 0
 
+    @property
+    def arg_constraints(self):
+        return {
+            "covariance_matrix": constraints.positive_definite,
+            "precision_matrix": constraints.positive_definite,
+            "scale_tril": constraints.lower_cholesky,
+            "df": constraints.greater_than(self.event_shape[-1] - 1),
+        }
+
     def __init__(
         self,
-        df: Union[Tensor, Number],
-        covariance_matrix: Optional[Tensor] = None,
-        precision_matrix: Optional[Tensor] = None,
-        scale_tril: Optional[Tensor] = None,
-        validate_args=None,
-    ):
-        assert (covariance_matrix is not None) + (scale_tril is not None) + (
-            precision_matrix is not None
-        ) == 1, "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+        df: Tensor | Number,
+        covariance_matrix: Tensor | None = None,
+        precision_matrix: Tensor | None = None,
+        scale_tril: Tensor | None = None,
+        validate_args: bool | None = None,
+    ) -> None:
+        if (
+            (covariance_matrix is not None)
+            + (scale_tril is not None)
+            + (precision_matrix is not None)
+        ) != 1:
+            raise AssertionError(
+                "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+            )
 
         param = next(
             p
@@ -97,7 +105,7 @@ class Wishart(ExponentialFamily):
                 "scale_tril must be at least two-dimensional, with optional leading batch dimensions"
             )
 
-        if isinstance(df, Number):
+        if isinstance(df, _Number):
             batch_shape = torch.Size(param.shape[:-2])
             self.df = torch.tensor(df, dtype=param.dtype, device=param.device)
         else:
@@ -111,18 +119,22 @@ class Wishart(ExponentialFamily):
             )
 
         if scale_tril is not None:
+            # pyrefly: ignore [read-only]
             self.scale_tril = param.expand(batch_shape + (-1, -1))
         elif covariance_matrix is not None:
+            # pyrefly: ignore [read-only]
             self.covariance_matrix = param.expand(batch_shape + (-1, -1))
         elif precision_matrix is not None:
+            # pyrefly: ignore [read-only]
             self.precision_matrix = param.expand(batch_shape + (-1, -1))
 
-        self.arg_constraints["df"] = constraints.greater_than(event_shape[-1] - 1)
         if self.df.lt(event_shape[-1]).any():
             warnings.warn(
-                "Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim."
+                "Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim.",
+                stacklevel=2,
             )
 
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
         self._batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
 
@@ -254,7 +266,7 @@ class Wishart(ExponentialFamily):
         sample_shape = torch.Size(sample_shape)
         sample = self._bartlett_sampling(sample_shape)
 
-        # Below part is to improve numerical stability temporally and should be removed in the future
+        # Below part is to improve numerical stability temporarily and should be removed in the future
         is_singular = self.support.check(sample)
         if self._batch_shape:
             is_singular = is_singular.amax(self._batch_dims)
@@ -272,7 +284,7 @@ class Wishart(ExponentialFamily):
         else:
             # More optimized version with data-dependent control flow.
             if is_singular.any():
-                warnings.warn("Singular sample detected.")
+                warnings.warn("Singular sample detected.", stacklevel=2)
 
                 for _ in range(max_try_correction):
                     sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
@@ -331,6 +343,7 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         return -self.precision_matrix / 2, (nu - p - 1) / 2
 
+    # pyrefly: ignore [bad-override]
     def _log_normalizer(self, x, y):
         p = self._event_shape[-1]
         return (y + (p + 1) / 2) * (

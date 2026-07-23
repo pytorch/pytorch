@@ -2,7 +2,7 @@
 #
 # NOTE: If any changes are being made to the ADInplaceOrView codegen please also check
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
-# The fallback is expected to mimick this codegen, so we should keep the two in sync.
+# The fallback is expected to mimic this codegen, so we should keep the two in sync.
 
 from __future__ import annotations
 
@@ -302,7 +302,8 @@ def unpack_args(f: NativeFunction) -> tuple[list[str], list[Binding]]:
     unpacked_bindings: list[Binding] = []
 
     for i, binding in enumerate(extract_bindings(f)):
-        assert not isinstance(binding.argument, SelfArgument)
+        if isinstance(binding.argument, SelfArgument):
+            raise AssertionError("Binding argument should not be SelfArgument")
         if isinstance(binding.argument, TensorOptionsArguments):
             raise RuntimeError("VariableKernel shouldn't take TensorOptions")
 
@@ -340,7 +341,7 @@ def get_base_name(f: NativeFunction) -> str:
 
 def get_view_info(f: NativeFunction) -> str | None:
     base_name = get_base_name(f)
-    view_info = VIEW_FUNCTIONS.get(base_name, None)
+    view_info = VIEW_FUNCTIONS.get(base_name)
     if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
         view_info = "self"
     return view_info
@@ -547,7 +548,8 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> li
         for r in cpp.return_names(f):
             inplace_view_body.append(f"increment_version({r});")
     else:
-        assert get_view_info(f) is not None
+        if get_view_info(f) is None:
+            raise AssertionError("Expected view info to be non-None")
         inplace_view_body.append(
             VIEW_REDISPATCH.substitute(
                 assign_return_values="auto " + TMP_VAR + " = ",
@@ -557,7 +559,8 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> li
         )
         call, rhs_value = emit_view_body(fn, TMP_VAR)
         inplace_view_body.append(call)
-        assert rhs_value is not None
+        if rhs_value is None:
+            raise AssertionError("Expected rhs_value to be non-None")
         inplace_view_body.append(
             ASSIGN_RETURN_VALUE.substitute(
                 return_values=tie_return_values(f), rhs_value=rhs_value
@@ -575,7 +578,7 @@ def gen_formals(f: NativeFunction) -> str:
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
         + [
-            f'{cpp.argument_type(a, binds="__placeholder__", symint=True).cpp_type()} {a.name}'
+            f"{cpp.argument_type(a, binds='__placeholder__', symint=True).cpp_type()} {a.name}"
             for a in f.func.schema_order_arguments()
         ]
     )

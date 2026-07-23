@@ -15,7 +15,7 @@ class BackwardPassCleanupGuard;
 
 // This is a singleton class responsible for running distributed backward
 // passes. This engine relies heavily on the vanilla autograd engine and tries
-// to re-use it as much as possible. This class is mostly responsible for the
+// to reuse it as much as possible. This class is mostly responsible for the
 // distributed aspects of autograd and tries to hook into the autograd engine
 // where convenient.
 
@@ -44,7 +44,7 @@ class TORCH_API DistEngine {
   // The gradients are accumulated in the provided autograd context.
   c10::intrusive_ptr<c10::ivalue::Future> executeSendFunctionAsync(
       const ContextPtr& autogradContext,
-      const std::shared_ptr<SendRpcBackward>& sendFunction,
+      const c10::intrusive_ptr<SendRpcBackward>& sendFunction,
       bool retainGraph);
 
   // Number of backward passes currently running for the Distributed Engine.
@@ -82,7 +82,7 @@ class TORCH_API DistEngine {
       const ContextPtr& context,
       const torch::autograd::edge_list& rootEdges,
       const torch::autograd::variable_list& grads,
-      const std::shared_ptr<torch::autograd::Node>& graphRoot,
+      const c10::intrusive_ptr<torch::autograd::Node>& graphRoot,
       torch::autograd::edge_list& outputEdges,
       bool retainGraph);
 
@@ -125,7 +125,7 @@ class TORCH_API DistEngine {
   // context.
   c10::intrusive_ptr<c10::ivalue::Future> runEngineAndAccumulateGradients(
       const ContextPtr& autogradContext,
-      const std::shared_ptr<torch::autograd::Node>& graphRoot,
+      const c10::intrusive_ptr<torch::autograd::Node>& graphRoot,
       const torch::autograd::edge_list& outputEdges,
       bool incrementOutStandingTasks = true);
 

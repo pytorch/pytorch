@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Any, Optional, Union
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -32,7 +32,7 @@ def _untie_named_tensors_map(
 
     Args:
         module (torch.nn.Module): the module to determine which tensors are tied.
-        parameters_and_buffers (Dict[str, Tensor]): a map of {name: tensor} for reparamaterizing the module.
+        parameters_and_buffers (Dict[str, Tensor]): a map of {name: tensor} for reparameterizing the module.
 
     Returns:
         A new untied version of the parameters_and_buffers dictionary.
@@ -103,9 +103,6 @@ def _reparametrize_module(
     strict: bool = False,
     stack_weights: bool = False,
 ):
-    parameters_and_buffers = parameters_and_buffers
-    stack_weights = stack_weights
-
     if tie_weights:
         untied_parameters_and_buffers = _untie_named_tensors_map(
             module, parameters_and_buffers
@@ -168,8 +165,8 @@ def _reparametrize_module(
 def functional_call(
     module: "torch.nn.Module",
     parameters_and_buffers: dict[str, Tensor],
-    args: Optional[Union[Any, tuple]] = None,
-    kwargs: Optional[dict[str, Any]] = None,
+    args: Any | tuple | None = None,
+    kwargs: dict[str, Any] | None = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,
@@ -223,7 +220,7 @@ def functional_call(
         args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
         kwargs (dict): keyword arguments to be passed to the module call
         tie_weights (bool, optional): If True, then parameters and buffers tied in the original model will be treated as
-            tied in the reparamaterized version. Therefore, if True and different values are passed for the tied
+            tied in the reparameterized version. Therefore, if True and different values are passed for the tied
             parameters and buffers, it will error. If False, it will not respect the originally tied parameters and
             buffers unless the values passed for both weights are the same. Default: True.
         strict (bool, optional): If True, then the parameters and buffers passed in must match the parameters and
@@ -246,8 +243,8 @@ def functional_call(
 def _functional_call(
     module: "torch.nn.Module",
     parameters_and_buffers: dict[str, Tensor],
-    args: Optional[Union[Any, tuple]] = None,
-    kwargs: Optional[dict[str, Any]] = None,
+    args: Any | tuple | None = None,
+    kwargs: dict[str, Any] | None = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,

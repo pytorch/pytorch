@@ -24,7 +24,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
-from typing import Any, Callable
+
+from typing import Any
 from unittest import mock
 
 from functorch.einops._parsing import (
@@ -37,9 +38,8 @@ from functorch.einops._parsing import (
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-mock_anonymous_axis_eq: Callable[[AnonymousAxis, object], bool] = (
-    lambda self, other: isinstance(other, AnonymousAxis) and self.value == other.value
-)
+def mock_anonymous_axis_eq(self: AnonymousAxis, other: object) -> bool:
+    return isinstance(other, AnonymousAxis) and self.value == other.value
 
 
 class TestAnonymousAxis(TestCase):
@@ -108,7 +108,7 @@ class TestParsedExpression(TestCase):
             ParsedExpression("(a) ((b c) (d ...))")
 
         # invalid identifiers
-        ParsedExpression("camelCase under_scored cApiTaLs \u00DF ...")
+        ParsedExpression("camelCase under_scored cApiTaLs \u00df ...")
         with self.assertRaises(ValueError):
             ParsedExpression("1a")
         with self.assertRaises(ValueError):

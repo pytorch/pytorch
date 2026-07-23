@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.optim._functional as F
@@ -12,7 +11,7 @@ from torch.distributed.optim._deprecation_warning import (
 __all__: list[str] = []
 
 
-# Define a TorchScript compatible Functional Adadelta Optimizer
+# Define a Functional Adadelta Optimizer
 # where we use these optimizer in a functional way.
 # Instead of using the `param.grad` when updating parameters,
 # we explicitly allow the distributed optimizer pass gradients to
@@ -21,7 +20,6 @@ __all__: list[str] = []
 # parameters without data traces on accumulating to the same .grad.
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
-@torch.jit.script
 class _FunctionalAdadelta:
     def __init__(
         self,
@@ -53,7 +51,7 @@ class _FunctionalAdadelta:
 
         self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Tensor | None]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []

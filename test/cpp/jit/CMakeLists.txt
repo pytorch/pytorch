@@ -17,7 +17,7 @@ set(BACKEND_WITH_COMPILER_SRCS
 )
 if(USE_KINETO)
   # Testing edge profiler for backend use
-  # profiler_edge should only be aded when USE_KINETO flag is on
+  # profiler_edge should only be added when USE_KINETO flag is on
   list(APPEND BACKEND_WITH_COMPILER_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/mobile/profiler_edge.cpp)
 endif()
@@ -39,6 +39,7 @@ endif()
 
 # Build the cpp gtest binary containing the cpp-only tests.
 set(JIT_TEST_SRCS
+  ${JIT_TEST_ROOT}/source_range_test.cpp
   ${JIT_TEST_ROOT}/test_add_if_then_else.cpp
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
@@ -70,6 +71,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_ir.cpp
   ${JIT_TEST_ROOT}/test_irparser.cpp
   ${JIT_TEST_ROOT}/test_jit_type.cpp
+  ${JIT_TEST_ROOT}/test_lexer.cpp
   ${JIT_TEST_ROOT}/test_lite_interpreter.cpp
   ${JIT_TEST_ROOT}/test_lite_interpreter_direct.cpp
   ${JIT_TEST_ROOT}/test_lite_trainer.cpp
@@ -86,6 +88,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_subgraph_matcher.cpp
   ${JIT_TEST_ROOT}/test_subgraph_rewriter.cpp
   ${JIT_TEST_ROOT}/test_subgraph_utils.cpp
+  ${JIT_TEST_ROOT}/test_te.cpp
   ${JIT_TEST_ROOT}/test_union.cpp
   ${JIT_TEST_ROOT}/test_utils.cpp
   ${JIT_TEST_ROOT}/test_script_profile.cpp
@@ -101,7 +104,10 @@ add_executable(test_jit
 )
 
 # We also build with UBSAN flag in build_asan.h
-if(USE_ASAN)
+# Skip UBSan on ROCm: combining ASAN + UBSan on ROCm Clang causes
+# misaligned ASAN global metadata, triggering spurious ASAN alignment
+# check aborts at startup.
+if(USE_ASAN AND NOT USE_ROCM)
   target_compile_options(test_jit PRIVATE "-fsanitize=undefined")
   target_link_libraries(test_jit PRIVATE "-fsanitize=undefined")
 endif()
@@ -115,13 +121,15 @@ target_compile_definitions(test_jit PRIVATE USE_GTEST)
 
 if(USE_SYSTEM_ONNX)
   target_link_libraries(test_jit PRIVATE onnx_proto onnx)
+else()
+  target_link_libraries(test_jit PRIVATE onnx_library)
 endif()
 
 if(USE_MKLDNN)
   target_link_libraries(test_jit PRIVATE caffe2::mkldnn)
 endif()
 
-set(JIT_TEST_DEPENDENCIES torch gtest jitbackend_test backend_with_compiler)
+set(JIT_TEST_DEPENDENCIES torch gtest_main jitbackend_test backend_with_compiler gmock)
 
 if(MSVC)
   list(APPEND JIT_TEST_DEPENDENCIES onnx_library)
@@ -153,6 +161,9 @@ endif()
 if(INSTALL_TEST)
   set_target_properties(test_jit PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS test_jit DESTINATION bin)
+  install(FILES ${JIT_TEST_ROOT}/test_interpreter_async.pt DESTINATION bin)
+  install(FILES ${JIT_TEST_ROOT}/script_module_v4.ptl DESTINATION bin)
+  install(DIRECTORY ${JIT_TEST_ROOT}/upgrader_models DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)
     install(FILES $<TARGET_PDB_FILE:test_jit> DESTINATION bin OPTIONAL)

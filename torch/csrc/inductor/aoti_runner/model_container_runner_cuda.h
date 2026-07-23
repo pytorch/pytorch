@@ -17,7 +17,18 @@ class TORCH_CUDA_CPP_API AOTIModelContainerRunnerCuda
       const std::string& model_so_path,
       size_t num_models = 1,
       const std::string& device_str = "cuda",
-      const std::string& cubin_dir = "");
+      const std::string& cubin_dir = "",
+      const bool run_single_threaded = false);
+
+  // Construct with externally-provided weights (zero GPU allocation for
+  // constants — the .so weights are not loaded). Caller retains tensor
+  // ownership; tensors must outlive the runner.
+  AOTIModelContainerRunnerCuda(
+      const std::string& model_so_path,
+      size_t num_models,
+      const std::string& device_str,
+      const std::string& cubin_dir,
+      std::unordered_map<std::string, at::Tensor>& constants);
 
   ~AOTIModelContainerRunnerCuda() override;
 

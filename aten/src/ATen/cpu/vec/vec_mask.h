@@ -68,7 +68,12 @@ struct VecMaskTo {
   }
 };
 
-template <typename dst_t, int dst_n, typename src_t, int src_n, typename Enabled = void>
+template <
+    typename dst_t,
+    int dst_n,
+    typename src_t,
+    int src_n,
+    typename Enabled = void>
 struct VecMaskCast {
   static inline VecMask<dst_t, dst_n> apply(
       const VecMask<src_t, src_n>& vec_mask) {
@@ -88,15 +93,17 @@ struct VecMaskCheck {
   static inline bool all_zero(const VectorizedN<T, N>& vec_mask) {
     __at_align__ T mask[VectorizedN<T, N>::size()];
     vec_mask.store(mask);
-    return std::all_of(
-        mask, mask + VectorizedN<T, N>::size(), [](T m) { return m == static_cast<T>(0); });
+    return std::all_of(mask, mask + VectorizedN<T, N>::size(), [](T m) {
+      return m == static_cast<T>(0);
+    });
   }
 
   static inline bool all_masked(const VectorizedN<T, N>& vec_mask) {
     __at_align__ T mask[VectorizedN<T, N>::size()];
     vec_mask.store(mask);
-    return std::all_of(
-        mask, mask + VectorizedN<T, N>::size(), [](T m) { return m != static_cast<T>(0); });
+    return std::all_of(mask, mask + VectorizedN<T, N>::size(), [](T m) {
+      return m != static_cast<T>(0);
+    });
   }
 
   static inline bool is_masked(const VectorizedN<T, N>& vec_mask, int i) {
@@ -116,6 +123,16 @@ class VecMask {
 
  private:
   VectorizedN<T, N> mask_;
+
+  template <typename U>
+  constexpr static T value_to_mask(U b) {
+    if constexpr (std::is_same_v<T, bool>) {
+      return static_cast<bool>(b);
+    } else {
+      using int_t = int_same_size_t<T>;
+      return b ? c10::bit_cast<T>(static_cast<int_t>(-1)) : static_cast<T>(0);
+    }
+  }
 
  public:
   VecMask() : mask_(static_cast<T>(0)) {}
@@ -140,32 +157,39 @@ class VecMask {
 
   template <typename U>
   static VecMask<T, N> from(U b) {
-    using int_t = int_same_size_t<T>;
-    T mask = b ? c10::bit_cast<T>((int_t)(~(int_t)0)) : (T)0;
-    return VectorizedN<T, N>(mask);
+    return VectorizedN<T, N>(value_to_mask(b));
   }
 
   template <typename U>
   static VecMask<T, N> from(U* b) {
-    using int_t = int_same_size_t<T>;
     __at_align__ T mask[size()];
 #ifndef __msvc_cl__
 #pragma unroll
 #endif
     for (int i = 0; i < size(); i++) {
-      *(int_t*)(mask + i) = b[i] ? ~(int_t)0 : (int_t)0;
+      mask[i] = value_to_mask(b[i]);
     }
     return VectorizedN<T, N>(VectorizedN<T, N>::loadu(mask));
   }
 
+  template <typename U>
+  static VecMask<T, N> from(U* b, int count) {
+    __at_align__ T mask[size()];
+#ifndef __msvc_cl__
+#pragma unroll
+#endif
+    for (int i = 0; i < count; i++) {
+      mask[i] = value_to_mask(b[i]);
+    }
+    return VectorizedN<T, N>(VectorizedN<T, N>::loadu(mask, count));
+  }
+
   static VecMask<T, N> blendv(
-    const VecMask<T, N>& c,
-    const VecMask<T, N>& b,
-    const VecMask<T, N>& a) {
+      const VecMask<T, N>& c,
+      const VecMask<T, N>& b,
+      const VecMask<T, N>& a) {
     VectorizedN<T, N> result = VectorizedN<T, N>::blendv(
-      VectorizedN<T, N>(c),
-      VectorizedN<T, N>(b),
-      VectorizedN<T, N>(a));
+        VectorizedN<T, N>(c), VectorizedN<T, N>(b), VectorizedN<T, N>(a));
     return result;
   }
 
@@ -174,14 +198,14 @@ class VecMask {
       const VecMask<T, N>& b,
       int64_t count = size()) {
     VectorizedN<T, N> result = VectorizedN<T, N>::set(
-      VectorizedN<T, N>(a),
-      VectorizedN<T, N>(b),
-      count);
+        VectorizedN<T, N>(a), VectorizedN<T, N>(b), count);
     return result;
   }
 
   void store(bool* b, int count = size()) {
-    constexpr int L = (VectorizedN<T, N>::size() + Vectorized<bool>::size() - 1)/ Vectorized<bool>::size();
+    constexpr int L =
+        (VectorizedN<T, N>::size() + Vectorized<bool>::size() - 1) /
+        Vectorized<bool>::size();
     auto res = this->to<bool, L>();
     res.store(b, count);
     return;

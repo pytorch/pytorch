@@ -87,6 +87,12 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
+  // XPU: oneDNN LSTM for inference (GPU primitive supports f32 and f16)
+  if (input.is_xpu()) {
+    return !at::GradMode::is_enabled() &&
+        (input.scalar_type() == kFloat || input.scalar_type() == kHalf) &&
+        input.numel() != 0;
+  }
   auto is_cpu_backend = [&](const TensorList tensors) {
     bool backend_cpu = true;
     for (const auto& t : tensors) {
@@ -104,8 +110,18 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
        (input.scalar_type() == kHalf && !at::GradMode::is_enabled() &&
         mkldnn_fp16_device_check())) &&
       input.numel() != 0;
-#endif
+#else
+  (void)params;
+  (void)hx;
   return false;
+#endif
+}
+
+bool use_cudnn(const Tensor& t) {
+  bool acceptable = at::cudnn_is_acceptable(t);
+  auto st = t.scalar_type();
+  bool bfloat16_cond = st == kBFloat16 && at::detail::getCUDAHooks().supportsBFloat16RNNWithCuDNN();
+  return acceptable && (bfloat16_cond || st == kDouble || st == kFloat || st == kHalf);
 }
 
 template<typename T>
@@ -294,9 +310,9 @@ struct QuantizedCellParams : public CellParamsBase {
                                                zero_point_hh.toLong()};
     return CellParamsSerializationType(
         "quantized",
-        tensors_to_serialize,
-        doubles_to_serialize,
-        longs_to_serialize,
+        std::move(tensors_to_serialize),
+        std::move(doubles_to_serialize),
+        std::move(longs_to_serialize),
         {});
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -436,10 +452,10 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     // reduce_range parameter is serialized along with the int field values.
     return CellParamsSerializationType(
         "quantized_dynamic",
-        tensors_to_serialize,
+        std::move(tensors_to_serialize),
         {},
         {reduce_range_},
-        packed_params_to_serialize);
+        std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
@@ -512,7 +528,7 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         packed_params_to_serialize{packed_ih, packed_hh};
 
     return CellParamsSerializationType(
-        "quantized_fp16", {}, {}, {}, packed_params_to_serialize);
+        "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
@@ -531,7 +547,7 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_fp16(
       std::move(w_ih_packed), std::move(w_hh_packed));
 }
 
-static std::unordered_map<
+std::unordered_map<
     std::string,
     c10::intrusive_ptr<CellParamsBase> (*)(CellParamsSerializationType)>
     cell_params_deserializers = {
@@ -571,7 +587,7 @@ struct QRNNCellParamsWrapper {
 
 // Gathers every two elements of a vector in a vector of pairs
 template<typename T>
-static std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
+std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
   TORCH_CHECK(vals.size() % 2 == 0, "Odd number of params or hiddens given to a bidirectional RNN");
   std::vector<pair_of<T>> result;
   result.reserve(vals.size() / 2);
@@ -583,7 +599,7 @@ static std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
 
 // Flattens a vector of pairs
 template<typename T>
-static std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
+std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
   std::vector<T> result;
   result.reserve(vals.size() * 2);
   for (const auto i : c10::irange(vals.size())) {
@@ -594,17 +610,19 @@ static std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
 }
 
 // Parses a flat list of parameter tensors into a list of CellParams
-static std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool has_projections = false) {
+std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool has_projections = false) {
   static at::Tensor undefined;
   std::vector<CellParams> result;
   if (has_biases) {
     if (has_projections) {
       TORCH_CHECK(params.size() % 5 == 0, "got an incorrect number of RNN parameters");
+      result.reserve(params.size() / 5);
       for (size_t i = 0; i < params.size(); i += 5) {
         result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], params[i + 4]);
       }
     } else {
       TORCH_CHECK(params.size() % 4 == 0, "got an incorrect number of RNN parameters");
+      result.reserve(params.size() / 4);
       for (size_t i = 0; i < params.size(); i += 4) {
         result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], undefined);
       }
@@ -612,11 +630,13 @@ static std::vector<CellParams> gather_params(TensorList params, bool has_biases,
   } else {
     if (has_projections) {
       TORCH_CHECK(params.size() % 3 == 0, "got an incorrect number of RNN parameters");
+      result.reserve(params.size() / 3);
       for (size_t i = 0; i < params.size(); i += 3) {
         result.emplace_back(params[i], params[i + 1], undefined, undefined, params[i + 2]);
       }
     } else {
       TORCH_CHECK(params.size() % 2 == 0, "got an incorrect number of RNN parameters");
+      result.reserve(params.size() / 2);
       for (size_t i = 0; i < params.size(); i += 2) {
         result.emplace_back(params[i], params[i + 1], undefined, undefined, undefined);
       }
@@ -687,6 +707,15 @@ void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, const 
     hx.sym_size(1) == hidden_size,
     "hidden", hidden_label, " has inconsistent hidden_size: got ", hx.sym_size(1), ", expected ", hidden_size);
 }
+
+template<int64_t gate_count>
+inline void check_rnn_cell_forward_weights(const Tensor& w_ih, const Tensor& w_hh, const c10::SymInt& hidden_size){
+    TORCH_CHECK(w_ih.size(0) == gate_count * hidden_size, "weight_ih first dim must be ", gate_count, " * hidden_size = ",
+        gate_count * hidden_size, ", but got ", w_ih.size(0));
+    TORCH_CHECK(w_hh.size(0) == gate_count * hidden_size, "weight_hh first dim must be ", gate_count, " * hidden_size = ",
+        gate_count * hidden_size, ", but got ", w_hh.size(0));
+}
+
 
 template<typename hidden_type_tmpl, typename cell_params_tmpl>
 struct Cell {
@@ -836,7 +865,7 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
       hidden = cell_(input, hidden, params, pre_compute_input);
       step_outputs.emplace_back(hidden_as_output(hidden));
     }
-    return {step_outputs, hidden};
+    return {std::move(step_outputs), std::move(hidden)};
   }
 
   output_type operator()(
@@ -849,12 +878,12 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
           (*this)(inputs_w.unbind(0), input_hidden, params, true);
       TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
       return {at::stack(unstacked_output.outputs, 0),
-              unstacked_output.final_hidden};
+              std::move(unstacked_output.final_hidden)};
     }
     auto unstacked_output = (*this)(inputs.unbind(0), input_hidden, params);
     TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
     return {at::stack(unstacked_output.outputs, 0),
-            unstacked_output.final_hidden};
+            std::move(unstacked_output.final_hidden)};
   }
 
   Cell<hidden_type, cell_params>& cell_;
@@ -880,7 +909,7 @@ struct FullBidirectionalLayer
       step_inputs = input_w.unbind(0);
       auto fw_result = layer_(
           step_inputs, input_hidden.first, params.first, true);
-      TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
+      TORCH_CHECK(!fw_result.outputs.empty(), "Expected sequence length to be larger than 0 in RNN");
       auto fw_output = at::stack(fw_result.outputs, 0);
       input_w = params.second.linear_ih(input);
       step_inputs = input_w.unbind(0);
@@ -890,12 +919,14 @@ struct FullBidirectionalLayer
       std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
       auto rev_output = at::stack(rev_result.outputs, 0);
       return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
-              std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
+              std::make_pair(
+                  std::move(fw_result.final_hidden),
+                  std::move(rev_result.final_hidden))};
     }
 
     step_inputs = input.unbind(0);
     auto fw_result = layer_(step_inputs, input_hidden.first, params.first);
-    TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
+    TORCH_CHECK(!fw_result.outputs.empty(), "Expected sequence length to be larger than 0 in RNN");
     auto fw_output = at::stack(fw_result.outputs, 0);
     auto rev_step_inputs = reverse(std::move(step_inputs));
     auto rev_result =
@@ -903,7 +934,9 @@ struct FullBidirectionalLayer
     std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
     auto rev_output = at::stack(rev_result.outputs, 0);
     return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
-            std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
+            std::make_pair(
+                std::move(fw_result.final_hidden),
+                std::move(rev_result.final_hidden))};
   }
 
   std::vector<Tensor> reverse(std::vector<Tensor>&& x) const {
@@ -931,7 +964,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     std::vector<hidden_type> hiddens;
     int64_t input_offset = 0;
     int64_t num_steps = input.batch_sizes.size(0);
-    int64_t* batch_sizes = input.batch_sizes.data_ptr<int64_t>();
+    const int64_t* batch_sizes = input.batch_sizes.const_data_ptr<int64_t>();
     int64_t last_batch_size = batch_sizes[0];
 
     const Tensor* input_ptr = &input.data;
@@ -990,7 +1023,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     std::vector<at::Tensor> step_outputs;
     int64_t input_offset = input.data.size(0);
     int64_t num_steps = input.batch_sizes.size(0);
-    int64_t* batch_sizes = input.batch_sizes.data_ptr<int64_t>();
+    const int64_t* batch_sizes = input.batch_sizes.const_data_ptr<int64_t>();
     int64_t last_batch_size = batch_sizes[num_steps - 1];
 
     const Tensor* input_ptr = &input.data;
@@ -1023,7 +1056,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     }
     std::reverse(step_outputs.begin(), step_outputs.end());
     return {PackedSequence{at::cat(step_outputs, 0), input.batch_sizes},
-            hidden};
+            std::move(hidden)};
   }
 
   Cell<hidden_type, cell_params>& cell_;
@@ -1049,8 +1082,10 @@ struct PackedBidirectionalLayer
     PackedSequence output{
         at::cat({fw_result.outputs.data, rev_result.outputs.data}, -1),
         input.batch_sizes};
-    return {output,
-            std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
+    return {std::move(output),
+            std::make_pair(
+                std::move(fw_result.final_hidden),
+                std::move(rev_result.final_hidden))};
   }
 
   PackedLayer<dir_hidden_type, cell_params> layer_;
@@ -1085,17 +1120,18 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
   auto hidden_it = hiddens.begin();
   auto weight_it = weights.begin();
   std::vector<hidden_type> final_hiddens;
+  final_hiddens.reserve(num_layers);
   for (const auto l : c10::irange(num_layers)) {
     auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++));
-    final_hiddens.push_back(layer_output.final_hidden);
-    layer_input = layer_output.outputs;
+    final_hiddens.push_back(std::move(layer_output.final_hidden));
+    layer_input = std::move(layer_output.outputs);
 
     if (dropout_p != 0 && train && l < num_layers - 1) {
       layer_input = dropout(layer_input, dropout_p);
     }
   }
 
-  return {layer_input, final_hiddens};
+  return {std::move(layer_input), std::move(final_hiddens)};
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1113,7 +1149,7 @@ LayerOutput<io_type, std::vector<typename CellType::hidden_type>> _rnn_impl(
   if (bidirectional) {
     using BidirLayer = BidirLayerT<hidden_type, cell_params>;
     auto bidir_result = apply_layer_stack(BidirLayer{cell}, input, pair_vec(hiddens), pair_vec(params), num_layers, dropout_p, train);
-    return {bidir_result.outputs, unpair_vec(std::move(bidir_result.final_hidden))};
+    return {std::move(bidir_result.outputs), unpair_vec(std::move(bidir_result.final_hidden))};
   } else {
     return apply_layer_stack(LayerT<hidden_type,cell_params>{cell}, input, hiddens, params, num_layers, dropout_p, train);
   }
@@ -1200,7 +1236,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       bool train,                                                           \
       bool bidirectional,                                                   \
       bool batch_first) {                                                   \
-    if (at::cudnn_is_acceptable(_input)) {                                  \
+    if (use_cudnn(_input)) {                                                \
       Tensor output, hy;                                                    \
       NAME##_cudnn_stub(                                                    \
           _input.device().type(),                                           \
@@ -1262,7 +1298,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       double dropout_p,                                                     \
       bool train,                                                           \
       bool bidirectional) {                                                 \
-    if (at::cudnn_is_acceptable(data)) {                                    \
+    if (use_cudnn(data)) {                                                  \
       Tensor output, hy;                                                    \
       NAME##_packed_cudnn_stub(                                             \
           data.device().type(),                                             \
@@ -1430,7 +1466,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  if (at::cudnn_is_acceptable(_input)) {
+  if (use_cudnn(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
@@ -1440,7 +1476,10 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   if (_input.is_mps()) {
     std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
-    std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(std::get<0>(output), std::get<1>(output), std::get<2>(output));
+    std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(
+        std::move(std::get<0>(output)),
+        std::move(std::get<1>(output)),
+        std::move(std::get<2>(output)));
     return return_values;
   }
 #endif
@@ -1491,7 +1530,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  if (at::cudnn_is_acceptable(data)) {
+  if (use_cudnn(data)) {
     Tensor output, hy, cy;
     lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
@@ -1508,6 +1547,29 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     } else {
       TORCH_WARN_ONCE(
           "LSTM with projections is not supported with MIOpen. Using default implementation.");
+    }
+  }
+
+  // If packed sequence has uniform batch size, unwrap to regular tensor
+  // and dispatch to the standard lstm (enables oneDNN path for CPU/XPU)
+  if (!has_projections && use_mkldnn(data, _params, hx) && batch_sizes.size(0) > 0) {
+    const int64_t* bs_ptr = batch_sizes.const_data_ptr<int64_t>();
+    int64_t first_batch = bs_ptr[0];
+    bool uniform = true;
+    for (int64_t i = 1; i < batch_sizes.size(0); i++) {
+      if (bs_ptr[i] != first_batch) {
+        uniform = false;
+        break;
+      }
+    }
+    if (uniform) {
+      int64_t seq_len = batch_sizes.size(0);
+      auto input_3d = data.reshape({seq_len, first_batch, data.size(-1)});
+      auto result = at::native::lstm(input_3d, hx, _params, has_biases,
+          num_layers, dropout_p, train, bidirectional, /*batch_first=*/false);
+      std::get<0>(result) = std::get<0>(result).reshape(
+          {seq_len * first_batch, std::get<0>(result).size(-1)});
+      return result;
     }
   }
 
@@ -1530,8 +1592,9 @@ std::tuple<Tensor, Tensor> lstm_cell(
   const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
   TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
-  check_rnn_cell_forward_input(input, w_ih.sym_size(1));
   auto hidden_size = w_hh.sym_size(1);
+  check_rnn_cell_forward_input(input, w_ih.sym_size(1));
+  check_rnn_cell_forward_weights<4>(w_ih, w_hh, hidden_size);
   check_rnn_cell_forward_hidden(input, hx[0], hidden_size, 0);
   check_rnn_cell_forward_hidden(input, hx[1], std::move(hidden_size), 1);
   static at::Tensor undefined;
@@ -1645,6 +1708,7 @@ Tensor gru_cell(
 
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
+  check_rnn_cell_forward_weights<3>(w_ih, w_hh, w_hh.size(1));
   static at::Tensor undefined;
   return GRUCell<CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
@@ -1658,6 +1722,7 @@ Tensor rnn_tanh_cell(
   const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
   static at::Tensor undefined;
+  check_rnn_cell_forward_weights<1>(w_ih, w_hh, w_hh.size(1));
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
   return SimpleCell<tanh_f, CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
@@ -1672,6 +1737,7 @@ Tensor rnn_relu_cell(
   const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
   static at::Tensor undefined;
+  check_rnn_cell_forward_weights<1>(w_ih, w_hh, w_hh.size(1));
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
   return SimpleCell<relu_f, CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
@@ -1887,10 +1953,10 @@ static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple
 
 namespace {
 
-[[maybe_unused]] static auto ensure_linear_params_registered =
+[[maybe_unused]] auto ensure_linear_params_registered =
     register_linear_params();
 
-static auto cell_params_base_registry =
+auto cell_params_base_registry =
     torch::selective_class_<CellParamsBase>("rnn", TORCH_SELECTIVE_CLASS("CellParamsBase"))
         .def_pickle(
             [](const c10::intrusive_ptr<CellParamsBase>& self)

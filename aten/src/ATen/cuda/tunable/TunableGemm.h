@@ -1,6 +1,6 @@
 // Original TunableOp is from onnxruntime.
 // https://github.com/microsoft/onnxruntime/blob/main/onnxruntime/core/framework/tunable.h
-// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/rocm/tunable
+// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/cuda/tunable
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 //
@@ -13,14 +13,16 @@
 #ifdef USE_ROCM
 #include <ATen/cuda/tunable/GemmHipblaslt.h>
 #include <ATen/cuda/tunable/GemmRocblas.h>
+#else
+#include <ATen/cuda/tunable/GemmCublaslt.h>
 #endif
-#include <ATen/cuda/tunable/StreamTimer.h>
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
+#include <c10/util/Float8_e8m0fnu.h>
 #include <c10/util/StringUtil.h>
 #include <fmt/printf.h>
 
@@ -95,10 +97,14 @@ class DefaultScaledGemmOp : public Callable<ScaledGemmParams<T>> {
           params->a_scale_ptr,
           params->lda,
           params->a_dtype,
+          params->a_scale_dtype,
+          params->a_scaling_type,
           params->b,
           params->b_scale_ptr,
           params->ldb,
           params->b_dtype,
+          params->b_scale_dtype,
+          params->b_scaling_type,
           params->bias_ptr,
           params->bias_dtype,
           params->c,
@@ -106,7 +112,7 @@ class DefaultScaledGemmOp : public Callable<ScaledGemmParams<T>> {
           params->ldc,
           params->c_dtype,
           params->use_fast_accum,
-          params->use_rowwise);
+          std::nullopt /* alpha */);
       return OK;
     }
 };
@@ -143,7 +149,11 @@ inline const char* TypeName(T v) {
 
 template <>
 inline const char* TypeName(float v) {
-  return "float";
+  if (at::globalContext().allowTF32CuBLAS()) {
+    return "tf32";
+  } else {
+    return "float";
+  }
 }
 
 template <>
@@ -182,6 +192,11 @@ inline const char* TypeName(Float8_e5m2fnuz v) {
 }
 
 template <>
+inline const char* TypeName(Float8_e8m0fnu v) {
+  return "Float8_e8m0fnu";
+}
+
+template <>
 inline const char* TypeName(c10::complex<double> v) {
   return "c10::complex<double>";
 }
@@ -192,21 +207,28 @@ inline const char* TypeName(c10::complex<float> v) {
 }
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
+class GemmTunableOp
+    : public
+#ifdef USE_ROCM
+          TunableOp<GemmParams<T>>
+#else
+          CublasltGemmTunableOp<T, GemmParams<T>>
+#endif
+{
  public:
   GemmTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
 
 #ifdef USE_ROCM
-    static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
-    if (env_rocblas == nullptr || strcmp(env_rocblas, "1") == 0) {
+    static const auto env_rocblas = c10::utils::check_env("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
+    if (!env_rocblas.has_value() || env_rocblas.value()) {
       for (auto&& [name, op] : GetRocBlasGemmTypeStringAndOps<T>()) {
         this->RegisterOp(std::move(name), std::move(op));
       }
     }
 
-    static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
-    if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
+    static const auto env_hipblaslt = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    if (!env_hipblaslt.has_value() || env_hipblaslt.value()) {
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -217,6 +239,8 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
       }
     }
 #endif
+
+    this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
   }
 
   std::string Signature() override {
@@ -225,14 +249,21 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
 };
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer> {
+class GemmAndBiasTunableOp
+    : public
+#ifdef USE_ROCM
+          TunableOp<GemmAndBiasParams<T>>
+#else
+          CublasltGemmTunableOp<T, GemmAndBiasParams<T>>
+#endif
+{
  public:
   GemmAndBiasTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
 
 #ifdef USE_ROCM
-    static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
-    if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
+    static const auto env_hipblaslt = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    if (!env_hipblaslt.has_value() || env_hipblaslt.value()) {
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -243,6 +274,8 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
       }
     }
 #endif
+
+    this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
   }
 
   std::string Signature() override {
@@ -251,21 +284,28 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
 };
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>, StreamTimer> {
+class GemmStridedBatchedTunableOp
+    : public
+#ifdef USE_ROCM
+          TunableOp<GemmStridedBatchedParams<T>>
+#else
+          CublasltGemmTunableOp<T, GemmStridedBatchedParams<T>>
+#endif
+{
  public:
   GemmStridedBatchedTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());
 
 #ifdef USE_ROCM
-    static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
-    if (env_rocblas == nullptr || strcmp(env_rocblas, "1") == 0) {
+    static const auto env_rocblas = c10::utils::check_env("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
+    if (!env_rocblas.has_value() || env_rocblas.value()) {
       for (auto&& [name, op] : GetRocBlasGemmStridedBatchedTypeStringAndOps<T>()) {
         this->RegisterOp(std::move(name), std::move(op));
       }
     }
 
-    static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
-    if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
+    static const auto env_hipblaslt = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    if (!env_hipblaslt.has_value() || env_hipblaslt.value()) {
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -276,6 +316,8 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
       }
     }
 #endif
+
+    this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());
   }
 
   std::string Signature() override {
@@ -284,7 +326,7 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
 };
 
 template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
-class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> {
+class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>> {
  public:
   ScaledGemmTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
@@ -294,6 +336,8 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
       this->RegisterOp(std::move(name), std::move(op));
     }
 #endif
+
+    this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
   }
 
   std::string Signature() override {

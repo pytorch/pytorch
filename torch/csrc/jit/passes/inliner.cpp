@@ -2,15 +2,9 @@
 
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/api/function_impl.h>
-#include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/jit_log.h>
 
 namespace torch::jit {
-
-namespace prim {
-using namespace ::c10::prim;
-}
 
 GraphFunction* tryToGraphFunction(Node* n) {
   if (n->kind() == prim::CallFunction) {

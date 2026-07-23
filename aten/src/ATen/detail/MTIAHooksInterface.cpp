@@ -5,7 +5,7 @@ namespace detail {
 
 const MTIAHooksInterface& getMTIAHooks() {
   auto create_impl = [] {
-    auto hooks = MTIAHooksRegistry()->Create("MTIAHooks", MTIAHooksArgs{});
+    auto hooks = MTIAHooksRegistry()->Create("MTIAHooks");
     if (hooks) {
       return hooks;
     }
@@ -21,6 +21,10 @@ bool isMTIAHooksBuilt() {
 
 } // namespace detail
 
-C10_DEFINE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs)
+bool MTIAHooksInterface::isAvailable() const {
+  return detail::isMTIAHooksBuilt() && detail::getMTIAHooks().deviceCount() > 0;
+}
+
+C10_DEFINE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface)
 
 } // namespace at

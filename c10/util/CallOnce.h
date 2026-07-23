@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 
 #include <atomic>
 #include <functional>
@@ -40,6 +39,9 @@ class once_flag {
   once_flag(once_flag&&) = delete;
   once_flag& operator=(once_flag&&) = delete;
   ~once_flag() = default;
+  bool test_once() {
+    return init_.load(std::memory_order_acquire);
+  }
 
  private:
   template <typename Flag, typename F, typename... Args>
@@ -53,10 +55,6 @@ class once_flag {
     }
     std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
     init_.store(true, std::memory_order_release);
-  }
-
-  bool test_once() {
-    return init_.load(std::memory_order_acquire);
   }
 
   void reset_once() {

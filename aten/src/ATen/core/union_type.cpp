@@ -1,10 +1,5 @@
 #include <ATen/core/Dict.h>
-#include <ATen/core/Tensor.h>
-#include <ATen/core/function.h>
-#include <ATen/core/function_schema.h>
-#include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
-#include <ATen/core/type_factory.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <ostream>
@@ -205,14 +200,14 @@ UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : SharedType
     for (const auto i : c10::irange(reference.size())) {
       msg << reference[i]->repr_str();
       if (i > 0) {
-        msg << ",";
+        msg << ',';
       }
-      msg << " ";
+      msg << ' ';
     }
     msg << "} has the single type " << types_[0]->repr_str()
          << ". Use the common supertype instead of creating a Union"
          << "type";
-    TORCH_INTERNAL_ASSERT(false, msg.str());
+    TORCH_INTERNAL_ASSERT(false, std::move(msg).str());
   }
 
   can_hold_none_ = false;
@@ -405,7 +400,7 @@ std::string UnionType::unionStr(const TypePrinter& printer, bool is_annotation_s
     }
   }
   ss << close_delimeter;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string UnionType::str() const {

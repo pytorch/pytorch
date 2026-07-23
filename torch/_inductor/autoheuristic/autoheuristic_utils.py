@@ -1,5 +1,6 @@
 import functools
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch
 
@@ -46,7 +47,7 @@ class AHOperation:
 
 class AHContext:
     """
-    This class is used to specify which information AutoHeuristic should store. For each choice, AutoHeursitic will
+    This class is used to specify which information AutoHeuristic should store. For each choice, AutoHeuristic will
     store the context and the collected feedback. The context could be something like the shape of a tensor, i.e.,
     information that will help to learn a heuristic.
     """
@@ -335,5 +336,5 @@ def context_add_strides(context: AHContext, name: str, stride: tuple[int, ...]) 
 def context_add_using_tf32(context: AHContext, dtype: torch.dtype) -> None:
     using_tf32 = "not_float_32"
     if dtype == torch.float32:
-        using_tf32 = torch.backends.cuda.matmul.allow_tf32
+        using_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
     context.add_feature("using_tf32", using_tf32, is_categorical=True)

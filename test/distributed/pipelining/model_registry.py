@@ -4,16 +4,25 @@
 import torch
 from torch.autograd import Function
 from torch.distributed.pipelining import pipe_split, SplitPoint
+from torch.distributed.tensor import DTensor
 
 
 class ExampleCode(torch.nn.Module):
-    def __init__(self, d_hid):
+    def __init__(self, d_hid, splits=2):
+        if not (splits <= 8):
+            raise AssertionError(f"Expected splits <= 8, got {splits}")
         super().__init__()
+        self.splits = splits
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.mm_param1 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.cval = torch.nn.Buffer(torch.randn((d_hid,), requires_grad=False))
         self.lin0 = torch.nn.Linear(d_hid, d_hid)
         self.lin1 = torch.nn.Linear(d_hid, d_hid)
+        self.lin2 = torch.nn.Linear(d_hid, d_hid)
+        self.lin3 = torch.nn.Linear(d_hid, d_hid)
+        self.lin4 = torch.nn.Linear(d_hid, d_hid)
+        self.lin5 = torch.nn.Linear(d_hid, d_hid)
+        self.lin6 = torch.nn.Linear(d_hid, d_hid)
 
     def forward(self, x):
         x = torch.mm(x, self.mm_param0)
@@ -24,8 +33,30 @@ class ExampleCode(torch.nn.Module):
         pipe_split()
         x = torch.relu(x) + a_constant
         x = torch.mm(x, self.mm_param1)
-        x = self.lin1(x)
-        x = torch.relu(x)
+        if self.splits > 2:
+            pipe_split()
+            x = self.lin1(x)
+            x = torch.relu(x)
+        if self.splits > 3:
+            pipe_split()
+            x = self.lin2(x)
+            x = torch.relu(x)
+        if self.splits > 4:
+            pipe_split()
+            x = self.lin3(x)
+            x = torch.relu(x)
+        if self.splits > 5:
+            pipe_split()
+            x = self.lin4(x)
+            x = torch.relu(x)
+        if self.splits > 6:
+            pipe_split()
+            x = self.lin5(x)
+            x = torch.relu(x)
+        if self.splits > 7:
+            pipe_split()
+            x = self.lin6(x)
+            x = torch.relu(x)
         return x
 
 
@@ -33,12 +64,21 @@ class ModelWithKwargs(torch.nn.Module):
     DEFAULT_DHID = 512
     DEFAULT_BATCH_SIZE = 256
 
-    def __init__(self, d_hid: int = DEFAULT_DHID):
+    def __init__(self, d_hid: int = DEFAULT_DHID, splits=2):
+        if not (splits <= 8):
+            raise AssertionError(f"Expected splits <= 8, got {splits}")
         super().__init__()
+        self.splits = splits
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.mm_param1 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.lin0 = torch.nn.Linear(d_hid, d_hid)
         self.lin1 = torch.nn.Linear(d_hid, d_hid)
+        self.lin2 = torch.nn.Linear(d_hid, d_hid)
+        self.lin3 = torch.nn.Linear(d_hid, d_hid)
+        self.lin4 = torch.nn.Linear(d_hid, d_hid)
+        self.lin5 = torch.nn.Linear(d_hid, d_hid)
+        self.lin6 = torch.nn.Linear(d_hid, d_hid)
+        self.lin7 = torch.nn.Linear(d_hid, d_hid)
 
     def forward(self, x, y=torch.zeros(DEFAULT_BATCH_SIZE, DEFAULT_DHID)):
         x = torch.mm(x, self.mm_param0)
@@ -49,6 +89,30 @@ class ModelWithKwargs(torch.nn.Module):
         x = torch.mm(x, self.mm_param1)
         x = self.lin1(x)
         x = torch.relu(x)
+        if self.splits > 2:
+            pipe_split()
+            x = self.lin2(x)
+            x = torch.relu(x)
+        if self.splits > 3:
+            pipe_split()
+            x = self.lin3(x)
+            x = torch.relu(x)
+        if self.splits > 4:
+            pipe_split()
+            x = self.lin4(x)
+            x = torch.relu(x)
+        if self.splits > 5:
+            pipe_split()
+            x = self.lin5(x)
+            x = torch.relu(x)
+        if self.splits > 6:
+            pipe_split()
+            x = self.lin6(x)
+            x = torch.relu(x)
+        if self.splits > 7:
+            pipe_split()
+            x = self.lin7(x)
+            x = torch.relu(x)
         return x
 
 
@@ -88,6 +152,27 @@ class MLPModule(torch.nn.Module):
         return x
 
 
+class MLPKWargModule(torch.nn.Module):
+    def __init__(self, d_hid: int, layer_num):
+        super().__init__()
+        self.net1 = torch.nn.Linear(d_hid, d_hid)
+        self.relu = torch.nn.ReLU()
+        self.net2 = torch.nn.Linear(d_hid, d_hid)
+        self.layer_num = layer_num
+
+    def forward(self, x, unused_kwarg: torch.Tensor = torch.zeros(1)):
+        x = self.net1(x)
+        x = self.relu(x)
+        x = self.net2(x)
+        # Test when only 1 module has extra outputs
+        # TODO: handle this case later
+        # if self.layer_num == 0:
+        #     return x, unused_kwarg
+        # else:
+        #     return x
+        return x
+
+
 # Multi-MLP model
 class MultiMLP(torch.nn.Module):
     def __init__(self, d_hid: int, n_layers: int = 2):
@@ -100,6 +185,53 @@ class MultiMLP(torch.nn.Module):
 
     def forward(self, x):
         for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+class TwoInputOutputOp(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input: torch.Tensor, weight: torch.Tensor):
+        return input, weight
+
+    @staticmethod
+    def backward(ctx, grad_input, grad_weight):
+        return grad_input, grad_weight
+
+
+# Model with multi-output intermediates
+class MultiInterMediateModel(torch.nn.Module):
+    def __init__(self, weight_shape: list[int]):
+        super().__init__()
+        self.shape = weight_shape
+        self.w = torch.nn.Parameter(torch.randn(*weight_shape))
+
+    def forward(self, x):
+        a, b = torch.split(x, self.shape, dim=1)
+        a, w = TwoInputOutputOp.apply(a, self.w)
+        a = torch.matmul(a, w)
+        return a * b
+
+
+# Multi-MLP with kwargs model
+class MultiMLPKwargs(torch.nn.Module):
+    def __init__(self, d_hid: int, n_layers: int = 2):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [MLPKWargModule(d_hid, i) for i in range(n_layers)]
+        )
+        # For testing purpose only, this should be defined by user
+        self.split_spec = {
+            f"layers.{i}": SplitPoint.BEGINNING for i in range(1, n_layers)
+        }
+
+    def forward(self, x, unused_kwarg: torch.Tensor = torch.zeros(1)):
+        for layer in self.layers:
+            # TODO: handle this case later
+            # if layer.layer_num == 0:
+            #     x, _ = layer(x, unused_kwarg)
+            # else:
+            #     x = layer(x)
             x = layer(x)
         return x
 
@@ -146,10 +278,10 @@ class MLPModuleWithDw(torch.nn.Module):
         self.fc2_weight = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.fc2_bias = torch.nn.Parameter(torch.randn(d_hid))
 
-        torch.nn.init.uniform_(self.fc1_weight, -0.01, 0.01)
-        torch.nn.init.uniform_(self.fc2_weight, -0.01, 0.01)
-        torch.nn.init.uniform_(self.fc1_bias, -0.01, 0.01)
-        torch.nn.init.uniform_(self.fc2_bias, -0.01, 0.01)
+        torch.nn.init.uniform_(self.fc1_weight, -0.001, 0.001)
+        torch.nn.init.uniform_(self.fc2_weight, -0.001, 0.001)
+        torch.nn.init.uniform_(self.fc1_bias, -0.001, 0.001)
+        torch.nn.init.uniform_(self.fc2_bias, -0.001, 0.001)
 
         self.cached_context = {}
         self.cached_context["fc1"] = []
@@ -231,3 +363,34 @@ class MultiMLPWithDw(torch.nn.Module):
 
         for i in reversed(range(len(self.layers))):
             self.layers[i].compute_dW()
+
+
+class ConditionalGradBlock(torch.nn.Module):
+    def __init__(self, d_hid, conditional=True):
+        super().__init__()
+        self.conditional = conditional
+        self.lin = torch.nn.Linear(d_hid, d_hid)
+
+    def forward(self, x, flag):
+        local_flag = flag.to_local() if isinstance(flag, DTensor) else flag
+        if self.conditional and not bool(local_flag.flatten()[0].item()):
+            y = x.detach().requires_grad_(True)
+        else:
+            y = self.lin(x)
+        return y, flag
+
+
+class ConditionalGradStack(torch.nn.Module):
+    def __init__(self, d_hid, n_layers):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [
+                ConditionalGradBlock(d_hid, conditional=i < n_layers - 1)
+                for i in range(n_layers)
+            ]
+        )
+
+    def forward(self, x, flag):
+        for layer in self.layers:
+            x, flag = layer(x, flag)
+        return x, flag

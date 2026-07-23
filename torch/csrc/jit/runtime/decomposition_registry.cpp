@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/peephole.h>
@@ -165,8 +164,8 @@ struct JitDecomp final : torch::autograd::impl::JitDecompInterface {
       torch::jit::Stack* stack) const override;
 };
 
-JitDecomp jitDecomp;
-torch::autograd::impl::JitDecompRegisterer registerJitDecomp(&jitDecomp);
+static JitDecomp jitDecomp;
+static torch::autograd::impl::JitDecompRegisterer registerJitDecomp(&jitDecomp);
 
 void JitDecomp::run_jit_decomposition(
     const c10::OperatorHandle& op,

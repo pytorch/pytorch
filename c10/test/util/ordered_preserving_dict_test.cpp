@@ -183,8 +183,15 @@ TEST(OrderedPreservingDictTest, test_range_insert) {
 
   ASSERT_EQUAL_PRIM(map.at(-2), 0);
 
-  for (int i = 10, j = 2; i < nb_values - 5; i++, j++) {
+  auto begin = map.begin();
+  begin++;
+  begin++;
+  for (int i = 10; i < nb_values - 5; i++, begin++) {
+    // Check range inserted kv pairs: map(i) = i + 1 for i = 10,....995
     ASSERT_EQUAL_PRIM(map.at(i), i + 1);
+    // Check range inserted kv pairs are correctly indexed/ordered
+    TORCH_INTERNAL_ASSERT(begin->first == i);
+    TORCH_INTERNAL_ASSERT(begin->second == i + 1);
   }
 }
 

@@ -520,6 +520,11 @@ class sherwood_v3_table : private EntryAlloc,
     EntryPointer it = entries + ptrdiff_t(index);
     for (int8_t distance = 0; it->distance_from_desired >= distance;
          ++distance, ++it) {
+      // The trailing terminator entry has distance_from_desired == 0, so at
+      // distance == 0 the loop condition also passes for it. Stop here before
+      // reading past the end (gh-174230).
+      if (it == end())
+        return end();
       if (compares_equal(key, it->value))
         return {it};
     }
@@ -556,6 +561,10 @@ class sherwood_v3_table : private EntryAlloc,
     int8_t distance_from_desired = 0;
     for (; current_entry->distance_from_desired >= distance_from_desired;
          ++current_entry, ++distance_from_desired) {
+      // See find() above; stop at the terminator rather than dereferencing
+      // past it (gh-174230).
+      if (current_entry == end())
+        break;
       if (compares_equal(key, current_entry->value))
         return {{current_entry}, false};
     }
@@ -573,13 +582,13 @@ class sherwood_v3_table : private EntryAlloc,
     return emplace(std::move(value));
   }
   template <typename... Args>
-  iterator emplace_hint(const_iterator, Args&&... args) {
+  iterator emplace_hint(const_iterator /*unused*/, Args&&... args) {
     return emplace(std::forward<Args>(args)...).first;
   }
-  iterator insert(const_iterator, const value_type& value) {
+  iterator insert(const_iterator /*unused*/, const value_type& value) {
     return emplace(value).first;
   }
-  iterator insert(const_iterator, value_type&& value) {
+  iterator insert(const_iterator /*unused*/, value_type&& value) {
     return emplace(std::move(value)).first;
   }
 
@@ -896,7 +905,7 @@ class sherwood_v3_table : private EntryAlloc,
 } // namespace detailv3
 
 struct prime_number_hash_policy {
-  static uint64_t mod0(uint64_t) {
+  static uint64_t mod0(uint64_t /*unused*/) {
     return 0llu;
   }
   static uint64_t mod2(uint64_t hash) {
@@ -1883,7 +1892,7 @@ struct power_of_two_hash_policy {
     size = detailv3::next_power_of_two(size);
     return 0;
   }
-  void commit(int8_t) {}
+  void commit(int8_t /*unused*/) {}
   void reset() {}
 };
 
@@ -1989,14 +1998,14 @@ class flat_hash_map
   }
   template <typename M>
   typename Table::iterator insert_or_assign(
-      typename Table::const_iterator,
+      typename Table::const_iterator /*unused*/,
       const key_type& key,
       M&& m) {
     return insert_or_assign(key, std::forward<M>(m)).first;
   }
   template <typename M>
   typename Table::iterator insert_or_assign(
-      typename Table::const_iterator,
+      typename Table::const_iterator /*unused*/,
       key_type&& key,
       M&& m) {
     return insert_or_assign(std::move(key), std::forward<M>(m)).first;

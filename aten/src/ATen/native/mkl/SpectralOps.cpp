@@ -160,12 +160,7 @@ static void _fft_fill_with_conjugate_symmetry_cpu_(
 }
 
 // Register this one implementation for all cpu types instead of compiling multiple times
-REGISTER_ARCH_DISPATCH(fft_fill_with_conjugate_symmetry_stub, DEFAULT, &_fft_fill_with_conjugate_symmetry_cpu_)
-REGISTER_AVX2_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
-REGISTER_AVX512_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
-REGISTER_ZVECTOR_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
-REGISTER_VSX_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
-REGISTER_SVE256_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
+REGISTER_ALL_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 
 // _out variants can be shared between PocketFFT and MKL
 Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
@@ -279,7 +274,7 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 
 
 Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
-  TORCH_CHECK(self.is_floating_point());
+  TORCH_CHECK(self.is_floating_point(), "Only supports floating-point dtypes, but found: ", self.scalar_type());
   auto input_sizes = self.sizes();
   DimVector out_sizes(input_sizes.begin(), input_sizes.end());
   auto last_dim = dim.back();
@@ -307,7 +302,7 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 }
 
 Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
-  TORCH_CHECK(self.is_complex());
+  TORCH_CHECK(self.is_complex(), "Only supports complex dtypes, but found: ", self.scalar_type());
   if (dim.empty()) {
     return self.clone();
   }
@@ -330,13 +325,13 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 }
 
 #elif AT_MKL_ENABLED()
-#include <ATen/Dispatch.h>
 
 #include <algorithm>
 #include <numeric>
 #include <cmath>
 
 #include <mkl_dfti.h>
+#include <mkl_version.h>
 #include <ATen/mkl/Exceptions.h>
 #include <ATen/mkl/Descriptors.h>
 #include <ATen/mkl/Limits.h>
@@ -479,6 +474,19 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
   const auto value_type = c10::toRealValueType(input.scalar_type());
   out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
 
+  // fix mkl issue
+  // https://github.com/pytorch/pytorch/issues/154477
+#ifdef INTEL_MKL_VERSION
+#if INTEL_MKL_VERSION > 20210400L
+  for (const auto& stride : input.strides()) {
+    if (stride == 0) {
+      input = input.clone(MemoryFormat::Contiguous);
+      break;
+    }
+  }
+#endif
+#endif
+
   auto descriptor = _plan_mkl_fft(
       input.strides(), out.strides(), signal_size, input.is_complex(),
       out.is_complex(), normalization, forward, value_type);
@@ -516,7 +524,7 @@ static DimVector _sort_dims(const Tensor& self, IntArrayRef dim, bool exclude_la
 
 // n-dimensional complex to real IFFT
 Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
-  TORCH_CHECK(self.is_complex());
+  TORCH_CHECK(self.is_complex(), "Only supports complex dtypes, but found: ", self.scalar_type());
   // NOTE: Multi-dimensional C2R transforms don't agree with numpy in cases
   // where the input isn't strictly Hermitian-symmetric. Instead, we use a
   // multi-dim C2C transform followed by a 1D C2R transform.
@@ -539,7 +547,7 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 
 // n-dimensional real to complex FFT
 Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
-  TORCH_CHECK(self.is_floating_point());
+  TORCH_CHECK(self.is_floating_point(), "Only supports floating-point dtypes, but found: ", self.scalar_type());
   auto input_sizes = self.sizes();
   DimVector out_sizes(input_sizes.begin(), input_sizes.end());
   auto last_dim = dim.back();
@@ -560,7 +568,7 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 
 // n-dimensional complex to complex FFT/IFFT
 Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
-  TORCH_CHECK(self.is_complex());
+  TORCH_CHECK(self.is_complex(), "Only supports complex dtypes, but found: ", self.scalar_type());
   if (dim.empty()) {
     return self.clone();
   }

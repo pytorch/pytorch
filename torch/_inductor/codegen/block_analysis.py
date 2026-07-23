@@ -1,11 +1,11 @@
 import collections
 import functools
 import textwrap
-from typing import Optional
 
 import sympy
 from sympy import Expr, Symbol
 
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from ..utils import sympy_dot, sympy_subs
@@ -17,8 +17,15 @@ class BlockPatternMatcher:
     Matches block indexing expressions.
     """
 
-    @staticmethod
-    def get_subexpr_involving_symbol(expr: Expr, symbol: Symbol) -> Expr:
+    _indexing_wild_signed_int = functools.partial(
+        sympy.Wild, properties=[lambda x: x.is_integer]
+    )
+    _indexing_wild_unsigned_int = functools.partial(
+        sympy.Wild, properties=[lambda x: x.is_integer and x.is_nonnegative]
+    )
+
+    @classmethod
+    def get_subexpr_involving_symbol(cls, expr: Expr, symbol: Symbol) -> Expr:
         """
         Given a sympy expression, return the subexpression comprised only of terms
         involving the specified symbol.
@@ -26,9 +33,34 @@ class BlockPatternMatcher:
         For example, if `expr` is `x * 5 + x ** 2 + y * 2 + 5`, and `symbol` is `x`,
         this returns `x * 5 + x ** 2`.
         """
+        expr = cls._preprocess(expr)
         return sympy.S.Zero + sum(
             term for term in sympy.Add.make_args(expr) if symbol in term.free_symbols
         )
+
+    @staticmethod
+    def factor_index_expr(expr: sympy.Expr, index_var: Symbol) -> sympy.Expr:
+        """
+        Given an index expression, factor the expression around
+        - FloorDiv(index_var, ...)
+        - ModularIndexing(index_var, ...)
+        - xindex
+
+        e.g. FloorDiv(index_var, d0)*s0 + FloorDiv(index_var, d0)*s1 ->
+        FloorDiv(index_var, d0) * (s0 + s1)
+        """
+        centres = OrderedSet()
+        for sub in sympy.preorder_traversal(expr):
+            if isinstance(sub, FloorDiv) and sub.args[0] == index_var:
+                centres.add(sub)
+            elif isinstance(sub, ModularIndexing) and sub.args[0] == index_var:
+                centres.add(sub)
+        centres.add(index_var)
+
+        expr_out = expr
+        for c in centres:
+            expr_out = sympy.collect(expr_out, c)
+        return expr_out
 
     @staticmethod
     def get_slice_numels(dims: list[Expr]) -> list[Expr]:
@@ -42,6 +74,15 @@ class BlockPatternMatcher:
             numels.appendleft(numel)
         return [*numels]
 
+    @staticmethod
+    def _preprocess(expr: Expr) -> Expr:
+        # Remove any Identity nodes, e.g. expand x + (5 * y) to x + 5 * y.
+        # Disable mul and multinomial as those expansions affect op trees:
+        # e.g. sympy expects to match Mul(a, b), but expansion has simplified
+        # to Add(...). Even though they may be algebraically equivalent,
+        # sympy `match` performs structural pattern matching
+        return expr.expand(mul=False, multinomial=False, identity=True)
+
     @classmethod
     def match_mod_div_block_expr(
         cls,
@@ -49,16 +90,31 @@ class BlockPatternMatcher:
         index_var: Symbol,
         numel: Expr,
         num_dims: int,
-    ) -> Optional[tuple[list[Expr], list[Expr], list[Expr]]]:
+    ) -> tuple[list[Expr], list[Expr], list[Expr]] | None:
         """
         Matches modular indexing expressions, converting them to implied block dimensions and strides.
         See triton.py for more information.
+
+        Warning: this function requires that `index`, `numel` and any other sympy
+        expression does not have precomputed replacements since otherwise block
+        pattern matching may fail.
+        See [Note: Precomputed replacements with BlockPatternMatch]
         """
+        index = cls._preprocess(index)
 
         # Pattern match to find the strides and offset.
-        wild = functools.partial(sympy.Wild, exclude=[index_var])
-        dims: list[Expr] = [wild(f"dim_mod{idx}") for idx in range(num_dims)]
-        strides: list[Expr] = [wild(f"stride_mod{idx}") for idx in range(num_dims)]
+        wild_unsigned_int = functools.partial(
+            cls._indexing_wild_unsigned_int, exclude=[index_var]
+        )
+        wild_signed_int = functools.partial(
+            cls._indexing_wild_signed_int, exclude=[index_var]
+        )
+        dims: list[Expr] = [
+            wild_unsigned_int(f"dim_mod{idx}") for idx in range(num_dims)
+        ]
+        strides: list[Expr] = [
+            wild_signed_int(f"stride_mod{idx}") for idx in range(num_dims)
+        ]
 
         # The first dimension's index is computed by division.
         # The remaining are computed by modulo.
@@ -76,7 +132,8 @@ class BlockPatternMatcher:
         # for more details. In short, here we check that each subexpression in sympy.Add contains
         # only FloorDiv or ModularIndexing expressions.
         if num_dims >= 5:
-            stride, denom, other = sympy.symbols("stride denominator other", cls=wild)
+            stride = sympy.symbols("stride", cls=wild_signed_int)
+            denom, other = sympy.symbols("denominator other", cls=wild_unsigned_int)
             mod_div_pattern = stride * ModularIndexing(index_var, denom, other)
             floor_div_pattern = stride * FloorDiv(index_var, denom)
             first_dim_floor_div_matched = False
@@ -111,33 +168,55 @@ class BlockPatternMatcher:
             if stride not in match:
                 match[stride] = sympy.S.Zero
 
-        sizevars = V.graph.sizevars
-
-        def get_match(expr: Expr) -> Expr:
-            return sizevars.lookup_precomputed_size(match[expr])
-
         # Replace wildcards with matched expressions.
-        dims = [dims[0]] + [get_match(dim) for dim in dims[1:]]
-        strides = [get_match(stride) for stride in strides]
+        dims = [dims[0]] + [match[dim] for dim in dims[1:]]
+        strides = [match[stride] for stride in strides]
         slice_numels = cls.get_slice_numels(dims)
         block_index_exprs = [sympy_subs(expr, match) for expr in block_index_exprs]
+
+        sizevars = V.graph.sizevars
 
         # The leading dimension is not directly matched in our expression.
         # We solve for it by dividing the range tree numel by the product of
         # all other dimensions. We quit if they are not known to be divisible.
-        assert dims[0] not in match, "Expected not to match the leading dimension!"
+        if dims[0] in match:
+            raise AssertionError("Expected not to match the leading dimension!")
         if not sizevars.statically_known_multiple_of(numel, slice_numels[0]):
             return None
         dims[0] = numel / slice_numels[0]
 
         # Sanity check that we can recover the index from the matched subexpressions.
         matched_index = sympy_dot(strides, block_index_exprs)
-        assert sizevars.statically_known_equals(matched_index, index), textwrap.dedent(
-            f"""
-            Invalid match!
-            Index: {index}
-            Matched expression: {matched_index}
-            """
-        )
+        if not sizevars.statically_known_equals(
+            matched_index,
+            index,
+        ):
+            raise AssertionError(
+                textwrap.dedent(
+                    f"""
+                    Invalid match!
+                    Index: {index}
+                    Matched expression: {matched_index}
+                    """
+                )
+            )
 
         return dims, strides, block_index_exprs
+
+    @classmethod
+    def match_affine_block_expr(
+        cls,
+        index: Expr,
+        index_var: Symbol,
+    ) -> Expr | None:
+        """
+        Matches simple expressions of the form stride * index, returning the
+        stride.
+        """
+        index = cls._preprocess(index)
+        stride = cls._indexing_wild_signed_int(name="stride", exclude=[index_var])
+        m = index.match(index_var * stride)
+        if m is None:
+            return None
+
+        return m[stride]

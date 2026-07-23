@@ -8,11 +8,12 @@ import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import wraps
-from typing import Any, Callable, cast, no_type_check, Optional, Union
+from typing import Any, cast, no_type_check
 from unittest import mock
 
 import torch
@@ -49,6 +50,7 @@ from torch.distributed.tensor.parallel import (
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
     run_subtests,
@@ -57,13 +59,19 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_cycles_per_ms,
+    set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
+    TEST_WITH_ROCM,
+    TEST_XPU,
 )
 from torch.utils._triton import has_triton
 
 
-DEVICE_COUNT = 4  # default
+if TEST_WITH_ROCM:
+    DEVICE_COUNT = min(4, max(2, torch.cuda.device_count()))
+else:
+    DEVICE_COUNT = 4
 
 if TEST_CUDA:
     DEVICE_TYPE = "cuda"
@@ -72,6 +80,10 @@ if TEST_CUDA:
 elif TEST_HPU:
     DEVICE_TYPE = "hpu:0"
     DISTRIBUTED_BACKEND = "hccl"
+elif TEST_XPU:
+    DEVICE_TYPE = "xpu"
+    DISTRIBUTED_BACKEND = "xccl"
+    DEVICE_COUNT = torch.xpu.device_count()
 else:
     DEVICE_TYPE = "cpu"
     DISTRIBUTED_BACKEND = "gloo"
@@ -102,7 +114,7 @@ class FSDPTestModel(nn.Module, ABC):
 
     @abstractmethod
     def get_input(self, device) -> tuple[torch.Tensor, ...]:
-        """Returns an input for the model as as tuple."""
+        """Returns an input for the model as a tuple."""
         ...
 
     @abstractmethod
@@ -146,10 +158,12 @@ def _assert_module_states(
     olist = [None for _ in range(world_size)]
     dist.all_gather_object(olist, named_module_states, group=process_group)
     rank0_states = olist[0]
-    assert rank0_states is not None  # mypy
+    if rank0_states is None:
+        raise AssertionError("Expected rank0_states to not be None")  # mypy
     for state in olist[1:]:
-        assert state is not None  # mypy
-        for (_, p1), (_, p2) in zip(rank0_states, state):
+        if state is None:
+            raise AssertionError("Expected state to not be None")  # mypy
+        for (_, p1), (_, p2) in zip(rank0_states, state, strict=True):
             assert_fn(p1, p2)
 
 
@@ -201,7 +215,7 @@ def _broadcast_state_dict(rank, state_dict):
     dist.broadcast_object_list(olist)
     state_dict = cast(dict[str, torch.Tensor], olist[0])
     # Ensure that the state is on DEVICE
-    for param_name in state_dict.keys():
+    for param_name in state_dict:
         state_dict[param_name] = state_dict[param_name].to(DEVICE_TYPE)
     return state_dict
 
@@ -322,10 +336,10 @@ class TransformerWithSharedParams(FSDPTestModel):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
         add_bn: bool = True,
-    ) -> Union[nn.Module, FSDP]:
+    ) -> nn.Module | FSDP:
         """
         Initializes a :class:`TransformerWithSharedParams` instance.
 
@@ -451,7 +465,7 @@ class NestedWrappedModule(FSDPTestModel):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
     ) -> nn.Module:
         """
@@ -499,7 +513,7 @@ class AlwaysWrapNestedWrappedModule(NestedWrappedModule):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
     ):
         """
@@ -581,7 +595,7 @@ class NonUniformReqGradNWM(NestedWrappedModule):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
     ):
         """
@@ -647,7 +661,7 @@ class ModuleWithDelay(FSDPTestModel):
     def get_loss(self, input, output):
         loss = self.module.get_loss(input, output)  # type: ignore[operator]
         if self.delay_after_loss_ms > 0:
-            if TEST_HPU:
+            if TEST_HPU or TEST_XPU:
                 time.sleep(self.delay_after_loss_ms / 1000)
             elif TEST_CUDA:
                 torch.cuda._sleep(int(self.delay_after_loss_ms * get_cycles_per_ms()))
@@ -655,7 +669,7 @@ class ModuleWithDelay(FSDPTestModel):
         return loss
 
     def run_backward(self, loss):
-        orig_reduce_scatter = torch.distributed.reduce_scatter_tensor
+        orig_reduce_scatter = torch.distributed.reduce_scatter_single
 
         def _delayed_reduce_scatter(*args, **kwargs):
             if self.delay_before_reduction_ms > 0:
@@ -663,12 +677,12 @@ class ModuleWithDelay(FSDPTestModel):
                     torch.cuda._sleep(
                         int(self.delay_before_reduction_ms * get_cycles_per_ms())
                     )
-                elif TEST_HPU:
+                elif TEST_HPU or TEST_XPU:
                     time.sleep(self.delay_before_reduction_ms / 1000)
             return orig_reduce_scatter(*args, **kwargs)
 
         with mock.patch(
-            "torch.distributed.reduce_scatter_tensor", _delayed_reduce_scatter
+            "torch.distributed.reduce_scatter_single", _delayed_reduce_scatter
         ):
             self.module.run_backward(loss)  # type: ignore[operator]
 
@@ -706,7 +720,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode = DEVICEInitMode.DEVICE_AFTER,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
         delay_after_loss_ms: int = 0,
         delay_before_reduction_ms: int = 0,
@@ -796,7 +810,7 @@ class MixtureOfExperts(NestedWrappedModule):
                         torch.cuda._sleep(
                             int(self.delay_before_free_ms * get_cycles_per_ms())
                         )
-                    elif TEST_HPU:
+                    elif TEST_HPU or TEST_XPU:
                         time.sleep(self.delay_before_free_ms / 1000)
 
                     return orig_reshard(*args, **kwargs)
@@ -826,7 +840,7 @@ class MixtureOfExperts(NestedWrappedModule):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
         delay_before_free_ms: int = 0,
     ):
@@ -877,7 +891,7 @@ class MLP(nn.Module):
     def __init__(
         self,
         dim: int,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
         *,
         bias: bool = True,
         with_buffer: bool = False,
@@ -965,7 +979,7 @@ class DoubleLinear(nn.Module):
 
     def forward(
         self, x: torch.Tensor
-    ) -> Union[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         if self.use_second_linear:
             return self.relu(self.lin1(x)), self.relu(self.lin2(x))
         return self.relu(self.lin1(x))
@@ -979,26 +993,62 @@ class DoubleLinear(nn.Module):
 # all threads use the patched value inside the context
 @contextlib.contextmanager
 def patch_all_gather(new_all_gather_into_tensor: Callable):
-    orig_all_gather = dist.all_gather_into_tensor
+    orig_all_gather = dist.all_gather_single
     dist.barrier()
-    dist.all_gather_into_tensor = new_all_gather_into_tensor
+    dist.all_gather_single = new_all_gather_into_tensor
     try:
         yield
     finally:
         dist.barrier()
-        dist.all_gather_into_tensor = orig_all_gather
+        dist.all_gather_single = orig_all_gather
+
+
+@contextlib.contextmanager
+def patch_foreach_all_gather(new_foreach_all_gather: Callable):
+    orig_foreach_all_gather = (
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather
+    )
+    dist.barrier()
+    torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather = (
+        new_foreach_all_gather
+    )
+    try:
+        yield
+    finally:
+        dist.barrier()
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather = (
+            orig_foreach_all_gather
+        )
+
+
+@contextlib.contextmanager
+def patch_foreach_reduce(new_foreach_reduce: Callable):
+    orig_foreach_foreach_reduce = (
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce
+    )
+    dist.barrier()
+    torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce = (
+        new_foreach_reduce
+    )
+    try:
+        yield
+    finally:
+        dist.barrier()
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce = (
+            orig_foreach_foreach_reduce
+        )
 
 
 @contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
-    orig_reduce_scatter = dist.reduce_scatter_tensor
+    orig_reduce_scatter = dist.reduce_scatter_single
     dist.barrier()
-    dist.reduce_scatter_tensor = new_reduce_scatter_tensor
+    dist.reduce_scatter_single = new_reduce_scatter_tensor
     try:
         yield
     finally:
         dist.barrier()
-        dist.reduce_scatter_tensor = orig_reduce_scatter
+        dist.reduce_scatter_single = orig_reduce_scatter
 
 
 @contextlib.contextmanager
@@ -1091,14 +1141,17 @@ def check_sharded_parity(
     prefixes_to_ignore: tuple[str, ...] = (),
 ):
     for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
-        replicated_module.named_parameters(), sharded_module.named_parameters()
+        replicated_module.named_parameters(),
+        sharded_module.named_parameters(),
+        strict=True,
     ):
         clean_sharded_name = sharded_name
         for prefix in prefixes_to_ignore:
             clean_sharded_name = clean_sharded_name.replace(prefix, "")
         cls.assertEqual(replicated_name, clean_sharded_name)
         cls.assertIsInstance(sharded_param, DTensor)
-        assert isinstance(sharded_param, DTensor)  # mypy
+        if not isinstance(sharded_param, DTensor):
+            raise AssertionError("Expected sharded_param to be a DTensor")  # mypy
         mesh, placements = sharded_param.device_mesh, sharded_param.placements
         if tuple(placements) == (Shard(0), Shard(0)):
             raise AssertionError(
@@ -1113,7 +1166,8 @@ def check_sharded_parity(
         cls.assertIsNotNone(sharded_param.grad)
         sharded_ref_grad = distribute_tensor(replicated_param.grad, mesh, placements)
         cls.assertIsInstance(sharded_param.grad, DTensor)
-        assert isinstance(sharded_param.grad, DTensor)  # mypy
+        if not isinstance(sharded_param.grad, DTensor):
+            raise AssertionError("Expected sharded_param.grad to be a DTensor")  # mypy
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
 
@@ -1136,31 +1190,11 @@ class FSDPTestMultiThread(MultiThreadedTestCase):
         torch._dynamo.reset()
 
 
-class FSDPTest(MultiProcessTestCase):
-    def setUp(self):
-        super().setUp()
-        # Set TORCH_NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,
-        # which can cause unit test flakiness:
-        # https://github.com/pytorch/pytorch/issues/90848
-        os.environ["TORCH_NCCL_DESYNC_DEBUG"] = "0"
-        self._spawn_processes()
-
-    @property
-    def world_size(self):
-        return DEVICE_COUNT
-
-    @property
-    def process_group(self):
-        return dist.distributed_c10d._get_default_group()
-
-    @property
-    def destroy_pg_upon_exit(self) -> bool:
-        # Overriding base test class: do not auto destroy PG upon exit.
-        return False
-
-    @property
-    def init_method(self):
-        return f"{FILE_SCHEMA}{self.file_name}"
+class FSDPTestMixin:
+    """
+    Mixin class containing shared test utilities for FSDP tests.
+    Provides common helper methods for both FSDPTest and FSDPTestContinuous.
+    """
 
     def _check_cpu_offload(self, fsdp_model, cpu_offload):
         self.assertEqual(cpu_offload, fsdp_model.cpu_offload)
@@ -1175,16 +1209,18 @@ class FSDPTest(MultiProcessTestCase):
         return run_subtests(self, *args, **kwargs)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe, **kwargs):
+    def _run(cls, rank, test_name, file_name, pipe, **kwargs):  # type: ignore[override]
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
         fake_pg = kwargs.get("fake_pg", False)
 
         print(f"dist init r={self.rank}, world={self.world_size}")
+        if DEVICE_TYPE != "cpu" and torch.accelerator.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
-        # Actual tests will be skipped if there is no enough GPUs.
+        # Actual tests will be skipped if there are not enough GPUs.
         try:
             if fake_pg:
                 store = torch.testing._internal.distributed.fake_pg.FakeStore()
@@ -1209,8 +1245,8 @@ class FSDPTest(MultiProcessTestCase):
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA:
-            torch.cuda.set_device(device_id)
+        if TEST_CUDA or TEST_XPU:
+            torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
         # Execute barrier prior to running test to ensure that every process
@@ -1219,6 +1255,7 @@ class FSDPTest(MultiProcessTestCase):
         dist.barrier(device_ids=device_ids)
 
         torch._dynamo.reset()
+        set_rng_seed()
         self.run_test(test_name, pipe)
         torch._dynamo.reset()
 
@@ -1232,12 +1269,12 @@ class FSDPTest(MultiProcessTestCase):
         num_steps: int,
         autocast: bool,
         lr: float = 0.01,
-        fsdp_cpu_offload: Optional[CPUOffload] = None,
+        fsdp_cpu_offload: CPUOffload | None = None,
         save_model: bool = False,
-        mixed_precision: Optional[MixedPrecision] = None,
+        mixed_precision: MixedPrecision | None = None,
         enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
-        sharded_grad_scaler_kwargs: Optional[dict[str, Any]] = None,
+        sharded_grad_scaler_kwargs: dict[str, Any] | None = None,
     ):
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
@@ -1278,16 +1315,20 @@ class FSDPTest(MultiProcessTestCase):
             loss = sharded_grad_scaler.scale(loss)
 
             if not mixed_precision and not use_pure_fp16:
-                assert (
-                    loss.dtype == torch.float32
-                ), "loss data type should be float32, as the original \
-                    parameter data type is float32."
+                if loss.dtype != torch.float32:
+                    raise AssertionError(
+                        "loss data type should be float32, as the original "
+                        "parameter data type is float32."
+                    )
             else:
                 if use_pure_fp16:
                     self.assertEqual(loss.dtype, torch.float16)
                 # FSDP loss is fp16, DDP AMP loss is fp32
                 elif isinstance(model, FSDP):
-                    assert mixed_precision is not None  # mypy
+                    if mixed_precision is None:
+                        raise AssertionError(
+                            "Expected mixed_precision to not be None"
+                        )  # mypy
                     self.assertEqual(loss.dtype, mixed_precision.param_dtype)
                 else:
                     self.assertEqual(loss.dtype, torch.float32)
@@ -1318,19 +1359,19 @@ class FSDPTest(MultiProcessTestCase):
         model_class: type[FSDPTestModel],
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        ref_init_fn: Optional[Callable] = None,
+        ref_init_fn: Callable | None = None,
         num_iters: int = 2,
         save_model: bool = True,
         cpu_offload: CPUOffload = CPUOffload(),
-        backward_prefetch: Optional[BackwardPrefetch] = None,
-        sharding_strategy: Optional[ShardingStrategy] = None,
-        mixed_precision: Optional[MixedPrecision] = None,
+        backward_prefetch: BackwardPrefetch | None = None,
+        sharding_strategy: ShardingStrategy | None = None,
+        mixed_precision: MixedPrecision | None = None,
         forward_prefetch: bool = False,
         use_orig_params: bool = False,
         enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
-        init_kwargs: Optional[dict[str, Any]] = None,
-        sharded_grad_scaler_kwargs: Optional[dict[str, Any]] = None,
+        init_kwargs: dict[str, Any] | None = None,
+        sharded_grad_scaler_kwargs: dict[str, Any] | None = None,
         **fsdp_kwargs,
     ):
         """
@@ -1347,9 +1388,8 @@ class FSDPTest(MultiProcessTestCase):
                 wrapper should provide data parallel semantics. If ``None``,
                 then the callable defaults to the DDP constructor.
         """
-        assert (
-            fsdp_init_mode != FSDPInitMode.NO_FSDP
-        ), "Expects an FSDP init mode that wraps with FSDP"
+        if fsdp_init_mode == FSDPInitMode.NO_FSDP:
+            raise AssertionError("Expects an FSDP init mode that wraps with FSDP")
         if init_kwargs is None:
             init_kwargs = {}
         lr = 1e-2
@@ -1367,6 +1407,8 @@ class FSDPTest(MultiProcessTestCase):
                 ref_model = DDP(
                     model, device_ids=[DEVICE_TYPE], output_device=DEVICE_TYPE
                 )
+            elif DEVICE_TYPE == "cpu":
+                ref_model = DDP(model)
             else:
                 ref_model = DDP(model, device_ids=[rank], output_device=rank)
         else:
@@ -1435,7 +1477,7 @@ class FSDPTest(MultiProcessTestCase):
             self.assertRaisesRegex(
                 RuntimeError,
                 "An FSDP-managed module with parameter CPU offloading enabled "
-                "has parameters on cuda",
+                f"has parameters on {DEVICE_TYPE}",
             )
             if expects_device_error
             else nullcontext()
@@ -1483,7 +1525,144 @@ class FSDPTest(MultiProcessTestCase):
             )
 
 
-def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
+class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        # Set TORCH_NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,
+        # which can cause unit test flakiness:
+        # https://github.com/pytorch/pytorch/issues/90848
+        os.environ["TORCH_NCCL_DESYNC_DEBUG"] = "0"
+        self._spawn_processes()
+
+    @property
+    def world_size(self):
+        return DEVICE_COUNT
+
+    @property
+    def process_group(self):
+        return dist.distributed_c10d._get_default_group()
+
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        # Overriding base test class: do not auto destroy PG upon exit.
+        return False
+
+    @property
+    def init_method(self):
+        return f"{FILE_SCHEMA}{self.file_name}"
+
+    @classmethod
+    def _run(cls, rank, test_name, file_name, pipe, **kwargs):  # type: ignore[override]
+        self = cls(test_name)
+        self.rank = rank
+        self.file_name = file_name
+        fake_pg = kwargs.get("fake_pg", False)
+
+        print(f"dist init r={self.rank}, world={self.world_size}")
+        if torch.accelerator.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+
+        # Specify gloo backend to make 'init_process_group()' succeed,
+        # Actual tests will be skipped if there are not enough GPUs.
+        try:
+            if fake_pg:
+                store = torch.testing._internal.distributed.fake_pg.FakeStore()
+                dist.init_process_group(
+                    backend="fake",
+                    world_size=self.world_size,
+                    rank=rank,
+                    store=store,
+                )
+            else:
+                dist.init_process_group(
+                    init_method=self.init_method,
+                    backend=DISTRIBUTED_BACKEND,
+                    world_size=int(self.world_size),
+                    rank=self.rank,
+                )
+        except RuntimeError as e:
+            if "recompile" in e.args[0]:
+                sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
+
+            raise
+
+        device_ids = None
+        device_id = self.rank % DEVICE_COUNT
+        if TEST_CUDA or TEST_XPU:
+            torch.accelerator.set_device_index(device_id)
+        device_ids = [device_id]
+
+        # Execute barrier prior to running test to ensure that every process
+        # has finished initialization and that the following test
+        # immediately exiting due to a skip doesn't cause flakiness.
+        dist.barrier(device_ids=device_ids)
+
+        torch._dynamo.reset()
+        set_rng_seed()
+        self.run_test(test_name, pipe)
+        torch._dynamo.reset()
+
+        dist.barrier(device_ids=device_ids)
+
+        dist.destroy_process_group()
+
+
+class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
+    """
+    FSDP test base class using MultiProcContinuousTest for faster test execution.
+    This class reuses worker processes across tests, reducing process spawn overhead.
+    Use this for tests that don't require fresh process state between tests.
+    """
+
+    world_size: int = DEVICE_COUNT
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return DISTRIBUTED_BACKEND
+
+    @classmethod
+    def device_type(cls) -> str:
+        return DEVICE_TYPE
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        # Set TORCH_NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,
+        # which can cause unit test flakiness:
+        # https://github.com/pytorch/pytorch/issues/90848
+        os.environ["TORCH_NCCL_DESYNC_DEBUG"] = "0"
+
+        if torch.accelerator.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+
+        device_id = rank % DEVICE_COUNT
+        if TEST_CUDA or TEST_XPU:
+            torch.accelerator.set_device_index(device_id)
+
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    def setUp(self):
+        super().setUp()
+        # Barrier to synchronize workers before test, similar to FSDPTest._run().
+        # This ensures all workers start the test together and prevents NCCL
+        # collective mismatches when the process group is reused across tests.
+        if self.rank != self.MAIN_PROCESS_RANK:
+            dist.barrier()
+        torch._dynamo.reset()
+        set_rng_seed()
+
+    def tearDown(self):
+        # Barrier to synchronize workers after test, similar to FSDPTest._run().
+        if self.rank != self.MAIN_PROCESS_RANK:
+            dist.barrier()
+        super().tearDown()
+        torch._dynamo.reset()
+
+    @property
+    def process_group(self):
+        return self.__class__.pg
+
+
+def compiled_fsdp_test(compile_compute_on_module: type | None = None):
     def fully_shard_with_compiled_compute(*args, **kwargs):
         torch.distributed.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
         if compile_compute_on_module is None or isinstance(
@@ -1501,17 +1680,17 @@ def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
             original_fully_shard: Any = torch.distributed.fsdp.fully_shard
             for mode in FullyShardMode:
                 if mode != FullyShardMode.EAGER and not has_triton():
-                    warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
+                    warnings.warn(
+                        "Inductor on GPU needs Triton and recent GPU arch", stacklevel=2
+                    )
                     continue
                 # barrier to ensure thread reading the same value
-                original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks
                 original_compile_threads = torch._inductor.config.compile_threads
                 torch.distributed.barrier()
 
                 if mode == FullyShardMode.EAGER:
                     fully_shard_patch = original_fully_shard
                 elif mode == FullyShardMode.COMPILED_COMPUTE:
-                    torch._dynamo.config.skip_fsdp_hooks = True
                     torch._inductor.config.compile_threads = 1
                     fully_shard_patch = fully_shard_with_compiled_compute  # type: ignore[assignment]
                 else:
@@ -1526,7 +1705,6 @@ def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
                 # other threads use patched func before this thread restores
                 torch.distributed.barrier()
                 func.__globals__[original_fully_shard.__name__] = original_fully_shard
-                torch._dynamo.config.skip_fsdp_hooks = original_skip_fsdp_hooks
                 torch._inductor.config.compile_threads = original_compile_threads
 
         return wrapper

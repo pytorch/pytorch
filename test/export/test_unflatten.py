@@ -1,49 +1,23 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
 import copy
-import dataclasses
 import unittest
-from contextlib import contextmanager
-from dataclasses import dataclass
 from re import escape
-from typing import Any, List
+from typing import Any, List, Optional
 
 import torch
 import torch._dynamo as torchdynamo
-from functorch.experimental.control_flow import cond, map
-from torch import Tensor
-from torch._export.utils import (
-    get_buffer,
-    get_param,
-    is_buffer,
-    is_param,
-    register_dataclass_as_pytree_node,
-)
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch.export import Constraint, Dim, export, FlatArgsAdapter, unflatten
-from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
-from torch.export.unflatten import _disable_interpreter
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing import FileCheck
+from torch.export import export, FlatArgsAdapter, unflatten
+from torch.export.unflatten import _assign_attr, _AttrKind, _disable_interpreter
 from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-from torch.utils._pytree import (
-    LeafSpec,
-    tree_flatten,
-    tree_unflatten,
-    TreeSpec,
-    treespec_dumps,
-    treespec_loads,
-)
+from torch.utils._pytree import TreeSpec
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -204,6 +178,108 @@ class TestUnflatten(TestCase):
             id(getattr(unflattened_module.sub_net, "2")),
         )
 
+    def test_unflatten_shared_submodule_reorder(self):
+        """Test that _reorder_submodules handles @N-suffixed FQNs correctly.
+
+        When modules are shared (aliased), PyTorch assigns @N suffixes to
+        duplicate entries in _modules. The fqn_order dict (built from
+        fqn_list) filters out @N entries, so _reorder_submodules must fall
+        back to the base FQN for ordering.
+        """
+
+        class Block(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                shared_block = Block()
+                self.blocks = torch.nn.Sequential(
+                    shared_block,
+                    torch.nn.ReLU(),
+                    shared_block,
+                    torch.nn.ReLU(),
+                )
+
+            def forward(self, x):
+                return self.blocks(x)
+
+        eager_module = Model()
+        inps = (torch.rand(2, 10),)
+        export_module = export(eager_module, inps, {}, strict=True)
+        unflattened_module = unflatten(export_module)
+        self.compare_outputs(eager_module, unflattened_module, inps)
+        # Verify shared identity is preserved
+        self.assertEqual(
+            id(getattr(unflattened_module.blocks, "0")),
+            id(getattr(unflattened_module.blocks, "2")),
+        )
+
+    def test_assign_attr_noncontiguous_call_indices(self):
+        """_assign_attr must populate every @N call-name variant present in
+        _modules, even when the indices are non-contiguous.
+
+        When a multi-called submodule has some calls inside a torch.no_grad() /
+        set_grad_enabled region, replace_set_grad_with_hop_pass relocates those
+        intermediate call copies (e.g. @1, @2) into a wrap_with_set_grad_enabled
+        HOP subgraph, leaving non-contiguous indices at the top level (e.g. base
+        + @3). A contiguous scan starting at @1 stops at the first gap and never
+        reaches the surviving @3 copy, leaving its parameters unassigned; that
+        copy later fails in _sink_params with a missing-attribute error.
+        """
+        for attr_kind, make_obj in (
+            (_AttrKind.PARAMETER, lambda: torch.nn.Parameter(torch.randn(4))),
+            (_AttrKind.BUFFER, lambda: torch.ones(4)),
+        ):
+            root = torch.nn.Module()
+            # base + @3, with @1/@2 absent (relocated into a HOP subgraph).
+            root._modules["leaf"] = torch.nn.Module()
+            root._modules["leaf@3"] = torch.nn.Module()
+
+            obj = make_obj()
+            _assign_attr(obj, root, "leaf.bias", attr_kind)
+
+            self.assertIs(root._modules["leaf"].bias, obj)
+            self.assertIs(root._modules["leaf@3"].bias, obj)
+
+    def test_assert_tensor_metadata_stack(self):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.randn(3)
+
+            def forward(self, x, y):
+                x = x.to(dtype=torch.int32)
+                y = y.to(dtype=torch.int32)
+                x = x + self.a
+                return x + y
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x, y):
+                x = x * x
+                y = y * y
+                return self.n(x, y)
+
+        m = M()
+        ep = torch.export.export(m, (torch.randn(3), torch.randn(3)))
+        for node in ep.graph.nodes:
+            if node.target == torch.ops.aten._assert_tensor_metadata.default:
+                self.assertEqual(len(node.meta.get("nn_module_stack")), 2)
+
+        uep = torch.export.unflatten(ep)
+
+        inp = (torch.randn(3), torch.randn(3))
+        self.assertTrue(torch.allclose(uep(*inp), m(*inp)))
+
     @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     @skipIfTorchDynamo("Non strict mode is not meant to run with dynamo")
     def test_unflatten_preserve_signature(self):
@@ -259,7 +335,7 @@ class TestUnflatten(TestCase):
             new_inps = *inps, torch.rand(2, 3)
             with self.assertRaisesRegex(
                 TypeError,
-                "There is no flat args adapter sepcified. Are you sure you are calling this with the right arguments?",
+                "There is no flat args adapter specified. Are you sure you are calling this with the right arguments?",
             ):
                 unflattened(new_inps)
 
@@ -270,6 +346,8 @@ class TestUnflatten(TestCase):
                     target_spec: TreeSpec,
                     input_spec: TreeSpec,
                     input_args: List[Any],
+                    metadata: dict[str, Any],
+                    obj: Optional[Any] = None,
                 ) -> List[Any]:
                     while len(input_args) > 2:
                         input_args.pop(-1)
@@ -350,9 +428,10 @@ class TestUnflatten(TestCase):
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=True)
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6"),
+            AssertionError,
+            escape("Guard failed: x.size()[0] == 2"),
         ):
+            # expected 2, but got 6
             export_module.module()(torch.randn(6, 6))
 
         unflattened = unflatten(export_module)
@@ -655,8 +734,6 @@ class TestUnflatten(TestCase):
             export_module.module(), unflattened, (torch.randn((2, 3)),)
         )
 
-    # skip connection is not supported yet
-    @unittest.expectedFailure
     def test_unflatten_skipped_call_module(self):
         class C(torch.nn.Module):
             def __init__(self):
@@ -694,7 +771,30 @@ class TestUnflatten(TestCase):
         # The call chain looks like this:
         # A -> B -> C -> A.d
         ep = torch.export.export(a, (torch.randn(3),), strict=False)
-        unflatten(ep)
+        ufm = unflatten(ep)
+        self.assertExpectedInline(
+            str(ufm.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    b = self.b(x);  x = None
+    return (b,)""",
+        )
+        self.assertExpectedInline(
+            str(ufm.b.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    c = self.c(x)
+    add = torch.ops.aten.add.Tensor(c, x);  c = x = None
+    return add""",
+        )
+        self.assertExpectedInline(
+            str(ufm.b.c.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    cos = torch.ops.aten.cos.default(x);  x = None
+    sin = torch.ops.aten.sin.default(cos);  cos = None
+    return sin""",
+        )
 
     def test_nested_leaf_non_strict(self):
         class Leaf(torch.nn.Module):
@@ -977,6 +1077,78 @@ class TestUnflatten(TestCase):
         # torch.compile submodule
         unflattened.foo = torch.compile(unflattened.foo, fullgraph=True)
         self.compare_outputs(orig_eager, unflattened, inputs)
+
+    def test_unflatten_none(self):
+        class M2(torch.nn.Module):
+            def forward(self, x, y):
+                return x + x, None
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m2 = M2()
+
+            def forward(self, x, y):
+                x = x + x
+                return self.m2(x, y)
+
+        ep = export(
+            M(), (torch.rand(2, 3), None), preserve_module_call_signature=("m2",)
+        )
+        unflattened = unflatten(ep)
+        inp = (torch.randn(2, 3), None)
+        self.assertTrue(torch.allclose(M()(*inp)[0], unflattened(*inp)[0]))
+
+    def test_unflatten_empty_branch(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                if x is None:
+                    return torch.ones(3), torch.ones(3)
+                else:
+                    return x + x, x * x
+
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = M()
+
+            def forward(self, x, y):
+                a, b = self.m(x)
+                c, d = self.m(y)
+                return a + b + c + d
+
+        ep = torch.export.export(M1(), (torch.randn(3), None))
+        unf = torch.export.unflatten(ep)
+        inp = (torch.randn(3), None)
+        self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
+
+        ep = torch.export.export(
+            M1(), (torch.randn(3), None), preserve_module_call_signature="m"
+        )
+        unf = torch.export.unflatten(ep)
+        inp = (torch.randn(3), None)
+        self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
+
+    def test_unflatten_root_module_type(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + x
+
+        class M1(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m = M()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.m(x)
+
+        inp = (torch.randn(3),)
+        ep = torch.export.export(M1(), inp)
+        unf = torch.export.unflatten(ep)
+        self.assertIsNotNone(unf.type_name())
+        self.assertEqual(unf.type_name().split(".")[-1], "M1")
+        self.assertEqual(unf.m.type_name().split(".")[-1], "M")
+        self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
 
 
 if __name__ == "__main__":

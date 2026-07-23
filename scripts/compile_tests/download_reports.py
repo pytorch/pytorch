@@ -9,24 +9,26 @@ import requests
 
 CONFIGS = {
     "dynamo39": {
-        "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
+        "linux-jammy-py3.10-clang12 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
+        "linux-jammy-py3.10-clang12 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
+        "linux-jammy-py3.10-clang12 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
-    "dynamo311": {
-        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
+    "dynamo313": {
+        "linux-jammy-py3.13-clang12 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
+        "linux-jammy-py3.13-clang12 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
+        "linux-jammy-py3.13-clang12 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
-    "eager311": {
-        "linux-focal-py3.11-clang10 / test (default, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (default, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (default, 3, 3, linux.2xlarge)",
+    "eager313": {
+        "linux-jammy-py3.13-clang12 / test (default, 1, 5, linux.4xlarge)",
+        "linux-jammy-py3.13-clang12 / test (default, 2, 5, linux.4xlarge)",
+        "linux-jammy-py3.13-clang12 / test (default, 3, 5, linux.4xlarge)",
+        "linux-jammy-py3.13-clang12 / test (default, 4, 5, linux.4xlarge)",
+        "linux-jammy-py3.13-clang12 / test (default, 5, 5, linux.4xlarge)",
     },
 }
 
 
-def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
+def download_reports(commit_sha, configs=("dynamo39", "dynamo313", "eager313")):
     log_dir = "tmp_test_reports_" + commit_sha
 
     def subdir_path(config):
@@ -62,9 +64,9 @@ def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
     for config in configs:
         required_jobs.extend(list(CONFIGS[config]))
     for job in required_jobs:
-        assert (
-            job in workflow_jobs
-        ), f"{job} not found, is the commit_sha correct? has the job finished running? The GitHub API may take a couple minutes to update."
+        assert job in workflow_jobs, (
+            f"{job} not found, is the commit_sha correct? has the job finished running? The GitHub API may take a couple minutes to update."
+        )
 
     # This page lists all artifacts.
     listings = requests.get(

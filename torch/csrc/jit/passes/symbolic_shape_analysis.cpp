@@ -12,16 +12,12 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/integer_value_refinement.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
-#include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/peephole_non_tensor.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_cache.h>
-#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <algorithm>
 #include <memory>
@@ -152,11 +148,11 @@ static std::ostream& operator<<(std::ostream& os, const ShapeArguments& sa) {
     return os;
   }
 
-  os << "(";
+  os << '(';
   for (const auto i : c10::irange(sa.len())) {
     os << sa.at(i);
   }
-  os << ")";
+  os << ')';
 
   return os;
 }
@@ -818,9 +814,9 @@ struct SymbolicShapeGraphAnalyzer {
 
     auto stitched_shape_compute_graph = std::make_shared<Graph>();
     // We want to build up a computational graph which computes all shapes
-    // we dont know statically - that is, all symbolic shapes within
+    // we don't know statically - that is, all symbolic shapes within
     // the region [beg, end). it must be executable before beg.
-    // TODO: dont require dimensions of tensors to be set AOT ?
+    // TODO: don't require dimensions of tensors to be set AOT ?
 
     for (auto it = beg_->iterator(); it != end_->iterator(); it++) {
       auto curr = *it;
@@ -853,7 +849,7 @@ struct SymbolicShapeGraphAnalyzer {
           return std::nullopt;
         }
         auto symbolic_sizes = tt->symbolic_sizes();
-        // TODO: dont require # of dimensions of tensors set ?
+        // TODO: don't require # of dimensions of tensors set ?
         if (!symbolic_sizes.rank()) {
           GRAPH_DEBUG("No rank on output ", getHeader(curr));
           return std::nullopt;
@@ -968,7 +964,7 @@ struct SymbolicShapeGraphAnalyzer {
     // When we add a new tensor node, we do two things:
     // 1: record a mapping from the tensor node output to its shape in the
     // partial eval graph 2: add each symbolic shape dimension that we have
-    // not already added as a output to the large shape compute graph
+    // not already added as an output to the large shape compute graph
 
     // Once we are done stitching together all partial eval'd graphs, we can
     // cleanup the graph and remove the unneeded complete shapes as outputs,

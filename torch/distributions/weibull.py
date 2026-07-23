@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -26,14 +27,22 @@ class Weibull(TransformedDistribution):
     Args:
         scale (float or Tensor): Scale parameter of distribution (lambda).
         concentration (float or Tensor): Concentration parameter of distribution (k/shape).
+        validate_args (bool, optional): Whether to validate arguments. Default: None.
     """
+
     arg_constraints = {
         "scale": constraints.positive,
         "concentration": constraints.positive,
     }
+    # pyrefly: ignore [bad-override]
     support = constraints.positive
 
-    def __init__(self, scale, concentration, validate_args=None):
+    def __init__(
+        self,
+        scale: Tensor | float,
+        concentration: Tensor | float,
+        validate_args: bool | None = None,
+    ) -> None:
         self.scale, self.concentration = broadcast_all(scale, concentration)
         self.concentration_reciprocal = self.concentration.reciprocal()
         base_dist = Exponential(
@@ -43,6 +52,7 @@ class Weibull(TransformedDistribution):
             PowerTransform(exponent=self.concentration_reciprocal),
             AffineTransform(loc=0, scale=self.scale),
         ]
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

@@ -11,7 +11,7 @@ import tempfile
 import threading
 import unittest
 from itertools import chain, repeat
-from typing import NamedTuple, Union
+from typing import NamedTuple
 
 import torch
 import torch.cuda.comm as comm
@@ -25,13 +25,13 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     instantiate_parametrized_tests,
     IS_JETSON,
+    IS_LINUX,
     IS_REMOTE_GPU,
     IS_SANDCASTLE,
     NoTest,
     run_tests,
     serialTest,
     skipCUDANonDefaultStreamIf,
-    skipIfRocm,
     TEST_CUDA,
     TestCase,
 )
@@ -43,7 +43,7 @@ TEST_CUDAMALLOCASYNC = TEST_CUDA and (
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
+    TestCase = NoTest
 
 
 class TestCudaMultiGPU(TestCase):
@@ -288,6 +288,7 @@ class TestCudaMultiGPU(TestCase):
         for _ in self._test_memory_stats_generator(self):
             self._check_memory_stat_consistency()
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/129860")
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_memory_stats_multigpu(self):
@@ -777,8 +778,6 @@ class TestCudaMultiGPU(TestCase):
             p2c.get()
             c2p.put(sync_func(self, TestCudaMultiGPU.FIFTY_MIL_CYCLES))
 
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_stream_event_nogil(self):
         for sync_func in [
@@ -815,11 +814,10 @@ class TestCudaMultiGPU(TestCase):
             # it may vary on different hardware in different environments.
             # Therefore, this test uses relative comparisons, checking if the
             # sum of parent and child threads execution time is greater than the
-            # real execution time by least 40%.
-            self.assertGreater(parent_time + child_time, total_time * 1.4)
+            # real execution time by least 30%.
+            self.assertGreater(parent_time + child_time, total_time * 1.3)
 
     # This test is flaky for ROCm, see issue #62602
-    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_events_wait(self):
         d0 = torch.device("cuda:0")
@@ -888,7 +886,6 @@ class TestCudaMultiGPU(TestCase):
             self.assertTrue(e1.query())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    @skipIfRocm
     def test_events_multi_gpu_elapsed_time(self):
         d0 = torch.device("cuda:0")
         d1 = torch.device("cuda:1")
@@ -967,7 +964,7 @@ class TestCudaMultiGPU(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_caching_pinned_memory_multi_gpu(self):
-        # checks that the events preventing pinned memory from being re-used
+        # checks that the events preventing pinned memory from being reused
         # too early are recorded on the correct GPU
         cycles_per_ms = get_cycles_per_ms()
 
@@ -982,7 +979,7 @@ class TestCudaMultiGPU(TestCase):
 
         del t
         t = torch.FloatTensor([2]).pin_memory()
-        self.assertNotEqual(t.data_ptr(), ptr, msg="allocation re-used too soon")
+        self.assertNotEqual(t.data_ptr(), ptr, msg="allocation reused too soon")
 
         with torch.cuda.device(0):
             gpu_tensor0.copy_(t, non_blocking=True)
@@ -1011,7 +1008,7 @@ class TestCudaMultiGPU(TestCase):
 
     # Verifies that mem_get_info works, including when called for a different device
     def test_mem_get_info(self):
-        def _test(device: Union[str, int, torch.device]):
+        def _test(device: str | int | torch.device):
             # Prevent PyTorch from reusing the allocated memory
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
@@ -1060,7 +1057,10 @@ class TestCudaMultiGPU(TestCase):
             except RuntimeError as e:
                 import re
 
-                assert re.match(regex, str(e)), str(e) + "\n does not match: \n" + regex
+                if not re.match(regex, str(e)):
+                    raise AssertionError(
+                        str(e) + "\n does not match: \n" + regex
+                    ) from None
         else:
             # assertRaisesRegex does not pass with Python for Jetson,
             # even though the RuntimeError matches regex using re.match

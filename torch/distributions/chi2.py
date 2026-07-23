@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.gamma import Gamma
@@ -22,9 +23,14 @@ class Chi2(Gamma):
     Args:
         df (float or Tensor): shape parameter of the distribution
     """
+
     arg_constraints = {"df": constraints.positive}
 
-    def __init__(self, df, validate_args=None):
+    def __init__(
+        self,
+        df: Tensor | float,
+        validate_args: bool | None = None,
+    ) -> None:
         super().__init__(0.5 * df, 0.5, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

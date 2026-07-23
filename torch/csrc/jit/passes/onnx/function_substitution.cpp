@@ -8,20 +8,20 @@ namespace torch::jit {
 
 namespace {
 
-const std::string kTopModuleVariableName = "";
+const std::string kTopModuleVariableName;
 
 std::string TidyClassNameFromTorchScript(
     const std::optional<c10::QualifiedName>& class_name) {
   if (!class_name) {
     return "UNKNOWN_CLASS";
   }
-  std::string out = "";
+  std::string out;
   for (const auto& atom : class_name->atoms()) {
     bool is_internal_torch_atom = (atom == "__torch__");
     bool is_mangle_atom = (atom.find("__torch_mangle") != std::string::npos);
     if (!is_internal_torch_atom && !is_mangle_atom) {
       if (!out.empty()) {
-        out += ".";
+        out += '.';
       }
       out += atom;
     }
@@ -182,7 +182,7 @@ ScopePtr ONNXGraphTopLevelScope(Graph& graph) {
 
 // This pass is to be used for ONNX conversion only. The ONNX converter depends
 // on a number of deprecated aten operators. These operators are removed from IR
-// and replaced by the compiled python function code. However, in-order to
+// and replaced by the compiled python function code. However, in order to
 // maintain the behavior for ONNX conversion, we replace these function calls
 // with the aten symbolic which can still be used by the ONNX converter.
 void ONNXFunctionCallSubstitution(Graph& graph) {

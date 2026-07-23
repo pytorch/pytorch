@@ -1,13 +1,13 @@
 # mypy: allow-untyped-defs
 import json
 import logging
-import os
 import struct
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import numpy as np
+
 
 from google.protobuf import struct_pb2
 
@@ -114,7 +114,7 @@ _TENSOR_TYPE_MAP = {
 }
 
 
-def _calc_scale_factor(tensor):
+def _calc_scale_factor(tensor) -> int:
     converted = tensor.numpy() if not isinstance(tensor, np.ndarray) else tensor
     return 1 if converted.dtype == np.uint8 else 255
 
@@ -248,7 +248,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             ssi.hparams[k].number_value = v
 
             if k in hparam_domain_discrete:
-                domain_discrete: Optional[struct_pb2.ListValue] = struct_pb2.ListValue(
+                domain_discrete: struct_pb2.ListValue | None = struct_pb2.ListValue(
                     values=[
                         struct_pb2.Value(number_value=d)
                         for d in hparam_domain_discrete[k]
@@ -327,7 +327,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     )
     ssi = Summary(value=[Summary.Value(tag=SESSION_START_INFO_TAG, metadata=smd)])
 
-    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict.keys()]
+    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict]
 
     exp = Experiment(hparam_infos=hps, metric_infos=mts)
 
@@ -369,9 +369,9 @@ def scalar(name, tensor, collections=None, new_style=False, double_precision=Fal
       ValueError: If tensor has the wrong shape or type.
     """
     tensor = make_np(tensor).squeeze()
-    assert (
-        tensor.ndim == 0
-    ), f"Tensor should contain one element (0 dimensions). Was given size: {tensor.size} and {tensor.ndim} dimensions."
+    if tensor.ndim != 0:
+        raise AssertionError(f"Tensor should contain one element (0 dimensions). \
+            Was given size: {tensor.size} and {tensor.ndim} dimensions.")
     # python float is double precision in numpy
     scalar = float(tensor)
     if new_style:
@@ -497,6 +497,7 @@ def make_histogram(values, bins, max_bins=None):
         subsampling = num_bins // max_bins
         subsampling_remainder = num_bins % subsampling
         if subsampling_remainder != 0:
+            # pyrefly: ignore [no-matching-overload]
             counts = np.pad(
                 counts,
                 pad_width=[[0, subsampling - subsampling_remainder]],
@@ -670,26 +671,22 @@ def make_video(tensor, fps):
     # encode sequence of images into gif string
     clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
 
-    filename = tempfile.NamedTemporaryFile(suffix=".gif", delete=False).name
-    try:  # newer version of moviepy use logger instead of progress_bar argument.
-        clip.write_gif(filename, verbose=False, logger=None)
-    except TypeError:
-        try:  # older version of moviepy does not support progress_bar argument.
-            clip.write_gif(filename, verbose=False, progress_bar=False)
+    with tempfile.NamedTemporaryFile(suffix=".gif") as f:
+        filename = f.name
+        try:  # newer version of moviepy use logger instead of progress_bar argument.
+            clip.write_gif(filename, verbose=False, logger=None)
         except TypeError:
-            clip.write_gif(filename, verbose=False)
+            try:  # older version of moviepy does not support progress_bar argument.
+                clip.write_gif(filename, verbose=False, progress_bar=False)
+            except TypeError:
+                clip.write_gif(filename, verbose=False)
 
-    with open(filename, "rb") as f:
+        f.seek(0)
         tensor_string = f.read()
 
-    try:
-        os.remove(filename)
-    except OSError:
-        logger.warning("The temporary file used by moviepy cannot be deleted.")
-
-    return Summary.Image(
-        height=h, width=w, colorspace=c, encoded_image_string=tensor_string
-    )
+        return Summary.Image(
+            height=h, width=w, colorspace=c, encoded_image_string=tensor_string
+        )
 
 
 def audio(tag, tensor, sample_rate=44100):
@@ -698,7 +695,9 @@ def audio(tag, tensor, sample_rate=44100):
     if abs(array).max() > 1:
         print("warning: audio amplitude out of range, auto clipped.")
         array = array.clip(-1, 1)
-    assert array.ndim == 1, "input tensor should be 1 dimensional."
+    if array.ndim != 1:
+        raise AssertionError("input tensor should be 1 dimensional.")
+    # pyrefly: ignore [no-matching-overload]
     array = (array * np.iinfo(np.int16).max).astype("<i2")
 
     import io
@@ -729,7 +728,8 @@ def custom_scalars(layout):
         for chart_name, chart_metadata in v.items():
             tags = chart_metadata[1]
             if chart_metadata[0] == "Margin":
-                assert len(tags) == 3
+                if len(tags) != 3:
+                    raise AssertionError("len(tags) != 3")
                 mgcc = layout_pb2.MarginChartContent(
                     series=[
                         layout_pb2.MarginChartContent.Series(
@@ -834,17 +834,21 @@ def compute_curve(labels, predictions, num_thresholds=None, weights=None):
         weights = 1.0
 
     # Compute bins of true positives and false positives.
+    # pyrefly: ignore [unsupported-operation]
     bucket_indices = np.int32(np.floor(predictions * (num_thresholds - 1)))
     float_labels = labels.astype(np.float64)
+    # pyrefly: ignore [unsupported-operation]
     histogram_range = (0, num_thresholds - 1)
     tp_buckets, _ = np.histogram(
         bucket_indices,
+        # pyrefly: ignore [bad-argument-type]
         bins=num_thresholds,
         range=histogram_range,
         weights=float_labels * weights,
     )
     fp_buckets, _ = np.histogram(
         bucket_indices,
+        # pyrefly: ignore [bad-argument-type]
         bins=num_thresholds,
         range=histogram_range,
         weights=(1.0 - float_labels) * weights,

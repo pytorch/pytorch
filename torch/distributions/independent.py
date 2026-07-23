@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
+from typing import Generic, TypeVar
 
 import torch
-from torch import Tensor
+from torch import Size, Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
@@ -11,7 +12,10 @@ from torch.types import _size
 __all__ = ["Independent"]
 
 
-class Independent(Distribution):
+D = TypeVar("D", bound=Distribution)
+
+
+class Independent(Distribution, Generic[D]):
     r"""
     Reinterprets some of the batch dims of a distribution as event dims.
 
@@ -40,22 +44,28 @@ class Independent(Distribution):
         reinterpreted_batch_ndims (int): the number of batch dims to
             reinterpret as event dims
     """
+
     arg_constraints: dict[str, constraints.Constraint] = {}
+    base_dist: D
 
     def __init__(
-        self, base_distribution, reinterpreted_batch_ndims, validate_args=None
-    ):
+        self,
+        base_distribution: D,
+        reinterpreted_batch_ndims: int,
+        validate_args: bool | None = None,
+    ) -> None:
         if reinterpreted_batch_ndims > len(base_distribution.batch_shape):
             raise ValueError(
                 "Expected reinterpreted_batch_ndims <= len(base_distribution.batch_shape), "
                 f"actual {reinterpreted_batch_ndims} vs {len(base_distribution.batch_shape)}"
             )
-        shape = base_distribution.batch_shape + base_distribution.event_shape
-        event_dim = reinterpreted_batch_ndims + len(base_distribution.event_shape)
+        shape: Size = base_distribution.batch_shape + base_distribution.event_shape
+        event_dim: int = reinterpreted_batch_ndims + len(base_distribution.event_shape)
         batch_shape = shape[: len(shape) - event_dim]
         event_shape = shape[len(shape) - event_dim :]
         self.base_dist = base_distribution
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -82,6 +92,7 @@ class Independent(Distribution):
         return self.base_dist.has_enumerate_support
 
     @constraints.dependent_property
+    # pyrefly: ignore [bad-override]
     def support(self):
         result = self.base_dist.support
         if self.reinterpreted_batch_ndims:

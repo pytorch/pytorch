@@ -2,22 +2,14 @@
 
 import copy
 import itertools
-import unittest
-from typing import Optional
+from typing import cast
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
-from torch.distributed._tensor import (
-    DeviceMesh,
-    distribute_tensor,
-    DTensor,
-    Replicate,
-    Shard,
-)
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_managed_modules,
     _get_managed_states,
@@ -26,9 +18,17 @@ from torch.distributed.fsdp._fully_shard._fsdp_param import ParamModuleInfo
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     _get_param_module_infos,
 )
+from torch.distributed.fsdp._fully_shard._fully_shard import FSDPModule
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
     _init_intra_node_process_group,
+)
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    Replicate,
+    Shard,
 )
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -36,14 +36,24 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.placement_types import _StridedShard
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import (
+    FSDPTest,
+    FSDPTestMultiThread,
+    get_devtype,
+    MLP,
+    patch_all_gather,
+    patch_reduce_scatter,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
     TransformerBlock,
 )
+
+
+device_type = torch.device(get_devtype())
 
 
 class TestFullyShardDeviceTensor(FSDPTestMultiThread):
@@ -53,15 +63,32 @@ class TestFullyShardDeviceTensor(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 1
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_move_states_to_device_tensor(self):
         model = MLP(8, torch.device("cpu"), with_buffer=True)
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             self.assertEqual(tensor.device, torch.device("cpu"))
         fully_shard(model)
-        cuda_device = torch.device("cuda", torch.cuda.current_device())
+        accelerator_device = torch.device(
+            device_type.type, torch.get_device_module(device_type).current_device()
+        )
         for tensor in itertools.chain(model.parameters(), model.buffers()):
-            self.assertEqual(tensor.device, cuda_device)
+            self.assertEqual(tensor.device, accelerator_device)
+
+    @skip_if_lt_x_gpu(1)
+    def test_move_states_to_device_ignored_param_device(self):
+        cpu_device = torch.device("cpu")
+        model = MLP(8, cpu_device, with_buffer=True)
+        ignored_params = [model.out_proj.weight, model.out_proj.bias]
+        fully_shard(model, ignored_params=set(ignored_params))
+        for tensor in ignored_params:
+            self.assertEqual(tensor.device, cpu_device)
+        accelerator_device = torch.device(
+            device_type.type, torch.get_device_module(device_type).current_device()
+        )
+        model.to(device_type)
+        for tensor in ignored_params:
+            self.assertEqual(tensor.device, accelerator_device)
 
 
 class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
@@ -71,12 +98,15 @@ class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 4
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_move_states_to_device_dtensor_valid(self):
-        assert self.world_size >= 4, f"{self.world_size}"
+        if not (self.world_size >= 4):
+            raise AssertionError(f"Expected world_size >= 4, but got {self.world_size}")
         dp_size = 2
         global_mesh = init_device_mesh(
-            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+            device_type.type,
+            (dp_size, self.world_size // dp_size),
+            mesh_dim_names=("dp", "tp"),
         )
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
         model = MLP(8, torch.device("cpu"), with_buffer=True)
@@ -85,31 +115,36 @@ class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
             tp_mesh,
             {"in_proj": ColwiseParallel(), "out_proj": RowwiseParallel()},
         )
-        cuda_device = torch.device("cuda", torch.cuda.current_device())
+        accelerator_device = torch.device(
+            device_type.type, torch.get_device_module(device_type).current_device()
+        )
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             if isinstance(tensor, DTensor):
                 # DTensor constructor moves to the mesh's device
-                self.assertEqual(tensor.device, cuda_device)
-                self.assertEqual(tensor._local_tensor.device, cuda_device)
+                self.assertEqual(tensor.device, accelerator_device)
+                self.assertEqual(tensor._local_tensor.device, accelerator_device)
             else:
                 self.assertEqual(tensor.device, torch.device("cpu"))
         fully_shard(model, mesh=dp_mesh)
         for tensor in itertools.chain(model.parameters(), model.buffers()):
-            self.assertEqual(tensor.device, cuda_device)
+            self.assertEqual(tensor.device, accelerator_device)
             if isinstance(tensor, DTensor):
-                self.assertEqual(tensor._local_tensor.device, cuda_device)
+                self.assertEqual(tensor._local_tensor.device, accelerator_device)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_move_states_to_device_dtensor_invalid(self):
-        assert self.world_size >= 4, f"{self.world_size}"
+        if not (self.world_size >= 4):
+            raise AssertionError(f"Expected world_size >= 4, but got {self.world_size}")
         dp_size = 2
-        global_cuda_mesh = init_device_mesh(
-            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+        global_accelerator_mesh = init_device_mesh(
+            device_type.type,
+            (dp_size, self.world_size // dp_size),
+            mesh_dim_names=("dp", "tp"),
         )
         global_cpu_mesh = init_device_mesh(
             "cpu", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
         )
-        dp_mesh = global_cuda_mesh["dp"]
+        dp_mesh = global_accelerator_mesh["dp"]
         tp_mesh = global_cpu_mesh["tp"]  # mismatched meshes!
         model = MLP(8, torch.device("cpu"), with_buffer=True)
         parallelize_module(
@@ -121,9 +156,54 @@ class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
             self.assertEqual(tensor.device, torch.device("cpu"))
             if isinstance(tensor, DTensor):
                 self.assertEqual(tensor._local_tensor.device, torch.device("cpu"))
-        regex = r"Requires DTensor to have mesh of the same type as the FSDP mesh but got cpu for DTensor and cuda for FSDP"
+        regex = (
+            rf"Requires DTensor to have mesh of the same type as the FSDP mesh but got "
+            rf"cpu for DTensor and {device_type.type} for FSDP"
+        )
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model, mesh=dp_mesh)
+
+
+class TestFullyShardContainerSubclasses(FSDPTestMultiThread):
+    """Tests that fully_shard accepts ModuleDict/ModuleList subclasses that implement forward()."""
+
+    class DictWithForward(nn.ModuleDict):
+        def __init__(self, in_features=8, out_features=8):
+            super().__init__({"lin": nn.Linear(in_features, out_features)})
+
+        def forward(self, x):
+            return self["lin"](x)
+
+    class ListWithForward(nn.ModuleList):
+        def __init__(self, in_features=8, out_features=8):
+            super().__init__([nn.Linear(in_features, out_features)])
+
+        def forward(self, x):
+            out = x
+            for m in self:
+                out = m(out)
+            return out
+
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @skip_if_lt_x_gpu(1)
+    def test_moduledict_subclass_with_forward(self):
+        model = self.DictWithForward(8, 8)
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        # Should not raise due to container type since forward() is implemented
+        fsdp_model = fully_shard(model, mesh=mesh)
+        x = torch.randn(2, 8, device=device_type)
+        _ = fsdp_model(x)
+
+    @skip_if_lt_x_gpu(1)
+    def test_modulelist_subclass_with_forward(self):
+        model = self.ListWithForward(8, 8)
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        fsdp_model = fully_shard(model, mesh=mesh)
+        x = torch.randn(2, 8, device=device_type)
+        _ = fsdp_model(x)
 
 
 class TestFullyShardMeshArg(FSDPTestMultiThread):
@@ -133,17 +213,15 @@ class TestFullyShardMeshArg(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 4
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_invalid_mesh_ndim(self):
-        mesh = init_device_mesh("cuda", (self.world_size, 1, 1))
+        mesh = init_device_mesh(device_type.type, (self.world_size, 1, 1))
         model = MLP(8)
         regex = r"fully\_shard expects a 1D or 2D DeviceMesh but got DeviceMesh"
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model, mesh=mesh)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_2d_mesh_without_mesh_dim_names(self):
-        mesh = init_device_mesh("cuda", (self.world_size // 2, 2))
+        mesh = init_device_mesh(device_type.type, (self.world_size // 2, 2))
         model = MLP(8)
         regex = "Please init the 2D mesh for HSDP with mesh_dim_names specified"
         with self.assertRaisesRegex(AssertionError, regex):
@@ -157,7 +235,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 1
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_managed_modules_single(self):
         model = MLP(8)
         # Assume calling `fully_shard` on `model`
@@ -165,7 +242,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         expected_managed_modules = list(model.modules())
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_managed_modules_nested(self):
         model = nn.Sequential(*[MLP(8) for _ in range(2)])
         fully_shard(model[0])
@@ -174,7 +250,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         expected_managed_modules = list(model[1].modules()) + [model]
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_managed_modules_nested_fully_shard_and_replicate(self):
         model = nn.Sequential(*[MLP(8) for _ in range(3)])
         replicate(model[0])
@@ -184,7 +259,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         expected_managed_modules = list(model[1].modules()) + [model]
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_managed_modules_duplicate(self):
         mlp = MLP(8)
         model = nn.Sequential(mlp, mlp)  # duplicate MLP
@@ -194,7 +268,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         expected_managed_modules = list(mlp.modules()) + [model]
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_managed_modules_list_of_mlps(self):
         model = nn.Sequential(*[MLP(8) for _ in range(5)])
         # Assume calling `fully_shard` on `[model[0], model[1], model[2]]`
@@ -218,7 +291,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         # Check set comparison since we do not require anything about the order
         self.assertEqual(set(managed_modules), set(expected_managed_modules))
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_managed_states_shared_params_and_buffers(self):
         model = nn.Sequential(*[MLP(8, with_buffer=True) for _ in range(3)])
         model[0].in_proj.weight = model[1].in_proj.weight
@@ -231,7 +303,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         expected_buffers = list(model.buffers())  # de-dups shared
         self._check_managed_states(params, buffers, expected_params, expected_buffers)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_managed_states_nested_fully_shard(self):
         model = nn.Sequential(*[MLP(8, with_buffer=True) for _ in range(2)])
         fully_shard(model[0])
@@ -242,7 +313,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         expected_buffers = list(model[1].buffers())
         self._check_managed_states(params, buffers, expected_params, expected_buffers)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_managed_states_list_of_mlps(self):
         model = nn.Sequential(*[MLP(8, with_buffer=True) for _ in range(5)])
         # Assume calling `fully_shard` on `[model[0], model[1], model[2]]`
@@ -278,7 +348,6 @@ class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_get_param_module_infos_shared_params(self):
         model = nn.Sequential(*[MLP(8) for _ in range(2)])
         model[0].in_proj.weight = model[1].in_proj.weight
@@ -299,7 +368,6 @@ class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
         self.assertEqual(len(param_module_infos), len(expected_param_module_infos))
         self.assertEqual(param_module_infos, expected_param_module_infos)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_get_param_module_infos_duplicates(self):
         mlp = MLP(8)
         model = nn.Sequential(mlp, mlp)  # shared MLP
@@ -327,7 +395,6 @@ class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
             ParamModuleInfo(mlp.out_proj, "bias", [], []),
         ]
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_get_param_module_infos_list_of_mlps(self):
         model = nn.Sequential(*[MLP(8) for _ in range(2)])
         managed_modules = _get_managed_modules((model[0], model[1]))
@@ -353,7 +420,7 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_shard_tensor_parameters(self):
         # Use odd dim sizes to test uneven shards
         model = nn.Sequential(*[MLP(3, dim_multiplier=3) for _ in range(3)])
@@ -373,7 +440,7 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
         self, orig_params: list[nn.Parameter], sharded_params: list[nn.Parameter]
     ):
         self.assertEqual(len(orig_params), len(sharded_params))
-        global_mesh = init_device_mesh("cuda", (self.world_size,))
+        global_mesh = init_device_mesh(device_type.type, (self.world_size,))
         for orig_param, sharded_param in zip(orig_params, sharded_params):
             self.assertIsInstance(sharded_param, DTensor)
             self.assertEqual(sharded_param.device_mesh, global_mesh)
@@ -383,17 +450,17 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
             chunks = torch.chunk(orig_param, self.world_size, dim=0)
             self.assertEqual(sharded_param._local_tensor, chunks[self.rank])
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_raise_scalar_parameter(self):
         """Tests raising an exception when the model has scalar parameters."""
         model = nn.Sequential(*[MLP(3, dim_multiplier=3) for _ in range(3)])
-        model.register_parameter("scalar_p", nn.Parameter(torch.tensor(1.0).cuda()))
+        model.register_parameter(
+            "scalar_p", nn.Parameter(torch.tensor(1.0).to(device_type))
+        )
         with self.assertRaisesRegex(
             ValueError, "Change scalar_p to a 1D tensor with numel equal to 1."
         ):
             fully_shard(model)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_raise_noncontiguous_parameter(self):
         """
         Tests raising an exception when the model has non-contiguous
@@ -411,17 +478,17 @@ class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 4
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_shard_dtensor_parameters(self):
         dp_size = 2 if self.world_size > 2 else 1
         global_mesh = init_device_mesh(
-            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+            device_type.type,
+            (dp_size, self.world_size // dp_size),
+            mesh_dim_names=("dp", "tp"),
         )
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
         # Use odd dim sizes to test uneven shards
-        # TODO: change "mlp_dim" back to 9 when uneven sharding
-        # is supported for FSDP+TP
-        model = MLP(8, dim_multiplier=3)
+        model = MLP(9, dim_multiplier=3)
         orig_params = [param.detach().clone() for param in model.parameters()]
         orig_param_names = [param_name for param_name, _ in model.named_parameters()]
         parallelize_module(
@@ -456,7 +523,6 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_fully_shard_is_root(self):
         """
         Tests that ``_is_root`` is set correctly after lazy initialization.
@@ -485,7 +551,6 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
             all_states, [root_state, model0_in_proj_state, model0_out_proj_state]
         )
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_fully_shard_module_and_param_fqns(self):
         """
         Tests that the module and parameter FQNs are computed correctly after
@@ -543,7 +608,6 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
             model0_out_proj_param_fqns, {"0.out_proj.weight", "0.out_proj.bias"}
         )
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_fully_shard_double_lazy_init(self):
         model = nn.Sequential(MLP(8), MLP(8))
         fully_shard(model[0].in_proj)
@@ -559,7 +623,6 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         with self.assertRaisesRegex(RuntimeError, regex):
             root_state._lazy_init()
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_fully_shard_multi_module_root(self):
         model = nn.Sequential(MLP(8), MLP(8))
         fully_shard([model[0], model[1]])
@@ -568,7 +631,6 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         with self.assertRaisesRegex(RuntimeError, regex):
             root_state._lazy_init()
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_reset_sharded_param_in_lazy_init(self):
         class MyModel(nn.Module):
             def __init__(self):
@@ -595,11 +657,11 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         fully_shard(model.layer2)
         fully_shard(model)
 
-        model.layer1.to_empty(device="cuda")
-        model.layer2.to_empty(device="cuda")
+        model.layer1.to_empty(device=device_type.type)
+        model.layer2.to_empty(device=device_type.type)
         model.init_weight_norm()
 
-        inp = torch.randn(3, 3, device="cuda")
+        inp = torch.randn(3, 3, device=device_type.type)
         loss = model(inp).sum()
         loss.backward()
 
@@ -609,23 +671,32 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 4
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_meta_device_1d_init(self):
         default_pg = torch.distributed.distributed_c10d._get_default_group()
-        mesh = init_device_mesh("cuda", mesh_shape=(default_pg.size(),))
-
-        # Test both even sharding (8) and uneven sharding (3)
-        for mlp_dim in (8, 3):
-            with torch.device("meta"):
-                model = nn.Sequential(MLP(mlp_dim, with_buffer=True), MLP(mlp_dim))
+        mesh = init_device_mesh(device_type.type, mesh_shape=(default_pg.size(),))
+        # Test both even sharding (8), uneven sharding (3), and empty local tensor (1)
+        for mlp_dim in (8, 3, 1):
+            # cover foreach_copy code path for bf16
+            for mp_policy in (
+                MixedPrecisionPolicy(),
+                MixedPrecisionPolicy(
+                    param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+                ),
+            ):
+                with torch.device("meta"):
+                    model = nn.Sequential(
+                        MLP(mlp_dim, dim_multiplier=1, with_buffer=True, bias=False),
+                        MLP(mlp_dim, dim_multiplier=1, bias=False),
+                    )
+                    for param in model.parameters():
+                        self.assertEqual(param.device, torch.device("meta"))
+                    fully_shard(model[0], mesh=mesh, mp_policy=mp_policy)
+                    fully_shard(model[1], mesh=mesh, mp_policy=mp_policy)
+                    fully_shard(model, mesh=mesh, mp_policy=mp_policy)
                 for param in model.parameters():
                     self.assertEqual(param.device, torch.device("meta"))
-                fully_shard(model[0], mesh=mesh)
-                fully_shard(model[1], mesh=mesh)
-                fully_shard(model, mesh=mesh)
-            for param in model.parameters():
-                self.assertEqual(param.device, torch.device("meta"))
-            self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
+                self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
 
         # Test that we can call `fully_shard` under meta-device context and
         # that `init_device_mesh` call still works
@@ -640,12 +711,15 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
             self.assertEqual(param.device, torch.device("meta"))
         self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_meta_device_2d_init(self):
-        assert self.world_size >= 4, f"{self.world_size}"
+        if not (self.world_size >= 4):
+            raise AssertionError(f"Expected world_size >= 4, but got {self.world_size}")
         dp_size = 2
         global_mesh = init_device_mesh(
-            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+            device_type.type,
+            (dp_size, self.world_size // dp_size),
+            mesh_dim_names=("dp", "tp"),
         )
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
 
@@ -673,7 +747,9 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         self, model: nn.Module, mesh: DeviceMesh, mlp_dim: int
     ):
         # Check that we can materialize it on GPU with empty values
-        device = torch.device("cuda", torch.cuda.current_device())
+        device = torch.device(
+            device_type.type, torch.get_device_module(device_type).current_device()
+        )
         model.to_empty(device=device)
         for param in model.parameters():
             self.assertEqual(param.device, device)
@@ -694,14 +770,14 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
             self.assertNotEqual(buffer, torch.ones_like(buffer) * const)
 
         # Check that we can run an iteration without erroring
-        inp = torch.randn((4, mlp_dim), device="cuda")
+        inp = torch.randn((4, mlp_dim), device=device_type.type)
         model(inp).sum().backward()
         optim.step()
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_invalid_meta_device_init(self):
         default_pg = torch.distributed.distributed_c10d._get_default_group()
-        mesh = init_device_mesh("cuda", mesh_shape=(default_pg.size(),))
+        mesh = init_device_mesh(device_type.type, mesh_shape=(default_pg.size(),))
         mlp_dim = 8
         with torch.device("meta"):
             model = nn.Sequential(MLP(mlp_dim, with_buffer=True), MLP(mlp_dim))
@@ -710,7 +786,7 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
             fully_shard(model[0], mesh=mesh)
             fully_shard(model[1], mesh=mesh)
             fully_shard(model, mesh=mesh)
-        inp = torch.randn((4, mlp_dim), device="cuda")
+        inp = torch.randn((4, mlp_dim), device=device_type.type)
         error_regex = (
             "FSDP parameters should be materialized from meta device before training, "
             "but the following were still on meta device: "
@@ -719,7 +795,7 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         with self.assertRaisesRegex(RuntimeError, error_regex):
             model(inp)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_rank0_broadcast_meta_device_init(self):
         model_args = ModelArgs(dropout_p=0.0)
         # Assume we have a CPU full state dict on rank 0
@@ -731,7 +807,7 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
                 self.assertEqual(param.device, torch.device("cpu"))
 
         # Initialize the sharded model on meta device
-        fsdp_mesh = init_device_mesh("cuda", (self.world_size,))
+        fsdp_mesh = init_device_mesh(device_type.type, (self.world_size,))
         with torch.device("meta"):
             model = Transformer(model_args)
         for module in model.modules():
@@ -751,7 +827,7 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
             for (param_name, full_param), sharded_meta_param in zip(
                 full_sd.items(), meta_sharded_sd.values()
             ):
-                full_param = full_param.detach().cuda()
+                full_param = full_param.detach().to(device_type)
                 mesh = sharded_meta_param.device_mesh
                 dist.broadcast(full_param, src=0, group=mesh.get_group(0))
                 sharded_tensor = distribute_tensor(
@@ -762,7 +838,7 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
             for param_name, sharded_meta_param in meta_sharded_sd.items():
                 full_tensor = torch.empty(
                     sharded_meta_param.size(),
-                    device="cuda",
+                    device=device_type.type,
                     dtype=sharded_meta_param.dtype,
                 )
                 mesh = sharded_meta_param.device_mesh
@@ -775,7 +851,7 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         model.load_state_dict(sharded_sd, assign=True)
         for param in model.parameters():
             self.assertIsInstance(param, DTensor)
-            self.assertEqual(param.device.type, "cuda")
+            self.assertEqual(param.device.type, device_type.type)
 
         # Construct the reference model on nonzero ranks by broadcasting the
         # unsharded model from rank 0 and sharding on all ranks
@@ -795,7 +871,7 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
             self.assertEqual(param, ref_param)
 
         # Check one forward/backward for parity
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
         loss = model(inp).sum()
         loss.backward()
         ref_loss = ref_model(inp).sum()
@@ -810,25 +886,28 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 4
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_1d_process_group_init(self):
-        assert self.world_size == 4, f"{self.world_size}"
+        if not (self.world_size == 4):
+            raise AssertionError(f"Expected world_size == 4, but got {self.world_size}")
         # For convenience, use device mesh's infra to construct the DP PG
         # (in practice, the trainer would do it manually via `new_group()`)
         dp_size = 2
         global_mesh = init_device_mesh(
-            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+            device_type.type,
+            (dp_size, self.world_size // dp_size),
+            mesh_dim_names=("dp", "tp"),
         )
         ref_dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
         dp_pg = ref_dp_mesh.get_group(0)
 
         # Check the `from_group()` API for correctness
-        dp_mesh = DeviceMesh.from_group(dp_pg, "cuda", mesh_dim_names=("dp",))
+        dp_mesh = DeviceMesh.from_group(dp_pg, device_type.type, mesh_dim_names=("dp",))
         # Only compare the mesh tensors, not `DeviceMesh` objects themselves,
         # since the ref has a parent mesh, while the `from_group` one does not
         self.assertEqual(dp_mesh.mesh, ref_dp_mesh.mesh)
         self.assertEqual(dp_mesh._coordinate_on_dim, ref_dp_mesh._coordinate_on_dim)
-        self.assertEqual(dp_mesh._dim_group_infos, ref_dp_mesh._dim_group_infos)
+        self.assertEqual(dp_mesh._dim_group_names, ref_dp_mesh._dim_group_names)
 
         # Check 1D FSDP forward/backward parity over the DP mesh
         # NOTE: We cannot use 2D DTensor-based training here because the DP
@@ -848,7 +927,7 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
             fully_shard(module, mesh=dp_mesh)
 
         # Ensure that TP ranks have the same input
-        inp = torch.randn((4, mlp_dim), device="cuda")
+        inp = torch.randn((4, mlp_dim), device=device_type.type)
         if self.rank in (0, 1):
             dist.broadcast(inp, src=0, group=tp_mesh.get_group(0))
         elif self.rank in (2, 3):
@@ -870,16 +949,17 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
                 param.grad.device_mesh.mesh, ref_param.grad.device_mesh.mesh
             )
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_2d_process_group_init(self):
         shard_mesh_dim_size = 2
-        assert (
-            self.world_size % shard_mesh_dim_size == 0
-        ), f"Expects {self.world_size} to be divisible by {shard_mesh_dim_size}"
+        if not (self.world_size % shard_mesh_dim_size == 0):
+            raise AssertionError(
+                f"Expects {self.world_size} to be divisible by {shard_mesh_dim_size}"
+            )
         replicate_mesh_dim_size = self.world_size // shard_mesh_dim_size
         mesh_dim_names = ("replicate", "shard")
         ref_mesh = init_device_mesh(
-            "cuda",
+            device_type.type,
             (replicate_mesh_dim_size, shard_mesh_dim_size),
             mesh_dim_names=mesh_dim_names,
         )
@@ -898,18 +978,12 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         # Check the `from_group()` API for correctness
         mesh = DeviceMesh.from_group(
             [dp_replicate_group, dp_shard_group],
-            "cuda",
+            device_type.type,
             mesh_dim_names=mesh_dim_names,
             mesh=mesh_tensor,
         )
         self.assertEqual(mesh.mesh, ref_mesh.mesh)
         self.assertEqual(mesh._coordinate_on_dim, ref_mesh._coordinate_on_dim)
-        for (_, ranks, _), (_, ref_ranks, _) in zip(
-            mesh._dim_group_infos, ref_mesh._dim_group_infos
-        ):
-            # Since we manually constructed new subgroups, the test and ref
-            # groups are not the same
-            self.assertEqual(ranks, ref_ranks)
         for mesh_dim_name in mesh_dim_names:
             child_mesh = mesh[mesh_dim_name]
             ref_child_mesh = ref_mesh[mesh_dim_name]
@@ -937,7 +1011,7 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         for module in (model.in_proj, model.out_proj, model):
             fully_shard(module, mesh=mesh)
 
-        inp = torch.randn((4, mlp_dim), device="cuda")
+        inp = torch.randn((4, mlp_dim), device=device_type.type)
         ref_loss = ref_model(inp).sum()
         ref_loss.backward()
         loss = model(inp).sum()
@@ -947,17 +1021,40 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
             self.assertEqual(param, ref_param)
             self.assertEqual(param.grad, ref_param.grad)
 
+        # Also cover the opt-in reduce-scatter PG setup on HSDP meshes. Each
+        # rank creates the communicator for its shard group, so the
+        # implementation must use local synchronization internally to avoid
+        # waiting for nonmember ranks in new_group's post-init barrier.
+        model.set_separate_reduce_scatter_group()
+        rs_process_groups = set()
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                for param_group in module._get_fsdp_state()._fsdp_param_groups:
+                    self.assertIsNotNone(
+                        param_group.mesh_info.reduce_scatter_process_group
+                    )
+                    self.assertIsNot(
+                        param_group._reduce_scatter_process_group,
+                        param_group.mesh_info.shard_process_group,
+                    )
+                    rs_process_groups.add(
+                        id(param_group.mesh_info.reduce_scatter_process_group)
+                    )
+        self.assertEqual(len(rs_process_groups), 1)
+
 
 class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
         return 4
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_hsdp_broadcast_across_replicas(self):
         shard_size, replicate_size = 2, 2
         mesh = init_device_mesh(
-            "cuda", (replicate_size, shard_size), mesh_dim_names=("replicate", "shard")
+            device_type.type,
+            (replicate_size, shard_size),
+            mesh_dim_names=("replicate", "shard"),
         )
         model_args = ModelArgs()
         model = Transformer(model_args)
@@ -1011,8 +1108,113 @@ class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
                 self.assertEqual(other_local_tensor, local_tensor_list[0])
 
         # Check that we can run an iteration without erroring
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
         model(inp).sum().backward()
+
+
+class TestHSDPWithCustomHook(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    def perThreadSetUp(self) -> None:
+        super().perThreadSetUp()
+        torch.set_default_device(device_type)
+
+    @skip_if_lt_x_gpu(1)
+    def test_custom_hook_custom_stream(self):
+        hsdp_mesh = init_device_mesh(
+            device_type.type, (2, 2), mesh_dim_names=("replicate", "shard")
+        )
+        model = MLP(10, bias=False)
+        fully_shard(model, mesh=hsdp_mesh)
+        model = cast(FSDPModule, model)
+        custom_stream = torch.get_device_module(device_type).Stream()
+
+        # native HSDP should reject
+        with self.assertRaises(ValueError) as cm:
+            model.set_all_reduce_hook(lambda output: output, stream=custom_stream)
+
+        ex = cm.exception
+        self.assertEqual(str(ex), "stream cannot be set when using native HSDP")
+
+        # FSDP + hook in custom stream is ok
+        intra_pg = _init_intra_node_process_group(2)
+        fsdp_mesh = DeviceMesh.from_group(
+            intra_pg,
+            device_type.type,
+            dist.get_process_group_ranks(intra_pg),
+            mesh_dim_names=("shard",),
+        )
+        hook_used_stream = None
+
+        def _hook(_output: torch.Tensor) -> None:
+            nonlocal hook_used_stream
+            hook_used_stream = torch.get_device_module(device_type).current_stream()
+
+        model = MLP(10, bias=False)
+        fully_shard(model, mesh=fsdp_mesh)
+        model = cast(FSDPModule, model)
+        model.set_all_reduce_hook(_hook, stream=custom_stream)
+
+        inp = torch.arange(10, dtype=torch.float32, requires_grad=True).view(1, 10)
+        out = model(inp)
+        out.sum().backward()
+        torch.get_device_module(device_type).synchronize()
+        self.assertEqual(hook_used_stream, custom_stream)
+
+    @skip_if_lt_x_gpu(1)
+    def test_custom_hsdp_all_reduce_hook(self):
+        world_pg = dist.distributed_c10d._get_default_group()
+        intra_pg = _init_intra_node_process_group(2)
+        inter_pg = _init_inter_node_process_group(world_pg, 2)
+        mesh = DeviceMesh.from_group(
+            intra_pg,
+            device_type.type,
+            dist.get_process_group_ranks(intra_pg),
+            mesh_dim_names=("shard",),
+        )
+        model = MLP(10, bias=False)
+        rank = dist.get_rank()
+        rank_group = rank // 2
+
+        # init the weights to be constant within each group
+        # this is just to simplify the test numeric check when we do bwd
+        torch.nn.init.constant_(model.in_proj.weight, 1.0 * rank_group)
+        torch.nn.init.constant_(model.out_proj.weight, 2.0 * rank_group)
+
+        model = fully_shard(model, mesh=mesh)
+
+        hook_called: bool = False
+
+        def _custom_hook(output: torch.Tensor) -> None:
+            nonlocal hook_called
+            dist.all_reduce(output, group=inter_pg, op=dist.ReduceOp.AVG)
+            hook_called = True
+
+        model.set_all_reduce_hook(_custom_hook)
+
+        inp = torch.arange(10, dtype=torch.float32, requires_grad=True).view(1, 10)
+        out = model(inp)
+        out.sum().backward()
+        torch.get_device_module(device_type).synchronize()
+        # custom hook was fired
+        self.assertTrue(hook_called)
+        # within each replica, FSDP shards the weights at dim 0
+        # so half of MLP weights with 2x2 setup
+        out_proj_local_grad = model.out_proj.weight.grad.to_local().cpu()
+        in_proj_local_grad = model.in_proj.weight.grad.to_local().cpu()
+
+        # grad is halved in custom bwd all reduce hook during avg
+        # as replica 0 weights are 0
+        self.assertEqual(
+            out_proj_local_grad,
+            torch.full((5, 40), 22.5, dtype=torch.float32, device="cpu"),
+        )
+        self.assertEqual(
+            in_proj_local_grad,
+            torch.arange(0, 100, 10, dtype=torch.float32, device="cpu").repeat(20, 1),
+        )
 
 
 class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
@@ -1029,17 +1231,20 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
         ref_model = copy.deepcopy(model)
         return model, ref_model
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_init_1d_transformer_shard_largest_dim(self):
         model, ref_model = self._init_models()
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             largest_dim = largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
                 if dim_size > largest_dim_size:
                     largest_dim = dim
                     largest_dim_size = dim_size
-            assert largest_dim >= 0, f"{param.shape}"
+            if not (largest_dim >= 0):
+                raise AssertionError(
+                    f"Expected largest_dim >= 0, but got {largest_dim} for shape {param.shape}"
+                )
             return Shard(largest_dim)
 
         for layer in model.layers:
@@ -1057,11 +1262,11 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
             full_param = param.full_tensor()
             self.assertEqual(full_param, ref_param)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_init_1d_transformer_shard_dim_neg1(self):
         model, ref_model = self._init_models()
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             # Check that FSDP will normalize this dim to non-negative
             return Shard(-1)
 
@@ -1073,22 +1278,25 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
             full_param = param.full_tensor()
             self.assertEqual(full_param, ref_param)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_init_2d_transformer_shard_diff_dim(self):
         model, ref_model = self._init_models()
 
         dp_size, tp_size = self.world_size // 2, 2
         global_mesh = init_device_mesh(
-            "cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+            device_type.type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
         )
         model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             if isinstance(param, DTensor):
                 for placement in param.placements:
                     if isinstance(placement, Shard):
                         shard_dim = param.ndim - 1 - placement.dim
-                        assert shard_dim >= 0, f"{param.shape}"
+                        if not (shard_dim >= 0):
+                            raise AssertionError(
+                                f"Expected shard_dim >= 0, but got {shard_dim} for shape {param.shape}"
+                            )
                         return Shard(shard_dim)
             return Shard(0)
 
@@ -1123,20 +1331,26 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
             full_param = param.full_tensor()
             self.assertEqual(full_param, ref_param)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_init_1d_uneven_shard_largest_dim(self):
         torch.manual_seed(42)
         model = nn.Sequential(nn.Linear(16, 17), nn.Linear(17, 8))
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             largest_dim = -1
             largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
                 if dim_size > largest_dim_size:
                     largest_dim = dim
                     largest_dim_size = dim_size
-            assert largest_dim >= 0, f"{param.shape}"
-            assert largest_dim < param.ndim, f"{largest_dim=} {param.shape}"
+            if not (largest_dim >= 0):
+                raise AssertionError(
+                    f"Expected largest_dim >= 0, but got {largest_dim} for shape {param.shape}"
+                )
+            if not (largest_dim < param.ndim):
+                raise AssertionError(
+                    f"Expected largest_dim < param.ndim, but got {largest_dim=} {param.shape}"
+                )
             return Shard(largest_dim)
 
         with self.assertRaisesRegex(
@@ -1144,11 +1358,10 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
         ):
             fully_shard(model, shard_placement_fn=shard_placement_fn)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_invalid_shard_dim(self):
         model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 8))
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             return Shard(1)
 
         # Shard(1) is invalid for 1D bias parameters
@@ -1165,11 +1378,7 @@ class TestFullyShardOldImport(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_old_import_training(self):
-        from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
-        from torch.distributed._composable.fsdp.fully_shard import FSDPModule
-
         model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16))
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
         fully_shard(model[0], mp_policy=mp_policy)
@@ -1180,8 +1389,135 @@ class TestFullyShardOldImport(FSDPTestMultiThread):
         self.assertIsInstance(model[1], FSDPModule)
         self.assertIsInstance(model, FSDPModule)
 
-        inp = torch.randn((8, 16), device="cuda")
+        inp = torch.randn((8, 16), device=device_type)
         model(inp).sum().backward()
+
+
+class TestFullyShardMixedDtypeParam(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_mixed_dtypes_no_grad_param(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # no grad params with different dtypes
+                self.w_fp8 = torch.nn.Parameter(
+                    torch.empty((256, 256), dtype=torch.float8_e4m3fn),
+                    requires_grad=False,
+                )
+                self.w_fp32 = torch.nn.Parameter(
+                    torch.empty((256, 256), dtype=torch.float32)
+                )
+
+            def forward(self, input):
+                return
+
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        model = Model()
+        fully_shard(model, mesh=mesh)
+        model(0)
+
+
+class TestFullyShardNonFloatParam(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_non_float_param(self):
+        """Non-float params (e.g. uint8, int64) are supported in all-gather,
+        excluded from reduce-scatter, and not cast by mp_policy.param_dtype."""
+        self.run_subtests(
+            {
+                "non_float_dtypes": [
+                    [torch.uint8],
+                    [torch.int64],
+                    [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64],
+                ],
+                "mp_policy": [
+                    MixedPrecisionPolicy(),
+                    MixedPrecisionPolicy(
+                        param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+                    ),
+                ],
+                "frozen_float": [False, True],
+            },
+            self._test_non_float_param,
+        )
+
+    def _test_non_float_param(
+        self,
+        non_float_dtypes: list,
+        mp_policy: MixedPrecisionPolicy,
+        frozen_float: bool,
+    ):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(16, 16)
+                if frozen_float:
+                    self.frozen_float = nn.Parameter(
+                        torch.randn(16), requires_grad=False
+                    )
+                for i, dtype in enumerate(non_float_dtypes):
+                    self.register_parameter(
+                        f"non_float_{i}",
+                        nn.Parameter(
+                            torch.randint(0, 127, (16,), dtype=dtype),
+                            requires_grad=False,
+                        ),
+                    )
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = Model()
+        fully_shard(model, mp_policy=mp_policy)
+        for p in model.parameters():
+            self.assertEqual(p.size(0) % self.world_size, 0)
+        ag_input_dtypes = set()
+        expected_ag_output_bytes = 0
+        for p in model.parameters():
+            if p.dtype.is_floating_point and mp_policy.param_dtype is not None:
+                ag_input_dtypes.add(mp_policy.param_dtype)
+                expected_ag_output_bytes += p.numel() * mp_policy.param_dtype.itemsize
+            else:
+                # Non-float params keep their original dtype; param_dtype
+                # only applies to floating-point params
+                ag_input_dtypes.add(p.dtype)
+                expected_ag_output_bytes += p.numel() * p.element_size()
+        expected_ag_dtype = (
+            next(iter(ag_input_dtypes)) if len(ag_input_dtypes) == 1 else torch.uint8
+        )
+        orig_ag = dist.all_gather_single
+
+        def assert_all_gather(*args, **kw):
+            output = kw.get("output", args[0] if len(args) > 0 else None)
+            input = kw.get("input_tensor", args[1] if len(args) > 1 else None)
+            self.assertEqual(input.dtype, expected_ag_dtype)
+            self.assertEqual(output.nbytes, expected_ag_output_bytes)
+            return orig_ag(*args, **kw)
+
+        expected_rs_input_numel = sum(
+            p.numel() for p in model.parameters() if p.requires_grad
+        )
+        orig_rs = dist.reduce_scatter_single
+
+        def assert_reduce_scatter(*args, **kw):
+            input = kw.get("input", args[1] if len(args) > 1 else None)
+            self.assertEqual(input.numel(), expected_rs_input_numel)
+            return orig_rs(*args, **kw)
+
+        x = torch.randn(4, 16, device=device_type)
+        with (
+            patch_all_gather(assert_all_gather),
+            patch_reduce_scatter(assert_reduce_scatter),
+        ):
+            loss = model(x).sum()
+            loss.backward()
 
 
 if __name__ == "__main__":

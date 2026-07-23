@@ -1,16 +1,21 @@
 from collections import namedtuple
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 from typing_extensions import NamedTuple
 
 import torch.return_types
-from torch.utils._pytree import PyTree, TreeSpec
+from torch.utils._pytree import PyTree, tree_flatten, TreeSpec
 
 
-FlattenFuncSpec = Callable[[PyTree, TreeSpec], list]
-FlattenFuncExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
+FlattenFnSpec = Callable[[PyTree, TreeSpec], list[Any]]
+FlattenFnExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
 
-SUPPORTED_NODES: dict[type[Any], FlattenFuncSpec] = {}
-SUPPORTED_NODES_EXACT_MATCH: dict[type[Any], Optional[FlattenFuncExactMatchSpec]] = {}
+# Keep deprecated alias for backward compatibility
+FlattenFuncSpec = FlattenFnSpec  # deprecated
+FlattenFuncExactMatchSpec = FlattenFnExactMatchSpec  # deprecated
+
+SUPPORTED_NODES: dict[type[Any], FlattenFnSpec] = {}
+SUPPORTED_NODES_EXACT_MATCH: dict[type[Any], FlattenFnExactMatchSpec | None] = {}
 
 _T = TypeVar("_T")
 _K = TypeVar("_K")
@@ -19,8 +24,8 @@ _V = TypeVar("_V")
 
 def register_pytree_flatten_spec(
     cls: type[Any],
-    flatten_fn_spec: FlattenFuncSpec,
-    flatten_fn_exact_match_spec: Optional[FlattenFuncExactMatchSpec] = None,
+    flatten_fn_spec: FlattenFnSpec,
+    flatten_fn_exact_match_spec: FlattenFnExactMatchSpec | None = None,
 ) -> None:
     SUPPORTED_NODES[cls] = flatten_fn_spec
     SUPPORTED_NODES_EXACT_MATCH[cls] = flatten_fn_exact_match_spec
@@ -36,30 +41,29 @@ def _deregister_pytree_flatten_spec(
 def tree_flatten_spec(
     pytree: PyTree,
     spec: TreeSpec,
-    exact_structural_match: bool = False,
 ) -> list[Any]:
     if spec.is_leaf():
         return [pytree]
-    if spec.type not in SUPPORTED_NODES:
+    # I guess these exist for BC, FC reasons.
+    # In general, we should be able to directly
+    # use pytree tree flattener to flatten them,
+    # as export serializes the pytree separately.
+    # Will remove it in follow up PR.
+    if spec.type in SUPPORTED_NODES:
+        flatten_fn_spec = SUPPORTED_NODES[spec.type]
+        child_pytrees = flatten_fn_spec(pytree, spec)
+        result: list[Any] = []
+        for child, child_spec in zip(child_pytrees, spec.children()):
+            flat = tree_flatten_spec(child, child_spec)
+            result += flat
+        return result
+    flat_result, real_spec = tree_flatten(pytree)
+    if spec != real_spec:
         raise RuntimeError(
-            f"{type(pytree)} does not have a flatten_fn_spec associated with it. Please register one with "
-            "torch.fx._pytree.register_pytree_flatten_spec.  If you have serialized your model, make "
-            "sure that any custom pytrees have been registered before loading it.",
+            f"Real spec {real_spec} of object {pytree} is different from expected spec {spec}. "
+            f"Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml"
         )
-    flatten_fn_spec = SUPPORTED_NODES[spec.type]
-    child_pytrees = flatten_fn_spec(pytree, spec)
-    if exact_structural_match:
-        flatten_fn_exact_match_spec = SUPPORTED_NODES_EXACT_MATCH[spec.type]
-        if flatten_fn_exact_match_spec and not flatten_fn_exact_match_spec(
-            pytree,
-            spec,
-        ):
-            raise RuntimeError(f"Cannot flatten pytree {pytree}, given spec: {spec}")
-    result = []
-    for child, child_spec in zip(child_pytrees, spec.children_specs):
-        flat = tree_flatten_spec(child, child_spec, exact_structural_match)
-        result += flat
-    return result
+    return flat_result
 
 
 def _dict_flatten_spec(d: dict[_K, _V], spec: TreeSpec) -> list[_V]:

@@ -2,7 +2,7 @@
 
 import unittest
 from collections import OrderedDict
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -10,7 +10,7 @@ from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, xfailIfS390X
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
@@ -19,36 +19,17 @@ from torch.testing._internal.torchbind_impls import (
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
+# prepacked linear requires XNNPACK support.
+requires_prepacked_linear = unittest.skipIf(
+    not hasattr(torch.ops.prepacked, "linear_clamp_prepack"),
+    "requires XNNPACK (prepacked linear ops)",
+)
+
 
 class TestConverter(TestCase):
     def setUp(self):
+        super().setUp()
         init_torchbind_implementations()
-
-        @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
-        class _FakeTensorQueue:
-            def __init__(self, queue):
-                self.queue = queue
-
-            @classmethod
-            def __obj_unflatten__(cls, flattened_ctx):
-                return cls(**dict(flattened_ctx))
-
-            def push(self, x):
-                self.queue.append(x)
-
-            def pop(self):
-                if self.is_empty():
-                    return torch.empty([])
-                return self.queue.pop(0)
-
-            def size(self):
-                return len(self.queue)
-
-            def is_empty(self):
-                return len(self.queue) == 0
-
-            def float_size(self):
-                return float(len(self.queue))
 
         self.torch_bind_ops = [
             torch.ops._TorchScriptTesting.queue_pop,
@@ -57,18 +38,16 @@ class TestConverter(TestCase):
         ]
 
     def tearDown(self):
-        torch._library.fake_class_registry.deregister_fake_class(
-            "_TorchScriptTesting::_TensorQueue"
-        )
+        return
 
     def _check_equal_ts_ep_converter(
         self,
         M,
         tracing_inputs,
-        option: Optional[list[str]] = None,
+        option: list[str] | None = None,
         check_persistent=False,
         lifted_tensor_constants=None,
-        runtime_inputs: Optional[list[Any]] = None,
+        runtime_inputs: list[Any] | None = None,
     ) -> list[ExportedProgram]:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
@@ -728,7 +707,7 @@ class TestConverter(TestCase):
                 else:
                     return self.w + self.m2(x)
 
-        # Super nested, parameters neeed to lifted
+        # Super nested, parameters need to be lifted
         # multiple times.
         class SuperNestedM(torch.nn.Module):
             def __init__(self) -> None:
@@ -783,7 +762,7 @@ class TestConverter(TestCase):
                 else:
                     return self.linear(self.m2(x))
 
-        # Super nested, parameters neeed to lifted
+        # Super nested, parameters need to be lifted
         # multiple times.
         class SuperNestedM1(torch.nn.Module):
             def __init__(self, dim: int) -> None:
@@ -799,7 +778,7 @@ class TestConverter(TestCase):
                     return self.linear(self.m2(x))
 
         # Super nested, even the input needs to be
-        # lifted recursively due to value propogation optimiztaion.
+        # lifted recursively due to value propagation optimization.
         class SuperNestedM2(torch.nn.Module):
             def __init__(self, dim: int) -> None:
                 super().__init__()
@@ -901,7 +880,7 @@ class TestConverter(TestCase):
 
         class MNotIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):
-                return x.dtype in [torch.int8]
+                return x.dtype == torch.int8
 
         class MTensorIn(torch.nn.Module):
             def forward(self, x: torch.Tensor, x_dict: dict[torch.Tensor, str]):
@@ -939,7 +918,7 @@ class TestConverter(TestCase):
                 return x + x
 
             # Meta function of the custom op.
-            @torch.library.impl_abstract(
+            @torch.library.register_fake(
                 "mylib::foo",
                 lib=lib,
             )
@@ -1394,12 +1373,12 @@ class TestConverter(TestCase):
                     x_list.append(x_list[k] + x_list[k + 1] - x_list[k + 2])
             return x, x_list
 
-        def func2(x):  # noqa: F841
+        def func2(x):
             for i in range(x.size(0)):
                 x = x * x * i
             return x
 
-        def func3(x):  # noqa: F841
+        def func3(x):
             while x.sum() < 10:
                 x += x.sin()
             return x
@@ -1431,7 +1410,9 @@ class TestConverter(TestCase):
         IS_WINDOWS,
         "Windows does not support qnnpack",
     )
-    def test_ts2ep_convert_quantized_model(self):
+    # qnnpack not supported on s390x
+    @xfailIfS390X
+    def test_ts2ep_convert_quantized_model1(self):
         class Standalone(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1474,6 +1455,13 @@ class TestConverter(TestCase):
             ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
             self._check_tensor_list_equal(orig_out, ep_out)
 
+    # qnnpack/xnnpack not supported on s390x.
+    # it is required by
+    # torch.ops.prepacked.linear_clamp_prepack
+    # and
+    # torch.ops.prepacked.linear_clamp_run
+    @xfailIfS390X
+    @requires_prepacked_linear
     def test_ts2ep_convert_quantized_model_with_opcontext(self):
         class M(torch.nn.Module):
             def __init__(self, linear_op):
@@ -1487,6 +1475,33 @@ class TestConverter(TestCase):
         linear_op = torch.ops.prepacked.linear_clamp_prepack(
             torch.randn(10, 10), torch.randn(10)
         )
+        m = M(linear_op)
+        inp = (torch.randn(1, 10),)
+        self._check_equal_ts_ep_converter(m, inp, ["script"])
+
+    # qnnpack/xnnpack not supported on s390x.
+    # it is required by
+    # torch.ops.prepacked.linear_clamp_prepack
+    # and
+    # torch.ops.prepacked.linear_clamp_run
+    @xfailIfS390X
+    @requires_prepacked_linear
+    def test_ts2ep_convert_quantized_model_with_opcontext_and_constant(self):
+        class M(torch.nn.Module):
+            def __init__(self, linear_op):
+                super().__init__()
+                self.linear_op = linear_op
+
+            def forward(self, x):
+                x = torch.ops.prepacked.linear_clamp_run(
+                    x + torch.ones(1), self.linear_op
+                )
+                return x
+
+        linear_op = torch.ops.prepacked.linear_clamp_prepack(
+            torch.randn(10, 10), torch.randn(10)
+        )
+
         m = M(linear_op)
         inp = (torch.randn(1, 10),)
         self._check_equal_ts_ep_converter(m, inp, ["script"])

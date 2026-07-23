@@ -7,12 +7,27 @@ AOTIModelContainerRunnerCuda::AOTIModelContainerRunnerCuda(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
-    const std::string& cubin_dir)
+    const std::string& cubin_dir,
+    const bool run_single_threaded)
     : AOTIModelContainerRunner(
           model_so_path,
           num_models,
           device_str,
-          cubin_dir) {}
+          cubin_dir,
+          run_single_threaded) {}
+
+AOTIModelContainerRunnerCuda::AOTIModelContainerRunnerCuda(
+    const std::string& model_so_path,
+    size_t num_models,
+    const std::string& device_str,
+    const std::string& cubin_dir,
+    std::unordered_map<std::string, at::Tensor>& constants)
+    : AOTIModelContainerRunner(
+          model_so_path,
+          num_models,
+          device_str,
+          cubin_dir,
+          constants) {}
 
 AOTIModelContainerRunnerCuda::~AOTIModelContainerRunnerCuda() = default;
 
@@ -37,9 +52,10 @@ std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_cuda(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
-    const std::string& cubin_dir) {
+    const std::string& cubin_dir,
+    const bool run_single_threaded) {
   return std::make_unique<AOTIModelContainerRunnerCuda>(
-      model_so_path, num_models, device_str, cubin_dir);
+      model_so_path, num_models, device_str, cubin_dir, run_single_threaded);
 }
 } // namespace
 

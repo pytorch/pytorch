@@ -96,8 +96,9 @@ struct TORCH_API LegacyEvent {
         return "pop";
       case EventKind::MemoryAlloc:
         return "memory_alloc";
+      default:
+        TORCH_CHECK(false, "unknown event kind");
     }
-    throw std::runtime_error("unknown event kind");
   }
 
   EventKind kind() const {
@@ -117,7 +118,7 @@ struct TORCH_API LegacyEvent {
   }
 
   double cpuElapsedUs(const LegacyEvent& e) const {
-    return static_cast<double>(e.cpu_ns_ - cpu_ns_) / (1000.0);
+    return static_cast<double>(e.cpu_ns_ - cpu_ns_) / 1000.0;
   }
 
   void setCpuUs(int64_t cpu_us) {
@@ -125,7 +126,7 @@ struct TORCH_API LegacyEvent {
   }
 
   double cpuUs() const {
-    return static_cast<double>(cpu_ns_) / (1000.0);
+    return static_cast<double>(cpu_ns_) / 1000.0;
   }
 
   double cudaElapsedUs(const LegacyEvent& e) const;
@@ -328,7 +329,7 @@ struct TORCH_API ProfilerDisableOptions {
 // NOTE: profiler mode is thread local, with automatic propagation
 // across thread boundary (e.g. at::launch tasks)
 TORCH_API void enableProfilerLegacy(
-    const torch::profiler::impl::ProfilerConfig&);
+    const torch::profiler::impl::ProfilerConfig& /*new_config*/);
 using thread_event_lists = std::vector<std::vector<LegacyEvent>>;
 TORCH_API thread_event_lists disableProfilerLegacy(
     std::optional<ProfilerDisableOptions> profilerDisableOptions =

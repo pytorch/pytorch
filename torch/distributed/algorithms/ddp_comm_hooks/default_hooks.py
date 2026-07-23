@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, cast
+from collections.abc import Callable
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -21,6 +22,7 @@ def _allreduce_fut(
     group_to_use = process_group if process_group is not None else dist.group.WORLD
 
     # Apply the division first to avoid overflow, especially for FP16.
+    # pyrefly: ignore [missing-attribute]
     tensor.div_(group_to_use.size())
 
     return (
@@ -58,6 +60,7 @@ def _compress_hook(
     bucket: dist.GradBucket,
 ) -> torch.futures.Future[torch.Tensor]:
     group_to_use = process_group if process_group is not None else dist.group.WORLD
+    # pyrefly: ignore [missing-attribute]
     world_size = group_to_use.size()
 
     buffer = (
@@ -77,7 +80,10 @@ def _compress_hook(
 
     if torch.compiler.is_compiling():
         grad = dist._functional_collectives.all_reduce(
-            compressed_tensor, "sum", group_to_use
+            compressed_tensor,
+            "sum",
+            # pyrefly: ignore [bad-argument-type]
+            group_to_use,
         )
         return decompress(grad)
     else:
@@ -129,7 +135,7 @@ def bf16_compress_hook(
 
 
 def fp16_compress_wrapper(
-    hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]
+    hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     """
     Cast input tensor to ``torch.float16``, cast result of hook back to input dtype.
@@ -167,13 +173,13 @@ def fp16_compress_wrapper(
 
 
 def bf16_compress_wrapper(
-    hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]
+    hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     """
     Warning: This API is experimental, and it requires NCCL version later than 2.9.6.
 
     This wrapper casts the input gradient tensor of a given DDP communication hook to half-precision
-    `Brain floating point format <https://en.wikipedia.org/wiki/Bfloat16_floating-point_format> `_  (``torch.bfloat16``),
+    `Brain floating point format <https://en.wikipedia.org/wiki/Bfloat16_floating-point_format>`_  (``torch.bfloat16``),
     and casts the resulting tensor of the given hook back to the input data type, such as ``float32``.
 
     Therefore, ``bf16_compress_hook`` is equivalent to ``bf16_compress_wrapper(allreduce_hook)``.

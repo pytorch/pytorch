@@ -56,6 +56,7 @@ def read_resource_file(resource_file: str) -> str:
 
 class ApiTest(unittest.TestCase):
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
         self.test_error_file = os.path.join(self.test_dir, "error.json")
 
@@ -122,6 +123,34 @@ class ApiTest(unittest.TestCase):
         self.assertEqual("SIGSEGV", pf.signal_name())
         self.assertEqual(
             f"Signal {signal.SIGSEGV} (SIGSEGV) received by PID {pf.pid}", pf.message
+        )
+
+    def test_format_msg_enriches_root_signal_failure(self):
+        # The root signal failure's rendered message is passed through the
+        # handler's enrichment seam at format time (no-op base; a build-swapped
+        # handler may append device-fault context). The seam works on the local
+        # rendered string, so the failure's stored message is not mutated.
+        with open(self.test_error_file, "w") as fp:
+            json.dump({"message": "Fatal signal received", "timestamp": 10}, fp)
+        handler = mock.MagicMock()
+        handler.maybe_enrich_signal_failure_message.side_effect = (
+            lambda message, error_file: message + "\n[device fault context]"
+        )
+        with mock.patch(
+            "torch.distributed.elastic.multiprocessing.errors.get_error_handler",
+            return_value=handler,
+        ):
+            pf = ProcessFailure(
+                local_rank=0,
+                pid=997,
+                exitcode=-signal.SIGABRT,
+                error_file=self.test_error_file,
+            )
+            rendered = str(ChildFailedError("trainer", {0: pf}))
+        self.assertIn("[device fault context]", rendered)
+        self.assertNotIn("[device fault context]", pf.message)
+        handler.maybe_enrich_signal_failure_message.assert_called_once_with(
+            mock.ANY, self.test_error_file
         )
 
     def test_process_failure_no_error_file(self):
@@ -225,9 +254,11 @@ class ApiTest(unittest.TestCase):
                 raise_child_failure_error_fn("trainer", trainer_error_file)
             pf = cm.exception.get_first_failure()[1]
             # compare worker error file with reply file and overridden error code
-            expect = json.load(open(pf.error_file))
+            with open(pf.error_file) as f:
+                expect = json.load(f)
             expect["message"]["errorCode"] = pf.exitcode
-            actual = json.load(open(self.test_error_file))
+            with open(self.test_error_file) as f:
+                actual = json.load(f)
             self.assertTrue(
                 json.dumps(expect, sort_keys=True),
                 json.dumps(actual, sort_keys=True),
@@ -245,3 +276,10 @@ class ApiTest(unittest.TestCase):
             # it SHOULD re-raise ChildFailedError for any upstream system
             # to handle it.
             self.assertFalse(os.path.isfile(self.test_error_file))
+
+    def test_child_failed_error_signal_name_in_message(self):
+        pf = self.failure_without_error_file(exitcode=-signal.SIGSEGV)
+        ex = ChildFailedError("trainer.par", {0: pf})
+        error_msg = str(ex)
+        self.assertIn("(SIGSEGV)", error_msg)
+        self.assertIn(f"exitcode  : {-signal.SIGSEGV}", error_msg)

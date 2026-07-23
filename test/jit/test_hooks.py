@@ -33,15 +33,8 @@ from jit.test_hooks_modules import (
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 # Tests for JIT forward hooks and pre-hooks
@@ -119,8 +112,8 @@ class TestHooks(JitTestCase):
         m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
         def foo(self, input: Tuple[str]) -> Tuple[str]:
-            assert self.name == "inner_mod_name"
-            assert input[0] == "a_outermod"
+            assert self.name == "inner_mod_name"  # noqa: S101
+            assert input[0] == "a_outermod"  # noqa: S101
             return ("pre_hook_override_name",)
 
         m.submodule.register_forward_pre_hook(foo)
@@ -181,8 +174,8 @@ class TestHooks(JitTestCase):
             return ("pre_hook_override_name",)
 
         def forward_hook(self, input: Tuple[str], output: str):
-            assert self.name == "outer_mod_name"
-            assert input == ("pre_hook_override_name",)
+            assert self.name == "outer_mod_name"  # noqa: S101
+            assert input == ("pre_hook_override_name",)  # noqa: S101
             output = output + "_fh"
             return output
 
@@ -204,7 +197,7 @@ class TestHooks(JitTestCase):
             return ("pre_hook_override_name",)
 
         def forward_hook(self, input: Tuple[str], output: str):
-            assert input == ("pre_hook_override_name",)
+            assert input == ("pre_hook_override_name",)  # noqa: S101
             return output + "_fh"
 
         m_submod_forward_call.submodule.register_forward_pre_hook(pre_hook)
@@ -230,8 +223,8 @@ class TestHooks(JitTestCase):
         m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
         def pre_hook(self, input: Tuple[str]) -> Tuple[str]:
-            assert self.name == "outer_mod_name"
-            assert input[4] == "a"  # out of bounds tuple range
+            assert self.name == "outer_mod_name"  # noqa: S101
+            assert input[4] == "a"  # noqa: S101 out of bounds tuple range
             return ("pre_hook_override_name",)
 
         m.register_forward_pre_hook(pre_hook)
@@ -393,3 +386,7 @@ class TestHooks(JitTestCase):
             r"Received type: 'str'. Expected type: 'Tuple\[str\]'",
         ):
             torch.jit.script(m)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

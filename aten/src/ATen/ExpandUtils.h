@@ -9,6 +9,7 @@
 
 #include <ATen/Tensor.h>
 #include <ATen/core/DimVector.h>
+#include <c10/core/SymBool.h>
 #include <c10/util/Exception.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/irange.h>
@@ -99,7 +100,18 @@ inline void check_defined(
 inline c10::MaybeOwned<Tensor> expand_inplace(
     const Tensor& tensor,
     const Tensor& to_expand) {
-  if (tensor.sym_sizes().equals(to_expand.sym_sizes())) {
+  auto t_sizes = tensor.sym_sizes();
+  auto e_sizes = to_expand.sym_sizes();
+  bool same = t_sizes.size() == e_sizes.size();
+  if (same) {
+    for (size_t i = 0; i < t_sizes.size(); ++i) {
+      if (!TORCH_GUARD_OR_FALSE(sym_eq(t_sizes[i], e_sizes[i]))) {
+        same = false;
+        break;
+      }
+    }
+  }
+  if (same) {
     return c10::MaybeOwned<Tensor>::borrowed(to_expand);
   }
   return c10::MaybeOwned<Tensor>::owned(
@@ -461,9 +473,17 @@ inline Tensor _sum_to(
     reduce_dims.push_back(i);
   }
   for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(shape[i - leading_dims], 1)) &&
-        TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(sizes[i], 1))) {
+    if (TORCH_GUARD_OR_FALSE(sym_eq(shape[i - leading_dims], 1)) &&
+        TORCH_GUARD_OR_TRUE(sym_ne(sizes[i], 1))) {
       reduce_dims.push_back(i);
+    } else {
+      // if we assume no reduction due to unbacked we ensure that at runtime.
+      TORCH_MAYBE_SYM_CHECK(
+          sym_eq(shape[i - leading_dims], sizes[i]),
+          "non-reduction path was assumed due to unbacked symbols expected those two sizes to be the same:",
+          shape[i - leading_dims],
+          ", ",
+          sizes[i])
     }
   }
 

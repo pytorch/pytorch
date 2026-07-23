@@ -1,6 +1,6 @@
 /**
  * This file is adapted from PyTorch/XLA
- * https://github.com/pytorch/xla/blob/master/third_party/xla_client/metrics.h
+ * https://github.com/pytorch/xla/blob/e0e5f937a0ba8d904f9608137dc8c51ba439df2d/third_party/xla_client/metrics.h
  */
 
 #pragma once
@@ -232,7 +232,7 @@ TORCH_API std::string CreateMetricReport(
     const std::vector<std::string>& metric_names);
 
 // Returns the currently registered metric names. Note that the list can grow
-// since metrics are usually function intialized (they are static function
+// since metrics are usually function initialized (they are static function
 // variables).
 TORCH_API std::vector<std::string> GetMetricNames();
 
@@ -241,7 +241,7 @@ TORCH_API std::vector<std::string> GetMetricNames();
 TORCH_API MetricData* GetMetric(const std::string& name);
 
 // Returns the currently registered counter names. Note that the list can grow
-// since counters are usually function intialized (they are static function
+// since counters are usually function initialized (they are static function
 // variables).
 TORCH_API std::vector<std::string> GetCounterNames();
 

@@ -17,7 +17,7 @@ from torch._inductor.autoheuristic.learnedheuristic_interface import (
 class MixedMMA100(LearnedHeuristicDecision):
 
     def __init__(self) -> None:
-        self.choices: List[Choice] = []
+        self.choices: list[Choice] = []
         self.fill_choices()
 
     def check_precondition(self, metadata: AHMetadata, context: AHContext,) -> bool:
@@ -30,7 +30,7 @@ class MixedMMA100(LearnedHeuristicDecision):
     def get_confidence_threshold(self) -> float:
         return 0.0
 
-    def get_choice(self, idx: int) -> Optional[str]:
+    def get_choice(self, idx: int) -> str | None:
         if idx < len(self.choices):
             return self.choices[idx]
         return None
@@ -62,7 +62,7 @@ class MixedMMA100(LearnedHeuristicDecision):
     def get_name(self) -> str:
         return 'mixed_mm'
 
-    def get_best_choices(self, context: AHContext) -> Optional[List[tuple[float, int]]]:
+    def get_best_choices(self, context: AHContext) -> list[tuple[float, int]] | None:
         if str(context.get_value('1LEQmLEQ16')) != 'True':
             if context.get_value('m') <= 32.5:
                 if context.get_value('n') <= 6976.0:

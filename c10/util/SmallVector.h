@@ -22,7 +22,6 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <c10/util/AlignOf.h>
 
 #include <algorithm>
 #include <cassert>
@@ -74,10 +73,10 @@ class C10_API SmallVectorBase {
 
  public:
   SmallVectorBase() = delete;
-  size_t size() const {
+  [[nodiscard]] size_t size() const {
     return Size;
   }
-  size_t capacity() const {
+  [[nodiscard]] size_t capacity() const {
     return Capacity;
   }
 
@@ -215,7 +214,7 @@ class SmallVectorTemplateCommon
       class ItTy,
       std::enable_if_t<!std::is_same_v<std::remove_const_t<ItTy>, T*>, bool> =
           false>
-  void assertSafeToReferenceAfterClear(ItTy, ItTy) {}
+  void assertSafeToReferenceAfterClear(ItTy /*unused*/, ItTy /*unused*/) {}
 
   /// Check whether any part of the range will be invalidated by growing.
   void assertSafeToAddRange(const T* From, const T* To) {
@@ -228,7 +227,7 @@ class SmallVectorTemplateCommon
       class ItTy,
       std::enable_if_t<!std::is_same_v<std::remove_const_t<ItTy>, T*>, bool> =
           false>
-  void assertSafeToAddRange(ItTy, ItTy) {}
+  void assertSafeToAddRange(ItTy /*unused*/, ItTy /*unused*/) {}
 
   /// Reserve enough space to add one element, and return the updated element
   /// pointer in case it was a reference to the storage.
@@ -273,85 +272,85 @@ class SmallVectorTemplateCommon
   using Base::size;
 
   // forward iterator creation methods.
-  iterator begin() {
+  [[nodiscard]] iterator begin() {
     return (iterator)this->BeginX;
   }
-  const_iterator begin() const {
+  [[nodiscard]] const_iterator begin() const {
     return (const_iterator)this->BeginX;
   }
-  iterator end() {
+  [[nodiscard]] iterator end() {
     return begin() + size();
   }
-  const_iterator end() const {
+  [[nodiscard]] const_iterator end() const {
     return begin() + size();
   }
 
   // reverse iterator creation methods.
-  reverse_iterator rbegin() {
+  [[nodiscard]] reverse_iterator rbegin() {
     return reverse_iterator(end());
   }
-  const_reverse_iterator rbegin() const {
+  [[nodiscard]] const_reverse_iterator rbegin() const {
     return const_reverse_iterator(end());
   }
-  reverse_iterator rend() {
+  [[nodiscard]] reverse_iterator rend() {
     return reverse_iterator(begin());
   }
-  const_reverse_iterator rend() const {
+  [[nodiscard]] const_reverse_iterator rend() const {
     return const_reverse_iterator(begin());
   }
 
-  size_type size_in_bytes() const {
+  [[nodiscard]] size_type size_in_bytes() const {
     return size() * sizeof(T);
   }
-  constexpr size_type max_size() const {
+  [[nodiscard]] constexpr size_type max_size() const {
     return std::min(this->SizeTypeMax(), size_type(-1) / sizeof(T));
   }
 
-  size_t capacity_in_bytes() const {
+  [[nodiscard]] size_t capacity_in_bytes() const {
     return capacity() * sizeof(T);
   }
 
   /// Return a pointer to the vector's buffer, even if empty().
-  pointer data() {
+  [[nodiscard]] pointer data() {
     return pointer(begin());
   }
   /// Return a pointer to the vector's buffer, even if empty().
-  const_pointer data() const {
+  [[nodiscard]] const_pointer data() const {
     return const_pointer(begin());
   }
 
   // SmallVector::at is NOT from LLVM.
-  reference at(size_type idx) {
+  [[nodiscard]] reference at(size_type idx) {
     assert(idx < size());
     return begin()[idx];
   }
-  const_reference at(size_type idx) const {
+  [[nodiscard]] const_reference at(size_type idx) const {
     assert(idx < size());
     return begin()[idx];
   }
-  reference operator[](size_type idx) {
+  [[nodiscard]] reference operator[](size_type idx) {
     assert(idx < size());
     return begin()[idx];
   }
-  const_reference operator[](size_type idx) const {
+  [[nodiscard]] const_reference operator[](size_type idx) const {
     assert(idx < size());
     return begin()[idx];
   }
 
-  reference front() {
+  [[nodiscard]] reference front() {
     assert(!empty());
     return begin()[0];
   }
-  const_reference front() const {
+  [[nodiscard]] const_reference front() const {
     assert(!empty());
     return begin()[0];
   }
 
-  reference back() {
+  [[nodiscard]] reference back() {
     assert(!empty());
     return end()[-1];
   }
-  const_reference back() const {
+  [[nodiscard]] const_reference back() const {
     assert(!empty());
     return end()[-1];
   }
@@ -370,9 +369,9 @@ class SmallVectorTemplateCommon
 /// note
 template <
     typename T,
-    bool = (std::is_trivially_copy_constructible_v<T>)&&(
-        std::is_trivially_move_constructible_v<
-            T>)&&std::is_trivially_destructible_v<T>>
+    bool = (std::is_trivially_copy_constructible_v<T>) &&
+        (std::is_trivially_move_constructible_v<T>) &&
+        std::is_trivially_destructible_v<T>>
 class SmallVectorTemplateBase : public SmallVectorTemplateCommon<T> {
   friend class SmallVectorTemplateCommon<T>;
 
@@ -538,7 +537,7 @@ class SmallVectorTemplateBase<T, true> : public SmallVectorTemplateCommon<T> {
   SmallVectorTemplateBase(size_t Size) : SmallVectorTemplateCommon<T>(Size) {}
 
   // No need to do a destroy loop for POD's.
-  static void destroy_range(T*, T*) {}
+  static void destroy_range(T* /*unused*/, T* /*unused*/) {}
 
   /// Move the range [I, E) onto the uninitialized memory
   /// starting with "Dest", constructing elements into it as needed.
@@ -563,8 +562,8 @@ class SmallVectorTemplateBase<T, true> : public SmallVectorTemplateCommon<T> {
       T1* I,
       T1* E,
       T2* Dest,
-      std::enable_if_t<std::is_same_v<std::remove_const_t<T1>, T2>>* =
-          nullptr) {
+      std::enable_if_t<std::is_same_v<std::remove_const_t<T1>, T2>>* /*unused*/
+      = nullptr) {
     // Use memcpy for PODs iterated by pointers (which includes SmallVector
     // iterators): std::uninitialized_copy optimizes to memmove, but we can
     // use memcpy here. Note that I and E are iterators and thus might be
@@ -795,7 +794,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
     std::move(I + 1, this->end(), I);
     // Drop the last elt.
     this->pop_back();
-    return (N);
+    return N;
   }
 
   iterator erase(iterator S, iterator E) {
@@ -807,7 +806,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
     // Drop the last elts.
     this->destroy_range(I, this->end());
     this->set_size(I - this->begin());
-    return (N);
+    return N;
   }
 
  private:
@@ -815,8 +814,8 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
   iterator insert_one_impl(iterator I, ArgType&& Elt) {
     // Callers ensure that ArgType is derived from T.
     static_assert(
-        std::is_same<std::remove_const_t<std::remove_reference_t<ArgType>>, T>::
-            value,
+        std::
+            is_same_v<std::remove_const_t<std::remove_reference_t<ArgType>>, T>,
         "ArgType must be derived from T!");
 
     if (I == this->end()) { // Important special case for empty vector.
@@ -1011,16 +1010,16 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
       std::is_nothrow_move_constructible_v<T> &&
       std::is_nothrow_destructible_v<T>);
 
-  bool operator==(const SmallVectorImpl& RHS) const {
+  [[nodiscard]] bool operator==(const SmallVectorImpl& RHS) const {
     if (this->size() != RHS.size())
       return false;
     return std::equal(this->begin(), this->end(), RHS.begin());
   }
-  bool operator!=(const SmallVectorImpl& RHS) const {
+  [[nodiscard]] bool operator!=(const SmallVectorImpl& RHS) const {
     return !(*this == RHS);
   }
 
-  bool operator<(const SmallVectorImpl& RHS) const {
+  [[nodiscard]] bool operator<(const SmallVectorImpl& RHS) const {
     return std::lexicographical_compare(
         this->begin(), this->end(), RHS.begin(), RHS.end());
   }
@@ -1405,20 +1404,20 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
 };
 
 template <typename T, unsigned N>
-inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
+[[nodiscard]] inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
   return X.capacity_in_bytes();
 }
 
 template <typename T, unsigned N>
 std::ostream& operator<<(std::ostream& out, const SmallVector<T, N>& list) {
   int i = 0;
-  out << "[";
+  out << '[';
   for (auto e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;
   }
-  out << "]";
+  out << ']';
   return out;
 }
 
@@ -1431,11 +1430,12 @@ using ValueTypeFromRangeType = std::remove_const_t<
 /// when you want to iterate a range and then sort the results.
 template <unsigned Size, typename R>
 // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-SmallVector<ValueTypeFromRangeType<R>, Size> to_vector(R&& Range) {
+[[nodiscard]] SmallVector<ValueTypeFromRangeType<R>, Size> to_vector(
+    R&& Range) {
   return {std::begin(Range), std::end(Range)};
 }
 template <typename R>
-SmallVector<
+[[nodiscard]] SmallVector<
     ValueTypeFromRangeType<R>,
     CalculateSmallVectorDefaultInlinedElements<
         ValueTypeFromRangeType<R>>::value>

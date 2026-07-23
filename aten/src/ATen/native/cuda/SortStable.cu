@@ -21,9 +21,15 @@ namespace {
 struct offset_t {
   int stride;
   int begin;
-  __device__ int operator[](int i) {
+  __host__ __device__ int operator[](int i) const {
     return stride * (begin + i);
   }
+#if CCCL_VERSION >= 3001000
+  __host__ __device__ offset_t& operator+=(int i) {
+    begin += i;
+    return *this;
+  }
+#endif
 };
 // Segmented sort by full sort algorithm:.
 // Say we are sorting a (2, 3) tensor. We have in flattened form:
@@ -118,7 +124,7 @@ inline void segmented_sort_large_segments(
       indices.get(), nsort, nsort_divider);
   const int64_t* initial_indices = indices.get();
 
-  for (auto i : c10::irange(nsegments)) {
+  for ([[maybe_unused]] auto i : c10::irange(nsegments)) {
     at::cuda::cub::radix_sort_pairs<scalar_t, int64_t>(
         self_ptr, values_ptr, initial_indices, indices_ptr, nsort, descending);
     indices_ptr += nsort;
@@ -225,8 +231,9 @@ void launch_stable_sort_kernel(
     return;
   }
 
-  int64_t numel_or_intmax =
-      std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
+  const int64_t intmax = static_cast<int64_t>(std::numeric_limits<int>::max());
+  // On ROCm, std::min -> ::min did not work as expected on when input values >= 2147483648
+  int64_t numel_or_intmax = numel < intmax ? numel : intmax;
   int64_t nsort = self.size(dim);
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
   TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
@@ -238,7 +245,8 @@ void launch_stable_sort_kernel(
         scalar_t* values_ptr = values.mutable_data_ptr<scalar_t>();
         int64_t remaining = numel;
         while (remaining > 0) {
-          int64_t n = std::min(remaining, nbatch);
+          // On ROCm, std::min -> ::min did not work as expected on when input values >= 2147483648
+          int64_t n = remaining < nbatch ? remaining : nbatch;
           int64_t nsegments = n / nsort;
 
           if (nsegments == 1 ||

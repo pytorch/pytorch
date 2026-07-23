@@ -14,7 +14,7 @@ inline int64_t divup(int64_t x, int64_t y) {
 TORCH_API void init_num_threads();
 
 // Sets the number of threads to be used in parallel region
-TORCH_API void set_num_threads(int);
+TORCH_API void set_num_threads(int /*nthreads*/);
 
 // Returns the maximum number of threads that may be used in a parallel region
 TORCH_API int get_num_threads();
@@ -37,7 +37,7 @@ inline void lazy_init_num_threads() {
   }
 }
 
-TORCH_API void set_thread_num(int);
+TORCH_API void set_thread_num(int /*id*/);
 
 class TORCH_API ThreadIdGuard {
  public:
@@ -93,12 +93,12 @@ ident: identity for binary combination function sf. sf(ident, x) needs to return
 x.
 
 f: function for reduction over a chunk. f needs to be of signature scalar_t
-f(int64_t partial_begin, int64_t partial_end, scalar_t identifiy)
+f(int64_t partial_begin, int64_t partial_end, scalar_t identify)
 
 sf: function to combine two partial results. sf needs to be of signature
 scalar_t sf(scalar_t x, scalar_t y)
 
-For example, you might have a tensor of 10000 entires and want to sum together
+For example, you might have a tensor of 10000 entries and want to sum together
 all the elements. Parallel_reduce with a grain_size of 2500 will then allocate
 an intermediate result tensor with 4 elements. Then it will execute the function
 "f" you provide and pass the beginning and end index of these chunks, so
@@ -130,7 +130,7 @@ inline scalar_t parallel_reduce(
 TORCH_API std::string get_parallel_info();
 
 // Sets number of threads used for inter-op parallelism
-TORCH_API void set_num_interop_threads(int);
+TORCH_API void set_num_interop_threads(int /*nthreads*/);
 
 // Returns the number of threads used for inter-op parallelism
 TORCH_API size_t get_num_interop_threads();

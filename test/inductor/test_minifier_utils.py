@@ -1,14 +1,39 @@
 # Owner(s): ["module: inductor"]
+from unittest.mock import patch
+
 import torch
+from torch._dynamo.debug_utils import NNModuleToString
+from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.repro.aoti import (
     AOTIMinifierError,
     export_for_aoti_minifier,
     get_module_string,
 )
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class MinifierUtilsTests(TestCase):
+    def test_invalid_output_user_error_classification(self):
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        with patch(
+            "torch.export.export",
+            side_effect=UserError(
+                UserErrorType.INVALID_OUTPUT,
+                "mocked invalid output user error",
+            ),
+        ):
+            gm = export_for_aoti_minifier(
+                SimpleModel(),
+                (torch.randn(2, 2),),
+                strict=True,
+                skip_export_error=False,
+            )
+            self.assertTrue(gm is None)
+
     def test_invalid_output(self):
         class SimpleModel(torch.nn.Module):
             def __init__(self):
@@ -63,19 +88,40 @@ class MinifierUtilsTests(TestCase):
         )
 
         model = M()
-        gm = torch.export.export(model, inputs, strict=False).module()
+        gm = torch.export.export(model, inputs, strict=False).module(check_guards=False)
 
-        # TODO: make NNModuleToString.convert() generate string for nested submodules.
         model_string = get_module_string(gm)
         self.assertExpectedInline(
             model_string.strip(),
             """\
 # from torch.nn import *
+# class true_graph_0_0(torch.nn.Module):
+#     def __init__(self) -> None:
+#         super().__init__()
+
+
+
+#     def forward(self, x):
+#         clone = torch.ops.aten.clone.default(x);  x = None
+#         return (clone,)
+
+
+# class false_graph_0_1(torch.nn.Module):
+#     def __init__(self) -> None:
+#         super().__init__()
+
+
+
+#     def forward(self, x):
+#         clone = torch.ops.aten.clone.default(x);  x = None
+#         return (clone,)
+
+
 # class Repro(torch.nn.Module):
 #     def __init__(self) -> None:
 #         super().__init__()
-#         self.true_graph_0 = <lambda>()
-#         self.false_graph_0 = <lambda>()
+#         self.true_graph_0 = true_graph_0_0()
+#         self.false_graph_0 = false_graph_0_1()
 
 
 
@@ -85,10 +131,36 @@ class MinifierUtilsTests(TestCase):
 #         gt = item > 0;  item = None
 #         true_graph_0 = self.true_graph_0
 #         false_graph_0 = self.false_graph_0
-#         cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x]);  gt = true_graph_0 = false_graph_0 = x = None
+#         cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x,));  gt = true_graph_0 = false_graph_0 = x = None
 #         getitem = cond[0];  cond = None
 #         return pytree.tree_unflatten((getitem,), self._out_spec)""",
         )
+
+    def test_cond_subgraph_roundtrips(self):
+        # torch.cond attaches its branches as nested GraphModule submodules.
+        # NNModuleToString.convert must serialize them as real nested classes
+        # that reconstruct -- not the invalid, body-less `<lambda>()` placeholder.
+        def fn(pred, x):
+            return torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
+
+        pred = torch.tensor(False)
+        x = torch.randn(4)
+        gm = make_fx(fn, tracing_mode="real")(pred, x)
+
+        result = NNModuleToString.convert(gm)
+
+        # The branch bodies must be present, with no invalid placeholder.
+        self.assertIn("sin", result)
+        self.assertIn("cos", result)
+        self.assertNotIn("<lambda>", result)
+
+        # The generated source must reconstruct a module whose forward matches
+        # the original graph for both branches.
+        ns = {"torch": torch}
+        exec(result, ns)
+        repro = ns["Repro"]()
+        self.assertEqual(repro(torch.tensor(False), x), gm(torch.tensor(False), x))
+        self.assertEqual(repro(torch.tensor(True), x), gm(torch.tensor(True), x))
 
 
 if __name__ == "__main__":

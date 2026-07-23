@@ -397,9 +397,14 @@ struct Token {
   int kind;
   SourceRange range;
   Token(int kind, SourceRange range) : kind(kind), range(std::move(range)) {}
-  std::string text() {
+  std::string text() const {
     return std::string(range.token_text());
   }
+
+  std::string_view text_view() const {
+    return range.token_text();
+  }
+
   std::string kindString() const {
     return kindToString(kind);
   }
@@ -407,11 +412,7 @@ struct Token {
 
 struct Lexer {
   explicit Lexer(std::shared_ptr<Source> source)
-      : source(std::move(source)),
-
-        indent_stack(),
-        next_tokens(),
-        shared(sharedParserData()) {
+      : source(std::move(source)), shared(sharedParserData()) {
     auto first_indent = lexRaw(true);
     indent_stack.push_back(first_indent.range.size());
     lex();
@@ -442,14 +443,14 @@ struct Lexer {
     std::stringstream ss;
     ss << what << ":\n";
     t.range.highlight(ss);
-    throw std::runtime_error(ss.str());
+    throw std::runtime_error(std::move(ss).str());
   }
   [[noreturn]] void expected(const std::string& what, const Token& t) {
     std::stringstream ss;
     ss << "expected " << what << " but found '" << t.kindString()
        << "' here:\n";
     t.range.highlight(ss);
-    throw std::runtime_error(ss.str());
+    throw std::runtime_error(std::move(ss).str());
   }
   [[noreturn]] void expected(const std::string& what) {
     expected(what, cur());

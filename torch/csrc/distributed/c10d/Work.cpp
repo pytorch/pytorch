@@ -1,10 +1,38 @@
 #include <ATen/ThreadLocalState.h>
 #include <distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/cuda/StreamBlock.hpp>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <utility>
 
 namespace c10d {
+
+namespace {
+// Raw pointer avoids thread_local destructor issues in forked
+// processes and dynamically-loaded libraries.
+thread_local std::string* comm_profiling_name = nullptr;
+static_assert(
+    std::is_trivially_destructible_v<decltype(comm_profiling_name)>,
+    "comm_profiling_name must be trivially destructible — a non-trivial "
+    "destructor (e.g. std::string) causes deadlocks after fork() in "
+    "dlopen'd libraries via __cxa_thread_atexit.");
+} // namespace
+
+void set_comm_profiling_name(const std::string& name) {
+  if (!comm_profiling_name) {
+    comm_profiling_name = new std::string(name);
+  } else {
+    *comm_profiling_name = name;
+  }
+}
+
+const std::string& get_comm_profiling_name() {
+  if (comm_profiling_name) {
+    return *comm_profiling_name;
+  }
+  static const std::string empty;
+  return empty;
+}
 
 Work::Work(
     int rank,
@@ -12,7 +40,11 @@ Work::Work(
     const char* profilingTitle,
     const std::optional<std::vector<at::Tensor>>& inputTensors)
     : rank_(rank), opType_(opType) {
-  if (profilingTitle != nullptr) {
+  // comm_profiling_name is thread-local; take a local copy so the
+  // RecordFunction owns the string (the TLS can be mutated after we return).
+  const bool use_tls_name =
+      comm_profiling_name != nullptr && !comm_profiling_name->empty();
+  if (use_tls_name || profilingTitle != nullptr) {
     auto recordingFunction =
         std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
     if (recordingFunction->isActive()) {
@@ -28,9 +60,17 @@ Work::Work(
           inputs.emplace_back(tensor);
         }
       }
-      recordingFunction->before(
-          profilingTitle,
-          c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+      if (use_tls_name) {
+        recordingFunction->before(
+            std::string(*comm_profiling_name),
+            c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+      } else {
+        // const char* overload — pointer is a string literal with static
+        // lifetime
+        recordingFunction->before(
+            profilingTitle,
+            c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+      }
       std::function<void()> end_handler = [recordingFunction]() {
         recordingFunction->end();
       };
@@ -98,6 +138,15 @@ bool Work::wait(std::chrono::milliseconds timeout) {
   synchronize();
   // Always return true, because abort API is not implemented.
   return true;
+}
+
+void Work::blockCurrentStream() {
+  // block cuda stream indefinitely until work is completed.
+  std::shared_ptr<c10d::cuda::StreamBlock> handle =
+      c10d::cuda::block_stream(std::chrono::milliseconds(0));
+
+  getFuture()->addCallback(
+      [handle](c10::ivalue::Future& future) { handle->abort(); });
 }
 
 void Work::abort() {

@@ -1,8 +1,29 @@
-# This module contains functions that *will be allowed* by dynamo
+"""
+This module contains utility functions that are explicitly allowed to be called during
+TorchDynamo compilation. These functions are carefully vetted to ensure they work
+correctly within the TorchDynamo tracing and compilation process.
+
+Key functionality groups:
+
+- Compilation State:
+  Functions for checking compilation state (is_compiling)
+
+- Function Wrapping:
+  Utilities for wrapping functions (wrap_inline, wrap_numpy) to work with
+  TorchDynamo compilation
+
+- Autograd Hooks:
+  Functions and classes for handling autograd hooks and backward passes
+  (call_hook, FakeBackwardCFunction, etc.)
+
+- Tensor Operations:
+  Utility functions for tensor operations and transformations
+"""
 
 import functools
 import warnings
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -51,7 +72,7 @@ def wrap_inline(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
 
 def call_hook(
-    hook: Callable[..., Optional[torch.Tensor]], *args: Any, **kwargs: Any
+    hook: Callable[..., torch.Tensor | None], *args: Any, **kwargs: Any
 ) -> torch.Tensor:
     """
     Used by compiled autograd to handle hook returning None.
@@ -77,6 +98,7 @@ def wrap_numpy(f: Callable[_P, _R]) -> Callable[_P, _R]:
             torch.Tensor, lambda x: x.numpy(), (args, kwargs)
         )
         out = f(*args, **kwargs)
+        # pyrefly: ignore [missing-attribute]
         return pytree.tree_map_only(np.ndarray, lambda x: torch.as_tensor(x), out)
 
     return wrap
@@ -106,7 +128,7 @@ def call_backward(
     backward_c_function: torch.autograd.function.BackwardCFunction,
     saved_tensors: list[torch.Tensor],
     *args: Any,
-) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
+) -> torch.Tensor | tuple[torch.Tensor, ...]:
     fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
     grads = fake._forward_cls.backward(fake, *args)  # type: ignore[attr-defined]
 
@@ -165,3 +187,110 @@ def call_module_hooks_from_backward_state(
         if new_result is not None:
             result = new_result
     return result
+
+
+# used for torch._dynamo.disable(recursive=False)
+def get_nonrecursive_disable_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    # wrap function to get the right error message
+    # this function is in external_utils so that convert_frame doesn't skip it.
+    @functools.wraps(fn)
+    def nonrecursive_disable_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if torch.compiler.is_exporting():
+            raise RuntimeError(
+                "Non-recursive torch.compiler.disable is not supported with torch.export."
+            )
+        return fn(*args, **kwargs)
+
+    return nonrecursive_disable_wrapper
+
+
+def wrap_dunder_call_ctx_manager(self: Any, func: Callable[_P, _R]) -> Callable[_P, _R]:
+    """
+    Apply self as a ctx manager around a call to func
+    """
+
+    # NOTE: do not functools.wraps(func) because we don't ever want this frame to be skipped!
+    def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with self:
+            return func(*args, **kwargs)
+
+    return inner
+
+
+# Use only on ints marked dynamic via torch.empty(0, integer)
+# Currently only way to mark ints as dynamic: https://github.com/pytorch/pytorch/issues/129623
+def unwrap_maybe_dynamic_int(x: torch.Tensor | int) -> int:
+    if isinstance(x, torch.Tensor):
+        # x.size() is expected to be [0, dynamic_int]
+        return x.size(1)
+    return x
+
+
+def call_accumulate_grad(
+    variable: torch.Tensor,
+    variable_grad: torch.Tensor | None,
+    grad: torch.Tensor | bool,
+    has_post_hooks: bool | None = None,
+) -> torch.Tensor | None:
+    if has_post_hooks is None:
+        # Backward compatibility for graphs captured before current grad became
+        # an explicit argument.
+        has_post_hooks = bool(grad)
+        grad = variable_grad  # type: ignore[assignment]
+        variable_grad = variable.grad
+    updated_grad = torch._dynamo.compiled_autograd.ops.AccumulateGrad(  # type: ignore[attr-defined]
+        [grad], variable, variable_grad, has_post_hooks
+    )
+    variable.grad = updated_grad[0]
+    return variable.grad
+
+
+def wrap_inline_with_error_on_graph_break(
+    fn: Callable[_P, _R], error_on_graph_break: bool
+) -> Callable[_P, _R]:
+    # NB: need multiple definitions in order to prevent `fullgraph` from
+    # being a freevar of wrapper
+    # NOTE: do not functools.wraps(fn) because we don't ever want these wrappers to be skipped!
+    if error_on_graph_break:
+
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with torch._dynamo.error_on_graph_break(True):
+                return fn(*args, **kwargs)
+
+    else:
+
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with torch._dynamo.error_on_graph_break(False):
+                return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def filter_out_const_values(tup: tuple[Any, ...], masks: list[bool]) -> tuple[Any, ...]:
+    """
+    masks is a list of bools, where True means the corresponding element in tup
+    is a const value. Filter out the const values.
+    """
+    out = []
+    for mask_idx, mask in enumerate(masks):
+        if not mask:
+            out.append(tup[mask_idx])
+    return tuple(out)
+
+
+def insert_const_values_with_mask(
+    tup: tuple[Any, ...], masks: list[bool], values: tuple[Any, ...]
+) -> tuple[Any, ...]:
+    """
+    masks and values are of same length. For indices where the mask is True, use
+    the const_values to fill in.
+    """
+    out = []
+    idx = 0
+    for mask_idx, mask in enumerate(masks):
+        if mask:
+            out.append(values[mask_idx])
+        else:
+            out.append(tup[idx])
+            idx += 1
+    return tuple(out)

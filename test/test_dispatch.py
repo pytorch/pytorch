@@ -151,7 +151,7 @@ class TestDispatch(TestCase):
             active_ops.add(op_ix)
             try:
                 ops[op_ix](refs[op_ix])
-                check_invariants(f"running ctors {ctor_order[:i + 1]}")
+                check_invariants(f"running ctors {ctor_order[: i + 1]}")
             except RuntimeError as e:
                 if not expect_raises:
                     raise
@@ -160,7 +160,7 @@ class TestDispatch(TestCase):
                 expected, _, expected_provenance = results.setdefault(
                     frozenset(active_ops),
                     Result(
-                        actual, "", f"error after running ctors {ctor_order[:i + 1]}"
+                        actual, "", f"error after running ctors {ctor_order[: i + 1]}"
                     ),
                 )
                 self.assertMultiLineEqual(expected, actual, expected_provenance)
@@ -181,8 +181,11 @@ class TestDispatch(TestCase):
             refs = None
             self.assertTrue(
                 False,
-                "expected exception to be raised, but nothing was raised "
-                f"(after running ctors {ctor_order})",
+                lambda msg: f"{msg}\n"
+                + (
+                    "expected exception to be raised, but nothing was raised "
+                    f"(after running ctors {ctor_order})"
+                ),
             )
         # In the order specified by dtor_order, run deregistrations
         for i, op_ix in enumerate(dtor_order):
@@ -195,7 +198,7 @@ class TestDispatch(TestCase):
             else:
                 active_ops.remove(op_ix)
             check_invariants(
-                f"running ctors {ctor_order[:last_ctor + 1]}, then running dtors {dtor_order[:i + 1]}"
+                f"running ctors {ctor_order[: last_ctor + 1]}, then running dtors {dtor_order[: i + 1]}"
             )
         return results[set_to_report][0]
 
@@ -950,7 +953,7 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
         self.assertEqual(
             0,
             len(dangling_impls),
-            msg=f"Expect zero dangling impls, but found: {dangling_impls}",
+            msg=lambda msg: f"{msg}\nExpect zero dangling impls, but found: {dangling_impls}",
         )
 
     def test_find_dangling_impls_ext(self):
@@ -1118,7 +1121,7 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
     def test_duplicate_registrations(self):
         dispatcher = PythonDispatcher()
 
-        with self.assertRaisesRegex(RuntimeError, r"Overriden is not allowed"):
+        with self.assertRaisesRegex(RuntimeError, r"Overridden is not allowed"):
             dispatcher.register(["CPU", "CPU"])
 
     def test_defaultbackend_math(self):

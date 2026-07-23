@@ -15,7 +15,8 @@
 
 namespace torch::autograd {
 
-using function_constructor = std::function<std::shared_ptr<Node>(edge_list&&)>;
+using function_constructor =
+    std::function<c10::intrusive_ptr<Node>(edge_list&&)>;
 
 /**
  * Wraps the tensor outputs in variables and creates the grad_fn and sets the
@@ -65,13 +66,16 @@ inline bool compute_requires_grad(Args&&... args) {
 
 inline void set_history(
     const at::Tensor& variable,
-    const std::shared_ptr<Node>& grad_fn) {
+    const c10::intrusive_ptr<Node>& grad_fn) {
   TORCH_CHECK(grad_fn != nullptr);
   if (variable.defined()) {
     // If the codegen triggers this, you most likely want to add your newly
     // added function to the DONT_REQUIRE_DERIVATIVE list in
     // tools/autograd/gen_variable_type.py
-    TORCH_INTERNAL_ASSERT(isDifferentiableType(variable.scalar_type()));
+    TORCH_CHECK(
+        isDifferentiableType(variable.scalar_type()),
+        "Autograd not support dtype: ",
+        variable.scalar_type());
     auto output_nr = grad_fn->add_input_metadata(variable);
     impl::set_gradient_edge(variable, {grad_fn, output_nr});
   } else {
@@ -81,7 +85,7 @@ inline void set_history(
 
 inline void set_history(
     const std::vector<Variable>& variables,
-    const std::shared_ptr<Node>& grad_fn) {
+    const c10::intrusive_ptr<Node>& grad_fn) {
   for (auto& variable : variables) {
     set_history(variable, grad_fn);
   }

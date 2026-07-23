@@ -5,7 +5,8 @@ import os
 import re
 import subprocess
 import sys
-from typing import Any, Generator
+from collections.abc import Generator
+from typing import Any
 
 from github_utils import gh_post_pr_comment as gh_post_comment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
@@ -58,7 +59,14 @@ def rebase_onto(
     refspec = f"{branch}:{pr.head_ref()}"
 
     repo.fetch(branch, branch)
-    repo._run_git("rebase", onto_branch, branch)
+    # Rebase only the PR's own commits. The 2-arg `git rebase <onto_branch>
+    # <branch>` form replays all of onto_branch..branch, which grafts in trunk
+    # commits when the PR has merged its base in and onto_branch (e.g.
+    # viable/strict) lags that base. Anchoring on the fork point from the PR's
+    # base branch excludes anything already on the base. See #187374.
+    base_branch = f"refs/remotes/{repo.remote}/{pr.base_ref()}"
+    fork_point = repo.get_merge_base(base_branch, branch)
+    repo._run_git("rebase", "--onto", onto_branch, fork_point, branch)
 
     if repo.rev_parse(branch) == repo.rev_parse(onto_branch):
         raise Exception(SAME_SHA_ERROR)  # noqa: TRY002
@@ -131,17 +139,17 @@ def rebase_ghstack_onto(
         # The contents of a successful push result should look like:
         # Summary of changes (ghstack 0.6.0)
 
-        #  - Updated https://github.com/clee2000/random-testing/pull/2
-        #  - Updated https://github.com/clee2000/random-testing/pull/1
+        #  - Updated https://github.com/clee2000/random-testing-public/pull/2
+        #  - Updated https://github.com/clee2000/random-testing-public/pull/1
 
         # Facebook employees can import your changes by running
         # (on a Facebook machine):
 
-        #     ghimport -s https://github.com/clee2000/random-testing/pull/2
+        #     ghimport -s https://github.com/clee2000/random-testing-public/pull/2
 
         # If you want to work on this diff stack on another machine:
 
-        #     ghstack checkout https://github.com/clee2000/random-testing/pull/2
+        #     ghstack checkout https://github.com/clee2000/random-testing-public/pull/2
         org, project = repo.gh_owner_and_name()
         for line in push_result.splitlines():
             if "Updated" in line:

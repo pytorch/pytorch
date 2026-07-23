@@ -19,7 +19,7 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 } // namespace
 
 // helper to determine if an optional tensor argument/value passed in is
-// statically defined (neither a None constant nor a Optional[Tensor] type)
+// statically defined (neither a None constant nor an Optional[Tensor] type)
 // return yes, no, or no value if we can't tell
 static std::optional<bool> isDefined(Value* tensor) {
   if (tensor->type()->isSubtypeOf(*TensorType::get())) {
@@ -57,7 +57,7 @@ static bool isDecomposableNorm(Node* normalize_op) {
   return false;
 }
 
-RegisterOperators reg_ops(
+static RegisterOperators reg_ops(
     {Operator(
          "aten::_ncf_unsqueeze(Tensor(a) self, int ndim) -> Tensor(a)",
          [](Stack& stack) {

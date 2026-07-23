@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 import torch
 from torch import inf, Tensor
 from torch.distributions import Categorical, constraints
@@ -47,6 +48,8 @@ class Multinomial(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities (unnormalized)
     """
+
+    # pyrefly: ignore [bad-override]
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     total_count: int
 
@@ -58,7 +61,13 @@ class Multinomial(Distribution):
     def variance(self) -> Tensor:
         return self.total_count * self.probs * (1 - self.probs)
 
-    def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        total_count: int = 1,
+        probs: Tensor | None = None,
+        logits: Tensor | None = None,
+        validate_args: bool | None = None,
+    ) -> None:
         if not isinstance(total_count, int):
             raise NotImplementedError("inhomogeneous total_count is not supported")
         self.total_count = total_count
@@ -66,6 +75,7 @@ class Multinomial(Distribution):
         self._binomial = Binomial(total_count=total_count, probs=self.probs)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -83,6 +93,7 @@ class Multinomial(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @constraints.dependent_property(is_discrete=True, event_dim=1)
+    # pyrefly: ignore [bad-override]
     def support(self):
         return constraints.multinomial(self.total_count)
 

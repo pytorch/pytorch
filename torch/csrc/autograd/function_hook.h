@@ -22,10 +22,12 @@ struct TORCH_API FunctionPreHook {
   virtual ~FunctionPreHook() = default;
   virtual variable_list operator()(const variable_list& grads) = 0;
   // only implemented for python hooks, registers hook with compiled autograd
-  virtual void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) {
-    throw std::runtime_error(
+  virtual void compiled_args(
+      torch::dynamo::autograd::CompiledNodeArgs& args) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
         std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
-        typeid(*this).name());
+            typeid(*this).name());
   }
 };
 
@@ -35,10 +37,12 @@ struct TORCH_API FunctionPostHook {
       const variable_list& outputs /* grad_inputs */,
       const variable_list& inputs /* grad_outputs */) = 0;
   // only implemented for python hooks, registers hook with compiled autograd
-  virtual void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) {
-    throw std::runtime_error(
+  virtual void compiled_args(
+      torch::dynamo::autograd::CompiledNodeArgs& args) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
         std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
-        typeid(*this).name());
+            typeid(*this).name());
   }
 };
 
@@ -47,18 +51,21 @@ struct TORCH_API PostAccumulateGradHook {
   virtual void operator()(const Variable& tensor) = 0;
   // only implemented for python hooks on nodes, registers hook with compiled
   // autograd
-  virtual void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) {
-    throw std::runtime_error(
-        std::string("not yet implemented for compiled autograd: ") +
-        typeid(*this).name());
+  virtual void compiled_args(
+      torch::dynamo::autograd::CompiledNodeArgs& args) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
+            typeid(*this).name());
   }
 
   virtual void apply_with_saved(
-      Variable&,
-      torch::dynamo::autograd::SwapSavedVariables&) {
-    throw std::runtime_error(
-        std::string("not yet implemented for compiled autograd: ") +
-        typeid(*this).name());
+      Variable& /*unused*/,
+      torch::dynamo::autograd::SwapSavedVariables& /*unused*/) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
+            typeid(*this).name());
   }
 };
 

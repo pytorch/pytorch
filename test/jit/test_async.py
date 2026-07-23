@@ -16,6 +16,7 @@ from typing import List
 
 from torch import Tensor
 from torch.jit import Future
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import _inline_everything, JitTestCase
 
 
@@ -34,7 +35,7 @@ class TestAsync(JitTestCase):
     def test_async_future_type_python(self):
         def foo(inp):
             futures = torch.jit.annotate(List[torch.jit.Future[torch.Tensor]], [])
-            for i in range(5):
+            for _ in range(5):
                 futures.append(torch.jit.fork(lambda x: x, inp))
             all_outputs = []
             for future in futures:
@@ -457,7 +458,7 @@ class TestAsync(JitTestCase):
         class TestListFutureModule(nn.Module):
             def forward(self, input):
                 input_list = []
-                for i in range(3):
+                for _ in range(3):
                     input_list.append(input)
 
                 fut_list: List[Future[torch.Tensor]] = []
@@ -547,8 +548,4 @@ class TestAsync(JitTestCase):
 
 
 if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
+    raise_on_run_directly("test/test_jit.py")

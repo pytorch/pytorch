@@ -169,7 +169,7 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
         << "GC has deleted them before calling shutdown(): \n"
         << ss.str();
     if (!ignoreRRefLeak) {
-      TORCH_CHECK(false, ss.str());
+      TORCH_CHECK(false, std::move(ss).str());
     }
   }
 }
@@ -256,7 +256,7 @@ void RRefContext::delAllUsersAndUnforkedOwners(
   // Start sending UserRRef delete messages, after all pendings are confirmed.
   // Note, there should be no new forkings in between, because it's assumed that
   // this utility is called during graceful shutdown, where no new user RPCs can
-  // be initiaited anymore.
+  // be initiated anymore.
   for (const auto& user : tempConfirmedUsers) {
     c10::intrusive_ptr<RRef> rref_ptr = user.second.lock();
     if (!rref_ptr) {
@@ -348,7 +348,7 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // here is a plain TensorType, they are not equal relationship:
     // specialized TensorType <: plain TensorType
     //
-    // In RPC we don't care the difference as we ser/de with just the
+    // In RPC we don't care the difference as we Ser/De with just the
     // plain TensorType. This is not a issue for UserRRef creation either,
     // since Tensor can only get specialized with a previous run of local
     // JIT function, and we shouldn't preserve the specialized SubTensorType

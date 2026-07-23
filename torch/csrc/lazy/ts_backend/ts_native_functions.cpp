@@ -398,7 +398,7 @@ at::Tensor LazyNativeFunctions::lift_fresh(const at::Tensor& tensor) {
 
 // All of the below ops correspond to CompositeExplicitAutograd kernels from
 // core that call into view operators internally. These are all composite ops
-// that LTC can technically re-use / get for free, but we need to
+// that LTC can technically reuse / get for free, but we need to
 // "functionalize" them to remove the view ops before we can use them.
 at::Tensor LazyNativeFunctions::block_diag(at::TensorList tensors) {
   return at::functionalization::functionalize_aten_op<ATEN_OP(
@@ -466,6 +466,14 @@ at::Tensor LazyNativeFunctions::linalg_pinv(
       linalg_pinv, atol_rtol_tensor)>::call(self, atol, rtol, hermitian);
 }
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor> LazyNativeFunctions::svd(
+    const at::Tensor& self,
+    bool some,
+    bool compute_uv) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(svd)>::call(
+      self, some, compute_uv);
+}
+
 // functionalize_aten_op can't handle out= ops directly.
 // Instead, we can call the composite kernel from core, and copy and mutations
 // back to the inputs.
@@ -527,21 +535,6 @@ at::Tensor LazyNativeFunctions::slice_backward_symint(
           std::move(start),
           std::move(end),
           std::move(step));
-}
-
-// re-use the composite kernel from core, that way we don't need to provide a
-// backwards formula for native_group_norm
-std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
-    const at::Tensor& input,
-    const std::optional<at::Tensor>& weight,
-    const std::optional<at::Tensor>& bias,
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
-    int64_t group,
-    double eps) {
-  return at::native::math_group_norm(
-      input, weight, bias, N, C, HxW, group, eps);
 }
 
 } // namespace torch::lazy

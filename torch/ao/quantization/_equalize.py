@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
+from itertools import chain
 from typing import Any
 
 import torch
@@ -91,9 +92,10 @@ def channel_range(input, axis=0):
     mins = min_over_ndim(input, axis_list)
     maxs = max_over_ndim(input, axis_list)
 
-    assert mins.size(0) == input.size(
-        axis
-    ), "Dimensions of resultant channel range does not match size of requested axis"
+    if mins.size(0) != input.size(axis):
+        raise AssertionError(
+            "Dimensions of resultant channel range does not match size of requested axis"
+        )
     return maxs - mins
 
 
@@ -233,7 +235,7 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
 
     name_to_module: dict[str, torch.nn.Module] = {}
     previous_name_to_module: dict[str, Any] = {}
-    name_set = {name for pair in paired_modules_list for name in pair}
+    name_set = set(chain.from_iterable(paired_modules_list))
 
     for name, module in model.named_modules():
         if name in name_set:
@@ -268,7 +270,7 @@ def converged(curr_modules, prev_modules, threshold=1e-4):
     summed_norms = torch.tensor(0.0)
     if None in prev_modules.values():
         return False
-    for name in curr_modules.keys():
+    for name in curr_modules:
         curr_weight = get_module_weight(curr_modules[name])
         prev_weight = get_module_weight(prev_modules[name])
 

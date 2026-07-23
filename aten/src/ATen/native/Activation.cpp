@@ -60,6 +60,7 @@
 #include <ATen/ops/_prelu_kernel_backward_native.h>
 #include <ATen/ops/relu6_native.h>
 #include <ATen/ops/relu_native.h>
+#include <ATen/ops/result_type.h>
 #include <ATen/ops/rrelu_native.h>
 #include <ATen/ops/rrelu_with_noise.h>
 #include <ATen/ops/rrelu_with_noise_backward_native.h>
@@ -208,15 +209,17 @@ TORCH_META_FUNC(hardshrink_backward) (
   build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
-static inline void softshrink_check(const Scalar& lambd) {
-  double lamb = lambd.to<double>();
-  TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
-}
-
 TORCH_META_FUNC(softshrink) (
   const Tensor & self, const Scalar& lambd
 ) {
-  softshrink_check(lambd);
+  double lamb = lambd.to<double>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+    self.scalar_type(), "softshrink_check", [&] {
+    auto max_val = static_cast<double>(std::numeric_limits<scalar_t>::max());
+    TORCH_CHECK(0 <= lamb && lamb <= max_val,
+      "lambda must be in range [0, ", max_val, "] for input dtype ",
+      self.scalar_type(), ", but found ", lamb);
+  });
   build_unary_op(maybe_get_output(), self);
 }
 
@@ -240,8 +243,8 @@ TORCH_META_FUNC(gelu_backward) (
 
 namespace at::native {
 
-static const double SELU_ALPHA = 1.6732632423543772848170429916717;
-static const double SELU_SCALE = 1.0507009873554804934193349852946;
+static constexpr double SELU_ALPHA = 1.6732632423543772848170429916717;
+static constexpr double SELU_SCALE = 1.0507009873554804934193349852946;
 
 DEFINE_DISPATCH(elu_stub);
 DEFINE_DISPATCH(elu_backward_stub);
@@ -585,9 +588,9 @@ static void _rrelu_with_noise_train(
   opmath_t lower = lower_.to<opmath_t>();
   opmath_t upper = upper_.to<opmath_t>();
   Tensor tmp_tensor = output.contiguous();
-  scalar_t* output_data = tmp_tensor.data_ptr<scalar_t>();
+  scalar_t* output_data = tmp_tensor.mutable_data_ptr<scalar_t>();
   const scalar_t* input_data = input.const_data_ptr<scalar_t>();
-  scalar_t* noise_data = noise.data_ptr<scalar_t>();
+  scalar_t* noise_data = noise.mutable_data_ptr<scalar_t>();
   auto gen  = at::get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   std::lock_guard<std::mutex> lock(gen->mutex_);
   for (const auto i : c10::irange(input.numel())) {
@@ -670,13 +673,15 @@ Tensor rrelu_with_noise_backward(
 }
 
 Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool training, std::optional<Generator> generator) {
-  TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
+  TORCH_CHECK(std::isfinite(lower.to<double>()), "rrelu: lower bound must be finite, got ", lower.to<double>());
+  TORCH_CHECK(std::isfinite(upper.to<double>()), "rrelu: upper bound must be finite, got ", upper.to<double>());
+  TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound");
   auto noise = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::rrelu_with_noise(self, noise, lower, upper, training, std::move(generator));
 }
 
 Tensor & rrelu_(Tensor & self, const Scalar& lower, const Scalar& upper, bool training, std::optional<Generator> generator) {
-  TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
+  TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound");
   auto noise = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::rrelu_with_noise_(self, noise, lower, upper, training, std::move(generator));
 }
@@ -752,16 +757,20 @@ Tensor infinitely_differentiable_gelu_backward(
     const Tensor& grad,
     const Tensor& self) {
   constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-  Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
-  Tensor pdf = (-0.5 * self * self).exp_();
-  return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
+  const auto result_dtype = at::result_type(grad, self);
+  const auto opmath_dtype = at::toOpMathType(result_dtype);
+  const Tensor grad_ = grad.to(opmath_dtype);
+  const Tensor self_ = self.to(opmath_dtype);
+  Tensor cdf = (1.0 + (self_ * M_SQRT1_2).erf_()).mul_(0.5);
+  Tensor pdf = (-0.5 * self_ * self_).exp_();
+  return cdf.addcmul_(self_, pdf, kAlpha).mul_(grad_).to(result_dtype);
 }
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
   auto result = at::empty_like(input, at::MemoryFormat::Contiguous);
   auto buffer = at::empty_like(input, at::MemoryFormat::Contiguous);
   log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
-  return std::make_tuple(result, buffer);
+  return std::make_tuple(std::move(result), std::move(buffer));
 }
 
 std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(const Tensor& input, Tensor& result, Tensor& buffer) {

@@ -6,7 +6,6 @@ constructor arguments.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Optional
 
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
@@ -218,9 +217,9 @@ class MixedPrecision:
 
     """
 
-    param_dtype: Optional[torch.dtype] = None
-    reduce_dtype: Optional[torch.dtype] = None
-    buffer_dtype: Optional[torch.dtype] = None
+    param_dtype: torch.dtype | None = None
+    reduce_dtype: torch.dtype | None = None
+    buffer_dtype: torch.dtype | None = None
     keep_low_precision_grads: bool = False
     cast_forward_inputs: bool = False
     cast_root_forward_inputs: bool = True
@@ -306,16 +305,21 @@ class FullStateDictConfig(StateDictConfig):
         >>> cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
         >>> with FSDP.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
         >>>     state = fsdp.state_dict()
-        >>>     # `state` will be empty on non rank 0 and contain CPU tensors on rank 0.
+        >>> # `state` will be empty on non rank 0 and contain CPU tensors on rank 0.
         >>> # To reload checkpoint for inference, finetuning, transfer learning, etc:
-        >>> model = model_fn() # Initialize model in preparation for wrapping with FSDP
+        >>> model = model_fn()  # Initialize model in preparation for wrapping with FSDP
         >>> if dist.get_rank() == 0:
-        >>>     # Load checkpoint only on rank 0 to avoid memory redundancy
+        >>> # Load checkpoint only on rank 0 to avoid memory redundancy
         >>>     state_dict = torch.load("my_checkpoint.pt")
         >>>     model.load_state_dict(state_dict)
         >>> # All ranks initialize FSDP module as usual. `sync_module_states` argument
         >>> # communicates loaded checkpoint states from rank 0 to rest of the world.
-        >>> fsdp = FSDP(model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
+        >>> fsdp = FSDP(
+        ...     model,
+        ...     device_id=torch.cuda.current_device(),
+        ...     auto_wrap_policy=...,
+        ...     sync_module_states=True,
+        ... )
         >>> # After this point, all ranks have FSDP model with loaded checkpoint.
 
     Attributes:

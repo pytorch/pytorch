@@ -9,13 +9,13 @@ half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdo
 """
 
 import warnings
-from collections.abc import Sequence
-from typing import cast, List, Optional, Tuple, Union
+from collections.abc import Mapping, Sequence
+from typing import cast, overload
 
 import torch
 from torch import _vmap_internals
 from torch.overrides import handle_torch_function, has_torch_function, is_tensor_like
-from torch.types import _size, _TensorOrTensors, _TensorOrTensorsOrGradEdge
+from torch.types import _size, _TensorOrOptionalTensors, _TensorOrTensorsOrGradEdge
 
 from . import forward_ad, functional, graph
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
@@ -24,6 +24,7 @@ from .grad_mode import (
     _force_original_view_tracking,
     _unsafe_preserve_version_counter,
     enable_grad,
+    enforce_grad_layout_policy,
     inference_mode,
     no_grad,
     set_grad_enabled,
@@ -50,15 +51,16 @@ __all__ = [
     "set_detect_anomaly",
     "set_grad_enabled",
     "set_multithreading_enabled",
+    "enforce_grad_layout_policy",
     "variable",
 ]
 
-_OptionalTensor = Optional[torch.Tensor]
-_ShapeorNestedShape = Union[_size, Sequence[_size], torch.Tensor]
+_OptionalTensor = torch.Tensor | None
+_ShapeorNestedShape = _size | Sequence[_size] | torch.Tensor
 
 
 def _calculate_shape(
-    output: Union[torch.Tensor, graph.GradientEdge],
+    output: torch.Tensor | graph.GradientEdge,
     grad: torch.Tensor,
     is_grads_batched: bool,
 ) -> tuple[_ShapeorNestedShape, _ShapeorNestedShape]:
@@ -87,13 +89,15 @@ def _calculate_shape(
 
 
 def _make_grads(
-    outputs: Union[Sequence[torch.Tensor], Sequence[graph.GradientEdge]],
+    outputs: Sequence[torch.Tensor] | Sequence[graph.GradientEdge],
     grads: Sequence[_OptionalTensor],
     is_grads_batched: bool,
 ) -> tuple[_OptionalTensor, ...]:
     new_grads: list[_OptionalTensor] = []
+
     for out, grad in zip(outputs, grads):
-        out = cast(Union[torch.Tensor, graph.GradientEdge], out)
+        # pyrefly: ignore [redundant-cast]
+        out = cast(torch.Tensor | graph.GradientEdge, out)
         out_size = None
         out_device = None
 
@@ -112,7 +116,8 @@ def _make_grads(
             # circular import
             from torch.nested._internal.nested_tensor import NestedTensor
 
-            assert isinstance(out, torch.Tensor)
+            if not isinstance(out, torch.Tensor):
+                raise AssertionError("Expected output to be a torch.Tensor")
             out_dtype = out.dtype
             out_is_nested = out.is_nested
             out_is_cpp_nested = out_is_nested and not isinstance(out, NestedTensor)
@@ -128,17 +133,19 @@ def _make_grads(
             # singleton int to represent jagged dimension, so that size() call
             # on nested tensor works.
             if out_is_cpp_nested:
-                assert isinstance(out, torch.Tensor)
+                if not isinstance(out, torch.Tensor):
+                    raise AssertionError("Expected output to be a torch.Tensor.")
                 shape_matches = torch.is_same_size(out, first_grad)
             else:
                 # We need to do a regular size check, without going through
                 # the operator, to be able to handle unbacked symints
                 # (expect_true ensures we can deal with unbacked)
-                assert out_size is not None
+                if out_size is None:
+                    raise AssertionError("Expected out_size to be set.")
                 shape_matches = expect_true(sym_eq(out_size, first_grad.size()))
 
             if not shape_matches:
-                out = cast(Union[torch.Tensor, graph.GradientEdge], out)
+                out = cast(torch.Tensor | graph.GradientEdge, out)  # type: ignore[redundant-cast]
                 out_shape, grad_shape = _calculate_shape(
                     out, first_grad, is_grads_batched
                 )
@@ -190,10 +197,12 @@ def _make_grads(
         elif grad is None:
             if isinstance(out, graph.GradientEdge) or out.requires_grad:  # type: ignore[attr-defined]
                 if isinstance(out, graph.GradientEdge):
-                    assert out_size is not None
+                    if out_size is None:
+                        raise AssertionError("Expected out_size to be set.")
                     out_numel_is_1 = all(o == 1 for o in out_size)
                 else:
-                    assert isinstance(out, torch.Tensor)
+                    if not isinstance(out, torch.Tensor):
+                        raise AssertionError("Expected output to be a torch.Tensor")
                     out_numel_is_1 = out.numel() == 1
                 if not out_numel_is_1:
                     raise RuntimeError(
@@ -206,8 +215,10 @@ def _make_grads(
                     )
                     raise RuntimeError(msg)
                 if isinstance(out, graph.GradientEdge):
-                    assert out_size is not None
-                    assert out_device is not None
+                    if out_size is None:
+                        raise AssertionError("Expected out_size to be set.")
+                    if out_device is None:
+                        raise AssertionError("Expected out_device to be set.")
                     new_grads.append(
                         torch.ones(
                             out_size,
@@ -216,7 +227,8 @@ def _make_grads(
                         )
                     )
                 else:
-                    assert isinstance(out, torch.Tensor)
+                    if not isinstance(out, torch.Tensor):
+                        raise AssertionError("Expected output to be a torch.Tensor")
                     new_grads.append(
                         torch.ones_like(out, memory_format=torch.preserve_format)
                     )
@@ -231,7 +243,7 @@ def _make_grads(
 
 
 def _tensor_or_tensors_to_tuple(
-    tensors: Optional[_TensorOrTensors], length: int
+    tensors: _TensorOrOptionalTensors | None, length: int
 ) -> tuple[_OptionalTensor, ...]:
     if tensors is None:
         return (None,) * length
@@ -242,11 +254,11 @@ def _tensor_or_tensors_to_tuple(
 
 def backward(
     tensors: _TensorOrTensorsOrGradEdge,
-    grad_tensors: Optional[_TensorOrTensors] = None,
-    retain_graph: Optional[bool] = None,
+    grad_tensors: _TensorOrOptionalTensors | None = None,
+    retain_graph: bool | None = None,
     create_graph: bool = False,
-    grad_variables: Optional[_TensorOrTensors] = None,
-    inputs: Optional[_TensorOrTensorsOrGradEdge] = None,
+    grad_variables: _TensorOrOptionalTensors | None = None,
+    inputs: _TensorOrTensorsOrGradEdge | dict[str, torch.Tensor] | None = None,
 ) -> None:
     r"""Compute the sum of gradients of given tensors with respect to graph leaves.
 
@@ -280,7 +292,7 @@ def backward(
     .. note::
 
         When ``inputs`` are provided and a given input is not a leaf,
-        the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
+        the current implementation will call its grad_fn (even though it is not strictly needed to get these gradients).
         It is an implementation detail on which the user should not rely.
         See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
 
@@ -299,10 +311,13 @@ def backward(
         create_graph (bool, optional): If ``True``, graph of the derivative will
             be constructed, allowing to compute higher order derivative products.
             Defaults to ``False``.
-        inputs (Sequence[Tensor] or Tensor or Sequence[GradientEdge], optional): Inputs w.r.t. which the gradient
-            be will accumulated into ``.grad``. All other Tensors will be ignored. If
-            not provided, the gradient is accumulated into all the leaf Tensors that
-            were used to compute the :attr:`tensors`.
+        inputs (Sequence[Tensor] or Tensor or Sequence[GradientEdge] or dict[str, Tensor], optional):
+            Inputs w.r.t. which the gradient will be accumulated into ``.grad``.
+            All other Tensors will be ignored. If not provided, the gradient is
+            accumulated into all the leaf Tensors that were used to compute the
+            :attr:`tensors`. A dict of tensors (e.g.
+            ``dict(model.named_parameters())``) is also accepted, in which case
+            the values are used as the input tensors.
     """
     if torch._C._are_functorch_transforms_active():
         raise RuntimeError(
@@ -325,22 +340,49 @@ def backward(
                 "arguments both passed to `backward()`. Please only "
                 "use `grad_tensors`."
             )
-    if inputs is not None and len(inputs) == 0:
+
+    inputs_tuple: tuple[torch.Tensor, ...] | tuple[graph.GradientEdge, ...]
+    if inputs is None:
+        inputs_tuple = ()
+    elif isinstance(inputs, (torch.Tensor, graph.GradientEdge)):
+        inputs_tuple = cast(
+            tuple[torch.Tensor, ...] | tuple[graph.GradientEdge, ...], (inputs,)
+        )
+    elif type(inputs) is dict:
+        # pyrefly: ignore [bad-argument-type]
+        inputs_tuple = tuple(inputs.values())
+    elif isinstance(inputs, Mapping):
+        raise TypeError(
+            f"`inputs` argument to `backward()` must be a dict, not {type(inputs).__name__}. "
+            "Other Mapping types are not supported."
+        )
+    else:
+        # pyrefly: ignore [bad-argument-type]
+        inputs_tuple = tuple(inputs)
+    if inputs is not None and len(inputs_tuple) == 0:
         raise RuntimeError("`inputs` argument to `backward()` cannot be empty.")
 
     if is_tensor_like(tensors) or isinstance(tensors, graph.GradientEdge):
-        tensors = cast(
-            Union[tuple[torch.Tensor], tuple[graph.GradientEdge]], (tensors,)
-        )
+        tensors = cast(tuple[torch.Tensor] | tuple[graph.GradientEdge], (tensors,))
     else:
+        # pyrefly: ignore [bad-argument-type]
         tensors = tuple(tensors)
-    inputs = (
-        (inputs,)
-        if isinstance(inputs, (torch.Tensor, graph.GradientEdge))
-        else tuple(inputs)
-        if inputs is not None
-        else ()
-    )
+
+    # Check for __torch_function__ on tensors (similar to torch.autograd.grad)
+    # This allows tensor subclasses to customize backward behavior
+    t_tensors = tuple(t for t in tensors if is_tensor_like(t))
+    t_inputs = tuple(t for t in inputs_tuple if is_tensor_like(t))
+    overridable_args = t_tensors + t_inputs
+    if has_torch_function(overridable_args):
+        return handle_torch_function(
+            backward,
+            overridable_args,
+            tensors,
+            grad_tensors=grad_tensors,
+            retain_graph=retain_graph,
+            create_graph=create_graph,
+            inputs=inputs_tuple if inputs is not None else None,
+        )
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
     grad_tensors_ = _make_grads(tensors, grad_tensors_, is_grads_batched=False)
@@ -355,23 +397,51 @@ def backward(
         grad_tensors_,
         retain_graph,
         create_graph,
-        inputs,
+        inputs_tuple,
         allow_unreachable=True,
         accumulate_grad=True,
     )
 
 
+@overload
 def grad(
     outputs: _TensorOrTensorsOrGradEdge,
     inputs: _TensorOrTensorsOrGradEdge,
-    grad_outputs: Optional[_TensorOrTensors] = None,
-    retain_graph: Optional[bool] = None,
+    grad_outputs: _TensorOrOptionalTensors | None = ...,
+    retain_graph: bool | None = ...,
+    create_graph: bool = ...,
+    only_inputs: bool = ...,
+    allow_unused: bool | None = ...,
+    is_grads_batched: bool = ...,
+    materialize_grads: bool = ...,
+) -> tuple[torch.Tensor, ...]: ...
+
+
+@overload
+def grad(
+    outputs: _TensorOrTensorsOrGradEdge,
+    inputs: dict[str, torch.Tensor],
+    grad_outputs: _TensorOrOptionalTensors | None = ...,
+    retain_graph: bool | None = ...,
+    create_graph: bool = ...,
+    only_inputs: bool = ...,
+    allow_unused: bool | None = ...,
+    is_grads_batched: bool = ...,
+    materialize_grads: bool = ...,
+) -> dict[str, torch.Tensor]: ...
+
+
+def grad(
+    outputs: _TensorOrTensorsOrGradEdge,
+    inputs: _TensorOrTensorsOrGradEdge | dict[str, torch.Tensor],
+    grad_outputs: _TensorOrOptionalTensors | None = None,
+    retain_graph: bool | None = None,
     create_graph: bool = False,
     only_inputs: bool = True,
-    allow_unused: Optional[bool] = None,
+    allow_unused: bool | None = None,
     is_grads_batched: bool = False,
     materialize_grads: bool = False,
-) -> tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
     r"""Compute and return the sum of gradients of outputs with respect to the inputs.
 
     ``grad_outputs`` should be a sequence of length matching ``output``
@@ -393,12 +463,14 @@ def grad(
 
     Args:
         outputs (sequence of Tensor or GradientEdge): outputs of the differentiated function.
-        inputs (sequence of Tensor or GradientEdge): Inputs w.r.t. which the gradient will be
-            returned (and not accumulated into ``.grad``).
-        grad_outputs (sequence of Tensor): The "vector" in the vector-Jacobian product.
-            Usually gradients w.r.t. each output. None values can be specified for scalar
-            Tensors or ones that don't require grad. If a None value would be acceptable
-            for all grad_tensors, then this argument is optional. Default: None.
+        inputs (sequence of Tensor or GradientEdge or dict[str, Tensor]): Inputs w.r.t. which
+            the gradient will be returned (and not accumulated into ``.grad``).
+            When a dict is provided (e.g. ``dict(model.named_parameters())``),
+            the result is returned as a dict with matching keys.
+        grad_outputs (sequence of [Tensor or None] or Tensor, optional): The "vector" in the
+            vector-Jacobian product. Usually gradients w.r.t. each output. None values can be
+            specified for scalar Tensors or ones that don't require grad. If a None value would be
+            acceptable for all grad_tensors, then this argument is optional. Default: None.
         retain_graph (bool, optional): If ``False``, the graph used to compute the grad
             will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient
@@ -436,23 +508,40 @@ def grad(
         allow_unused = materialize_grads
     if is_tensor_like(outputs) or isinstance(outputs, graph.GradientEdge):
         outputs = cast(
-            Union[Sequence[torch.Tensor], Sequence[graph.GradientEdge]], (outputs,)
+            Sequence[torch.Tensor] | Sequence[graph.GradientEdge], (outputs,)
         )
     else:
+        # pyrefly: ignore [bad-argument-type]
         outputs = tuple(outputs)
+
+    inputs_tuple: tuple[torch.Tensor, ...] | tuple[graph.GradientEdge, ...]
     if is_tensor_like(inputs) or isinstance(inputs, graph.GradientEdge):
-        inputs = cast(_TensorOrTensorsOrGradEdge, (inputs,))
+        inputs_tuple = cast(
+            tuple[torch.Tensor, ...] | tuple[graph.GradientEdge, ...], (inputs,)
+        )
+    elif type(inputs) is dict:
+        # pyrefly: ignore [bad-argument-type]
+        inputs_tuple = tuple(inputs.values())
+    elif isinstance(inputs, Mapping):
+        raise TypeError(
+            f"`inputs` argument to `grad()` must be a dict, not {type(inputs).__name__}. "
+            "Other Mapping types are not supported."
+        )
     else:
-        inputs = tuple(inputs)
+        # pyrefly: ignore [bad-argument-type]
+        inputs_tuple = tuple(inputs)
+    if len(inputs_tuple) == 0:
+        raise RuntimeError("`inputs` argument to `grad()` cannot be empty.")
+
     t_outputs = tuple(i for i in outputs if is_tensor_like(i))
-    t_inputs = tuple(i for i in inputs if is_tensor_like(i))
+    t_inputs = tuple(i for i in inputs_tuple if is_tensor_like(i))
     overridable_args = t_outputs + t_inputs
     if has_torch_function(overridable_args):
-        return handle_torch_function(
+        result_tuple = handle_torch_function(
             grad,
             overridable_args,
             outputs,
-            inputs,
+            inputs_tuple,
             grad_outputs=grad_outputs,
             retain_graph=retain_graph,
             create_graph=create_graph,
@@ -461,6 +550,9 @@ def grad(
             is_grads_batched=is_grads_batched,
             materialize_grads=materialize_grads,
         )
+        if type(inputs) is dict:
+            return dict(zip(inputs.keys(), result_tuple, strict=True))
+        return result_tuple
 
     if not only_inputs:
         warnings.warn(
@@ -490,7 +582,7 @@ def grad(
                 gO,
                 retain_graph,
                 create_graph,
-                inputs,
+                inputs_tuple,
                 allow_unused,
                 accumulate_grad=False,
             )
@@ -504,24 +596,28 @@ def grad(
             grad_outputs_,
             retain_graph,
             create_graph,
-            inputs,
+            inputs_tuple,
             allow_unused,
             accumulate_grad=False,
         )
     if materialize_grads:
         if any(
-            result[i] is None and not is_tensor_like(inputs[i])
-            for i in range(len(inputs))
+            r is None and not is_tensor_like(inp)
+            for r, inp in zip(result, inputs_tuple, strict=True)
         ):
             raise RuntimeError(
                 "materialize_grads cannot be used when the given input is a GradientEdge"
             )
         result = tuple(
-            output
-            if output is not None
-            else torch.zeros_like(input, requires_grad=True)
-            for (output, input) in zip(result, inputs)
+            r if r is not None else torch.zeros_like(inp, requires_grad=create_graph)
+            for (r, inp) in zip(
+                result,
+                cast(tuple[torch.Tensor, ...], inputs_tuple),
+                strict=True,
+            )
         )
+    if type(inputs) is dict:
+        return dict(zip(inputs.keys(), result, strict=True))
     return result
 
 
@@ -542,7 +638,7 @@ def _is_checkpoint_valid():
     return Variable._execution_engine.is_checkpoint_valid()
 
 
-def variable(*args, **kwargs):  # noqa: D103
+def variable(*args, **kwargs):
     raise RuntimeError(
         "torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead"
     )
@@ -566,6 +662,7 @@ from torch._C._autograd import (
     _enable_profiler_legacy,
     _enable_record_function,
     _get_sequence_nr,
+    _is_kineto_stopped,
     _kineto_step,
     _KinetoEvent,
     _pop_saved_tensors_default_hooks,

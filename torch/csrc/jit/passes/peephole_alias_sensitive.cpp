@@ -1,12 +1,6 @@
-#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
-#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_alias_sensitive.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
-#include <unordered_set>
 
 namespace torch::jit {
 
@@ -81,7 +75,7 @@ struct PeepholeOptimizeAliasSensitiveImpl {
               "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
               /*const_inputs=*/{attr::alpha, attr::other})) {
         // x + 0 == x - 0 == x
-        // if either scalar input is a float, than removing this operator could
+        // if either scalar input is a float, then removing this operator could
         // remove type promotion and affect semantics
         if (!isFloatingPoint(node->input(0)->type()->expectRef<TensorType>())) {
           auto inps = node->inputs();
@@ -110,7 +104,7 @@ struct PeepholeOptimizeAliasSensitiveImpl {
               "aten::div(Tensor self, Scalar other) -> Tensor",
               /*const_inputs=*/attr::other)) {
         // x * 1 == x / 1 == x
-        // is the node is a division or other isn't an integer, than removing
+        // if the node is a division or other isn't an integer, then removing
         // this operator could remove type promotion and affect semantics
         if (!isFloatingPoint(node->input(0)->type()->expectRef<TensorType>())) {
           if (node->kind() == aten::div ||

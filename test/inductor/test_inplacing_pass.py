@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import operator
+
 import torch
 import torch._inductor.config as inductor_config
 from functorch import make_fx
@@ -135,6 +137,89 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         self._test(f)
 
+    def test_view_index_put_should_reinplace_copy_to_base(self):
+        def f(input_pos, val, cache):
+            cache_view = aten.reshape.default(cache, [4, -1])
+            val_view = aten.reshape.default(val, [-1])
+            updated = aten.index_put.default(cache_view, [input_pos], val_view)
+            updated_base = aten.reshape.default(updated, [4, 3, 4])
+            return aten.copy_.default(cache, updated_base)
+
+        input_pos = torch.tensor([1], device=device)
+        val = torch.randn(3, 4, device=device)
+        cache = torch.randn(4, 3, 4, device=device)
+
+        expected_cache = cache.clone()
+        expected = f(input_pos, val, expected_cache)
+
+        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put_.default, targets)
+        self.assertNotIn(aten.index_put.default, targets)
+        self.assertNotIn(aten.copy_.default, targets)
+
+        actual_cache = cache.clone()
+        actual = gm(input_pos, val, actual_cache)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_cache, expected_cache)
+
+    def test_view_index_put_keeps_copy_when_later_view_is_live(self):
+        def f(input_pos, val, cache):
+            cache_view = aten.reshape.default(cache, [4, -1])
+            live_view = aten.select.int(cache, 0, 0)
+            val_view = aten.reshape.default(val, [-1])
+            updated = aten.index_put.default(cache_view, [input_pos], val_view)
+            live_use = aten.sin.default(live_view)
+            updated_base = aten.reshape.default(updated, [4, 3, 4])
+            copied = aten.copy_.default(cache, updated_base)
+            return live_use, copied
+
+        input_pos = torch.tensor([1], device=device)
+        val = torch.randn(3, 4, device=device)
+        cache = torch.randn(4, 3, 4, device=device)
+
+        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertIn(aten.copy_.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+
+    def test_view_index_put_rejects_non_inverse_copy_back_view(self):
+        def f(input_pos, val, cache):
+            cache_view = aten.transpose.int(cache, 0, 1)
+            updated = aten.index_put.default(cache_view, [input_pos], val)
+            copied_view = aten.as_strided.default(updated, [2, 3], [1, 2])
+            return aten.copy_.default(cache, copied_view)
+
+        input_pos = torch.tensor([1], device=device)
+        val = torch.tensor([[10.0, 20.0]], device=device)
+        cache = torch.arange(6, device=device, dtype=torch.float32).reshape(2, 3)
+
+        expected_cache = cache.clone()
+        expected = f(input_pos, val, expected_cache)
+
+        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertIn(aten.copy_.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+
+        actual_cache = cache.clone()
+        actual = gm(input_pos, val, actual_cache)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_cache, expected_cache)
+
     def test_counters_functionalize_old(self):
         ReinplaceCounters.clear()
 
@@ -191,7 +276,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             ):
                 auto_functionalized_found = True
                 counter += len(node.meta["only_clone_these_tensors"])
-        assert auto_functionalized_found
+        if not auto_functionalized_found:
+            raise AssertionError
         return counter
 
     def test_view_inplaced_functionalize_v2(self):
@@ -413,6 +499,31 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             # Both list inputs failed to reinplace. So we should have emitted clones for them.
             self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
 
+    def test_generalized_scatter(self):
+        # This is an integration test for the reinplacing pass.
+        def fn(x_1):
+            a = torch.ones([2, 3])
+            c = torch.ones(2)
+            a[:, 0].copy_(c)
+
+            d = a.clone()
+            e = torch.ops.aten.as_strided.default(d, [2], [3], 0)
+            f = e.clone()
+
+            g = torch.zeros(2)
+            e.copy_(g)
+
+            h = torch.zeros(2, 3)
+            h[:, 0].copy_(f)
+
+            add_1 = d + h
+            return add_1
+
+        x = torch.randn(2, 3)
+        expected = fn(x)
+        result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
+        self.assertEqual(result, expected)
+
     @parametrize(
         "factory_op",
         [
@@ -450,6 +561,311 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         x = torch.randn(3, requires_grad=True, device=device)
         f(x)
         self.assertEqual(num_reinplacing_failures(), 0)
+
+    def test_with_effects_reinplace(self):
+        """Test that the reinplace pass correctly handles with_effects wrapped ops.
+
+        When an effectful op is wrapped with with_effects, the reinplace pass should:
+        1. Find the inner op in the inplaceable_ops registry
+        2. Correctly compute the mutated arg indices (offset by 2 for token and op)
+        3. Convert functional -> inplace when safe
+        4. Replace getitem nodes that extract results with input tensors
+        """
+        from torch._higher_order_ops.effects import with_effects
+        from torch._inductor.fx_passes.reinplace import inplaceable_ops, InplaceableOp
+
+        # Define a simple effectful op pair (functional and inplace)
+        @torch.library.custom_op("_test_effects::my_add", mutates_args=())
+        def my_add_functional(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + y
+
+        @my_add_functional.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        @torch.library.custom_op("_test_effects::my_add_", mutates_args={"x"})
+        def my_add_inplace(x: torch.Tensor, y: torch.Tensor) -> None:
+            x.add_(y)
+
+        @my_add_inplace.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> None:
+            pass
+
+        # Register the functional -> inplace mapping
+        inplaceable_ops[my_add_functional._opoverload] = InplaceableOp(
+            my_add_inplace._opoverload,
+            0,  # First tensor arg (x) is mutated
+        )
+
+        try:
+
+            def f(a, b):
+                # Create tensors from ops (not placeholders) so can_inplace works
+                x = a.clone()
+                y = b.clone()
+                token = torch.ops.aten._make_dep_token()
+                result = with_effects(token, my_add_functional._opoverload, x, y)
+                # with_effects returns (new_token, result_tensor)
+                return result[1]
+
+            a = torch.randn(3, device=device)
+            b = torch.randn(3, device=device)
+
+            gm = make_fx(f, tracing_mode="fake")(a, b)
+
+            # Find the with_effects node before reinplace
+            with_effects_nodes_before = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_before), 1)
+
+            # The inner op should be the functional version
+            inner_op_before = with_effects_nodes_before[0].args[1]
+            self.assertEqual(inner_op_before, my_add_functional._opoverload)
+
+            # Count getitem nodes before reinplace
+            getitem_nodes_before = [
+                n for n in gm.graph.nodes if n.target is operator.getitem
+            ]
+            self.assertGreater(len(getitem_nodes_before), 0)
+
+            # Run reinplace pass
+            reinplace_inplaceable_ops_core(gm.graph)
+
+            # Find the with_effects node after reinplace
+            with_effects_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_after), 1)
+
+            # The inner op should now be the inplace version
+            inner_op_after = with_effects_nodes_after[0].args[1]
+            self.assertEqual(inner_op_after, my_add_inplace._opoverload)
+
+            # Verify getitem nodes for result extraction are cleaned up
+            # (getitem[i] for i >= 1 on with_effects should be removed or replaced)
+            getitem_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is operator.getitem
+                and n.args[0] is with_effects_nodes_after[0]
+                and n.args[1] >= 1
+            ]
+            self.assertEqual(
+                len(getitem_nodes_after),
+                0,
+                "getitem nodes extracting result should be cleaned up",
+            )
+
+        finally:
+            if my_add_functional._opoverload in inplaceable_ops:
+                del inplaceable_ops[my_add_functional._opoverload]
+
+    def test_with_effects_reinplace_multiple_mutated_args(self):
+        """Test reinplace pass with multiple mutated args in with_effects wrapped ops.
+
+        This tests the case where an effectful op mutates multiple tensors,
+        such as collective operations that update multiple output buffers.
+        """
+        from torch._higher_order_ops.effects import with_effects
+        from torch._inductor.fx_passes.reinplace import inplaceable_ops, InplaceableOp
+
+        # Define an op that returns two tensors (functional version)
+        @torch.library.custom_op("_test_effects::my_swap", mutates_args=())
+        def my_swap_functional(
+            x: torch.Tensor, y: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            # Swap values between x and y
+            return y.clone(), x.clone()
+
+        @my_swap_functional.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return torch.empty_like(x), torch.empty_like(y)
+
+        # Define inplace version that mutates both x and y
+        @torch.library.custom_op("_test_effects::my_swap_", mutates_args={"x", "y"})
+        def my_swap_inplace(x: torch.Tensor, y: torch.Tensor) -> None:
+            tmp = x.clone()
+            x.copy_(y)
+            y.copy_(tmp)
+
+        @my_swap_inplace.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> None:
+            pass
+
+        # Register the functional -> inplace mapping with multiple mutated args
+        inplaceable_ops[my_swap_functional._opoverload] = InplaceableOp(
+            my_swap_inplace._opoverload,
+            (0, 1),  # Both x (arg 0) and y (arg 1) are mutated
+        )
+
+        try:
+
+            def f(a, b):
+                # Create tensors from ops (not placeholders) so can_inplace works
+                x = a.clone()
+                y = b.clone()
+                token = torch.ops.aten._make_dep_token()
+                result = with_effects(token, my_swap_functional._opoverload, x, y)
+                # with_effects returns (new_token, (tensor1, tensor2))
+                # Access both results
+                out = result[1]
+                return out[0], out[1]
+
+            a = torch.randn(3, device=device)
+            b = torch.randn(3, device=device)
+
+            gm = make_fx(f, tracing_mode="fake")(a, b)
+
+            # Find the with_effects node before reinplace
+            with_effects_nodes_before = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_before), 1)
+
+            # The inner op should be the functional version
+            inner_op_before = with_effects_nodes_before[0].args[1]
+            self.assertEqual(inner_op_before, my_swap_functional._opoverload)
+
+            # Run reinplace pass
+            reinplace_inplaceable_ops_core(gm.graph)
+
+            # Find the with_effects node after reinplace
+            with_effects_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_after), 1)
+
+            # The inner op should now be the inplace version
+            inner_op_after = with_effects_nodes_after[0].args[1]
+            self.assertEqual(inner_op_after, my_swap_inplace._opoverload)
+
+            # Verify getitem nodes for result extraction are cleaned up
+            # (getitem[i] for i >= 1 on with_effects should be removed or replaced)
+            getitem_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is operator.getitem
+                and n.args[0] is with_effects_nodes_after[0]
+                and n.args[1] >= 1
+            ]
+            self.assertEqual(
+                len(getitem_nodes_after),
+                0,
+                "getitem nodes extracting result tuple should be cleaned up",
+            )
+
+        finally:
+            if my_swap_functional._opoverload in inplaceable_ops:
+                del inplaceable_ops[my_swap_functional._opoverload]
+
+    def test_with_effects_reinplace_list_arg(self):
+        """Test reinplace pass with list arguments in with_effects wrapped ops.
+
+        This tests the case where the mutated argument is a list of tensors,
+        similar to wait_tensors operations that take a list of tensors to wait on.
+        """
+        from torch._higher_order_ops.effects import with_effects
+        from torch._inductor.fx_passes.reinplace import inplaceable_ops, InplaceableOp
+
+        # Define an op that takes a list of tensors (functional version)
+        @torch.library.custom_op("_test_effects::my_wait", mutates_args=())
+        def my_wait_functional(
+            tensors: list[torch.Tensor],
+        ) -> list[torch.Tensor]:
+            return [t.clone() for t in tensors]
+
+        @my_wait_functional.register_fake
+        def _(tensors: list[torch.Tensor]) -> list[torch.Tensor]:
+            return [torch.empty_like(t) for t in tensors]
+
+        # Define inplace version that mutates the list of tensors
+        @torch.library.custom_op("_test_effects::my_wait_", mutates_args={"tensors"})
+        def my_wait_inplace(tensors: list[torch.Tensor]) -> None:
+            pass  # In reality would wait on async ops
+
+        @my_wait_inplace.register_fake
+        def _(tensors: list[torch.Tensor]) -> None:
+            pass
+
+        # Register the functional -> inplace mapping
+        inplaceable_ops[my_wait_functional._opoverload] = InplaceableOp(
+            my_wait_inplace._opoverload,
+            0,  # First arg (tensors list) is mutated
+        )
+
+        try:
+
+            def f(a, b, c):
+                # Create tensors from ops (not placeholders) so can_inplace works
+                x = a.clone()
+                y = b.clone()
+                z = c.clone()
+                token = torch.ops.aten._make_dep_token()
+                result = with_effects(token, my_wait_functional._opoverload, [x, y, z])
+                # Access individual results from the list
+                out = result[1]
+                return out[0], out[1], out[2]
+
+            a = torch.randn(3, device=device)
+            b = torch.randn(3, device=device)
+            c = torch.randn(3, device=device)
+
+            gm = make_fx(f, tracing_mode="fake")(a, b, c)
+
+            # Find the with_effects node before reinplace
+            with_effects_nodes_before = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_before), 1)
+
+            # The inner op should be the functional version
+            inner_op_before = with_effects_nodes_before[0].args[1]
+            self.assertEqual(inner_op_before, my_wait_functional._opoverload)
+
+            # Run reinplace pass
+            reinplace_inplaceable_ops_core(gm.graph)
+
+            # Find the with_effects node after reinplace
+            with_effects_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_after), 1)
+
+            # The inner op should now be the inplace version
+            inner_op_after = with_effects_nodes_after[0].args[1]
+            self.assertEqual(inner_op_after, my_wait_inplace._opoverload)
+
+            # Verify getitem nodes for result extraction are cleaned up
+            # (getitem[i] for i >= 1 on with_effects should be removed or replaced)
+            getitem_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is operator.getitem
+                and n.args[0] is with_effects_nodes_after[0]
+                and n.args[1] >= 1
+            ]
+            self.assertEqual(
+                len(getitem_nodes_after),
+                0,
+                "getitem nodes extracting result list should be cleaned up",
+            )
+
+        finally:
+            if my_wait_functional._opoverload in inplaceable_ops:
+                del inplaceable_ops[my_wait_functional._opoverload]
 
 
 instantiate_parametrized_tests(TestReinplacingPassCorrectness)

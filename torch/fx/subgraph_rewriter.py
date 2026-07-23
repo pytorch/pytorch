@@ -1,6 +1,7 @@
 import copy
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, TYPE_CHECKING
 
 import torch
 
@@ -47,7 +48,7 @@ def _replace_attributes(gm: GraphModule, replacement: torch.nn.Module) -> None:
     if isinstance(replacement, GraphModule):
         replacement.graph.lint()
 
-    def try_get_attr(gm: torch.nn.Module, target: str) -> Optional[Any]:
+    def try_get_attr(gm: torch.nn.Module, target: str) -> Any | None:
         module_path, _, attr_name = target.rpartition(".")
         try:
             mod: torch.nn.Module = gm.get_submodule(module_path)
@@ -94,8 +95,8 @@ def _replace_attributes(gm: GraphModule, replacement: torch.nn.Module) -> None:
 @compatibility(is_backward_compatible=True)
 def replace_pattern(
     gm: GraphModule,
-    pattern: Union[Callable, GraphModule],
-    replacement: Union[Callable, GraphModule],
+    pattern: Callable[..., Any] | GraphModule,
+    replacement: Callable[..., Any] | GraphModule,
 ) -> list[Match]:
     """
     Matches all possible non-overlapping sets of operators and their
@@ -140,7 +141,7 @@ def replace_pattern(
 
 
         def pattern(w1, w2):
-            return torch.cat([w1, w2]).sum()
+            return torch.cat([w1, w2])
 
 
         def replacement(w1, w2):
@@ -224,16 +225,14 @@ def replace_pattern(
 @compatibility(is_backward_compatible=False)
 def replace_pattern_with_filters(
     gm: GraphModule,
-    pattern: Union[Callable, Graph, GraphModule],
-    replacement: Union[Callable, Graph, GraphModule, None] = None,
-    match_filters: Optional[
-        list[Callable[["InternalMatch", Graph, Graph], bool]]
-    ] = None,
+    pattern: Callable[..., Any] | Graph | GraphModule,
+    replacement: Callable[..., Any] | Graph | GraphModule | None = None,
+    match_filters: list[Callable[["InternalMatch", Graph, Graph], bool]] | None = None,
     ignore_literals: bool = False,
     # Placed at the end to avoid breaking backward compatibility
-    replacement_callback: Optional[
-        Callable[["InternalMatch", Graph, Graph], Graph]
-    ] = None,
+    replacement_callback: Callable[["InternalMatch", Graph, Graph], Graph]
+    | None = None,
+    node_name_match: str = "",
 ) -> list[ReplacedPatterns]:
     """
     See replace_pattern for documentation. This function is an overload with an additional match_filter argument.
@@ -246,25 +245,30 @@ def replace_pattern_with_filters(
         ``replacement_callback``: A function that takes in a match and returns a
             Graph to be used as the replacement. This allows you to construct a
             replacement graph based on the match.
+        ``node_name_match``: Node name to match. If not empty, it will try to match the node name.
     """
 
     return _replace_pattern(
-        gm, pattern, replacement, match_filters, ignore_literals, replacement_callback
+        gm,
+        pattern,
+        replacement,
+        match_filters,
+        ignore_literals,
+        replacement_callback,
+        node_name_match,
     )
 
 
 def _replace_pattern(
     gm: GraphModule,
-    pattern: Union[Callable, Graph, GraphModule],
-    replacement: Union[Callable, Graph, GraphModule, None] = None,
-    match_filters: Optional[
-        list[Callable[["InternalMatch", Graph, Graph], bool]]
-    ] = None,
+    pattern: Callable[..., Any] | Graph | GraphModule,
+    replacement: Callable[..., Any] | Graph | GraphModule | None = None,
+    match_filters: list[Callable[["InternalMatch", Graph, Graph], bool]] | None = None,
     ignore_literals: bool = False,
     # Placed at the end to avoid breaking backward compatibility
-    replacement_callback: Optional[
-        Callable[["InternalMatch", Graph, Graph], Graph]
-    ] = None,
+    replacement_callback: Callable[["InternalMatch", Graph, Graph], Graph]
+    | None = None,
+    node_name_match: str = "",
 ) -> list[ReplacedPatterns]:
     from torch.fx.passes.utils.matcher_utils import InternalMatch, SubgraphMatcher
 
@@ -279,7 +283,7 @@ def _replace_pattern(
     elif isinstance(pattern, Graph):
         pattern_graph = pattern
     else:
-        pattern_graph = symbolic_trace(pattern).graph
+        pattern_graph = symbolic_trace(pattern).graph  # type: ignore[arg-type]
 
     matcher = SubgraphMatcher(
         pattern_graph,
@@ -288,7 +292,9 @@ def _replace_pattern(
         remove_overlapping_matches=True,
         ignore_literals=ignore_literals,
     )
-    _matches: list[InternalMatch] = matcher.match(original_graph)
+    _matches: list[InternalMatch] = matcher.match(
+        original_graph, node_name_match=node_name_match
+    )
 
     # Filter out matches that don't match the filter
     _matches = [
@@ -307,10 +313,11 @@ def _replace_pattern(
     elif callable(replacement):
         common_replacement_graph = symbolic_trace(replacement).graph
     else:
-        assert (
-            replacement_callback is not None
-        ), "Must provide either a replacement GraphModule or a replacement callback"
-        common_replacement_graph = None
+        if replacement_callback is None:
+            raise AssertionError(
+                "Must provide either a replacement GraphModule or a replacement callback"
+            )
+        common_replacement_graph = None  # type: ignore[assignment]
 
     # As we progressively replace nodes, we'll need to keep track of how the match results should change
     match_changed_node: dict[Node, Node] = {}
@@ -322,9 +329,10 @@ def _replace_pattern(
                 match, original_graph, pattern_graph
             )
         else:
-            assert (
-                common_replacement_graph is not None
-            ), "Must provide either a replacement GraphModule or a replacement callback"
+            if common_replacement_graph is None:
+                raise AssertionError(
+                    "Must provide either a replacement GraphModule or a replacement callback"
+                )
             replacement_graph = common_replacement_graph
         replacement_placeholders = [
             n for n in replacement_graph.nodes if n.op == "placeholder"
@@ -334,7 +342,11 @@ def _replace_pattern(
 
         # Initialize `val_map` with mappings from placeholder nodes in
         # `replacement` to their corresponding node in `original_graph`
-        assert len(match.placeholder_nodes) == len(replacement_placeholders)
+        if len(match.placeholder_nodes) != len(replacement_placeholders):
+            raise AssertionError(
+                f"Placeholder count mismatch: {len(match.placeholder_nodes)} vs "
+                f"{len(replacement_placeholders)}"
+            )
         val_map: dict[Node, Node] = {}
         for rn, gn in zip(replacement_placeholders, match.placeholder_nodes):
             if isinstance(gn, Node):
@@ -382,7 +394,8 @@ def _replace_pattern(
         insert_point = (
             first_user_node if first_user_node is not None else first_next_node
         )
-        assert insert_point is not None, "The insert point can't be None"
+        if insert_point is None:
+            raise AssertionError("The insert point can't be None")
         with original_graph.inserting_before(insert_point):
             copied_returning_nodes = original_graph.graph_copy(
                 replacement_graph, val_map
@@ -398,9 +411,15 @@ def _replace_pattern(
 
         # Hook the output Node of the replacement subgraph in to the
         # original Graph at the correct location
-        assert len(match.returning_nodes) == len(copied_returning_nodes)  # type: ignore[arg-type]
+        if len(match.returning_nodes) != len(copied_returning_nodes):  # type: ignore[arg-type]
+            raise AssertionError(
+                f"Returning nodes count mismatch: {len(match.returning_nodes)} vs "
+                f"{len(copied_returning_nodes)}"  # pyrefly: ignore [bad-argument-type]
+            )
         for gn, copied_node in zip(match.returning_nodes, copied_returning_nodes):  # type: ignore[arg-type]
+            # pyrefly: ignore [bad-argument-type]
             gn.replace_all_uses_with(copied_node)
+            # pyrefly: ignore [unsupported-operation]
             match_changed_node[gn] = copied_node
         # Remove the original nodes
         for node in reversed(pattern_graph.nodes):

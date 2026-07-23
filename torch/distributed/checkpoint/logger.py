@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
 import functools
+import logging
 import time
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 from uuid import uuid4
 
@@ -9,8 +11,12 @@ import torch.distributed.c10d_logger as c10d_logger
 from torch.distributed.checkpoint.logging_handlers import DCP_LOGGER_NAME
 
 
+logger = logging.getLogger()
+
+
 __all__: list[str] = []
 
+# pyrefly: ignore [unknown-name]
 global _dcp_logger
 _dcp_logger = c10d_logger._get_or_create_logger(DCP_LOGGER_NAME)
 
@@ -25,15 +31,16 @@ def _msg_dict_from_dcp_method_args(*args, **kwargs) -> dict[str, Any]:
     msg_dict = {}
 
     # checkpoint ID can be passed in through the serializer or through the checkpoint id directly
-    storage_writer = kwargs.get("storage_writer", None)
-    storage_reader = kwargs.get("storage_reader", None)
-    planner = kwargs.get("planner", None)
+    storage_writer = kwargs.get("storage_writer")
+    storage_reader = kwargs.get("storage_reader")
+    planner = kwargs.get("planner")
 
-    checkpoint_id = kwargs.get("checkpoint_id", None)
+    checkpoint_id = kwargs.get("checkpoint_id")
     if not checkpoint_id and (serializer := storage_writer or storage_reader):
         checkpoint_id = getattr(serializer, "checkpoint_id", None)
 
     msg_dict["checkpoint_id"] = (
+        # pyrefly: ignore [unsupported-operation]
         str(checkpoint_id) if checkpoint_id is not None else checkpoint_id
     )
 
@@ -101,3 +108,14 @@ def _dcp_method_logger(
         return wrapper
 
     return decorator
+
+
+def _init_logger(rank: int):
+    logger.setLevel(logging.INFO)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        f"[{rank}] %(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)

@@ -1,5 +1,4 @@
 #include <torch/library.h>
-#include <ATen/core/boxing/KernelFunction.h>
 
 using torch::CppFunction;
 
@@ -20,12 +19,12 @@ namespace at {
 // We haven't made a decision on that yet so we are temporarily banning random
 // operations inside of vmap while we gather user feedback.
 
-template <typename... Args> Tensor unsupportedRandomOp(Args... args) {
+template <typename... Args> static Tensor unsupportedRandomOp(Args... args) {
   TORCH_CHECK(false, "vmap: We do not yet support calling random operations inside of vmap. ",
               "Please perform random operations outside of vmap as a workaround");
 }
 
-template <typename... Args> Tensor& unsupportedRandomOp_(Args... args) {
+template <typename... Args> static Tensor& unsupportedRandomOp_(Args... args) {
   TORCH_CHECK(false, "vmap: We do not yet support calling random operations inside of vmap. ",
               "Please perform random operations outside of vmap as a workaround");
 }
@@ -35,10 +34,6 @@ TORCH_LIBRARY_IMPL(_, VmapMode, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, VmapMode, m) {
-  // NB: I'd really like to register a special kernel like
-  // CppFunction::makeNamedNotSupported() to avoid listing out the types of everything.
-  // However, registering e.g. CppFunction::makeNamedNotSupported() as an implementation
-  // only works for operators that support boxing.
 #define TENSOROPTIONS std::optional<c10::ScalarType>, std::optional<c10::Layout>, std::optional<c10::Device>, std::optional<bool>
 
   // random operations (out-of-place)
@@ -72,22 +67,24 @@ TORCH_LIBRARY_IMPL(aten, VmapMode, m) {
   m.impl("random_", unsupportedRandomOp_<Tensor&, std::optional<Generator>>);
 
   m.impl("rand_like", unsupportedRandomOp<const Tensor&, TENSOROPTIONS, std::optional<MemoryFormat>>);
+  m.impl("rand_like.generator", unsupportedRandomOp<const Tensor&, std::optional<Generator>, TENSOROPTIONS, std::optional<MemoryFormat>>);
   m.impl("randn_like", unsupportedRandomOp<const Tensor&, TENSOROPTIONS, std::optional<MemoryFormat>>);
+  m.impl("randn_like.generator", unsupportedRandomOp<const Tensor&, std::optional<Generator>, TENSOROPTIONS, std::optional<MemoryFormat>>);
 
   m.impl("randint_like", unsupportedRandomOp<const Tensor&, int64_t, TENSOROPTIONS, std::optional<MemoryFormat>>);
+  m.impl("randint_like.Tensor", unsupportedRandomOp<const Tensor&, const Tensor&, TENSOROPTIONS, std::optional<MemoryFormat>>);
   m.impl("randint_like.low_dtype", unsupportedRandomOp<const Tensor&, int64_t, int64_t, TENSOROPTIONS, std::optional<MemoryFormat>>);
+  m.impl("randint_like.generator", unsupportedRandomOp<const Tensor&, int64_t, std::optional<Generator>, TENSOROPTIONS, std::optional<MemoryFormat>>);
+  m.impl("randint_like.Tensor_generator", unsupportedRandomOp<const Tensor&, const Tensor&, std::optional<Generator>, TENSOROPTIONS, std::optional<MemoryFormat>>);
+  m.impl("randint_like.low_generator_dtype", unsupportedRandomOp<const Tensor&, int64_t, int64_t, std::optional<Generator>, TENSOROPTIONS, std::optional<MemoryFormat>>);
 
   m.impl("rand", unsupportedRandomOp<IntArrayRef, TENSOROPTIONS>);
   m.impl("rand.generator", unsupportedRandomOp<IntArrayRef, std::optional<Generator>, TENSOROPTIONS>);
-  m.impl("rand.names", unsupportedRandomOp<IntArrayRef, std::optional<DimnameList>, TENSOROPTIONS>);
-  m.impl("rand.generator_with_names", unsupportedRandomOp<IntArrayRef, std::optional<Generator>, std::optional<DimnameList>, TENSOROPTIONS>);
   m.impl("rand.out", unsupportedRandomOp_<IntArrayRef, Tensor&>);
   m.impl("rand.generator_out", unsupportedRandomOp_<IntArrayRef, std::optional<Generator>, Tensor&>);
 
   m.impl("randn", unsupportedRandomOp<IntArrayRef, TENSOROPTIONS>);
   m.impl("randn.generator", unsupportedRandomOp<IntArrayRef, std::optional<Generator>, TENSOROPTIONS>);
-  m.impl("randn.names", unsupportedRandomOp<IntArrayRef, std::optional<DimnameList>, TENSOROPTIONS>);
-  m.impl("randn.generator_with_names", unsupportedRandomOp<IntArrayRef, std::optional<Generator>, std::optional<DimnameList>, TENSOROPTIONS>);
   m.impl("randn.out", unsupportedRandomOp_<IntArrayRef, Tensor&>);
   m.impl("randn.generator_out", unsupportedRandomOp_<IntArrayRef, std::optional<Generator>, Tensor&>);
 

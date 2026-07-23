@@ -2,12 +2,14 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/mps/MPSGeneratorImpl.h>
 #include <ATen/native/RNN.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_lstm_mps_native.h>
 #include <ATen/ops/lstm_mps_backward_native.h>
 #import <MetalPerformanceShadersGraph/MPSGraphRNNOps.h>
+#import <MetalPerformanceShadersGraph/MPSGraphRandomOps.h>
 
 namespace at::native {
 
@@ -126,15 +128,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
     NSMutableArray<MPSGraphTensor*>* recurrentKernelWeightsList_ = nil;
     NSMutableArray<MPSGraphTensor*>* biasList_ = nil;
     NSMutableArray<MPSGraphTensor*>* recurrentBiasList_ = nil;
+    MPSGraphTensor* dropoutStateTensor_ = nil;
   };
 
+  const bool apply_dropout = dropout_p > 0.0 && train && num_layers > 1;
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "lstm_" + getTensorsStringKey({input, hx[0], hx[1]}) + getMPSTypeString(input) + "_num_layers_" +
+    std::string key = "lstm_" + getTensorsStringKey({input, hx[0], hx[1]}) + getMPSTypeString(input) + "_num_layers_" +
         std::to_string(num_layers) + "_bidirectional_" + std::to_string(bidirectional) + "_has_biases_" +
         std::to_string(has_biases) + "_dropout_" + std::to_string(dropout_p) + "_batch_first_" +
-        std::to_string(batch_first);
+        std::to_string(batch_first) + "_train_" + std::to_string(train);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       NSMutableArray<MPSGraphTensor*>* kernelWeightsList = [[NSMutableArray alloc] initWithCapacity:params.size()];
       NSMutableArray<MPSGraphTensor*>* recurrentKernelWeightsList =
@@ -142,6 +146,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
       NSMutableArray<MPSGraphTensor*>* kernelBiasList = [[NSMutableArray alloc] initWithCapacity:params.size()];
       NSMutableArray<MPSGraphTensor*>* recurrentBiasList = [[NSMutableArray alloc] initWithCapacity:params.size()];
       NSMutableArray<MPSGraphTensor*>* layersOutputsList = [[NSMutableArray alloc] initWithCapacity:num_layers];
+      NSMutableArray<MPSGraphTensor*>* dropoutMasksList = [[NSMutableArray alloc] initWithCapacity:num_layers];
 
       for (const auto i : c10::irange(total_layers)) {
         [kernelWeightsList
@@ -169,6 +174,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
           stateTensor,
           cellStateTensor,
       };
+      MPSGraphTensor* dropoutStateTensor = nil;
+      MPSGraphTensor* dropoutState = nil;
+      if (apply_dropout) {
+        dropoutStateTensor =
+            mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
+        dropoutState = dropoutStateTensor;
+      }
 
       if (batch_first) {
         inputTensor = [mpsGraph transposeTensor:inputTensor dimension:0 withDimension:1 name:nil];
@@ -205,13 +217,45 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
                                             name:nil];
 
         inputTensor_ = [outputs objectAtIndex:0];
-        // no need to keep the final layer output copy as it is
-        // returned anyway and not used in backprop
+        if (apply_dropout && (i != num_layers - 1)) {
+          // MPSGraph's dropoutTensor:rate:name: has no seed input, so the
+          // cached graph reuses the same mask on every forward. This builds
+          // dropout manually from a Philox-seeded uniform random tensor instead and
+          // chains the returned state into the next layer's call.
+          MPSDataType inputDType = getMPSDataType(input);
+          MPSGraphRandomOpDescriptor* randDesc =
+              [MPSGraphRandomOpDescriptor descriptorWithDistribution:MPSGraphRandomDistributionUniform
+                                                            dataType:MPSDataTypeFloat32];
+          randDesc.min = 0.0f;
+          randDesc.max = 1.0f;
+          MPSGraphTensor* shapeTensor = [mpsGraph shapeOfTensor:inputTensor_ name:nil];
+          NSArray<MPSGraphTensor*>* randResults = [mpsGraph randomTensorWithShapeTensor:shapeTensor
+                                                                             descriptor:randDesc
+                                                                            stateTensor:dropoutState
+                                                                                   name:nil];
+          MPSGraphTensor* randTensor = randResults[0];
+          dropoutState = randResults[1];
+
+          MPSGraphTensor* threshold = [mpsGraph constantWithScalar:dropout_p dataType:MPSDataTypeFloat32];
+          MPSGraphTensor* keepMask = [mpsGraph greaterThanOrEqualToWithPrimaryTensor:randTensor
+                                                                     secondaryTensor:threshold
+                                                                                name:nil];
+          MPSGraphTensor* keepMaskCast = [mpsGraph castTensor:keepMask toType:inputDType name:nil];
+          // dropout_p == 1 keeps nothing; 1/(1-p) would be inf and 0*inf NaN.
+          MPSGraphTensor* invKeepProb = [mpsGraph constantWithScalar:(dropout_p >= 1.0 ? 0.0 : 1.0 / (1.0 - dropout_p))
+                                                            dataType:inputDType];
+          MPSGraphTensor* scaledMask = [mpsGraph multiplicationWithPrimaryTensor:keepMaskCast
+                                                                 secondaryTensor:invKeepProb
+                                                                            name:nil];
+          inputTensor_ = [mpsGraph multiplicationWithPrimaryTensor:inputTensor_ secondaryTensor:scaledMask name:nil];
+          [dropoutMasksList addObject:[mpsGraph expandDimsOfTensor:scaledMask axis:0 name:nil]];
+        }
+        // Save what the next layer actually consumes (post-dropout); backward
+        // uses it as that layer's source tensor and, with the masks appended
+        // after the outputs below, routes gradients through the dropout. The
+        // final layer's output is returned anyway and not used in backprop.
         if (i != num_layers - 1) {
           [layersOutputsList addObject:[mpsGraph expandDimsOfTensor:inputTensor_ axis:0 name:nil]];
-        }
-        if (dropout_p > 0.0 && train && (i != num_layers - 1)) {
-          inputTensor_ = [mpsGraph dropoutTensor:inputTensor_ rate:dropout_p name:nil];
         }
 
         if (bidirectional) {
@@ -267,6 +311,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
       MPSGraphTensor* outputCellStates = [mpsGraph concatTensors:outputCellStateArray dimension:0 name:nil];
       MPSGraphTensor* outputZStates = [mpsGraph concatTensors:outputZStateArray dimension:0 name:nil];
       MPSGraphTensor* outputCellStatesFwd = [mpsGraph concatTensors:outputCellStateFwdArray dimension:0 name:nil];
+      // With dropout, the scaled masks are stacked after the (num_layers - 1)
+      // post-dropout layer outputs; backward slices them back out.
+      if (apply_dropout) {
+        [layersOutputsList addObjectsFromArray:dropoutMasksList];
+      }
       MPSGraphTensor* layersOutputs =
           (num_layers > 1) ? [mpsGraph concatTensors:layersOutputsList dimension:0 name:nil] : nil;
 
@@ -278,6 +327,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
       newCachedGraph->recurrentKernelWeightsList_ = recurrentKernelWeightsList;
       newCachedGraph->biasList_ = kernelBiasList;
       newCachedGraph->recurrentBiasList_ = recurrentBiasList;
+      newCachedGraph->dropoutStateTensor_ = dropoutStateTensor;
     });
 
     NSMutableArray<MPSGraphTensor*>* kernelWeightsList = cachedGraph->kernelWeightsList_;
@@ -306,6 +356,23 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
     [feeds setObject:selfState.getMPSGraphTensorData() forKey:selfState.getMPSGraphTensor()];
     [feeds setObject:selfCellState.getMPSGraphTensorData() forKey:selfCellState.getMPSGraphTensor()];
 
+    if (cachedGraph->dropoutStateTensor_) {
+      auto mps_gen =
+          get_generator_or_default<at::MPSGeneratorImpl>(std::nullopt, at::mps::detail::getDefaultMPSGenerator());
+      MPSNDArrayDescriptor* stateDesc =
+          [MPSNDArrayDescriptor descriptorWithDataType:MPSDataTypeInt32 shape:@[ @(at::mps::detail::PHILOX_STATE_N) ]];
+      MPSNDArray* stateNDArray = [[[MPSNDArray alloc] initWithDevice:stream->device()
+                                                          descriptor:stateDesc] autorelease];
+      {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+        mps_gen->update_philox_counters();
+        [stateNDArray writeBytes:mps_gen->state_data() strideBytes:nil];
+      }
+      MPSGraphTensorData* stateTensorData = [[[MPSGraphTensorData alloc] initWithMPSNDArray:stateNDArray] autorelease];
+      [feeds setObject:stateTensorData forKey:cachedGraph->dropoutStateTensor_];
+    }
+
     auto dims = getTensorShape(cachedGraph->outputTensors_[0]);
     Tensor output = at::empty(IntArrayRef(dims), input.options());
     Tensor hy = at::empty_like(hx[0], input.options());
@@ -322,13 +389,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
     Placeholder outputPlaceholder3 = Placeholder(cachedGraph->outputTensors_[3], zState);
     Placeholder outputPlaceholder4 = Placeholder(cachedGraph->outputTensors_[4], cellStateFwd);
 
-    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = [@{
+    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = [[@{
       outputPlaceholder0.getMPSGraphTensor() : outputPlaceholder0.getMPSGraphTensorData(),
       outputPlaceholder1.getMPSGraphTensor() : outputPlaceholder1.getMPSGraphTensorData(),
       outputPlaceholder2.getMPSGraphTensor() : outputPlaceholder2.getMPSGraphTensorData(),
       outputPlaceholder3.getMPSGraphTensor() : outputPlaceholder3.getMPSGraphTensorData(),
       outputPlaceholder4.getMPSGraphTensor() : outputPlaceholder4.getMPSGraphTensorData(),
-    } mutableCopy];
+    } mutableCopy] autorelease];
 
     if (num_layers > 1) {
       Placeholder outputPlaceholder5 = Placeholder(cachedGraph->outputTensors_[5], layerOutputs);
@@ -356,7 +423,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                                                bool bidirectional,
                                                                                bool batch_first) {
   using namespace mps;
-  bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+  bool is_macos_14_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_14_4);
 
   const Tensor& grad_y_r = grad_y_opt.value_or(Tensor());
   const Tensor& grad_hy_r = grad_hy_opt.value_or(Tensor());
@@ -408,10 +475,12 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
   // Get stream
   MPSStream* stream = getCurrentMPSStream();
   @autoreleasepool {
-    string key = "lstm_backward_" + getTensorsStringKey({input, z_state, cell_state_fwd, grad_y, grad_cy, grad_hy}) +
-        getMPSTypeString(input) + "_num_layers_" + std::to_string(num_layers) + "_bidirectional_" +
-        std::to_string(bidirectional) + "_has_biases_" + std::to_string(has_biases) + "_batch_first_" +
-        std::to_string(batch_first);
+    const bool apply_dropout = dropout_p > 0.0 && train && num_layers > 1;
+    std::string key = "lstm_backward_" +
+        getTensorsStringKey({input, z_state, cell_state_fwd, grad_y, grad_cy, grad_hy}) + getMPSTypeString(input) +
+        "_num_layers_" + std::to_string(num_layers) + "_bidirectional_" + std::to_string(bidirectional) +
+        "_has_biases_" + std::to_string(has_biases) + "_batch_first_" + std::to_string(batch_first) + "_dropout_" +
+        std::to_string(dropout_p) + "_train_" + std::to_string(train);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       NSMutableArray<MPSGraphTensor*>* kernelWeightsList = [[NSMutableArray alloc] initWithCapacity:params.size()];
       NSMutableArray<MPSGraphTensor*>* recurrentKernelWeightsList =
@@ -523,14 +592,10 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
         if (i == 0) {
           iterationInputTensor_ = inputTensor;
         } else {
-          iterationInputTensor_ = [mpsGraph sliceTensor:layersOutputsTensor
-                                              dimension:0
-                                                  // the last element in layersOutputsTensor
-                                                  // contains **inputs** for the **last** layer
-                                                  // and so on
-                                                  start:i - num_layers
-                                                 length:1
-                                                   name:nil];
+          // Entry j holds the (post-dropout) input to layer j + 1; with
+          // dropout, the scaled masks follow after entry num_layers - 2, so
+          // index from the front rather than the end.
+          iterationInputTensor_ = [mpsGraph sliceTensor:layersOutputsTensor dimension:0 start:i - 1 length:1 name:nil];
           if (is_macos_14_4_or_newer) {
             // Prevents shape optimization bug in kernel when num_layers > 2
             iterationInputTensor_ = [mpsGraph identityWithTensor:iterationInputTensor_ name:nil];
@@ -555,6 +620,23 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                      name:nil];
 
         gradientTensor_ = [outputs objectAtIndex:0];
+        if (apply_dropout && i > 0) {
+          // The gradient just computed is w.r.t. layer i's post-dropout
+          // input; multiply by the scaled mask saved by forward to get the
+          // gradient w.r.t. layer i-1's raw output.
+          MPSGraphTensor* maskTensor = [mpsGraph sliceTensor:layersOutputsTensor
+                                                   dimension:0
+                                                       start:(num_layers - 1) + (i - 1)
+                                                      length:1
+                                                        name:nil];
+          if (is_macos_14_4_or_newer) {
+            maskTensor = [mpsGraph identityWithTensor:maskTensor name:nil];
+          }
+          maskTensor = [mpsGraph squeezeTensor:maskTensor axis:0 name:nil];
+          gradientTensor_ = [mpsGraph multiplicationWithPrimaryTensor:gradientTensor_
+                                                      secondaryTensor:maskTensor
+                                                                 name:nil];
+        }
         if (bidirectional) {
           int outputIter = 1;
           auto gradRecWeightsBidirectional = [outputs objectAtIndex:outputIter++];

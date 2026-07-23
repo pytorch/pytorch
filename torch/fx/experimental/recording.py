@@ -1,13 +1,24 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
 import functools
 import inspect
 import itertools
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, ParamSpec, TYPE_CHECKING, TypeVar
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 import torch
 import torch.utils._pytree as pytree
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv, TrackedFake
 
 
 log = logging.getLogger(__name__)
@@ -80,21 +91,21 @@ __all__ = [
 @dataclass
 class ShapeEnvEvent:
     # ShapeEnv method.
-    f: Callable
+    f: Callable[..., Any]
 
     # Arguments and keyword arguments called with.
-    args: Optional[list[Any]] = None
-    kwargs: Optional[dict[str, Any]] = None
+    args: list[object] | None = None
+    kwargs: dict[str, Any] | None = None
 
     # List of tracked_fakes at the time the method was called.
-    tracked_fakes: Optional[list[Any]] = None
+    tracked_fakes: list[TrackedFake] | None = None
 
     # Name of the captured event.
     # Used for special handling of particular methods.
-    name: Optional[str] = None
+    name: str | None = None
 
     # Replay itself, but using shape_env as self.
-    def run(self, shape_env=None) -> Any:
+    def run(self, shape_env: ShapeEnv | None = None) -> Any:
         from torch.fx.experimental.symbolic_shapes import (
             is_symbolic,
             ShapeEnv,
@@ -103,10 +114,16 @@ class ShapeEnvEvent:
 
         # Special handling for the constructor event.
         if self.f is ShapeEnv:
-            assert shape_env is None and self.args is None and self.kwargs is not None
+            if not (
+                shape_env is None and self.args is None and self.kwargs is not None
+            ):
+                raise AssertionError(
+                    "ShapeEnv constructor requires shape_env=None, args=None, kwargs set"
+                )
             return ShapeEnv(**self.kwargs)
 
-        assert shape_env is not None
+        if shape_env is None:
+            raise AssertionError("shape_env is required for non-constructor events")
         args = list(self.args or [])
         kwargs = dict(self.kwargs or {})
 
@@ -132,13 +149,15 @@ class ShapeEnvEvent:
             # If, at some point, we created an FX node, it means that translation validation is on.
             # It also means we are building an FX graph for symbolic shapes at shape_env.graph, and
             # we are tracking node names at shape_env.name_to_node.
-            assert hasattr(shape_env, "name_to_node")
+            if not hasattr(shape_env, "name_to_node"):
+                raise AssertionError("shape_env missing name_to_node attribute")
             name_to_node = shape_env.name_to_node  # type: ignore[attr-defined]
-            assert x.name in name_to_node
+            if x.name not in name_to_node:
+                raise AssertionError(f"Node {x.name} not found in name_to_node")
             return name_to_node[x.name]
 
-        # Replaces the value of an specific argument by the result of fn.
-        def replacearg(index: int, key: str, fn: Callable):
+        # Replaces the value of a specific argument by the result of fn.
+        def replacearg(index: int, key: str, fn: Callable[..., Any]) -> None:
             if index < len(args):
                 args[index] = fn(args[index])
             if key in kwargs:
@@ -155,7 +174,7 @@ class ShapeEnvEvent:
                 fn=lambda args: tuple(maybe_convert_node(a) for a in args),
             )
         if self.is_evaluate_expr() or self.is_defer_runtime_assert():
-            # ShapeEnv.evaluate_expr and ShapeEnv.defer_runtime_assert:
+            # ShapeEnv.evaluate_expr and ShapeEnv.guard_or_defer_runtime_assert:
             # "fx_node" parameter is an (optional) FX node that represents the evaluate expression.
             # They must be replaced, since it will be part of a "call_function" FX node for
             # torch._assert, which will be added to the FX graph of the new shape_env.
@@ -175,7 +194,7 @@ class ShapeEnvEvent:
         return self.name == "evaluate_expr"
 
     def is_defer_runtime_assert(self) -> bool:
-        return self.name == "defer_runtime_assert"
+        return self.name == "guard_or_defer_runtime_assert"
 
 
 NEST = 0
@@ -187,12 +206,15 @@ NEST = 0
 #   2. SymInt, SymFloat, or SymBool arguments
 # If we find more than one object of any of the above types, we
 # also check that the ShapeEnv instance is the same for all of them.
-def _extract_shape_env_and_assert_equal(args, kwargs):
+def _extract_shape_env_and_assert_equal(
+    args: tuple[object, ...] | list[object], kwargs: dict[str, object]
+) -> ShapeEnv | None:
     from torch.fx.experimental.symbolic_shapes import is_symbolic, ShapeEnv, SymTypes
 
-    def assert_equal(old: Optional[ShapeEnv], new: ShapeEnv) -> ShapeEnv:
+    def assert_equal(old: ShapeEnv | None, new: ShapeEnv) -> ShapeEnv:
         if old is not None:
-            assert old is new, "call with different ShapeEnv"
+            if old is not new:
+                raise AssertionError("call with different ShapeEnv")
         return new
 
     shape_env = None
@@ -200,6 +222,7 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
         if isinstance(val, ShapeEnv):
             shape_env = assert_equal(shape_env, val)
         if isinstance(val, SymTypes) and is_symbolic(val):
+            # pyrefly: ignore [bad-argument-type]
             shape_env = assert_equal(shape_env, val.node.shape_env)
 
     return shape_env
@@ -214,6 +237,10 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
 # save_tracked_fakes: saves a snapshot of the TrackedFake list.
 # This is used when calling ShapeEnv.produce_guards at arbitrary points in time.
 #
+# name: the name of the function being recorded. Normally (and by default) this
+# is taken from the decorated function but can be set if you need to override
+# it.
+#
 # When to save the list of TrackedFake?
 # =====================================
 # We should save the list of TrackedFake whenever the translation validation
@@ -224,22 +251,29 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
 #
 # At the moment, there are 2 methods that save the list:
 #   - ShapeEnv.evaluate_expr
-#   - ShapeEnv.defer_runtime_assert
-def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
-    def decorator(fn: Callable) -> Callable:
-        assert callable(fn)
+#   - ShapeEnv.guard_or_defer_runtime_assert
+def record_shapeenv_event(
+    *, save_tracked_fakes: bool = False, name: str | None = None
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    def decorator(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+        if not callable(fn):
+            raise AssertionError(f"Expected callable, got {type(fn)}")
         args = inspect.getfullargspec(fn).args
-        assert args and args[0] == "self", (
-            "record_shapeenv_event should only wrap methods on ShapeEnv; refactor your "
-            "code so that it calls into a method on ShapeEnv"
-        )
-        name = fn.__name__
+        if not (args and args[0] == "self"):
+            raise AssertionError(
+                "record_shapeenv_event should only wrap methods on ShapeEnv; refactor your "
+                "code so that it calls into a method on ShapeEnv"
+            )
+        nonlocal name
+        if name is None:
+            name = fn.__name__
 
         @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-            assert isinstance(args[0], ShapeEnv)
+            if not isinstance(args[0], ShapeEnv):
+                raise AssertionError(f"Expected ShapeEnv, got {type(args[0])}")
 
             global NEST
 
@@ -248,12 +282,13 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
             )
             NEST += 1
 
-            def retlog(r):
+            def retlog(r: _R) -> _R:
                 trace_shape_events_log.debug("%s-> %s", " " * (NEST - 1), r)
                 return r
 
+            shape_env = args[0]
+
             try:
-                shape_env = args[0]
                 if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
@@ -280,7 +315,11 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                     )
                     # Record the event for 'fn'.
                     event = ShapeEnvEvent(
-                        fn, list(args), kwargs, tracked_fakes, name=fn.__name__
+                        fn,
+                        list(args),
+                        kwargs,
+                        tracked_fakes,
+                        name=name,
                     )
                     # Play the event on this ShapeEnv.
                     # NB: It's important to put the event first, because running
@@ -296,7 +335,10 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                         raise
 
             except Exception:
-                log.error(  # noqa: G201
+                if not shape_env.should_record_events or shape_env.is_recording:
+                    # If ShapeEnv is disabled or already recording an event, re-raise the exception without logging.
+                    raise
+                log.error(
                     "failed while running %s(*%s, **%s)",
                     name,
                     args[1:],
@@ -317,11 +359,14 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
 # It assumes the first event is the constructor call.
 #
 # fn: transforms an old FX node into one corresponding to the newly created ShapeEnv.
-def replay_shape_env_events(events):
+def replay_shape_env_events(events: list[ShapeEnvEvent]) -> ShapeEnv:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     constructor_event = events[0]
-    assert constructor_event.f == ShapeEnv
+    if constructor_event.f != ShapeEnv:
+        raise AssertionError(
+            f"First event must be ShapeEnv constructor, got {constructor_event.f}"
+        )
 
     # Constructs the new ShapeEnv.
     shape_env = constructor_event.run()
@@ -344,25 +389,25 @@ def replay_shape_env_events(events):
 # ShapeEnv.produce_guards.
 @dataclass
 class FakeTensorMeta:
-    tensor_size: tuple[Union[int, torch.SymInt], ...]
-    tensor_stride: tuple[Union[int, torch.SymInt], ...]
-    tensor_storage_offset: Union[int, torch.SymInt]
+    tensor_size: tuple[int | torch.SymInt, ...]
+    tensor_stride: tuple[int | torch.SymInt, ...]
+    tensor_storage_offset: int | torch.SymInt
     is_nested: bool
 
-    def size(self) -> tuple[Union[int, torch.SymInt], ...]:
+    def size(self) -> tuple[int | torch.SymInt, ...]:
         return self.tensor_size
 
-    def stride(self) -> tuple[Union[int, torch.SymInt], ...]:
+    def stride(self) -> tuple[int | torch.SymInt, ...]:
         return self.tensor_stride
 
-    def storage_offset(self) -> Union[int, torch.SymInt]:
+    def storage_offset(self) -> int | torch.SymInt:
         return self.tensor_storage_offset
 
     def dim(self) -> int:
         return len(self.tensor_size)
 
     @staticmethod
-    def from_fake(fake) -> "FakeTensorMeta":
+    def from_fake(fake: torch.Tensor) -> FakeTensorMeta:
         return FakeTensorMeta(
             fake.size(), fake.stride(), fake.storage_offset(), fake.is_nested
         )
@@ -414,7 +459,12 @@ class FakeTensorMeta:
 
 # Checks whether the state of two ShapeEnv are equal w.r.t. the guards
 # returned by ShapeEnv.produce_guards.
-def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value):
+def shape_env_check_state_equal(
+    env1: ShapeEnv,
+    env2: ShapeEnv,
+    non_state_variable_names: tuple[str, ...],
+    map_value: Callable[[str, object], object],
+) -> None:
     # Collect and remove variables that don't necessarily represent the state
     # of a ShapeEnv. Note: we copy the dictionary so that we don't modify the
     # instance itself.
@@ -444,7 +494,7 @@ def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value)
     # Here, we allow the value of each field to be mapped, so that we appropriately
     # compare the two values.
     def compare_vars(
-        map_value: Callable[[str, Any], Any]
+        map_value: Callable[[str, object], object],
     ) -> list[tuple[str, str, str]]:
         env1_set, env2_set = set(env1_vars), set(env2_vars)
 

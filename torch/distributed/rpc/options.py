@@ -1,13 +1,10 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
-
 import torch
-from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
 
-from . import constants as rpc_contants
+from . import _is_tensorpipe_available, constants as rpc_contants
 
 
-DeviceType = Union[int, str, torch.device]
+DeviceType = int | str | torch.device
 
 __all__ = ["TensorPipeRpcBackendOptions"]
 
@@ -23,7 +20,7 @@ def _to_device(device: DeviceType) -> torch.device:
 
 
 def _to_device_map(
-    device_map: dict[DeviceType, DeviceType]
+    device_map: dict[DeviceType, DeviceType],
 ) -> dict[torch.device, torch.device]:
     full_device_map: dict[torch.device, torch.device] = {}
     reverse_map: dict[torch.device, torch.device] = {}
@@ -43,6 +40,13 @@ def _to_device_list(devices: list[DeviceType]) -> list[torch.device]:
     return list(map(_to_device, devices))
 
 
+if _is_tensorpipe_available:  # type: ignore[has-type]
+    from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
+else:
+    _TensorPipeRpcBackendOptionsBase = object  # type: ignore[assignment, misc]
+
+
+# pyrefly: ignore [invalid-inheritance]
 class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
     r"""
     The backend options for
@@ -83,10 +87,10 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         num_worker_threads: int = rpc_contants.DEFAULT_NUM_WORKER_THREADS,
         rpc_timeout: float = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
         init_method: str = rpc_contants.DEFAULT_INIT_METHOD,
-        device_maps: Optional[dict[str, dict[DeviceType, DeviceType]]] = None,
-        devices: Optional[list[DeviceType]] = None,
-        _transports: Optional[list] = None,
-        _channels: Optional[list] = None,
+        device_maps: dict[str, dict[DeviceType, DeviceType]] | None = None,
+        devices: list[DeviceType] | None = None,
+        _transports: list | None = None,
+        _channels: list | None = None,
     ):
         full_device_maps = (
             {}
@@ -127,7 +131,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             >>> options = TensorPipeRpcBackendOptions(
             >>>     num_worker_threads=8,
             >>>     device_maps={"worker1": {0: 1}}
-            >>>     # maps worker0's cuda:0 to worker1's cuda:1
+            >>> # maps worker0's cuda:0 to worker1's cuda:1
             >>> )
             >>> options.set_device_map("worker1", {1: 2})
             >>> # maps worker0's cuda:1 to worker1's cuda:2

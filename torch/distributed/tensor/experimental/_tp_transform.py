@@ -2,7 +2,7 @@
 import copy
 import operator
 from collections.abc import Sequence
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
@@ -10,9 +10,9 @@ from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpSchema,
+    OpSpec,
     OutputSharding,
     OutputSpecType,
-    PlacementStrategy,
 )
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.parallel.style import ColwiseParallel, ParallelStyle
@@ -60,7 +60,8 @@ def tensor_parallel_transformation(
             exported_program.graph_signature,
             parallel_strategies,
         )(gm)
-        assert res is not None
+        if res is None:
+            raise AssertionError
         gm = res.graph_module
 
     return exported_program._update(gm, sig, state_dict=state_dict)
@@ -69,8 +70,8 @@ def tensor_parallel_transformation(
 class _TensorParallelTransformPass(PassBase):
     """
     This pass is responsible for transforming a single-device graph into a tensor parallel
-    graph. It will mark the placement strategy of each node in the graph,
-    partition the graph into distributed graph, then shard the parameters/buffers accordingly.
+    graph. It will mark the OpSpec of each node in the graph, partition the graph into
+    distributed graph, then shard the parameters/buffers accordingly.
     """
 
     def __init__(
@@ -116,7 +117,8 @@ def _generate_parameter_and_buffer_placements(
     for linear_fqn, parallel_style in parallel_strategies.items():
         weight_fqn = f"{linear_fqn}.weight"
         bias_fqn = f"{linear_fqn}.bias"
-        assert weight_fqn in params_and_buffers
+        if weight_fqn not in params_and_buffers:
+            raise AssertionError
         parameter_placements[weight_fqn] = (
             Shard(0) if parallel_style == ColwiseParallel else Shard(1)
         )
@@ -132,11 +134,11 @@ def _mark_tensor_parallel_shardings(
     graph_signature: ExportGraphSignature,
     mesh: DeviceMesh,
     parameter_placements: dict[str, Placement],
-) -> dict[Node, PlacementStrategy]:
+) -> dict[Node, OpSpec]:
     """
     Mark the placement strategies of the parameter and buffer placeholder nodes.
     """
-    placement_strategies: dict[Node, PlacementStrategy] = {}
+    placement_strategies: dict[Node, OpSpec] = {}
     num_params_and_buffers = len(graph_signature.inputs_to_parameters) + len(
         graph_signature.inputs_to_buffers
     )
@@ -184,13 +186,16 @@ def _mark_sharding(
     graph_signature: ExportGraphSignature,
     mesh: DeviceMesh,
     parameter_placements: dict[str, Placement],
-) -> dict[Node, PlacementStrategy]:
+) -> dict[Node, OpSpec]:
     """
     Mark the sharding strategy for each node in the graph module.
     """
-    placement_strategies: dict[
-        Node, PlacementStrategy
-    ] = _mark_tensor_parallel_shardings(gm, graph_signature, mesh, parameter_placements)
+    placement_strategies: dict[Node, OpSpec] = _mark_tensor_parallel_shardings(
+        gm,
+        graph_signature,
+        mesh,
+        parameter_placements,
+    )
 
     for node in gm.graph.nodes:
         if node.op == "placeholder":
@@ -200,11 +205,13 @@ def _mark_sharding(
                 )
             node.meta["sharding"] = placement_strategies[node]
         elif node.op == "call_function":
-            if node.target == operator.getitem:
+            if node.target is operator.getitem:
                 input_nodes = node.all_input_nodes
-                assert (
-                    len(input_nodes) == 1
-                ), f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"
+                if len(input_nodes) != 1:
+                    raise AssertionError(
+                        f"non-compute op only support one input now, found node: {node} "
+                        f"with length of inputs: {len(node.args)}"
+                    )
                 arg_strategy = placement_strategies[input_nodes[0]]
                 placement_strategies[node] = _create_placement_strategy(
                     node,
@@ -217,11 +224,12 @@ def _mark_sharding(
                 op_schema = _get_op_schema(node, placement_strategies)
 
                 # get DTensor specs for inputs and outputs
+                sharding_propagator = DTensor._op_dispatcher.sharding_propagator
                 if (
-                    op_schema.op
-                    not in DTensor._op_dispatcher.sharding_propagator.op_strategy_funcs
+                    op_schema.op not in sharding_propagator.op_strategy_funcs
+                    and op_schema.op not in sharding_propagator.op_to_rules
                     and op_schema.op
-                    not in DTensor._op_dispatcher.sharding_propagator.op_to_rules
+                    not in sharding_propagator.op_single_dim_strategy_funcs
                 ):
                     # Mark all as replicated
                     output_sharding = _generate_default_output_sharding(
@@ -233,9 +241,12 @@ def _mark_sharding(
                     output_sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding(  # type: ignore[assignment]
                         op_schema,
                     )
-                placement_strategies[node] = PlacementStrategy(
+                placement_strategies[node] = OpSpec(
+                    # pyrefly: ignore [bad-argument-type]
                     output_specs=_get_output_spec_from_output_sharding(output_sharding),
+                    # pyrefly: ignore [missing-attribute]
                     input_specs=output_sharding.redistribute_schema.args_spec
+                    # pyrefly: ignore [missing-attribute]
                     if output_sharding.redistribute_schema is not None
                     else _get_input_node_specs(node, placement_strategies),
                 )
@@ -257,8 +268,10 @@ def _get_output_spec_from_output_sharding(
         return output_sharding.output_spec
     else:
         # For ops that return multiple outputs, the outputs should have the same output spec
-        assert isinstance(output_sharding.output_spec, Sequence)
-        assert output_sharding.output_spec[0] is not None
+        if not isinstance(output_sharding.output_spec, Sequence):
+            raise AssertionError
+        if output_sharding.output_spec[0] is None:
+            raise AssertionError
         output_sharding.output_spec[0].tensor_meta = None
         return output_sharding.output_spec[0]
 
@@ -267,12 +280,12 @@ def _create_placement_strategy(
     node: Node,
     mesh: DeviceMesh,
     placements: tuple[Placement, ...],
-    input_specs: Optional[Sequence[DTensorSpec]] = None,
-) -> PlacementStrategy:
+    input_specs: Sequence[DTensorSpec] | None = None,
+) -> OpSpec:
     """
-    Util function to construct a placement strategy for a given node.
+    Util function to construct an OpSpec for a given node.
     """
-    placement = PlacementStrategy(
+    placement = OpSpec(
         input_specs=input_specs,
         output_specs=DTensorSpec(
             mesh=mesh,
@@ -288,16 +301,19 @@ def _populate_tensor_meta(node: Node, output_spec: OutputSpecType) -> None:
     Util function to populate tensor meta of output_spec based on node metadata.
     """
     if isinstance(node.meta["val"], Sequence):
-        assert isinstance(output_spec, Sequence)
+        if not isinstance(output_spec, Sequence):
+            raise AssertionError
         for spec, fake_tensor in zip(output_spec, node.meta["val"]):
-            assert spec is not None
+            if spec is None:
+                raise AssertionError
             spec.tensor_meta = TensorMeta(
                 shape=fake_tensor.shape,
                 stride=fake_tensor.stride(),
                 dtype=fake_tensor.dtype,
             )
     else:
-        assert isinstance(output_spec, DTensorSpec)
+        if not isinstance(output_spec, DTensorSpec):
+            raise AssertionError
         output_spec.tensor_meta = TensorMeta(
             shape=node.meta["val"].shape,
             stride=node.meta["val"].stride(),
@@ -414,15 +430,22 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
             return local_shard
 
         for idx, placement in enumerate(spec.placements):
+            # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
             if placement.is_shard():
                 placement = cast(Shard, placement)
                 num_chunks = spec.mesh.size(mesh_dim=idx)
                 my_coord = spec.mesh.get_coordinate()
-                assert my_coord is not None, "current rank not in mesh!"
+                if my_coord is None:
+                    raise AssertionError("current rank not in mesh!")
                 my_coord_on_mesh_dim = my_coord[idx]
-                local_shard = placement._split_tensor(
-                    local_shard, num_chunks, with_padding=False, contiguous=True
-                )[0][my_coord_on_mesh_dim]
+                local_shard = placement._select_split_tensor(
+                    local_shard,
+                    num_chunks,
+                    my_coord_on_mesh_dim,
+                    with_padding=False,
+                    contiguous=True,
+                    clone=False,
+                )
         return local_shard
     elif isinstance(val, (list, tuple)):
         return val.__class__(_partition_val(v, spec) for v in val)
@@ -461,7 +484,7 @@ def _insert_reshard_gm(
             if reshard_node.op not in ["placeholder", "output"]:
                 reshard_node.meta["nn_module_stack"] = (
                     copy.copy(input_arg.meta["nn_module_stack"])
-                    if not input_arg.op == "placeholder"
+                    if input_arg.op != "placeholder"
                     else copy.copy(node.meta["nn_module_stack"])
                 )
         output_node = gm.graph.graph_copy(
@@ -486,7 +509,7 @@ def _clean_up_graph_metadata(gm: torch.fx.GraphModule) -> None:
 
 
 def _get_input_node_specs(
-    node: Node, placement_strategies: dict[Node, PlacementStrategy]
+    node: Node, placement_strategies: dict[Node, OpSpec]
 ) -> tuple[DTensorSpec, ...]:
     """
     Get the input specs of a node.
@@ -495,16 +518,15 @@ def _get_input_node_specs(
     for input_arg in node.all_input_nodes:
         if input_arg in placement_strategies:
             output_spec = placement_strategies[input_arg].output_specs
-            assert isinstance(output_spec, DTensorSpec)
+            if not isinstance(output_spec, DTensorSpec):
+                raise AssertionError
             input_specs_list.append(output_spec)
         else:
             raise ValueError(f"{input_arg} does not have output_spec populated.")
     return tuple(input_specs_list)
 
 
-def _get_op_schema(
-    node: Node, placement_strategies: dict[Node, PlacementStrategy]
-) -> OpSchema:
+def _get_op_schema(node: Node, placement_strategies: dict[Node, OpSpec]) -> OpSchema:
     """
     Util function to construct the operator schema of a node.
     """
@@ -521,14 +543,14 @@ def _get_op_schema(
 
 def _shard_state_dict(
     state_dict: dict[str, torch.Tensor],
-    placement_strategies: dict[Node, PlacementStrategy],
+    placement_strategies: dict[Node, OpSpec],
     graph_signature: ExportGraphSignature,
     mesh: DeviceMesh,
 ) -> None:
     """
-    Inplace partition the weights based on the placement strategy
+    Inplace partition the weights based on the OpSpec
     """
-    for node, placement_strategy in placement_strategies.items():
+    for node, op_spec in placement_strategies.items():
         if node.op != "placeholder":
             continue
         if node.name in graph_signature.inputs_to_parameters:
@@ -537,13 +559,14 @@ def _shard_state_dict(
             fqn = graph_signature.inputs_to_buffers[node.name]
         else:
             continue
-        assert fqn in state_dict, f"{fqn} not found in state dict: {state_dict.keys()}"
+        if fqn not in state_dict:
+            raise AssertionError(f"{fqn} not found in state dict: {state_dict.keys()}")
 
         original_param = state_dict[fqn]
         dtensor_param = distribute_tensor(
             original_param,
             mesh,
-            placement_strategy.output_spec.placements,
+            op_spec.output_spec.placements,
         )
         local_param = dtensor_param.to_local()
         state_dict[fqn] = (

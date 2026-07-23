@@ -6,6 +6,7 @@ we keep the old import path starts with `_tensor` for
 backward compatibility. We will remove this folder once
 we resolve all the BC issues.
 """
+
 import sys
 from importlib import import_module
 
@@ -25,7 +26,7 @@ for submodule in submodules:
         full_module_name
     )
 
-from torch.distributed.tensor import (  # noqa: F401
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_module,
     distribute_tensor,

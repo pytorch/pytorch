@@ -20,8 +20,10 @@ allowed to compute gradients on).
 
 class TracableCreateParameter(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(ctx: Any, tensor: Any, placeholder: Any) -> torch.nn.Parameter:
-        assert not tensor.requires_grad
+        if tensor.requires_grad:
+            tensor = tensor.detach()
         return placeholder.set_(tensor)
 
     @staticmethod
@@ -46,7 +48,7 @@ def new_parameter_placeholder(
         torch.empty(size, dtype=dtype, device=device), requires_grad=requires_grad
     )
     # TODO(jansel): alloc followed by free is inefficient, need a way to allocate an unbacked tensor.
-    # Allocating a zero tensor would causes assert failures in autograd.
+    # Allocating a zero tensor would cause assert failures in autograd.
     result.untyped_storage().resize_(0)
     return result
 

@@ -54,17 +54,18 @@ import os
 import signal
 import socket
 import time
-import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.utils.logging import get_logger
 
-from .error_handler import ErrorHandler  # noqa: F401
-from .handlers import get_error_handler  # noqa: F401
+from .error_handler import ErrorHandler
+from .handlers import get_error_handler
 
 
 __all__ = [
@@ -78,12 +79,13 @@ __all__ = [
 logger = get_logger(__name__)
 
 
-JSON = dict
+JSON = dict[str, Any]
 
-_EMPTY_ERROR_DATA = {"message": "<NONE>"}
+_EMPTY_ERROR_DATA: dict[str, Any] = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
 
-T = TypeVar("T")
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
 
 
 @dataclass
@@ -141,6 +143,10 @@ class ProcessFailure:
                     f" received by PID {self.pid}"
                 )
             else:
+                self.error_file_data["errorTraits"] = {
+                    "category": "system_terminated_error",
+                    "retryability": "False",
+                }
                 self.message = "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html"
 
     def _get_error_data(self, error_file_data: dict[str, Any]) -> tuple[str, int]:
@@ -179,7 +185,7 @@ _FAILURE_FORMAT_TEMPLATE = """[${idx}]:
   time      : ${time}
   host      : ${hostname}
   rank      : ${rank} (local_rank: ${local_rank})
-  exitcode  : ${exitcode} (pid: ${pid})
+  exitcode  : ${exitcode} (pid: ${pid}) ${signal_name}
   error_file: ${error_file}
   traceback : ${message}"""
 
@@ -234,9 +240,9 @@ class ChildFailedError(Exception):
     def __init__(self, name: str, failures: dict[GlobalRank, ProcessFailure]):
         self.name = name
         self.failures = failures
-        assert (
-            self.failures
-        )  # does not make sense to create a ChildFaileError with no failures
+        # does not make sense to create a ChildFailedError with no failures
+        if not self.failures:
+            raise AssertionError
         super().__init__(self.format_msg())
 
     def get_first_failure(self) -> tuple[GlobalRank, ProcessFailure]:
@@ -288,6 +294,22 @@ class ChildFailedError(Exception):
                 .replace("\n", "\n  ")  # to properly indent the traceback
             )
 
+        # For signal failures, let the (build-swapped) handler append
+        # device-fault context (e.g. ROCm GPU faults) to the rendered message.
+        # Works on the local string, so error_file_data is never mutated, and it
+        # is a no-op in OSS (the base handler returns the message unchanged).
+        # Best-effort: never let a handler override break failure rendering.
+        if failure.exitcode < 0:
+            try:
+                msg = get_error_handler().maybe_enrich_signal_failure_message(
+                    msg, failure.error_file
+                )
+            except Exception:
+                logger.warning("Failed to enrich signal failure message", exc_info=True)
+
+        signal_name = failure.signal_name()
+        signal_name_str = f" ({signal_name})" if signal_name != _NOT_AVAILABLE else ""
+
         fmt = Template(_FAILURE_FORMAT_TEMPLATE).substitute(
             idx=idx,
             time=failure.timestamp_isoformat(),
@@ -296,6 +318,7 @@ class ChildFailedError(Exception):
             local_rank=failure.local_rank,
             exitcode=failure.exitcode,
             pid=failure.pid,
+            signal_name=signal_name_str,
             error_file=failure.error_file,
             message=msg,
         )
@@ -306,8 +329,8 @@ class ChildFailedError(Exception):
 
 
 def record(
-    fn: Callable[..., T], error_handler: Optional[ErrorHandler] = None
-) -> Callable[..., T]:
+    fn: Callable[_P, _R], error_handler: ErrorHandler | None = None
+) -> Callable[_P, _R | None]:
     """
     Syntactic sugar to record errors/exceptions that happened in the decorated
     function using the provided ``error_handler``.
@@ -319,14 +342,14 @@ def record(
      error_handler = get_error_handler()
      error_handler.initialize()
      try:
-        foobar()
+         foobar()
      except ChildFailedError as e:
-        _, failure = e.get_first_failure()
-        error_handler.dump_error_file(failure.error_file, failure.exitcode)
-        raise
+         _, failure = e.get_first_failure()
+         error_handler.dump_error_file(failure.error_file, failure.exitcode)
+         raise
      except Exception as e:
-        error_handler.record(e)
-        raise
+         error_handler.record_exception(e)
+         raise
 
     .. important:: use this decorator once per process at the top level method,
                    typically this is the main method.
@@ -339,17 +362,19 @@ def record(
      def main():
          pass
 
-     if __name__=="__main__":
-        main()
+
+     if __name__ == "__main__":
+         main()
 
     """
     if not error_handler:
         error_handler = get_error_handler()
 
-    def wrap(f):
+    def wrap(f: Callable[_P, _R]) -> Callable[_P, _R | None]:
         @wraps(f)
-        def wrapper(*args, **kwargs):
-            assert error_handler is not None  # assertion for mypy type checker
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs):
+            if error_handler is None:
+                raise AssertionError  # assertion for mypy type checker
             error_handler.initialize()
             try:
                 return f(*args, **kwargs)

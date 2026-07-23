@@ -1,28 +1,21 @@
+import importlib
 import itertools
 import logging
 import pickle
 import random
 import signal
 import string
-import sys
 import traceback
-from collections.abc import KeysView
+import types
+from collections.abc import Callable, KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
-from typing import (
-    Any,
-    Callable,
-    get_args,
-    get_origin,
-    Literal,
-    Optional,
-    TypeVar,
-    Union,
-)
+from typing import Any, get_args, get_origin, Literal, TypeVar, Union
 
 import torch
-from torch._inductor.custom_graph_pass import CustomGraphPass
+from functorch.compile import min_cut_rematerialization_partition
+from torch._inductor.custom_graph_pass import CustomGraphPass, CustomPartitionerFn
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch.utils._config_module import _ConfigEntry, ConfigModule
 from torch.utils._ordered_set import OrderedSet
@@ -69,7 +62,21 @@ class DummyPass(CustomGraphPass):
     def __call__(self, graph: torch.fx.graph.Graph) -> None:
         return None
 
-    def uuid(self) -> Optional[Any]:
+    def uuid(self) -> Any | None:
+        return None
+
+
+class DummyPartitionerFn(CustomPartitionerFn):
+    """
+    A Dummy partitioner function to be used by ConfigFuzzer
+    """
+
+    def __call__(
+        self, gm: torch.fx.GraphModule, joint_inputs: Sequence[object], **kwargs: Any
+    ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+        return min_cut_rematerialization_partition(gm, joint_inputs, **kwargs)
+
+    def uuid(self) -> Any | None:
         return None
 
 
@@ -83,20 +90,37 @@ class TypeExemplars:
 
     TYPE_EXEMPLARS: dict[str, Any] = {
         CustomGraphPass.__name__: DummyPass(),
+        CustomPartitionerFn.__name__: DummyPartitionerFn(),
         torch.fx.graph.Graph.__name__: torch.fx.graph.Graph(),
         BaseSchedulerNode.__name__: BaseSchedulerNode(None),  # type: ignore[arg-type]
     }
 
     @staticmethod
-    def example(t: type[T]) -> Optional[T]:
+    def example(t: type[T]) -> T | None:
         """
         Return an example of a class.
         """
+
         return TypeExemplars.TYPE_EXEMPLARS.get(t.__name__, None)
 
     @staticmethod
     def contains(t: type[T]) -> bool:
         return t.__name__ in TypeExemplars.TYPE_EXEMPLARS
+
+
+def check_halide_import() -> bool:
+    """checks if we have halide available"""
+    try:
+        importlib.import_module("halide")
+        return True
+    except ModuleNotFoundError:
+        return False
+
+
+if check_halide_import():
+    CUDA_BACKEND = ["triton", "halide"]
+else:
+    CUDA_BACKEND = ["triton"]
 
 
 class Status(Enum):
@@ -132,7 +156,9 @@ class Status(Enum):
 
 # Sometime the types of configs aren't expressive enough to be captured by python type system, so the options can be
 # manually specified here:
+# TODO this needs to be indexed to the module, like inductor or dynamo, for name collisions
 TYPE_OVERRIDES: dict[str, list[Any]] = {
+    "cuda_backend": CUDA_BACKEND,
     "post_grad_fusion_options": [
         {
             "batch_linear_post_grad": {
@@ -153,8 +179,20 @@ TYPE_OVERRIDES: dict[str, list[Any]] = {
             "group_linear": {"require_fbgemm": True},
         },
     ],
-    "autoheuristic_collect": ["pad_mm", "mixed_mm"],
-    "autoheuristic_use": ["pad_mm", "mixed_mm"],
+    "autoheuristic_collect": [
+        {"pad_mm": True, "mixed_mm": True},
+        {"pad_mm": True, "mixed_mm": False},
+        {"pad_mm": False, "mixed_mm": True},
+        {"pad_mm": False, "mixed_mm": False},
+    ],
+    "autoheuristic_use": [
+        {"pad_mm": True, "mixed_mm": True},
+        {"pad_mm": True, "mixed_mm": False},
+        {"pad_mm": False, "mixed_mm": True},
+        {"pad_mm": False, "mixed_mm": False},
+    ],
+    "traceable_tensor_subclasses": [OrderedSet()],
+    "nontraceable_tensor_subclasses": [OrderedSet()],
 }
 SamplingType = Callable[[str, type[Any], Any], Any]
 
@@ -183,26 +221,25 @@ class SamplingMethod(Enum):
         if field_name in TYPE_OVERRIDES:
             return random.choice(TYPE_OVERRIDES[field_name])
 
-        if type_hint == bool:
+        if type_hint is bool:
             return random.choice([True, False]) if random_sample else not default
-        elif type_hint == int:
+        elif type_hint is int:
             # NOTE initially tried to use negation of the value, but it doesn't work because most types are ints
             # when they should be natural numbers + zero. Python types to cover these values aren't super convenient.
             return random.randint(0, 1000)
-        elif type_hint == float:
+        elif type_hint is float:
             return random.uniform(0, 1000)
-        elif type_hint == str:
+        elif type_hint is str:
             characters = string.ascii_letters + string.digits + string.punctuation
             return "".join(
                 random.choice(characters) for _ in range(random.randint(1, 20))
             )
         elif is_type(type_hint, list):
-            elem_type = getattr(
-                type_hint,
-                "__args__",
-                [type(default[0])] if len(default) else [type(None)],
+            elem_type = (
+                get_args(type_hint)
+                or ([type(default[0])] if default and len(default) else [type(None)])
             )[0]
-            new_default = default[0] if len(default) > 0 else None
+            new_default = default[0] if default and len(default) > 0 else None
             return [
                 SamplingMethod._generate_value_for_type(
                     random_sample, field_name, elem_type, new_default
@@ -211,12 +248,11 @@ class SamplingMethod(Enum):
             ]
         elif is_type(type_hint, set):  # noqa: set_linter
             indexable = list(default)
-            elem_type = getattr(
-                type_hint,
-                "__args__",
-                [type(indexable[0])] if len(default) else [type(None)],
+            elem_type = (
+                get_args(type_hint)
+                or ([type(indexable[0])] if default and len(default) else [type(None)])
             )[0]
-            new_default = indexable[0] if len(default) > 0 else None
+            new_default = indexable[0] if default and len(default) > 0 else None
             return {  # noqa: set_linter
                 SamplingMethod._generate_value_for_type(
                     random_sample, field_name, elem_type, new_default
@@ -225,12 +261,11 @@ class SamplingMethod(Enum):
             }
         elif is_type(type_hint, OrderedSet):
             indexable = list(default)
-            elem_type = getattr(
-                type_hint,
-                "__args__",
-                [type(indexable[0])] if len(default) else [type(None)],
+            elem_type = (
+                get_args(type_hint)
+                or ([type(indexable[0])] if default and len(default) else [type(None)])
             )[0]
-            new_default = indexable[0] if len(default) > 0 else None
+            new_default = indexable[0] if default and len(default) > 0 else None
             return OrderedSet(
                 [
                     SamplingMethod._generate_value_for_type(
@@ -240,12 +275,10 @@ class SamplingMethod(Enum):
                 ]
             )
         elif is_type(type_hint, dict):
-            key_type, value_type = getattr(
-                type_hint,
-                "__args__",
-                map(type, next(iter(default.items())))
+            key_type, value_type = get_args(type_hint) or (
+                tuple(map(type, next(iter(default.items()))))
                 if (default is not None and len(default))
-                else (type(None), type(None)),
+                else (type(None), type(None))
             )
             if default is not None and len(default.items()) > 0:
                 default_key, default_val = next(iter(default.items()))
@@ -259,21 +292,20 @@ class SamplingMethod(Enum):
                 )
                 for _ in range(random.randint(0, 3))
             }
-        elif is_type(type_hint, Union):
+        elif is_type(type_hint, Union) or is_type(type_hint, types.UnionType):
             # do whatever is not the type of default
-            try:
-                assert len(type_hint.__args__) > 1
-            except AttributeError as err:
-                raise ValueError("Union type with no args") from err
+            union_args = get_args(type_hint)
+            if len(union_args) <= 1:
+                raise ValueError("Union type with no args")
             if random_sample:
-                new_type = random.choice(type_hint.__args__)
+                new_type = random.choice(union_args)
             else:
                 new_type = random.choice(
-                    [t for t in type_hint.__args__ if t != type(default)]
+                    [t for t in union_args if t is not type(default)]
                 )
             try:
                 new_default = new_type()
-            except Exception:  # noqa: E722
+            except Exception:
                 # if default constructor doesn't work, try None
                 new_default = None
 
@@ -281,11 +313,7 @@ class SamplingMethod(Enum):
                 random_sample, field_name, new_type, new_default
             )
         elif is_type(type_hint, tuple):
-            args = getattr(
-                type_hint,
-                "__args__",
-                tuple(map(type, default)),
-            )
+            args = get_args(type_hint) or tuple(map(type, default))
             zipped = zip(args, default)
             return tuple(
                 map(  # noqa: C417
@@ -296,22 +324,22 @@ class SamplingMethod(Enum):
                 )
             )
         elif is_type(type_hint, Literal):
-            try:
-                if random_sample:
-                    return random.choice(type_hint.__args__)
+            literal_args = get_args(type_hint)
+            if not literal_args:
+                raise ValueError("Literal type with no args")
+            if random_sample:
+                return random.choice(literal_args)
+            else:
+                choices = [t for t in literal_args if t != default]
+                if choices:
+                    return random.choice(choices)
                 else:
-                    choices = [t for t in type_hint.__args__ if t != default]
-                    if choices:
-                        return random.choice(choices)
-                    else:
-                        return default
-            except AttributeError as err:
-                raise ValueError("Literal type with no args") from err
+                    return default
         elif is_optional_type(type_hint):
-            try:
-                elem_type = type_hint.__args__[0]
-            except AttributeError as err:
-                raise ValueError("Optional type with no args") from err
+            optional_args = get_args(type_hint)
+            if not optional_args:
+                raise ValueError("Optional type with no args")
+            elem_type = optional_args[0]
             if random_sample:
                 return random.choice(
                     [
@@ -331,10 +359,10 @@ class SamplingMethod(Enum):
         elif type_hint is type(None):
             return None
         elif is_callable_type(type_hint):
-            try:
-                return_type = list(type_hint.__args__)[-1]
-            except AttributeError as err:
-                raise ValueError("Callable type with no args") from err
+            callable_args = get_args(type_hint)
+            if not callable_args:
+                raise ValueError("Callable type with no args")
+            return_type = callable_args[-1]
 
             @wraps(lambda *args, **kwargs: None)
             def dummy_function(*args, **kwargs):  # type: ignore[no-untyped-def]
@@ -343,10 +371,12 @@ class SamplingMethod(Enum):
                 )
 
             return dummy_function
+        elif type_hint == torch._ops.OpOverload:
+            return torch.ops.aten.add.default
         elif TypeExemplars.contains(type_hint):
             return TypeExemplars.example(type_hint)
         elif type_hint == Any:
-            return 1 if not default == 1 else 2
+            return 1 if default != 1 else 2
         else:
             raise ValueError(f"Unable to process type {type_hint}. PRs welcome :)")
 
@@ -405,7 +435,7 @@ class ResultType:
         combo = tuple(sorted(combo))
         self._vals[combo] = status
 
-    def lookup(self, combo: ComboType) -> Optional[Status]:
+    def lookup(self, combo: ComboType) -> Status | None:
         combo = tuple(sorted(combo))
         return self._vals.get(combo, None)
 
@@ -419,6 +449,75 @@ ConfigType = dict[str, Any]
 FactoryOutputType = Callable[[], bool]
 # input function factory
 FactoryType = Callable[[], FactoryOutputType]
+
+# Why are some configs disabled by default? Because if we don't the fuzzer produces uninteresting results.
+# It will always hone-in on these failures, even with the most basic model, making it useless for
+#   debugging more complex models.
+#
+# More explicit explanations are below:
+# Out of Scope: We can't fuzz, say, the cuda version because that comes from the environment and will
+#   produce a failure if not aligned with env.
+# Known Failure: Disabled due to known failure. Hopefully re-enable. Known failures are listed in the
+#   docstring of this file.
+# Required: Required for the fuzzer to operate (removing caching, etc.)
+# FSDP: Flag meant for FSDP that fails in non FSDP envs. Re-enable these if you're testing FSDP.
+# Typing: disabled because the type annotation of the config isn't constrained enough to produce
+#   meaningful fuzz values. These could be improved.
+# Timing: These take too long to compile, feel free to enable.
+MODULE_DEFAULTS: dict[str, ConfigType] = {
+    "torch._inductor.config": {
+        "force_disable_caches": True,  # Required
+        "cpp.cxx": DEFAULT,  # Out of Scope
+        "TYPE_CHECKING": DEFAULT,  # Not a config
+        "max_autotune_pointwise": DEFAULT,  # Timing
+        "max_autotune_gemm": DEFAULT,  # Timing, re-enable when autotune speed improvements merged.
+        "max_autotune_gemm_backends": DEFAULT,  # Timing
+        "max_autotune_conv_backends": DEFAULT,  # Timing
+        "max_autotune_gemm_search_space": DEFAULT,  # Timing
+        "max_autotune_subproc_result_timeout_seconds": DEFAULT,  # Timing
+        "max_autotune_subproc_graceful_timeout_seconds": DEFAULT,  # Timing
+        "max_autotune_subproc_terminate_timeout_seconds": DEFAULT,  # Timing
+        "aot_inductor.presets": DEFAULT,  # Typing
+        "cuda.arch": DEFAULT,  # Out of Scope
+        "cuda.version": DEFAULT,  # Out of Scope
+        "cuda.cutlass_dir": DEFAULT,  # Out of Scope
+        "cuda.cuda_cxx": DEFAULT,  # Out of Scope
+        "rocm.arch": DEFAULT,  # Out of Scope
+        "rocm.ck_supported_arch": DEFAULT,  # Out of Scope
+        "rocm.ck_dir": DEFAULT,  # Out of Scope
+        "rocm.rocm_home": DEFAULT,  # Out of Scope
+        "check_stack_no_cycles_TESTING_ONLY": DEFAULT,  # Testing
+        "sleep_sec_TESTING_ONLY": DEFAULT,  # Testing
+        "triton.inject_relu_bug_TESTING_ONLY": DEFAULT,  # Testing
+        "reorder_for_compute_comm_overlap": DEFAULT,  # FSDP
+        "enabled_metric_tables": DEFAULT,  # Typing
+        "profile_bandwidth_regex": DEFAULT,  # Known Failure
+        "disable_cpp_codegen": DEFAULT,  # Known Failure
+        "trace.save_real_tensors": DEFAULT,  # Known Failure
+        "pre_grad_fusion_options": DEFAULT,  # Typing
+        "external_matmul": DEFAULT,  # Typing, need to add this to type overrides or type exemplars.
+        "test_configs.autotune_choice_name_regex": DEFAULT,  # Typing
+        "test_configs.autotune_choice_desc_regex": DEFAULT,  # Typing
+        "cpp.enable_floating_point_contract_flag": DEFAULT,  # Typing
+        "post_grad_custom_pre_pass": DEFAULT,  # Typing
+        "post_grad_custom_post_pass": DEFAULT,  # Typing
+        "reorder_for_compute_comm_overlap_passes": DEFAULT,  # Typing
+        "joint_custom_post_pass": DEFAULT,  # Typing
+        "joint_custom_pre_pass": DEFAULT,  # Typing
+        "pre_grad_custom_pass": DEFAULT,  # Typing
+        "custom_partitioner_fn": DEFAULT,  # Typing
+        "inductor_choices_class": DEFAULT,  # Typing
+        "cudagraph_policy": DEFAULT,  # Typing
+    },
+    "torch._dynamo.config": {
+        "traceable_tensor_subclasses": DEFAULT,  # Typing
+        "nontraceable_tensor_subclasses": DEFAULT,  # Typing
+        "compiled_autograd_kwargs_override": DEFAULT,  # Typing
+        "fail_on_recompile_limit_hit": DEFAULT,  # fails in combo with suppress_errors
+        "suppress_errors": DEFAULT,
+        "caching_precompile": False,  # Required
+    },
+}
 
 
 class ConfigFuzzer:
@@ -441,6 +540,7 @@ class ConfigFuzzer:
     ```python
     import torch._inductor.config as cfg
 
+
     def create_simple_test_model_gpu() -> FactoryOutputType:
         batch_size = 32
         seq_length = 50
@@ -454,6 +554,8 @@ class ConfigFuzzer:
             return True
 
         return test_fn
+
+
     fuzzer = ConfigFuzzer(cfg, create_simple_test_model_gpu, seed=2)
 
     # Test every pair of configs:
@@ -465,25 +567,26 @@ class ConfigFuzzer:
     ret = fuzzer.bisect(num_attempts=10)
 
     # reproduce a failing config
-    fuzzer.reproduce([{"triton.autotune_pointwise": ..., "coordinate_descent_tuning": ...}])
+    fuzzer.reproduce(
+        [{"triton.autotune_pointwise": ..., "coordinate_descent_tuning": ...}]
+    )
     ```
 
     The list of known failures on inductor config are:
-    cpp_wrapper, triton_debug_sync_graph
-    cpp_wrapper, triton_debug_sync_kernel
     cpp_wrapper, disable_cpp_codegen
     combo_kernels, benchmark_combo_kernel, profile_bandwidth, profile_bandwidth_regex
     trace.enabled, trace.save_real_tensors
     """
 
     sample: SamplingType
+    default: ConfigType
 
     def __init__(
         self,
         config_module: ConfigModule,
         test_model_fn_factory: FactoryType,
         seed: int,
-        default: Optional[ConfigType] = None,
+        default: ConfigType | None = None,
         sm: SamplingMethod = SamplingMethod.TOGGLE,
         test_timeout: int = 3600,
     ):
@@ -493,13 +596,10 @@ class ConfigFuzzer:
             test_model_fn_factory: Function that returns a test model, which runs and returns True if successful, or
               the outputs if they should be compared with eager
             seed: Randomness seed.
-            default: Default values for the config. Inductor has preset based on know failures.
+            default: Default values for the config. Inductor has preset based on known failures.
             sm: How type value samples are generated, default TOGGLE.
             test_timeout: max time a test can take.
         """
-        if sys.version_info < (3, 10):
-            log.error("Only python 3.10 and later supported")
-            return
         self.seed = seed
         self.test_timeout = test_timeout
         self.detailed_results: dict[ComboType, dict[str, Any]] = {}
@@ -509,54 +609,8 @@ class ConfigFuzzer:
         self.sample = SamplingMethod.dispatch(sm)
 
         if default is None:
-            if self.config_module.__name__ == "torch._inductor.config":
-                # Why are some configs disabled by default? Because if we don't the fuzzer produces uninteresting results.
-                # It will always hone-in on these failures, even with the most basic model, making it useless for
-                #   debugging more complex models.
-                #
-                # More explicit explanations are below:
-                # Out of Scope: We can't fuzz, say, the cuda version because that comes from the environment and will
-                #   produce a failure if not aligned with env.
-                # Known Failure: Disabled due to known failure. Hopefully re-enable. Known failures are listed in the
-                #   docstring of this file.
-                # Required: Required for the fuzzer to operate (removing caching, etc.)
-                # FSDP: Flag meant for FSDP that fails in non FSDP envs. Re-enable these if you're testing FSDP.
-                # Typing: disabled because the type annotation of the config isn't constrained enough to produce
-                #   meaningful fuzz values. These could be improved.
-                # Timing: These take too long to compile, feel free to enable.
-                self.default = {
-                    "force_disable_caches": True,  # Required
-                    "cpp.cxx": DEFAULT,  # Out of Scope
-                    "TYPE_CHECKING": DEFAULT,  # Not a config
-                    "max_autotune_pointwise": DEFAULT,  # Timing
-                    "max_autotune_gemm": DEFAULT,  # Timing, re-enable when autotune speed improvements merged.
-                    "max_autotune_gemm_backends": DEFAULT,  # Timing
-                    "max_autotune_conv_backends": DEFAULT,  # Timing
-                    "max_autotune_gemm_search_space": DEFAULT,  # Timing
-                    "max_autotune_subproc_result_timeout_seconds": DEFAULT,  # Timing
-                    "max_autotune_subproc_graceful_timeout_seconds": DEFAULT,  # Timing
-                    "max_autotune_subproc_terminate_timeout_seconds": DEFAULT,  # Timing
-                    "aot_inductor.presets": DEFAULT,  # Typing
-                    "cuda.arch": DEFAULT,  # Out of Scope
-                    "cuda.version": DEFAULT,  # Out of Scope
-                    "cuda.cutlass_dir": DEFAULT,  # Out of Scope
-                    "cuda.cuda_cxx": DEFAULT,  # Out of Scope
-                    "rocm.arch": DEFAULT,  # Out of Scope
-                    "rocm.ck_supported_arch": DEFAULT,  # Out of Scope
-                    "rocm.ck_dir": DEFAULT,  # Out of Scope
-                    "rocm.rocm_home": DEFAULT,  # Out of Scope
-                    "check_stack_no_cycles_TESTING_ONLY": DEFAULT,  # Testing
-                    "sleep_sec_TESTING_ONLY": DEFAULT,  # Testing
-                    "reorder_for_compute_comm_overlap": DEFAULT,  # FSDP
-                    "enabled_metric_tables": DEFAULT,  # Typing
-                    "triton.debug_sync_graph": DEFAULT,  # Known Failure
-                    "triton.debug_sync_kernel": DEFAULT,  # Known Failure
-                    "triton.inject_relu_bug_TESTING_ONLY": DEFAULT,  # Testing
-                    "profile_bandwidth_regex": DEFAULT,  # Known Failure
-                    "disable_cpp_codegen": DEFAULT,  # Known Failure
-                    "trace.save_real_tensors": DEFAULT,  # Known Failure
-                    "pre_grad_fusion_options": DEFAULT,  # Typing
-                }
+            if self.config_module.__name__ in MODULE_DEFAULTS:
+                self.default = MODULE_DEFAULTS[self.config_module.__name__]
             else:
                 raise ValueError("No default passed to ConfigFuzzer.")
         else:
@@ -565,7 +619,7 @@ class ConfigFuzzer:
     def __repr__(self) -> str:
         return (
             f"ConfigFuzzer(config_module={self.config_module}, "
-            f"test_model_fn_factor={self.test_model_fn_factory}, seed={self.seed}, default={self.default})"
+            f"test_model_fn_factory={self.test_model_fn_factory}, seed={self.seed}, default={self.default})"
         )
 
     def _set_config(self, field_name: str, value: Any) -> None:
@@ -585,15 +639,23 @@ class ConfigFuzzer:
         }
         return ret
 
-    def reproduce(self, configs: list[ConfigType]) -> ResultType:
+    def reproduce(self, configs: Sequence[ConfigType]) -> ResultType:
         """entrypoint to reproduce any failure"""
         results = ResultType()
         for conf in configs:
-            print(f"Starting repro of {conf}")
-            new_config = self.new_config()
-            new_config.update(conf)
-            self.test_config(results, new_config)
-            print(f"Status of {conf}:\n{results.lookup(tuple(conf.keys()))}")
+            self._reproduce_single_helper(conf, results)
+        return results
+
+    def _reproduce_single_helper(self, conf: ConfigType, results: ResultType) -> None:
+        print(f"Starting repro of {conf}")
+        new_config = self.new_config()
+        new_config.update(conf)
+        self.test_config(results, new_config)
+        print(f"Status of {conf}:\n{results.lookup(tuple(conf.keys()))}")
+
+    def reproduce_single(self, config: ConfigType) -> ResultType:
+        results = ResultType()
+        self._reproduce_single_helper(config, results)
         return results
 
     def _fuzz_helper(self, results: ResultType, combo: ComboType) -> Status:
@@ -654,7 +716,7 @@ class ConfigFuzzer:
             self.results = state["results"]
             self.detailed_results = state.get("detailed_results", {})
 
-    def timeout_handler(self, signum: int, frame: Optional[FrameType]) -> None:
+    def timeout_handler(self, signum: int, frame: FrameType | None) -> None:
         raise TimeoutError("Test execution timed out")
 
     def test_config(self, results: ResultType, config: ConfigType) -> Status:
@@ -684,7 +746,7 @@ class ConfigFuzzer:
             message: str,
             return_status: Status,
             print_traceback: bool,
-            exc: Optional[Exception],
+            exc: Exception | None,
         ) -> Status:
             signal.signal(signal.SIGALRM, original_handler)
             print(f"{message} with config combination:")
@@ -706,7 +768,7 @@ class ConfigFuzzer:
         test_model_fn = self.test_model_fn_factory()
         try:
             test_model_fn()
-        except Exception as exc:  # noqa: E722
+        except Exception as exc:
             return handle_return(
                 "Eager exception", Status.FAILED_RUN_EAGER_EXCEPTION, True, exc
             )
@@ -715,7 +777,7 @@ class ConfigFuzzer:
         try:
             test_model_fn2 = self.test_model_fn_factory()
             comp = torch.compile(test_model_fn2, backend="inductor")
-        except Exception as exc:  # noqa: E722
+        except Exception as exc:
             return handle_return(
                 "Exception compiling", Status.FAILED_COMPILE, True, exc
             )
@@ -723,7 +785,7 @@ class ConfigFuzzer:
         # try running compiled
         try:
             compile_result = comp()
-        except Exception as exc:  # noqa: E722
+        except Exception as exc:
             return handle_return(
                 "Exception running compiled",
                 Status.FAILED_RUN_COMPILE_EXCEPTION,
@@ -758,6 +820,7 @@ class ConfigFuzzer:
                 if (
                     field_name not in config
                     and not field_name.startswith("_")
+                    and "TESTING_ONLY" not in field_name
                     and random.random() < p
                 ):
                     value = self.sample(
@@ -777,12 +840,12 @@ class ConfigFuzzer:
 
     def _bisect_failing_config(
         self, results: ResultType, failing_config: ConfigType
-    ) -> Optional[ConfigType]:
+    ) -> ConfigType | None:
         return self._bisect_failing_config_helper(results, list(failing_config.items()))
 
     def _bisect_failing_config_helper(
         self, results: ResultType, failing_config: list[tuple[str, Any]]
-    ) -> Optional[ConfigType]:
+    ) -> ConfigType | None:
         """
         Bisect a failing configuration to find minimal set of configs that cause failure.
 
@@ -842,11 +905,13 @@ def visualize_results(
     Creates an HTML document representing the results of running the fuzzer with fuzz_n_tuple, with n = 2.
     """
     # TODO support more dimensions
-    assert n == 2
-    assert len(results) > 0
+    if n != 2:
+        raise AssertionError(f"expected n == 2, got {n}")
+    if len(results) <= 0:
+        raise AssertionError("expected non-empty results")
 
     input_set: OrderedSet[str] = OrderedSet({})
-    for key in results.keys():
+    for key in results.keys():  # noqa: SIM118
         input_set.add(key[0])
         input_set.add(key[1])
     input_list = sorted(input_set)
@@ -893,15 +958,15 @@ def visualize_results(
     """
 
     html_content += "<tr><th>\\</th>"
-    for i, col_name in enumerate(input_list):
+    for col_name in input_list:
         col = "<br>".join(col_name)
         html_content += f"<th>{col}</th>"
     html_content += "</tr></thead><tbody>"
 
     # Add table rows
-    for i, row_name in enumerate(input_list):
+    for row_name in input_list:
         html_content += f"<tr><th>{row_name}</th>"
-        for j, col_name in enumerate(input_list):
+        for col_name in input_list:
             # Determine the status class for the cell
             status_enum = results.lookup((row_name, col_name))
             status_class = ""

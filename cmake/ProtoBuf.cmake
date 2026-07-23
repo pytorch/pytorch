@@ -33,26 +33,30 @@ macro(custom_protobuf_find)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-  if(MSVC)
-    foreach(flag_var
-        CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
-        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
-      if(${flag_var} MATCHES "/Z[iI7]")
-        string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
-      endif()
-    endforeach(flag_var)
-    if(MSVC_Z7_OVERRIDE)
-      foreach(flag_var
-          CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELWITHDEBINFO
-          CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-        if(${flag_var} MATCHES "/Z[iI]")
-          string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
-        endif()
-      endforeach(flag_var)
-    endif(MSVC_Z7_OVERRIDE)
-  endif(MSVC)
+  # protobuf's CMakeLists.txt injects compiler-only flags (e.g. /bigobj, /utf-8)
+  # via add_definitions(), which CMake also applies to the resource compiler.
+  # protobuf works around this by overriding CMAKE_RC_COMPILE_OBJECT to drop the
+  # compile <FLAGS>, but only when CMAKE_CXX_COMPILER_ID STREQUAL "MSVC". With
+  # clang-cl the id is "Clang" (while MSVC stays true), so the workaround is
+  # skipped and rc.exe fails with "RC1106 invalid option: /bigobj". Install the
+  # same override for the clang-cl case, restoring it afterwards.
+  set(__caffe2_CMAKE_RC_COMPILE_OBJECT "${CMAKE_RC_COMPILE_OBJECT}")
+  if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    enable_language(RC)
+    set(CMAKE_RC_COMPILE_OBJECT
+        "<CMAKE_RC_COMPILER> /l0x409 <DEFINES> /fo<OBJECT> <SOURCE>")  # codespell:ignore fo
+  endif()
 
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+    message(WARNING "Ancient protobuf forces CMake compatibility")
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
+    unset(CMAKE_POLICY_VERSION_MINIMUM)
+  else()
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
+  endif()
+
+  set(CMAKE_RC_COMPILE_OBJECT "${__caffe2_CMAKE_RC_COMPILE_OBJECT}")
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 

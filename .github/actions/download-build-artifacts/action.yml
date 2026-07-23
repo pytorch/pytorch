@@ -18,14 +18,14 @@ runs:
   using: composite
   steps:
     - name: Download PyTorch Build Artifacts from S3
-      if: ${{ !inputs.use-gha }}
+      if: inputs.use-gha == '' || inputs.use-gha == 'false'
       uses: seemethere/download-artifact-s3@v4
       with:
         name: ${{ inputs.name }}
         s3-bucket: ${{ inputs.s3-bucket }}
 
     - name: Download PyTorch Build Artifacts from GHA
-      if: ${{ inputs.use-gha }}
+      if: inputs.use-gha != '' && inputs.use-gha != 'false'
       uses: actions/download-artifact@v4
       with:
         name: ${{ inputs.name }}

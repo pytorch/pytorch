@@ -4,7 +4,8 @@ import functools
 import itertools
 import sys
 import unittest
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 from unittest import mock
 
 import torch
@@ -35,6 +36,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
+    IS_LINUX,
     parametrize,
     run_tests,
     TEST_HPU,
@@ -103,12 +105,13 @@ class TestParityWithDDP(FSDPTest):
             "use_orig_params": [False, True],
         }
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/170373")
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_nested_wrapped_model(
         self,
         cpu_offload: CPUOffload,
-        sharding_strategy: Optional[ShardingStrategy],
+        sharding_strategy: ShardingStrategy | None,
     ):
         self.run_subtests(
             self._get_subtest_config(cpu_offload),
@@ -124,7 +127,7 @@ class TestParityWithDDP(FSDPTest):
     def test_nested_wrapped_model_single_iteration_mixed_precision(
         self,
         cpu_offload: CPUOffload,
-        sharding_strategy: Optional[ShardingStrategy],
+        sharding_strategy: ShardingStrategy | None,
     ):
         mixed_precision = MixedPrecision(
             param_dtype=torch.float16,
@@ -147,7 +150,7 @@ class TestParityWithDDP(FSDPTest):
     def test_nested_always_wrap_model(
         self,
         cpu_offload: CPUOffload,
-        sharding_strategy: Optional[ShardingStrategy],
+        sharding_strategy: ShardingStrategy | None,
     ):
         self.run_subtests(
             self._get_subtest_config(cpu_offload),
@@ -163,7 +166,7 @@ class TestParityWithDDP(FSDPTest):
     def test_transformer(
         self,
         cpu_offload: CPUOffload,
-        sharding_strategy: Optional[ShardingStrategy],
+        sharding_strategy: ShardingStrategy | None,
     ):
         self.run_subtests(
             self._get_subtest_config(cpu_offload),
@@ -179,7 +182,7 @@ class TestParityWithDDP(FSDPTest):
     def test_delayed_optim_step(
         self,
         cpu_offload: CPUOffload,
-        sharding_strategy: Optional[ShardingStrategy],
+        sharding_strategy: ShardingStrategy | None,
     ):
         """Tests the FSDP forward, backward, and optimizer step runtime by
         using a model with a long CUDA delay after the loss computation/before
@@ -201,7 +204,7 @@ class TestParityWithDDP(FSDPTest):
     def test_delayed_reduce_scatter(
         self,
         cpu_offload: CPUOffload,
-        sharding_strategy: Optional[ShardingStrategy],
+        sharding_strategy: ShardingStrategy | None,
     ):
         """Tests the FSDP forward, backward, and optimizer step runtime by
         using a model with a long CUDA delay before the gradient reduce-scatter
@@ -227,7 +230,7 @@ class TestParityWithDDP(FSDPTest):
     def test_mixture_of_experts(
         self,
         cpu_offload: CPUOffload,
-        sharding_strategy: Optional[ShardingStrategy],
+        sharding_strategy: ShardingStrategy | None,
     ):
         fsdp_kwargs = {"device_id": device_type.type}
         self.run_subtests(
@@ -249,7 +252,7 @@ class TestParityWithDDP(FSDPTest):
     def test_mixture_of_experts_with_delay_before_free(
         self,
         cpu_offload: CPUOffload,
-        sharding_strategy: Optional[ShardingStrategy],
+        sharding_strategy: ShardingStrategy | None,
     ):
         fsdp_kwargs = {"device_id": device_type.type}
         self.run_subtests(
@@ -379,12 +382,15 @@ class TestHooks(FSDPTest):
             register_pre_backward_hooks_call_count += 1
             return orig_register_pre_backward_hooks(*args, **kwargs)
 
-        with mock.patch(
-            "torch.distributed.fsdp._runtime_utils._register_pre_backward_hooks",
-            _register_pre_backward_hooks_with_count,
-        ), mock.patch(
-            "torch.distributed.fsdp._runtime_utils._register_post_backward_hook"
-        ) as register_post_bwd_mock:
+        with (
+            mock.patch(
+                "torch.distributed.fsdp._runtime_utils._register_pre_backward_hooks",
+                _register_pre_backward_hooks_with_count,
+            ),
+            mock.patch(
+                "torch.distributed.fsdp._runtime_utils._register_post_backward_hook"
+            ) as register_post_bwd_mock,
+        ):
             self.assertEqual(register_pre_backward_hooks_call_count, 0)
             self.assertFalse(register_post_bwd_mock.called)
             fsdp_model(*input)
@@ -467,7 +473,7 @@ class TestAutograd(FSDPTest):
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
         forward_prefetch: bool,
-        backward_prefetch: Optional[BackwardPrefetch],
+        backward_prefetch: BackwardPrefetch | None,
     ):
         orig_use_unsharded_views = FlatParamHandle._use_unsharded_views
 
@@ -512,11 +518,15 @@ class TestAutograd(FSDPTest):
             FlatParamHandle._use_unsharded_views = orig_use_unsharded_views
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestHooks, globals(), only_for=devices)
-instantiate_device_type_tests(TestParityWithDDP, globals(), only_for=devices)
-instantiate_device_type_tests(TestNoGrad, globals(), only_for=devices)
-instantiate_device_type_tests(TestParamInit, globals(), only_for=devices)
-instantiate_device_type_tests(TestAutograd, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(TestHooks, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(
+    TestParityWithDDP, globals(), only_for=devices, allow_xpu=True
+)
+instantiate_device_type_tests(TestNoGrad, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(
+    TestParamInit, globals(), only_for=devices, allow_xpu=True
+)
+instantiate_device_type_tests(TestAutograd, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

@@ -26,14 +26,14 @@ struct bitset final {
   using bitset_type = long long int;
 #endif
  public:
-  static constexpr size_t NUM_BITS() {
+  [[nodiscard]] static constexpr size_t NUM_BITS() {
     return 8 * sizeof(bitset_type);
   }
 
   constexpr bitset() noexcept = default;
   constexpr bitset(const bitset&) noexcept = default;
   constexpr bitset(bitset&&) noexcept = default;
-  // there is an issure for gcc 5.3.0 when define default function as constexpr
+  // there is an issue for gcc 5.3.0 when define default function as constexpr
   // see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=68754.
   bitset& operator=(const bitset&) noexcept = default;
   bitset& operator=(bitset&&) noexcept = default;
@@ -47,11 +47,11 @@ struct bitset final {
     bitset_ &= ~(static_cast<long long int>(1) << index);
   }
 
-  constexpr bool get(size_t index) const noexcept {
+  [[nodiscard]] constexpr bool get(size_t index) const noexcept {
     return bitset_ & (static_cast<long long int>(1) << index);
   }
 
-  constexpr bool is_entirely_unset() const noexcept {
+  [[nodiscard]] constexpr bool is_entirely_unset() const noexcept {
     return 0 == bitset_;
   }
 
@@ -104,14 +104,14 @@ struct bitset final {
 #endif
   }
 
-  friend bool operator==(bitset lhs, bitset rhs) noexcept {
+  [[nodiscard]] friend bool operator==(bitset lhs, bitset rhs) noexcept {
     return lhs.bitset_ == rhs.bitset_;
   }
 
   bitset_type bitset_{0};
 };
 
-inline bool operator!=(bitset lhs, bitset rhs) noexcept {
+[[nodiscard]] inline bool operator!=(bitset lhs, bitset rhs) noexcept {
   return !(lhs == rhs);
 }
 

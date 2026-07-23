@@ -26,6 +26,7 @@ def path(script):
 
 class LaunchTest(unittest.TestCase):
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp()
         # set a sentinel env var on the parent proc
         # this should be present on the child and gets
@@ -84,3 +85,10 @@ class LaunchTest(unittest.TestCase):
         self.assertSetEqual(
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

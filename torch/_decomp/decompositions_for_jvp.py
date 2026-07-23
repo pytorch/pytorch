@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import torch
 import torch._decomp
@@ -19,7 +19,7 @@ aten = torch.ops.aten
 # The mechanism is in VariableType,
 #   IF any inputs have forward grad
 #      AND there is no forward AD formula implemented
-#      AND the functions is actually differentiable
+#      AND the functions are actually differentiable
 #   run the decomposition
 #      See run_jit_decomposition_with_args_for_jvp
 #      We currently use python decompositions that we torchscript.
@@ -34,7 +34,7 @@ aten = torch.ops.aten
 # (and possibly produce an unintelligible error) vs erroring out earlier and
 # printing that the forward AD formula is not implemented.
 #
-# The solution to this may be to have a explicitly white list control when
+# The solution to this may be to have an explicit whitelist to control when
 # to enable the decomposition.
 
 
@@ -83,7 +83,7 @@ def _register_jit_decomposition_for_jvp(decomp, use_python=False):
         # Thanks copilot!
         def get_function_def(sig):
             param_def = [f"{param_str}" for param_str in sig.parameters.values()]
-            param_use = [f"{param_str}" for param_str in sig.parameters.keys()]
+            param_use = [f"{param_str}" for param_str in sig.parameters]
 
             return f"def wrapped_decomp({', '.join(param_def)}):\n  return decomp_fn({', '.join(param_use)})\n"
 
@@ -120,11 +120,12 @@ def recompute_mean_var(
     # for most norm decompositions, it will be the same as the core version except for here.
     # We recompute the mean and variance so that they track gradients through input
 
-    mean = torch.mean(input, dim=inner_dim_indices, keepdim=keepdim)
-    var = torch.var(input, dim=inner_dim_indices, unbiased=False, keepdim=keepdim)
+    var, mean = torch.var_mean(
+        input, dim=inner_dim_indices, correction=0, keepdim=keepdim
+    )
     eps = torch.pow(1 / rstd, 2) - var  # this makes me so sad inside
     eps = eps.detach()
-    rstd = 1 / torch.sqrt(var + eps)
+    rstd = torch.rsqrt(var + eps)
     return mean, rstd
 
 
@@ -135,10 +136,10 @@ def native_layer_norm_backward(
     normalized_shape: list[int],
     mean: Tensor,
     rstd: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
     output_mask: list[bool],
-) -> tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
     input_shape = input.shape
     input_ndim = input.dim()
 
@@ -146,7 +147,7 @@ def native_layer_norm_backward(
     inner_dims = input_shape[axis:]
     outer_dims = input_shape[:axis]
     inner_dim_indices = list(range(axis, input_ndim))
-    outer_dim_indices = list(range(0, axis))
+    outer_dim_indices = list(range(axis))
 
     N = 1
     for i in inner_dims:
@@ -176,13 +177,13 @@ def native_layer_norm_backward(
     inner = a - b - c3
 
     if output_mask[0]:
-        d_input: Optional[Tensor] = (rstd_ / N) * inner
+        d_input: Tensor | None = (rstd_ / N) * inner
     else:
         d_input = torch.zeros_like(input)  # should be None but doesn't work with vjp
 
     if output_mask[1] and weight is not None:
         if len(outer_dim_indices) > 0:
-            d_weight: Optional[Tensor] = torch.sum(
+            d_weight: Tensor | None = torch.sum(
                 grad_out * x_hat, outer_dim_indices, False
             )
         else:
@@ -194,7 +195,7 @@ def native_layer_norm_backward(
 
     if output_mask[2] and bias is not None:
         if len(outer_dim_indices) > 0:
-            d_bias: Optional[Tensor] = torch.sum(grad_out, outer_dim_indices, False)
+            d_bias: Tensor | None = torch.sum(grad_out, outer_dim_indices, False)
         else:
             d_bias = grad_out.clone()
     elif bias is not None:
@@ -216,37 +217,46 @@ def prod(x: list[int]):
 def native_batch_norm_backward(
     grad_out: Tensor,
     input: Tensor,
-    weight: Optional[Tensor],
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
-    save_mean: Optional[Tensor],
-    save_invstd: Optional[Tensor],
+    weight: Tensor | None,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+    save_mean: Tensor | None,
+    save_invstd: Tensor | None,
     train: bool,
     eps: float,
     output_mask: list[bool],
-) -> tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor, Tensor | None, Tensor | None]:
     input_shape = input.shape
     input_rank = input.dim()
-    assert input_rank >= 2, "rank of the input must be at least 2"
+    if input_rank < 2:
+        raise AssertionError(f"rank of the input must be at least 2, got {input_rank}")
 
     axis = 1
     num_features = prod(input_shape) / input_shape[axis]  # type: ignore[arg-type]
     mean = save_mean
     invstd = save_invstd
     if train:
-        assert (
-            save_mean is not None and save_invstd is not None
-        ), "when train=True, save_mean and save_invstd are required"
+        if save_mean is None or save_invstd is None:
+            raise AssertionError(
+                "when train=True, save_mean and save_invstd are required"
+            )
 
         reduciton_dims = [0] + list(range(2, input.dim()))
-        assert invstd is not None  # for typing
+        if invstd is None:
+            raise AssertionError("invstd must not be None for typing")
         mean, invstd = recompute_mean_var(input, invstd, reduciton_dims, keepdim=False)
     else:
-        assert running_mean is not None and running_var is not None
+        if running_mean is None or running_var is None:
+            raise AssertionError(
+                "running_mean and running_var must not be None when train=False"
+            )
         mean = running_mean
         invstd = torch.rsqrt(running_var + eps)
 
-    assert invstd is not None and mean is not None
+    if invstd is None or mean is None:
+        raise AssertionError(
+            f"invstd and mean must not be None, got invstd={invstd}, mean={mean}"
+        )
 
     broadcast_mask = [1] * input_rank
     broadcast_mask[axis] = input_shape[axis]
@@ -299,15 +309,15 @@ def batch_norm_backward(
     grad_out: Tensor,
     input: Tensor,
     weight: Tensor,
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
-    save_mean: Optional[Tensor],
-    save_var: Optional[Tensor],
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+    save_mean: Tensor | None,
+    save_var: Tensor | None,
     update: bool,
     eps: float,
     output_mask: list[bool],
     reserve: Tensor,
-) -> tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor, Tensor | None, Tensor | None]:
     return native_batch_norm_backward(
         grad_out,
         input,

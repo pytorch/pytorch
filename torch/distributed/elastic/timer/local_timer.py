@@ -59,7 +59,7 @@ class MultiprocessingRequestQueue(RequestQueue):
     def get(self, size, timeout: float) -> list[TimerRequest]:
         requests = []
         wait = timeout
-        for _ in range(0, size):
+        for _ in range(size):
             start = time.time()
 
             try:

@@ -1,8 +1,5 @@
 #include <ATen/core/Tensor.h>
-#include <ATen/core/Formatting.h>
 #include <ATen/core/VariableHooksInterface.h>
-#include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/FunctionalTensorWrapper.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/MethodOperators.h>
@@ -51,9 +48,8 @@ TensorBase TensorBase::to(
 }
 
 void TensorBase::enforce_invariants() {
-  if (impl_.get() == nullptr) {
-    throw std::runtime_error("TensorImpl with nullptr is not supported");
-  }
+  TORCH_CHECK(
+      impl_.get() != nullptr, "TensorImpl with nullptr is not supported");
   // Following line throws if the method is not a POD data type or is not
   // supported by ATen
   scalar_type();
@@ -72,7 +68,7 @@ void TensorBase::enforce_invariants() {
 
 void TensorBase::print() const {
   if (defined()) {
-    std::cerr << "[" << toString() << " " << sizes() << "]" << '\n';
+    std::cerr << '[' << toString() << ' ' << sizes() << ']' << '\n';
   } else {
     std::cerr << "[UndefinedTensor]" << '\n';
   }
@@ -139,7 +135,7 @@ void Tensor::_backward(TensorList inputs,
         const std::optional<Tensor>& gradient,
         std::optional<bool> keep_graph,
         bool create_graph) const {
-  return impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
+  impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
 }
 
 const TensorBase& TensorBase::requires_grad_(bool _requires_grad) const {
@@ -162,7 +158,7 @@ const std::string& TensorBase::name() const {
   return impl::GetVariableHooks()->name(*this);
 }
 
-const std::shared_ptr<torch::autograd::Node>& TensorBase::grad_fn() const {
+const c10::intrusive_ptr<torch::autograd::Node>& TensorBase::grad_fn() const {
   return impl::GetVariableHooks()->grad_fn(*this);
 }
 
@@ -172,6 +168,14 @@ void TensorBase::remove_hook(unsigned pos) const {
 
 unsigned TensorBase::_register_hook(std::function<TensorBase(const TensorBase&)> hook) const {
   return impl::GetVariableHooks()->_register_hook(*this, std::move(hook));
+}
+
+std::optional<ScalarType> TensorBase::grad_dtype() const {
+  return impl::GetVariableHooks()->grad_dtype(*this);
+}
+
+void TensorBase::set_grad_dtype(const std::optional<ScalarType>& grad_dtype) const {
+  return impl::GetVariableHooks()->set_grad_dtype(*this, grad_dtype);
 }
 
 } // namespace at

@@ -2,18 +2,20 @@
 
 import copy
 import random
+
 import torch
 from torch.distributed._shard import sharded_tensor
+from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 
-from torch.distributed._shard.sharding_spec import (
-    ChunkShardingSpec,
-)
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 PLACEMENTS = [
-    "rank:0/cuda:0",
-    "rank:1/cuda:1",
-    "rank:2/cuda:2",
-    "rank:3/cuda:3",
+    f"rank:0/{device_type}:0",
+    f"rank:1/{device_type}:1",
+    f"rank:2/{device_type}:2",
+    f"rank:3/{device_type}:3",
 ]
 
 DEFAULT_GPU_NUM = 4
@@ -31,13 +33,9 @@ def _chunk_sharding_specs_list_for_test(sharding_dims, seed=0):
         )
     return spec_list
 
+
 class MyShardedModel2(torch.nn.Module):
-    def __init__(
-        self,
-        spec=None,
-        group=None,
-        init_rrefs=True
-    ) -> None:
+    def __init__(self, spec=None, group=None, init_rrefs=True) -> None:
         super().__init__()
         if spec is not None:
             self.sharded_tensor2 = sharded_tensor.rand(
@@ -49,12 +47,7 @@ class MyShardedModel2(torch.nn.Module):
 
 
 class MyShardedModel1(torch.nn.Module):
-    def __init__(
-        self,
-        spec=None,
-        group=None,
-        init_rrefs=True
-    ) -> None:
+    def __init__(self, spec=None, group=None, init_rrefs=True) -> None:
         super().__init__()
         if spec is not None:
             self.sharded_tensor1 = sharded_tensor.rand(

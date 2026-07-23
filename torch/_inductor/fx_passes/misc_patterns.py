@@ -7,23 +7,27 @@ from torch._ops import OpOverload, OpOverloadPacket
 from torch.utils._ordered_set import OrderedSet
 
 from ..pattern_matcher import fwd_only, register_replacement
+from ..utils import is_nvidia_sm100_or_later
 
 
 aten = torch.ops.aten
 
 
-@functools.lru_cache(None)
-def _misc_patterns_init():
+@functools.cache
+def _misc_patterns_init(input_device: torch.device | None = None):
     from .joint_graph import patterns as joint_graph_patterns
     from .post_grad import pass_patterns as post_grad_patterns_all
 
     post_grad_patterns = post_grad_patterns_all[1]  # medium priority
 
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
+    if input_device:
+        device = str(input_device)
     else:
-        device = "cpu"
+        if torch.cuda.is_available():
+            # workaround https://github.com/pytorch/pytorch/issues/97894
+            device = "cuda"
+        else:
+            device = "cpu"
 
     # These patterns do 2 things
     # 1. Since we know that index is completely unique, we can codegen it using
@@ -44,11 +48,37 @@ def _misc_patterns_init():
         )
 
     register_replacement(
+        # pyrefly: ignore [bad-argument-type]
         randperm_index_add_pattern,
+        # pyrefly: ignore [bad-argument-type]
         randperm_index_add_replacement,
         [torch.empty(4, 8, device=device), torch.empty(2, 8, device=device)],
+        # pyrefly: ignore [bad-argument-type]
         fwd_only,
+        # pyrefly: ignore [bad-argument-type]
         [post_grad_patterns, joint_graph_patterns],
+        skip_duplicates=True,
+    )
+
+    def randperm_index_full_pattern(x):
+        index = torch.randperm(x.shape[0], device=x.device)
+        return torch.ops.aten.index(x, (index,)), index
+
+    def randperm_index_full_replacement(x):
+        index = torch.randperm(x.shape[0], device=x.device)
+        return torch.ops.aten._unsafe_index(x, (index,)), index
+
+    register_replacement(
+        # pyrefly: ignore [bad-argument-type]
+        randperm_index_full_pattern,
+        # pyrefly: ignore [bad-argument-type]
+        randperm_index_full_replacement,
+        [torch.empty(4, 8, device=device)],
+        # pyrefly: ignore [bad-argument-type]
+        fwd_only,
+        # pyrefly: ignore [bad-argument-type]
+        [post_grad_patterns, joint_graph_patterns],
+        skip_duplicates=True,
     )
 
     def randperm_index_pattern(x, slice_shape):
@@ -60,13 +90,127 @@ def _misc_patterns_init():
         return torch.ops.aten._unsafe_index(x, (index,)), index
 
     register_replacement(
+        # pyrefly: ignore [bad-argument-type]
         randperm_index_pattern,
+        # pyrefly: ignore [bad-argument-type]
         randperm_index_replacement,
         [torch.empty(4, 8, device=device)],
+        # pyrefly: ignore [bad-argument-type]
         fwd_only,
+        # pyrefly: ignore [bad-argument-type]
         [post_grad_patterns, joint_graph_patterns],
-        scalar_workaround={"slice_shape": 42},
+        # Keep this smaller than the example input dim so tracing preserves the slice.
+        scalar_workaround={"slice_shape": 2},
+        skip_duplicates=True,
     )
+
+    # Pattern: e8m0 extraction with ceiling rounding (for MX format scaling)
+    if device.startswith("cuda"):
+
+        def e8m0_extra_check(match):
+            inp = match.kwargs.get("inp")
+            if inp is None:
+                return False
+            inp_val = inp.meta.get("val")
+            return (
+                inp_val is not None
+                and inp_val.device.type == "cuda"
+                and inp_val.dtype == torch.float32
+            )
+
+        is_sm100_plus = is_nvidia_sm100_or_later()
+
+        if is_sm100_plus:
+            from .. import inductor_prims
+
+            # Pattern 1: Bit manipulation approach (NVIDIA SM100+ only - uses PTX instruction)
+            def e8m0_rceil_pattern(inp):
+                inp_bits = inp.view(torch.int32)
+                biased_exp = (inp_bits >> 23) & 0xFF
+                mantissa = inp_bits & 0x7FFFFF
+                needs_round_up = mantissa != 0
+                e8m0_biased = biased_exp + needs_round_up.to(torch.int32)
+                e8m0_biased = torch.clamp(e8m0_biased, 0, 255)
+                return e8m0_biased.to(torch.uint8)
+
+            def e8m0_rceil_replacement(inp):
+                return inductor_prims.cvt_e8m0_rceil(inp)
+
+            register_replacement(
+                # pyrefly: ignore [bad-argument-type]
+                e8m0_rceil_pattern,
+                # pyrefly: ignore [bad-argument-type]
+                e8m0_rceil_replacement,
+                [torch.randn(32, device="cuda", dtype=torch.float32)],
+                # pyrefly: ignore [bad-argument-type]
+                fwd_only,
+                # pyrefly: ignore [bad-argument-type]
+                [post_grad_patterns],
+                extra_check=e8m0_extra_check,
+                skip_duplicates=True,
+            )
+
+        # Pattern 2: log2 + ceil approach (used by torchao MX formats)
+        # Matches: (clamp(ceil(log2(x)), -127, 127) + 127).to(uint8)
+        #
+        # Registered on ALL CUDA hardware. On NVIDIA SM100+ uses the PTX instruction;
+        # on earlier hardware uses exact IEEE 754 bit-manipulation.
+        #
+        # The bit-manipulation replacement is preferred over the software
+        # log2+ceil because Triton's fused kernels can produce inputs that
+        # differ by ~1 ULP from eager mode (e.g. due to FMA or libdevice
+        # polynomial differences in erf-based GELU). When such an input falls
+        # exactly on a power-of-2 boundary, software log2 may round the result
+        # to the integer below, making ceil return the wrong value and the
+        # uint8 output differ by 1.  The bit-manipulation approach reads the
+        # IEEE 754 biased exponent directly, which is always correct for any
+        # representable positive normal float32 value.
+        E8M0_BIAS = 127
+
+        def e8m0_rceil_log2_pattern(inp):
+            log2_val = torch.log2(inp)
+            ceil_val = torch.ceil(log2_val)
+            clamped = torch.clamp(ceil_val, min=-E8M0_BIAS, max=E8M0_BIAS)
+            biased = clamped + E8M0_BIAS
+            return biased.to(torch.uint8)
+
+        if is_sm100_plus:
+
+            def e8m0_rceil_log2_replacement(inp):
+                return inductor_prims.cvt_e8m0_rceil(inp)
+
+        else:
+            # Bit-manipulation fallback: extract IEEE 754 biased exponent with
+            # ceiling rounding.  Equivalent to clamp(ceil(log2(inp)), -127, 127)
+            # + 127 for all positive normal float32 values, but avoids software
+            # log2 imprecision near exact powers of 2.
+            # Clamp to [0, 254] to match the satfinite semantics of the original
+            # pattern (clamp(ceil_val, -127, 127) + 127 gives at most 254).
+            def e8m0_rceil_log2_replacement(inp):
+                inp_bits = inp.view(torch.int32)
+                biased_exp = (inp_bits >> 23) & 0xFF
+                mantissa = inp_bits & 0x7FFFFF
+                needs_round_up = mantissa != 0
+                e8m0_biased = biased_exp + needs_round_up.to(torch.int32)
+                e8m0_biased = torch.clamp(e8m0_biased, 0, 254)
+                return e8m0_biased.to(torch.uint8)
+
+        register_replacement(
+            # pyrefly: ignore [bad-argument-type]
+            e8m0_rceil_log2_pattern,
+            # pyrefly: ignore [bad-argument-type]
+            e8m0_rceil_log2_replacement,
+            [torch.randn(32, device="cuda", dtype=torch.float32).abs() + 1e-10],
+            # pyrefly: ignore [bad-argument-type]
+            fwd_only,
+            # pyrefly: ignore [bad-argument-type]
+            [post_grad_patterns],
+            extra_check=e8m0_extra_check,
+            skip_duplicates=True,
+        )
+
+    # TODO: Add pattern for cvt.rn.bf16x2.ue8m0x2 (e8m0 -> bf16 conversion)
+    # This is the inverse operation for MX format dequantization
 
 
 class NumpyCompatNormalization:
@@ -84,7 +228,10 @@ class NumpyCompatNormalization:
         self.inverse_mapping = {}
         for actual_kwarg, numpy_kwargs in self.numpy_compat.items():
             for numpy_kwarg in numpy_kwargs:
-                assert numpy_kwarg not in self.inverse_mapping
+                if numpy_kwarg in self.inverse_mapping:
+                    raise AssertionError(
+                        f"duplicate numpy kwarg mapping for {numpy_kwarg}"
+                    )
                 self.inverse_mapping[numpy_kwarg] = actual_kwarg
 
     def __call__(self, graph: torch.fx.Graph):
@@ -105,7 +252,7 @@ class NumpyCompatNormalization:
                 signatures = () if signatures is None else signatures
                 replaceable_kwargs = OrderedSet()
                 for sig in signatures:
-                    for param_name in sig.parameters.keys():
+                    for param_name in sig.parameters:
                         if param_name in self.numpy_compat:
                             replaceable_kwargs.update(self.numpy_compat[param_name])
 

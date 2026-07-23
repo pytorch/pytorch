@@ -58,13 +58,13 @@ std::string DispatchKeyExtractor::dumpState() const {
   std::ostringstream oss;
   for (const auto i : c10::irange(c10::utils::bitset::NUM_BITS())) {
     if (dispatch_arg_indices_reverse_.get(i)) {
-      oss << "1";
+      oss << '1';
     } else {
-      oss << "0";
+      oss << '0';
     }
   }
-  oss << " " << nonFallthroughKeys_ << "\n";
-  return oss.str();
+  oss << ' ' << nonFallthroughKeys_ << '\n';
+  return std::move(oss).str();
 }
 
 void DispatchKeyExtractor::checkInvariants(const FunctionSchema& schema) const {

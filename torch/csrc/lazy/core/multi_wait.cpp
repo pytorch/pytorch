@@ -1,8 +1,8 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/lazy/core/multi_wait.h>
 
 #include <chrono>
 #include <exception>
-#include <stdexcept>
 
 namespace torch::lazy {
 
@@ -31,7 +31,7 @@ void MultiWait::Wait(double wait_seconds) {
   if (!cv_.wait_for(lock, std::chrono::duration<double>(wait_seconds), [this] {
         return completed_count_ >= count_;
       })) {
-    throw std::runtime_error("Timeout");
+    TORCH_CHECK(false, "Timeout");
   }
   if (exptr_ != nullptr) {
     std::rethrow_exception(exptr_);

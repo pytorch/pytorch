@@ -2,9 +2,7 @@
 
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 
 namespace torch::jit {
 
@@ -83,7 +81,7 @@ bool SimpleValue::hasAttr(
       return false;
     } else {
       throw(
-          ErrorReport(loc) << "hasattr's first argument must be a object "
+          ErrorReport(loc) << "hasattr's first argument must be an object "
                            << "or NamedTuple, but got a normal Tuple "
                            << value_->type()->repr_str() << " instead");
     }
@@ -267,7 +265,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   }
 
   ErrorReport report(loc);
-  report << "'" << value_->type()->repr_str()
+  report << '\'' << value_->type()->repr_str()
          << "' object has no attribute or method '" << field << "'.";
   if (auto classType = value_->type()->cast<ClassType>()) {
     if (classType->isUnresolvedClassAttribute(field)) {
@@ -359,8 +357,8 @@ void SimpleValue::setAttr(
         throw(
             ErrorReport(loc)
             << "Assignment to attribute '" << field
-            << "' cannot be of a type that contains class "
-            << "'" << classType->repr_str() << "'.\n"
+            << "' cannot be of a type that contains class " << '\''
+            << classType->repr_str() << "'.\n"
             << "Classes that recursively contain instances of themselves"
             << " are not yet supported");
       }
@@ -462,7 +460,7 @@ Value* SimpleValue::len(const SourceRange& loc, GraphFunction& m) {
     return g.insert(aten::len, {val}, {}, loc);
   } else {
     throw(
-        ErrorReport(loc) << "'" << val_type->repr_str() << "'"
+        ErrorReport(loc) << '\'' << val_type->repr_str() << '\''
                          << " object is not iterable");
   }
 }
@@ -502,7 +500,7 @@ SugaredValuePtr SimpleValue::getitem(
     return attr(loc, m, "__getitem__")->call(loc, m, {idx}, {}, 1);
   } else {
     throw(
-        ErrorReport(loc) << "'" << val_type->repr_str() << "'"
+        ErrorReport(loc) << '\'' << val_type->repr_str() << '\''
                          << " object is not subscriptable");
   }
 }
@@ -529,7 +527,7 @@ SugaredValuePtr SimpleValue::iter(const SourceRange& loc, GraphFunction& m) {
     return std::make_shared<SugaredTupleValue>(tup_sugared);
   } else {
     throw(
-        ErrorReport(loc) << "'" << type->repr_str() << "'"
+        ErrorReport(loc) << '\'' << type->repr_str() << '\''
                          << " object is not iterable");
   }
 }
@@ -627,7 +625,7 @@ std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
 }
 
 Value* IterableTree::len(const SourceRange& loc, GraphFunction& m) {
-  // if it's a iterable tree, we get the base iterables that consists of
+  // if it's an iterable tree, we get the base iterables that consists of
   // SimpleValue or RangeValue, and then calculate the minimum length of all the
   // base iterables to be max_trip_count_val
   TORCH_INTERNAL_ASSERT(!unroll_length_);
@@ -800,8 +798,8 @@ std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
       [&field](const at::EnumNameValue& nv) { return nv.first == field; });
   if (it == names_values.end()) {
     throw(
-        ErrorReport(loc) << enum_type_->repr_str() << "'"
-                         << " has no attribute '" << field << "'");
+        ErrorReport(loc) << enum_type_->repr_str() << '\''
+                         << " has no attribute '" << field << '\'');
   }
   auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
       enum_type_, it->first, it->second);
@@ -824,6 +822,84 @@ SugaredValuePtr SugaredEnumClass::iter(
   auto enum_values_list_constant = std::make_shared<SimpleValue>(
       m.graph()->insertConstant(enum_value_ivalues, loc));
   return enum_values_list_constant;
+}
+
+std::shared_ptr<SugaredValue> TorchCheckValue::call(
+    const SourceRange& loc,
+    GraphFunction& m,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  if (args.size() + kwargs.size() < 1 || args.size() + kwargs.size() > 2) {
+    throw(
+        ErrorReport(loc) << "torch._check() expects 1 or 2 arguments, got "
+                         << (args.size() + kwargs.size()));
+  }
+
+  NamedValue* cond_arg = nullptr;
+  NamedValue* message_arg = nullptr;
+  bool found_cond_kwarg = false;
+  bool found_message_kwarg = false;
+
+  for (const auto& kwarg : kwargs) {
+    if (kwarg.name() == "cond") {
+      if (found_cond_kwarg) {
+        throw(
+            ErrorReport(loc)
+            << "torch._check() got multiple values for argument 'cond'");
+      }
+      cond_arg = const_cast<NamedValue*>(&kwarg);
+      found_cond_kwarg = true;
+    } else if (kwarg.name() == "message") {
+      if (found_message_kwarg) {
+        throw(
+            ErrorReport(loc)
+            << "torch._check() got multiple values for argument 'message'");
+      }
+      message_arg = const_cast<NamedValue*>(&kwarg);
+      found_message_kwarg = true;
+    } else {
+      throw(
+          ErrorReport(loc) << "torch._check() got unexpected keyword argument '"
+                           << kwarg.name() << '\'');
+    }
+  }
+
+  if (!args.empty()) {
+    if (found_cond_kwarg) {
+      throw(
+          ErrorReport(loc)
+          << "torch._check() got multiple values for argument 'cond'");
+    }
+    cond_arg = const_cast<NamedValue*>(&args[0]);
+  }
+
+  if (args.size() >= 2) {
+    if (found_message_kwarg) {
+      throw(
+          ErrorReport(loc)
+          << "torch._check() got multiple values for argument 'message'");
+    }
+    message_arg = const_cast<NamedValue*>(&args[1]);
+  }
+
+  if (!cond_arg) {
+    throw(
+        ErrorReport(loc) << "torch._check() missing required argument 'cond'");
+  }
+
+  std::vector<NamedValue> assert_args;
+  assert_args.push_back(*cond_arg);
+
+  if (message_arg) {
+    assert_args.push_back(*message_arg);
+  } else {
+    Value* default_msg = insertConstant(*m.graph(), std::string(""), loc);
+    assert_args.emplace_back(loc, "message", default_msg);
+  }
+
+  emitBuiltinCall(loc, *m.graph(), Symbol::aten("_assert"), assert_args, {});
+  return std::make_shared<NoneValue>();
 }
 
 } // namespace torch::jit

@@ -4,10 +4,10 @@ import inspect
 import logging
 import math
 import operator
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast
 
 import torch
 import torch.fx as fx
@@ -39,12 +39,12 @@ def move_block_before(block: list[fx.Node], target_node: fx.Node) -> None:
 
 def call_function(
     graph: fx.Graph,
-    target: Union[str, Callable[..., Any]],
-    args: Optional[tuple[fx.node.Argument, ...]] = None,
-    kwargs: Optional[dict[str, fx.node.Argument]] = None,
+    target: str | Callable[..., Any],
+    args: tuple[fx.node.Argument, ...] | None = None,
+    kwargs: dict[str, fx.node.Argument] | None = None,
 ) -> fx.Node:
     # We accept target as a str to avoid typing error as the type of
-    # a node.target is Union[str, Callable[..., Any]].
+    # a node.target is str | Callable[..., Any].
     # This also allows us to avoid writing check for every call.
     if isinstance(target, str):
         raise RuntimeError(f"Call function should not get a str target {target=}")
@@ -62,7 +62,7 @@ def call_function(
 
 @dataclass(unsafe_hash=True)
 class CommBlock:
-    shape: Union[torch.Size, list[torch.Size]]
+    shape: torch.Size | list[torch.Size]
     node_list: list[fx.Node]
     inputs: list[fx.Node]
     wait_nodes: list[fx.Node]
@@ -70,10 +70,10 @@ class CommBlock:
     outputs: OrderedSet[fx.Node]
 
 
-def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
+def get_comm_block(comm_node: fx.Node) -> CommBlock | None:
     """
     Given a collective node (e.g., allreduce), find out all the nodes belong to
-    this communcation.
+    this communication.
 
     Args:
         comm_node(fx.Node): The target communication/collective node.
@@ -85,19 +85,19 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
     wait_nodes = []
     inputs, _ = tree_flatten((comm_node.args, comm_node.kwargs))
     input_nodes = [inp for inp in inputs if isinstance(inp, fx.Node)]
-    # If the users of the wait node are following items, we consinder them
+    # If the users of the wait node are following items, we consider them
     # to be a part of the output.
     intermediate_outputs = ("split", "reshape", "getitem", "detach", "alias")
 
     first_user = next(iter(comm_node.users))
     if (
         len(comm_node.users) == 1
-        and first_user.target == torch.ops._c10d_functional.wait_tensor.default
+        and first_user.target is torch.ops._c10d_functional.wait_tensor.default
     ):
         # Collective with only one output
         node_list = [comm_node, first_user]
         wait_nodes.append(first_user)
-    elif len(comm_node.users) > 1 and first_user.target == operator.getitem:
+    elif len(comm_node.users) > 1 and first_user.target is operator.getitem:
         # Collective with only more than one output
         node_list.append(comm_node)
         for user in comm_node.users:
@@ -128,7 +128,7 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
                 break
 
     tensor_meta = input_nodes[0].meta["tensor_meta"]
-    shape: Union[torch.Size, list[torch.Size]]
+    shape: torch.Size | list[torch.Size]
     if isinstance(tensor_meta, TensorMetadata):
         shape = tensor_meta.shape
     elif isinstance(tensor_meta, (list, tuple)):
@@ -150,7 +150,7 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
 def get_all_comm_blocks(
     graph: fx.Graph,
     comm_ops: tuple[torch._ops.OpOverload, ...],
-    comm_filter: Optional[Callable[..., bool]] = None,
+    comm_filter: Callable[..., bool] | None = None,
 ) -> list[CommBlock]:
     if comm_filter is None:
 
@@ -180,7 +180,11 @@ def _fuse_allreduce_by_concat(
     with graph.inserting_after(last_input_node):
         cat_inputs = []
         for input_node in all_input_nodes:
-            assert isinstance(input_node.args[0], fx.Node)
+            if not isinstance(input_node.args[0], fx.Node):
+                raise AssertionError(
+                    f"expected input_node.args[0] to be an fx.Node, got "
+                    f"{type(input_node.args[0])}"
+                )
             input_node = input_node.args[0]
             cat_inputs.append(
                 call_function(graph, aten.flatten.using_ints, (input_node,))
@@ -193,7 +197,8 @@ def _fuse_allreduce_by_concat(
     # Insert the fused div node and remove the input div nodes.
     # This is an optimization and is not mandatory for fusion.
     divisors = [div.args[1] for div in all_input_nodes]
-    assert all(divisor == divisors[0] for divisor in divisors)
+    if not all(divisor == divisors[0] for divisor in divisors):
+        raise AssertionError("expected all divisors to be equal")
     with graph.inserting_after(cat_node):
         div_node = call_function(graph, last_input_node.target, (cat_node, divisors[0]))
 
@@ -215,6 +220,7 @@ def _fuse_allreduce_by_concat(
 
     # Move the fused all_reduce and its args to right after the input node
     nodes_to_move = cat_inputs + [cat_node, div_node, fused_comm_node, fused_wait_node]
+    # pyrefly: ignore [bad-argument-type]
     move_block_after(nodes_to_move, last_input_node)
 
     return CommBlock(
@@ -241,7 +247,8 @@ def _fuse_with_coalesced_op(
     # This is an optimization and is not mandatory for fusion.
     dividends = [div.args[0] for div in all_input_nodes]
     divisors = [div.args[1] for div in all_input_nodes]
-    assert all(divisor == divisors[0] for divisor in divisors)
+    if not all(divisor == divisors[0] for divisor in divisors):
+        raise AssertionError("expected all divisors to be equal")
     with graph.inserting_before(last_input_node):
         last_input_node = call_function(
             graph, aten._foreach_div.Scalar, (dividends, divisors[0])
@@ -304,9 +311,10 @@ def _scatter_fused_allreduce_waits(
     """
 
     # Before we mass up the order, we need to get the index of the last wait node
-    # in orig_comm_blocks. This index will be later used to determinee what users
+    # in orig_comm_blocks. This index will be later used to determine what users
     # nodes need to be move to maintain a correct topological sort order.
     last_wait_node_idx = 0
+
     for node in graph.nodes:
         last_wait_node_idx = max(
             node_indices.get(node, last_wait_node_idx), last_wait_node_idx
@@ -346,7 +354,7 @@ def _scatter_fused_allreduce_waits(
         # Some descendant users of the orig_comm_blocks may be scheduled before
         # the fused all_reduce. For example, the user nodes of the very first
         # all_reduce may be scheduled before the second all_reduce. Since the
-        # fused all_reduce is inserted right after the last all_reudce, the
+        # fused all_reduce is inserted right after the last all_reduce, the
         # order can be wrong.
         # `incorrect_order_nodes` records these nodes.
 
@@ -356,6 +364,7 @@ def _scatter_fused_allreduce_waits(
             user_node = nodes.popleft()
             if not isinstance(user_node, fx.Node):
                 continue
+
             if node_indices[user_node] < last_wait_node_idx:
                 incorrect_order_nodes.append(user_node)
                 nodes.extend(list(user_node.users))
@@ -396,7 +405,8 @@ def _fuse_allreduce(
         all_input_nodes.append(input_node)
         index = node_indices[input_node]
         if index >= last_input_index:
-            assert index != last_input_index
+            if index == last_input_index:
+                raise AssertionError(f"expected index != last_input_index, got {index}")
             last_input_node = input_node
             last_input_index = index
 
@@ -545,9 +555,10 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
     node_indices = {node: i for i, node in enumerate(graph.nodes)}
     for allreduce in comm_blocks:
         # Find the earliest/first user -- target_node.
-        assert (
-            len(allreduce.outputs) >= 1
-        ), f"Found a allreduce that has zero outputs/users -- {allreduce}."
+        if len(allreduce.outputs) < 1:
+            raise AssertionError(
+                f"Found an allreduce that has zero outputs/users -- {allreduce}."
+            )
         # Initialize the target node to avoid typing issues.
         target_node = next(iter(next(iter(allreduce.outputs)).users))
         target_node_index = 2**31
@@ -563,16 +574,18 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
         for wait_idx, node in enumerate(allreduce.node_list):
             if node == allreduce.wait_nodes[0]:
                 break
-        assert wait_idx >= 0
+        if wait_idx < 0:
+            raise AssertionError(f"expected wait_idx >= 0, got {wait_idx}")
         move_block_before(allreduce.node_list[wait_idx:], target_node)
 
 
 def fuse_ddp_communication(
-    graph: fx.Graph, passes: list[Union[Callable[..., None], str]], bucket_size_mb: int
+    graph: fx.Graph, passes: list[Callable[..., None] | str], bucket_size_mb: int
 ) -> None:
     for i, pa in enumerate(passes):
         with GraphTransformObserver(
-            graph.owning_module, f"fuse_ddp_communication_pass_{i}"
+            graph.owning_module,  # pyrefly: ignore[bad-argument-type]
+            f"fuse_ddp_communication_pass_{i}",
         ):
             if isinstance(pa, str):
                 func = globals()[pa]

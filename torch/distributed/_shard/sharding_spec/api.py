@@ -2,8 +2,9 @@
 import functools
 import operator
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
@@ -203,7 +204,7 @@ def _infer_sharding_spec_from_shards_metadata(shards_metadata):
     chunk_offset_list = []
     shard_size_list = []
     shard_offset_list = []
-    # collect local shard metadatas from the global sharded_tensor_metadata
+    # collect local shard metadata from the global sharded_tensor_metadata
     for shard_metadata in shards_metadata:  # type: ignore[attr-defined]
         placements.append(shard_metadata.placement)
         local_offsets = shard_metadata.shard_offsets

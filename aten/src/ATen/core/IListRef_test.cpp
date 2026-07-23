@@ -12,6 +12,7 @@ using namespace c10;
 static std::vector<at::Tensor> get_tensor_vector() {
   std::vector<at::Tensor> tensors;
   const size_t SIZE = 5;
+  tensors.reserve(SIZE);
   for (size_t i = 0; i < SIZE; i++) {
     tensors.emplace_back(at::empty({0}));
   }
@@ -41,7 +42,7 @@ static std::vector<at::OptionalTensorRef> get_unboxed_opt_tensor_vector() {
 }
 
 template <typename T>
-void check_elements_same(at::ITensorListRef list, const T& thing, int use_count) {
+static void check_elements_same(at::ITensorListRef list, const T& thing, int use_count) {
   EXPECT_EQ(thing.size(), list.size());
   size_t i = 0;
   for (const auto& t : list) {

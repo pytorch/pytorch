@@ -18,7 +18,7 @@ def transpose_tensors(p_transpose_both: float = 0.05) -> tuple[bool, bool]:
 
 def fits_in_memory(dtype: Any, m: int, k: int, n: int) -> Any:
     threshold_memory = torch.cuda.get_device_properties(0).total_memory / 4
-    # dividing by 4 beause we otherwise sometimes run out of memory, I assume because
+    # dividing by 4 because we otherwise sometimes run out of memory, I assume because
     # inductor creates copies of tensors for benchmarking?
     return dtype.itemsize * (m * k + k * n + m * n) < threshold_memory
 
@@ -58,5 +58,6 @@ def get_random_between_pow2(min_power2: int, max_power2: int) -> int:
     i = random.randint(min_power2, max_power2 - 1)
     lower = 2**i + 1
     upper = 2 ** (i + 1) - 1
-    assert lower <= upper, "lower must not be greater than upper"
+    if lower > upper:
+        raise AssertionError("lower must not be greater than upper")
     return random.randint(lower, upper)

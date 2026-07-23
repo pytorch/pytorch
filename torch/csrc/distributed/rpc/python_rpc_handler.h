@@ -55,7 +55,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // PythonRpcHandler singleton cleans up py::objects and call dec_ref(), it
   // will crash.
   // The solution is to clean up py::objects earlier when Rpc agent join().
-  // Be note that py::objects can not be cleaned up when Rpc agent is destroyed
+  // Note that py::objects cannot be cleaned up when Rpc agent is destroyed
   // as well, as Rpc agent is global variable and it will have same issue as
   // PythonRpcHandler.
   void cleanup();
@@ -120,7 +120,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   std::shared_ptr<jit::ScriptTypeParser> typeParser_;
 
   // Indicates whether or not we have properly initialized the handler.
-  bool initialized_;
+  bool initialized_{false};
 
   // Lock to protect initialization.
   std::mutex init_lock_;

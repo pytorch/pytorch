@@ -20,22 +20,23 @@ Usage 1: Launching two trainers as a function
 
  from torch.distributed.elastic.multiprocessing import Std, start_processes
 
+
  def trainer(a, b, c):
-     pass # train
+     pass  # train
 
 
  # runs two trainers
  # LOCAL_RANK=0 trainer(1,2,3)
  # LOCAL_RANK=1 trainer(4,5,6)
  ctx = start_processes(
-         name="trainer",
-         entrypoint=trainer,
-         args={0: (1,2,3), 1: (4,5,6)},
-         envs={0: {"LOCAL_RANK": 0}, 1: {"LOCAL_RANK": 1}},
-         log_dir="/tmp/foobar",
-         redirects=Std.ALL, # write all worker stdout/stderr to a log file
-         tee={0: Std.ERR}, # tee only local rank 0's stderr to console
-       )
+     name="trainer",
+     entrypoint=trainer,
+     args={0: (1, 2, 3), 1: (4, 5, 6)},
+     envs={0: {"LOCAL_RANK": 0}, 1: {"LOCAL_RANK": 1}},
+     log_dir="/tmp/foobar",
+     redirects=Std.ALL,  # write all worker stdout/stderr to a log file
+     tee={0: Std.ERR},  # tee only local rank 0's stderr to console
+ )
 
  # waits for all copies of trainer to finish
  ctx.wait()
@@ -62,9 +63,10 @@ was launched a :class:`api.SubprocessContext` is returned. Both are specific
 implementations of the parent :class:`api.PContext` class.
 """
 
-from typing import Callable, Dict, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
-from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
+from torch.distributed.elastic.multiprocessing.api import (
     _validate_full_rank,
     DefaultLogsSpecs,
     LogsDest,
@@ -79,6 +81,7 @@ from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     to_map,
 )
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.numa.binding import NumaOptions
 
 
 __all__ = [
@@ -99,12 +102,15 @@ __all__ = [
 
 def start_processes(
     name: str,
-    entrypoint: Union[Callable, str],
+    entrypoint: Callable | str,
     args: dict[int, tuple],
     envs: dict[int, dict[str, str]],
     logs_specs: LogsSpecs,
-    log_line_prefixes: Optional[dict[int, str]] = None,
+    log_line_prefixes: dict[int, str] | None = None,
     start_method: str = "spawn",
+    numa_options: NumaOptions | None = None,
+    duplicate_stdout_filters: list[str] | None = None,
+    duplicate_stderr_filters: list[str] | None = None,
 ) -> PContext:
     """
     Start ``n`` copies of ``entrypoint`` processes with the provided options.
@@ -126,11 +132,16 @@ def start_processes(
               this is done by default and there is no need to manually annotate
               with the ``@record`` annotation.
 
-    ``redirects`` and ``tee`` are bitmasks specifying which std stream(s) to redirect
-    to a log file in the ``log_dir``. Valid mask values are defined in ``Std``.
-    To redirect/tee only certain local ranks, pass ``redirects`` as a map with the key as
-    the local rank to specify the redirect behavior for.
+    Inside ``logs_specs``, ``redirects`` and ``tee`` are bitmasks specifying which std
+    stream(s) to redirect to a log file in the ``log_dir``. Valid mask values are defined
+    in ``Std``.  To redirect/tee only certain local ranks, pass ``redirects`` as a map
+    with the key as the local rank to specify the redirect behavior for.
     Any missing local ranks will default to ``Std.NONE``.
+
+    ``duplicate_stdout_filters`` and ``duplicate_stderr_filters``, if non-empty,
+    duplicate stdouts and stderrs respectively specified in ``logs_specs``'s ``tee``
+    to a file containing only lines that match _any_ of the filter strings. The log
+    file is aggregated across all ranks selected by ``tee``.
 
     ``tee`` acts like the unix "tee" command in that it redirects + prints to console.
     To avoid worker stdout/stderr from printing to console, use the ``redirects`` parameter.
@@ -138,8 +149,10 @@ def start_processes(
     For each process, the ``log_dir`` will contain:
 
     #. ``{local_rank}/error.json``: if the process failed, a file with the error info
-    #. ``{local_rank}/stdout.json``: if ``redirect & STDOUT == STDOUT``
-    #. ``{local_rank}/stderr.json``: if ``redirect & STDERR == STDERR``
+    #. ``{local_rank}/stdout.log``: if ``redirect & STDOUT == STDOUT``
+    #. ``{local_rank}/stderr.log``: if ``redirect & STDERR == STDERR``
+    #. ``filtered_stdout.log``: if ``duplicate_stdout_filters`` is non-empty
+    #. ``filtered_stderr.log``: if ``duplicate_stderr_filters`` is non-empty
 
     .. note:: It is expected that the ``log_dir`` exists, is empty, and is a directory.
 
@@ -194,9 +207,13 @@ def start_processes(
         log_dir: directory used to write log files
         start_method: multiprocessing start method (spawn, fork, forkserver)
                       ignored for binaries
-        redirects: which std streams to redirect to a log file
-        tee: which std streams to redirect + print to console
+        logs_specs: defines ``log_dir``, ``redirects``, and ``tee``.
+                    inside ``logs_specs``:
+                    - redirects: which std streams to redirect to a log file
+                    - tee: which std streams to redirect + print to console
         local_ranks_filter: which ranks' logs to print to console
+        duplicate_stdout_filters: filters for the duplicated stdout logs
+        duplicate_stderr_filters: filters for the duplicated stderr logs
 
     """
 
@@ -211,8 +228,11 @@ def start_processes(
             entrypoint=entrypoint,
             args=args,
             envs=envs,
+            duplicate_stdout_filters=duplicate_stdout_filters,
+            duplicate_stderr_filters=duplicate_stderr_filters,
             logs_specs=logs_specs,
             log_line_prefixes=log_line_prefixes,
+            numa_options=numa_options,
         )
     else:
         context = MultiprocessContext(
@@ -220,9 +240,12 @@ def start_processes(
             entrypoint=entrypoint,
             args=args,
             envs=envs,
+            duplicate_stdout_filters=duplicate_stdout_filters,
+            duplicate_stderr_filters=duplicate_stderr_filters,
             log_line_prefixes=log_line_prefixes,
             start_method=start_method,
             logs_specs=logs_specs,
+            numa_options=numa_options,
         )
 
     try:

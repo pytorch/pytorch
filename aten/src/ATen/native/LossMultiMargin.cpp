@@ -57,7 +57,7 @@ inline int64_t target_index_checked(
 }
 
 template <typename scalar_t>
-static inline void multi_margin_loss_cpu_kernel(
+inline void multi_margin_loss_cpu_kernel(
     Tensor& output,
     const scalar_t* input_data,
     const int64_t* target_data,
@@ -104,8 +104,7 @@ void multi_margin_loss_out_cpu_template(
     const Scalar& margin,
     const std::optional<Tensor>& weight,
     int64_t reduction) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t nframe, dim;
+  int64_t nframe = 0, dim = 0;
   const auto ndims = input.dim();
 
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
@@ -149,7 +148,7 @@ void multi_margin_loss_out_cpu_template(
 }
 
 template <typename scalar_t>
-static void multi_margin_loss_backward_cpu_kernel(
+void multi_margin_loss_backward_cpu_kernel(
     scalar_t* grad_input_data,
     const Tensor& grad_output,
     const scalar_t* input_data,
@@ -216,8 +215,7 @@ void multi_margin_loss_backward_out_cpu_template(
     const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t nframe, dim;
+  int64_t nframe = 0, dim = 0;
   const auto ndims = input.dim();
 
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");

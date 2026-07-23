@@ -4,8 +4,6 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
@@ -1522,7 +1520,7 @@ InsertObserversHelper::insertObserversFor(
           }
         }
       } else if (n->kind() == prim::If) {
-        // a vector recoding whether each output is observed or not
+        // a vector recording whether each output is observed or not
         std::vector<bool> aggregated_output_observe_state;
         for (Block* subblock : n->blocks()) {
           if (alwaysRaisesException(subblock)) {
@@ -1620,7 +1618,9 @@ InsertObserversHelper::insertObserversFor(
     block_observer_map_[block] = observer_name_and_modules;
   }
   return std::make_tuple(
-      block_input_observers, block_output_observers, output_idxs);
+      std::move(block_input_observers),
+      std::move(block_output_observers),
+      std::move(output_idxs));
 }
 
 void InsertObserversHelper::propagateObservedProperty(
@@ -1701,8 +1701,8 @@ Module InsertObserversForOnDevicePTQ(
   // find observable value inside If block? Also side effect of inlining is that
   // you will have multiple getattrs for the same attribute and thus potentially
   // multiple observers observing the same value. This will also lead to
-  // increased size of the packed param struct. I dont expect this to be a
-  // common pattern but something to be aware fo Note that current quant
+  // increased size of the packed param struct. I don't expect this to be a
+  // common pattern but something to be aware of Note that current quant
   // workflow does not prevent this anyway since during inset quant dequant
   // things are inlined anyway
   helper.fillBoundaryValueMap(cloned_module, observer_method_name);

@@ -50,15 +50,14 @@ def triton_red_fused_add_sum_2(in_out_ptr0, in_ptr0, xnumel, rnumel, XBLOCK : tl
     tmp5 = tmp4 + tmp2
     tl.debug_barrier()
     tl.store(in_out_ptr0 + (x0), tmp5, xmask)
-""".replace(
-    "GPU_TYPE", GPU_TYPE
-)
+""".replace("GPU_TYPE", GPU_TYPE)
 
 
 class TestMetrics(TestCase):
     def test_parse_proper_kernel_fn_code(self):
         proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(example_kernel)
-        assert proper_kernel_fn_code.startswith("def ")
+        if not proper_kernel_fn_code.startswith("def "):
+            raise AssertionError
 
     def test_count_args(self):
         proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(example_kernel)
@@ -78,6 +77,7 @@ class TestMetrics(TestCase):
         )
 
     @config.patch("fx_graph_remote_cache", False)
+    @config.patch("partitioned_scatter_enabled", False)
     def test_atomic_add(self):
         @torch.compile
         def f(lhs, index, rhs):
@@ -95,7 +95,7 @@ class TestMetrics(TestCase):
         kernel_code = kernel_list[0]
         self.assertEqual(metrics._count_pattern(kernel_code, "tl.atomic_add"), 1)
 
-    @largeTensorTest(25e7 * 2 * 4, device=GPU_TYPE)
+    @largeTensorTest(25e7 * 2 * 4, device=GPU_TYPE, inductor=True)
     @config.patch("fx_graph_remote_cache", False)
     @config.patch("benchmark_kernel", True)
     def test_kernel_args_num_gb(self):

@@ -2,14 +2,14 @@
 
 """Test the support on onnxscript in PyTorch-ONNX converter with onnxruntime."""
 
-from typing import List
+from typing import Sequence  # noqa: UP035
 
 import onnx_test_common
 import onnxscript
 from onnxscript.onnx_types import FLOAT
 
 import torch
-from torch.onnx._internal import jit_utils
+from torch.onnx._internal.torchscript_exporter import jit_utils
 from torch.testing._internal import common_utils
 
 
@@ -90,7 +90,11 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
 
         @onnxscript.script(custom_opset)
         def layer_norm(
-            X, axes: List[int], weight: FLOAT[...], bias: FLOAT[...], eps: float
+            X,
+            axes: Sequence[int],
+            weight: FLOAT[...],
+            bias: FLOAT[...],
+            eps: float,
         ):
             mean = op.ReduceMean(X, axes=axes)
             D = X - mean  # op.Sub(X, mean)

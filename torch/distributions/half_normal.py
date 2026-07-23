@@ -29,11 +29,19 @@ class HalfNormal(TransformedDistribution):
     Args:
         scale (float or Tensor): scale of the full Normal distribution
     """
+
     arg_constraints = {"scale": constraints.positive}
+    # pyrefly: ignore [bad-override]
     support = constraints.nonnegative
     has_rsample = True
+    # pyrefly: ignore [bad-override]
+    base_dist: Normal
 
-    def __init__(self, scale, validate_args=None):
+    def __init__(
+        self,
+        scale: Tensor | float,
+        validate_args: bool | None = None,
+    ) -> None:
         base_dist = Normal(0, scale, validate_args=False)
         super().__init__(base_dist, AbsTransform(), validate_args=validate_args)
 

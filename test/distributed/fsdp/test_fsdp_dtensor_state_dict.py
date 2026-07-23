@@ -5,7 +5,6 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor, Shard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
@@ -13,11 +12,12 @@ from torch.distributed.fsdp.api import (
     ShardedStateDictConfig,
     StateDictType,
 )
+from torch.distributed.tensor import DTensor, Shard
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import parametrize, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -60,7 +60,7 @@ class TestDummyModelUneven(torch.nn.Module):
         return torch.rand(5, 5, device=device_type.type)
 
 
-class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
+class TestFSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     def _create_model(self, is_even_sharded_model, device_mesh=None):
         dummy_model = (
             TestDummyModel() if is_even_sharded_model else TestDummyModelUneven()
@@ -285,9 +285,9 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                 FSDP.optim_state_dict(model, optim)
 
 
-devices = ("cuda", "hpu")
+devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
-    TestFSDPWithDeviceMeshAndDTensor, globals(), only_for=devices
+    TestFSDPWithDeviceMeshAndDTensor, globals(), only_for=devices, allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()

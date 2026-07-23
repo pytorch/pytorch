@@ -14,35 +14,38 @@ from torch.distributed._shard.sharding_spec._internals import (
 )
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 def generate_chunk_sharding_specs_for_test(sharding_dim):
     return [
         ChunkShardingSpec(
             dim=sharding_dim,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         ),
         # Test different ordering. (Case 1)
         ChunkShardingSpec(
             dim=sharding_dim,
             placements=[
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
             ],
         ),
         # Test different ordering. (Case 2)
         ChunkShardingSpec(
             dim=sharding_dim,
             placements=[
-                "rank:3/cuda:3",
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
+                f"rank:3/{device_type}:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
             ],
         ),
     ]
@@ -55,22 +58,22 @@ def generate_enumerable_sharding_specs_for_test():
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{device_type}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:2/cuda:2",
+                    placement=f"rank:2/{device_type}:2",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:3/cuda:3",
+                    placement=f"rank:3/{device_type}:3",
                 ),
             ]
         )
@@ -121,16 +124,17 @@ def clone_module_parameter(module, param_name):
     tensor = getattr(module, param_name)
     return torch.nn.Parameter(tensor.detach().clone())
 
-def gen_binary_op_func(python_op, inplace=False):
-    src_lines = ['def f(lhs, rhs):']
-    if "torch" in python_op:
-        src_lines.append(f'  return {python_op}(lhs, rhs)\n')
-    elif inplace:
-        src_lines.append(f'  lhs {python_op}= rhs\n  return lhs\n')
-    else:
-        src_lines.append(f'  return lhs {python_op} rhs\n')
 
-    code_str = '\n'.join(src_lines)
-    g = {'torch': torch}
+def gen_binary_op_func(python_op, inplace=False):
+    src_lines = ["def f(lhs, rhs):"]
+    if "torch" in python_op:
+        src_lines.append(f"  return {python_op}(lhs, rhs)\n")
+    elif inplace:
+        src_lines.append(f"  lhs {python_op}= rhs\n  return lhs\n")
+    else:
+        src_lines.append(f"  return lhs {python_op} rhs\n")
+
+    code_str = "\n".join(src_lines)
+    g = {"torch": torch}
     builtins.exec(code_str, g)
     return g["f"]

@@ -6,6 +6,7 @@
 #include <ATen/TensorUtils.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/SymBool.h>
 
 #include <utility>
 
@@ -78,6 +79,17 @@ inline c10::SymInt maybe_convert_symint(c10::SymInt x) { return x; }
 template <>
 inline int64_t maybe_convert_symint(c10::SymInt x) { return x.guard_int(__FILE__, __LINE__); }
 
+// Sub-byte quantized dtypes (QUInt4x2, QUInt2x4) pack multiple logical
+// elements per storage byte. Itemsize is still 1, so the standard
+// element*itemsize formula over-counts; divide by this packing factor.
+inline int64_t subByteElementPerByte(const caffe2::TypeMeta& data_type) {
+  switch (c10::typeMetaToScalarType(data_type)) {
+    case c10::ScalarType::QUInt4x2: return 2;
+    case c10::ScalarType::QUInt2x4: return 4;
+    default: return 1;
+  }
+}
+
 template <typename T>
 inline void checkInBoundsForStorage(
     ArrayRef<T> size,
@@ -85,16 +97,35 @@ inline void checkInBoundsForStorage(
     T storage_offset,
     const caffe2::TypeMeta& data_type,
     const Storage& new_storage) {
-  T storage_size_bytes =
-      at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
-  T storage_offset_bytes = storage_offset * data_type.itemsize();
-  if (storage_size_bytes == 0) {
+  T storage_size_bytes, storage_size_plus_offset_bytes;
+  if (stride.data()) {
+    storage_size_bytes =
+        at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
+    storage_size_plus_offset_bytes = at::detail::computeStorageNbytes(
+        size, stride, data_type.itemsize(), storage_offset);
+  } else {
+    storage_size_bytes =
+        at::detail::computeStorageNbytesContiguous(size, data_type.itemsize());
+    storage_size_plus_offset_bytes = at::detail::computeStorageNbytesContiguous(
+        size, data_type.itemsize(), storage_offset);
+  }
+  const int64_t element_per_byte = subByteElementPerByte(data_type);
+  if (element_per_byte > 1) {
+    storage_size_bytes =
+        (storage_size_bytes + element_per_byte - 1) / element_per_byte;
+    storage_size_plus_offset_bytes =
+        (storage_size_plus_offset_bytes + element_per_byte - 1) / element_per_byte;
+  }
+  // It's ok to always evaluate to False for this early return for SymInts because
+  // (1) maybe_convert_symint below only installs guard for int64_t case
+  // (2) we check for this condition in the TORCH_MAYBE_SYM_CHECK below
+  if (TORCH_GUARD_OR_FALSE(sym_eq(storage_size_bytes, 0))) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
   T new_storage_size_bytes = maybe_convert_symint<T>(new_storage.sym_nbytes());
-  TORCH_CHECK(
-      storage_size_bytes + storage_offset_bytes <= new_storage_size_bytes,
+  TORCH_MAYBE_SYM_CHECK(
+      sym_eq(storage_size_bytes, 0) || sym_le(storage_size_plus_offset_bytes, new_storage_size_bytes),
       "setStorage: sizes ",
       size,
       ", strides ",
@@ -105,14 +136,14 @@ inline void checkInBoundsForStorage(
       ", and itemsize ",
       data_type.itemsize(),
       " requiring a storage size of ",
-      storage_size_bytes + storage_offset_bytes,
+      storage_size_plus_offset_bytes,
       " are out of bounds for storage of size ",
       new_storage_size_bytes);
 }
 
 template <typename T>
 inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
-                                   ArrayRef<T> size, ArrayRef<T> stride) {
+                                   ArrayRef<T> size, ArrayRef<T> stride, bool check_offset_in_bounds = true) {
   // FIXME: stride should be optional
   if (stride.data()) {
     TORCH_CHECK(size.size() == stride.size(), "unequal size length (", size.size(),
@@ -122,6 +153,28 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
 #ifdef DEBUG
   TORCH_CHECK(size.size() <= INT_MAX, "size length (", size.size(), ") greater than INT_MAX");
 #endif
+
+  // storageOffset
+  TORCH_CHECK(
+    TORCH_GUARD_OR_TRUE(sym_ge(storage_offset, 0)), "Tensor: invalid storage offset ", storage_offset);
+
+  // set_storage_{device} (except set_storage_meta__symint)
+  // will (unsafely) set the storage offset and then call resize_impl that
+  // handles resizing the storage However, resize_impl will only resize the
+  // storage if the sizes/strides changed. For the case that the sizes/strides
+  // remain unchanged, the storage offset is not properly validated, so we do
+  // that here.
+  if (check_offset_in_bounds) {
+    auto result_tensor_impl = result.unsafeGetTensorImpl();
+    bool size_unchanged = result_tensor_impl->generic_sizes<T>() == size;
+    bool stride_unchanged = stride.data()
+        ? result_tensor_impl->generic_strides<T>() == stride
+        : true;
+    if (size_unchanged && stride_unchanged) {
+      checkInBoundsForStorage(
+          size, stride, storage_offset, result.dtype(), storage);
+    }
+  }
 
   // storage: note this can't be replaced with result.set_(storage) as the semantics of that
   // function is to set the tensor size to be equal to the size of the storage.
@@ -139,9 +192,6 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
                 "\".  This is no longer allowed; the devices must match.");
     result.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
   }
-
-  // storageOffset
-  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
 }
 
 /**
@@ -149,24 +199,76 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
  * (size, stride, storage_offset) must be in bounds for self's storage.
  */
 template <typename T>
+void checkAsStridedArgs(
+    ArrayRef<T> size,
+    ArrayRef<T> stride,
+    T storage_offset) {
+  TORCH_CHECK(
+      size.size() == stride.size(), "mismatch in length of strides and shape");
+  for (const auto& val : stride) {
+    TORCH_CHECK(
+        val >= 0,
+        "as_strided: Negative strides are not supported at the moment, "
+        "got strides: ",
+        stride);
+  }
+  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+}
+
+template <typename T>
+void checkAsStridedArgsAllowUnbackedSymInts(
+    ArrayRef<T> size,
+    ArrayRef<T> stride,
+    T storage_offset) {
+  TORCH_CHECK(
+      size.size() == stride.size(), "mismatch in length of strides and shape");
+  if constexpr (std::is_same_v<T, c10::SymInt>) {
+    // FakeTensor/Meta view replay can pass ephemeral symbolic metadata here,
+    // so only validate values once the SymInts become concrete.
+    for (const auto& val : stride) {
+      if (auto maybe_val = val.maybe_as_int()) {
+        TORCH_CHECK(
+            *maybe_val >= 0,
+            "as_strided: Negative strides are not supported at the moment, "
+            "got strides: ",
+            stride);
+      }
+    }
+
+    if (auto maybe_storage_offset = storage_offset.maybe_as_int()) {
+      TORCH_CHECK(
+          *maybe_storage_offset >= 0,
+          "Tensor: invalid storage offset ",
+          storage_offset);
+    }
+  } else {
+    for (const auto& val : stride) {
+      TORCH_CHECK(
+          val >= 0,
+          "as_strided: Negative strides are not supported at the moment, "
+          "got strides: ",
+          stride);
+    }
+
+    TORCH_CHECK(
+        storage_offset >= 0,
+        "Tensor: invalid storage offset ",
+        storage_offset);
+  }
+}
+
+template <typename T>
 inline void setStrided(
     const Tensor& self,
     ArrayRef<T> size,
     ArrayRef<T> stride,
     T storage_offset) {
-  TORCH_CHECK(size.size() == stride.size(), "mismatch in length of strides and shape");
-  for (const auto& val : stride) {
-    TORCH_CHECK(val >= 0,
-                "as_strided: Negative strides are not supported at the moment, "
-                "got strides: ", stride);
-  }
+  checkAsStridedArgs(size, stride, storage_offset);
 
   auto* self_ = self.unsafeGetTensorImpl();
   checkInBoundsForStorage(
       size, stride, storage_offset, self_->dtype(), self_->storage());
 
-  /* storage offset */
-  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
   self_->set_sizes_and_strides(size, stride, storage_offset);
 }
 

@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 import torch
 from torch import Tensor
 from torch._awaits import _Await as Await
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
@@ -193,7 +194,7 @@ class TestAwait(JitTestCase):
         def C_wait_impl(self: C) -> C:
             return C(self._a * 2, self._b * 3)
 
-        def fn_arg_C(x: C) -> Tensor:  # noqa: F841
+        def fn_arg_C(x: C) -> Tensor:
             return x._a + x._b
 
         def fn(x: Tensor):
@@ -268,7 +269,7 @@ class TestAwait(JitTestCase):
         def main(x: Tensor) -> Tensor:
             aw = torch.jit._awaitable(delayed, x)
             if torch.jit.is_scripting():
-                assert isinstance(aw, torch.jit._Await)
+                assert isinstance(aw, torch.jit._Await)  # noqa: S101
             return torch.jit._awaitable_wait(aw)
 
         inp = torch.eye(2)
@@ -390,3 +391,7 @@ class TestAwait(JitTestCase):
         sm = torch.jit.load(iofile)
         script_out_load = sm(inp)
         self.assertTrue(torch.allclose(expected, script_out_load))
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

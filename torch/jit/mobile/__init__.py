@@ -47,14 +47,15 @@ def _load_for_lite_interpreter(f, map_location=None):
         cpp_module = torch._C._load_for_lite_interpreter(os.fspath(f), map_location)
     else:
         cpp_module = torch._C._load_for_lite_interpreter_from_buffer(
-            f.read(), map_location
+            f.read(),
+            map_location,
         )
 
     return LiteScriptModule(cpp_module)
 
 
 class LiteScriptModule:
-    def __init__(self, cpp_module):
+    def __init__(self, cpp_module) -> None:
         self._c = cpp_module
         super().__init__()
 
@@ -141,7 +142,7 @@ def _get_mobile_model_contained_types(f_input) -> int:
 
 
 def _backport_for_mobile(f_input, f_output, to_version):
-    r"""Take a input string containing a file name (file-like object) and a new destination to return a boolean.
+    r"""Take an input string containing a file name (file-like object) and a new destination to return a boolean.
 
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
@@ -161,11 +162,15 @@ def _backport_for_mobile(f_input, f_output, to_version):
         isinstance(f_output, (str, os.PathLike))
     ):
         return torch._C._backport_for_mobile(
-            os.fspath(f_input), os.fspath(f_output), to_version
+            os.fspath(f_input),
+            os.fspath(f_output),
+            to_version,
         )
     else:
         return torch._C._backport_for_mobile_from_buffer(
-            f_input.read(), str(f_output), to_version
+            f_input.read(),
+            str(f_output),
+            to_version,
         )
 
 
@@ -187,7 +192,8 @@ def _backport_for_mobile_to_buffer(f_input, to_version):
         return torch._C._backport_for_mobile_to_buffer(os.fspath(f_input), to_version)
     else:
         return torch._C._backport_for_mobile_from_buffer_to_buffer(
-            f_input.read(), to_version
+            f_input.read(),
+            to_version,
         )
 
 

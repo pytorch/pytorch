@@ -2,8 +2,12 @@
 import copy
 import logging
 import random
+from typing import Any
+from typing_extensions import override
 
 from torch._inductor.virtualized import V
+
+from .rocm_template import ArgInfo
 
 
 try:
@@ -88,16 +92,13 @@ class CKGroupedConvFwdTemplate(CKTemplate):
 
         constexpr index_t NumDTensor = {{n_d_tensors}};
         constexpr index_t NDimSpatial = {{n_dim_spatial}};
-        constexpr index_t GroupCount = {{group_count}};
-        constexpr index_t NBatch = {{batch_size}};
-        constexpr index_t NOutChannels = {{n_output_channels}};
-        constexpr index_t NInChannels = {{n_input_channels}};
-        const std::vector<index_t> FilterSize = { {{filter_size}} };
-        const std::vector<index_t> InputSize = { {{input_size}} };
-        const std::vector<index_t> ConvolutionStrides = { {{convolution_strides}} };
-        const std::vector<index_t> Dilations = { {{dilations}} };
-        const std::vector<index_t> LeftPads = { {{left_pads}} };
-        const std::vector<index_t> RightPads = { {{right_pads}} };
+        const std::vector<index_t> FilterSize = { FilterSize_0, FilterSize_1 };
+        const std::vector<index_t> InputSize = { InputSize_0, InputSize_1 };
+        const std::vector<index_t> ConvolutionStrides = { ConvolutionStrides_0, ConvolutionStrides_1 };
+        const std::vector<index_t> Dilations = { Dilations_0, Dilations_1 };
+        const std::vector<index_t> LeftPads = { LeftPads_0, LeftPads_1 };
+        const std::vector<index_t> RightPads = { RightPads_0, RightPads_1 };
+
 
         auto conv_param = ck::utils::conv::ConvParam {
             NDimSpatial,
@@ -286,6 +287,8 @@ class CKGroupedConvFwdTemplate(CKTemplate):
 
                 using ConvolutionForwardSpecialization = ck::tensor_operation::device::ConvolutionForwardSpecialization;
 
+                using OutElementOp = PassThrough;
+
                 namespace ck {
                 namespace utils {
                 namespace conv {
@@ -351,19 +354,13 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                 } // namespace utils
                 } // namespace ck
 
-                const std::vector<std::size_t>& HostTensorDescriptor::GetLengths() const { return mLens; }
-                const std::vector<std::size_t>& HostTensorDescriptor::GetStrides() const { return mStrides; }
-                std::size_t HostTensorDescriptor::GetNumOfDimension() const { return mLens.size(); }
-                void HostTensorDescriptor::CalculateStrides() {
-                    mStrides.clear();
-                    mStrides.resize(mLens.size(), 0);
-                    if(mStrides.empty())
-                        return;
-
-                    mStrides.back() = 1;
-                    std::partial_sum(
-                        mLens.rbegin(), mLens.rend() - 1, mStrides.rbegin() + 1, std::multiplies<std::size_t>());
-                }
+                // NOTE: HostTensorDescriptor methods are declared in CK headers but defined
+                // in CK's utility library. For architectural reasons, generated code doesn't
+                // link with this library, so we provide local definitions here.
+                // CalculateStrides is omitted as it became a template method in CK 4266f867.
+                const std::vector<std::size_t>& ck::HostTensorDescriptor::GetLengths() const { return mLens; }
+                const std::vector<std::size_t>& ck::HostTensorDescriptor::GetStrides() const { return mStrides; }
+                std::size_t ck::HostTensorDescriptor::GetNumOfDimension() const { return mLens.size(); }
             """
         )
         return res
@@ -463,6 +460,8 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         # disable 1x1 and odd-channels conv specializations for now
         if "Default" not in op.conv_forward_specialization:
             return None
+        if self.is_blocked_by_tf32_setting(op):
+            return None
         return op
 
     def gen_ops(self):
@@ -477,9 +476,9 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         chosen_instances = (
             random.sample(
                 filtered_instances,
-                min(len(filtered_instances), config.rocm.n_max_profiling_configs),
+                min(len(filtered_instances), config.rocm.ck_max_profiling_configs),
             )
-            if config.rocm.n_max_profiling_configs
+            if config.rocm.ck_max_profiling_configs
             else filtered_instances
         )
         log.debug(
@@ -510,17 +509,24 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                     arg = f"/* {field_name} */ Tuple<{tuple_elements}>"
                 else:  # tile shape
                     arg = f"/* {field_name} */ S<{tuple_elements}>"
+                # pyrefly: ignore [bad-argument-type]
                 template_params.append(arg)
             else:
                 if field_value is not None:
+                    # pyrefly: ignore [bad-argument-type]
                     template_params.append(f"/* {field_name} */ {field_value}")
         return self._template_from_string(template_definition).render(
             operation_name=op.name(),
             template_params=(",\n" + 12 * " ").join(template_params),
         ), self._template_from_string(template_type).render(operation_name=op.name())
 
-    def render(self, kernel: ROCmTemplateKernel, op: "CKGroupedConvFwdOp", **kwargs) -> str:  # type: ignore[override, name-defined]
-        template_buffer_node = kwargs.get("template_buffer_node", None)
+    def render(  # type: ignore[override]
+        self,
+        kernel: ROCmTemplateKernel,
+        op: "CKGroupedConvFwdOp",  # type: ignore[name-defined]
+        **kwargs,
+    ) -> str:
+        template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -530,6 +536,25 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         op = copy.deepcopy(op)
 
         instance_definition, instance_type = self.emit_ck_instance(op)
+
+        size_arg_strs = [
+            "GroupCount",
+            "NBatch",
+            "NOutChannels",
+            "NInChannels",
+            "FilterSize_0",
+            "FilterSize_1",
+            "InputSize_0",
+            "InputSize_1",
+            "ConvolutionStrides_0",
+            "ConvolutionStrides_1",
+            "Dilations_0",
+            "Dilations_1",
+            "LeftPads_0",
+            "LeftPads_1",
+            "RightPads_0",
+            "RightPads_1",
+        ]
 
         return self._template_from_string(self.conv_template).render(
             headers=self.header().getvalue(),
@@ -542,24 +567,57 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                 names_str="input, weight, bias, output"
                 if Bias is not None
                 else "input, weight, output",
-                size_args=[],
+                size_args=[f"int32_t {arg}" for arg in size_arg_strs],
             ),
             n_d_tensors=1 if Bias is not None else 0,
             n_dim_spatial=self.n_spatial_dimensions,
-            group_count=self.groups,
-            batch_size=X.shape[0],  # type: ignore[index]
-            n_output_channels=Y.shape[1],  # type: ignore[index]
-            n_input_channels=X.shape[1],  # type: ignore[index]
-            filter_size=", ".join(map(str, W.shape[2:])),  # type: ignore[index]
-            input_size=", ".join(map(str, X.shape[2:])),  # type: ignore[index]
-            convolution_strides=", ".join(map(str, self.stride)),
-            dilations=", ".join(map(str, self.dilation)),
-            left_pads=", ".join(map(str, self.padding)),
-            right_pads=", ".join(map(str, self.padding)),
             input_layout=op.a_layout,
             weight_layout=op.b_layout,
             output_layout=op.e_layout,
         )
 
     def size_args(self):
+        x, w = self.input_nodes[0], self.input_nodes[1]
+        y = self.output_node
+
+        group_count = self.groups
+        n_batch = x.shape[0]  # type: ignore[index]
+        n_out_channels = y.shape[1]  # type: ignore[index]
+        n_in_channels = x.shape[1]  # type: ignore[index]
+
+        filter_size_0, filter_size_1 = w.shape[2:4]  # type: ignore[index]
+        input_size_0, input_size_1 = x.shape[2:4]  # type: ignore[index]
+        convolution_strides_0, convolution_strides_1 = self.stride
+        dilations_0, dilations_1 = self.dilation
+        left_pads_0, left_pads_1 = self.padding
+        right_pads_0, right_pads_1 = self.padding
+
+        return (
+            group_count,
+            n_batch,
+            n_out_channels,
+            n_in_channels,
+            filter_size_0,
+            filter_size_1,
+            input_size_0,
+            input_size_1,
+            convolution_strides_0,
+            convolution_strides_1,
+            dilations_0,
+            dilations_1,
+            left_pads_0,
+            left_pads_1,
+            right_pads_0,
+            right_pads_1,
+        )
+
+    @override
+    def get_runtime_arg_info(self) -> list[ArgInfo]:
+        return []
+
+    @override
+    def get_runtime_arg_values(self, **kwargs: Any) -> list[Any]:
+        """
+        Helper method to retrieve runtime args from generate kwargs
+        """
         return []

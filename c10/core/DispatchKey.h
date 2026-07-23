@@ -45,6 +45,7 @@ namespace c10 {
   _(VE, extra)                                  \
   _(Lazy, extra)                                \
   _(MTIA, extra)                                \
+  _(MAIA, extra)                                \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
   _(PrivateUse3, extra)                         \
@@ -180,13 +181,6 @@ enum class DispatchKey : uint16_t {
   FPGA, // Xilinx support lives out of tree at
   // https://gitlab.com/pytorch-complex/vitis_kernels
 
-  // TODO: put this in BackendComponents
-  // MAIA backend lives out of tree
-  // - test/cpp_extensions/maia_extension.cpp
-  // - test/test_torch.py
-  // - aten/src/ATen/test/extension_backend_test.cpp
-  MAIA,
-
   Vulkan, // TODO: put this in BackendComponents
   Metal, // TODO: put this in BackendComponents
 
@@ -227,12 +221,12 @@ enum class DispatchKey : uint16_t {
   // correct backend.
   BackendSelect,
 
-  Python,
-
-  // Out-of-core key for Fake Tensor in torchdistx.
-  // See https://pytorch.org/torchdistx/latest/fake_tensor.html
-  // TODO: delete this in favor of Python-implemented fake tensor
+  // Fake dispatch key for C++ FakeTensor mode. Must be BELOW Python so that
+  // TorchDispatchModes (e.g. ProxyTorchDispatchMode, FakeTensorMode) fire
+  // first, matching the Python FakeTensor dispatch order.
   Fake,
+
+  Python,
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
   // be directly after ADInplaceOrView and all of the autograd keys.
@@ -244,21 +238,6 @@ enum class DispatchKey : uint16_t {
   // we can consider adding separate keys dedicated to those individual passes.
   // See Note [Functionalization Pass In Core] for details.
   Functionalize,
-
-  // The named dispatch key is set for any tensors with named dimensions.
-  // Although we have a dispatch key for named tensors, for historical reasons,
-  // this dispatch key doesn't do any of the substantive functionality for named
-  // tensor (though, hypothetically, it could!)  At the moment, it's just
-  // responsible for letting us give good error messages when operations
-  // don't support named tensors.
-  //
-  // NB: If you ever consider moving named tensor functionality into
-  // this dispatch key, note that it might be necessary add another dispatch
-  // key that triggers before composite operators, in case a composite operator
-  // has named dimension propagation that doesn't match that of its
-  // constituent parts.
-  // TODO: delete this once torchdim lands in functorch
-  Named,
 
   // The Conjugate dispatch key is set for any tensors that need to perform
   // conjugation
@@ -353,6 +332,8 @@ enum class DispatchKey : uint16_t {
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
+  AutocastMTIA,
+  AutocastMAIA,
   AutocastXPU,
   AutocastIPU,
   AutocastHPU,
@@ -594,10 +575,12 @@ constexpr uint16_t num_runtime_entries = num_functionality_keys +
 constexpr uint16_t full_backend_mask =
     (static_cast<uint16_t>(1) << num_backends) - 1;
 
-C10_API const char* toString(DispatchKey);
-C10_API const char* toString(BackendComponent);
-C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
-C10_API std::ostream& operator<<(std::ostream&, BackendComponent);
+C10_API const char* toString(DispatchKey /*t*/);
+C10_API const char* toString(BackendComponent /*t*/);
+C10_API std::ostream& operator<<(std::ostream& /*str*/, DispatchKey /*rhs*/);
+C10_API std::ostream& operator<<(
+    std::ostream& /*str*/,
+    BackendComponent /*rhs*/);
 
 C10_API DispatchKey getAutogradKeyFromBackend(BackendComponent k);
 
@@ -740,7 +723,7 @@ struct hash<c10::DispatchKey> {
   typedef size_t result_type;
   typedef c10::DispatchKey argument_type;
 
-  size_t operator()(c10::DispatchKey x) const {
+  size_t operator()(c10::DispatchKey x) const noexcept {
     return static_cast<size_t>(x);
   }
 };

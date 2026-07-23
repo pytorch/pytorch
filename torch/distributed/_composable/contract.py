@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import uuid
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable, Generic, Optional, overload, Protocol, TypeVar, Union
-from typing_extensions import Concatenate, ParamSpec
+from typing import Concatenate, Generic, Protocol
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch.nn as nn
@@ -33,45 +33,20 @@ class RegistryItem:
 
 
 _TState = TypeVar("_TState", bound="_State", covariant=True)
+_M = TypeVar("_M", nn.Module, list[nn.Module])
 
 
 class _ContractFn(Protocol, Generic[_P, _T, _TState]):
-    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
-        ...
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T: ...
 
-    def state(self, module: nn.Module) -> _TState:
-        ...
-
-
-@overload
-def contract() -> (
-    Callable[
-        [Callable[Concatenate[nn.Module, _P], Optional[nn.Module]]],
-        _ContractFn[Concatenate[nn.Module, _P], _T, _State],
-    ]
-):
-    ...
-
-
-@overload
-def contract(
-    state_cls: type[_TState],
-) -> Callable[
-    [Callable[Concatenate[nn.Module, _P], Optional[nn.Module]]],
-    _ContractFn[Concatenate[nn.Module, _P], _T, _TState],
-]:
-    ...
+    def state(self, module: nn.Module) -> _TState: ...
 
 
 def contract(
-    state_cls: type = _State,
+    state_cls: type[_TState] = _State,  # type: ignore[assignment]
 ) -> Callable[
-    [
-        Callable[
-            Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], Optional[nn.Module]
-        ]
-    ],
-    _ContractFn,
+    [Callable[Concatenate[_M, _P], _M]],
+    _ContractFn[Concatenate[_M, _P], _M, _TState],
 ]:
     r"""
     Decorate a function as a composable distributed API, where the first
@@ -116,25 +91,23 @@ def contract(
     # wraps will make functions decorated with contract() pickleable - needed for integration with torch.package
     @wraps(state_cls)  # type: ignore[arg-type]
     def inner(
-        func: Callable[
-            Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], Optional[nn.Module]
-        ]
-    ) -> _ContractFn[
-        Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], _T, _TState
-    ]:
+        func: Callable[Concatenate[_M, _P], _M],
+    ) -> _ContractFn[Concatenate[_M, _P], _M, _TState]:
         @wraps(func)
         def wrapper(
-            module: Union[nn.Module, Sequence[nn.Module]],
+            module: _M,
             *args: _P.args,
             **kwargs: _P.kwargs,
-        ) -> Optional[nn.Module]:
+        ) -> _M:
             inp_module = module
+            modules: list[nn.Module]
             if isinstance(module, nn.Module):
                 modules = [module]
             else:
                 # If the user passes a sequence of modules, then we assume that
                 # we only need to insert the state object on the root modules
                 # (i.e. those without a parent) among the passed-in modules.
+                # pyrefly: ignore [no-matching-overload]
                 modules = _get_root_modules(list(module))
             state = state_cls()  # shared across all modules
             registry_item = RegistryItem()  # shared across all modules
@@ -179,10 +152,11 @@ def contract(
             updated = func(inp_module, *args, **kwargs)
             if updated is None:
                 updated = inp_module  # type: ignore[assignment]
+            updated_modules: list[nn.Module]
             if isinstance(updated, nn.Module):
                 updated_modules = [updated]
             else:
-                updated_modules = _get_root_modules(list(inp_module))  # type: ignore[arg-type]
+                updated_modules = _get_root_modules(list(inp_module))  # type: ignore[arg-type, call-overload]
 
             all_new_named_params: list[dict[str, nn.Parameter]] = []
             all_new_named_buffers: list[dict[str, torch.Tensor]] = []
@@ -258,18 +232,16 @@ def contract(
             return module.__dict__.setdefault(  # type: ignore[call-overload]
                 STATE_KEY,
                 {},  # TODO(@yhcharles): this is a temporary fix, need a better way
-            ).get(
-                func
-            )  # type: ignore[call-overload]
+            ).get(func)  # type: ignore[call-overload]
 
         wrapper.state = get_state  # type: ignore[attr-defined]
 
         return wrapper  # type: ignore[return-value]
 
-    return inner
+    return inner  # type: ignore[return-value]
 
 
-def _get_registry(module: nn.Module) -> Optional[dict[str, RegistryItem]]:
+def _get_registry(module: nn.Module) -> dict[str, RegistryItem] | None:
     r"""
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name. If no API has been applied, then this

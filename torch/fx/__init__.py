@@ -52,7 +52,7 @@ demonstration of these components in action:
 
 The **symbolic tracer** performs "symbolic execution" of the Python
 code. It feeds fake values, called Proxies, through the code. Operations
-on theses Proxies are recorded. More information about symbolic tracing
+on these Proxies are recorded. More information about symbolic tracing
 can be found in the :func:`symbolic_trace` and :class:`Tracer`
 documentation.
 
@@ -84,14 +84,15 @@ Several example transformations can be found at the
 repository.
 '''
 
-from torch.fx._symbolic_trace import (  # noqa: F401
+from torch.fx import immutable_collections
+from torch.fx._symbolic_trace import (
     PH,
     ProxyableClassMeta,
     symbolic_trace,
     Tracer,
     wrap,
 )
-from torch.fx.graph import CodeGen, Graph  # noqa: F401
+from torch.fx.graph import CodeGen, Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.interpreter import Interpreter, Transformer
 from torch.fx.node import has_side_effect, map_arg, Node

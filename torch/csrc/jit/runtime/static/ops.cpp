@@ -44,7 +44,7 @@
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
     true,
-    "If on, static runtime may use use optimizations that cause accuracy loss "
+    "If on, static runtime may use optimizations that cause accuracy loss "
     "vs the jit interpreter")
 
 namespace at::native {
@@ -163,7 +163,7 @@ static at::Tensor& flatten_copy_out(
 
 namespace {
 
-// This is annoying and sily, but it's solving a real problem: the
+// This is annoying and silly, but it's solving a real problem: the
 // _MSC_VER version causes an ICE on our old clang5 builds. The
 // non-_MSC_VER version is a syntax error according to MSVC. Use the
 // appropriate version depending on if we're MSVC or not.
@@ -1344,7 +1344,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ToArgs {
   std::optional<at::ScalarType> dtype;
   c10::Layout layout;
@@ -1911,7 +1910,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
 
-    if (in0_t.sizes() == in1_t.sizes() &&
+    if (te && te->checkInput<float>(in0_t) && in0_t.sizes() == in1_t.sizes() &&
         in0_t.scalar_type() == in1_t.scalar_type() &&
         in0_t.strides() == in1_t.strides() && in0_t.is_contiguous() &&
         in0_t.scalar_type() == at::kFloat) {

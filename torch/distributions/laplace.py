@@ -1,12 +1,11 @@
 # mypy: allow-untyped-defs
-from numbers import Number
 
 import torch
 from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["Laplace"]
@@ -27,6 +26,8 @@ class Laplace(Distribution):
         loc (float or Tensor): mean of the distribution
         scale (float or Tensor): scale of the distribution
     """
+
+    # pyrefly: ignore [bad-override]
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.real
     has_rsample = True
@@ -47,9 +48,14 @@ class Laplace(Distribution):
     def stddev(self) -> Tensor:
         return (2**0.5) * self.scale
 
-    def __init__(self, loc, scale, validate_args=None):
+    def __init__(
+        self,
+        loc: Tensor | float,
+        scale: Tensor | float,
+        validate_args: bool | None = None,
+    ) -> None:
         self.loc, self.scale = broadcast_all(loc, scale)
-        if isinstance(loc, Number) and isinstance(scale, Number):
+        if isinstance(loc, _Number) and isinstance(scale, _Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()

@@ -173,7 +173,7 @@ def save_results(
     all_tests: dict[str, dict[str, int]],
 ) -> None:
     """
-    Save the result to S3, which then gets put into the HUD backened database
+    Save the result to S3, which then gets put into the HUD backend database
     """
     should_be_enabled_tests = {
         name: stats
@@ -245,7 +245,9 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
 
         # The scheduled workflow has both rerun disabled tests and memory leak check jobs.
         # We are only interested in the former here
-        if not is_rerun_disabled_tests(tests):
+        if not is_rerun_disabled_tests(
+            report, workflow_run_id, workflow_run_attempt, tests
+        ):
             continue
 
         for name, stats in tests.items():

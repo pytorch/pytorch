@@ -11,6 +11,12 @@
 #include <sleef.h>
 #endif
 
+#if defined(CPU_CAPABILITY_SVE128)
+#include <ATen/cpu/vec/sve/vec_float.h>
+#endif
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
+
 // Sleef offers vectorized versions of some transcedentals
 // such as sin, cos, tan etc..
 // However for now opting for STL, since we are not building
@@ -41,122 +47,143 @@ inline namespace CPU_CAPABILITY {
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
 
-template<int index, bool mask_val>
+#if defined(CPU_CAPABILITY_SVE128)
+// With -msve-vector-bits=128, svfloat32_t and float32x4_t have identical layout
+// so these conversions compile to zero instructions.
+static inline svfloat32_t neon_to_sve(float32x4_t v) {
+  svfloat32_t r;
+  __builtin_memcpy(&r, &v, sizeof(v));
+  return r;
+}
+static inline float32x4_t sve_to_neon(svfloat32_t v) {
+  float32x4_t r;
+  __builtin_memcpy(&r, &v, sizeof(r));
+  return r;
+}
+#endif
+
+template <int index, bool mask_val>
 struct BlendRegs {
   static float32x4_t impl(
-    const float32x4_t& a, const float32x4_t& b, float32x4_t& res);
+      const float32x4_t& a,
+      const float32x4_t& b,
+      float32x4_t& res);
 };
 
-template<int index>
-struct BlendRegs<index, true>{
+template <int index>
+struct BlendRegs<index, true> {
   static float32x4_t impl(
-      const float32x4_t& a, const float32x4_t& b, float32x4_t& res) {
+      const float32x4_t& a,
+      const float32x4_t& b,
+      float32x4_t& res) {
     return vsetq_lane_f32(vgetq_lane_f32(b, index), res, index);
   }
 };
 
-template<int index>
-struct BlendRegs<index, false>{
+template <int index>
+struct BlendRegs<index, false> {
   static float32x4_t impl(
-      const float32x4_t& a, const float32x4_t& b, float32x4_t& res) {
+      const float32x4_t& a,
+      const float32x4_t& b,
+      float32x4_t& res) {
     return vsetq_lane_f32(vgetq_lane_f32(a, index), res, index);
   }
 };
 
-template <> class Vectorized<float> {
-private:
+template <>
+struct is_vec_specialized_for<float> : std::bool_constant<true> {};
+
+template <>
+class Vectorized<float> {
+ private:
   float32x4_t values;
-public:
+
+ public:
   using value_type = float;
   using size_type = int;
   static constexpr size_type size() {
     return 4;
   }
-  Vectorized() {}
+  Vectorized() {
+    values = vmovq_n_f32(0);
+  }
   Vectorized(float32x4_t v) : values(v) {}
   Vectorized(float val) : values{vdupq_n_f32(val)} {}
-  Vectorized(float val0, float val1, float val2, float val3) :
-         values{val0, val1, val2, val3} {}
+  Vectorized(float val0, float val1, float val2, float val3)
+      : values{val0, val1, val2, val3} {}
   Vectorized(float (&arr)[4]) : Vectorized(arr[0], arr[1], arr[2], arr[3]) {}
   operator float32x4_t() const {
     return values;
   }
   template <int64_t mask>
-  static Vectorized<float> blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static Vectorized<float> blend(
+      const Vectorized<float>& a,
+      const Vectorized<float>& b) {
     Vectorized<float> vec;
-    vec.values =
-      BlendRegs<0, (mask & 0x01)!=0>::impl(
-          a.values, b.values, vec.values);
-    vec.values =
-      BlendRegs<1, (mask & 0x02)!=0>::impl(
-          a.values, b.values, vec.values);
-    vec.values =
-      BlendRegs<2, (mask & 0x04)!=0>::impl(
-          a.values, b.values, vec.values);
-    vec.values =
-      BlendRegs<3, (mask & 0x08)!=0>::impl(
-          a.values, b.values, vec.values);
+    vec.values = BlendRegs < 0,
+    (mask & 0x01) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 1,
+    (mask & 0x02) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 2,
+    (mask & 0x04) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 3,
+    (mask & 0x08) != 0 > ::impl(a.values, b.values, vec.values);
     return vec;
   }
-  static Vectorized<float> blendv(const Vectorized<float>& a, const Vectorized<float>& b,
-                              const Vectorized<float>& mask) {
+  static Vectorized<float> blendv(
+      const Vectorized<float>& a,
+      const Vectorized<float>& b,
+      const Vectorized<float>& mask) {
     // TODO
     // NB: This requires that each value, i.e., each uint value,
     // of the mask either all be zeros or all be 1s.
     // We perhaps need some kind of an assert?
     // But that will affect performance.
     Vectorized<float> vec(mask.values);
-    vec.values = vbslq_f32(
-        vreinterpretq_u32_f32(vec.values),
-        b.values,
-        a.values);
+    vec.values =
+        vbslq_f32(vreinterpretq_u32_f32(vec.values), b.values, a.values);
     return vec;
   }
-  template<typename step_t>
-  static Vectorized<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
+  template <typename step_t>
+  static Vectorized<float> arange(
+      float base = 0.f,
+      step_t step = static_cast<step_t>(1)) {
     const Vectorized<float> base_vec(base);
     const Vectorized<float> step_vec(step);
     const Vectorized<float> step_sizes(0, 1, 2, 3);
     return fmadd(step_sizes, step_vec, base_vec);
   }
-  static Vectorized<float> set(const Vectorized<float>& a, const Vectorized<float>& b,
-                           int64_t count = size()) {
+  static Vectorized<float> set(
+      const Vectorized<float>& a,
+      const Vectorized<float>& b,
+      int64_t count = size()) {
     switch (count) {
       case 0:
         return a;
-      case 1:
-        {
-          Vectorized<float> vec;
-          static uint32x4_t mask_low = {0xFFFFFFFF, 0x0, 0x0, 0x0};
-          vec.values = vreinterpretq_f32_u32(mask_low);
-          vec.values = vbslq_f32(
-              vreinterpretq_u32_f32(vec.values),
-              b.values,
-              a.values);
-          return vec;
-        }
-      case 2:
-        {
-          Vectorized<float> vec;
-          static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0x0, 0x0};
-          vec.values = vreinterpretq_f32_u32(mask_low);
-          vec.values = vbslq_f32(
-              vreinterpretq_u32_f32(vec.values),
-              b.values,
-              a.values);
-          return vec;
-        }
-      case 3:
-        {
-          Vectorized<float> vec;
-          static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x0};
-          vec.values = vreinterpretq_f32_u32(mask_low);
-          vec.values = vbslq_f32(
-              vreinterpretq_u32_f32(vec.values),
-              b.values,
-              a.values);
-          return vec;
-        }
+      case 1: {
+        Vectorized<float> vec;
+        static uint32x4_t mask_low = {0xFFFFFFFF, 0x0, 0x0, 0x0};
+        vec.values = vreinterpretq_f32_u32(mask_low);
+        vec.values =
+            vbslq_f32(vreinterpretq_u32_f32(vec.values), b.values, a.values);
+        return vec;
+      }
+      case 2: {
+        Vectorized<float> vec;
+        static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0x0, 0x0};
+        vec.values = vreinterpretq_f32_u32(mask_low);
+        vec.values =
+            vbslq_f32(vreinterpretq_u32_f32(vec.values), b.values, a.values);
+        return vec;
+      }
+      case 3: {
+        Vectorized<float> vec;
+        static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x0};
+        vec.values = vreinterpretq_f32_u32(mask_low);
+        vec.values =
+            vbslq_f32(vreinterpretq_u32_f32(vec.values), b.values, a.values);
+        return vec;
+      }
     }
     return b;
   }
@@ -164,14 +191,12 @@ public:
     if (count == size()) {
       return vld1q_f32(reinterpret_cast<const float*>(ptr));
     } else {
-      __at_align__ float tmp_values[size()];
-      for (const auto i : c10::irange(size())) {
-        tmp_values[i] = 0.0;
-      }
+      // Zero tail past `count`.
+      __at_align__ float tmp_values[size()] = {};
       std::memcpy(
           tmp_values,
           reinterpret_cast<const float*>(ptr),
-          count * sizeof(float));
+          std::min<int64_t>(count, size()) * sizeof(float));
       return vld1q_f32(reinterpret_cast<const float*>(tmp_values));
     }
   }
@@ -181,7 +206,8 @@ public:
     } else {
       float tmp_values[size()];
       vst1q_f32(reinterpret_cast<float*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(float));
+      std::memcpy(
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(float));
     }
   }
   // Very slow implementation of indexing.
@@ -198,18 +224,14 @@ public:
     store(tmp);
     return tmp[idx];
   }
-  // For boolean version where we want to if any 1/all zero
-  // etc. can be done faster in a different way.
   int zero_mask() const {
-    __at_align__ float tmp[size()];
-    store(tmp);
-    int mask = 0;
-    for (int i = 0; i < size(); ++ i) {
-      if (tmp[i] == 0.f) {
-        mask |= (1 << i);
-      }
-    }
-    return mask;
+    uint32x4_t is_zero_vec = vceqzq_f32(values);
+    const int32x4_t shift = vcombine_s32(
+        vcreate_s32(0x0 | (int64_t(0x1) << 32)),
+        vcreate_s32(0x2 | (int64_t(0x3) << 32)));
+    uint32x4_t bits_vec =
+        vshlq_u32(vandq_u32(is_zero_vec, vdupq_n_u32(1)), shift);
+    return vaddvq_u32(bits_vec);
   }
   Vectorized<float> isnan() const {
     return vreinterpretq_f32_u32(vmvnq_u32(vceqq_f32(values, values)));
@@ -218,7 +240,7 @@ public:
     __at_align__ float tmp[size()];
     store(tmp);
     for (const auto i : c10::irange(size())) {
-      if(_isnan(tmp[i]) || _isinf(tmp[i])) {
+      if (_isnan(tmp[i]) || _isinf(tmp[i])) {
         return true;
       }
     }
@@ -262,50 +284,173 @@ public:
   Vectorized<float> conj() const {
     return *this;
   }
-#define DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(name, sleef_name) \
-  Vectorized<float> name() const {                                      \
-    return USE_SLEEF(                                                   \
-        Vectorized<float>(sleef_name(values)),                          \
-        map(std::name)                                                  \
-    );                                                                  \
+#define DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(      \
+    name, sleef_name)                                                        \
+  Vectorized<float> name() const {                                           \
+    return USE_SLEEF(Vectorized<float>(sleef_name(values)), map(std::name)); \
   }
 
-#define DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(name)    \
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(name, Sleef_##name##f4_u10)
+#define DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(name)      \
+  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME( \
+      name, Sleef_##name##f4_u10)
 
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(acos)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(acosh)
+  // Sleef acoshf/sinhf/coshf overflow for large float inputs where the scalar
+  // C library returns finite results, because Sleef uses float-range
+  // intermediates internally while the scalar C library uses double precision.
+  Vectorized<float> acosh() const {
+    return map(std::acosh);
+  }
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(asin)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(asinh)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(atan)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(atanh)
 
-#define DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(name, sleef_name) \
-  Vectorized<float> name(const Vectorized<float> &arg) const {          \
-    return USE_SLEEF(                                                   \
-        Vectorized<float>(sleef_name(values, arg.values)),              \
-        map2(arg, std::name)                                            \
-    );                                                                  \
+#define DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME( \
+    name, sleef_name)                                                    \
+  Vectorized<float> name(const Vectorized<float>& arg) const {           \
+    return USE_SLEEF(                                                    \
+        Vectorized<float>(sleef_name(values, arg.values)),               \
+        map2(arg, std::name));                                           \
   }
 
-#define DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC(name)           \
-  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(name, Sleef_##name##f4_u10)
+#define DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC(name)      \
+  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME( \
+      name, Sleef_##name##f4_u10)
 
   DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC(atan2)
-  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(copysign, Sleef_copysignf4)
+  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
+      copysign,
+      Sleef_copysignf4)
   Vectorized<float> erf() const;
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(erfc, Sleef_erfcf4_u15)
+  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
+      erfc,
+      Sleef_erfcf4_u15)
   Vectorized<float> erfinv() const {
     return map(calc_erfinv);
   }
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(exp)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(exp2)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(expm1)
-  Vectorized<float> exp_u20() const {
-    return exp();
+#if defined(CPU_CAPABILITY_SVE128) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+  Vectorized<float> exp2() const {
+    return Vectorized<float>(
+        sve_to_neon(Sleef_exp2fx_u10sve(neon_to_sve(values))));
   }
-  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(fmod, Sleef_fmodf4)
-  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(hypot, Sleef_hypotf4_u05)
+#else
+  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(exp2)
+#endif
+  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(expm1)
+  // Implementation copied from Arm Optimized Routine
+  // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/advsimd/expf.c
+  inline Vectorized<float> vexpq_f32_u20() const {
+    // bail out to sleef if it's a special case:
+    // i.e. there's an input s.t. |input| > 87.3....
+    const float32x4_t special_bound = vdupq_n_f32(0x1.5d5e2ap+6f);
+    uint32x4_t cmp = vcagtq_f32(values, special_bound);
+    if (vpaddd_u64(vreinterpretq_u64_u32(cmp)) != 0) {
+      return exp();
+    }
+
+    const float32x4_t inv_ln2 = vdupq_n_f32(0x1.715476p+0f);
+    constexpr float ln2_hi = 0x1.62e4p-1f;
+    constexpr float ln2_lo = 0x1.7f7d1cp-20f;
+    constexpr float c0 = 0x1.0e4020p-7f;
+    constexpr float c2 = 0x1.555e66p-3f;
+    const float32x4_t ln2_c02 = {ln2_hi, ln2_lo, c0, c2};
+
+    const uint32x4_t exponent_bias = vdupq_n_u32(0x3f800000);
+    const float32x4_t c1 = vdupq_n_f32(0x1.573e2ep-5f);
+    const float32x4_t c3 = vdupq_n_f32(0x1.fffdb6p-2f);
+    const float32x4_t c4 = vdupq_n_f32(0x1.ffffecp-1f);
+
+    /* exp(x) = 2^n (1 + poly(r)), with 1 + poly(r) in [1/sqrt(2),sqrt(2)]
+      x = ln2*n + r, with r in [-ln2/2, ln2/2].  */
+
+    float32x4_t n = vrndaq_f32(vmulq_f32(values, inv_ln2));
+    float32x4_t r = vfmsq_laneq_f32(values, n, ln2_c02, 0);
+    r = vfmsq_laneq_f32(r, n, ln2_c02, 1);
+    uint32x4_t e = vshlq_n_u32(vreinterpretq_u32_s32(vcvtq_s32_f32(n)), 23);
+    float32x4_t scale = vreinterpretq_f32_u32(vaddq_u32(e, exponent_bias));
+
+    float32x4_t r2 = vmulq_f32(r, r);
+    float32x4_t p = vfmaq_laneq_f32(c1, r, ln2_c02, 2);
+    float32x4_t q = vfmaq_laneq_f32(c3, r, ln2_c02, 3);
+    q = vfmaq_f32(q, p, r2);
+    p = vmulq_f32(c4, r);
+    float32x4_t poly = vfmaq_f32(p, q, r2);
+
+    return vfmaq_f32(scale, poly, scale);
+  }
+#if defined(CPU_CAPABILITY_SVE128)
+  // SVE128 uses the ASIMD wrapper type, but can still reuse the SVE exp
+  // helpers.
+  Vectorized<float> exp_u20() const {
+    // special case to handle special inputs that are too large or too small
+    // i.e. where there's at least one element x, s.t. |x| >= 87.3...
+    svfloat32_t sve_values = neon_to_sve(values);
+    svbool_t is_special_case =
+        svacgt(svptrue_b32(), sve_values, 0x1.5d5e2ap+6f);
+    if (svptest_any(svptrue_b32(), is_special_case)) {
+      return exp();
+    }
+    return sve_to_neon(at::vec::exp_u20_fast_path(sve_values));
+  }
+  Vectorized<float> fexp_u20() const {
+    return sve_to_neon(at::vec::fexp_u20(neon_to_sve(values)));
+  }
+#else
+  Vectorized<float> exp_u20() const {
+    return vexpq_f32_u20();
+  }
+  Vectorized<float> fexp_u20() const {
+    // fast exponential intended for cases where outputs will be downcasted to
+    // FP16 / BF16 (e.g. attention softmax). Accurate within 1 ULP for FP16
+    // Accurate within 1 ULP for BF16 for inputs in [-87.683, 88.376] & clamps
+    // inputs outside this range to 0 / inf. Implementation is similar to
+    // exp_u20, but:
+    // - uses a third degree polynomial approximation for exp(r) instead of a
+    // fifth degree one, with coefficients re-tuned.
+    // - does not split natural log (ln) into high / low parts
+    // - clamps exp(x) to 0 for x < -87.346351f and inf for x > 88.3762589f
+
+    const float32x4_t lower_bound = vdupq_n_f32(-0x1.5ebb82p+6f);
+    const float32x4_t upper_bound = vdupq_n_f32(0x1.61814ap+6f);
+    const float32x4_t inv_ln2 = vdupq_n_f32(0x1.715476p+0f);
+    constexpr float ln2 = 0x1.62e43p-1f;
+    constexpr float c2 = 0x1.5592ecp-3f;
+    const float32x4_t c3 = vdupq_n_f32(0x1.017d34p-1f);
+    const uint32x4_t lt_lower = vcltq_f32(values, lower_bound);
+    const uint32x4_t gt_upper = vcgtq_f32(values, upper_bound);
+
+    // exp(x) = 2^n (1 + exp(r))
+    // r = x - n*ln2, with n = round(x/ln2)
+    // exp(r) ~ poly(r) = r + r^2 * (c3 + c2 * r)
+
+    // n = round(x / ln2), r = x - n*ln2
+    float32x4_t n = vrndaq_f32(vmulq_f32(values, inv_ln2));
+    float32x4_t r = vfmsq_n_f32(values, n, ln2);
+    // e = n << 23
+    uint32x4_t e = vshlq_n_u32(vreinterpretq_u32_s32(vcvtq_s32_f32(n)), 23);
+
+    float32x4_t r2 = vmulq_f32(r, r);
+    float32x4_t q = vfmaq_n_f32(c3, r, c2);
+    float32x4_t s = vaddq_f32(vdupq_n_f32(1.0f), r);
+    float32x4_t p = vfmaq_f32(s, q, r2);
+
+    // 2^n * p
+    float32x4_t y =
+        vreinterpretq_f32_u32(vaddq_u32(vreinterpretq_u32_f32(p), e));
+
+    y = vbslq_f32(lt_lower, vdupq_n_f32(0.0f), y);
+    y = vbslq_f32(gt_upper, vdupq_n_f32(INFINITY), y);
+    return y;
+  }
+#endif
+  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
+      fmod,
+      Sleef_fmodf4)
+  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
+      hypot,
+      Sleef_hypotf4_u05)
   Vectorized<float> i0() const {
     return map(calc_i0);
   }
@@ -315,22 +460,31 @@ public:
   Vectorized<float> digamma() const {
     return map(calc_digamma);
   }
-  Vectorized<float> igamma(const Vectorized<float> &x) const {
+  Vectorized<float> igamma(const Vectorized<float>& x) const {
     return map2(x, calc_igamma);
   }
-  Vectorized<float> igammac(const Vectorized<float> &x) const {
+  Vectorized<float> igammac(const Vectorized<float>& x) const {
     return map2(x, calc_igammac);
   }
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(log)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(log10)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(log1p)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(log2)
-  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(nextafter, Sleef_nextafterf4)
+  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
+      nextafter,
+      Sleef_nextafterf4)
   Vectorized<float> frac() const;
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(sin)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(sinh)
+  // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
+  // return finite results, because Sleef uses float-range intermediates
+  // internally while the scalar C library uses double precision.
+  Vectorized<float> sinh() const {
+    return map(std::sinh);
+  }
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(cos)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(cosh)
+  Vectorized<float> cosh() const {
+    return map(std::cosh);
+  }
   Vectorized<float> ceil() const {
     return map(at::native::ceil_impl);
   }
@@ -338,11 +492,11 @@ public:
     return map(at::native::floor_impl);
   }
   Vectorized<float> neg() const {
-    return Vectorized<float>(
-        vnegq_f32(values));
+    return Vectorized<float>(vnegq_f32(values));
   }
   Vectorized<float> round() const {
-    // We do not use std::round because we would like to round midway numbers to the nearest even integer.
+    // We do not use std::round because we would like to round midway numbers to
+    // the nearest even integer.
     return map(at::native::round_impl);
   }
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(tan)
@@ -362,29 +516,34 @@ public:
   }
   DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC(pow)
   Vectorized<float> operator==(const Vectorized<float>& other) const {
-    return Vectorized<float>(vreinterpretq_f32_u32(vceqq_f32(values, other.values)));
+    return Vectorized<float>(
+        vreinterpretq_f32_u32(vceqq_f32(values, other.values)));
   }
 
   Vectorized<float> operator!=(const Vectorized<float>& other) const {
-    float32x4_t r0 = vreinterpretq_f32_u32(
-        vmvnq_u32(vceqq_f32(values, other.values)));
+    float32x4_t r0 =
+        vreinterpretq_f32_u32(vmvnq_u32(vceqq_f32(values, other.values)));
     return Vectorized<float>(r0);
   }
 
   Vectorized<float> operator<(const Vectorized<float>& other) const {
-    return Vectorized<float>(vreinterpretq_f32_u32(vcltq_f32(values, other.values)));
+    return Vectorized<float>(
+        vreinterpretq_f32_u32(vcltq_f32(values, other.values)));
   }
 
   Vectorized<float> operator<=(const Vectorized<float>& other) const {
-    return Vectorized<float>(vreinterpretq_f32_u32(vcleq_f32(values, other.values)));
+    return Vectorized<float>(
+        vreinterpretq_f32_u32(vcleq_f32(values, other.values)));
   }
 
   Vectorized<float> operator>(const Vectorized<float>& other) const {
-    return Vectorized<float>(vreinterpretq_f32_u32(vcgtq_f32(values, other.values)));
+    return Vectorized<float>(
+        vreinterpretq_f32_u32(vcgtq_f32(values, other.values)));
   }
 
   Vectorized<float> operator>=(const Vectorized<float>& other) const {
-    return Vectorized<float>(vreinterpretq_f32_u32(vcgeq_f32(values, other.values)));
+    return Vectorized<float>(
+        vreinterpretq_f32_u32(vcgeq_f32(values, other.values)));
   }
 
   Vectorized<float> eq(const Vectorized<float>& other) const;
@@ -396,22 +555,30 @@ public:
 };
 
 template <>
-Vectorized<float> inline operator+(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator+(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return Vectorized<float>(vaddq_f32(a, b));
 }
 
 template <>
-Vectorized<float> inline operator-(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator-(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return Vectorized<float>(vsubq_f32(a, b));
 }
 
 template <>
-Vectorized<float> inline operator*(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator*(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return Vectorized<float>(vmulq_f32(a, b));
 }
 
 template <>
-Vectorized<float> inline operator/(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator/(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return Vectorized<float>(vdivq_f32(a, b));
 }
 
@@ -420,162 +587,166 @@ inline Vectorized<float> Vectorized<float>::frac() const {
   return *this - this->trunc();
 }
 
-//Added sleef Implementation for Maximum
-Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b)  {
-  if(!a.has_inf_nan() && !b.has_inf_nan()){
-    return USE_SLEEF(
-      Vectorized<float>(Sleef_fmaxf4(a, b)),
-      Vectorized<float>(vmaxq_f32(a,b)));
-  }
-  else{
-    return Vectorized<float>(vmaxq_f32(a, b));
-  }
+template <>
+Vectorized<float> inline maximum(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
+  return Vectorized<float>(vmaxq_f32(a, b));
 }
 
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorized<float> inline minimum(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline minimum(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return Vectorized<float>(vminq_f32(a, b));
 }
 
 template <>
-Vectorized<float> inline clamp(const Vectorized<float>& a, const Vectorized<float>& min, const Vectorized<float>& max) {
+Vectorized<float> inline clamp(
+    const Vectorized<float>& a,
+    const Vectorized<float>& min,
+    const Vectorized<float>& max) {
   return minimum(max, maximum(min, a));
 }
 
 template <>
-Vectorized<float> inline clamp_max(const Vectorized<float>& a, const Vectorized<float>& max) {
+Vectorized<float> inline clamp_max(
+    const Vectorized<float>& a,
+    const Vectorized<float>& max) {
   return minimum(max, a);
 }
 
 template <>
-Vectorized<float> inline clamp_min(const Vectorized<float>& a, const Vectorized<float>& min) {
+Vectorized<float> inline clamp_min(
+    const Vectorized<float>& a,
+    const Vectorized<float>& min) {
   return maximum(min, a);
 }
 
 template <>
-Vectorized<float> inline operator&(const Vectorized<float>& a, const Vectorized<float>& b) {
-  return Vectorized<float>(vreinterpretq_f32_u32(vandq_u32(
-      vreinterpretq_u32_f32(a),
-      vreinterpretq_u32_f32(b))));
+Vectorized<float> inline operator&(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
+  return Vectorized<float>(vreinterpretq_f32_u32(
+      vandq_u32(vreinterpretq_u32_f32(a), vreinterpretq_u32_f32(b))));
 }
 
 template <>
-Vectorized<float> inline operator|(const Vectorized<float>& a, const Vectorized<float>& b) {
-  return Vectorized<float>(vreinterpretq_f32_u32(vorrq_u32(
-      vreinterpretq_u32_f32(a),
-      vreinterpretq_u32_f32(b))));
+Vectorized<float> inline operator|(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
+  return Vectorized<float>(vreinterpretq_f32_u32(
+      vorrq_u32(vreinterpretq_u32_f32(a), vreinterpretq_u32_f32(b))));
 }
 
 template <>
-Vectorized<float> inline operator^(const Vectorized<float>& a, const Vectorized<float>& b) {
-  return Vectorized<float>(vreinterpretq_f32_u32(veorq_u32(
-      vreinterpretq_u32_f32(a),
-      vreinterpretq_u32_f32(b))));
+Vectorized<float> inline operator^(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
+  return Vectorized<float>(vreinterpretq_f32_u32(
+      veorq_u32(vreinterpretq_u32_f32(a), vreinterpretq_u32_f32(b))));
 }
 
-inline Vectorized<float> Vectorized<float>::eq(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::eq(
+    const Vectorized<float>& other) const {
   return (*this == other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::ne(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::ne(
+    const Vectorized<float>& other) const {
   return (*this != other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::gt(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::gt(
+    const Vectorized<float>& other) const {
   return (*this > other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::ge(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::ge(
+    const Vectorized<float>& other) const {
   return (*this >= other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::lt(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::lt(
+    const Vectorized<float>& other) const {
   return (*this < other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::le(
+    const Vectorized<float>& other) const {
   return (*this <= other) & Vectorized<float>(1.0f);
 }
 
 template <>
-inline void convert(const float* src, int32_t* dst, int64_t n) {
-  int64_t i;
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
-    vst1q_s32(dst + i, vcvtq_s32_f32(vld1q_f32(src + i)));
-  }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (; i < n; i++) {
-    dst[i] = static_cast<int32_t>(src[i]);
-  }
-}
-
-template <>
-inline void convert(const int32_t* src, float* dst, int64_t n) {
-  int64_t i;
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
-    vst1q_f32(dst + i, vcvtq_f32_s32(vld1q_s32(src + i)));
-  }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (; i < n; i++) {
-    dst[i] = static_cast<float>(src[i]);
-  }
-}
-
-template <>
-Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
+Vectorized<float> inline fmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
   return Vectorized<float>(vfmaq_f32(c, a, b));
 }
 
 template <>
-Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
+Vectorized<float> inline fnmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
   return Vectorized<float>(vfmsq_f32(c, a, b));
 }
 
-inline Vectorized<float> Vectorized<float>::erf() const{
-    // constants
-    const Vectorized<float> neg_zero_vec(-0.f);
-    const Vectorized<float> one_vec(1.0f);
-    const Vectorized<float> p(0.3275911f);
-    const Vectorized<float> p1(0.254829592f);
-    const Vectorized<float> p2(-0.284496736f);
-    const Vectorized<float> p3(1.421413741f);
-    const Vectorized<float> p4(-1.453152027f);
-    const Vectorized<float> p5(1.061405429f);
-    // sign(x)
-    auto sign_mask = neg_zero_vec & *this;
-    auto abs_vec = this->abs();
-    // t = 1 / (p * abs(x) + 1)
-    auto tmp0 = fmadd(p, abs_vec, one_vec);
-    auto t = one_vec / tmp0;
-    // r = p5 * t ^ 4 + p4 * t ^ 3 + p3 * t ^ 2 + p2 * t + p1
-    auto tmp1 = fmadd(p5, t, p4);
-    auto tmp2 = fmadd(tmp1, t, p3);
-    auto tmp3 = fmadd(tmp2, t, p2);
-    auto r = fmadd(tmp3, t, p1);
-    // - exp(- x * x)
-    auto pow_2 = (*this) * (*this);
-    auto neg_pow_2 = pow_2 ^ neg_zero_vec;
-    auto tmp4 = neg_pow_2.map(std::exp); // This can be swapped for a faster implementation of exp.
-    auto tmp5 = tmp4 ^ neg_zero_vec;
-    // erf(x) = sign(x) * (1 - r * t * exp(- x * x))
-    auto tmp6 = t * tmp5;
-    auto tmp7 = fmadd(tmp6, r, one_vec);
-    return tmp7 ^ sign_mask;
+template <>
+Vectorized<float> inline fmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return Vectorized<float>(vnegq_f32(vfmsq_f32(c, a, b)));
+}
+
+template <>
+Vectorized<float> inline fnmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return Vectorized<float>(vnegq_f32(vfmaq_f32(c, a, b)));
+}
+
+inline Vectorized<float> Vectorized<float>::erf() const {
+  // constants
+  const Vectorized<float> neg_zero_vec(-0.f);
+  const Vectorized<float> one_vec(1.0f);
+  const Vectorized<float> p(0.3275911f);
+  const Vectorized<float> p1(0.254829592f);
+  const Vectorized<float> p2(-0.284496736f);
+  const Vectorized<float> p3(1.421413741f);
+  const Vectorized<float> p4(-1.453152027f);
+  const Vectorized<float> p5(1.061405429f);
+  // sign(x)
+  auto sign_mask = neg_zero_vec & *this;
+  auto abs_vec = this->abs();
+  // t = 1 / (p * abs(x) + 1)
+  auto tmp0 = fmadd(p, abs_vec, one_vec);
+  auto t = one_vec / tmp0;
+  // r = p5 * t ^ 4 + p4 * t ^ 3 + p3 * t ^ 2 + p2 * t + p1
+  auto tmp1 = fmadd(p5, t, p4);
+  auto tmp2 = fmadd(tmp1, t, p3);
+  auto tmp3 = fmadd(tmp2, t, p2);
+  auto r = fmadd(tmp3, t, p1);
+  // - exp(- x * x)
+  auto pow_2 = (*this) * (*this);
+  auto neg_pow_2 = pow_2 ^ neg_zero_vec;
+  auto tmp4 = neg_pow_2.vexpq_f32_u20();
+  auto tmp5 = tmp4 ^ neg_zero_vec;
+  // erf(x) = sign(x) * (1 - r * t * exp(- x * x))
+  auto tmp6 = t * tmp5;
+  auto tmp7 = fmadd(tmp6, r, one_vec);
+  return tmp7 ^ sign_mask;
 }
 #undef DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC
 #undef DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC
 #endif /* defined(aarch64) */
 
-}} // namespace at::vec::CPU_CAPABILITY
+} // namespace CPU_CAPABILITY
+} // namespace at::vec
+
+C10_DIAGNOSTIC_POP()

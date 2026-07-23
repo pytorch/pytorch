@@ -11,7 +11,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     get_devtype,
     NestedWrappedModule,
     TransformerWithSharedParams,
@@ -33,25 +33,29 @@ if TEST_WITH_DEV_DBG_ASAN:
 device_type = torch.device(get_devtype())
 
 
-class TestApply(FSDPTest):
+class TestApply(FSDPTestContinuous):
+    # FSDP v1 has reference cycles that prevent GC from freeing model tensors,
+    # causing false positives in the CUDA memory leak checker.
+    _do_cuda_memory_leak_check = False
+
     @property
     def world_size(self):
-        if torch.cuda.is_available():
-            gpu_cnt = torch.cuda.device_count()
+        if torch.accelerator.is_available():
+            gpu_cnt = torch.accelerator.device_count()
             if gpu_cnt < 2:
                 return gpu_cnt
         return 2
 
     @torch.no_grad()
     def _init_linear_weights(self, m):
-        if type(m) == nn.Linear:
+        if type(m) is nn.Linear:
             m.weight.fill_(1.0)
             m.bias.fill_(1.0)
 
     def check_weights(self, fsdp, expected_tensor_fn, check):
         with FSDP.summon_full_params(fsdp, recurse=True):
             linear_modules = [
-                module for module in fsdp.modules() if type(module) == nn.Linear
+                module for module in fsdp.modules() if type(module) is nn.Linear
             ]
             for module in linear_modules:
                 for param in module.parameters():
@@ -113,7 +117,7 @@ class TestApply(FSDPTest):
                 transformer.apply(self._init_linear_weights)
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestApply, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(TestApply, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

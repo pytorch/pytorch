@@ -3,18 +3,21 @@ from collections import OrderedDict
 from copy import deepcopy
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PrepareModuleInput,
+    PrepareModuleInputOutput,
     PrepareModuleOutput,
     RowwiseParallel,
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
+    map_local_tensor_for_rank,
     MLPModule,
     MLPStacked,
     with_comms,
@@ -32,7 +35,7 @@ class DummyModule(torch.nn.Module):
 class TensorParallelAPITests(DTensorTestBase):
     @property
     def world_size(self):
-        gpu_num = torch.cuda.device_count()
+        gpu_num = torch.accelerator.device_count()
         return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
 
     def _compare_params(
@@ -52,7 +55,7 @@ class TensorParallelAPITests(DTensorTestBase):
                 (not rank0_only)
                 or (self.rank == 0)
                 or (
-                    name not in ["net2.bias"]
+                    name != "net2.bias"
                     and not skip_rowwise_bias
                     or name not in ["bias", "net2.bias"]
                 )
@@ -62,7 +65,7 @@ class TensorParallelAPITests(DTensorTestBase):
                     dist_param.redistribute(
                         device_mesh=dist_param.device_mesh, placements=replicate
                     ).to_local(),
-                    f"{name} not equal between dist and non-dist",
+                    lambda msg: f"{msg}\n{name} not equal between dist and non-dist",
                 )
 
     def _compare_module(
@@ -77,7 +80,14 @@ class TensorParallelAPITests(DTensorTestBase):
 
         # check forward correctness
         local_output = local_module(inp)
-        inp = inp.chunk(self.world_size, dim=-1)[self.rank] if rowwise else inp
+        inp = map_local_tensor_for_rank(
+            inp,
+            self.rank,
+            lambda inp, rank: inp.chunk(self.world_size, dim=-1)[rank]
+            if rowwise
+            else inp,
+        )
+        # inp = inp.chunk(self.world_size, dim=-1)[self.rank] if rowwise else inp
         dist_output = dist_module(inp)
         dist_output = (
             dist_output.redistribute(dist_output.device_mesh, [Replicate()]).to_local()
@@ -202,6 +212,29 @@ class TensorParallelAPITests(DTensorTestBase):
         self.assertEqual(inp, output)
 
     @with_comms
+    def test_prepare_module_input_output(self):
+        module = DummyModule()
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        parallelize_module(
+            module,
+            device_mesh,
+            PrepareModuleInputOutput(
+                input_layouts=Shard(0),
+                desired_input_layouts=Replicate(),
+                output_layouts=Replicate(),
+                desired_output_layouts=Shard(1),
+            ),
+        )
+        inp = torch.rand(5, 7, device=self.device_type)
+        output = module(inp)
+        inp = (
+            DTensor.from_local(inp, device_mesh, [Shard(0)], run_check=False)
+            .redistribute(device_mesh, [Shard(1)])
+            .to_local()
+        )
+        self.assertEqual(inp, output)
+
+    @with_comms
     def test_parallelize_module_with_star(self):
         inp_size = [12, 10]
         model = MLPModule(self.device_type)
@@ -309,6 +342,49 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
+    def test_parallelize_module_with_root_module(self):
+        inp_size = [16, 10]
+        model = MLPModule(self.device_type)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        model_tp = deepcopy(model)
+        model_tp = parallelize_module(
+            model_tp,
+            device_mesh,
+            {
+                "": PrepareModuleInputOutput(
+                    input_layouts=Replicate(),
+                    desired_input_layouts=Shard(0),
+                    output_layouts=Shard(0),
+                    desired_output_layouts=Replicate(),
+                ),
+                "net1": ColwiseParallel(input_layouts=Shard(0)),
+                "net2": RowwiseParallel(output_layouts=Shard(0)),
+            },
+        )
+        self._compare_module(model, model_tp, inp_size, rank0_only=False)
+
+    @with_comms
+    def test_parallelize_module_with_no_match(self):
+        inp_size = [16, 10]
+        model = MLPModule(self.device_type)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        model_tp = deepcopy(model)
+        with self.assertWarns(UserWarning):
+            model_tp = parallelize_module(
+                model_tp,
+                device_mesh,
+                {
+                    "net0.hello.world": ColwiseParallel(),
+                    "net1": ColwiseParallel(),
+                    "net2": RowwiseParallel(),
+                    "net3": ColwiseParallel(),
+                },
+            )
+        self._compare_module(model, model_tp, inp_size, rank0_only=False)
+
+    @with_comms
     def test_under_devicemesh_context(self):
         # test ColwiseParallel
         inp_size = [8, 10]
@@ -333,7 +409,17 @@ class TensorParallelAPITests(DTensorTestBase):
         # Call parallelize_module with empty plan.
         # Goal is not to crash.
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        parallelize_module(model, device_mesh)
+        with self.assertWarns(UserWarning):
+            parallelize_module(model, device_mesh)
+
+
+TensorParallelAPITestsWithLocalTensor = create_local_tensor_test_class(
+    TensorParallelAPITests,
+    skipped_tests=[
+        # Uses mesh_scatter that has local rank dependent logic
+        "test_parallelize_module_src_data_rank",
+    ],
+)
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import collections.abc
 import functools
 import math
 import warnings
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 
@@ -28,7 +28,7 @@ _FLOATING_8BIT_TYPES = [
     torch.float8_e4m3fnuz,
     torch.float8_e5m2fnuz,
 ]
-_COMPLEX_TYPES = [torch.complex32, torch.complex64, torch.complex128]
+_COMPLEX_TYPES = [torch.complex32, torch.bcomplex32, torch.complex64, torch.complex128]
 _BOOLEAN_OR_INTEGRAL_TYPES = [torch.bool, *_INTEGRAL_TYPES]
 _FLOATING_OR_COMPLEX_TYPES = [*_FLOATING_TYPES, *_COMPLEX_TYPES]
 
@@ -43,15 +43,15 @@ def _uniform_random_(t: torch.Tensor, low: float, high: float) -> torch.Tensor:
 
 
 def make_tensor(
-    *shape: Union[int, torch.Size, list[int], tuple[int, ...]],
+    *shape: int | torch.Size | list[int] | tuple[int, ...],
     dtype: torch.dtype,
-    device: Union[str, torch.device],
-    low: Optional[float] = None,
-    high: Optional[float] = None,
+    device: str | torch.device,
+    low: float | None = None,
+    high: float | None = None,
     requires_grad: bool = False,
     noncontiguous: bool = False,
     exclude_zero: bool = False,
-    memory_format: Optional[torch.memory_format] = None,
+    memory_format: torch.memory_format | None = None,
 ) -> torch.Tensor:
     r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
     values uniformly drawn from ``[low, high)``.
@@ -115,18 +115,18 @@ def make_tensor(
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> from torch.testing import make_tensor
         >>> # Creates a float tensor with values in [-1, 1)
-        >>> make_tensor((3,), device='cpu', dtype=torch.float32, low=-1, high=1)
+        >>> make_tensor((3,), device="cpu", dtype=torch.float32, low=-1, high=1)
         >>> # xdoctest: +SKIP
         tensor([ 0.1205, 0.2282, -0.6380])
         >>> # Creates a bool tensor on CUDA
-        >>> make_tensor((2, 2), device='cuda', dtype=torch.bool)
+        >>> make_tensor((2, 2), device="cuda", dtype=torch.bool)
         tensor([[False, False],
                 [False, True]], device='cuda:0')
     """
 
     def modify_low_high(
-        low: Optional[float],
-        high: Optional[float],
+        low: float | None,
+        high: float | None,
         *,
         lowest_inclusive: float,
         highest_exclusive: float,

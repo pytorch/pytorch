@@ -15,7 +15,7 @@ struct TORCH_API IPUHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
   }
 
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
     TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
     return false;
   }
@@ -26,14 +26,15 @@ struct TORCH_API IPUHooksInterface : AcceleratorHooksInterface {
   }
 
   Generator getNewGenerator(
-      DeviceIndex device_index [[maybe_unused]] = -1) const override {
+      DeviceIndex /*device_index*/ = -1) const override {
     TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
   }
 };
 
+// Deprecated: no longer used internally, kept for ABI compatibility.
 struct TORCH_API IPUHooksArgs {};
 
-TORCH_DECLARE_REGISTRY(IPUHooksRegistry, IPUHooksInterface, IPUHooksArgs);
+TORCH_DECLARE_REGISTRY(IPUHooksRegistry, IPUHooksInterface);
 #define REGISTER_IPU_HOOKS(clsname) \
   C10_REGISTER_CLASS(IPUHooksRegistry, clsname, clsname)
 

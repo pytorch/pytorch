@@ -20,7 +20,7 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
-CHECKPOINT_DIR = f"~/{os.environ['LOGNAME']}/checkpoint"
+CHECKPOINT_DIR = f"~/{os.environ.get('LOGNAME', '')}/checkpoint"
 
 
 class Model(torch.nn.Module):

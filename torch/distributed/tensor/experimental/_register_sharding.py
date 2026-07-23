@@ -1,14 +1,12 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import partial
-from typing import Callable, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed.tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor._op_schema import (
-    _is_inplace_op,
     OpSchema,
     OpStrategy,
     PlacementList,
@@ -22,7 +20,7 @@ from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 __all__ = ["register_sharding"]
 
 
-def register_sharding(op: Union[OpOverload, list[OpOverload]]):
+def register_sharding(op: OpOverload | list[OpOverload]):
     """
     :meth:`register_sharding` is an experimental API that allows users to register sharding
     strategies for an operator when the tensor inputs and outputs are DTensor.
@@ -42,7 +40,7 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
         as the original op (except that if an arg is a :class:`torch.Tensor`, it will be
         replaced by a tensor-like object that DTensor uses internally). The function should
         return a sequence of 2-tuples, each specifying acceptable output placements and its
-        corresponding intput placements.
+        corresponding input placements.
 
     Example:
         >>> # xdoctest: +SKIP("distributed")
@@ -71,7 +69,6 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
         custom_sharding_fn: Callable[
             ..., Sequence[tuple[PlacementList, PlacementList]]
         ],
-        mesh: DeviceMesh,
         op_schema: OpSchema,
     ) -> StrategyType:
         def strategy_to_spec(strategy: object) -> object:
@@ -79,9 +76,11 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
                 # take the output spec from the first strategy
                 return strategy.strategies[0].output_spec
             elif isinstance(strategy, TupleStrategy):
-                return tuple(strategy_to_spec(s) for s in strategy.childs)
+                return tuple(strategy_to_spec(s) for s in strategy.children)
             else:
                 return strategy
+
+        mesh = op_schema.get_mesh_from_args()
 
         args_schema = tuple(strategy_to_spec(i) for i in op_schema.args_schema)
         kwargs_schema = {
@@ -100,7 +99,7 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
             op_schema,
             single_mesh_dim_strategies,
             input_index=len(op_schema.op._schema.returns),
-            inplace_op=_is_inplace_op(op_schema.op),
+            inplace_op=op_schema.is_inplace_op(),
         )
 
     def wrapper(custom_sharding_fn):

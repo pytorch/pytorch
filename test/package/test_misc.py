@@ -146,7 +146,10 @@ class TestMisc(PackageTestCase):
                         spec = spec_from_loader(fullname, finder)
                     if spec is not None:
                         break
-                assert spec is not None and isinstance(spec.loader, SourceFileLoader)
+                if spec is None or not isinstance(spec.loader, SourceFileLoader):
+                    raise AssertionError(
+                        f"Expected SourceFileLoader, got {type(spec.loader) if spec else None}"
+                    )
                 spec.loader = LoaderThatRemapsModuleA(
                     spec.loader.name, spec.loader.path
                 )
@@ -196,7 +199,7 @@ class TestMisc(PackageTestCase):
         "Tests that use temporary files are disabled in fbcode",
     )
     def test_load_python_version_from_package(self):
-        """Tests loading a package with a python version embdded"""
+        """Tests loading a package with a python version embedded"""
         importer1 = PackageImporter(
             f"{Path(__file__).parent}/package_e/test_nn_module.pt"
         )

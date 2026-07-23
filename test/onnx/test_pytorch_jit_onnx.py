@@ -4,8 +4,11 @@ import pytorch_test_common
 from pytorch_test_common import skipIfNoCuda
 
 import torch
-from torch.onnx import verification
-from torch.onnx._globals import GLOBALS
+from torch.onnx._internal.torchscript_exporter import verification
+from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
+from torch.onnx._internal.torchscript_exporter.utils import (
+    _trigger_symbolic_function_registration,
+)
 from torch.testing._internal import common_utils
 
 
@@ -20,6 +23,7 @@ def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
     """
 
     GLOBALS.export_onnx_opset_version = opset_version
+    _trigger_symbolic_function_registration()
     graph = torch.onnx.utils._optimize_graph(
         graph, operator_export_type, params_dict={}
     )
@@ -51,7 +55,7 @@ class _TestJITIRToONNX:
     ort_providers = ["CPUExecutionProvider"]
     check_shape = True
     check_dtype = True
-    ignore_none = True  # True for tracing, and Flase for scripting
+    ignore_none = True  # True for tracing, and False for scripting
 
     def run_test(self, graph_ir, example_inputs, parse_tensor_constants=False):
         graph = torch._C.parse_ir(graph_ir, parse_tensor_constants)

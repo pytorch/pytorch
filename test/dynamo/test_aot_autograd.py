@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import copy
+import operator
 import re
 import unittest
 from textwrap import dedent
@@ -18,12 +19,23 @@ from torch._dynamo.testing import (
     rand_strided,
 )
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
+from torch._functorch.partitioners import _extract_fwd_bwd_modules
 from torch._guards import CompileContext, StorageOverlap, TracingContext
+from torch._inductor.graph import GraphLowering
+from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.profiler import profile
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
+from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 def maybe_dupe_op(x):
@@ -40,7 +52,7 @@ def is_dynamic_shape_test(test_name):
 
 
 aten = torch.ops.aten
-lib = torch.library.Library("custom", "DEF")  # noqa: TOR901
+lib = torch.library.Library("custom", "DEF")  # noqa: SCOPED_LIBRARY
 lib.define("maybe_dupe_op(Tensor a) -> (Tensor, Tensor)")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "CPU")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
@@ -256,29 +268,26 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         # for gm in gms:
         #     print("GM CODE", gm.code)
 
-        self.assertEqual(counter.frame_count, 4)
+        self.assertEqual(counter.frame_count, 2)
         self.assertEqual(counter.op_count, 7)
         # Graph 1
-        # def forward(self, x : torch.nn.parameter.Parameter, y : torch.Tensor):
-        #     mul = x * y;  x = y = None
-        #     return (mul,)
-        # BREAK
-        # Graph 2
-        # def forward(self, y : torch.Tensor):
-        #     getitem = y[0];  y = None
+        # def forward(self, L_x_ : torch.nn.parameter.Parameter, L_y_ : torch.Tensor):
+        #     l_x_ = L_x_
+        #     l_y_ = L_y_
+        #     a = l_x_ * l_y_;  l_x_ = l_y_ = None
+        #     getitem = a[0]
         #     getitem_1 = getitem[0];  getitem = None
         #     lt = getitem_1 < 3;  getitem_1 = None
-        #     return (lt,)
+        #     return (lt, a)
         # BREAK
-        # Graph 3
-        # def forward(self, param : torch.Tensor, y : torch.Tensor):
-        #     add = y + param;  y = param = None
-        #     return (add,)
-        # BREAK
-        # Graph 4
-        # def forward(self, _stack0 : torch.Tensor, x : torch.nn.parameter.Parameter, y : torch.Tensor):
-        #     add = x + y;  x = y = None
-        #     mul = _stack0 * add;  _stack0 = add = None
+        # Graph 2
+        # def forward(self, L_nested_frame_values_0_1_ : torch.Tensor, L_x_ : torch.nn.parameter.Parameter, L_y_ : torch.Tensor):
+        #     l_nested_frame_values_0_1_ = L_nested_frame_values_0_1_
+        #     l_x_ = L_x_
+        #     l_y_ = L_y_
+        #     a = l_nested_frame_values_0_1_ + l_nested_frame_values_0_1_;  l_nested_frame_values_0_1_ = None
+        #     b = l_x_ + l_y_;  l_x_ = l_y_ = None
+        #     mul = a * b;  a = b = None
         #     return (mul,)
 
         # Run fn with AOT
@@ -318,7 +327,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         compare_equal_outs_and_grads(self, F(), fxy, (x, y))
         compare_equal_outs_and_grads(self, F(), fxy, (x, z))
         self.assertIn(
-            """tensor 'L['y']' requires_grad mismatch. expected requires_grad=1""",
+            """tensor 'y' requires_grad mismatch. expected requires_grad=1""",
             failure_reason,
         )
 
@@ -336,15 +345,18 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         self.assertEqual(cc.frame_count, 1)
         self.assertTrue(failure_reason is None)
 
-    def test_double_backward_errors(self):
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_double_backward_with_compile(self):
         # Remove this test after we get double backward to actually work
         for grad_output in (torch.tensor(1.0, requires_grad=True), None):
             x = torch.tensor(1.0, requires_grad=True)
             err = "torch.compile with aot_autograd does not currently support double backward"
 
-            # The following cases should be equivalent:
-
             # (1) double backward entirely inside compiled function
+            # Graph break happens at autograd.grad, but y = x.sin().exp() already
+            # went through AOT autograd. When autograd.grad(y, x, create_graph=True)
+            # runs in eager, it backwards through AOT nodes, creating gx with grad_fn
+            # pointing to CompiledFunctionBackward. Second autograd.grad(gx, x) fails.
             def f1(x):
                 y = x.sin().exp()
                 (gx,) = torch.autograd.grad(
@@ -354,11 +366,13 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
                 return gx
 
             compiled_f1 = torch.compile(backend="aot_eager")(f1)
-            f1(x)
             with self.assertRaisesRegex(RuntimeError, err):
                 compiled_f1(x)
 
             # (2) the second half of double backward outside compiled function
+            # This works because autograd.grad inside the compiled function is traced,
+            # so gx.grad_fn is CompiledFunctionBackward (not BackwardBackward).
+            # The second autograd.grad(gx, x) is just first-level backward.
             def f2(x):
                 y = x.sin().exp()
                 (gx,) = torch.autograd.grad(
@@ -368,10 +382,11 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
             compiled_f2 = torch.compile(backend="aot_eager")(f2)
             gx = compiled_f2(x)
-            with self.assertRaisesRegex(RuntimeError, err):
-                torch.autograd.grad(gx, x)
+            torch.autograd.grad(gx, x)
 
             # (3) double backward entirely outside compiled function
+            # This still raises RuntimeError because autograd.grad is outside
+            # the compiled function, so the graph break detection doesn't apply.
             def f3(x):
                 y = x.sin().exp()
                 return y
@@ -436,7 +451,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         fxx(x3, x3)
         fxx(x4, y4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""L['x'] is L['y']""", failure_reason)
+        self.assertIn("""x is y""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg(self):
@@ -470,7 +485,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """L['a'] is L['b']""",
+            """a is b""",
             failure_reason,
         )
 
@@ -487,7 +502,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(c3, c3, 3, 3)
         f(c4, d4, 3, 3)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""L['a'] is L['b']""", failure_reason)
+        self.assertIn("""a is b""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_with_global(self):
@@ -524,7 +539,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """L['a'] is L['b']""",
+            """a is b""",
             failure_reason,
         )
 
@@ -560,7 +575,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f([3, 2, 1], [4, 5, 6], a2, b2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """L['a'] is L['b']""",
+            """a is b""",
             failure_reason,
         )
 
@@ -610,7 +625,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a2, b2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """L['a'] is L['b']""",
+            """a is b""",
             failure_reason,
         )
 
@@ -627,7 +642,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(c3, c3)
         f(c4, d4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""L['a'] is L['b']""", failure_reason)
+        self.assertIn("""a is b""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args(self):
@@ -659,7 +674,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """L['a'] is L['b']""",
+            """a is b""",
             failure_reason,
         )
 
@@ -676,7 +691,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a3, b3, c3, c3)
         f(a4, b4, c4, d4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""L['c'] is L['d']""", failure_reason)
+        self.assertIn("""c is d""", failure_reason)
 
     def test_alias_inputs(self):
         def fn():
@@ -715,8 +730,45 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         out = compiled_fn(x, y)
         out.sum().backward()
 
+    def test_joint_custom_pass(self):
+        is_called = False
+
+        def joint_custom_pass(joint_gm: torch.fx.GraphModule, joint_inputs):
+            nonlocal is_called
+            is_called = True
+
+            self.assertTrue(isinstance(joint_gm, torch.fx.GraphModule))
+
+            self.assertTrue(isinstance(joint_inputs, tuple))
+            # first input is list of primals
+            self.assertTrue(isinstance(joint_inputs[0], list))
+            # second input is list of tangents
+            self.assertTrue(isinstance(joint_inputs[1], list))
+
+            return joint_gm
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        x = torch.randn(10, requires_grad=False)
+        compiled_fn = torch.compile(M(), backend="aot_eager")
+
+        with torch._functorch.config.patch("joint_custom_pass", joint_custom_pass):
+            _ = compiled_fn(x)
+        # x doesn't require grad, shouldn't trigger joint graph compiler
+        self.assertFalse(is_called)
+
+        y = torch.randn(10, requires_grad=True)
+        with torch._functorch.config.patch("joint_custom_pass", joint_custom_pass):
+            out = compiled_fn(y)
+        # y requires grad, should trigger joint graph compiler
+        self.assertTrue(is_called)
+        out.sum().backward()
+
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    @patch("torch._functorch.config.check_custom_op_aliasing", False)
     @patch("torch._functorch.config.debug_assert", True)
     def test_multiple_aot_autograd_calls_dupe_args(self):
         # this is just dealing with the fact that
@@ -880,43 +932,41 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
             dedent(
                 """\
 SeqNr|OrigAten|SrcFn|FwdSrcFn
-0|aten.convolution.default|l__self___conv1|
-0|aten.add.Tensor|l__self___bn1|
-1|aten._native_batch_norm_legit_functional.default|l__self___bn1|
-2|aten.relu.default|l__self___relu1|
-2|aten.detach.default|l__self___relu1|
-2|aten.detach.default|l__self___relu1|
+0|aten.convolution.default|conv2d|
+0|aten.add.Tensor|add_|
+1|aten._native_batch_norm_legit_functional.default|batch_norm|
+2|aten.relu.default|relu|
+2|aten.detach.default|relu|
 3|aten.add.Tensor|add|
 4|aten.view.default|flatten|
-5|aten.view.default|l__self___fc1|
-6|aten.t.default|l__self___fc1|
-7|aten.addmm.default|l__self___fc1|
-8|aten.view.default|l__self___fc1|
-9|aten.sub.Tensor|l__self___loss_fn|
-10|aten.abs.default|l__self___loss_fn|
-11|aten.mean.default|l__self___loss_fn|
-11|aten.ones_like.default||l__self___loss_fn
-11|aten.expand.default||l__self___loss_fn
-11|aten.div.Scalar||l__self___loss_fn
-10|aten.sgn.default||l__self___loss_fn
-10|aten.mul.Tensor||l__self___loss_fn
-8|aten.view.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.mm.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.mm.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.sum.dim_IntList||l__self___fc1
-7|aten.view.default||l__self___fc1
-6|aten.t.default||l__self___fc1
-5|aten.view.default||l__self___fc1
-4|aten.view.default||
-2|aten.detach.default||l__self___relu1
-2|aten.detach.default||l__self___relu1
-2|aten.threshold_backward.default||l__self___relu1
-1|aten.native_batch_norm_backward.default||l__self___bn1
-0|aten.convolution_backward.default||l__self___conv1
-11|aten.add.Tensor||l__self___loss_fn
+5|aten.view.default|linear|
+6|aten.t.default|linear|
+7|aten.addmm.default|linear|
+8|aten.view.default|linear|
+9|aten.sub.Tensor|l1_loss|
+10|aten.abs.default|l1_loss|
+11|aten.mean.default|l1_loss|
+11|aten.ones_like.default||l1_loss
+11|aten.expand.default||l1_loss
+11|aten.div.Scalar||l1_loss
+10|aten.sgn.default||l1_loss
+10|aten.mul.Tensor||l1_loss
+8|aten.view.default||linear
+7|aten.t.default||linear
+7|aten.mm.default||linear
+7|aten.t.default||linear
+7|aten.mm.default||linear
+7|aten.t.default||linear
+7|aten.sum.dim_IntList||linear
+7|aten.view.default||linear
+6|aten.t.default||linear
+5|aten.view.default||linear
+4|aten.view.default||flatten
+2|aten.detach.default||relu
+2|aten.threshold_backward.default||relu
+1|aten.native_batch_norm_backward.default||batch_norm
+0|aten.convolution_backward.default||conv2d
+11|aten.add.Tensor||
 """
             ),
         )
@@ -1068,7 +1118,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             )
 
     def test_aot_autograd_raises_invalid_leaf_set(self):
-        @torch.compile
+        @torch.compile(backend="aot_eager")
         def f(x):
             x.set_(torch.ones(2))
 
@@ -1131,9 +1181,13 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     def test_data_ptr_access_fails_in_forward(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch.library.define("mylib::foo", "(Tensor x) -> Tensor", lib=lib)
+            torch.library.define(
+                "mylib::foo_data_ptr_forward", "(Tensor x) -> Tensor", lib=lib
+            )
 
-            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            @torch.library.impl(
+                "mylib::foo_data_ptr_forward", "CompositeImplicitAutograd", lib=lib
+            )
             def _(x):
                 x.data_ptr()
                 return x.clone()
@@ -1141,12 +1195,12 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             x = torch.randn(3)
 
             def data_ptr_graph_input(x):
-                r0 = torch.ops.mylib.foo(x)
+                r0 = torch.ops.mylib.foo_data_ptr_forward(x)
                 return r0
 
             def data_ptr_graph_intermediate(x):
                 y = x.clone()
-                r0 = torch.ops.mylib.foo(y)
+                r0 = torch.ops.mylib.foo_data_ptr_forward(y)
                 return r0
 
             tests = [data_ptr_graph_input, data_ptr_graph_intermediate]
@@ -1166,7 +1220,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     def test_data_ptr_access_fails_in_backward(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch.library.define("mylib::foo", "(Tensor x) -> Tensor", lib=lib)
+            torch.library.define(
+                "mylib::foo_data_ptr_backward", "(Tensor x) -> Tensor", lib=lib
+            )
 
             backward_called = False
 
@@ -1182,12 +1238,14 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                     grad.data_ptr()
                     return grad.clone()
 
-            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            @torch.library.impl(
+                "mylib::foo_data_ptr_backward", "CompositeImplicitAutograd", lib=lib
+            )
             def _(x):
                 return Foo.apply(x)
 
             def f(x):
-                return torch.ops.mylib.foo(x)
+                return torch.ops.mylib.foo_data_ptr_backward(x)
 
             x = torch.randn(3, requires_grad=True)
             with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer"):
@@ -1213,9 +1271,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch(donated_buffer=True)
     def test_donated_buffer1(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def relu(x):
             return torch.nn.functional.relu(x)
 
@@ -1233,10 +1291,10 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer2(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        # we will re-use the graph for g across f1 and f2
-        @torch.compile()
+        # we will reuse the graph for g across f1 and f2
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def g(activation, param2):
             return torch.matmul(activation, param2)
 
@@ -1255,10 +1313,10 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer3(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        # we will re-use the graph for g across f1 and f2
-        @torch.compile()
+        # we will reuse the graph for g across f1 and f2
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def g(activation, param2):
             return torch.matmul(activation, param2)
 
@@ -1278,7 +1336,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer4(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
@@ -1289,7 +1347,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                 return torch.nn.functional.relu(x) + self.param
 
         mod = Mod()
-        mod = torch.compile(mod)
+        mod = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
 
         inp = torch.ones([2, 2], requires_grad=True)
 
@@ -1309,9 +1367,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer5(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def f(x, z):
             y = x.view(2, 3)
             z = torch.nn.functional.relu(z)
@@ -1335,10 +1393,17 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         #   %le : [num_users=1] = call_function[target=torch.ops.aten.le.Scalar](args = (%relu, 0), kwargs = {})
         #   return [add, primals_1, le]
         #
+        if is_dynamic_shape_test(self._testMethodName):
+            # an extra symint exists before the saved tensors
+            expected_msg = "bw_donated_idxs=[2]"
+        else:
+            expected_msg = "bw_donated_idxs=[1]"
+
         # `le` is a donated buffer but primals_1 is not.
-        FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
+        FileCheck().check(expected_msg).run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
     def test_donated_buffer6(self):
         if is_dynamic_shape_test(self._testMethodName):
             # parameters should not be dynamic shape
@@ -1346,13 +1411,13 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             #    SymNodeVariable() is not a constant
             return
 
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         def fn(x):
             p = torch.nn.Parameter(x + 123)
             return p, p.sin()
 
-        opt = torch.compile(fn, fullgraph=True)
+        opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         x = torch.randn(16)
 
         with self.assertLogs(logger_name, level="INFO") as captured:
@@ -1374,7 +1439,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         inp = torch.randn(3, 3, requires_grad=True)
 
-        mod = torch.compile(Mod())
+        mod = torch.compile(Mod())  # noqa: UNSPECIFIED_BACKEND
         for _ in range(5):
             mod(inp).sum().backward()
 
@@ -1391,7 +1456,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         inp = torch.randn(3, 3, requires_grad=True)
 
-        mod = torch.compile(Mod())
+        mod = torch.compile(Mod())  # noqa: UNSPECIFIED_BACKEND
         out = mod(inp).sum()
         for _ in range(5):
             out.backward(retain_graph=True)
@@ -1410,12 +1475,39 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         inp = torch.randn(3, 3, requires_grad=True)
 
-        mod = torch.compile(Mod())
+        mod = torch.compile(Mod())  # noqa: UNSPECIFIED_BACKEND
         mod(inp).sum().backward(create_graph=True)
         out = mod(inp).sum()
         for _ in range(5):
             out.backward(retain_graph=True)
         out.backward()
+
+    def test_autograd_function_tangent_mutation(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone(), x.clone()
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1.copy_(grad2)
+
+        def f(x):
+            return Foo.apply(x)
+
+        x = torch.randn(4, requires_grad=True)
+        x_ref = x.clone().detach().requires_grad_()
+
+        out_ref = f(x_ref)
+        out = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(out_ref, out)
+        self.assertEqual(x_ref, x)
+
+        (out[0] + out[1]).sum().backward()
+        (out_ref[0] + out_ref[1]).sum().backward()
+
+        self.assertEqual(x_ref.grad, x.grad)
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer_with_retain_or_create_graph4(self):
@@ -1430,7 +1522,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         inp = torch.randn(3, 3, requires_grad=True)
 
-        mod = torch.compile(Mod())
+        mod = torch.compile(Mod())  # noqa: UNSPECIFIED_BACKEND
         mod(inp).sum().backward()
         out = mod(inp).sum()
         with self.assertRaisesRegex(
@@ -1496,7 +1588,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         )
         self.assertExpectedInline(
             guard_failure,
-            """0/0: check_overlapping(overlapping=[L['args'][1], L['args'][2]], non_overlapping=[L['args'][0]])""",
+            """0/0: check_overlapping(overlapping=[args[1], args[2]], non_overlapping=[args[0]])""",
         )
 
     def test_different_inputs_overlapping_set_with_mutation(self):
@@ -1519,7 +1611,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         )
         self.assertExpectedInline(
             guard_failure,
-            """0/0: check_overlapping(overlapping=[L['a'], L['b']], non_overlapping=[L['c'], L['d']])""",
+            """0/0: check_overlapping(overlapping=[a, b], non_overlapping=[c, d])""",
         )
 
     def _test_no_storage_overlap_guards(self, f, argsfn):
@@ -1622,6 +1714,293 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         # However, at the time this change was introduced, it went down from 15154 to 403.
         self.assertLess(len(shape_env_guards), 1000)
 
+    # See # https://github.com/pytorch/pytorch/issues/164814
+    def test_aot_autograd_stride_reconstruction_on_zero_dim_dynamic_shaped_tensor(
+        self,
+    ) -> None:
+        def repro(sentinel: torch.Tensor, skip_squeeze: bool = False) -> torch.Tensor:
+            x = torch.unique(torch.ones(1))
+            x = torch.reshape(x, [1])
+            if not skip_squeeze:
+                x = torch.squeeze(x)  # 0-d tensor
+            return x * sentinel
+
+        # Grad required to trigger the issue (need to replay stride)
+        sentinel = torch.tensor(1.0, requires_grad=True)
+        eager_sq = repro(sentinel)
+        comp_aot_sq = torch.compile(repro, backend="aot_eager", fullgraph=True)(
+            sentinel
+        )
+        comp_ind_sq = torch.compile(repro, backend="inductor", fullgraph=True)(sentinel)
+        self.assertEqual(eager_sq, comp_aot_sq)
+        self.assertEqual(eager_sq, comp_ind_sq)
+        self.assertEqual(eager_sq.stride(), comp_ind_sq.stride())
+
+        # Now check semantics preserved when skipping squeeze
+        eager_no_sq = repro(sentinel, skip_squeeze=True)
+        comp_aot_no_sq = torch.compile(repro, backend="aot_eager", fullgraph=True)(
+            sentinel, skip_squeeze=True
+        )
+        comp_ind_no_sq = torch.compile(repro, backend="inductor", fullgraph=True)(
+            sentinel, skip_squeeze=True
+        )
+        self.assertEqual(eager_no_sq, comp_aot_no_sq)
+        self.assertEqual(eager_no_sq, comp_ind_no_sq)
+        self.assertEqual(eager_no_sq.stride(), comp_ind_no_sq.stride())
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_unbacked_activation_specialized_in_inductor(self):
+        """Test compilation with unbacked operations like nonzero."""
+        torch._dynamo.reset()
+
+        def fuzzed_program(arg_0, sentinel):
+            var_node_1 = arg_0
+            var_node_5 = torch.full((1, 2), -66, dtype=torch.int32)
+            var_node_6 = torch.full((1, 2), 77, dtype=torch.int64)
+            var_node_4 = torch.ops.aten.add(var_node_5, var_node_6)
+            var_node_7 = torch.full((1, 2), -64, dtype=torch.int32)
+            var_node_3 = torch.ops.aten.mul(var_node_4, var_node_7)
+            var_node_9 = torch.full((3, 4), False, dtype=torch.bool)
+            var_node_8 = torch.nonzero(var_node_9)
+            var_node_2 = torch.ops.aten.add(var_node_3, var_node_8)
+            var_node_0 = torch.ops.aten.div(var_node_1, var_node_2)
+            result = var_node_0 * sentinel
+            if result.is_complex():
+                result = result.real
+            return result
+
+        sentinel = torch.tensor(1.0, requires_grad=True)
+        arg_0 = torch.randint(0, 3, (1, 2), dtype=torch.int64)
+        args = (arg_0,) + (sentinel,)
+
+        result_original = fuzzed_program(*args)
+
+        compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)  # noqa: UNSPECIFIED_BACKEND
+        result_compiled = compiled_program(*args)
+
+        self.assertTrue(torch.allclose(result_original, result_compiled))
+
+    def test_layer_norm_double_backward_dynamic_shapes(self):
+        """
+        Test that layer_norm with create_graph=True (double backward) works
+        with dynamic shapes without recompilations.
+
+        This tests the fix for layer_norm_double_backward to use SymInt properly
+        so that dynamic batch sizes don't cause specialization/recompilation.
+        """
+
+        class LayerNormGradModel(torch.nn.Module):
+            def __init__(self, dim=64):
+                super().__init__()
+                self.layer_norm = torch.nn.LayerNorm(dim)
+
+            def forward(self, x: torch.Tensor):
+                x = x.clone().requires_grad_(True)
+                y = self.layer_norm(x)
+                grad_outputs = torch.ones_like(y)
+                # create_graph=True triggers layer_norm_double_backward
+                (grad,) = torch.autograd.grad(
+                    y,
+                    x,
+                    grad_outputs=grad_outputs,
+                    create_graph=True,
+                    allow_unused=True,
+                )
+                return y, grad
+
+        model = LayerNormGradModel(dim=64)
+
+        # Trace with symbolic shapes
+        example_input = torch.randn(10, 64)
+        fx_model = make_fx(
+            model,
+            tracing_mode="symbolic",
+            _allow_non_fake_inputs=True,
+        )(example_input)
+
+        # Compile with dynamic=True and a counter to track recompilations
+        cnt = CompileCounterWithBackend(backend="inductor")
+        compiled_model = torch.compile(
+            fx_model, dynamic=True, fullgraph=True, backend=cnt
+        )
+
+        batch_sizes = [10, 20, 30, 40]
+        for batch_size in batch_sizes:
+            x = torch.randn(batch_size, 64)
+            y, grad = compiled_model(x)
+            self.assertEqual(y.shape, (batch_size, 64))
+            self.assertEqual(grad.shape, (batch_size, 64))
+
+        # Should only compile once regardless of batch size changes
+        self.assertEqual(cnt.frame_count, 1)
+
+    @fx_config.patch(translation_validation=False)
+    def test_partitioner_saves_unreplaced_input_symbols_for_bw(self):
+        shape_env = ShapeEnv(should_record_events=False)
+        s0 = make_symbol(SymT.SIZE, 0, integer=True)
+        shape_env.var_to_range[s0] = ValueRanges(2, 10)
+        shape_env.add_backed_var_to_val(s0, 3)
+        s0_sym = shape_env.create_symintnode(s0, hint=3)
+
+        u0_sym = shape_env.create_unbacked_symint()
+        u0 = u0_sym.node._expr
+        shape_env._set_replacement(u0, s0, "test")
+        u1_sym = shape_env.create_unbacked_symint()
+        u1 = u1_sym.node._expr
+        shape_env._rename_unbacked_to(u0, u1)
+        derived_sym = shape_env.create_symintnode(u0 + 1, hint=None)
+
+        graph = torch.fx.Graph()
+        s0_node = graph.placeholder("primals_1")
+        s0_node.meta["val"] = s0_sym
+        u0_node = graph.call_function(operator.add, (s0_node, 0))
+        u0_node.meta["val"] = u0_sym
+        u0_node.meta["unbacked_bindings"] = {u0: ()}
+        derived_node = graph.call_function(operator.add, (u0_node, 1))
+        derived_node.meta["val"] = derived_sym
+        output = graph.output((s0_node, derived_node))
+        output.meta["desc"] = [None, None]
+        joint = torch.fx.GraphModule({}, graph)
+
+        _, bw_graph = _extract_fwd_bwd_modules(
+            joint, [], [derived_node], num_fwd_outputs=1
+        )
+        bw_placeholders = list(bw_graph.graph.find_nodes(op="placeholder"))
+        # The backward binds the unreplaced symbol u0 (needed by runtime
+        # assertions, which preserve raw placeholder expressions) *and* the
+        # replacement target s0 (needed by sizevar codegen and FxGraphCache
+        # guards, which use ShapeEnv replacements). Binding only u0 leaves s0
+        # undefined in the backward, surfacing as a KeyError during backward
+        # FxGraphCache guard evaluation.
+        self.assertEqual(
+            [node.meta["val"].node._expr for node in bw_placeholders],
+            [s0, u0, u0 + 1],
+        )
+
+        graph_inputs = [node.meta["val"] for node in bw_placeholders]
+        lowering = GraphLowering(
+            bw_graph, graph_inputs, shape_env=shape_env, is_backward=True
+        )
+        with V.set_graph_handler(lowering):
+            lowering.run(*graph_inputs)
+
+        self.assertEqual(
+            [lowering.graph_inputs[name] for name in lowering.graph_input_names],
+            [s0, u1, u1 + 1],
+        )
+        self.assertEqual(
+            [
+                lowering.graph_inputs[name].xreplace({u1: s0})
+                for name in lowering.graph_input_names
+            ],
+            [s0, s0, s0 + 1],
+        )
+
+    def test_batched_matmul_inference_mode(self):
+        # Regression test for torch.compile crash with batched matmul in inference_mode
+        x = torch.randn(2, 4, 8)
+        w = torch.randn(8, 8)
+
+        def f(x, w):
+            with torch.inference_mode():
+                return (x @ w).sum()
+
+        torch._dynamo.reset()
+        result = torch.compile(f)(x, w)  # noqa: UNSPECIFIED_BACKEND
+        self.assertIsInstance(result, torch.Tensor)
+
+
+class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
+    @onlyAccelerator
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @patch.object(torch._dynamo.config, "capture_dynamic_output_shape_ops", True)
+    def test_partitioner_filters_symbool_saved_for_bw(self, device):
+        """When cross-rank sync injects SymBool nodes (whose only consumers are
+        _assert_scalar) into saved_values, the partitioner must filter them out
+        so they don't become backward graph inputs that Inductor can't lower.
+
+        In multi-GPU MoE training, different EP ranks can produce different
+        min-cut partitioner decisions due to data-dependent shapes. The
+        cross-rank sync (_sync_decision_cross_ranks) picks one rank's decision
+        for all, which may include SymBool assertion nodes that weren't in
+        another rank's saved set. We simulate this by patching
+        _sync_decision_cross_ranks to inject all SymBool nodes.
+
+        Regression test for https://github.com/pytorch/pytorch/pull/179315
+        """
+        import torch._functorch.config as functorch_config
+        import torch._functorch.partitioners as P
+
+        # Simulate cross-rank sync picking a rank that saved SymBool nodes
+        def inject_symbool_nodes(joint_graph, saved_values):
+            for node in joint_graph.nodes:
+                val = node.meta.get("val")
+                if isinstance(val, torch.SymBool) and node not in saved_values:
+                    saved_values = saved_values + [node]
+            return saved_values
+
+        def fn(x, splits_tensor, mask):
+            splits = splits_tensor.tolist()
+            indices = torch.nonzero(mask).squeeze(-1)
+            y = x[indices]
+            # split verifies sum(splits) == y.shape[0], creating an
+            # Equality SymBool node consumed only by _assert_scalar
+            chunks = torch.split(y, splits, dim=0)
+            return torch.cat([c * 2.0 for c in chunks], dim=0).sum()
+
+        x = torch.randn(20, 16, requires_grad=True, device=device)
+        splits_tensor = torch.tensor([3, 5], device=device)
+        mask = torch.zeros(20, dtype=torch.bool, device=device)
+        mask[:8] = True
+
+        with (
+            patch.object(P, "_sync_decision_cross_ranks", inject_symbool_nodes),
+            patch.object(functorch_config, "_sync_decision_cross_ranks", True),
+        ):
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+            loss = compiled_fn(x, splits_tensor, mask)
+            # Without the fix, this raises:
+            # InductorError: Unsupported inductor graph input type:
+            #   <class 'sympy.core.relational.GreaterThan'>
+            loss.backward()
+        self.assertIsNotNone(x.grad)
+
+        captured_fw_graphs = []
+
+        def fw_compiler(gm, inputs):
+            captured_fw_graphs.append(gm)
+            return gm
+
+        from functorch.compile import aot_function, default_partition, nop
+
+        x = torch.randn(20, 16, requires_grad=True, device=device)
+        compiled_fn = aot_function(
+            fn,
+            fw_compiler=fw_compiler,
+            bw_compiler=nop,
+            partition_fn=default_partition,
+            dynamic=True,
+        )
+        loss = compiled_fn(x, splits_tensor, mask)
+        loss.backward()
+        self.assertEqual(len(captured_fw_graphs), 1)
+        output_node = next(
+            node for node in captured_fw_graphs[0].graph.nodes if node.op == "output"
+        )
+        outputs = output_node.args[0]
+        if not isinstance(outputs, (list, tuple)):
+            outputs = (outputs,)
+        self.assertFalse(
+            any(
+                isinstance(node, torch.fx.Node)
+                and isinstance(node.meta.get("val"), torch.SymBool)
+                for node in outputs
+            )
+        )
+
+
+instantiate_device_type_tests(AotAutogradFallbackTestsDevice, globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

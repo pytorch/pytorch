@@ -7,15 +7,8 @@ import threading
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import IS_MACOS, run_tests, TestCase
+from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary
 
 
@@ -91,12 +84,12 @@ class WeakTest(TestCase):
         weakdict = klass()
         weakdict.update(dict)
         self.assertEqual(len(weakdict), len(dict))
-        for k in weakdict.keys():
+        for k in weakdict:
             self.assertIn(k, dict, "mysterious new key appeared in weak dict")
             v = dict.get(k)
             self.assertIs(v, weakdict[k])
             self.assertIs(v, weakdict.get(k))
-        for k in dict.keys():
+        for k in dict:
             self.assertIn(k, weakdict, "original key disappeared in weak dict")
             v = dict[k]
             self.assertIs(v, weakdict[k])
@@ -166,7 +159,7 @@ class WeakTest(TestCase):
         self.assertRaises(KeyError, d.__delitem__, o)
         self.assertRaises(KeyError, d.__getitem__, o)
 
-        # If a key isn't of a weakly referencable type, __getitem__ and
+        # If a key isn't of a weakly referenceable type, __getitem__ and
         # __setitem__ raise TypeError.  __delitem__ should too.
         self.assertRaises(TypeError, d.__delitem__, 13)
         self.assertRaises(TypeError, d.__getitem__, 13)
@@ -182,11 +175,11 @@ class WeakTest(TestCase):
 
         # Cannot give these slots as weakrefs weren't supported
         # on these objects until later versions of Python
-        class DummyKey:  # noqa: B903
+        class DummyKey:
             def __init__(self, ctr):
                 self.ctr = ctr
 
-        class DummyValue:  # noqa: B903
+        class DummyValue:
             def __init__(self, ctr):
                 self.ctr = ctr
 
@@ -335,7 +328,7 @@ class WeakKeyDictionaryTestCase(TestCase):
         for key, value in self.reference.items():
             p[key] = value
             self.assertEqual(p[key], value)
-        for key in self.reference.keys():
+        for key in self.reference:
             del p[key]
             self.assertRaises(KeyError, lambda: p[key])
         p = self._empty_mapping()
@@ -589,23 +582,16 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         return x
 
     def setUp(self):
+        super().setUp()
         if IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
 
     def __init__(self, *args, **kw):
         unittest.TestCase.__init__(self, *args, **kw)
-        if IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_MACOS:
-            # don't load the library, just skip the tests in setUp
-            return
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
+        try:
+            load_torchbind_test_lib()
+        except unittest.SkipTest:
+            return  # Skip in setup
 
         self.reference = self._reference().copy()
 
@@ -676,7 +662,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         for key, value in self.reference.items():
             p[key] = value
             self.assertEqual(p[key], value)
-        for key in self.reference.keys():
+        for key in self.reference:
             del p[key]
             self.assertRaises(KeyError, lambda: p[key])
         p = self._empty_mapping()

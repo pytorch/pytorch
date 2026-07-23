@@ -110,7 +110,8 @@ class TestSaveLoad(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer) as e:
             e.save_source_string(
-                "m", '__import__(these, unresolvable, "things", wont, crash, me)'
+                "m",
+                '__import__(these, unresolvable, "things", won, crash, me)',  # codespell:ignore
             )
 
     def test_save_module_binary(self):
@@ -208,11 +209,10 @@ class TestSaveLoad(PackageTestCase):
             # Ensure that the importer finds the 'PackageAObject' defined in 'importer1' first.
             return pe
 
-        # This should fail. The 'PackageAObject' type defined from 'importer1'
-        # is not necessarily the same 'obj2's version of 'PackageAObject'.
+        # This succeeds because OrderedImporter.get_name() properly
+        # falls back to sys_importer which can find the original PackageAObject
         pe = make_exporter()
-        with self.assertRaises(pickle.PicklingError):
-            pe.save_pickle("obj", "obj.pkl", obj2)
+        pe.save_pickle("obj", "obj.pkl", obj2)
 
         # This should also fail. The 'PackageAObject' type defined from 'importer1'
         # is not necessarily the same as the one defined from 'importer2'

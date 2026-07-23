@@ -19,6 +19,7 @@ The script itself is not a test case hence no assertions are made in this script
 see: - test/distributed/launcher/run_test.py#test_is_torchelastic_launched()
      - test/distributed/launcher/run_test.py#test_is_not_torchelastic_launched()
 """
+
 import argparse
 
 import torch.distributed as dist

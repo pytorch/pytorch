@@ -86,7 +86,7 @@ std::tuple<Tensor, Tensor> fake_quantize_per_tensor_affine_cachemask(
       self.device().type(), Y, mask, self, scale, zero_point, quant_min, quant_max);
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
   //   1 byte per element, we only need 1 bit per element).
-  return std::make_tuple(Y, mask);
+  return std::make_tuple(std::move(Y), std::move(mask));
 }
 
 std::tuple<Tensor, Tensor> _fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
@@ -106,7 +106,7 @@ std::tuple<Tensor, Tensor> _fake_quantize_per_tensor_affine_cachemask_tensor_qpa
       self.device().type(), Y, mask, self, scale, zero_point, fake_quant_enabled, quant_min, quant_max);
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
   //   1 byte per element, we only need 1 bit per element).
-  return std::make_tuple(Y, mask);
+  return std::make_tuple(std::move(Y), std::move(mask));
 }
 
 /* Backward path to fake-quantize the 'inputs' tensor, with mask.
@@ -140,7 +140,7 @@ static int64_t _get_zero_point_from_tensor(
     bool is_forward) {
   float zero_point_fp = zero_point[0].item<float>();
   zero_point_fp = is_forward ? std::nearbyint(zero_point_fp) : zero_point_fp + 0.5f;
-  float zero_point_clamped = std::min(std::max(zero_point_fp, static_cast<float>(quant_min)),
+  float zero_point_clamped = std::clamp(zero_point_fp, static_cast<float>(quant_min),
                                        static_cast<float>(quant_max));
   return static_cast<int64_t>(zero_point_clamped);
 }
@@ -184,15 +184,23 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
           0 & \text{ else }
         \end{cases}
   */
-  float scale_val = scale[0].item<float>();
-  float inv_scale_val = 1.0f / scale_val;
-  int64_t zero_point_val = native::_get_zero_point_from_tensor(zero_point, quant_min, quant_max, false);
 
-  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(X.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(scale.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(zero_point.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(X.numel() == dY.numel(), "`X` and `dY` are not the same size");
+  bool is_bfloat16 = (X.scalar_type() == at::kBFloat16);
+
+  at::Tensor X_ = is_bfloat16 ? X.to(ScalarType::Float) : X;
+  at::Tensor dY_ = is_bfloat16 ? dY.to(ScalarType::Float) : dY;
+  at::Tensor scale_ = is_bfloat16 ? scale.to(ScalarType::Float) : scale;
+  at::Tensor zero_point_ = is_bfloat16 ? zero_point.to(ScalarType::Float) : zero_point;
+
+  float scale_val = scale_[0].item<float>();
+  float inv_scale_val = 1.0f / scale_val;
+  int64_t zero_point_val = native::_get_zero_point_from_tensor(zero_point_, quant_min, quant_max, false);
+
+  TORCH_CHECK(dY_.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(X_.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(scale_.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(zero_point_.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(X_.numel() == dY_.numel(), "`X` and `dY` are not the same size");
   TORCH_CHECK(
       quant_min <= 0 && quant_max >= 0,
       "`quant_min` should be less than or \
@@ -200,30 +208,30 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
   TORCH_CHECK(
       zero_point_val >= quant_min && zero_point_val <= quant_max,
       "`zero_point` must be between `quant_min` and `quant_max`.");
-  if (X.numel() <= 0) {
+  if (X_.numel() <= 0) {
     return std::make_tuple(X, scale, zero_point);
   }
 
-  auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
-  auto dScale_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
-  auto dZeroPoint_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
+  auto dX = at::empty_like(X_, X_.options(), MemoryFormat::Preserve);
+  auto dScale_vec = at::empty_like(X_, X_.options(), MemoryFormat::Preserve);
+  auto dZeroPoint_vec = at::empty_like(X_, X_.options(), MemoryFormat::Preserve);
 
   auto iter = TensorIteratorConfig()
     .add_output(dX)
     .add_output(dScale_vec)
     .add_output(dZeroPoint_vec)
-    .add_input(X)
-    .add_input(dY)
+    .add_input(X_)
+    .add_input(dY_)
     .build();
 
   fake_quant_grad_learnable_tensor_stub(
-    X.device().type(), iter, scale_val, inv_scale_val, zero_point_val, quant_min, quant_max, grad_factor);
+    X_.device().type(), iter, scale_val, inv_scale_val, zero_point_val, quant_min, quant_max, grad_factor);
 
   // The total sums over the scale and zero point gradient vectors are what will be returned in the end.
-  auto dScale = dScale_vec.sum().unsqueeze(0).to(scale.device());
-  auto dZeroPoint = dZeroPoint_vec.sum().unsqueeze(0).to(zero_point.device());
+  auto dScale = dScale_vec.sum().unsqueeze(0).to(scale_.device());
+  auto dZeroPoint = dZeroPoint_vec.sum().unsqueeze(0).to(zero_point_.device());
 
-  return std::make_tuple(dX, dScale, dZeroPoint);
+  return std::make_tuple(std::move(dX), std::move(dScale), std::move(dZeroPoint));
 }
 
 } // namespace at::native

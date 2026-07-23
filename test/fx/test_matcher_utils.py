@@ -2,11 +2,11 @@
 
 import os
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import torch.nn.functional as F
-from torch.export import export_for_training
+from torch.export import export
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -19,7 +19,7 @@ from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
     SubgraphMatcherWithNameNodeMap,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
+from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -172,8 +172,8 @@ class TestMatcher(JitTestCase):
             torch.randn(1, 3, 3, 3) * 10,
             torch.randn(3, 3, 3, 3),
         )
-        pattern_gm = export_for_training(
-            WrapperModule(pattern), example_inputs
+        pattern_gm = export(
+            WrapperModule(pattern), example_inputs, strict=True
         ).module()
         before_split_res = pattern_gm(*example_inputs)
         pattern_gm, _ = _split_to_graph_and_name_node_map(pattern_gm)
@@ -203,26 +203,31 @@ class TestMatcher(JitTestCase):
             torch.randn(1, 3, 3, 3) * 10,
             torch.randn(3, 3, 3, 3),
         )
-        pattern_gm = export_for_training(
-            WrapperModule(pattern), example_inputs
+        pattern_gm = export(
+            WrapperModule(pattern), example_inputs, strict=True
         ).module()
         matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
-        target_gm = export_for_training(
-            WrapperModule(target_graph), example_inputs
+        target_gm = export(
+            WrapperModule(target_graph), example_inputs, strict=True
         ).module()
         internal_matches = matcher.match(target_gm.graph)
         for internal_match in internal_matches:
             name_node_map = internal_match.name_node_map
-            assert "conv" in name_node_map
-            assert "relu" in name_node_map
+            if "conv" not in name_node_map:
+                raise AssertionError("Expected 'conv' in name_node_map")
+            if "relu" not in name_node_map:
+                raise AssertionError("Expected 'relu' in name_node_map")
             name_node_map["conv"].meta["custom_annotation"] = "annotation"
             # check if we correctly annotated the target graph module
             for n in target_gm.graph.nodes:
                 if n == name_node_map["conv"]:
-                    assert (
+                    if not (
                         "custom_annotation" in n.meta
                         and n.meta["custom_annotation"] == "annotation"
-                    )
+                    ):
+                        raise AssertionError(
+                            "Expected custom_annotation to be 'annotation'"
+                        )
 
     @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
     def test_matcher_with_name_node_map_module(self):
@@ -248,23 +253,31 @@ class TestMatcher(JitTestCase):
                 return linear, {"linear": linear, "x": x}
 
         example_inputs = (torch.randn(3, 5),)
-        pattern_gm = export_for_training(Pattern(), example_inputs).module()
+        pattern_gm = export(Pattern(), example_inputs, strict=True).module()
         matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
-        target_gm = export_for_training(M(), example_inputs).module()
+        target_gm = export(M(), example_inputs, strict=True).module()
         internal_matches = matcher.match(target_gm.graph)
         for internal_match in internal_matches:
             name_node_map = internal_match.name_node_map
-            assert "linear" in name_node_map
-            assert "x" in name_node_map
+            if "linear" not in name_node_map:
+                raise AssertionError("Expected 'linear' in name_node_map")
+            if "x" not in name_node_map:
+                raise AssertionError("Expected 'x' in name_node_map")
             name_node_map["linear"].meta["custom_annotation"] = "annotation"
             # check if we correctly annotated the target graph module
             for n in target_gm.graph.nodes:
                 if n == name_node_map["linear"]:
-                    assert (
+                    if not (
                         "custom_annotation" in n.meta
                         and n.meta["custom_annotation"] == "annotation"
-                    )
+                    ):
+                        raise AssertionError(
+                            "Expected custom_annotation to be 'annotation'"
+                        )
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

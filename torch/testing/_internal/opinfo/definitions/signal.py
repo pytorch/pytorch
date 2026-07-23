@@ -1,9 +1,9 @@
 # mypy: ignore-errors
 
 import unittest
+from collections.abc import Callable
 from functools import partial
 from itertools import product
-from typing import Callable
 
 import numpy
 
@@ -29,6 +29,8 @@ def sample_inputs_window(op_info, device, dtype, requires_grad, *args, **kwargs)
     additional keyword arguments.
     """
 
+    # Remove include_conjugated_inputs from kwargs
+    kwargs.pop("include_conjugated_inputs", None)
     # Tests window sizes up to 5 samples.
     for size, sym in product(range(6), (True, False)):
         yield SampleInput(

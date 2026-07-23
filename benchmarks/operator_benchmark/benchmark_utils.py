@@ -14,7 +14,7 @@ This module contains utilities for writing microbenchmark tests.
 
 # Here are the reserved keywords in the benchmark suite
 _reserved_keywords = {"probs", "total_samples", "tags"}
-_supported_devices = {"cpu", "cuda"}
+_supported_devices = {"cpu", "cuda", "mps", "xpu"}
 
 
 def shape_to_string(shape):
@@ -37,7 +37,7 @@ def numpy_random(dtype, *shapes):
     Args:
         shapes: int or a sequence of ints to defining the shapes of the tensor
         dtype: use the dtypes from numpy
-            (https://docs.scipy.org/doc/numpy/user/basics.types.html)
+            (https://numpy.org/doc/stable/user/basics.types.html)
     Return:
         numpy tensor of dtype
     """
@@ -87,7 +87,8 @@ def generate_configs(**configs):
                       ({'M': 2}, {'N' : 4}),
                       ({'M': 2}, {'N' : 5}))
     """
-    assert "sample_func" in configs, "Missing sample_func to generate configs"
+    if "sample_func" not in configs:
+        raise AssertionError("Missing sample_func to generate configs")
     result = []
     for key, values in configs.items():
         if key == "sample_func":
@@ -128,20 +129,23 @@ def _validate(configs):
     """Validate inputs from users."""
     if "device" in configs:
         for v in configs["device"]:
-            assert v in _supported_devices, "Device needs to be a string."
+            if v not in _supported_devices:
+                raise AssertionError(
+                    f"Device must be one of {_supported_devices}, got {v}"
+                )
 
 
 def config_list(**configs):
     """Generate configs based on the list of input shapes.
     This function will take input shapes specified in a list from user. Besides
-    that, all other parameters will be cross producted first and each of the
+    that, all other parameters will be cross produced first and each of the
     generated list will be merged with the input shapes list.
 
     Reserved Args:
         attr_names(reserved): a list of names for input shapes.
         attrs(reserved): a list of values for each input shape.
         corss_product: a dictionary of attributes which will be
-                       cross producted with the input shapes.
+                       cross produced with the input shapes.
         tags(reserved): a tag used to filter inputs.
 
     Here is an example:
@@ -215,12 +219,18 @@ class RandomSample:
     def _random_sample(self, key, values, weights):
         """given values and weights, this function randomly sample values based their weights"""
         # TODO(mingzhe09088): cache the results to avoid recalculation overhead
-        assert len(values) == len(weights)
+        if len(values) != len(weights):
+            raise AssertionError(
+                f"values and weights must have same length, got {len(values)} and {len(weights)}"
+            )
         _distribution_func_vals = self._distribution_func(key, weights)
         x = random.random()
         idx = bisect.bisect(_distribution_func_vals, x)
 
-        assert idx <= len(values), "Wrong index value is returned"
+        if idx > len(values):
+            raise AssertionError(
+                f"Wrong index value is returned: idx={idx}, len(values)={len(values)}"
+            )
         # Due to numerical property, the last value in cumsum could be slightly
         # smaller than 1, and lead to the (index == len(values)).
         if idx == len(values):

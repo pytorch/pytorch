@@ -27,7 +27,8 @@ struct TORCH_API SimplifierHashType {
 namespace std {
 template <>
 struct hash<torch::jit::tensorexpr::SimplifierHashType> {
-  size_t operator()(const torch::jit::tensorexpr::SimplifierHashType& k) const {
+  size_t operator()(
+      const torch::jit::tensorexpr::SimplifierHashType& k) const noexcept {
     return k._h;
   }
 };
@@ -125,7 +126,7 @@ class TORCH_API HashProvider : public IRVisitor {
     std::stringstream ss;
     IRPrinter printer(ss);
     e->accept(&printer);
-    SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
+    SimplifierHashType hash = SimplifierHashType(te_hash(std::move(ss).str()));
     putHash(e, hash);
 
     return hash;
@@ -141,7 +142,7 @@ class TORCH_API HashProvider : public IRVisitor {
     std::stringstream ss;
     IRPrinter printer(ss);
     s->accept(&printer);
-    SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
+    SimplifierHashType hash = SimplifierHashType(te_hash(std::move(ss).str()));
     putHash(s, hash);
 
     return hash;

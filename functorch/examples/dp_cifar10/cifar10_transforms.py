@@ -185,11 +185,10 @@ def test(args, model, test_loader, device):
 
     top1_avg = np.mean(top1_acc)
 
-    print(f"\tTest set:" f"Loss: {np.mean(losses):.6f} " f"Acc@1: {top1_avg :.6f} ")
+    print(f"\tTest set:Loss: {np.mean(losses):.6f} Acc@1: {top1_avg:.6f}")
     return np.mean(top1_acc)
 
 
-# flake8: noqa: C901
 def main():
     args = parse_args()
 

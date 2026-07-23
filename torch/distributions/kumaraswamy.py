@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
@@ -13,7 +14,7 @@ __all__ = ["Kumaraswamy"]
 
 def _moments(a, b, n):
     """
-    Computes nth moment of Kumaraswamy using using torch.lgamma
+    Computes nth moment of Kumaraswamy using torch.lgamma
     """
     arg1 = 1 + n / a
     log_value = torch.lgamma(arg1) + torch.lgamma(b) - torch.lgamma(arg1 + b)
@@ -37,14 +38,21 @@ class Kumaraswamy(TransformedDistribution):
         concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
     """
+
     arg_constraints = {
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
     }
+    # pyrefly: ignore [bad-override]
     support = constraints.unit_interval
     has_rsample = True
 
-    def __init__(self, concentration1, concentration0, validate_args=None):
+    def __init__(
+        self,
+        concentration1: Tensor | float,
+        concentration0: Tensor | float,
+        validate_args: bool | None = None,
+    ) -> None:
         self.concentration1, self.concentration0 = broadcast_all(
             concentration1, concentration0
         )
@@ -58,6 +66,7 @@ class Kumaraswamy(TransformedDistribution):
             AffineTransform(loc=1.0, scale=-1.0),
             PowerTransform(exponent=self.concentration1.reciprocal()),
         ]
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

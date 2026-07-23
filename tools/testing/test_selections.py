@@ -2,30 +2,38 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import subprocess
 from pathlib import Path
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from tools.stats.import_test_stats import get_disabled_tests
 from tools.testing.test_run import ShardedTest, TestRun
 
 
+try:
+    from torch.testing._internal.common_cuda import SM80OrLater
+    from torch.testing._internal.common_utils import TEST_CUDA
+except ImportError:
+    TEST_CUDA = False
+    SM80OrLater = False
+
+
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
-USE_3_PROCS = "sm86" in BUILD_ENVIRONMENT or "cuda" not in BUILD_ENVIRONMENT
 
 # NUM_PROCS_FOR_SHARDING_CALC must remain consistent across all shards of a job
 # to ensure that sharding is consistent, NUM_PROCS is the actual number of procs
 # used to run tests.  If they are not equal, the only consequence should be
 # unequal shards.
 IS_ROCM = os.path.exists("/opt/rocm")
-NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 3 if USE_3_PROCS else 2
+NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 3 if not TEST_CUDA or SM80OrLater else 2
 NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
 THRESHOLD = 60 * 10  # 10 minutes
 
@@ -43,7 +51,8 @@ if IS_ROCM and not IS_MEM_LEAK_CHECK:
         for line in lines:
             if " gfx" in line:
                 count += 1
-        assert count > 0  # there must be at least 1 GPU
+        if count == 0:
+            raise AssertionError("There must be at least 1 GPU")
         # Limiting to 8 GPUs(PROCS)
         NUM_PROCS = min(count, 8)
     except subprocess.CalledProcessError:
@@ -124,9 +133,10 @@ def get_duration(
 
     if included:
         return included_classes_duration
-    assert (
-        excluded
-    ), f"TestRun {test} is not full file but doesn't have included or excluded classes"
+    if not excluded:
+        raise AssertionError(
+            f"TestRun {test} is not full file but doesn't have included or excluded classes"
+        )
     if file_duration is None:
         return None
     return file_duration - excluded_classes_duration
@@ -140,9 +150,8 @@ def shard(
 ) -> None:
     # Modifies sharded_jobs in place
     if len(sharded_jobs) == 0:
-        assert (
-            len(pytest_sharded_tests) == 0
-        ), "No shards provided but there are tests to shard"
+        if len(pytest_sharded_tests) != 0:
+            raise AssertionError("No shards provided but there are tests to shard")
         return
 
     round_robin_index = 0
@@ -160,7 +169,8 @@ def shard(
     def _shard_serial(
         tests: Sequence[ShardedTest], sharded_jobs: list[ShardJob]
     ) -> None:
-        assert estimated_time_limit is not None, "Estimated time limit must be provided"
+        if estimated_time_limit is None:
+            raise AssertionError("Estimated time limit must be provided")
         new_sharded_jobs = sharded_jobs
         for test in tests:
             if (
@@ -263,3 +273,12 @@ def calculate_shards(
 
 def get_test_case_configs(dirpath: str) -> None:
     get_disabled_tests(dirpath=dirpath)
+
+
+# Strip the "test"/"test-osdc" target suffix to recover the build env, the key
+# tools/torchci writes to test-times.json. Must match the write-side extraction.
+JOB_BASE_NAME_RE = re.compile(r" / test(?:-osdc)? \(")
+
+
+def get_job_base_name(job_name: str) -> str:
+    return JOB_BASE_NAME_RE.split(job_name, maxsplit=1)[0]

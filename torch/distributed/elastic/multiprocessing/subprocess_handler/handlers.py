@@ -7,6 +7,7 @@
 from torch.distributed.elastic.multiprocessing.subprocess_handler.subprocess_handler import (
     SubprocessHandler,
 )
+from torch.numa.binding import NumaOptions
 
 
 __all__ = ["get_subprocess_handler"]
@@ -19,6 +20,7 @@ def get_subprocess_handler(
     stdout: str,
     stderr: str,
     local_rank_id: int,
+    numa_options: NumaOptions | None = None,
 ) -> SubprocessHandler:
     return SubprocessHandler(
         entrypoint=entrypoint,
@@ -27,4 +29,5 @@ def get_subprocess_handler(
         stdout=stdout,
         stderr=stderr,
         local_rank_id=local_rank_id,
+        numa_options=numa_options,
     )

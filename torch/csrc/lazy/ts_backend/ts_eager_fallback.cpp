@@ -271,7 +271,7 @@ void ts_eager_fallback(
   // the temporary eager output tensor that we created.
   //
   // Note [Eager Fallback Does Not Handle View Operators]
-  // Also note that we are incapable of handling immutable alises properly.
+  // Also note that we are incapable of handling immutable aliases properly.
   // Why?
   // Schemas with an immutable alias'd tensor outputs correspond to view
   // operators. For example, the `view_as` schema from native_functions.yaml:
@@ -340,14 +340,14 @@ void ts_eager_fallback(
             // We should never hit this for a view op,
             // because LazyTensor should provide a lowering for the
             // corresponding view_copy operator. The functionalization pass will
-            // take care of calling the view_copy operator intead of the view.
+            // take care of calling the view_copy operator instead of the view.
             TORCH_CHECK(
                 false,
                 "The operator ",
                 op.schema().operator_name(),
                 " appears to be a view operator, ",
                 "but it has no implementation for the backend \"",
-                dev_str.str(),
+                std::move(dev_str).str(),
                 "\". View operators don't support ",
                 "falling back to run on the eager, since the tensor's "
                 "storage cannot be shared across devices.");

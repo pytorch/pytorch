@@ -35,10 +35,10 @@ def generate_example_rst(example_case: ExportCase):
     source_code = source_code.replace("\n", "\n    ")
     splitted_source_code = re.split(r"@export_rewrite_case.*\n", source_code)
 
-    assert len(splitted_source_code) in {
-        1,
-        2,
-    }, f"more than one @export_rewrite_case decorator in {source_code}"
+    if len(splitted_source_code) not in {1, 2}:
+        raise AssertionError(
+            f"more than one @export_rewrite_case decorator in {source_code}"
+        )
 
     more_arguments = ""
     if example_case.example_kwargs:
@@ -49,7 +49,7 @@ def generate_example_rst(example_case: ExportCase):
     # Generate contents of the .rst file
     title = f"{example_case.name}"
     doc_contents = f"""{title}
-{'^' * (len(title))}
+{"^" * (len(title))}
 
 .. note::
 
@@ -117,12 +117,12 @@ def generate_index_rst(example_cases, tag_to_modules, support_level_to_modules):
         module_contents = "\n\n".join(v)
         support_contents += f"""
 {support_level}
-{'-' * (len(support_level))}
+{"-" * (len(support_level))}
 
 {module_contents}
 """
 
-    tag_names = "\n    ".join(t for t in tag_to_modules.keys())
+    tag_names = "\n    ".join(t for t in tag_to_modules)
 
     with open(os.path.join(PWD, "blurb.txt")) as file:
         blurb = file.read()

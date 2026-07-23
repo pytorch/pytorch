@@ -27,14 +27,19 @@ class Pareto(TransformedDistribution):
         scale (float or Tensor): Scale parameter of the distribution
         alpha (float or Tensor): Shape parameter of the distribution
     """
+
     arg_constraints = {"alpha": constraints.positive, "scale": constraints.positive}
 
     def __init__(
-        self, scale: Tensor, alpha: Tensor, validate_args: Optional[bool] = None
+        self,
+        scale: Tensor | float,
+        alpha: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         self.scale, self.alpha = broadcast_all(scale, alpha)
         base_dist = Exponential(self.alpha, validate_args=validate_args)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(

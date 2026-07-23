@@ -43,7 +43,13 @@ def _load_boolean_flag(
     return state
 
 
-USE_EXPERIMENTAL_LOGIC: bool = _load_boolean_flag(
-    "TORCH_ONNX_USE_EXPERIMENTAL_LOGIC",
-    this_will="use ExportedProgram and the new torch.onnx export logic",
+ENABLE_DRAFT_EXPORT: bool = _load_boolean_flag(
+    "TORCH_ONNX_ENABLE_DRAFT_EXPORT",
+    this_will="enable torch.export.draft_export as a strategy for capturing models",
+    default=False,
+)
+PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS: bool = _load_boolean_flag(
+    "TORCH_ONNX_PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS",
+    this_will="set prefer_deferred_runtime_asserts_over_guards when calling torch.export",
+    default=True,
 )

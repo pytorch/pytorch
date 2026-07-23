@@ -5,9 +5,12 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
+#if !defined(__powerpc__)
 #include <cpuinfo.h>
+#endif
 
 #include <c10/util/CallOnce.h>
+#include <c10/util/hash.h>
 
 using PrimitiveCacheKey = std::tuple<
     double, // input_scale
@@ -432,12 +435,21 @@ inline bool should_use_onednn_quant(
 #if !defined(__linux__)
   return false;
 #else
-  bool vnni_available = cpuinfo_has_x86_avx512vnni();
+#if defined(__powerpc__) || defined(__aarch64__) || defined(_M_ARM64)
+  constexpr auto vnni_available = true;
+#else
+  const auto vnni_available = cpuinfo_has_x86_avx512vnni();
+#endif
+#if defined(__aarch64__) || defined(_M_ARM64)
+  const auto valid_type = weight.scalar_type() == at::kQInt8;
+#else
+  constexpr auto valid_type = true;
+#endif
   bool w_sym_quant =
       is_weight_symmetric_quant(weight, is_transposed_conv);
   bool opad_all_zero =
       std::all_of(output_padding.begin(), output_padding.end(), [](int i) { return i==0; });
-  return vnni_available && (groups <= 100) && w_sym_quant && opad_all_zero;
+  return vnni_available && (groups <= 100) && w_sym_quant && opad_all_zero && valid_type;
 #endif
 }
 
@@ -453,5 +465,75 @@ at::Tensor _qconv_prepack_onednn(
     torch::List<int64_t> dilation,
     int64_t groups,
     std::optional<torch::List<int64_t>> input_shape=std::nullopt);
+
+#define FP8E4M3_MAX 448.0
+
+#define CACHE_ONEDNN_CONTEXT_FLAG "ONEDNN_CACHE_CONTEXT_UNSAFE"
+#if IDEEP_PREREQ(3, 9, 0, 0)
+#define ONEDNN_FP8_QCONV_SUPPORTED
+#endif
+
+struct QlinearForwardCacheKey {
+  int64_t weight_addr;
+  int64_t M;
+
+  bool operator==(const QlinearForwardCacheKey& other) const {
+    return weight_addr == other.weight_addr && M == other.M;
+  }
+};
+
+struct QlinearForwardCacheKeyHash {
+  size_t operator()(const QlinearForwardCacheKey& key) const {
+    const size_t addr_hash = std::hash<int64_t>{}(key.weight_addr);
+    const size_t m_hash = std::hash<int64_t>{}(key.M);
+    return c10::hash_combine(addr_hash, m_hash);
+  }
+};
+
+struct QlinearForwardParams {
+  int64_t K{-1};
+  int64_t N{-1};
+  c10::ScalarType out_dtype{c10::ScalarType::Undefined};
+  std::vector<int64_t> output_size;
+  dnnl::matmul primitive;
+  ideep::exec_args args;
+  ideep::tensor src;
+  ideep::tensor dst;
+  std::optional<ideep::tensor> src1;
+  ideep::tensor packed_weight;
+  ideep::tensor weight_scales;
+  std::optional<ideep::tensor> src_scale;
+  std::optional<ideep::tensor> src_zero_point;
+  std::optional<ideep::tensor> dst_scale;
+  std::optional<ideep::tensor> dst_zero_point;
+  std::optional<ideep::tensor> bias;
+  ideep::tensor scratchpad;
+
+  void init_args() {
+    args.insert({DNNL_ARG_SRC, src});
+    args.insert({DNNL_ARG_WEIGHTS, packed_weight});
+    args.insert({DNNL_ARG_DST, dst});
+    args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+    if (src1.has_value()) {
+      args.insert({DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src1.value()});
+    }
+    if (bias.has_value()) {
+      args.insert({DNNL_ARG_BIAS, bias.value()});
+    }
+    if (src_scale.has_value()) {
+      args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scale.value()});
+    }
+    if (dst_scale.has_value()) {
+      args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_scale.value()});
+    }
+    args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, weight_scales});
+    if (src_zero_point.has_value()) {
+      args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zero_point.value()});
+    }
+    if (dst_zero_point.has_value()) {
+      args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zero_point.value()});
+    }
+  }
+};
 
 #endif // #if AT_MKLDNN_ENABLED()

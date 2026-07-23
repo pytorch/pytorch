@@ -8,23 +8,50 @@
 
 namespace pytorch_flash {
 
+// SFINAE trait to detect block-scale quantization fields in fmha_fwd_args.
+// Newer versions of composable_kernel add these fields; older versions don't.
+// This lets the PyTorch integration layer work with either version.
+template <typename T, typename = void>
+struct has_fmha_block_scale_fields : std::false_type {};
+
+template <typename T>
+struct has_fmha_block_scale_fields<T,
+    std::void_t<decltype(std::declval<T&>().block_scale_size_q)>> : std::true_type {};
+
+template <typename Args>
+void set_fmha_fwd_block_scale_fields([[maybe_unused]] Args& args) {
+    if constexpr (has_fmha_block_scale_fields<Args>::value) {
+        args.block_scale_seqstart_q_ptr = nullptr;
+        args.block_scale_seqstart_k_ptr = nullptr;
+        args.nhead_stride_q_descale = 0;
+        args.nhead_stride_k_descale = 0;
+        args.nhead_stride_v_descale = 0;
+        args.batch_stride_q_descale = 0;
+        args.batch_stride_k_descale = 0;
+        args.batch_stride_v_descale = 0;
+        args.block_scale_size_q = 0;
+        args.block_scale_size_kv = 0;
+    }
+}
+
 fmha_fwd_traits get_ck_fmha_varlen_fwd_traits(const mask_info &mask,
                                               std::string dtype,
                                               int head_size,
                                               bool has_dropout,
                                               bool has_lse,
-                                              bool enable_alibi)
+                                              bool enable_bias)
 {
     return fmha_fwd_traits{head_size,
                            head_size,
                            dtype,
                            true, // is_group_mode
                            true, // is_v_rowmajor
+                           false, // has_logits_soft_cap
                            mask.type,
-                           enable_alibi ? bias_enum::alibi : bias_enum::no_bias,
+                           enable_bias ? bias_enum::elementwise_bias : bias_enum::no_bias,
                            has_lse,
                            has_dropout,
-                           false}; // do_fp8_static_quant
+                           quant_scale_enum::no_scale};
 }
 
 fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
@@ -42,11 +69,10 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                                           const at::Tensor v,
                                           const at::Tensor seqlens_q,
                                           const at::Tensor seqlens_k,
-                                          std::optional<at::Tensor> &alibi_slopes_,
+                                          std::optional<at::Tensor> &attn_bias_,
                                           at::Tensor out,
                                           at::Tensor softmax_lse,
                                           at::Tensor dropout_randval,
-
                                           float softmax_scale,
                                           float p_dropout,
                                           std::pair<uint64_t*, uint64_t*> drop_seed_offset)
@@ -56,7 +82,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
     // v: (total_k, nheads_k, d)
     // o: (total_q, nheads, d)
 
-    // alibi_slopes:(batch, nheads) or (nhead)
+    // attn_bias :(batch, nheads, max_seqlen_q, max_seqlen_k)
     // lse: (batch, nheads, max_seqlen_q)
     // randval: (nheads, total_q, max_seqlen_k)
 
@@ -73,7 +99,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
     ck_tile::index_t nhead_stride_k = k.stride(1);
     ck_tile::index_t nhead_stride_v = v.stride(1);
     ck_tile::index_t nhead_stride_o = out.stride(1);
-    ck_tile::index_t nhead_stride_lse = has_lse ? softmax_lse.stride(1) : 0;
+    ck_tile::index_t nhead_stride_lse = has_lse ? softmax_lse.stride(0) : 0;
     ck_tile::index_t nhead_stride_randval = has_dropout_randval ? dropout_randval.stride(0) : 0;
 
     ck_tile::index_t batch_stride_q = 0;
@@ -81,68 +107,76 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
     ck_tile::index_t batch_stride_v = 0;
     ck_tile::index_t batch_stride_o = 0;
 
-    ck_tile::index_t batch_stride_lse = has_lse ? softmax_lse.stride(0) : 0;
+    ck_tile::index_t batch_stride_lse = 0;
     ck_tile::index_t batch_stride_randval = 0;
 
-    void *alibi_slopes_ptr = nullptr;
-    ck_tile::index_t stride_alibi_slopes = 0;
+    void *attn_bias_ptr = nullptr;
+    ck_tile::index_t stride_attn_bias = 0;
 
-    if (alibi_slopes_.has_value()) {
-        auto alibi_slopes = alibi_slopes_.value();
-        CHECK_DEVICE(alibi_slopes);
-        TORCH_CHECK(alibi_slopes.stride(-1) == 1, "ALiBi slopes tensor must have contiguous last dimension");
-        TORCH_CHECK(alibi_slopes.sizes() == at::IntArrayRef({h}) || alibi_slopes.sizes() == at::IntArrayRef({b, h}));
-        alibi_slopes_ptr = alibi_slopes.data_ptr();
-        stride_alibi_slopes = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
+    if (attn_bias_.has_value()) {
+        auto a_b = attn_bias_.value();
+        CHECK_DEVICE(a_b);
+        TORCH_CHECK(a_b.stride(-1) == 1, "ALiBi slopes tensor must have contiguous last dimension");
+        //TORCH_CHECK(alibi_slopes.sizes() == at::IntArrayRef({h}) || alibi_slopes.sizes() == at::IntArrayRef({b, h}));
+        attn_bias_ptr = a_b.data_ptr();
+        //stride_attn_bias = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
+        stride_attn_bias = a_b.stride(0);
     }
 
-    return fmha_fwd_args{q.data_ptr(),
-                         k.data_ptr(),
-                         v.data_ptr(),
-                         alibi_slopes_ptr, // bias
-                         has_dropout_randval ? dropout_randval.data_ptr() : nullptr,
-                         has_lse ? softmax_lse.data_ptr() : nullptr,
-                         out.data_ptr(),
-                         seqlens_q.data_ptr(), // seqstart_q
-                         seqlens_k.data_ptr(), // seqstart_k
-                         nullptr,              // seqlen_kpads
-                         total_q,
-                         total_k,
-                         b,
-                         max_seqlen_q,
-                         d,             // hdim_q
-                         d,             // hdim_v
-                         h,             // nhead
-                         h_k,           // nhead_k
-                         softmax_scale, // scale_s
-                         1,             // scale_p
-                         1,             // scale_o
-                         stride_q,
-                         stride_k,
-                         stride_v,
-                         stride_alibi_slopes,
-                         stride_randval,
-                         stride_o,
-                         nhead_stride_q,
-                         nhead_stride_k,
-                         nhead_stride_v,
-                         0, // nhead_stride_bias, FA without bias
-                         nhead_stride_randval,
-                         nhead_stride_lse,
-                         nhead_stride_o,
-                         batch_stride_q,
-                         batch_stride_k,
-                         batch_stride_v,
-                         0, // batch_stride_bias, FA without bias
-                         batch_stride_randval,
-                         batch_stride_lse,
-                         batch_stride_o,
-                         mask.left,
-                         mask.right,
-                         static_cast<ck_tile::index_t>(mask.type),
-                         p_dropout,
-                         has_dropout_randval,
-                         drop_seed_offset};
+    fmha_fwd_args args{};
+    args.q_ptr = q.data_ptr();
+    args.k_ptr = k.data_ptr();
+    args.v_ptr = v.data_ptr();
+    args.bias_ptr = attn_bias_ptr;
+    args.q_descale_ptr = nullptr;
+    args.k_descale_ptr = nullptr;
+    args.v_descale_ptr = nullptr;
+    args.rand_val_ptr = has_dropout_randval ? dropout_randval.data_ptr() : nullptr;
+    args.lse_ptr = has_lse ? softmax_lse.data_ptr() : nullptr;
+    args.o_ptr = out.data_ptr();
+    args.seqstart_q_ptr = seqlens_q.data_ptr();
+    args.seqstart_k_ptr = seqlens_k.data_ptr();
+    args.sink_ptr = nullptr;
+    args.seqlen_q = total_q;
+    args.seqlen_k = total_k;
+    args.batch = b;
+    args.max_seqlen_q = max_seqlen_q;
+    args.hdim_q = d;
+    args.hdim_v = d;
+    args.nhead_q = h;
+    args.nhead_k = h_k;
+    args.scale_s = softmax_scale;
+    args.logits_soft_cap = 0.0f;
+    args.stride_q = stride_q;
+    args.stride_k = stride_k;
+    args.stride_v = stride_v;
+    args.stride_bias = stride_attn_bias;
+    args.stride_randval = stride_randval;
+    args.stride_o = stride_o;
+    args.nhead_stride_q = nhead_stride_q;
+    args.nhead_stride_k = nhead_stride_k;
+    args.nhead_stride_v = nhead_stride_v;
+    args.nhead_stride_bias = 0;
+    args.nhead_stride_randval = nhead_stride_randval;
+    args.nhead_stride_lse = nhead_stride_lse;
+    args.nhead_stride_o = nhead_stride_o;
+    args.batch_stride_q = batch_stride_q;
+    args.batch_stride_k = batch_stride_k;
+    args.batch_stride_v = batch_stride_v;
+    args.batch_stride_bias = 0;
+    args.batch_stride_randval = batch_stride_randval;
+    args.batch_stride_lse = batch_stride_lse;
+    args.batch_stride_o = batch_stride_o;
+    args.window_size_left = mask.left;
+    args.window_size_right = mask.right;
+    args.sink_size = 0;
+    args.mask_type = static_cast<ck_tile::index_t>(mask.type);
+    args.min_seqlen_q = -1;
+    args.p_drop = p_dropout;
+    args.s_randval = has_dropout_randval;
+    args.drop_seed_offset = drop_seed_offset;
+    set_fmha_fwd_block_scale_fields(args);
+    return args;
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -153,7 +187,6 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
                   const at::Tensor &cu_seqlens_q,  // b+1
                   const at::Tensor &cu_seqlens_k,  // b+1
                   std::optional<at::Tensor> & /*seqused_k*/,
-                  std::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
                   int max_seqlen_q,
                   const int max_seqlen_k,
                   const float p_dropout,
@@ -163,7 +196,8 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
                   int window_size_left,
                   int window_size_right,
                   const bool return_dropout_randval,
-                  std::optional<at::Generator> gen_)
+                  std::optional<at::Generator> gen_,
+                  const std::optional<at::Tensor>& attn_bias_)
 {
     auto q_dtype = q.dtype();
     TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -200,7 +234,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
     const int max_num_blocks_per_seq = 0;
     const int num_blocks = 0;
 
-    if (max_seqlen_q == 1 && !alibi_slopes_.has_value()) { is_causal = false; }  // causal=true is the same as causal=false in this case
+    if (max_seqlen_q == 1 && !attn_bias_.has_value()) { is_causal = false; }  // causal=true is the same as causal=false in this case
 
     // TODO
     // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
@@ -209,7 +243,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
     const int total_q = q.size(0);
     const int total_k = k.size(0);
 
-    TORCH_CHECK(batch_size > 0, "batch size must be postive");
+    TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size_og <= 256, "CK only supports head dimension at most 256");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
@@ -270,7 +304,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
 
     // Otherwise the kernel will be launched from cuda:0 device
     // Cast to char to avoid compiler warning about narrowing
-    at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+    at::cuda::CUDAGuard device_guard{(char)q.get_device()};
 
     auto opts = q.options();
     bool has_lse = true;
@@ -278,7 +312,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
 
     at::Tensor softmax_lse;
     // TODO - check gradient, only training require lse
-    softmax_lse = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
+    softmax_lse = at::empty({num_heads, total_q}, opts.dtype(at::kFloat));
 
     at::Tensor p;
     if (return_dropout_randval) {
@@ -304,17 +338,24 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
         std::lock_guard<std::mutex> lock(gen->mutex_);
         auto philox_args = gen->philox_cuda_state(counter_offset);
         hipLaunchKernelGGL(
-            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::hip::getCurrentHIPStreamMasqueradingAsCUDA(), philox_args, rng_state_ptr);
+            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::cuda::getCurrentCUDAStream(), philox_args, rng_state_ptr);
+    }
+
+    // remove const from attn_bias_
+    std::optional<at::Tensor> attn_bias;
+    if( attn_bias_.has_value())
+    {
+      attn_bias = attn_bias_;
     }
 
 
     if (max_seqlen_k > 0) {
         auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
-        auto stream = at::cuda::getCurrentHIPStream().stream();
+        auto stream = at::cuda::getCurrentCUDAStream().stream();
         ck_tile::stream_config stream_config{stream};
 
         auto traits =
-            get_ck_fmha_varlen_fwd_traits(mask, q_dtype_str, head_size_8x, has_dropout, has_lse, alibi_slopes_.has_value());
+            get_ck_fmha_varlen_fwd_traits(mask, q_dtype_str, head_size_8x, has_dropout, has_lse, attn_bias_.has_value());
 
         auto args =
             get_ck_fmha_varlen_fwd_args(
@@ -331,7 +372,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
                 v_padded,
                 cu_seqlens_q,
                 cu_seqlens_k,
-                alibi_slopes_,
+                attn_bias,
                 out,
                 softmax_lse,
                 p,

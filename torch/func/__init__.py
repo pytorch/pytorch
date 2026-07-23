@@ -1,6 +1,7 @@
 from torch._functorch.apis import grad, grad_and_value, vmap
 from torch._functorch.batch_norm_replacement import replace_all_batch_norm_modules_
 from torch._functorch.eager_transforms import (
+    debug_unwrap,
     functionalize,
     hessian,
     jacfwd,
@@ -9,6 +10,7 @@ from torch._functorch.eager_transforms import (
     linearize,
     vjp,
 )
+from torch._functorch.einops import rearrange
 from torch._functorch.functional_call import functional_call, stack_module_state
 
 
@@ -23,7 +25,9 @@ __all__ = [
     "jacrev",
     "jvp",
     "linearize",
+    "rearrange",
     "vjp",
     "functional_call",
     "stack_module_state",
+    "debug_unwrap",
 ]

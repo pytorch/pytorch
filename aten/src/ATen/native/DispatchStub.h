@@ -44,6 +44,7 @@
 //   - MPS: Apple Silicon GPUs (Metal Performance Shaders)
 //   - MTIA: Meta Training and Inference Devices
 //   - XPU: Intel GPUs
+//   - HPU: Reserved for HPU (Intel Gaudi) device types
 //   - PrivateUse1: Reserved for private/custom device types
 //
 // If you want to update the list of supported devices, add a new dispatch_ptr
@@ -65,6 +66,7 @@ enum class CPUCapability {
   ZVECTOR = 1,
 #elif defined(HAVE_SVE_CPU_DEFINITION)
   SVE256 = 1,
+  SVE128 = 2,
 #else
   AVX2 = 1,
   AVX512 = 2,
@@ -114,7 +116,8 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
       , void *ZVECTOR
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+      , void *SVE128
       , void *SVE256
 #endif
   );
@@ -135,7 +138,8 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
     , void *ZVECTOR
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+    , void *SVE128
     , void *SVE256
 #endif
   );
@@ -156,7 +160,8 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
       , void *ZVECTOR
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+      , void *SVE128
       , void *SVE256
 #endif
   );
@@ -180,7 +185,8 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
     , void *ZVECTOR
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+    , void *SVE128
     , void *SVE256
 #endif
   );
@@ -196,6 +202,7 @@ struct TORCH_API DispatchStubImpl {
   #if defined(USE_XPU)
     void* xpu_dispatch_ptr;
   #endif
+    void* hpu_dispatch_ptr;
     void* privateuse1_dispatch_ptr;
   #else
     std::atomic<void*> cpu_dispatch_ptr{nullptr};
@@ -206,6 +213,7 @@ struct TORCH_API DispatchStubImpl {
   #if defined(USE_XPU)
     void* xpu_dispatch_ptr = nullptr;
   #endif
+    void* hpu_dispatch_ptr = nullptr;
     void* privateuse1_dispatch_ptr = nullptr;
   #endif
 };
@@ -235,7 +243,8 @@ private:
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
       , reinterpret_cast<void*>(ZVECTOR)
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+      , reinterpret_cast<void*>(SVE128)
       , reinterpret_cast<void*>(SVE256)
 #endif
       )
@@ -258,6 +267,10 @@ public:
     impl.xpu_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
   #endif
+
+  void set_hpu_dispatch_ptr(FnPtr fn_ptr) {
+    impl.hpu_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
+  }
 
   void set_hip_dispatch_ptr(FnPtr fn_ptr) {
     impl.hip_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
@@ -292,7 +305,8 @@ public:
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
       , reinterpret_cast<void*>(ZVECTOR)
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+      , reinterpret_cast<void*>(SVE128)
       , reinterpret_cast<void*>(SVE256)
 #endif
       );
@@ -315,7 +329,8 @@ public:
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
   static TORCH_API FnPtr ZVECTOR;
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+  static TORCH_API FnPtr SVE128;
   static TORCH_API FnPtr SVE256;
 #endif
 private:
@@ -334,6 +349,13 @@ template <typename DispatchStub>
 struct RegisterXPUDispatch {
   RegisterXPUDispatch(DispatchStub &stub, typename DispatchStub::FnPtr value){
     stub.set_xpu_dispatch_ptr(value);
+  }
+};
+
+template <typename DispatchStub>
+struct RegisterHPUDispatch {
+  RegisterHPUDispatch(DispatchStub &stub, typename DispatchStub::FnPtr value){
+    stub.set_hpu_dispatch_ptr(value);
   }
 };
 
@@ -412,9 +434,11 @@ struct RegisterPRIVATEUSE1Dispatch {
 #define REGISTER_ZVECTOR_DISPATCH(name, fn)
 #endif
 
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+#define REGISTER_SVE128_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, SVE128, fn)
 #define REGISTER_SVE256_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, SVE256, fn)
 #else
+#define REGISTER_SVE128_DISPATCH(name, fn)
 #define REGISTER_SVE256_DISPATCH(name, fn)
 #endif
 
@@ -426,6 +450,7 @@ struct RegisterPRIVATEUSE1Dispatch {
   REGISTER_AVX2_DISPATCH(name, fn)                                             \
   REGISTER_VSX_DISPATCH(name, fn)                                              \
   REGISTER_ZVECTOR_DISPATCH(name, fn)                                          \
+  REGISTER_SVE128_DISPATCH(name, fn)                                           \
   REGISTER_SVE256_DISPATCH(name, fn)
 
 #define REGISTER_NO_CPU_DISPATCH(name)                                         \
@@ -436,6 +461,9 @@ struct RegisterPRIVATEUSE1Dispatch {
 
 #define REGISTER_XPU_DISPATCH(name, fn) \
   static RegisterXPUDispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
+
+#define REGISTER_HPU_DISPATCH(name, fn) \
+  static RegisterHPUDispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
 
 #define REGISTER_HIP_DISPATCH(name, fn) \
   static RegisterHIPDispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
@@ -471,6 +499,7 @@ struct RegisterPRIVATEUSE1Dispatch {
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif
 #define ALSO_REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
+#define ALSO_REGISTER_SVE128_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #define ALSO_REGISTER_SVE256_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif
 } // namespace at::native

@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: export"]
-import unittest
 from collections import OrderedDict
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch._export.passes.lift_constants_pass import (
@@ -18,15 +17,8 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.export.graph_signature import CustomObjArgument
-from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 
 
 class GraphBuilder:
@@ -72,7 +64,7 @@ class GraphBuilder:
         self.nodes[out] = node
 
     def constant(
-        self, name: str, value: Any, target: Optional[str] = None, module_fqn: str = ""
+        self, name: str, value: Any, target: str | None = None, module_fqn: str = ""
     ):
         if target is None:
             target = name
@@ -127,9 +119,11 @@ class GraphBuilder:
     # NOTE: does not handle non-user-outputs atm
     def gen_graph_signature(self) -> ExportGraphSignature:
         output = [n for n in self.graph.nodes if n.op == "output"]
-        assert len(output) == 1
+        if len(output) != 1:
+            raise AssertionError(f"Expected 1 output node, got {len(output)}")
         output = output[0]
-        assert len(output.args) == 1, "multiple outputs NYI"
+        if len(output.args) != 1:
+            raise AssertionError(f"multiple outputs NYI, got {len(output.args)}")
 
         return ExportGraphSignature(
             input_specs=self.create_input_specs(),
@@ -146,18 +140,8 @@ class GraphBuilder:
 
 class TestLift(TestCase):
     def setUp(self):
-        if IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        elif IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
+        super().setUp()
+        load_torchbind_test_lib()
 
     def test_lift_basic(self):
         builder = GraphBuilder()
@@ -379,18 +363,8 @@ class TestLift(TestCase):
 
 class ConstantAttrMapTest(TestCase):
     def setUp(self):
-        if IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        elif IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
+        super().setUp()
+        load_torchbind_test_lib()
 
     def test_dict_api(self):
         constant_attr_map = ConstantAttrMap()
