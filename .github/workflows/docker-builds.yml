@@ -44,6 +44,7 @@ jobs:
         buildkit_addr: ["tcp://buildkitd-amd64.buildkit:1234"]
         docker-image-name: [
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks,
@@ -59,6 +60,7 @@ jobs:
           pytorch-linux-noble-rocm-nightly-py3,
           pytorch-linux-jammy-rocm-n-py3-benchmarks,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-clang18,
+          pytorch-linux-jammy-cuda13.2-cudnn9-py3.10-clang18,
           pytorch-linux-jammy-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
           pytorch-linux-jammy-cuda13.0-py3.12-pallas,
