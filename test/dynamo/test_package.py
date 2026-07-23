@@ -435,6 +435,30 @@ def add(x, y):
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
 
+    def test_reset_clears_installed_package_inductor(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190664.
+        # package.install() must register target_code in input_codes so that
+        # torch._dynamo.reset() clears precompile entries for the inductor backend.
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend="inductor", package=package)(fn)
+        compiled_fn(torch.randn(3, 2))
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        package.install(backends)
+        self.assertGreater(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+        torch._dynamo.reset()
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_serialize(self, device):
