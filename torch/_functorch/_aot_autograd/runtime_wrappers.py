@@ -2724,6 +2724,11 @@ class _AutogradForwardEpilogue:
                 o = raw_returns[raw_return_idx]
                 raw_returns[raw_return_idx] = torch.ops.aten._unsafe_view(o, o.shape)
 
+        for idx in self.metadata.unsafe_view_intermediate_base_indices:
+            raw_return_idx = num_mutated_runtime_inps + num_outputs + idx
+            o = raw_returns[raw_return_idx]
+            raw_returns[raw_return_idx] = torch.ops.aten._unsafe_view(o, o.shape)
+
         if num_outputs_aliased > 0:
             for idx in self.metadata.aliased_out_indices:
                 raw_return_idx = num_mutated_runtime_inps + idx
@@ -3430,6 +3435,13 @@ class _AOTDispatchAutogradFunctionFactory:
                     buf.writeline(
                         f"raw_returns[{ri}] = torch.ops.aten._unsafe_view(_o, _o.shape)"
                     )
+
+            for idx in fw_metadata.unsafe_view_intermediate_base_indices:
+                ri = num_mutated_runtime_inps + num_outputs + idx
+                buf.writeline(f"_o = raw_returns[{ri}]")
+                buf.writeline(
+                    f"raw_returns[{ri}] = torch.ops.aten._unsafe_view(_o, _o.shape)"
+                )
 
             if num_outputs_aliased > 0:
                 for idx in fw_metadata.aliased_out_indices:

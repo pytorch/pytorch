@@ -2388,15 +2388,20 @@ def forward(self, primals_1):
             out.unsqueeze_(0)
             return out
 
-        inp = torch.ones(2, requires_grad=True)
-        ref = f(inp)
+        for requires_grad in (False, True):
+            inp = [torch.ones(2, requires_grad=requires_grad)]
+            self.verify_aot_autograd(f, inp, test_mutation=True)
+
+        ref = f(torch.ones(2, requires_grad=True))
         self.assertFalse(ref._is_view())
-        ref.mul_(2)
 
         compiled_f = aot_function(f, nop)
         test = compiled_f(torch.ones(2, requires_grad=True))
         self.assertFalse(test._is_view())
+        self.assertEqual(test, ref)
+        ref.mul_(2)
         test.mul_(2)
+        self.assertEqual(test, ref)
 
     def test_output_aliases_intermediate_view_then_inplace_view(self):
         def f(a):
@@ -2404,15 +2409,20 @@ def forward(self, primals_1):
             out.unsqueeze_(0)
             return out
 
-        inp = torch.ones(2, 4, requires_grad=True)
-        ref = f(inp)
+        for requires_grad in (False, True):
+            inp = [torch.ones(2, 4, requires_grad=requires_grad)]
+            self.verify_aot_autograd(f, inp, test_mutation=True)
+
+        ref = f(torch.ones(2, 4, requires_grad=True))
         self.assertTrue(ref._is_view())
-        ref.mul_(2)
 
         compiled_f = aot_function(f, nop)
         test = compiled_f(torch.ones(2, 4, requires_grad=True))
         self.assertTrue(test._is_view())
+        self.assertEqual(test, ref)
+        ref.mul_(2)
         test.mul_(2)
+        self.assertEqual(test, ref)
 
     def test_output_aliases_intermediate_inplace_view_with_detach(self):
         def f(a):
@@ -2448,6 +2458,22 @@ def forward(self, primals_1):
 
         inp = [torch.ones(2, 4, requires_grad=True)]
         self.verify_aot_autograd(f, inp, test_mutation=True)
+
+    def test_output_aliases_intermediate_inplace_view_hidden_base(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            out.unsqueeze_(0)
+            return out.view(2, 4), out.transpose(1, 2)
+
+        inp = [torch.ones(2, 4, requires_grad=True)]
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+
+        ref = f(torch.ones(2, 4, requires_grad=True))
+        test = aot_function(f, nop)(torch.ones(2, 4, requires_grad=True))
+        self.assertEqual(test, ref)
+        ref[0].add_(2)
+        test[0].add_(2)
+        self.assertEqual(test, ref)
 
     def test_output_aliases_intermediate_multiple_mixed(self):
         def f(a):

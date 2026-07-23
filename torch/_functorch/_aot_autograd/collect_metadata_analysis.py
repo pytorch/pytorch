@@ -420,6 +420,7 @@ def run_functionalized_fw_and_collect_metadata(
         intermediate_base_tensor_id_to_output_idx: dict[int, int] = {}
         intermediate_bases: list[torch.Tensor] = []
         intermediate_bases_descs: list[AOTInput] = []
+        unsafe_view_intermediate_base_indices: list[int] = []
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #
@@ -546,9 +547,9 @@ alias each other from a multi-output view call"
 
             elif (
                 # Functionalization represents inplace view ops on intermediates
-                # as metadata mutations on the functional tensor. This matches
-                # eager's output metadata: after out.unsqueeze_(0), `out` is not
-                # a differentiable view. The traced graph can still return an
+                # as metadata mutations on the functional tensor. Its _is_view()
+                # state tracks eager's distinction: after out.unsqueeze_(0),
+                # `out` is not a differentiable view. The traced graph can return an
                 # out-of-place view op though, and returning that view directly
                 # from a compiled autograd.Function changes the user's ability
                 # to mutate it. Hide that internal view from autograd with the
@@ -632,6 +633,16 @@ from a multi-output view call"
                                 new_out_idx
                             )
                             intermediate_bases.append(o._base)
+                            if (
+                                isinstance(o._base, FunctionalTensor)
+                                and not o._base._is_view()
+                                and torch._functionalize_has_metadata_mutation(
+                                    o._base.elem  # type: ignore[attr-defined]
+                                )
+                            ):
+                                unsafe_view_intermediate_base_indices.append(
+                                    new_out_idx
+                                )
                             # NB: The desc we picked here is guaranteed to be
                             # synchronized with the one in
                             # graph_capture_wrappers.py because we
@@ -672,12 +683,23 @@ from a multi-output view call"
             # The FunctionalTensor will be saved if one of the 2 conditions below
             # is true:
             view_meta_sequence = None
-            alias_base_is_metadata_mutated_user_output = (
+            alias_base_has_metadata_mutation = (
                 output_type == OutputType.alias_of_intermediate_base_is_user_output
                 and base_idx is not None
                 and isinstance(flat_f_outs[base_idx], FunctionalTensor)
                 and torch._functionalize_has_metadata_mutation(
                     flat_f_outs[base_idx].elem  # type: ignore[attr-defined]
+                )
+            ) or (
+                output_type
+                in (
+                    OutputType.alias_of_intermediate,
+                    OutputType.alias_of_intermediate_save_as_output,
+                )
+                and isinstance(o, FunctionalTensor)
+                and isinstance(o._base, FunctionalTensor)
+                and torch._functionalize_has_metadata_mutation(
+                    o._base.elem  # type: ignore[attr-defined]
                 )
             )
             if (
@@ -711,12 +733,12 @@ from a multi-output view call"
                 and not input_info[base_idx].mutates_metadata
             ):
                 # ViewMeta sequences are rooted at the original intermediate. If
-                # the chosen base is a metadata-mutated user output, replaying the
-                # sequence from that already-updated base would apply the inplace
-                # view a second time. Use the metadata reconstruction fallback.
+                # the chosen base is metadata-mutated, replaying the sequence from
+                # that already-updated base would apply the inplace view a second
+                # time. Use the metadata reconstruction fallback.
                 if (
                     isinstance(o, FunctionalTensor)
-                    and not alias_base_is_metadata_mutated_user_output
+                    and not alias_base_has_metadata_mutation
                 ):
                     view_meta_sequence = ViewMetaSequence(o)
 
@@ -900,6 +922,9 @@ from a multi-output view call"
             input_info=input_info,
             output_info=output_info,
             num_intermediate_bases=len(intermediate_bases),
+            unsafe_view_intermediate_base_indices=(
+                unsafe_view_intermediate_base_indices
+            ),
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
             traced_tangents_descs=traced_tangents_descs,
