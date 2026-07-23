@@ -45,6 +45,8 @@ jobs:
         docker-image-name: [
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
           pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks,
+          pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks,
