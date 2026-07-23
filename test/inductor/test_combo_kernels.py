@@ -1233,6 +1233,10 @@ class ComboKernelTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_gpu_and_triton
+    @skipIfXpu(
+        msg="dynamic_scale_rblock requires GPU-specific device properties "
+        "(major, regs_per_multiprocessor, warp_size) not available on XPU"
+    )
     @torch._inductor.config.patch(
         {
             "combo_kernel_per_subkernel_blocks": True,
