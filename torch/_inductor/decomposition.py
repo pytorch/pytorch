@@ -502,6 +502,40 @@ def addmm(
     return NotImplemented
 
 
+def _addmm_dtype(
+    self: torch.Tensor,
+    mat1: torch.Tensor,
+    mat2: torch.Tensor,
+    out_dtype: torch.dtype,
+    beta: torch.types.Number = 1,
+    alpha: torch.types.Number = 1,
+) -> torch.Tensor:
+    out = alpha * torch.mm(mat1, mat2, out_dtype=out_dtype)
+    if beta == 0:
+        return out
+    return out + beta * self.to(out_dtype)
+
+
+def _addmm_dtype_out(
+    self: torch.Tensor,
+    mat1: torch.Tensor,
+    mat2: torch.Tensor,
+    out_dtype: torch.dtype,
+    beta: torch.types.Number = 1,
+    alpha: torch.types.Number = 1,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    result = _addmm_dtype(self, mat1, mat2, out_dtype, beta, alpha)
+    out.copy_(result)
+    return out
+
+
+# Override the existing addmm.dtype entries. The @pw_cast_for_opmath decorator on the
+# aten.addmm decomposition would incorrectly downcast the result when out_dtype is specified.
+decompositions[aten.addmm.dtype] = _addmm_dtype
+decompositions[aten.addmm.dtype_out] = _addmm_dtype_out
+
+
 @register_decomposition([aten.mm])
 @pw_cast_for_opmath
 def mm(
