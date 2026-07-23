@@ -54,7 +54,7 @@ from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
-from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_repr, is_custom_class_obj
 from torch._prims_common import (
     compute_required_storage_length,
@@ -7314,13 +7314,6 @@ class ExternKernel(InputsKernel):
         # We need to retain the constant values of fake tensors that we originally
         # propagated the graph with, because for some operators running without a
         # constant would trigger an error / DataDependentException
-        # TorchBind fake objects are mutable and may have been advanced by AOT
-        # tracing. Replay effectful ops on a fresh per-graph copy of the guarded
-        # object state instead of the already-mutated lowering value.
-        replay_torchbind = (
-            isinstance(kernel, torch._higher_order_ops.torchbind.CallTorchBind)
-            or V.current_node.target is torch._higher_order_ops.effects.with_effects
-        )
         for x in tensor_args:
             # if x is a view of a constant, we need to realize the view
             # (we can't pass the constant into the kernel directly)
@@ -7332,15 +7325,7 @@ class ExternKernel(InputsKernel):
             ):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             elif isinstance(x, TorchBindObject):
-                if replay_torchbind:
-                    replay_objects = V.graph.torchbind_replay_objects
-                    if x.get_name() not in replay_objects:
-                        replay_objects[x.get_name()] = maybe_to_fake_obj(
-                            V.fake_mode, x.get_real_obj()
-                        )
-                    example_args.append(replay_objects[x.get_name()])
-                else:
-                    example_args.append(x.get_value())
+                example_args.append(x.get_value())
             elif isinstance(x, OpaqueMultiOutput):
                 example_args.append(x.opaque_example_value)
             elif isinstance(x, torch._inductor.ir.GeneratorState):
@@ -7953,45 +7938,27 @@ class ExternKernel(InputsKernel):
             op_name = "unknown_op"
         return op_name
 
-    def is_inplace_view(self) -> bool:
-        return (
-            isinstance(self.op_overload, torch._ops.OpOverload)
-            and torch.Tag.inplace_view in self.op_overload.tags
-        )
-
-    def should_assert_dtype(self, op_name: str) -> bool:
-        # FakeTensor does not support quantized meta tensors today, so
-        # quantize_per_tensor's fake dtype intentionally remains non-quantized.
-        return (
-            not self.is_inplace_view()
-            and not op_name.startswith("torch.ops.aten.quantize_per_tensor.")
-            and (
-                self.op_overload
-                not in (
-                    torch.ops.aten.quantize_per_tensor.default,
-                    torch.ops.aten.quantize_per_tensor.tensor_qparams,
-                )
-            )
-        )
-
     def codegen_size_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if not config.size_asserts:
             return
-        if self.is_inplace_view() and not V.graph.cpp_wrapper:
+        # comparing strides for 0 size tensor is tricky. Ignore them for now.
+        if sympy_product(self.get_size()) == 0:
             return
+        size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
+        stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
         op_name = self.get_op_name()
         name = self.get_name()
         if V.graph.cpp_wrapper:
             # inplace_view ops (e.g. set_.source_Tensor) don't declare an
             # output variable; assert on the mutated input instead.
-            if self.is_inplace_view():
-                if not isinstance(self.inputs[0], IRNode):
-                    raise AssertionError("Expected isinstance(self.inputs[0], IRNode)")
-                name = self.inputs[0].get_name()
-        size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
-        stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-        dtype = self.get_dtype() if self.should_assert_dtype(op_name) else None
-        wrapper.write_assert_size_stride(name, size, stride, op_name, dtype)
+            if isinstance(self.op_overload, torch._ops.OpOverload):
+                if torch.Tag.inplace_view in self.op_overload.tags:
+                    if not isinstance(self.inputs[0], IRNode):
+                        raise AssertionError(
+                            "Expected isinstance(self.inputs[0], IRNode)"
+                        )
+                    name = self.inputs[0].get_name()
+        wrapper.write_assert_size_stride(name, size, stride, op_name)
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if config.alignment_asserts and not V.graph.cpp_wrapper:
@@ -9852,7 +9819,10 @@ class FallbackKernel(ExternKernelAlloc):
             wrapper.generate_fallback_kernel(self)
 
         self.codegen_unbacked_symbol_defs(wrapper)
-        if isinstance(self.layout, Layout):
+        # AOT runtime dispatch assertions are emitted by the proxy executor path.
+        if not (self.use_runtime_dispatch and V.graph.aot_mode) and isinstance(
+            self.layout, Layout
+        ):
             self.codegen_size_asserts(wrapper)
             self.codegen_alignment_asserts(wrapper)
             self.codegen_memory_tracking(wrapper)
