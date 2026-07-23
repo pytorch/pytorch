@@ -1410,9 +1410,13 @@ static PyObject* get_base_setup_context() {
   return setup_context;
 }
 
+// Stable interned names let CPython cache type lookups without caching values.
+// They are intentionally kept alive for the lifetime of the process.
 static int is_setup_context_defined(PyObject* cls) {
+  static PyObject* setup_context_name =
+      PyUnicode_InternFromString("setup_context");
   auto cls_setup_context =
-      THPObjectPtr(PyObject_GetAttrString(cls, "setup_context"));
+      THPObjectPtr(PyObject_GetAttr(cls, setup_context_name));
   if (!cls_setup_context) {
     return -1;
   }
@@ -1636,6 +1640,14 @@ PyObject* THPFunction_apply(
     PyObject* orig_kwargs) {
   HANDLE_TH_ERRORS
 
+  static PyObject* backward_cls_name =
+      PyUnicode_InternFromString("_backward_cls");
+  static PyObject* clear_saved_tensors_on_access_name =
+      PyUnicode_InternFromString("clear_saved_tensors_on_access");
+  static PyObject* boxed_grads_call_name =
+      PyUnicode_InternFromString("boxed_grads_call");
+  static PyObject* forward_name = PyUnicode_InternFromString("forward");
+
   auto is_setup_ctx_defined = is_setup_context_defined(cls);
   if (is_setup_ctx_defined == -1) {
     return nullptr;
@@ -1726,7 +1738,7 @@ PyObject* THPFunction_apply(
     functorch_tls->checkSupportsSingleLevelAutogradFunction();
   }
 
-  THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
+  THPObjectPtr backward_cls(PyObject_GetAttr(cls, backward_cls_name));
   if (!backward_cls)
     return nullptr;
   THPObjectPtr ctx_obj(PyObject_CallFunctionObjArgs(backward_cls, nullptr));
@@ -1747,7 +1759,7 @@ PyObject* THPFunction_apply(
 
   // Get clear_saved_tensors_on_access from the Function class
   THPObjectPtr clear_attr(
-      PyObject_GetAttrString(cls, "clear_saved_tensors_on_access"));
+      PyObject_GetAttr(cls, clear_saved_tensors_on_access_name));
   TORCH_CHECK(
       clear_attr,
       "autograd.Function is missing clear_saved_tensors_on_access attribute");
@@ -1758,7 +1770,7 @@ PyObject* THPFunction_apply(
   ctx->clear_saved_tensors_on_access = Py_IsTrue(clear_attr.get());
 
   // Get boxed_grads_call from the Function class
-  THPObjectPtr boxed_attr(PyObject_GetAttrString(cls, "boxed_grads_call"));
+  THPObjectPtr boxed_attr(PyObject_GetAttr(cls, boxed_grads_call_name));
   TORCH_CHECK(
       boxed_attr, "autograd.Function is missing boxed_grads_call attribute");
   TORCH_CHECK(
@@ -1774,7 +1786,7 @@ PyObject* THPFunction_apply(
   {
     AutoGradMode grad_mode(false);
     at::AutoFwGradMode fw_grad_mode(false);
-    THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
+    THPObjectPtr forward_fn(PyObject_GetAttr(cls, forward_name));
     if (!forward_fn)
       return nullptr;
     if (is_setup_ctx_defined) {
