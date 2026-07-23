@@ -37,6 +37,13 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
     TORCH_CHECK(
         PyGILState_Check(),
         "torch_tensor_to_pyobject requires the GIL to be held");
+    // Guard before reinterpret_cast: THPVariable_Wrap calls type->tp_alloc, so
+    // a non-type py_type would dereference garbage. THPVariable_Wrap itself then
+    // checks it is actually a torch.Tensor subclass.
+    TORCH_CHECK(
+        py_type == nullptr || PyType_Check(py_type),
+        "torch_tensor_to_pyobject: py_type must be a Python type object, got ",
+        Py_TYPE(py_type)->tp_name);
     at::Tensor* t = tensor_handle_to_tensor_pointer(ath);
     PyObject* py = (py_type != nullptr)
         ? THPVariable_Wrap(*t, reinterpret_cast<PyTypeObject*>(py_type))
@@ -55,6 +62,12 @@ struct RegisterPyObjectConversion {
   ConcretePyObjectConversion impl;
   RegisterPyObjectConversion() {
     setPyObjectConversionImpl(&impl);
+  }
+  ~RegisterPyObjectConversion() {
+    // On libtorch_python teardown, reset g_impl to the libtorch-resident no-op
+    // so a late conversion errors cleanly instead of using this destroyed impl
+    // (cf. PyInterpreterHolder::~PyInterpreterHolder calling disarm()).
+    setPyObjectConversionImpl(nullptr);
   }
 };
 
