@@ -498,12 +498,16 @@ def significant_strides_equal(
     shape: Sequence[_IntLike],
 ) -> bool:
     """
-    Returns true if the strides are equal, ignoring dimensions of size 1 .
+    Returns true if the strides are equal, ignoring dimensions of size 0 or 1.
+    If any dimension is size 0, all strides are insignificant since the tensor
+    is empty.
     """
     if not (len(shape) == len(strides1) and len(strides1) == len(strides2)):
         raise AssertionError(
             "Expected len(shape) == len(strides1) and len(strides1) == len(strides2)"
         )
+    if any(V.graph.sizevars.statically_known_equals(dim, 0) for dim in shape):
+        return True
     for dim, s1, s2 in zip(shape, strides1, strides2):
         if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
@@ -537,8 +541,9 @@ def try_match_insignificant_strides(
 
     storage, old_layout = as_storage_and_layout(tensor)
     new_stride = [*old_layout.stride]
+    is_empty = tensor.is_zero_elements()
     for i, s in enumerate(tensor.get_size()):
-        if V.graph.sizevars.statically_known_leq(s, 1):
+        if is_empty or V.graph.sizevars.statically_known_leq(s, 1):
             new_stride[i] = strides[i]
 
     new_layout = FixedLayout(
@@ -591,6 +596,7 @@ class IRNode:
 
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
     _current_stream_idx: ClassVar[int | None] = None
+    _current_mempool: ClassVar[tuple[int, int] | None] = None
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
@@ -601,6 +607,8 @@ class IRNode:
     annotations: dict[str, object] = dataclasses.field(init=False)
     # User-annotated stream index from FX node metadata (set during lowering)
     stream_idx: int | None = dataclasses.field(init=False)
+    # User-annotated CUDA MemPool from FX node metadata (set during lowering)
+    mempool: tuple[int, int] | None = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -623,6 +631,18 @@ class IRNode:
             yield
         finally:
             IRNode._current_stream_idx = old
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_mempool(
+        mempool: tuple[int, int] | None,
+    ) -> Generator[None, None, None]:
+        old = IRNode._current_mempool
+        IRNode._current_mempool = mempool
+        try:
+            yield
+        finally:
+            IRNode._current_mempool = old
 
     @staticmethod
     def is_realized_node(node: IRNode) -> bool:
@@ -656,6 +676,7 @@ class IRNode:
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self._post_init_setattr("annotations", {})
         self._post_init_setattr("stream_idx", self._current_stream_idx)
+        self._post_init_setattr("mempool", self._current_mempool)
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -954,6 +975,11 @@ class Operation:
         if not hasattr(self, "stream_idx"):
             raise AssertionError('Expected hasattr(self, "stream_idx")')
         return self.stream_idx
+
+    def get_mempool(self) -> tuple[int, int] | None:
+        if not hasattr(self, "mempool"):
+            raise AssertionError('Expected hasattr(self, "mempool")')
+        return self.mempool
 
     def get_operation_name(self) -> str:
         if self.operation_name is None:
@@ -1268,6 +1294,7 @@ class Scatter(Pointwise):
 REDUCTION_COMBINE_FN: dict[str, Callable[..., OpsValue]] = {
     "any": ops_wrapper("logical_or"),
     "max": ops_wrapper("maximum"),
+    "fmax": ops_wrapper("fmaximum"),
     "min": ops_wrapper("minimum"),
     "prod": ops_wrapper("mul"),
     "sum": ops_wrapper("add"),
@@ -1918,7 +1945,13 @@ class Reduction(Loops):
     def default_accumulator(
         reduction_type: str, dtype: torch.dtype
     ) -> _NumLike | Sequence[_NumLike]:
-        if reduction_type in ("max", "argmax", "argmax_value", "argmax_with_value"):
+        if reduction_type in (
+            "max",
+            "fmax",
+            "argmax",
+            "argmax_value",
+            "argmax_with_value",
+        ):
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
@@ -6346,7 +6379,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
         assert isinstance(caller, NVUniversalGemmCaller), type(caller)  # noqa: S101
-        assert self.layout == caller.layout  # noqa: S101 # noqa: S101
+        assert self.layout == caller.layout  # noqa: S101
 
         render = self.make_kernel_render
         prev_kind = self._render_kind
@@ -6499,6 +6532,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         swizzle_type_b: Any | None = None,
         supports_epilogue_fusion: bool = False,
         swap_ab: bool = False,
+        bias_node: Buffer | None = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6513,6 +6547,9 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.swizzle_type_b = swizzle_type_b
         self.supports_epilogue_fusion = supports_epilogue_fusion
         self.swap_ab = swap_ab
+        # When set, the last entry of `inputs` is an addmm bias consumed as a
+        # fixed bias-add epilogue; the GEMM operands are the remaining inputs.
+        self.bias_node = bias_node
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.operator_name,
@@ -6563,6 +6600,13 @@ class NVUniversalGemmBuffer(TemplateBuffer):
                 inp = inp.data
             input_nodes.append(inp)
 
+        # For a baked addmm bias, the bias is the last input and is consumed by
+        # the epilogue, not as a GEMM operand.
+        bias_node = None
+        if self.bias_node is not None:
+            bias_node = input_nodes[-1]
+            input_nodes = input_nodes[:-1]
+
         kernel_name = str(Placeholder.KERNEL_NAME)
 
         render_kernel = NVUniversalGemmKernel(
@@ -6582,6 +6626,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
             swap_ab=self.swap_ab,
+            bias_node=bias_node,
         )
 
         def render():
@@ -7311,6 +7356,7 @@ class ExternKernel(InputsKernel):
             ctx: AbstractContextManager[None] = nullcontext()
             if V.current_node.target is torch._higher_order_ops.effects.with_effects:
                 # remove the first effect token in meta["val"] and meta["unbacked_bindings"]
+                # pyrefly: ignore[unsupported-operation]
                 node_meta_val = node_meta_val[1]
                 ctx = _remove_effect_token_unbacked_bindings(V.current_node)
 
@@ -7625,18 +7671,43 @@ class ExternKernel(InputsKernel):
             for dim in expanded_dims:
                 x = torch._inductor.lowering.slice_(x, dim, 0, 1)
 
-        # Although this is a clone, inductor is good about fusing clones into previous
-        # operations if they weren't realized and their layouts were flexible.
-        x = cls.copy_input(x)
+        if x.get_dtype().is_complex:
+            # Triton signature codegen has no complex pointer dtype, so avoid
+            # materializing complex layout constraints through a pointwise copy.
+            if exact_strides is not None:
+                layout = FlexibleLayout(
+                    x.get_device_or_error(), x.get_dtype(), x.get_size()
+                ).as_exact_strides(exact_strides, allow_padding=allow_padding)
+            else:
+                if order is None:
+                    raise AssertionError(
+                        "Expected order is not None when exact_strides is None"
+                    )
+                layout = FlexibleLayout(
+                    x.get_device_or_error(), x.get_dtype(), x.get_size()
+                ).as_stride_order(order, allow_padding=allow_padding)
 
-        as_storage_and_layout(
-            x,
-            freeze=True,
-            want_contiguous=False,
-            stride_order=order,
-            allow_padding=allow_padding,
-            exact_strides=exact_strides,
-        )
+            src = x
+            x = torch._inductor.lowering.empty_strided(
+                x.get_size(),
+                layout.stride,
+                dtype=x.get_dtype(),
+                device=x.get_device_or_error(),
+            )
+            InplaceCopyFallback.create(x, src)
+        else:
+            # Although this is a clone, inductor is good about fusing clones into previous
+            # operations if they weren't realized and their layouts were flexible.
+            x = cls.copy_input(x)
+
+            as_storage_and_layout(
+                x,
+                freeze=True,
+                want_contiguous=False,
+                stride_order=order,
+                allow_padding=allow_padding,
+                exact_strides=exact_strides,
+            )
         if (
             order
             and not free_unbacked_symbols(x.get_size())
@@ -9315,6 +9386,9 @@ class FallbackKernel(ExternKernelAlloc):
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
             self.mutation_names.append(tensor_args[0].get_name())
+            # Record aliasing relationship so memory planning doesn't wrongly
+            # reuse its storage.
+            self.alias_names.append(tensor_args[0].get_name())
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
@@ -10529,6 +10603,7 @@ class StorageBox(MutableBox):
         self.data.origin_node = origin_node
         self.data.traceback = traceback
         self.data.stream_idx = self.data.data.stream_idx
+        self.data.mempool = self.data.data.mempool
         return self.data.name
 
     def realize_hint(self) -> None:
@@ -10630,6 +10705,7 @@ class StorageBox(MutableBox):
 class Subgraph(IRNode):
     name: str
     graph_module: torch.fx.GraphModule
+    inductor_config_patches: dict[str, Any] | None = None
     graph: GraphLowering | None = None
 
 
@@ -10725,15 +10801,29 @@ class InvokeSubgraph(ExternKernel):
         # pyrefly: ignore [bad-assignment]
         operands = new_operands
 
+        if subgraph.inductor_config_patches is None:
+            nested_config = current_node.meta.get("custom", {}).get(
+                "nested_region_config"
+            )
+            subgraph.inductor_config_patches = getattr(
+                nested_config, "inductor_config_patches", None
+            )
+
         if subgraph.graph is None:
             # create and lower subgraphs
-            subgraph.graph = V.graph.make_subgraph(
-                gm=subgraph.graph_module,
-                example_inputs=fake_operands,
-                subgraph_name=subgraph.name,
+            ctx = (
+                config.patch(subgraph.inductor_config_patches)
+                if subgraph.inductor_config_patches
+                else nullcontext()
             )
-            with V.set_graph_handler(subgraph.graph):
-                subgraph.graph.run(*fake_operands)
+            with ctx:
+                subgraph.graph = V.graph.make_subgraph(
+                    gm=subgraph.graph_module,
+                    example_inputs=fake_operands,
+                    subgraph_name=subgraph.name,
+                )
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.run(*fake_operands)
 
         outputs = subgraph.graph.graph_outputs
 
@@ -10784,40 +10874,52 @@ class InvokeSubgraph(ExternKernel):
         wrapper.codegen_invoke_subgraph(self)
 
 
+def _maybe_expr(s: int | torch.SymInt) -> int | Expr:
+    """Convert an int or SymInt to a plain int or sympy Expr for use in IR layouts."""
+    if isinstance(s, int):
+        return s
+    return s.node.expr
+
+
 @ir_dataclass(frozen=False)
-class Conditional(ExternKernel):
+class Switch(ExternKernel):
     """
-    IR node representing torch.cond
+    IR node representing torch.cond and torch.switch.
+
+    For torch.cond: ``selector`` is a boolean scalar tensor, branches contains exactly
+    two subgraphs (true branch, false branch), and is_cond=True.
+    For torch.switch: ``selector`` is an integer scalar tensor, branches contains one
+    subgraph per case, and is_cond=False.
 
     Attributes:
-        predicate: A boolean scalar tensor determining which branch to execute.
-        operands: Input tensors passed to both true and false subgraphs.
-        true_subgraph: Subgraph executed when predicate is True.
-        false_subgraph: Subgraph executed when predicate is False.
-        outputs: MultiOutput nodes representing the conditional's outputs.
+        selector: A scalar tensor selecting which branch to execute.
+        branches: Non-empty sequence of subgraphs representing the individual branches.
+        operands: Input tensors passed to the individual subgraphs.
+        is_cond: True when this node represents a torch.cond (boolean 2-branch select).
+        outputs: MultiOutput nodes representing the node's outputs.
     """
 
-    predicate: IRNode | None = None
+    selector: IRNode | None = None
+    branches: Sequence[Subgraph] | None = None
     operands: Sequence[IRNode] | None = None
-    true_subgraph: Subgraph | None = None
-    false_subgraph: Subgraph | None = None
+    is_cond: bool = False
     outputs: Sequence[MultiOutput] | None = None
 
     def __init__(
         self,
-        predicate: IRNode,
+        selector: IRNode,
+        branches: Sequence[Subgraph],
         operands: Sequence[IRNode],
-        true_subgraph: Subgraph,
-        false_subgraph: Subgraph,
         layout: MultiOutputLayout,
         unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None,
+        is_cond: bool = False,
     ) -> None:
-        self.predicate = predicate
+        self.selector = selector
+        self.branches = branches
         self.operands = operands
-        self.true_subgraph = true_subgraph
-        self.false_subgraph = false_subgraph
+        self.is_cond = is_cond
 
-        sym_args, tensor_args = _split_by_sym_type([predicate, *operands])
+        sym_args, tensor_args = _split_by_sym_type([selector, *operands])
 
         super().__init__(
             name=None,
@@ -10832,30 +10934,19 @@ class Conditional(ExternKernel):
         V.graph.register_operation(self)
 
     def get_subgraphs(self) -> list[Subgraph]:
-        subgraphs = []
-        if self.true_subgraph:
-            subgraphs.append(self.true_subgraph)
-        if self.false_subgraph:
-            subgraphs.append(self.false_subgraph)
-        return subgraphs
-
-    @staticmethod
-    def _maybe_expr(s: int | torch.SymInt) -> int | Expr:
-        if isinstance(s, int):
-            return s
-        return s.node.expr
+        return list(self.branches) if self.branches is not None else []
 
     @classmethod
     def create(
         cls,
-        predicate: TensorBox,
-        true_fn: Subgraph,
-        false_fn: Subgraph,
+        selector: TensorBox,
+        branches: list[Subgraph],
         operands: list[TensorBox],
+        is_cond: bool = False,
     ) -> list[MultiOutput]:
-        """Create a Sequence of IRNodes from a conditional statement (see .lowering.cond)"""
+        """Create a sequence of IRNodes from a switch/cond statement."""
         # pyrefly: ignore [bad-assignment]
-        predicate = cls.realize_input(predicate)
+        selector = cls.realize_input(selector)
         # pyrefly: ignore [bad-assignment]
         operands = [cls.realize_input(x) for x in operands]
         fx_operands: Argument = V.graph.current_node.args[-1]
@@ -10877,22 +10968,31 @@ class Conditional(ExternKernel):
         def _require_exact_strides(
             graph_outputs: Sequence[IRNode],
             fake_tensors: Sequence[torch.Tensor],
+            branch_fakes: Sequence[torch.Tensor | int | None],
         ) -> list[IRNode]:
             ret = []
-            for output, fake in zip(graph_outputs, fake_tensors):
+            for output, fake, branch_fake in zip(
+                graph_outputs, fake_tensors, branch_fakes
+            ):
                 if isinstance(output, ShapeAsConstantBuffer):
                     ret.append(output)
                 else:
+                    strides = fake.stride()
+                    # merged strides can contain unbacked symbols (from mismatched
+                    # branch output shapes) undefined inside the subgraph
+                    if has_free_unbacked_symbols(strides):
+                        # pyrefly: ignore [missing-attribute]
+                        strides = branch_fake.stride()
                     ret.append(
                         # pyrefly: ignore [bad-argument-type]
                         ExternKernel.require_exact_strides(
-                            TensorBox(output), fake.stride(), allow_padding=False
+                            TensorBox(output), strides, allow_padding=False
                         )
                     )
             # pyrefly: ignore [bad-return]
             return ret
 
-        for subgraph in (true_fn, false_fn):
+        for subgraph in branches:
             if subgraph.graph is None:
                 # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(
@@ -10900,39 +11000,48 @@ class Conditional(ExternKernel):
                     example_inputs=fake_operands,
                     subgraph_name=subgraph.name,
                 )
+                branch_out_args = subgraph.graph_module.graph.output_node().args[0]
+                if not isinstance(branch_out_args, Sequence):
+                    raise AssertionError(type(branch_out_args))
+                branch_fakes: list[Any] = [
+                    a.meta["val"] if isinstance(a, Node) else a for a in branch_out_args
+                ]
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
-                    # Force subgraph outputs to have the expected strides from
-                    # FakeTensor metadata. This ensures both branches produce
-                    # outputs with consistent strides.
+                    # Force subgraph outputs to the expected strides from
+                    # FakeTensor metadata. Branches share the merged strides
+                    # unless those carry an unbacked symbol (mismatched inner
+                    # dims), in which case each branch keeps its own strides.
                     subgraph.graph.graph_outputs = _require_exact_strides(
-                        subgraph.graph.graph_outputs, fake_outputs
+                        subgraph.graph.graph_outputs, fake_outputs, branch_fakes
                     )
 
-        if true_fn.graph is None:
-            raise AssertionError("Expected true_fn.graph is not None")
-        if false_fn.graph is None:
-            raise AssertionError("Expected false_fn.graph is not None")
-        true_outputs = true_fn.graph.graph_outputs
-        false_outputs = false_fn.graph.graph_outputs
+        if any(branch.graph is None for branch in branches):
+            raise AssertionError("Expected all branch.graph to be not None")
 
-        for name, outputs in (("true_fn", true_outputs), ("false_fn", false_outputs)):
-            if _has_aliased_buffers(true_outputs):
+        branch_outputs = [branch.graph.graph_outputs for branch in branches]  # type: ignore[union-attr]
+
+        op_name = "torch.cond" if is_cond else "torch.switch"
+        for branch, b_outputs in zip(branches, branch_outputs):
+            if _has_aliased_buffers(b_outputs):
                 raise AssertionError(
-                    "Output aliasing is currently not supported in compiled torch.cond. "
-                    f"The outputs of the {name} subgraph of torch.cond are aliased: {outputs}"
+                    f"Output aliasing is currently not supported in compiled {op_name}. "
+                    f"The outputs of the {branch.name} subgraph of {op_name} are aliased: {b_outputs}"
                 )
 
-        # make sure true and false outputs are structurally equivalent
-        if len(true_outputs) != len(false_outputs):
-            raise AssertionError((true_outputs, false_outputs))
-        for i, (t_o, f_o) in enumerate(zip(true_outputs, false_outputs)):
-            if t_o.get_device() != f_o.get_device():
-                raise AssertionError((i, t_o, f_o))
-            if t_o.get_dtype() != f_o.get_dtype():
-                raise AssertionError((i, t_o, f_o))
-            if t_o.get_layout().offset != f_o.get_layout().offset:
-                raise AssertionError((i, t_o, f_o))
+        # All branches must produce structurally equivalent outputs (same count,
+        # device, dtype, and layout offset).
+        ref_outputs = branch_outputs[0]
+        for b_outputs in branch_outputs[1:]:
+            if len(ref_outputs) != len(b_outputs):
+                raise AssertionError((ref_outputs, b_outputs))
+            for i, (r_o, b_o) in enumerate(zip(ref_outputs, b_outputs)):
+                if r_o.get_device() != b_o.get_device():
+                    raise AssertionError((i, r_o, b_o))
+                if r_o.get_dtype() != b_o.get_dtype():
+                    raise AssertionError((i, r_o, b_o))
+                if r_o.get_layout().offset != b_o.get_layout().offset:
+                    raise AssertionError((i, r_o, b_o))
 
         # Determine device from operands and predicate
         # The predicate can be on a different device (e.g., CPU for control flow)
@@ -10940,7 +11049,7 @@ class Conditional(ExternKernel):
         # using predicate device as a fallback.
         device = next(
             o.get_device()
-            for o in operands + [predicate]
+            for o in operands + [selector]
             if not isinstance(o, ShapeAsConstantBuffer)
         )
         unbacked_bindings = resolve_unbacked_bindings(
@@ -10949,13 +11058,13 @@ class Conditional(ExternKernel):
         )
         if device is None:
             raise AssertionError("cannot determine device")
-        conditional = Conditional(
-            predicate=predicate,
+        switch = Switch(
+            selector=selector,
+            branches=branches,
             operands=operands,
-            true_subgraph=true_fn,
-            false_subgraph=false_fn,
             layout=MultiOutputLayout(device=device),
             unbacked_bindings=unbacked_bindings,
+            is_cond=is_cond,
         )
 
         outputs = [
@@ -10966,50 +11075,44 @@ class Conditional(ExternKernel):
                     if output.get_device() is not None
                     else device,  # type: ignore[arg-type]
                     dtype=output.get_dtype(),
-                    size=[Conditional._maybe_expr(sz) for sz in merged_output.size()],
-                    stride=[
-                        Conditional._maybe_expr(sz) for sz in merged_output.stride()
-                    ],
+                    size=[_maybe_expr(sz) for sz in merged_output.size()],
+                    stride=[_maybe_expr(sz) for sz in merged_output.stride()],
                     offset=output.get_layout().offset,
                     is_pinned=output.get_layout().is_pinned,
                 ),
-                conditional,
+                switch,
                 [(list, i)],
             )
             # as the true and false outputs are equivalent,
             # we can use either of them here as a "template"
             for i, (output, merged_output) in enumerate(
-                zip(true_outputs, V.graph.current_node.meta["val"])
+                zip(ref_outputs, V.graph.current_node.meta["val"])
             )
         ]
 
-        conditional.outputs = outputs  # type: ignore[assignment]
+        switch.outputs = outputs  # type: ignore[assignment]
 
         from torch._higher_order_ops.utils import (
             check_input_alias_and_mutation_return_outputs,
         )
 
-        (_, _, _, true_mutated_inputs, _) = (
-            check_input_alias_and_mutation_return_outputs(true_fn.graph_module)
-        )
-        (_, _, _, false_mutated_inputs, _) = (
-            check_input_alias_and_mutation_return_outputs(false_fn.graph_module)
-        )
-
-        mutated_operand_indices = OrderedSet(true_mutated_inputs) | OrderedSet(
-            false_mutated_inputs
-        )
+        mutated_operand_indices: OrderedSet[int] = OrderedSet()
+        for branch in branches:
+            (_, _, _, branch_mutated, _) = (
+                check_input_alias_and_mutation_return_outputs(branch.graph_module)
+            )
+            mutated_operand_indices |= OrderedSet(branch_mutated)
 
         # Create MutationOutput for each mutated operand (for scheduler dependencies)
-        conditional.mutation_outputs = [
-            MutationOutput(operands[idx].layout, operands[idx], conditional)  # type: ignore[union-attr]
+        switch.mutation_outputs = [
+            MutationOutput(operands[idx].layout, operands[idx], switch)  # type: ignore[union-attr]
             for idx in sorted(mutated_operand_indices)
         ]
 
         return outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        wrapper.codegen_conditional(self)
+        wrapper.codegen_switch(self)
         wrapper.codegen_unbacked_symbol_defs_for_outputs(
             self.get_name(), self.outputs, getattr(self, "unbacked_bindings", {})
         )
@@ -11325,8 +11428,8 @@ class WhileLoop(ExternKernel):
                     FixedLayout(
                         device=output.device,  # type: ignore[arg-type]
                         dtype=output.dtype,
-                        size=[Conditional._maybe_expr(sz) for sz in output.size()],
-                        stride=[Conditional._maybe_expr(st) for st in output.stride()],
+                        size=[_maybe_expr(sz) for sz in output.size()],
+                        stride=[_maybe_expr(st) for st in output.stride()],
                     ),
                     while_loop,
                     [(list, idx)],
