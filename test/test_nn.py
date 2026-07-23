@@ -9059,6 +9059,36 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
+        # Non-positive output sizes should result in an error.
+        with self.assertRaisesRegex(RuntimeError, 'must be >= 1'):
+            torch._C._nn.replication_pad2d(
+                torch.zeros(1, 1, 4, 1, device=device, dtype=dtype),
+                padding=[-2, -2, 0, 0])
+        with self.assertRaisesRegex(RuntimeError, 'must be >= 1'):
+            torch._C._nn.replication_pad2d(
+                torch.zeros(1, 1, 1, 4, device=device, dtype=dtype),
+                padding=[0, 0, -2, -2])
+        with self.assertRaisesRegex(RuntimeError, 'must be >= 1'):
+            torch._C._nn.replication_pad3d(
+                torch.zeros(1, 1, 4, 4, 1, device=device, dtype=dtype),
+                padding=[-2, -2, 0, 0, 0, 0])
+        with self.assertRaisesRegex(RuntimeError, 'must be >= 1'):
+            torch._C._nn.replication_pad3d(
+                torch.zeros(1, 1, 1, 4, 4, device=device, dtype=dtype),
+                padding=[0, 0, 0, 0, -2, -2])
+
+        # The Python meta registration (used by FakeTensor / torch.compile /
+        # device='meta') shares the same shape check; verify it is consistent
+        # with the device kernels above.
+        with self.assertRaisesRegex(RuntimeError, 'must be >= 1'):
+            torch._C._nn.replication_pad2d(
+                torch.zeros(1, 1, 4, 1, device='meta', dtype=dtype),
+                padding=[-2, -2, 0, 0])
+        with self.assertRaisesRegex(RuntimeError, 'must be >= 1'):
+            torch._C._nn.replication_pad3d(
+                torch.zeros(1, 1, 1, 4, 4, device='meta', dtype=dtype),
+                padding=[0, 0, 0, 0, -2, -2])
+
     @onlyNativeDeviceTypes
     @skipMPS  # MPS routes through a separate kernel (mps::pad_out_template) that does not validate the channel dim
     def test_ReplicationPad_backward_channel_mismatch(self, device):

@@ -2248,10 +2248,10 @@ def _pad2d_common(input, padding, *, is_reflection):
         )
 
     torch._check(
-        output_w >= 1 or output_h >= 1,
+        sym_and(output_w >= 1, output_h >= 1),
         lambda: (
-            f"input (H: {input_h} W: {input_w}) is too small. "
-            f"Calculated output H: {output_h} W: {output_w}"
+            f"Calculated output H: {output_h} W: {output_w} must be >= 1 "
+            f"in every dimension (input H: {input_h}, W: {input_w})"
         ),
     )
 
@@ -2383,13 +2383,11 @@ def _pad3d_common(input, padding, *, is_reflection):
             ),
         )
 
-    from torch.fx.experimental.symbolic_shapes import sym_or
-
     torch._check(
-        sym_or(output_w >= 1, output_h >= 1, output_d >= 1),
+        sym_and(output_w >= 1, output_h >= 1, output_d >= 1),
         lambda: (
-            f"input (D: {input_d} H: {input_h} W: {input_w}) is too small. "
-            f"Calculated output D: {output_d} H: {output_h} W: {output_w}"
+            f"Calculated output D: {output_d} H: {output_h} W: {output_w} must be >= 1 "
+            f"in every dimension (input D: {input_d}, H: {input_h}, W: {input_w})"
         ),
     )
 
@@ -6624,7 +6622,7 @@ def meta__scaled_dot_product_efficient_attention(
 
     if torch.version.hip and torch.cuda.is_available():
         """Please see: https://github.com/pytorch/pytorch/issues/146848
-        longsumexp last dim should be seq length
+        logsumexp last dim should be seq length
         """
         logsumexp_dim = M if compute_log_sumexp else 0
     else:
@@ -6971,9 +6969,16 @@ def meta__efficient_attention_forward(
             )
         actual_max_seqlen_q = max_seqlen_q
     actual_max_seqlen_k = max_seqlen_k if max_seqlen_k is not None else N
-    logsumexp_dim = (
-        math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
-    )
+
+    if torch.version.hip is not None:
+        # ROCm efficient-attention backends return compact LSE. CUDA's
+        # memory-efficient attention kernel pads LSE to its kernel alignment.
+        logsumexp_dim = actual_max_seqlen_q if compute_log_sumexp else 0
+    else:
+        logsumexp_dim = (
+            math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
+        )
+
     logsum_exp = torch.empty(
         (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
