@@ -9242,6 +9242,34 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(guard_failure is not None)
         self.assertIn("""tensor 'x' size mismatch at index 0""", guard_failure[0])
 
+    def test_fstring_dynamic_symint_across_graph_break(self):
+        class Arch(torch.nn.Module):
+            def __init__(self, n):
+                super().__init__()
+                self.register_buffer("w", torch.randn(n))
+                self.msg = ""
+
+            def forward(self, idx):
+                max_idx = self.w.size(0) - 1
+                idx = idx.long()
+                mask = (idx < 0) | (idx > max_idx)
+                if mask.any():
+                    self.msg = f"max_idx={max_idx}, bad={idx[mask].tolist()}"
+                    idx = torch.clamp(idx, 0, max_idx)
+                return torch.index_select(self.w, 0, idx)
+
+        @torch.compile(backend="eager")
+        def run(arch, idx):
+            return arch(idx)
+
+        idx = torch.tensor([0, -1, 2])
+        # Distinct buffer sizes across the shared compiled forward force
+        # automatic-dynamic, turning w.size(0) into a SymNodeVariable.
+        for n in (8, 6, 7):
+            arch = Arch(n)
+            run(arch, idx)
+            self.assertEqual(arch.msg, f"max_idx={n - 1}, bad=[-1]")
+
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
         # and then rolls back due to control flow.

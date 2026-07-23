@@ -908,6 +908,79 @@ class TestMPS(TestCaseMPS):
         kl_div = F.kl_div(q.log(), p, reduction='sum').item()
         self.assertLess(kl_div, 0.03)
 
+    def test_stream_base(self):
+        s1 = torch._C._MPSStreamBase()
+        s2 = torch._C._MPSStreamBase()
+        self.assertNotEqual(s1, s2)
+        self.assertNotEqual(s2.stream_id, s1.stream_id)
+        self.assertEqual(s1.device.type, 'mps')
+        self.assertEqual(s2.device.type, 'mps')
+
+        def concurrent_sine_loop(a1, a2, s1=None, s2=None, n=100):
+            r1 = a1
+            r2 = a2
+
+            for _ in range(n):
+                torch._C._mps_setStream(s1)
+                r1 = torch.sin(r1)
+                torch._C._mps_setStream(s2)
+                r2 = torch.sin(r2)
+
+            return r1, r2
+
+        try:
+            torch._C._mps_setStream(None)
+            a1 = torch.randn(100, device='mps')
+            a2 = torch.randn(100, device='mps')
+            torch.mps.synchronize()
+
+            r1, r2 = concurrent_sine_loop(a1, a2, s1, s2)
+            s1.synchronize()
+            s2.synchronize()
+            torch._C._mps_setStream(None)
+            r1_check, r2_check = concurrent_sine_loop(a1, a2, s1=None, s2=None)
+            torch.mps.synchronize()
+
+            self.assertEqual(r1, r1_check)
+            self.assertEqual(r2, r2_check)
+
+        finally:
+            torch._C._mps_setStream(None)
+            torch.mps.synchronize()
+            s1.synchronize()
+            s2.synchronize()
+            torch.mps.empty_cache()
+
+    def test_buffer_reuse_per_stream(self):
+        def make_and_free_get_ptr(stream):
+            torch._C._mps_setStream(stream)
+            t = torch.randn(1 << 16, device='mps')
+            stream.synchronize()
+            ptr = t.data_ptr()
+            del t
+            stream.synchronize()
+            return ptr
+
+        s1 = torch._C._MPSStreamBase()
+        s2 = torch._C._MPSStreamBase()
+
+        try:
+            # Same stream: the exact same buffer should be reused
+            ptr_s1_first = make_and_free_get_ptr(s1)
+            ptr_s1_second = make_and_free_get_ptr(s1)
+            self.assertEqual(ptr_s1_second, ptr_s1_first)
+
+            # Different stream: must not reuse s1's freed buffer
+            ptr_s2 = make_and_free_get_ptr(s2)
+            self.assertNotEqual(ptr_s2, ptr_s1_second)
+
+        finally:
+            torch._C._mps_setStream(None)
+            torch.mps.synchronize()
+            s1.synchronize()
+            s2.synchronize()
+            torch.mps.empty_cache()
+
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
@@ -10194,6 +10267,40 @@ class TestMPS(TestCaseMPS):
         r_mps = emb_mps(torch.tensor([1, 2, 3], device="mps"), torch.tensor([0], device="mps"))
         r_cpu = emb_cpu(torch.tensor([1, 2, 3]), torch.tensor([0]))
         self.assertEqual(r_mps.cpu(), r_cpu)
+
+    # https://github.com/pytorch/pytorch/issues/149325
+    # Generic nonzero correctness (baseline, empty, dtypes, N-D) is covered by
+    # the nonzero OpInfo; only the large-tensor paths are MPS-specific and can't
+    # be reached through OpInfo, so they live here.
+    # ~11 GiB unified memory needed: the input bool tensor is ~2.2 GiB and the
+    # int32 prefix-sum temporary buffer is ~8 GiB (numel * 4 bytes).
+    @serialTest()
+    @largeTensorTest("11GB", device="mps")
+    def test_nonzero_multichunk_above_int32(self):
+        # (1<<31)+1024 elements: above INT_MAX, and above the 2^31 per-dispatch
+        # chunk size, so it exercises the multi-chunk count/scatter path and the
+        # 64-bit scatter index variant. Must match CPU on a sparse pattern.
+        n = (1 << 31) + 1024
+        x = torch.zeros(n, dtype=torch.bool, device="mps")
+        positions = torch.tensor([0, 7, 1023, (1 << 30), (1 << 31) - 1, n - 1], device="mps")
+        x[positions] = True
+        out = x.nonzero().squeeze(-1)
+        self.assertEqual(out, positions.sort().values.to(torch.int64))
+
+    # ~22 GiB unified memory needed (input bool ~4 GiB + int32 prefix ~16 GiB);
+    # skips on machines/CI without enough memory.
+    @serialTest()
+    @largeTensorTest("22GB", device="mps")
+    def test_nonzero_above_uint32(self):
+        # More than 2^32 elements: the flat index and the count/scatter dispatch
+        # both exceed Metal's 32-bit thread_position_in_grid, so this exercises
+        # the chunked dispatch with a set position beyond 2^32.
+        n = (1 << 32) + 1024
+        x = torch.zeros(n, dtype=torch.bool, device="mps")
+        positions = torch.tensor([0, (1 << 31), (1 << 32) - 1, n - 1], device="mps")
+        x[positions] = True
+        out = x.nonzero().squeeze(-1)
+        self.assertEqual(out, positions.sort().values.to(torch.int64))
 
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
