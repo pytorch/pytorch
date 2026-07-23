@@ -527,19 +527,11 @@ class DeviceCachingAllocator {
   RingBuffer<TraceEntry> alloc_buffer;
   std::unordered_set<TraceEntry::Action> skip_actions_list;
 
-  // Active pool-diversion scopes. Each entry routes allocations matching its
-  // filter into a private mempool. Populated by beginAllocateToPool /
-  // endAllocateToPool, including from XPUGraph capture and MemPool usage. A
-  // non-empty list does NOT imply an active capture; for that, see
-  // num_active_captures_ below. Usually empty, so get_pool can short-circuit.
+  // Active pool-diversion scopes.
   std::vector<std::pair<MempoolId_t, std::function<bool(sycl::queue*)>>>
       allocation_scopes_;
 
-  // Count of in-progress SYCL graph captures on this device. Bumped by
-  // XPUGraph's capture_begin / capture_end around begin_recording /
-  // end_recording. Distinct from allocation_scopes_, which tracks pool routing
-  // and can be populated without an active capture (e.g. MemPool usage).
-  // Plain int because all access is serialized through `mutex`.
+  // Count of in-progress XPU graph captures on this device.
   int num_active_captures_ = 0;
 
   ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
@@ -1346,21 +1338,7 @@ class DeviceCachingAllocator {
   }
 
   // Returns true iff the calling thread's current stream is actively recording
-  // into a XPU graph. Allocator paths that gate on capture safety
-  // (event insertion, deferred-free, OOM-time release_cached_blocks) use this
-  // instead of a bare allocation_scopes_.empty() check, so that a private
-  // mempool diversion (e.g. via MemPool) is not mistaken for a real capture.
-  //
-  // Two layers, from cheapest to most expensive:
-  //   1. Device-wide counter: num_active_captures_ == 0 means no capture is in
-  //      progress anywhere on this device, so the answer is trivially false.
-  //      This is the common case and the hot path.
-  //   2. Per-stream query: ext_oneapi_get_state on the current stream, only
-  //      paid when some capture is active on this device. Distinguishes a
-  //      non-capturing stream on a device that has another stream capturing
-  //      from the capturing stream itself (which must follow capture rules).
-  //
-  // The counter read is safe because all callers hold `mutex`.
+  // into a XPU graph.
   bool is_capture_context() const {
     if (C10_LIKELY(num_active_captures_ == 0)) {
       return false;
