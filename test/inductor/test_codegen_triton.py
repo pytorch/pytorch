@@ -649,6 +649,31 @@ class TestCodegenTriton(InductorTestCase):
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
 
+    def test_imports_for_benchmark_kernel_multiline_get_raw_stream(self):
+        # Regression: a backend whose import_get_raw_stream_as returns a
+        # multi-line snippet (e.g. the CPU override, which MTIA uses) must not
+        # break the textwrap.dedent of the benchmark-kernel imports. Formatting
+        # before dedenting used to leave the imports indented (IndentationError).
+        # TritonKernel and ComboKernel carry identical copies of this helper.
+        from torch._inductor.codegen.triton_combo_kernel import ComboKernel
+
+        class FakeDeviceOps:
+            def import_get_raw_stream_as(self, name):
+                return f"def {name}(_):\n    return 0"
+
+        class FakeGraph:
+            device_ops = FakeDeviceOps()
+
+        for kernel_cls in (TritonKernel, ComboKernel):
+            with V.set_graph_handler(FakeGraph()):
+                # imports_for_benchmark_kernel does not use self.
+                imports = kernel_cls.imports_for_benchmark_kernel(None)
+            # Compiles without IndentationError and the top-level imports stay at
+            # column 0 (they would be indented if dedent ran after substitution).
+            compile(imports, "<benchmark_kernel_imports>", "exec")
+            self.assertIn("\nfrom torch._dynamo.testing import rand_strided\n", imports)
+            self.assertIn("\nimport torch\n", imports)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
