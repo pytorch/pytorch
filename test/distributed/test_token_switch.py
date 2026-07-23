@@ -147,7 +147,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         received = out_tokens[:NUM_TOKENS].float()
         self.assertTrue(
             received.eq(expected_val).all(),
-            f"rank {self.rank}: expected {expected_val}, got {received[0, 0].item()}",
+            lambda msg: f"{msg}\nrank {self.rank}: expected {expected_val}, got {received[0, 0].item()}",
         )
 
     @skip_if_lt_x_gpu(2)

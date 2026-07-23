@@ -488,7 +488,17 @@ def get_wrapper_codegen_for_device(
         if fx_wrapper:
             return wrapper_codegen_obj.fx_wrapper_codegen
         elif cpp_wrapper:
-            return wrapper_codegen_obj.cpp_wrapper_codegen
+            cpp_wrapper_codegen = wrapper_codegen_obj.cpp_wrapper_codegen
+            # allow_stack_allocation is a per-compile config, so the arrayref CPU
+            # wrapper must follow the current config value rather than whatever it
+            # happened to be at first registration (see init_backend_registration).
+            if device == "cpu" and config.aot_inductor.allow_stack_allocation:
+                from .cpp_wrapper_cpu import CppWrapperCpu
+                from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
+
+                if cpp_wrapper_codegen is CppWrapperCpu:
+                    return CppWrapperCpuArrayRef
+            return cpp_wrapper_codegen
         else:
             return wrapper_codegen_obj.wrapper_codegen
     return None
@@ -510,7 +520,6 @@ def init_backend_registration() -> None:
     """
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
-    from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cpp_wrapper_mps import CppWrapperMps
     from .cuda_combined_scheduling import CUDACombinedScheduling
@@ -534,9 +543,11 @@ def init_backend_registration() -> None:
             "cpu",
             lambda scheduling: cpu_backends[config.cpu_backend](scheduling),
             PythonWrapperCodegen,
-            CppWrapperCpuArrayRef
-            if config.aot_inductor.allow_stack_allocation
-            else CppWrapperCpu,
+            # allow_stack_allocation selects CppWrapperCpuArrayRef, but that is a
+            # per-compile config; the choice is made dynamically in
+            # get_wrapper_codegen_for_device rather than frozen here at the
+            # process's first registration.
+            CppWrapperCpu,
             WrapperFxCodegen,
         )
 
@@ -1273,6 +1284,17 @@ class OverridesData:
     mps: Callable[..., str] | None = None
 
 
+def _triton_bessel(order: int, kind: str, x: str) -> str:
+    # PyTorch eager returns NaN for +/-inf, while libdevice returns
+    # the mathematical limit. x - x yields NaN in x's dtype
+    # (avoids fp32 literal promotion under tl.where for float64 inputs)
+    return (
+        f"tl.where(tl_math.abs({x}) == float('inf'), "
+        f"{x} - {x}, "
+        f"libdevice.{kind}{order}({x}))"
+    )
+
+
 def _triton_cyl_bessel_i(order: int, x: str) -> str:
     # PyTorch's Cephes-derived kernels return NaN for infinities; libdevice
     # returns signed infinities, so synthesize a same-dtype NaN with x - x.
@@ -1294,25 +1316,25 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     bessel_j0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_j0_forward({x})",
-        triton=lambda x: f"libdevice.j0({x})",
+        triton=lambda x: _triton_bessel(0, "j", x),
         name="special_bessel_j0",
     ),
     bessel_j1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_j1_forward({x})",
-        triton=lambda x: f"libdevice.j1({x})",
+        triton=lambda x: _triton_bessel(1, "j", x),
         name="special_bessel_j1",
     ),
     bessel_y0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_y0_forward({x})",
-        triton=lambda x: f"libdevice.y0({x})",
+        triton=lambda x: _triton_bessel(0, "y", x),
         name="special_bessel_y0",
     ),
     bessel_y1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_y1_forward({x})",
-        triton=lambda x: f"libdevice.y1({x})",
+        triton=lambda x: _triton_bessel(1, "y", x),
         name="special_bessel_y1",
     ),
     digamma=OverridesData(
@@ -2168,7 +2190,9 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         shape: BlockShapeType = None,
     ) -> CSEVariableType:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name, bounds, dtype, shape)
+        var = cast(
+            "CSEVariableType", V.kernel.create_cse_var(var_name, bounds, dtype, shape)
+        )
         self.varname_map[var_name] = var
         return var
 
@@ -2182,7 +2206,9 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         torch._check_value(
             name not in self.varname_map, lambda: f"duplicate name: {name}"
         )
-        var = V.kernel.create_cse_var(name, bounds, dtype, shape)
+        var = cast(
+            "CSEVariableType", V.kernel.create_cse_var(name, bounds, dtype, shape)
+        )
         self.varname_map[name] = var
         return var
 
@@ -2787,6 +2813,7 @@ class CSEProxy(DefaultHandler):
                 V.kernel.compute,
                 v,
                 bounds=bounds,
+                # pyrefly: ignore[bad-argument-type]
                 dtype=output_dtype,
                 shape=output_shape,
             )
