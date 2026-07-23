@@ -23,6 +23,7 @@ if _TEST_ROOT not in sys.path:
 from conftest import (
     _decorator_gpu_requirement,
     _is_cpu_backed,
+    _is_local_tensor_simulation,
     _needs_extra_gpus,
     _probe_world_size,
 )
@@ -67,10 +68,26 @@ class _MPCunset(MultiProcContinuousTest):
     pass
 
 
-def _fake_item(cls=None, func=None, module_name="test_something"):
-    module = types.SimpleNamespace()
-    module.__name__ = module_name
-    return types.SimpleNamespace(cls=cls, obj=func, module=module)
+# A LocalTensor simulation class: multi-process base and world_size 4, but runs
+# single-process on one GPU. Detected by the "LocalTensor" name token.
+class _MPws4WithLocalTensor(_MPws4):
+    pass
+
+
+# A LocalTensor simulation class detected by the is_local_tensor_enabled probe
+# (name carries no "LocalTensor" token).
+class _MPws4Simulated(_MPws4):
+    @property
+    def is_local_tensor_enabled(self):
+        return True
+
+
+def _fake_item(cls=None, func=None, filename="test_something.py"):
+    # Model the real collected node: the resolver reads the test-file identity
+    # from ``path``/``nodeid`` (as pytest populates them), not module.__name__.
+    return types.SimpleNamespace(
+        cls=cls, obj=func, path=filename, nodeid=f"{filename}::Cls::method"
+    )
 
 
 class TestMultiGpuMarker(TestCase):
@@ -103,9 +120,18 @@ class TestMultiGpuMarker(TestCase):
         self.assertEqual(_decorator_gpu_requirement(None), 0)
 
     def test_cpu_backed_detection(self):
-        self.assertTrue(_is_cpu_backed(_fake_item(module_name="test_c10d_gloo")))
-        self.assertTrue(_is_cpu_backed(_fake_item(module_name="test_foo_cpu")))
-        self.assertFalse(_is_cpu_backed(_fake_item(module_name="test_c10d_nccl")))
+        self.assertTrue(_is_cpu_backed(_fake_item(filename="test_c10d_gloo.py")))
+        self.assertTrue(_is_cpu_backed(_fake_item(filename="test_foo_cpu.py")))
+        self.assertFalse(_is_cpu_backed(_fake_item(filename="test_c10d_nccl.py")))
+        # Backend tokens match whole ``_``-delimited words, not substrings: the
+        # "mpi" backend must not flag "compile".
+        self.assertFalse(_is_cpu_backed(_fake_item(filename="test_dtensor_compile.py")))
+
+    def test_local_tensor_simulation_detection(self):
+        self.assertTrue(_is_local_tensor_simulation(_MPws4WithLocalTensor))
+        self.assertTrue(_is_local_tensor_simulation(_MPws4Simulated))
+        self.assertFalse(_is_local_tensor_simulation(_MPws4))
+        self.assertFalse(_is_local_tensor_simulation(None))
 
     def test_world_size_selection(self):
         # >2 GPU tests are selected; <=2 are not.
@@ -122,18 +148,28 @@ class TestMultiGpuMarker(TestCase):
     def test_cpu_backed_high_world_size_excluded(self):
         # A CPU-backed multi-process test spawns ranks, not GPUs, so a high
         # world_size does not qualify it as an extra-GPU test.
-        item = _fake_item(cls=_MPws4, module_name="test_c10d_gloo")
+        item = _fake_item(cls=_MPws4, filename="test_c10d_gloo.py")
         self.assertFalse(_needs_extra_gpus(item, _MPws4))
 
-    def test_explicit_decorator_overrides_cpu_gate(self):
-        # An explicit GPU decorator asserts the requirement even for a
-        # CPU-named module.
+    def test_cpu_gate_short_circuits_decorator(self):
+        # The CPU/gloo gate wins over any GPU decorator: a CPU-backed test never
+        # qualifies, since it spawns ranks rather than GPUs.
         @skip_if_lt_x_gpu(4)
         def needs4(self):
             pass
 
-        item = _fake_item(cls=_MPws2, func=needs4, module_name="test_c10d_gloo")
-        self.assertTrue(_needs_extra_gpus(item, _MPws2))
+        item = _fake_item(cls=_MPws2, func=needs4, filename="test_c10d_gloo.py")
+        self.assertFalse(_needs_extra_gpus(item, _MPws2))
+
+    def test_decorator_and_world_size_combine(self):
+        # The 5 genuine 4-GPU misses: only ``skip_if_lt_x_gpu(2)`` but the class
+        # hardcodes world_size=4. The larger of the two signals must win.
+        @skip_if_lt_x_gpu(2)
+        def needs2(self):
+            pass
+
+        item = _fake_item(cls=_MPws4, func=needs2, filename="test_2d_composability.py")
+        self.assertTrue(_needs_extra_gpus(item, _MPws4))
 
 
 if __name__ == "__main__":
