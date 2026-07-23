@@ -75,9 +75,8 @@ jobs:
         ]
     name: ${{ matrix.name }}:${{ matrix.tag }}
     steps:
-      # TESTING ONLY -- REVERT TO @main BEFORE MERGE (pinned to PR branch to test its own action)
       - name: Build docker image
-        uses: pytorch/pytorch/.github/actions/binary-docker-build@atalman/cd-docker-content-addressed
+        uses: pytorch/pytorch/.github/actions/binary-docker-build@main
         with:
           docker-image-name: ${{ matrix.name }}
           custom-tag-prefix: ${{ matrix.tag }}

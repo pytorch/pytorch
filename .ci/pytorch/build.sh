@@ -180,19 +180,12 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
   exit 1
 fi
 
-# We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
-# memory to build and will OOM
-
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr ' ' '\n' | sed 's/$/>= 8.0/' | bc | grep -q 1; then
-  J=2  # default to 2 jobs
-  case "$RUNNER" in
-    linux.12xlarge.memory|linux.24xlarge.memory)
-      J=24
-      ;;
-  esac
-  echo "Building FlashAttention with job limit $J"
-  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
-fi
+# FlashAttention CUDA kernels (built for CUDA 8.0+) need large amounts of memory
+# to compile and can OOM at full build parallelism. The previous mitigation set
+# BUILD_CUSTOM_STEP to pre-build the flash_attention target at a reduced job
+# count; it was consumed by the setuptools build path removed in this stack, so
+# it is dropped here. Re-homing the throttle as a CMake JOB_POOLS constraint is
+# tracked in https://github.com/pytorch/pytorch/issues/190663.
 
 # TODO: Removeme once all the wrappers are gone
 if [[ "$BUILD_ENVIRONMENT" == *clang* ]] && [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then

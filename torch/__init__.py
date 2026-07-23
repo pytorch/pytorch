@@ -3228,7 +3228,7 @@ def compile(
         - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
           This is an unsafe feature and there is no backward compatibility guarantee provided
           for dynamo guards as data types.
-          For stable helper functions to use, see the documentations in `torch.compiler`, for example:
+          For stable helper functions to use, see the documentation in `torch.compiler`, for example:
           - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
           - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
           - `torch.compiler.keep_tensor_guards_unsafe`
