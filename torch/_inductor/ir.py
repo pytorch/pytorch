@@ -498,12 +498,16 @@ def significant_strides_equal(
     shape: Sequence[_IntLike],
 ) -> bool:
     """
-    Returns true if the strides are equal, ignoring dimensions of size 1 .
+    Returns true if the strides are equal, ignoring dimensions of size 0 or 1.
+    If any dimension is size 0, all strides are insignificant since the tensor
+    is empty.
     """
     if not (len(shape) == len(strides1) and len(strides1) == len(strides2)):
         raise AssertionError(
             "Expected len(shape) == len(strides1) and len(strides1) == len(strides2)"
         )
+    if any(V.graph.sizevars.statically_known_equals(dim, 0) for dim in shape):
+        return True
     for dim, s1, s2 in zip(shape, strides1, strides2):
         if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
@@ -537,8 +541,9 @@ def try_match_insignificant_strides(
 
     storage, old_layout = as_storage_and_layout(tensor)
     new_stride = [*old_layout.stride]
+    is_empty = tensor.is_zero_elements()
     for i, s in enumerate(tensor.get_size()):
-        if V.graph.sizevars.statically_known_leq(s, 1):
+        if is_empty or V.graph.sizevars.statically_known_leq(s, 1):
             new_stride[i] = strides[i]
 
     new_layout = FixedLayout(
@@ -10700,6 +10705,7 @@ class StorageBox(MutableBox):
 class Subgraph(IRNode):
     name: str
     graph_module: torch.fx.GraphModule
+    inductor_config_patches: dict[str, Any] | None = None
     graph: GraphLowering | None = None
 
 
@@ -10795,15 +10801,29 @@ class InvokeSubgraph(ExternKernel):
         # pyrefly: ignore [bad-assignment]
         operands = new_operands
 
+        if subgraph.inductor_config_patches is None:
+            nested_config = current_node.meta.get("custom", {}).get(
+                "nested_region_config"
+            )
+            subgraph.inductor_config_patches = getattr(
+                nested_config, "inductor_config_patches", None
+            )
+
         if subgraph.graph is None:
             # create and lower subgraphs
-            subgraph.graph = V.graph.make_subgraph(
-                gm=subgraph.graph_module,
-                example_inputs=fake_operands,
-                subgraph_name=subgraph.name,
+            ctx = (
+                config.patch(subgraph.inductor_config_patches)
+                if subgraph.inductor_config_patches
+                else nullcontext()
             )
-            with V.set_graph_handler(subgraph.graph):
-                subgraph.graph.run(*fake_operands)
+            with ctx:
+                subgraph.graph = V.graph.make_subgraph(
+                    gm=subgraph.graph_module,
+                    example_inputs=fake_operands,
+                    subgraph_name=subgraph.name,
+                )
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.run(*fake_operands)
 
         outputs = subgraph.graph.graph_outputs
 

@@ -554,12 +554,12 @@ class TestPrecompile(TestCase):
             self.assertEqual(cg, ig)
 
     def test_eager_param_ordering_agrees_with_inductor(self):
-        # The eager driver has its OWN _extract_param_buffers copy (in
-        # _EAGER_DRIVER_SOURCE), most prone to silent drift from
+        # Both backends now emit the same _extract_param_buffers (from
+        # torch._precompile_driver), which must stay in sync with
         # torch._precompile._intern_param_buffers. The test above cross-checks only the
         # cached vs inductor-inlined paths; cross-check the EAGER backend too, on the same
         # multi-module + tied-weight + backward step, so an ordering divergence in the
-        # eager copy shows as a scattered-grad mismatch against the inductor cached path.
+        # shared driver shows as a scattered-grad mismatch against the inductor cached path.
         torch.manual_seed(0)
         a = torch.nn.Linear(4, 4, bias=False)
         b = torch.nn.Linear(4, 4, bias=False)
