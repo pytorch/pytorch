@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from functools import partial
 from typing import Any, cast
 
 import torch
@@ -14,6 +15,8 @@ from torch._higher_order_ops.utils import (
     unique_graph_id,
 )
 from torch._ops import HigherOrderOperator
+from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch._prims_common.wrappers import elementwise_type_promotion_wrapper
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
@@ -71,6 +74,63 @@ def mark_flex_gemm_body_gemm_node(
 FLEX_GEMM_BODY_GRAPH_PASSES: tuple[
     Callable[[torch.fx.GraphModule, torch._ops.OpOverload], None], ...
 ] = (mark_flex_gemm_body_gemm_node,)
+
+
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("x",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def flex_gemm_fast_math_sigmoid(x: torch.Tensor) -> torch.Tensor:
+    """Use the tanh sigmoid identity selected by QUACK fast math."""
+    return torch.tanh(x * 0.5) * 0.5 + 0.5
+
+
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("x",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def flex_gemm_fast_math_silu(x: torch.Tensor) -> torch.Tensor:
+    """Use the tanh SiLU identity selected by QUACK fast math."""
+    half = x * 0.5
+    return half * torch.tanh(half) + half
+
+
+def flex_gemm_fast_math_gelu(
+    x: torch.Tensor,
+    approximate: str = "none",
+    *,
+    fallback: Callable[..., Any],
+) -> torch.Tensor:
+    """Select the standard tanh GELU approximation for exact GELU calls."""
+    if approximate == "none":
+        approximate = "tanh"
+    return fallback(x, approximate)
+
+
+FLEX_GEMM_FAST_MATH_DECOMPOSITIONS: dict[torch._ops.OpOverload, Callable[..., Any]] = {
+    torch.ops.aten.sigmoid.default: flex_gemm_fast_math_sigmoid,
+    torch.ops.aten.silu.default: flex_gemm_fast_math_silu,
+}
+
+
+def flex_gemm_body_decomposition_table(
+    kernel_options: dict[str, Any],
+    decomposition_table: Mapping[torch._ops.OpOverload, Callable[..., Any]],
+) -> dict[torch._ops.OpOverload, Callable[..., Any]] | None:
+    """Override composite body decompositions enabled by QUACK fast math."""
+    if (
+        kernel_options.get("backend") != "QUACK"
+        or kernel_options.get("fast_math") is not True
+    ):
+        return None
+    merged_decompositions = dict(decomposition_table)
+    merged_decompositions.update(FLEX_GEMM_FAST_MATH_DECOMPOSITIONS)
+    gelu = torch.ops.aten.gelu.default
+    if gelu in merged_decompositions:
+        merged_decompositions[gelu] = partial(
+            flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
+        )
+    return merged_decompositions
 
 
 def apply_flex_gemm_body_graph_passes(
@@ -213,7 +273,12 @@ def flex_gemm_proxy_torch_dispatch_mode(
         def tracing_body_fn(*flat_body_args):
             return body_fn(*flat_body_args)
 
-        body_graph = reenter_make_fx(tracing_body_fn)(*flat_args)
+        body_graph = reenter_make_fx(
+            tracing_body_fn,
+            subgraph_decomp_table=flex_gemm_body_decomposition_table(
+                kernel_options, proxy_mode.decomposition_table
+            ),
+        )(*flat_args)
         apply_flex_gemm_body_graph_passes(body_graph, gemm_op)
         _, body_graph_name = unique_graph_id(proxy_mode, prefix="flex_gemm_body_graph")
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
