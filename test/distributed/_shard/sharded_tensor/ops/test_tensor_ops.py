@@ -26,7 +26,7 @@ backend = torch.distributed.get_default_backend_for_device(device_type)
 class TestTensorOps(ShardedTensorTestBase):
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     def test_deep_copy(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -45,7 +45,7 @@ class TestTensorOps(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     def test_inplace_copy(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -72,7 +72,7 @@ class TestTensorOps(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     def test_clone(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -91,7 +91,7 @@ class TestTensorOps(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     def test_detach(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -116,7 +116,7 @@ class TestTensorOps(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     def test_set_requires_grad(self):
         spec = ChunkShardingSpec(
             dim=0,
