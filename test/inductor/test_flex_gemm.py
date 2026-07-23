@@ -2036,13 +2036,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             a.shape[1],
         )
 
-
-
-
-
-
-
-
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
@@ -3920,10 +3913,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         self.assertLocalReduceAuxCode(code, group, callbacks=True)
         self.assertIn("cluster_n', 1", code)
-
-
-
-
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -6223,6 +6212,7 @@ class TestFlexGemmFastMathDevice(FlexGemmTestCase):
         self.assertIn("fastmath=True", code)
         self.assertNotIn("cute.math.erf", code)
 
+
 instantiate_device_type_tests(TestFlexGemmFastMathDevice, globals(), only_for="cuda")
 
 
@@ -6515,6 +6505,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             self.assertIn(f"FlexGemmLocalReduceGeometry(group={group}, axis=0)", code)
             self.assertIn("FlexGemmLocalReduceCallbacks(", code)
         self.assertIn(f"config_key={config_key!r}", code)
+
 
 instantiate_device_type_tests(
     TestFlexGemmExplicitConfigDevice, globals(), only_for="cuda"
