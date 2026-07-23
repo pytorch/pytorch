@@ -453,27 +453,43 @@ TESTS_REQUIRING_LAPACK = [
     "distributions/test_distributions",
 ]
 
-# These are just the slowest ones, this isn't an exhaustive list.
-TESTS_NOT_USING_GRADCHECK = [
-    # Note that you should use skipIfSlowGradcheckEnv if you do not wish to
-    # skip all the tests in that file, e.g. test_mps
-    "doctests",
-    "test_meta",
-    "test_hub",
-    "test_fx",
-    "test_decomp",
-    "test_cpp_extensions_jit",
-    "test_jit",
-    "test_matmul_cuda",
-    "test_ops",
-    "test_ops_jit",
-    "dynamo/test_recompile_ux",
-    "inductor/test_compiled_optimizers",
-    "inductor/test_cutlass_backend",
-    "inductor/test_max_autotune",
-    "inductor/test_select_algorithm",
-    "inductor/test_smoke",
-    "test_quantization",
+# Allowlist of the test files that actually exercise gradcheck -- either via the
+# OpInfo/ModuleInfo gradient sweeps or the internal common_utils.gradcheck
+# wrapper (which is what flips fast_mode off under slow gradcheck). In slow
+# gradcheck mode we run ONLY these: every other file gains nothing from
+# fast_mode=False and just burns the per-shard time budget, and the full suite
+# is ~2x too large to fit the shards' timeout otherwise.
+#
+# This is an allowlist, so a NEW file that adds gradcheck coverage must be added
+# here or it will silently not run in slow gradcheck. Files that call
+# torch.autograd.gradcheck directly (rather than the common_utils wrapper) are
+# intentionally omitted: they run identically in normal CI and slow mode adds
+# nothing. Use skipIfSlowGradcheckEnv to opt out individual tests within a file.
+TESTS_USING_GRADCHECK = [
+    # OpInfo / ModuleInfo gradient sweeps -- the core of slow gradcheck
+    "test_ops_gradients",
+    "test_ops_fwd_gradients",
+    "test_modules",
+    # Core autograd + nn
+    "test_autograd",
+    "autograd/test_functional",
+    "autograd/test_complex",
+    "test_nn",
+    "nn/test_convolution",
+    "nn/test_pooling",
+    "nn/test_parametrization",
+    # Domain-specific autograd coverage
+    "test_linalg",
+    "test_sparse",
+    "test_sparse_csr",
+    "test_nestedtensor",
+    "test_foreach",
+    "test_view_ops",
+    "test_segment_reductions",
+    "test_transformers",
+    "test_mkldnn",
+    "distributions/test_distributions",
+    "optim/test_optim",
 ]
 
 
@@ -1933,12 +1949,10 @@ def get_selected_tests(options) -> list[str]:
         )
 
     if TEST_WITH_SLOW_GRADCHECK:
-        selected_tests = exclude_tests(
-            TESTS_NOT_USING_GRADCHECK,
-            selected_tests,
-            "Running in slow gradcheck mode, skipping tests that don't use gradcheck.",
-            exact_match=True,
-        )
+        # Avoid running files that don't use gradcheck. See TESTS_USING_GRADCHECK.
+        selected_tests = [
+            test for test in selected_tests if test in TESTS_USING_GRADCHECK
+        ]
 
     selected_tests = [parse_test_module(x) for x in selected_tests]
     return selected_tests
