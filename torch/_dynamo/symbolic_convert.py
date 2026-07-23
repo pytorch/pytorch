@@ -5336,15 +5336,32 @@ class InstructionTranslatorBase(
     def raise_loop_graph_break(
         code: types.CodeType, exc: Unsupported | UserError
     ) -> NoReturn:
-        unimplemented(
-            gb_type="graph break in loop",
-            context=f"frame skipped: {format_frame_info(code)}",
-            explanation="torch.compile detected a graph break in a for/while loop. "
-            "Skipping the frame and falling back to eager, as graph breaks in loops are not supported.",
-            hints=[*graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK],
-            from_exc=exc,
-            skip_frame=True,
-        )
+        # A graph break in a loop forces us to skip THIS frame and run it
+        # eagerly. If we let child frames still be intercepted (the default
+        # FrameExecStrategy(SKIP, DEFAULT)), children (e.g. nn.Module blocks
+        # inside a `for blk in self.blocks:` loop under `module.compile()`)
+        # get compiled independently while their parent runs eager. That
+        # mixed eager-parent / compiled-child execution breaks correctness
+        # for wrappers whose forward/backward hooks assume a single
+        # execution mode per iteration (e.g. FSDP2, which then double-counts
+        # the reduce-scatter). Propagate SKIP recursively for this failure.
+        from .types import FrameAction, FrameExecStrategy
+
+        try:
+            unimplemented(
+                gb_type="graph break in loop",
+                context=f"frame skipped: {format_frame_info(code)}",
+                explanation="torch.compile detected a graph break in a for/while loop. "
+                "Skipping the frame and falling back to eager, as graph breaks in loops are not supported.",
+                hints=[*graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK],
+                from_exc=exc,
+                skip_frame=True,
+            )
+        except Unsupported as new_exc:
+            new_exc.frame_exec_strategy = FrameExecStrategy(
+                FrameAction.SKIP, FrameAction.SKIP
+            )
+            raise
 
     def __init__(
         self,
