@@ -10904,40 +10904,52 @@ class InvokeSubgraph(ExternKernel):
         wrapper.codegen_invoke_subgraph(self)
 
 
+def _maybe_expr(s: int | torch.SymInt) -> int | Expr:
+    """Convert an int or SymInt to a plain int or sympy Expr for use in IR layouts."""
+    if isinstance(s, int):
+        return s
+    return s.node.expr
+
+
 @ir_dataclass(frozen=False)
-class Conditional(ExternKernel):
+class Switch(ExternKernel):
     """
-    IR node representing torch.cond
+    IR node representing torch.cond and torch.switch.
+
+    For torch.cond: ``selector`` is a boolean scalar tensor, branches contains exactly
+    two subgraphs (true branch, false branch), and is_cond=True.
+    For torch.switch: ``selector`` is an integer scalar tensor, branches contains one
+    subgraph per case, and is_cond=False.
 
     Attributes:
-        predicate: A boolean scalar tensor determining which branch to execute.
-        operands: Input tensors passed to both true and false subgraphs.
-        true_subgraph: Subgraph executed when predicate is True.
-        false_subgraph: Subgraph executed when predicate is False.
-        outputs: MultiOutput nodes representing the conditional's outputs.
+        selector: A scalar tensor selecting which branch to execute.
+        branches: Non-empty sequence of subgraphs representing the individual branches.
+        operands: Input tensors passed to the individual subgraphs.
+        is_cond: True when this node represents a torch.cond (boolean 2-branch select).
+        outputs: MultiOutput nodes representing the node's outputs.
     """
 
-    predicate: IRNode | None = None
+    selector: IRNode | None = None
+    branches: Sequence[Subgraph] | None = None
     operands: Sequence[IRNode] | None = None
-    true_subgraph: Subgraph | None = None
-    false_subgraph: Subgraph | None = None
+    is_cond: bool = False
     outputs: Sequence[MultiOutput] | None = None
 
     def __init__(
         self,
-        predicate: IRNode,
+        selector: IRNode,
+        branches: Sequence[Subgraph],
         operands: Sequence[IRNode],
-        true_subgraph: Subgraph,
-        false_subgraph: Subgraph,
         layout: MultiOutputLayout,
         unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None,
+        is_cond: bool = False,
     ) -> None:
-        self.predicate = predicate
+        self.selector = selector
+        self.branches = branches
         self.operands = operands
-        self.true_subgraph = true_subgraph
-        self.false_subgraph = false_subgraph
+        self.is_cond = is_cond
 
-        sym_args, tensor_args = _split_by_sym_type([predicate, *operands])
+        sym_args, tensor_args = _split_by_sym_type([selector, *operands])
 
         super().__init__(
             name=None,
@@ -10952,30 +10964,19 @@ class Conditional(ExternKernel):
         V.graph.register_operation(self)
 
     def get_subgraphs(self) -> list[Subgraph]:
-        subgraphs = []
-        if self.true_subgraph:
-            subgraphs.append(self.true_subgraph)
-        if self.false_subgraph:
-            subgraphs.append(self.false_subgraph)
-        return subgraphs
-
-    @staticmethod
-    def _maybe_expr(s: int | torch.SymInt) -> int | Expr:
-        if isinstance(s, int):
-            return s
-        return s.node.expr
+        return list(self.branches) if self.branches is not None else []
 
     @classmethod
     def create(
         cls,
-        predicate: TensorBox,
-        true_fn: Subgraph,
-        false_fn: Subgraph,
+        selector: TensorBox,
+        branches: list[Subgraph],
         operands: list[TensorBox],
+        is_cond: bool = False,
     ) -> list[MultiOutput]:
-        """Create a Sequence of IRNodes from a conditional statement (see .lowering.cond)"""
+        """Create a sequence of IRNodes from a switch/cond statement."""
         # pyrefly: ignore [bad-assignment]
-        predicate = cls.realize_input(predicate)
+        selector = cls.realize_input(selector)
         # pyrefly: ignore [bad-assignment]
         operands = [cls.realize_input(x) for x in operands]
         fx_operands: Argument = V.graph.current_node.args[-1]
@@ -11021,7 +11022,7 @@ class Conditional(ExternKernel):
             # pyrefly: ignore [bad-return]
             return ret
 
-        for subgraph in (true_fn, false_fn):
+        for subgraph in branches:
             if subgraph.graph is None:
                 # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(
@@ -11045,30 +11046,32 @@ class Conditional(ExternKernel):
                         subgraph.graph.graph_outputs, fake_outputs, branch_fakes
                     )
 
-        if true_fn.graph is None:
-            raise AssertionError("Expected true_fn.graph is not None")
-        if false_fn.graph is None:
-            raise AssertionError("Expected false_fn.graph is not None")
-        true_outputs = true_fn.graph.graph_outputs
-        false_outputs = false_fn.graph.graph_outputs
+        if any(branch.graph is None for branch in branches):
+            raise AssertionError("Expected all branch.graph to be not None")
 
-        for name, outputs in (("true_fn", true_outputs), ("false_fn", false_outputs)):
-            if _has_aliased_buffers(true_outputs):
+        branch_outputs = [branch.graph.graph_outputs for branch in branches]  # type: ignore[union-attr]
+
+        op_name = "torch.cond" if is_cond else "torch.switch"
+        for branch, b_outputs in zip(branches, branch_outputs):
+            if _has_aliased_buffers(b_outputs):
                 raise AssertionError(
-                    "Output aliasing is currently not supported in compiled torch.cond. "
-                    f"The outputs of the {name} subgraph of torch.cond are aliased: {outputs}"
+                    f"Output aliasing is currently not supported in compiled {op_name}. "
+                    f"The outputs of the {branch.name} subgraph of {op_name} are aliased: {b_outputs}"
                 )
 
-        # make sure true and false outputs are structurally equivalent
-        if len(true_outputs) != len(false_outputs):
-            raise AssertionError((true_outputs, false_outputs))
-        for i, (t_o, f_o) in enumerate(zip(true_outputs, false_outputs)):
-            if t_o.get_device() != f_o.get_device():
-                raise AssertionError((i, t_o, f_o))
-            if t_o.get_dtype() != f_o.get_dtype():
-                raise AssertionError((i, t_o, f_o))
-            if t_o.get_layout().offset != f_o.get_layout().offset:
-                raise AssertionError((i, t_o, f_o))
+        # All branches must produce structurally equivalent outputs (same count,
+        # device, dtype, and layout offset).
+        ref_outputs = branch_outputs[0]
+        for b_outputs in branch_outputs[1:]:
+            if len(ref_outputs) != len(b_outputs):
+                raise AssertionError((ref_outputs, b_outputs))
+            for i, (r_o, b_o) in enumerate(zip(ref_outputs, b_outputs)):
+                if r_o.get_device() != b_o.get_device():
+                    raise AssertionError((i, r_o, b_o))
+                if r_o.get_dtype() != b_o.get_dtype():
+                    raise AssertionError((i, r_o, b_o))
+                if r_o.get_layout().offset != b_o.get_layout().offset:
+                    raise AssertionError((i, r_o, b_o))
 
         # Determine device from operands and predicate
         # The predicate can be on a different device (e.g., CPU for control flow)
@@ -11076,7 +11079,7 @@ class Conditional(ExternKernel):
         # using predicate device as a fallback.
         device = next(
             o.get_device()
-            for o in operands + [predicate]
+            for o in operands + [selector]
             if not isinstance(o, ShapeAsConstantBuffer)
         )
         unbacked_bindings = resolve_unbacked_bindings(
@@ -11085,13 +11088,13 @@ class Conditional(ExternKernel):
         )
         if device is None:
             raise AssertionError("cannot determine device")
-        conditional = Conditional(
-            predicate=predicate,
+        switch = Switch(
+            selector=selector,
+            branches=branches,
             operands=operands,
-            true_subgraph=true_fn,
-            false_subgraph=false_fn,
             layout=MultiOutputLayout(device=device),
             unbacked_bindings=unbacked_bindings,
+            is_cond=is_cond,
         )
 
         outputs = [
@@ -11102,50 +11105,44 @@ class Conditional(ExternKernel):
                     if output.get_device() is not None
                     else device,  # type: ignore[arg-type]
                     dtype=output.get_dtype(),
-                    size=[Conditional._maybe_expr(sz) for sz in merged_output.size()],
-                    stride=[
-                        Conditional._maybe_expr(sz) for sz in merged_output.stride()
-                    ],
+                    size=[_maybe_expr(sz) for sz in merged_output.size()],
+                    stride=[_maybe_expr(sz) for sz in merged_output.stride()],
                     offset=output.get_layout().offset,
                     is_pinned=output.get_layout().is_pinned,
                 ),
-                conditional,
+                switch,
                 [(list, i)],
             )
             # as the true and false outputs are equivalent,
             # we can use either of them here as a "template"
             for i, (output, merged_output) in enumerate(
-                zip(true_outputs, V.graph.current_node.meta["val"])
+                zip(ref_outputs, V.graph.current_node.meta["val"])
             )
         ]
 
-        conditional.outputs = outputs  # type: ignore[assignment]
+        switch.outputs = outputs  # type: ignore[assignment]
 
         from torch._higher_order_ops.utils import (
             check_input_alias_and_mutation_return_outputs,
         )
 
-        (_, _, _, true_mutated_inputs, _) = (
-            check_input_alias_and_mutation_return_outputs(true_fn.graph_module)
-        )
-        (_, _, _, false_mutated_inputs, _) = (
-            check_input_alias_and_mutation_return_outputs(false_fn.graph_module)
-        )
-
-        mutated_operand_indices = OrderedSet(true_mutated_inputs) | OrderedSet(
-            false_mutated_inputs
-        )
+        mutated_operand_indices: OrderedSet[int] = OrderedSet()
+        for branch in branches:
+            (_, _, _, branch_mutated, _) = (
+                check_input_alias_and_mutation_return_outputs(branch.graph_module)
+            )
+            mutated_operand_indices |= OrderedSet(branch_mutated)
 
         # Create MutationOutput for each mutated operand (for scheduler dependencies)
-        conditional.mutation_outputs = [
-            MutationOutput(operands[idx].layout, operands[idx], conditional)  # type: ignore[union-attr]
+        switch.mutation_outputs = [
+            MutationOutput(operands[idx].layout, operands[idx], switch)  # type: ignore[union-attr]
             for idx in sorted(mutated_operand_indices)
         ]
 
         return outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        wrapper.codegen_conditional(self)
+        wrapper.codegen_switch(self)
         wrapper.codegen_unbacked_symbol_defs_for_outputs(
             self.get_name(), self.outputs, getattr(self, "unbacked_bindings", {})
         )
@@ -11461,8 +11458,8 @@ class WhileLoop(ExternKernel):
                     FixedLayout(
                         device=output.device,  # type: ignore[arg-type]
                         dtype=output.dtype,
-                        size=[Conditional._maybe_expr(sz) for sz in output.size()],
-                        stride=[Conditional._maybe_expr(st) for st in output.stride()],
+                        size=[_maybe_expr(sz) for sz in output.size()],
+                        stride=[_maybe_expr(st) for st in output.stride()],
                     ),
                     while_loop,
                     [(list, idx)],

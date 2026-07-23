@@ -542,16 +542,16 @@ class EnterSubgraphLine(WrapperLine):
 
 
 @dataclasses.dataclass
-class ConditionalLine(WrapperLine):
+class SwitchLine(WrapperLine):
     wrapper: PythonWrapperCodegen
-    node: ir.Conditional
+    node: ir.Switch
 
     def codegen(self, code: IndentedBuffer) -> None:
         raise NotImplementedError("Only supports FX codegen")
 
     @staticmethod
     def codegen_fx(converter: FxConverter) -> FxConversionFunc:
-        return converter._generate_conditional
+        return converter._generate_switch
 
 
 @dataclasses.dataclass
@@ -4723,38 +4723,44 @@ class PythonWrapperCodegen(CodeGen):
         else:
             self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, name)
 
-    def codegen_conditional(self, conditional) -> None:
-        name = conditional.get_name()
+    def codegen_switch(self, node) -> None:
+        name = node.get_name()
 
-        outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
+        outer_inputs = [buf.codegen_reference() for buf in node.operands]
 
-        predicate = conditional.predicate.codegen_reference()
-        if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
-            # move the Tensor predicate to host
-            predicate = f"{predicate}.item()"
-
-        self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
-        self.writeline(f"if {predicate}:")
-        self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
-        if V.graph.aot_mode:
-            outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
-            self.codegen_subgraph_by_inlining(
-                conditional.true_subgraph, outer_inputs, outer_outputs
-            )
+        selector_ref = node.selector.codegen_reference()
+        # Evaluate the selector once into a named local.
+        selector_var = f"{name}_selector"
+        if not isinstance(node.selector, ir.ShapeAsConstantBuffer):
+            # move the Tensor selector to host; always as int so the branch loop
+            # can use uniform index comparisons (cond: True==1, False==0)
+            self.writeline(f"{selector_var} = int({selector_ref}.item())")
         else:
-            self.codegen_subgraph(conditional.true_subgraph, outer_inputs, name)
+            # ShapeAsConstantBuffer yields a Python bool/int expression; wrap in
+            # int() so "== <idx>" comparisons don't form a Python chained comparison.
+            self.writeline(f"{selector_var} = int({selector_ref})")
 
-        self.writeline(ExitSubgraphLine(self))
-        self.writeline("else:")
-        self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
-        if V.graph.aot_mode:
-            outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
-            self.codegen_subgraph_by_inlining(
-                conditional.false_subgraph, outer_inputs, outer_outputs
-            )
-        else:
-            self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
-        self.writeline(ExitSubgraphLine(self))
+        self.writeline(f"{name} = [None] * {len(node.outputs)}")
+
+        def _emit_branch(keyword: str, condition: str, branch) -> None:
+            self.writeline(f"{keyword}{condition}:")
+            self.writeline(EnterSubgraphLine(self, branch.graph))
+            if V.graph.aot_mode:
+                outer_outputs = [f"{name}[{i}]" for i in range(len(node.outputs))]
+                self.codegen_subgraph_by_inlining(branch, outer_inputs, outer_outputs)
+            else:
+                self.codegen_subgraph(branch, outer_inputs, name)
+            self.writeline(ExitSubgraphLine(self))
+
+        num_branches = len(node.branches)
+        for b_idx, branch in enumerate(node.branches):
+            if b_idx == 0:
+                keyword, condition = "if", f" {selector_var} == 0"
+            elif b_idx < num_branches - 1:
+                keyword, condition = "elif", f" {selector_var} == {b_idx}"
+            else:
+                keyword, condition = "else", ""
+            _emit_branch(keyword, condition, branch)
 
     def codegen_while_loop(self, while_loop, stack_output):
         """while_loop is codegened as a host side while_loop"""

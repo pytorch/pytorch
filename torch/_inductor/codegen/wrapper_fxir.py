@@ -51,7 +51,6 @@ from .wrapper import (
     AllocateLine,
     BufferLike,
     CommentLine,
-    ConditionalLine,
     DynamicScalarLine,
     EnterDeviceContextManagerLine,
     EnterSubgraphLine,
@@ -72,6 +71,7 @@ from .wrapper import (
     ReuseLine,
     ScatterFallbackLine,
     SubgraphPythonWrapperCodegen,
+    SwitchLine,
     SymbolicCallArg,
     SymbolicCallArgLine,
     UnbackedSymbolDefsLine,
@@ -157,13 +157,13 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         Since the FX converter handles this, do nothing here.
         """
 
-    def codegen_conditional(self, conditional: ir.Conditional) -> None:
+    def codegen_switch(self, node: ir.Switch) -> None:
         """
-        Conditional codegen normally emits a number of different wrapper lines.
-        Instead, FX conversion uses a dedicated line for the whole conditional.
+        Switch/cond codegen normally emits a number of different wrapper lines.
+        Instead, FX conversion uses a dedicated line for the whole node.
         """
-        self.writeline(ConditionalLine(self, conditional))
-        for subgraph in (conditional.true_subgraph, conditional.false_subgraph):
+        self.writeline(SwitchLine(self, node))
+        for subgraph in node.branches:  # pyrefly: ignore [not-iterable]
             self.codegen_subgraph_common(subgraph)
 
     def define_subgraph_launcher_fn(
@@ -718,35 +718,43 @@ class FxConverter:
         node.name = name
         self._record_allocation(buffer, node)
 
-    def _generate_conditional(self, line: WrapperLine) -> None:
-        if not isinstance(line, ConditionalLine):
-            raise AssertionError(f"expected ConditionalLine, got {type(line)}")
+    def _generate_switch(self, line: WrapperLine) -> None:
+        if not isinstance(line, SwitchLine):
+            raise AssertionError(f"expected SwitchLine, got {type(line)}")
 
-        def get_subgm_attr(subgraph: ir.Subgraph | None) -> torch.fx.Node:
-            if subgraph is None:
-                raise AssertionError("subgraph must not be None")
-            return self._get_subgm_attr(subgraph)
-
-        # Access the subgraphs as getattrs.
         ir_node = line.node
-        (true_subgm, false_subgm) = [
-            get_subgm_attr(subgraph)
-            for subgraph in (ir_node.true_subgraph, ir_node.false_subgraph)
-        ]
+        if ir_node.branches is None:
+            raise AssertionError("ir_node.branches must not be None")
+        if ir_node.operands is None:
+            raise AssertionError("ir_node.operands must not be None")
 
         def generate_buffer(node: ir.IRNode | None) -> torch.fx.Node | None:
             if node is None:
                 raise AssertionError("node must not be None")
             return self._generate_buffer(node)
 
-        predicate = generate_buffer(ir_node.predicate)
-        if ir_node.operands is None:
-            raise AssertionError("ir_node.operands must not be None")
+        selector = generate_buffer(ir_node.selector)
         operands = tuple(generate_buffer(arg) for arg in ir_node.operands)
-        fx_node = self.gm.graph.call_function(
-            torch.ops.higher_order.cond,
-            args=(predicate, true_subgm, false_subgm, operands),
-        )
+        branch_subgms = [self._get_subgm_attr(branch) for branch in ir_node.branches]
+
+        if ir_node.is_cond:
+            # cond expects (selector, true_fn, false_fn, operands) -- branches unpacked positionally.
+            if len(branch_subgms) != 2:
+                raise AssertionError(
+                    f"cond requires exactly 2 branches, got {len(branch_subgms)}"
+                )
+            # branches are stored as [false_fn, true_fn] in ir.Switch
+            false_subgm, true_subgm = branch_subgms
+            fx_node = self.gm.graph.call_function(
+                torch.ops.higher_order.cond,
+                args=(selector, true_subgm, false_subgm, operands),
+            )
+        else:
+            # switch expects (selector, [branch_fn, ...], operands) -- branches passed as a list.
+            fx_node = self.gm.graph.call_function(
+                torch.ops.higher_order.switch,
+                args=(selector, branch_subgms, operands),
+            )
         self._record_allocation(ir_node, fx_node)
 
     def _generate_assert_size_stride(self, line: WrapperLine) -> None:
