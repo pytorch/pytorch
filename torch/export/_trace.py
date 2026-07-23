@@ -883,7 +883,11 @@ def _source_from_public_input_path(
             )
         else:
             source = LocalSource(path[0].key, is_input=True)
-        current_value = path[0].get(current_value)
+        if current_value is not _MISSING:
+            try:
+                current_value = path[0].get(current_value)
+            except (AttributeError, IndexError, KeyError, TypeError):
+                current_value = _MISSING
         path = path[1:]
     else:
         source = base_source

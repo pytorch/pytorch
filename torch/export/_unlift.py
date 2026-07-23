@@ -180,23 +180,29 @@ def _convert_guards_code_to_fn(
 
     from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
 
+    source_replacements = []
+    for idx, path in enumerate(paths_of_placeholders):
+        shadow_source = str(getattr(path[0], "key", f"args[{idx}]")) + pytree.keystr(
+            path[1:]
+        )
+        try:
+            ast.parse(shadow_source, mode="eval")
+        except (SyntaxError, ValueError):
+            shadow_source = f"args[{idx}]"
+        for source in (
+            _export_flat_arg_source_for_guard(idx),
+            "L" + pytree.keystr(path),
+        ):
+            source_replacements.append((source, f"args[{idx}]", shadow_source))
+    source_replacements.sort(key=lambda replacement: len(replacement[0]), reverse=True)
+
     actual_guards_code = []
     shadow_guards_code = []
     for c in guards_code:
         a, s = c, c
-        for idx, path in enumerate(paths_of_placeholders):
-            flat_arg_source = _export_flat_arg_source_for_guard(idx)
-            path_source = "L" + pytree.keystr(path)
-            shadow_source = str(
-                getattr(path[0], "key", f"args[{idx}]")
-            ) + pytree.keystr(path[1:])
-            try:
-                ast.parse(shadow_source, mode="eval")
-            except (SyntaxError, ValueError):
-                shadow_source = f"args[{idx}]"
-            for source in (flat_arg_source, path_source):
-                a = a.replace(source, f"args[{idx}]")
-                s = s.replace(source, shadow_source)
+        for source, actual_source, shadow_source in source_replacements:
+            a = a.replace(source, actual_source)
+            s = s.replace(source, shadow_source)
         actual_guards_code.append(a)
         shadow_guards_code.append(s.replace("\n", ""))
 

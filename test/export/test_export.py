@@ -733,6 +733,16 @@ class TestExport(TestCase):
 
         self.assertIsNotNone(guards_fn)
 
+    def test_guards_fn_replaces_longest_source_first(self):
+        from torch.export._unlift import _convert_guards_code_to_fn
+
+        paths = [
+            (pytree.MappingKey("a"),),
+            (pytree.MappingKey("a"), pytree.MappingKey("b")),
+        ]
+        guards_fn = _convert_guards_code_to_fn(["L['a']['b'].size()[0] == 3"], paths)
+        guards_fn(torch.randn(1), torch.randn(3))
+
     def _check_dynamic_shapes_specs_and_shapes(
         self,
         model,
@@ -6913,7 +6923,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 self.assertTrue(torch.allclose(m(**inputs2), epm(**inputs2)))
 
     @testing.expectedFailureRetraceability
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_dynamic_shapes_nested_kwargs_overlapping_source_names(self):
         class KwargsModel(torch.nn.Module):
             def forward(self, **kwargs):
