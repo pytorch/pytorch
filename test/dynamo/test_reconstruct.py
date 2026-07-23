@@ -3,6 +3,7 @@
 import collections
 import contextlib
 import dis
+import sys
 import unittest
 
 import torch
@@ -526,6 +527,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         res = torch.compile(create_tma, backend="eager")(x)
         self.assertEqual(ref[1].desc, res[1].desc)
 
+    @unittest.skipIf(
+        sys.version_info >= (3, 13),
+        "Tensor in TensorDescriptor not comparable in Python 3.13+",
+    )
     @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @unittest.skipIf(
         not has_triton_tensor_descriptor_host_tma(),
