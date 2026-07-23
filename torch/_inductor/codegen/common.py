@@ -1140,6 +1140,17 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             f"{type(self).__name__}: store should be handled by CSEProxy"
         )
 
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: OpVarT,
+        mask: OpVarT,
+    ) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: masked_store should be handled by CSEProxy"
+        )
+
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
@@ -2348,6 +2359,15 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> None:
         raise NotImplementedError
 
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mask: CSEVariable,
+    ) -> None:
+        raise NotImplementedError
+
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
@@ -2994,6 +3014,19 @@ class CSEProxy(DefaultHandler):
             self.kernel.store(name, index, value, mode=mode)
             self.kernel.num_store += 1
         self.kernel.record_op_trace("store", (name, index, value, mode), {})
+
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mask: CSEVariable,
+    ) -> None:
+        self.kernel.store_buffer_names.add(name)
+        self._update_store_cache(name, value)
+        if name not in V.graph.removed_buffers:
+            self.kernel.masked_store(name, index, value, mask)
+            self.kernel.num_store += 1
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)

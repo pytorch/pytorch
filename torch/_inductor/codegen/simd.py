@@ -1271,7 +1271,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         raise NotImplementedError("NYI: call_kernel")
 
     @contextlib.contextmanager
-    def mask_loads(self, mask: str | OpsWrapper, value: int | float) -> Iterator[str]:
+    def mask_loads(
+        self, mask: str | OpsWrapper | CSEVariableType, value: int | float
+    ) -> Iterator[Any]:
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
         prior_val = self._load_other
@@ -1287,6 +1289,16 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         finally:
             self._load_mask = prior
             self._load_other = prior_val
+
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariableType,
+        mask: CSEVariableType,
+    ) -> None:
+        with self.mask_loads(mask, value=0):
+            self.store(name, index, value)
 
     def get_strides_of_load(self, index: sympy.Expr) -> dict[sympy.Symbol, sympy.Expr]:
         """
