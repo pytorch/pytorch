@@ -104,9 +104,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         factor = 0.5
 
         premul_sum_op = dist.ReduceOp.PREMUL_SUM(factor)
-        input_tensor = torch.full(
-            shape, fill_value=float(rank + 1), device=device
-        )
+        input_tensor = torch.full(shape, fill_value=float(rank + 1), device=device)
         output = fcols.all_reduce(
             input_tensor, reduceOp=premul_sum_op, group=group_name
         )
@@ -826,6 +824,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
 
         for reduce_op in ["sum", "avg", "min", "max"]:
             with self.subTest(reduce_op=reduce_op):
+
                 @torch.compile(fullgraph=True)
                 def compiled_fn(tensor):
                     output = fcols.all_reduce(tensor, reduce_op, group=group_name)
@@ -833,10 +832,15 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
 
                 if reduce_op in ("min", "max"):
                     input_tensor = torch.full(
-                        shape, fill_value=float(self.rank), device=self.device, requires_grad=True
+                        shape,
+                        fill_value=float(self.rank),
+                        device=self.device,
+                        requires_grad=True,
                     )
                 else:
-                    input_tensor = torch.randn(*shape, device=self.device, requires_grad=True)
+                    input_tensor = torch.randn(
+                        *shape, device=self.device, requires_grad=True
+                    )
 
                 loss = compiled_fn(input_tensor)
                 loss.backward()
@@ -847,13 +851,23 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
                         shape, fill_value=float(self.world_size), device=self.device
                     )
                 elif reduce_op == "avg":
-                    expected_grad = torch.full(shape, fill_value=1.0, device=self.device)
+                    expected_grad = torch.full(
+                        shape, fill_value=1.0, device=self.device
+                    )
                 elif reduce_op == "min":
                     grad_val = float(self.world_size) if self.rank == 0 else 0.0
-                    expected_grad = torch.full(shape, fill_value=grad_val, device=self.device)
+                    expected_grad = torch.full(
+                        shape, fill_value=grad_val, device=self.device
+                    )
                 elif reduce_op == "max":
-                    grad_val = float(self.world_size) if self.rank == self.world_size - 1 else 0.0
-                    expected_grad = torch.full(shape, fill_value=grad_val, device=self.device)
+                    grad_val = (
+                        float(self.world_size)
+                        if self.rank == self.world_size - 1
+                        else 0.0
+                    )
+                    expected_grad = torch.full(
+                        shape, fill_value=grad_val, device=self.device
+                    )
                 self.assertEqual(input_tensor.grad, expected_grad)
 
     @with_comms

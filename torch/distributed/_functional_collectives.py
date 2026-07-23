@@ -11,6 +11,7 @@ import torch.compiler.config
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch._utils import _maybe_view_chunk_cat
+from torch.distributed import ReduceOp
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
@@ -644,24 +645,20 @@ torch.library.register_autograd(
 )
 
 
-def _is_min_max(op):
-    from torch.distributed import ReduceOp as _ReduceOp
-
-    if isinstance(op, _ReduceOp):
-        return op.op in (_ReduceOp.MIN, _ReduceOp.MAX)
+def _is_min_max(op: str | ReduceOp):
+    if isinstance(op, ReduceOp):
+        return op.op in (ReduceOp.MIN, ReduceOp.MAX)
     return op in ("min", "max")
 
 
-def _is_reduceop_supported(op):
-    from torch.distributed import ReduceOp as _ReduceOp
-
-    if isinstance(op, _ReduceOp):
+def _is_reduceop_supported(op: str | ReduceOp):
+    if isinstance(op, ReduceOp):
         return op.op in (
-            _ReduceOp.SUM,
-            _ReduceOp.AVG,
-            _ReduceOp.PREMUL_SUM,
-            _ReduceOp.MAX,
-            _ReduceOp.MIN,
+            ReduceOp.SUM,
+            ReduceOp.AVG,
+            ReduceOp.PREMUL_SUM,
+            ReduceOp.MAX,
+            ReduceOp.MIN,
         )
     return op in ("sum", "avg", "premul_sum", "max", "min")
 
@@ -670,7 +667,7 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
     reduce_op = ctx.reduce_op
     if not _is_reduceop_supported(reduce_op):
         raise RuntimeError(
-            f"all_reduce backward only supports sum-like reductions, got '{reduce_op}'"
+            f"all_reduce backward only supports `sum`, `premul_sum`, `avg`, `max`, `min` reductions, got '{reduce_op}'"
         )
     grad_reduce_op = "sum" if _is_min_max(reduce_op) else reduce_op
     output = torch.ops._c10d_functional.all_reduce(

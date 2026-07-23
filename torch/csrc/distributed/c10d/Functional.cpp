@@ -4,10 +4,10 @@
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <torch/custom_class_detail.h>
 #include <utility>
-#include <torch/csrc/distributed/c10d/Types.hpp>
 
 namespace {
 
@@ -586,8 +586,9 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "all_reduce_(Tensor(a!) input, Any reduce_op, Any group_name) -> Tensor(a!)",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          [](at::Tensor& input, const c10::IValue& reduce_op, const c10::IValue& group)
-              -> at::Tensor& {
+          [](at::Tensor& input,
+             const c10::IValue& reduce_op,
+             const c10::IValue& group) -> at::Tensor& {
             return c10d::all_reduce_(
                 input,
                 get_reduce_op(reduce_op, "all_reduce_"),
