@@ -1077,7 +1077,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation = False
         super().generate_scatter_fallback(node)
 
-    def _generate_scatter_fallback_inputs(self, inputs: Sequence[Any]) -> list[str]:
+    def _generate_scatter_fallback_args(self, inputs: Sequence[Any]) -> list[str]:
         self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
         return [
             f"borrow_arrayref_tensor_as_tensor({x})" if isinstance(x, str) else str(x)
