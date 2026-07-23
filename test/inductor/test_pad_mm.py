@@ -701,6 +701,75 @@ class PadMMTest(TestCase):
         test_masked_mha(B, H, S, D, device, dtype)
 
 
+class PadMMPolicyTest(TestCase):
+    """Tests for torch._inductor.config.pad_mm_policy (the pad_mm override hook)."""
+
+    def _count_pads(self, m, k, n, dtype=torch.float16):
+        # Compile `a @ b` in deterministic mode and count the constant_pad_nd nodes
+        # (GEMM operands pad_mm chose to pad) in the post-grad graph.
+        pad_counts = []
+
+        def count_pads(graph):
+            pad_counts.append(
+                sum(
+                    node.target is torch.ops.aten.constant_pad_nd.default
+                    for node in graph.nodes
+                )
+            )
+
+        a = torch.randn(m, k, device=GPU_TYPE, dtype=dtype)
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=dtype)
+        # Reset so each shape compiles fresh and static (avoid automatic dynamic
+        # shapes across calls, which would make dims symbolic and unpaddable).
+        torch._dynamo.reset()
+        with (
+            fresh_cache(),
+            inductor_config.patch(
+                deterministic=True, post_grad_custom_post_pass=count_pads
+            ),
+        ):
+            out = torch.compile(lambda x, y: x @ y)(a, b)
+        self.assertEqual(out, a @ b)
+        return sum(pad_counts)
+
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "GPU and Triton required")
+    def test_deterministic_pad_mm_policy_respected(self):
+        # A policy that force-pads one shape, force-skips another, and defers
+        # (returns None) for the rest. All shapes are unaligned pad candidates.
+        pad_shape = (2048, 2048, 2050)
+        skip_shape = (2048, 2048, 2054)
+        defer_shape = (2048, 2048, 2058)
+        seen = []
+
+        def policy(ctx):
+            seen.append(ctx)
+            if (ctx.m, ctx.k, ctx.n) == pad_shape:
+                return True
+            if (ctx.m, ctx.k, ctx.n) == skip_shape:
+                return False
+            return None  # defer to Inductor's built-in decision
+
+        # Install exactly the way a user would ship a policy.
+        with inductor_config.patch(pad_mm_policy=policy):
+            # True -> padded, even though deterministic mode would otherwise skip
+            # padding (it cannot benchmark to decide).
+            self.assertGreater(self._count_pads(*pad_shape), 0)
+            # False -> not padded, even though the shape is a valid pad candidate.
+            self.assertEqual(self._count_pads(*skip_shape), 0)
+            # None -> defer to the default, which does not pad in deterministic mode.
+            self.assertEqual(self._count_pads(*defer_shape), 0)
+
+        # The policy was consulted for each shape with the concrete (m, k, n)...
+        shapes_seen = {(c.m, c.k, c.n) for c in seen}
+        self.assertIn(pad_shape, shapes_seen)
+        self.assertIn(skip_shape, shapes_seen)
+        self.assertIn(defer_shape, shapes_seen)
+        # ...and the context is well-formed (unaligned N -> nonzero pad length).
+        pad_ctx = next(c for c in seen if (c.m, c.k, c.n) == pad_shape)
+        self.assertEqual(pad_ctx.op, "mm")
+        self.assertGreater(pad_ctx.n_padded_length, 0)
+
+
 if __name__ == "__main__":
     if HAS_GPU_AND_TRITON:
         run_tests()

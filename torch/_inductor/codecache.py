@@ -1146,6 +1146,13 @@ class CacheabilityValidator:
         for p in config._fuse_ddp_communication_passes:
             if callable(p) and not isinstance(p, CustomGraphPass):
                 self.bypass("Unsupported _fuse_ddp_communication_pass")
+        # pad_mm_policy must be a PadMMPolicy with a uuid() to be cacheable; a raw
+        # callable cannot be identified in the cache key.
+        if config.pad_mm_policy is not None and (
+            not isinstance(config.pad_mm_policy, CustomPassBase)
+            or not config.pad_mm_policy.uuid()
+        ):
+            self.bypass("Unsupported pad_mm_policy")
 
     def _check_nested_region_inductor_config_patches(self) -> None:
         # Nested region config patches are hashed by pickling their raw value
@@ -1669,6 +1676,7 @@ class FxGraphHashDetails:
         self._fuse_ddp_communication_passes = self._get_custom_pass_detail_unsafe(
             config._fuse_ddp_communication_passes
         )
+        self.pad_mm_policy = self._get_custom_pass_detail_unsafe(config.pad_mm_policy)
 
         # Register inductor backends and custom passes and get their UUIDs.
         init_backend_registration()
