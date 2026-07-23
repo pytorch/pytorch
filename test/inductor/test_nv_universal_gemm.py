@@ -897,6 +897,19 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "pointwise op was NOT fused into epilogue")
 
+    def test_matmul_multi_store_epilogue_fusion(self):
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = (a @ b).float()
+            return torch.relu(result), result + 1.0
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused)
+        self.assertIn("out_ptr1", code)
+
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one
         ComputedBuffer and is fused as a single epilogue."""
