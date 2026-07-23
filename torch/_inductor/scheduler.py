@@ -3249,8 +3249,8 @@ class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
         """
         Fuse a user-defined Triton kernel with an epilogue node.
 
-        When speculative=True, skip commit-time scheduler mutations; the
-        accepted fusion path applies them later via commit_epilogue_fusion().
+        When speculative=True, skip persistent scheduler mutations. This is used
+        only for analysis-only fusion candidates that may be discarded.
         """
         if not isinstance(node1.node, ir.UserDefinedTritonKernel):
             raise AssertionError(
@@ -6168,7 +6168,6 @@ class Scheduler:
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         fused_nodes: OrderedSet[BaseSchedulerNode],
-        prebuilt_fused_node: BaseSchedulerNode | None = None,
     ) -> BaseSchedulerNode:
         fusion_log.debug("fusing %s with %s", node1.get_name(), node2.get_name())
 
@@ -6177,14 +6176,7 @@ class Scheduler:
             raise AssertionError(
                 f"expected node2 device to be {device}, got {node2.get_device()}"
             )
-        # prebuilt_fused_node: fused node the memory-timeline guard already built
-        # while simulating this fusion; reuse it to avoid fusing the pair twice.
-        backend = self.get_backend(device)
-        fused = prebuilt_fused_node
-        if fused is None:
-            fused = backend.fuse(node1, node2)
-        else:
-            backend.commit_fusion(node1, node2, fused)
+        fused = self.get_backend(device).fuse(node1, node2)
         fused_nodes.remove(node1)
         fused_nodes.remove(node2)
         fused_nodes.add(fused)
@@ -6207,12 +6199,7 @@ class Scheduler:
         if rejected:
             return None
 
-        fused = self.fuse_two_nodes(
-            node1,
-            node2,
-            fused_nodes,
-            memory_update.candidate if memory_update is not None else None,
-        )
+        fused = self.fuse_two_nodes(node1, node2, fused_nodes)
         if ctx is not None and memory_update is not None:
             ctx.apply_accepted_fusion(memory_update, fused)
         return fused
@@ -10768,10 +10755,9 @@ class BaseScheduling:  # noqa: docstring_linter
 
         Args:
             speculative: If True, build a candidate for analysis only. Fusion
-                implementations must not mutate persistent scheduler state until
-                the caller accepts the candidate via commit_fusion(). The default
-                False is the normal committed fusion path and may apply those
-                side effects immediately.
+                implementations must not mutate persistent scheduler state. The
+                default False is the normal fusion path and may apply those side
+                effects immediately.
         """
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.fuse(node1, node2)
@@ -10797,20 +10783,6 @@ class BaseScheduling:  # noqa: docstring_linter
             )
         else:
             return FusedSchedulerNode.fuse(node1, node2)
-
-    def commit_fusion(
-        self,
-        node1: BaseSchedulerNode,
-        node2: BaseSchedulerNode,
-        fused: BaseSchedulerNode,
-    ) -> None:
-        """
-        Apply commit-time side effects for a candidate built with speculative=True.
-        """
-        if isinstance(fused, FusedExternTritonKernelSchedulerNode):
-            FusedExternTritonKernelSchedulerNode.commit_epilogue_fusion(
-                fused.kernel_node
-            )
 
     def group_fn(
         self, sizes: Sequence[Sequence[sympy.Expr]]

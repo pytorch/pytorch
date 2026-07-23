@@ -526,11 +526,16 @@ def estimate_region_peak_memory(
     each node: alloc = sum of `size_alloc` over its outputs; free =
     sum of `size_free` over `pred_buffers` whose proposed last
     consumer is this node. Then accumulates per step starting from
-    `cur_memory` (live bytes at the window boundary) and returns the peak
-    plus optional live-before/live-after vectors for the simulated region.
+    `cur_memory` (live bytes at the window boundary) and returns the maximum
+    live bytes.
+
     Candidate overrides in `last_use_step_cache` take precedence over
     context-wide `known_last_use_steps`. If `max_peak` is exceeded, returns
     immediately with empty live-memory vectors.
+
+    If `return_live_memory` is True, also returns live-before/live-after vectors
+    for the simulated region. If False, returns empty live-memory vectors after
+    computing the peak.
     """
     R = region_end - region_start + 1
     allocs = [0] * R

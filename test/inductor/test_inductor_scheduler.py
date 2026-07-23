@@ -198,7 +198,7 @@ class TestScheduler(TestCase):
             )
         epilogue_fuse.assert_called_once_with(node1, node2, speculative=True)
 
-    def test_fuse_two_nodes_commits_prebuilt_candidate(self):
+    def test_fuse_two_nodes_builds_fusion(self):
         scheduler = object.__new__(Scheduler)
         backend = Mock()
         scheduler.get_backend = Mock(return_value=backend)
@@ -215,16 +215,15 @@ class TestScheduler(TestCase):
         node2.get_nodes.return_value = [node2]
         fused = Mock()
         fused.get_nodes.return_value = [node1, node2]
+        backend.fuse.return_value = fused
         fused_nodes = OrderedSet([node1, node2])
         scheduler.node_to_stream = {node1: 0}
 
         self.assertIs(
-            Scheduler.fuse_two_nodes(
-                scheduler, node1, node2, fused_nodes, prebuilt_fused_node=fused
-            ),
+            Scheduler.fuse_two_nodes(scheduler, node1, node2, fused_nodes),
             fused,
         )
-        backend.commit_fusion.assert_called_once_with(node1, node2, fused)
+        backend.fuse.assert_called_once_with(node1, node2)
 
     def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
         snode = Mock()
