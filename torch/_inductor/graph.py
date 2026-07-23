@@ -507,6 +507,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.torchbind_constants: dict[
             str, torch._C.ScriptObject | FakeScriptObject
         ] = {}
+        self.torchbind_replay_objects: dict[
+            str, torch._C.ScriptObject | FakeScriptObject
+        ] = {}
         self.opaque_value_type_classes: dict[str, type] = {}
         self.seen_subgraphs: dict[str, ir.Subgraph] = {}
         self.constant_reprs: dict[str, str] = {}
@@ -1587,7 +1590,15 @@ class GraphLowering(torch.fx.Interpreter):
             if target in self.seen_subgraphs:
                 return self.seen_subgraphs[target]
 
-            out = ir.Subgraph(name=target, graph_module=value)
+            nested_config = getattr(value, "meta", {}).get("nested_region_config")
+            inductor_config_patches = getattr(
+                nested_config, "inductor_config_patches", None
+            )
+            out = ir.Subgraph(
+                name=target,
+                graph_module=value,
+                inductor_config_patches=inductor_config_patches,
+            )
             self.seen_subgraphs[target] = out
             return out
 

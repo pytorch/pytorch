@@ -2302,9 +2302,7 @@ class SkipFunctionVariable(VariableTracker):
             guard_on_source = source
             guard_on_value = value
 
-            while inspect.getattr_static(
-                guard_on_value, "_torchdynamo_orig_callable", False
-            ):
+            while getattr(guard_on_value, "_torchdynamo_orig_callable", False):
                 guard_on_value = guard_on_value._torchdynamo_orig_callable
                 guard_on_source = AttrSource(
                     guard_on_source, "_torchdynamo_orig_callable"
@@ -2354,7 +2352,29 @@ class SkipFunctionVariable(VariableTracker):
             )
             return VariableTracker.build(tx, result)
 
-        if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+        def unimplemented_direct_disable_call(api_name: str) -> Never:
+            # The registry linter keys off this helper name and records concrete
+            # entries from the call sites below. Use an alias here so the
+            # parameterized helper body is not recorded as a generic
+            # `{api_name}` entry.
+            _unimplemented = unimplemented
+            _unimplemented(
+                gb_type=f"Call to `{api_name}()`",
+                context=f"Called `{api_name}()` with args `{args}`, kwargs `{kwargs}`",
+                explanation=f"`{api_name}()` was called inside a compiled region. "
+                "This API disables compilation when used as a decorator or wrapper "
+                "outside the compiled region.",
+                hints=[
+                    f"Move the `{api_name}()` call outside the compiled function and apply it to the function that should run eagerly.",
+                    "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.",
+                ],
+            )
+
+        if self.value is torch._dynamo.disable:
+            unimplemented_direct_disable_call("torch._dynamo.disable")
+        elif self.value is torch.compiler.disable:
+            unimplemented_direct_disable_call("torch.compiler.disable")
+        elif inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented(
                 gb_type="Skip calling `torch.compiler.disable()`d function",
@@ -2664,11 +2684,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         # (the wrapper's original callable matches the root frame's code).
         is_inner_torch_compile = (
             self.attr_to_trace == "_torchdynamo_inline"
-            and inspect.getattr_static(self.wrapper_obj, "_is_torch_compile", False)
+            and getattr(self.wrapper_obj, "_is_torch_compile", False)
             and getattr(
-                inspect.getattr_static(
-                    self.wrapper_obj, "_torchdynamo_orig_callable", None
-                ),
+                getattr(self.wrapper_obj, "_torchdynamo_orig_callable", None),
                 "__code__",
                 None,
             )
@@ -2689,7 +2707,10 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         )
 
     def get_real_python_backed_value(self) -> object:
-        return getattr(self.wrapper_obj, self.attr_to_trace)
+        # This VT stands for the wrapper, which is also what self.source
+        # denotes. The inline target is reached via attr_to_trace and is a
+        # different object.
+        return self.wrapper_obj
 
 
 class WrapperUserMethodVariable(WrapperUserFunctionVariable):
