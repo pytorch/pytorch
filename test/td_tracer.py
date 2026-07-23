@@ -27,12 +27,18 @@ if TYPE_CHECKING:
 TD_TRACER_OPTION_NAME = "td_tracer"
 TD_TRACER_RUN_ID_ENV = "PYTORCH_TD_TRACER_RUN_ID"
 TD_TRACER_CURRENT_TEST_ENV = "PYTORCH_TD_TRACER_CURRENT_TEST"
+TD_TRACER_DEFER_MERGE_ENV = "PYTORCH_TD_TRACER_DEFER_MERGE"
 
 _SCHEMA_VERSION = 4
 _TOOL_ID = 4
 _WORKER_OUTPUT_KEY = "td_tracer_fragment"
 _WORKER_RUN_ID_KEY = "td_tracer_run_id"
 _WORKER_PARTICIPANT_ID_KEY = "td_tracer_participant_id"
+_OUTER_FAILURE_MARKER = "outer-failure"
+_SUCCESSFUL_EXIT_CODES = {
+    int(pytest.ExitCode.OK),
+    int(pytest.ExitCode.NO_TESTS_COLLECTED),
+}
 
 
 def td_tracer_arguments(parser: Parser) -> None:
@@ -88,66 +94,89 @@ def _load_fragment(path: Path, run_id: str) -> dict[str, Any]:
     return fragment
 
 
+def _merge_td_tracer_fragments_locked(output_path: Path, run_id: str) -> dict[str, Any]:
+    fragment_dir = _run_dir(output_path, run_id)
+    fragments = [
+        _load_fragment(path, run_id) for path in sorted(fragment_dir.glob("*.json"))
+    ]
+    running = sorted(path.stem for path in fragment_dir.glob("*.running"))
+    outer_failed = (fragment_dir / _OUTER_FAILURE_MARKER).exists()
+
+    coverage_by_test: dict[str, set[str]] = collections.defaultdict(set)
+    environments: dict[str, dict[str, Any]] = {}
+    revisions: set[str] = set()
+    participants = []
+
+    for fragment in fragments:
+        for test, paths in fragment["coverage_by_test"].items():
+            coverage_by_test[test].update(paths)
+        environment = fragment["environment"]
+        environments[json.dumps(environment, sort_keys=True)] = environment
+        if environment["revision"] is not None:
+            revisions.add(environment["revision"])
+        participants.append(
+            {
+                "complete": fragment["complete"],
+                "exit_status": fragment["exit_status"],
+                "participant_id": fragment["participant_id"],
+                "pid": fragment["pid"],
+                "session_id": fragment["session_id"],
+                "worker_id": fragment["worker_id"],
+            }
+        )
+
+    complete = (
+        bool(fragments)
+        and not running
+        and not outer_failed
+        and len(revisions) <= 1
+        and all(fragment["complete"] for fragment in fragments)
+    )
+    successful = (
+        bool(fragments)
+        and not outer_failed
+        and all(
+            fragment["exit_status"] in _SUCCESSFUL_EXIT_CODES for fragment in fragments
+        )
+    )
+    merged = {
+        "schema_version": _SCHEMA_VERSION,
+        "run_id": run_id,
+        "complete": complete,
+        "successful": successful,
+        "usable": complete and successful,
+        "running_participants": running,
+        "participants": sorted(
+            participants, key=lambda participant: participant["participant_id"]
+        ),
+        "environments": [environments[key] for key in sorted(environments)],
+        "coverage_by_test": {
+            test: sorted(paths) for test, paths in sorted(coverage_by_test.items())
+        },
+    }
+    _atomic_write_json(output_path, merged)
+    return merged
+
+
 def merge_td_tracer_fragments(
     output_path: str | os.PathLike[str], run_id: str
 ) -> dict[str, Any]:
     output_path = Path(output_path).resolve()
-    fragment_dir = _run_dir(output_path, run_id)
     with FileLock(f"{output_path}.lock"):
-        fragments = [
-            _load_fragment(path, run_id) for path in sorted(fragment_dir.glob("*.json"))
-        ]
-        running = sorted(path.stem for path in fragment_dir.glob("*.running"))
+        return _merge_td_tracer_fragments_locked(output_path, run_id)
 
-        coverage_by_test: dict[str, set[str]] = collections.defaultdict(set)
-        environments: dict[str, dict[str, Any]] = {}
-        revisions: set[str] = set()
-        participants = []
 
-        for fragment in fragments:
-            for test, paths in fragment["coverage_by_test"].items():
-                coverage_by_test[test].update(paths)
-            environment = fragment["environment"]
-            environments[json.dumps(environment, sort_keys=True)] = environment
-            if environment["revision"] is not None:
-                revisions.add(environment["revision"])
-            participants.append(
-                {
-                    "complete": fragment["complete"],
-                    "exit_status": fragment["exit_status"],
-                    "participant_id": fragment["participant_id"],
-                    "pid": fragment["pid"],
-                    "session_id": fragment["session_id"],
-                    "worker_id": fragment["worker_id"],
-                }
+def finalize_td_tracer(
+    output_path: str | os.PathLike[str], run_id: str, test_successful: bool
+) -> dict[str, Any]:
+    output_path = Path(output_path).resolve()
+    with FileLock(f"{output_path}.lock"):
+        if not test_successful:
+            _atomic_write_json(
+                _run_dir(output_path, run_id) / _OUTER_FAILURE_MARKER,
+                {"schema_version": _SCHEMA_VERSION, "run_id": run_id},
             )
-
-        complete = (
-            bool(fragments)
-            and not running
-            and len(revisions) <= 1
-            and all(fragment["complete"] for fragment in fragments)
-        )
-        successful = bool(fragments) and all(
-            fragment["exit_status"] == int(pytest.ExitCode.OK) for fragment in fragments
-        )
-        merged = {
-            "schema_version": _SCHEMA_VERSION,
-            "run_id": run_id,
-            "complete": complete,
-            "successful": successful,
-            "usable": complete and successful,
-            "running_participants": running,
-            "participants": sorted(
-                participants, key=lambda participant: participant["participant_id"]
-            ),
-            "environments": [environments[key] for key in sorted(environments)],
-            "coverage_by_test": {
-                test: sorted(paths) for test, paths in sorted(coverage_by_test.items())
-            },
-        }
-        _atomic_write_json(output_path, merged)
-        return merged
+        return _merge_td_tracer_fragments_locked(output_path, run_id)
 
 
 class TDTracer:
@@ -161,16 +190,20 @@ class TDTracer:
 
         self._config = config
         self._out_path = Path(config.getoption(TD_TRACER_OPTION_NAME)).resolve()
+        self._defer_merge = os.environ.get(TD_TRACER_DEFER_MERGE_ENV) == "1"
         self._torch_dir = Path(torch_spec.origin).resolve().parent
         self._repo_root = self._torch_dir.parent
         self._python_roots = (self._torch_dir,)
         self._code_paths: dict[CodeType, str | None] = {}
         self._current_test: str | None = None
+        self._parent_test = os.environ.get(TD_TRACER_CURRENT_TEST_ENV)
         self._collection_target: Path | None = None
         self._collecting = False
         self._shared_collection_coverage: set[str] = set()
         self._collection_coverage: dict[Path, set[str]] = collections.defaultdict(set)
         self._coverage_by_test: dict[str, set[str]] = collections.defaultdict(set)
+        if self._parent_test is not None:
+            self._coverage_by_test.setdefault(self._parent_test, set())
         self._fixture_coverage: dict[object, set[str]] = collections.defaultdict(set)
         self._fixture_consumers: dict[object, set[str]] = collections.defaultdict(set)
         self._active_fixture_setups: list[object] = []
@@ -230,7 +263,11 @@ class TDTracer:
                 "state": "running",
             },
         )
-        merge_td_tracer_fragments(self._out_path, self._run_id)
+        self._merge_fragments()
+
+    def _merge_fragments(self) -> None:
+        if not self._defer_merge:
+            merge_td_tracer_fragments(self._out_path, self._run_id)
 
     def _release_tool(self) -> None:
         try:
@@ -411,7 +448,7 @@ class TDTracer:
                 "state": "running",
             },
         )
-        merge_td_tracer_fragments(self._out_path, self._run_id)
+        self._merge_fragments()
 
     @pytest.hookimpl(optionalhook=True)
     def pytest_testnodedown(self, node, error) -> None:
@@ -421,7 +458,7 @@ class TDTracer:
         participant_id = fragment["participant_id"]
         _atomic_write_json(self._fragment_dir / f"{participant_id}.json", fragment)
         (self._fragment_dir / f"{participant_id}.running").unlink(missing_ok=True)
-        merge_td_tracer_fragments(self._out_path, self._run_id)
+        self._merge_fragments()
 
     def pytest_sessionfinish(self, session, exitstatus):
         self._apply_shared_coverage()
@@ -432,7 +469,7 @@ class TDTracer:
 
         _atomic_write_json(self._fragment_path, fragment)
         self._running_path.unlink(missing_ok=True)
-        merge_td_tracer_fragments(self._out_path, self._run_id)
+        self._merge_fragments()
 
     def pytest_unconfigure(self, config: Config) -> None:
         self._release_tool()
@@ -456,6 +493,8 @@ class TDTracer:
                 destinations.append(self._collection_coverage[self._collection_target])
             elif self._collecting and self._current_test is None:
                 destinations.append(self._shared_collection_coverage)
+        if self._parent_test is not None:
+            destinations.append(self._coverage_by_test[self._parent_test])
 
         added = False
         for destination in destinations:

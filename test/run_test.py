@@ -741,6 +741,39 @@ def extend_python_path(install_directories):
         os.environ["PYTHONPATH"] = python_path
 
 
+def _td_tracer_pytest_args(options) -> list[str]:
+    tracer_args = []
+    args = iter(options.additional_args)
+    for arg in args:
+        if arg == "--td-tracer":
+            tracer_args.extend((arg, next(args, "")))
+        elif arg.startswith("--td-tracer="):
+            tracer_args.append(arg)
+    return tracer_args
+
+
+def _run_custom_pytest(command, test_directory, options, env) -> int:
+    output_path = env.get("PYTORCH_TD_TRACER_OUTPUT")
+    run_id = env.get("PYTORCH_TD_TRACER_RUN_ID")
+    fragment_dir = None
+    before = set()
+    if output_path and run_id:
+        fragment_dir = Path(f"{Path(output_path).resolve()}.td-tracer.d") / run_id
+        before = set(fragment_dir.glob("*.json"))
+
+    return_code = shell(
+        [*command, *_td_tracer_pytest_args(options)],
+        cwd=test_directory,
+        env=env,
+    )
+    if return_code == 0 and fragment_dir is not None:
+        after = set(fragment_dir.glob("*.json"))
+        if after == before:
+            print_to_stderr("TD tracer subprocess produced no fragment")
+            return 1
+    return return_code
+
+
 def try_set_cpp_stack_traces(env, command, set=True):
     # Print full c++ stack traces during retries
     env = env or {}
@@ -974,14 +1007,14 @@ def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
 
 
 def test_autoload_enable(test_module, test_directory, options):
-    return _test_autoload(test_directory, options, enable=True)
+    return _test_autoload(test_module, test_directory, options, enable=True)
 
 
 def test_autoload_disable(test_module, test_directory, options):
-    return _test_autoload(test_directory, options, enable=False)
+    return _test_autoload(test_module, test_directory, options, enable=False)
 
 
-def _test_autoload(test_directory, options, enable=True):
+def _test_autoload(test_module, test_directory, options, enable=True):
     cpp_extensions_test_dir = os.path.join(test_directory, "cpp_extensions")
     install_directory, return_code = install_cpp_extensions(cpp_extensions_test_dir)
     if return_code != 0:
@@ -990,6 +1023,17 @@ def _test_autoload(test_directory, options, enable=True):
     try:
         os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(int(enable))
         with extend_python_path([install_directory]):
+            if getattr(options, "td_tracer_enabled", False):
+                from td_tracer import TD_TRACER_CURRENT_TEST_ENV
+
+                env = os.environ.copy()
+                env[TD_TRACER_CURRENT_TEST_ENV] = test_module.name
+                return _run_custom_pytest(
+                    [sys.executable, "-m", "pytest", "-q", "test_autoload.py"],
+                    test_directory,
+                    options,
+                    env,
+                )
             cmd = [sys.executable, "test_autoload.py"]
             return_code = shell(cmd, cwd=test_directory, env=os.environ)
             return return_code
@@ -1019,14 +1063,26 @@ def test_openreg(test_module, test_directory, options):
         if return_code != 0:
             return return_code
 
+    tests_dir = os.path.join(openreg_dir, "tests")
     with extend_python_path([install_dir]):
+        if getattr(options, "td_tracer_enabled", False):
+            from td_tracer import TD_TRACER_CURRENT_TEST_ENV
+
+            env = os.environ.copy()
+            env[TD_TRACER_CURRENT_TEST_ENV] = test_module.name
+            return _run_custom_pytest(
+                [sys.executable, "-m", "pytest", "-q", tests_dir],
+                test_directory,
+                options,
+                env,
+            )
         cmd = [
             sys.executable,
             "-m",
             "unittest",
             "discover",
             "-s",
-            os.path.join(openreg_dir, "tests"),
+            tests_dir,
             "-v",
         ]
         return shell(cmd, cwd=test_directory, env=os.environ)
@@ -1116,6 +1172,15 @@ def run_doctests(test_module, test_directory, options):
     xdoctest runner on the torch library itself.
     """
     import xdoctest
+
+    if (
+        getattr(options, "td_tracer_enabled", False)
+        and options.xdoctest_command != "all"
+    ):
+        print_to_stderr(
+            "--xdoctest-command only supports 'all' when TD tracing is enabled"
+        )
+        return 1
 
     pkgpath = Path(torch.__file__).parent
 
@@ -1229,6 +1294,32 @@ def run_doctests(test_module, test_directory, options):
         "options": "+IGNORE_WHITESPACE",
     }
     xdoctest_verbose = max(1, options.verbose)
+    if getattr(options, "td_tracer_enabled", False):
+        from td_tracer import TD_TRACER_CURRENT_TEST_ENV
+
+        command = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "conftest",
+            "--noconftest",
+            pkgpath,
+            "--xdoctest-modules",
+            "--xdoctest-analysis=static",
+            "--xdoctest-style=google",
+            "--xdoctest-options=+IGNORE_WHITESPACE",
+            f"--xdoctest-verbose={xdoctest_verbose}",
+            "--xdoctest-global-exec",
+            xdoctest_config["global_exec"],
+        ]
+        for excluded_module in exclude_module_list:
+            relative_path = excluded_module.removeprefix("torch.").removesuffix(".*")
+            command.extend(("--ignore", os.path.join(pkgpath, relative_path)))
+        env = os.environ.copy()
+        env[TD_TRACER_CURRENT_TEST_ENV] = "doctests"
+        return _run_custom_pytest(command, test_directory, options, env)
+
     run_summary = xdoctest.runner.doctest_module(
         os.fspath(pkgpath),
         config=xdoctest_config,
@@ -2226,10 +2317,23 @@ def main():
     check_pip_packages()
 
     options = parse_args()
-    options.additional_args.append(f"--td-tracer={REPO_ROOT / 'td_result.json'}")
-    from td_tracer import ensure_td_tracer_run_id
+    td_tracer_output = os.environ.get("PYTORCH_TD_TRACER_OUTPUT")
+    td_tracer_requested = any(
+        arg == "--td-tracer" or arg.startswith("--td-tracer=")
+        for arg in options.additional_args
+    )
+    if td_tracer_output and not td_tracer_requested:
+        output_path = Path(td_tracer_output)
+        if not output_path.is_absolute():
+            output_path = REPO_ROOT / output_path
+        options.additional_args.append(f"--td-tracer={output_path}")
+    if td_tracer_output or td_tracer_requested:
+        from td_tracer import ensure_td_tracer_run_id
 
-    ensure_td_tracer_run_id()
+        ensure_td_tracer_run_id()
+    options.td_tracer_enabled = bool(td_tracer_output or td_tracer_requested)
+    if options.td_tracer_enabled:
+        options.exclude.append("test_ci_sanity_check_fail")
     tests_to_include_env = os.environ.get("TESTS_TO_INCLUDE", "").strip()
     if tests_to_include_env:
         # Parse env var tests to module names (strips .py suffix and ::method)
