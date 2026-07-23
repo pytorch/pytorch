@@ -1591,8 +1591,9 @@ class AbstractLargeCommTest:
         self.assertIn(rank, ranks_in)
         self.assertNotIn(rank, ranks_out)
 
-        self.assertIsNone(
-            dist.new_group(ranks=ranks_out, use_local_synchronization=True)
+        self.assertIs(
+            dist.new_group(ranks=ranks_out, use_local_synchronization=True),
+            dist.GroupMember.NON_GROUP_MEMBER,
         )
 
         new_pg = dist.new_group(ranks=ranks_in, use_local_synchronization=True)
