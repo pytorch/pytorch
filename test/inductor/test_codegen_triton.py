@@ -42,6 +42,27 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
 
+if has_triton_package():
+    import triton
+    import triton.language as tl
+
+    @triton.jit(
+        noinline=True,
+        debug=True,
+        do_not_specialize=["x"],
+    )
+    def noinline_helper_for_codegen(x):
+        return x + 1
+
+    @triton.jit
+    def root_for_noinline_helper(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = noinline_helper_for_codegen(tl.load(x + offsets, mask=mask))
+        tl.store(out + offsets, values, mask=mask)
+
+
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -648,6 +669,22 @@ class TestCodegenTriton(InductorTestCase):
         _, code = run_and_get_code(torch.compile(fn), x, y)
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_preserves_jit_decorator(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        source = user_defined_triton_kernel_transitive_closure_source_code(
+            root_for_noinline_helper
+        )
+        decorator_idx = source.index("@triton.jit(")
+        helper_idx = source.index("def noinline_helper_for_codegen")
+        self.assertLess(decorator_idx, helper_idx)
+        self.assertIn("noinline=True", source)
+        self.assertIn("debug=True", source)
+        self.assertIn('do_not_specialize=["x"]', source)
 
     def test_imports_for_benchmark_kernel_multiline_get_raw_stream(self):
         # Regression: a backend whose import_get_raw_stream_as returns a
