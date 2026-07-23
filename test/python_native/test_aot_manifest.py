@@ -5,7 +5,7 @@
     JIT-coverage checks (the router consults coverage once per call)
   * the native-AOT Context switch (set_aot_enabled/aot_enabled) and
     its integration with python_native.<dsl>.disabled()
-  * _load_native_aot_lib() search order and opt-out
+  * _native_aot_embedded() detection and the env opt-out
 
 None of these need the AOT kernel library or a GPU; tensors are CPU
 where a tensor is needed at all.
@@ -271,13 +271,19 @@ class TestAotContextSwitch(TestCase):
         self.assertTrue(_native.aot_enabled())
 
 
-class TestEmbedLibLoad(TestCase):
-    def test_disable_env_var(self):
-        # Subprocess: with the opt-out set, the loader must return None.
+class TestEmbedDetection(TestCase):
+    def test_disable_env_var_flips_context_switch(self):
+        # Subprocess: on an embedded build the opt-out masks the kernels
+        # by flipping the Context switch; gated coverage then declines,
+        # so covered calls keep their JIT route. On a build without
+        # artifacts the switch stays on (nothing to mask).
         code = (
             "import torch\n"
-            "from torch._native import _load_native_aot_lib\n"
-            "assert _load_native_aot_lib() is None\n"
+            "from torch._native import _native_aot_embedded, aot_enabled\n"
+            "if _native_aot_embedded():\n"
+            "    assert not aot_enabled()\n"
+            "else:\n"
+            "    assert aot_enabled()\n"
             "print('OPT_OUT_OK')\n"
         )
         env = dict(os.environ, TORCH_DISABLE_NATIVE_AOT="1")
@@ -290,33 +296,6 @@ class TestEmbedLibLoad(TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("OPT_OUT_OK", proc.stdout)
-
-    def test_env_override_takes_priority_and_bad_lib_warns(self):
-        # A path that exists but is not a loadable .so: loader must warn
-        # and return None rather than raise.
-        code = (
-            "import warnings, torch\n"
-            "from torch._native import _load_native_aot_lib\n"
-            "_load_native_aot_lib.cache_clear()\n"
-            "with warnings.catch_warnings(record=True) as w:\n"
-            "    warnings.simplefilter('always')\n"
-            "    assert _load_native_aot_lib() is None\n"
-            "assert any('Failed to load native-AOT library' in str(x.message) for x in w), [str(x.message) for x in w]\n"
-            "print('BAD_LIB_OK')\n"
-        )
-        with tempfile.NamedTemporaryFile(suffix=".so") as bad:
-            bad.write(b"not an elf")
-            bad.flush()
-            env = dict(os.environ, TORCH_NATIVE_AOT_LIB=bad.name)
-            proc = subprocess.run(
-                [sys.executable, "-c", code],
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=600,
-            )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("BAD_LIB_OK", proc.stdout)
 
     def test_import_does_not_initialize_cuda(self):
         if not torch.cuda.is_available():

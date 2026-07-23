@@ -62,42 +62,34 @@ with warnings.catch_warnings():
 
 
 @cache
-def _load_native_aot_lib() -> str | None:
-    """Load the native-AOT kernel library, if present.
+def _native_aot_embedded() -> bool:
+    """True iff this libtorch_cuda was linked with AOT kernel artifacts.
 
-    The library's static initializers register kernels on the
-    at::native DispatchStubs in the generated NativeAotStubs.h; without
-    it the stubs have no kernel and the generated wrappers run the
-    stock impls. Loading must not initialize CUDA: kernel cubins load
-    lazily on first use.
+    The artifacts' static initializers registered the stub kernels and
+    the _native_aot covers custom ops at load time (every shipped
+    artifact set registers at least one covers op -- the in-process
+    marker probed here). A build whose stage 2 never ran has no
+    artifacts, no registrations, and the generated wrapper stubs fall
+    through to the stock impls. Nothing here initializes CUDA: kernel
+    cubins load lazily on first use.
 
-    Search order: $TORCH_NATIVE_AOT_LIB, torch/lib (installed),
-    build/native_aot (development). Returns the loaded path or None.
+    TORCH_DISABLE_NATIVE_AOT=1 masks the kernels by flipping the
+    Context switch every stub consultation checks; gated coverage then
+    declines, so covered calls keep their JIT route.
     """
-    if os.getenv("TORCH_DISABLE_NATIVE_AOT") == "1":
-        return None
-    torch_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    name = "libtorch_native_aot_cuda.so"
-    candidates = [
-        os.getenv("TORCH_NATIVE_AOT_LIB"),
-        os.path.join(torch_dir, "lib", name),
-        os.path.join(os.path.dirname(torch_dir), "build", "native_aot", name),
-    ]
-    for path in candidates:
-        if path and os.path.exists(path):
-            try:
-                # Registers the lib in torch.ops.loaded_libraries as well
-                # as dlopen-ing it (static initializers do the stub
-                # registration; there are no TORCH_LIBRARY defs inside).
-                torch.ops.load_library(path)
-            except OSError as e:
-                warnings.warn(f"Failed to load native-AOT library {path}: {e}")
-                return None
-            return path
-    return None
+    try:
+        embedded = any(
+            schema.name.startswith("_native_aot::")
+            for schema in torch._C._jit_get_all_schemas()
+        )
+    except Exception:
+        embedded = False
+    if embedded and os.getenv("TORCH_DISABLE_NATIVE_AOT") == "1":
+        torch._C._set_native_aot_enabled(False)
+    return embedded
 
 
-_load_native_aot_lib()
+_native_aot_embedded()
 
 
 def set_aot_enabled(enabled: bool) -> None:
