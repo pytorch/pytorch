@@ -10,6 +10,7 @@ common_cuda.py) so that existing import sites need not change.
 import contextlib
 import functools
 import inspect
+import threading
 
 import torch
 
@@ -19,25 +20,47 @@ import torch
 # ---------------------------------------------------------------------------
 
 
+_tf32_off_lock = threading.Lock()
+_tf32_off_depth = 0
+_tf32_off_saved_precision = None
+_tf32_off_cudnn_ctx = None
+
+
 @contextlib.contextmanager
 def tf32_off():
     """Context manager that disables TF32 for both CUDA (cuBLAS/cuDNN) and
     XPU (oneDNN/mkldnn) for the duration of the ``with`` block."""
-    old_cuda_matmul = torch.backends.cuda.matmul.allow_tf32
+    # First-in saves state and disables TF32; last-out restores it. Nested
+    # contexts can otherwise restore the process-global precision state in the
+    # wrong order when tests enter this context from multiple threads.
+    global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx
+    with _tf32_off_lock:
+        if _tf32_off_depth == 0:
+            # Save fp32_precision rather than allow_tf32 so that the ``None``
+            # default is restored exactly instead of being changed to ``ieee``.
+            _tf32_off_saved_precision = torch.backends.cuda.matmul.fp32_precision
+            torch.backends.cuda.matmul.allow_tf32 = False
+            _tf32_off_cudnn_ctx = torch.backends.cudnn.flags(
+                enabled=None, benchmark=None, deterministic=None, allow_tf32=False
+            )
+            _tf32_off_cudnn_ctx.__enter__()
+        _tf32_off_depth += 1
     try:
-        torch.backends.cuda.matmul.allow_tf32 = False
-        with torch.backends.cudnn.flags(
-            enabled=None, benchmark=None, deterministic=None, allow_tf32=False
+        with torch.backends.mkldnn.flags(
+            enabled=None,
+            deterministic=None,
+            allow_tf32=False,
+            fp32_precision=None,
         ):
-            with torch.backends.mkldnn.flags(
-                enabled=None,
-                deterministic=None,
-                allow_tf32=False,
-                fp32_precision=None,
-            ):
-                yield
+            yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_cuda_matmul
+        with _tf32_off_lock:
+            _tf32_off_depth -= 1
+            if _tf32_off_depth == 0:
+                _tf32_off_cudnn_ctx.__exit__(None, None, None)
+                _tf32_off_cudnn_ctx = None
+                torch.backends.cuda.matmul.fp32_precision = _tf32_off_saved_precision
+                _tf32_off_saved_precision = None
 
 
 @contextlib.contextmanager
@@ -46,7 +69,7 @@ def tf32_on(self, tf32_precision=1e-5):
     temporarily lowers the test's precision threshold to *tf32_precision*."""
     import os
 
-    old_cuda_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
     old_precision = self.precision
     # ROCm uses an environment variable to enable TF32 in hipBLASLt
     hip_allow_tf32 = None
@@ -72,7 +95,7 @@ def tf32_on(self, tf32_precision=1e-5):
                 os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
             else:
                 del os.environ["HIPBLASLT_ALLOW_TF32"]
-        torch.backends.cuda.matmul.allow_tf32 = old_cuda_matmul
+        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
         self.precision = old_precision
 
 
@@ -81,7 +104,7 @@ def tf32_enabled():
     """Context manager to temporarily enable TF32 for both CUDA and XPU
     operations. The previous backend TF32 state is automatically restored when
     exiting the context."""
-    old_cuda_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
         with torch.backends.cudnn.flags(
@@ -95,7 +118,7 @@ def tf32_enabled():
             ):
                 yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_cuda_matmul
+        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
 
 
 # ---------------------------------------------------------------------------
