@@ -203,10 +203,6 @@ EOF
       fi
     fi
 
-    # sqlite3 CLI is used just below to fix up the MIOpen kdb files (previously
-    # pulled in via conda). Only this non-nightly path runs that fixup.
-    apt-get install -y sqlite3
-
     # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
     for kdb in /opt/rocm/share/miopen/db/*.kdb
     do
@@ -227,9 +223,8 @@ EOF
             HIP_TAG=rocm-6.4.0
             CLR_HASH=600f5b0d2baed94d5121e2174a9de0851b040b0c  # branch release/rocm-rel-6.4-statco-hotfix
         fi
-        # clr build needs CppHeaderParser; install it via pip_install so it lands
-        # in the active env as jenkins (keeps venv files jenkins-owned)
-        pip_install CppHeaderParser
+        # clr build needs CppHeaderParser but can only find it using conda's python
+        python -m pip install CppHeaderParser
         git clone https://github.com/ROCm/HIP -b $HIP_TAG
         HIP_COMMON_DIR=$(readlink -f HIP)
         git clone https://github.com/jeffdaily/clr
@@ -238,8 +233,8 @@ EOF
         popd
         mkdir -p clr/build
         pushd clr/build
-        # Point CMake at the active Python interpreter so it can find CppHeaderParser
-        cmake .. -DPython3_EXECUTABLE="$(python -c 'import sys; print(sys.executable)')" -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
+        # Need to point CMake to the correct python installation to find CppHeaderParser
+        cmake .. -DPython3_EXECUTABLE=/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/bin/python3 -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
         make -j
         cp hipamd/lib/libamdhip64.so.6.4.* /opt/rocm/lib/libamdhip64.so.6.4.*
         popd

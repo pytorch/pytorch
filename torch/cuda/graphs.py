@@ -168,7 +168,7 @@ class CUDAGraph(_CUDAGraph):
             ``keep_graph=True`` and access it via ``raw_cuda_graph`` after
             ``capture_end``. Note that the cudaGraphExec_t will not be
             instantiated at the end of ``capture_end`` in this
-            case. Instead, it will be instantiated via an explicit called
+            case. Instead, it will be instantiated via an explicit call
             to ``instantiate`` or automatically on the first call to
             ``replay`` if ``instantiate`` was not already called. Calling
             ``instantiate`` manually before ``replay`` is recommended to
