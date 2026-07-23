@@ -1185,6 +1185,17 @@ class CuptiMonitor:
                 # .copy() so the column is writable and owns its memory (the
                 # frombuffer view is read-only over the transient bytes).
                 cols[fid] = np.frombuffer(raw, dtype=ctype.numpy(size)).copy()
+            elif size > 8:
+                # Oversized field (the 20-byte CUpti_ActivityEnvironment union): keep its
+                # first 8 bytes as u8 -- the primary metric pair (power+powerLimit / smClock+
+                # memoryClock / temperature / fanSpeed), split downstream by ENVIRONMENT_KIND.
+                cols[fid] = (
+                    np.frombuffer(raw, dtype=np.uint8)
+                    .reshape(-1, size)[:, :8]
+                    .copy()
+                    .view("<u8")
+                    .ravel()
+                )
         return cols
 
     def _maybe_warn_backpressure(self) -> None:
