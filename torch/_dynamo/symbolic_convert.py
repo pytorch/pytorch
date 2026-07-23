@@ -1127,6 +1127,19 @@ def break_graph_if_unsupported(
                 if not self.should_compile_partial_graph():
                     raise
 
+                # Note [NGB suppress propagation]
+                # When a graph break originates from a function on the
+                # NGB_SUPPRESS_INLINELIST (e.g. torch.distributed), the
+                # exception is tagged with _ngb_suppress_propagate=True
+                # in step(). This forces all parent InliningITs to
+                # re-raise instead of handling the break via NGB, so the
+                # break propagates to the top-level frame -- matching
+                # the behavior of baseline (no NGB) compilation.
+                # Set in: step() (when _is_in_ngb_suppressed_context()).
+                # Checked in: break_graph_if_unsupported (here), step().
+                if excp._ngb_suppress_propagate and self.parent is not None:
+                    raise
+
                 if self.maybe_has_backedge():
                     self.raise_loop_graph_break(self.f_code, excp)
 
@@ -1753,6 +1766,12 @@ class InstructionTranslatorBase(
                         ],
                     )
                 raise
+            # See Note [NGB suppress propagation]
+            # getattr needed: this catches StepUnsupported too, which
+            # doesn't declare _ngb_suppress_propagate.
+            if getattr(e, "_ngb_suppress_propagate", False) and self.parent is not None:
+                e.skip_frame = True
+                raise
             if self.current_speculation is None:
                 log.debug("empty checkpoint - cannot resume from graph break")
                 if isinstance(e, StepUnsupported):
@@ -1769,6 +1788,9 @@ class InstructionTranslatorBase(
                         ],
                         skip_frame=True,
                     )
+                # See Note [NGB suppress propagation]
+                if self._is_in_ngb_suppressed_context():
+                    e._ngb_suppress_propagate = True
                 e.skip_frame = True
                 raise
             reason = (
@@ -3934,6 +3956,9 @@ class InstructionTranslatorBase(
 
         # TOS: resume 1, resume call args
         cg.extend_output(create_call_function_ex(False, True))
+
+    def _is_in_ngb_suppressed_context(self) -> bool:
+        return False
 
     def should_compile_partial_graph(self) -> bool:
         if sys.version_info >= (3, 11):
@@ -6185,6 +6210,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except (Unsupported, UserError) as e:
             # If this graph break has skip_frame set, unset it
             # since it refers to the current frame and not the parent.
+            # Do NOT clear _ngb_suppress_propagate here -- it must
+            # survive across inline boundaries to reach the top-level
+            # frame. See Note [NGB suppress propagation].
             e.skip_frame = False
             raise
         except Exception:
@@ -6315,6 +6343,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if not self.parent.should_compile_partial_graph():
             return False
         return True
+
+    def _is_in_ngb_suppressed_context(self) -> bool:
+        from torch._dynamo.trace_rules import is_ngb_suppressed_inline
+
+        if not config.nested_graph_breaks or not self._allow_nested_graph_breaks:
+            return False
+        if not isinstance(self.funcvar, variables.UserFunctionVariable):
+            return False
+        return is_ngb_suppressed_inline(self.funcvar.get_filename())
 
     def should_compile_partial_graph(self) -> bool:
         if config.nested_graph_breaks:
