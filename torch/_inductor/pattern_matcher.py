@@ -207,7 +207,7 @@ def _common_custom_context(nodes: Sequence[torch.fx.Node]) -> dict[str, Any]:
         )
         != (stream, mempool, mempool_device)
         for node in nodes[1:]
-        for c in (node.meta.get("custom"),)
+        for c in (node.meta.get("custom"),)  # bind custom once per node
     ):
         return {}
 
@@ -215,7 +215,7 @@ def _common_custom_context(nodes: Sequence[torch.fx.Node]) -> dict[str, Any]:
     if stream != 0 or any(
         c is not None and "stream" in c
         for node in nodes
-        for c in (node.meta.get("custom"),)
+        for c in (node.meta.get("custom"),)  # bind custom once per node
     ):
         context["stream"] = stream
     if mempool is not None:
@@ -2680,7 +2680,7 @@ class PatternMatcherPass:
                                     c.get("mempool_device") if c else None,
                                 )
                                 for n in m.nodes
-                                for c in (n.meta.get("custom"),)
+                                for c in (n.meta.get("custom"),)  # bind custom once per node
                             )
                         )
                         != 1
