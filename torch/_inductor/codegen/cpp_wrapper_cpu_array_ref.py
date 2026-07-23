@@ -120,6 +120,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         size: str,
         stride: str,
         op_name: str,
+        dtype: torch.dtype | None = None,
     ) -> None:
         # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
         # assert_size_stride would fail to compile.
@@ -1047,15 +1048,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.writeline("}")
 
     def generate_c_shim_extern_kernel_call(
-        self,
-        kernel: str,
-        args: list[str],
-        device: str,
-        *,
-        input_handles: list[str] | None = None,
-        num_scalars: int = 0,
-        output_handle: str | None = None,
-        **_,
+        self, kernel: str, args: list[str], device: str, **_
     ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
@@ -1077,13 +1070,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             wrapped_args.append(arg)
 
         super().generate_c_shim_extern_kernel_call(
-            kernel,
-            wrapped_args,
-            device,
-            debug_args=args,
-            input_handles=input_handles,
-            num_scalars=num_scalars,
-            output_handle=output_handle,
+            kernel, wrapped_args, device, debug_args=args
         )
 
     def generate_scatter_fallback(self, node: ir.ScatterFallback):

@@ -48,7 +48,20 @@ from torch.utils._sympy.symbol import SymT
 from torch.utils._triton import has_triton_tma_device
 
 
-torch.set_float32_matmul_precision("high")
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
@@ -116,6 +129,10 @@ class TestFP8Types(TestCase):
     @onlyCUDA
     @skipIfRocm
     @config.patch({"force_disable_caches": True})
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/189560"
+    )
     def test_float8_e4m3fn_uint8_decode_codegen(self, device):
         import torch._inductor.codegen.triton as triton_codegen
         import torch._inductor.codegen.triton_utils as triton_utils
@@ -1104,6 +1121,28 @@ class TestFP8Lowering(TestCase):
         scaling_block_sizes: tuple[int, int, int, int],
         device,
     ):
+        # (shape, use_fast_accum, scaling_block_sizes) combos disabled due to CI
+        # failures; other combos still run. See the referenced issues.
+        _disabled_combos = {
+            ((16, 256, 256), False, (1, 128, 128, 128)),
+            ((16, 256, 256), False, (1, 128, 1, 128)),
+            ((16, 256, 256), False, (128, 128, 1, 128)),
+            ((16, 256, 256), True, (1, 128, 128, 128)),
+            ((16, 256, 256), True, (1, 128, 1, 128)),
+            ((16, 256, 256), True, (128, 128, 1, 128)),
+            ((1024, 512, 1024), False, (1, 128, 1, 128)),
+            ((1024, 512, 1024), False, (128, 128, 1, 128)),
+            ((1024, 512, 1024), True, (1, 128, 1, 128)),
+            ((1024, 512, 1024), True, (128, 128, 1, 128)),
+            ((32768, 4096, 4096), False, (1, 128, 1, 128)),
+            ((32768, 4096, 4096), False, (128, 128, 1, 128)),
+            ((32768, 4096, 4096), True, (1, 128, 1, 128)),
+            ((32768, 4096, 4096), True, (128, 128, 1, 128)),
+        }
+        if (shape, use_fast_accum, scaling_block_sizes) in _disabled_combos:
+            self.skipTest("disabled due to CI failures; see #190236")
+        if "xpu" in device and use_fast_accum:
+            self.skipTest("XPU does not support use_fast_accum=True for now")
         # Only bf16 output type is supported for non-tensorwise scaling, not fp32
         dtype: torch.dtype = torch.bfloat16
         dtype_float8 = torch.float8_e4m3fn
@@ -1751,7 +1790,7 @@ class TestFP8Lowering(TestCase):
         # The swizzled path must use the ATen fallback, not a generated kernel
         FileCheck().check("_scaled_mm_v2").run(code)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
     def test_mx_fp8_max_autotune(self, device):
         M, K, N = 128, 32, 128

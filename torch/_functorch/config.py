@@ -368,7 +368,6 @@ generate_fake_kernels_from_real_mismatches = False
 fake_tensor_prefer_device_type: str | None = None
 
 # CUDAGraph safe run_with_rng functionalization.
-# TODO: turn on by default
 graphsafe_rng_functionalization = True
 
 # Whether or not to eagerly compile the backward
