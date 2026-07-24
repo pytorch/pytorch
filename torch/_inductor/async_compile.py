@@ -86,6 +86,15 @@ size_hints_regex = re.compile(
 )
 
 
+def _pycodecache_kernel_compile_env() -> dict[str, str | None]:
+    env_vars = [
+        "TORCHINDUCTOR_CACHE_DIR",
+        "TRITON_CACHE_DIR",
+        "TORCHINDUCTOR_CUTLASS_DIR",
+    ]
+    return {v: os.environ.get(v) for v in env_vars}
+
+
 def pre_fork_setup():
     """
     Setup that must be done prior to forking with a process pool.
@@ -385,6 +394,40 @@ class AsyncCompile:
         return cls._ready_future.done()
 
     @classmethod
+    def wait_process_pool_ready(cls, timeout: float = 120) -> bool:
+        """Block (up to ``timeout`` s) until the process pool is ready, returning
+        whether it's usable.
+
+        Like use_process_pool() but blocking. Use when a backend's serial
+        fallback is far costlier than the warmup wait -- e.g. NVGEMM subprocess
+        precompile, where skipping the pool forces ~15x-slower lazy compilation
+        at benchmark time. (use_process_pool()'s non-blocking readiness check can
+        race pool warmup when little other compilation precedes the decision.)
+        On timeout, degrade gracefully (return False -> serial) rather than hang
+        on a stuck worker.
+        """
+        if get_compile_threads() <= 1 or not _process_pool_allowed():
+            return False
+        if config.triton.proton_profiling:
+            return False
+        if not cls._ready_future:
+            cls._ready_future = cls.process_pool().submit(cls._get_ready)
+        try:
+            cls._ready_future.result(timeout=timeout)
+        except FuturesTimeoutError:
+            log.warning(
+                "Process pool not ready after %ss; falling back to serial", timeout
+            )
+            return False
+        except (BrokenProcessPool, RuntimeError) as e:
+            # A warmup worker died or the pool was closed. The readiness probe
+            # failing must degrade to serial (the documented contract), not
+            # propagate and abort the caller's algorithm selection.
+            log.warning("Process pool unusable (%s); falling back to serial", e)
+            return False
+        return True
+
+    @classmethod
     def wakeup(cls) -> None:
         """
         If using a SubprocPool, signal the sidecar process to start up its
@@ -466,7 +509,7 @@ class AsyncCompile:
                 "TRITON_CACHE_DIR",
                 "TRITON_LIBDEVICE_PATH",
             ]
-            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+            extra_env = {v: os.environ.get(v) for v in env_vars}
             extra_config = {
                 "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
             }
@@ -658,8 +701,7 @@ class AsyncCompile:
         is_parallel = self.use_process_pool()
 
         if is_parallel:
-            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TORCHINDUCTOR_CUTLASS_DIR"]
-            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+            extra_env = _pycodecache_kernel_compile_env()
 
             subprocess_task = self.process_pool().submit(
                 _worker_compile_pycodecache_kernel,
@@ -747,7 +789,7 @@ class AsyncCompile:
                 real CuTe DSL compilation in the subprocess worker.
 
         Note:
-            NVIDIA Universal GEMM kernels are Python code that calls the cutlass_api library.
+            NVIDIA Universal GEMM kernels are Python code that calls the cutlass.operators library.
             We use the PyCodeCache to write the source code to a file and load it.
         """
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
@@ -763,8 +805,7 @@ class AsyncCompile:
         is_parallel = self.use_process_pool()
 
         if is_parallel:
-            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TORCHINDUCTOR_CUTLASS_DIR"]
-            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+            extra_env = _pycodecache_kernel_compile_env()
 
             subprocess_task = self.process_pool().submit(
                 _worker_compile_pycodecache_kernel,
@@ -805,6 +846,53 @@ class AsyncCompile:
             return NVUniversalGemmKernelWrapper(
                 getattr(mod, main_func_name), kernel_path=path
             )
+
+    def nvgemm_precompile(
+        self,
+        kernel_name,
+        variant_name,
+        accumulator_type,
+        input_tensor_meta,
+        output_tensor_meta,
+        cuda_ctx,
+        scale_type_a=None,
+        scale_type_b=None,
+        swizzle_type_a=None,
+        swizzle_type_b=None,
+        has_bias_epilogue=False,
+        swap_ab=False,
+        metadata=None,
+    ):
+        """Submit NVGEMM kernel precompilation to the subprocess pool.
+
+        Compiles the CuTeDSL kernel artifact in a subprocess worker so the
+        thread-unsafe kernel.compile() call is process-isolated. The compiled
+        artifact is saved to the disk cache; the main process loads it on the
+        next cache lookup during benchmarking.
+        """
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _worker_nvgemm_autotuning_precompile,
+        )
+
+        extra_env = _pycodecache_kernel_compile_env()
+
+        return self.process_pool().submit(
+            _worker_nvgemm_autotuning_precompile,
+            kernel_name,
+            variant_name,
+            accumulator_type,
+            input_tensor_meta,
+            output_tensor_meta,
+            extra_env,
+            cuda_ctx,
+            scale_type_a,
+            scale_type_b,
+            swizzle_type_a,
+            swizzle_type_b,
+            has_bias_epilogue,
+            swap_ab,
+            metadata,
+        )
 
     def metal(self, kernel_name: str, source: str, headers: list[str]) -> None:
         """Register a Metal kernel body; wait() compiles all registered kernels into one library."""

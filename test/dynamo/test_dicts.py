@@ -2598,10 +2598,12 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         return super().tearDown()
 
     def assertEqual(self, x, y):
-        self.assertTrue(x == y, f"Expected {x} to be equal to {y}")
+        self.assertTrue(x == y, lambda msg: f"{msg}\nExpected {x} to be equal to {y}")
 
     def assertNotEqual(self, x, y):
-        self.assertFalse(x == y, f"Expected {x} to not be equal to {y}")
+        self.assertFalse(
+            x == y, lambda msg: f"{msg}\nExpected {x} to not be equal to {y}"
+        )
 
     @make_dynamo_test
     def test_dict_items_cmp_value_eq_raises(self):
@@ -2715,9 +2717,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         d4 |= d1
         self.assertEqual(d3, {"a": 1, "b": 3, "c": 4})
         self.assertEqual(d4, {"a": 1, "b": 2, "c": 4})
-
-        # Test with an iterable
-        d3, d4 = d1.copy(), d2.copy()
 
         # Test the __ior__ method
         d3, d4 = d1.copy(), d2.copy()
@@ -3005,7 +3004,10 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
             if self.thetype == other:
                 continue
             self.assertNotEqual(self.thetype, other)
-            self.assertTrue(self.thetype is not other, f"{self.thetype=}, {other=}")
+            self.assertTrue(
+                self.thetype is not other,
+                lambda msg: f"{msg}\n{self.thetype=}, {other=}",
+            )
 
     @make_dynamo_test
     def test_dict___iter__(self):
@@ -3200,10 +3202,12 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
         return super().tearDown()
 
     def assertEqual(self, x, y):
-        self.assertTrue(x == y, f"Expected {x} to be equal to {y}")
+        self.assertTrue(x == y, lambda msg: f"{msg}\nExpected {x} to be equal to {y}")
 
     def assertNotEqual(self, x, y):
-        self.assertFalse(x == y, f"Expected {x} to not be equal to {y}")
+        self.assertFalse(
+            x == y, lambda msg: f"{msg}\nExpected {x} to not be equal to {y}"
+        )
 
     class OrderedDictSubclass(OrderedDict):
         def get(self, key, default=None, /):
