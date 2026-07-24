@@ -1777,7 +1777,6 @@ class TestSpecialMethodLookupRegressions(torch._dynamo.test_case.TestCase):
             self.assertIn("is not iterable", str(e))
         self.assertTrue(raised)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_next_missing_message(self):
         # builtin next() gates on PyIter_Check: "is not an iterator"
