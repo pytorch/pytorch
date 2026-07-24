@@ -115,7 +115,7 @@ class TestPureFP16(FSDPTestContinuous):
             self.assertEqual(param.dtype, torch.float16)
         inp = tuple(
             t.half() if torch.is_tensor(t) else t
-            for t in fsdp_model.module.get_input(self.device_type)
+            for t in fsdp_model.module.get_input(device_type)
         )
         out = fsdp_model(*inp)
         out.sum().backward()
@@ -151,7 +151,7 @@ class TestPureFP16(FSDPTestContinuous):
                 self.assertEqual(param.grad.dtype, torch.float16)
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = ("cuda", "hpu", "xpu", "privateuse1")
 instantiate_device_type_tests(TestPureFP16, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
