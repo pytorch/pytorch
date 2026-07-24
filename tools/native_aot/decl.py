@@ -46,6 +46,13 @@ Required exports (module or declaration object):
 
 Optional exports:
 
+  ARCHS: tuple[str, ...]      architectures the op's kernels are valid
+                              on (sm strings). Defaults to all sm90+.
+                              Export skips arches outside it; codegen
+                              emits a runtime device gate from
+                              ARCHS intersect shipped-arches, so
+                              declarations never hand-write arch
+                              checks.
   cpp_dispatch_prelude() -> str | None
                               shared front half of the dispatch chain:
                               cheap universal rejects and setup (locals,
@@ -99,6 +106,14 @@ class AotDeclaration(Protocol):
     ATEN_OP: str
     DISPATCH_KEY: str
     KERNEL_MODULE: str
+    # Architectures this op's kernels are valid on (sm strings, e.g.
+    # ("sm_90a", "sm_100a")). Optional in source declarations; the
+    # validating loader defaults it to _DEFAULT_ARCHS and materializes
+    # it, so loaded declarations always carry it (consumers read
+    # d.ARCHS directly, never getattr). Export skips (declaration x
+    # arch) pairs outside it; codegen emits a runtime gate from the
+    # intersection of ARCHS with the arches actually shipped.
+    ARCHS: tuple[str, ...]
 
     def kernel_precompile_grid(self) -> list[dict]: ...
     def covered_axes(self, *args: Any, **kwargs: Any) -> dict: ...
@@ -128,6 +143,13 @@ _OPTIONAL_FNS = {
     "cpp_helpers": False,
     "cpp_covers": False,
 }
+
+# Default ARCHS: every current kernel requires sm90+ features (TMA,
+# clusters, cp.async.bulk); Blackwell variants included. Declarations
+# override to narrow (e.g. a Blackwell-only kernel pins ("sm_100a",)).
+_DEFAULT_ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a", "sm_103", "sm_103a")
+
+_SM_RE = r"sm_\d+a?"
 
 
 def _load_by_path(name: str, path: str):
@@ -167,6 +189,25 @@ def _validate(d, path: str, label: str) -> None:
     for name, takes_spec in _OPTIONAL_FNS.items():
         if getattr(d, name, None) is not None:
             _check_arity(d, name, takes_spec, path)
+
+    # Normalize ARCHS here, once: optional in the source module, always
+    # present (as a tuple) on validated declarations. Everything
+    # downstream reads d.ARCHS directly -- this is the only place
+    # absence is legal.
+    import re
+
+    try:
+        archs = d.ARCHS
+    except AttributeError:
+        archs = _DEFAULT_ARCHS
+    if not archs or not all(
+        isinstance(a, str) and re.fullmatch(_SM_RE, a) for a in archs
+    ):
+        raise RuntimeError(
+            f"{path}: {label} ARCHS must be a non-empty sequence of sm "
+            f"strings (e.g. ('sm_90a', 'sm_100a')), got {archs!r}"
+        )
+    d.ARCHS = tuple(archs)
 
     grid = d.kernel_precompile_grid()
     if not isinstance(grid, list) or not grid:
