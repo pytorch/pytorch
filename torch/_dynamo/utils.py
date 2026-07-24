@@ -4070,7 +4070,9 @@ def _get_fake_value_impl(
         )
 
     try:
-        with fake_mode, enable_python_dispatcher():
+        from torch._dynamo.eval_frame import _use_eager_on_nested_compile
+
+        with fake_mode, enable_python_dispatcher(), _use_eager_on_nested_compile():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
@@ -5630,6 +5632,12 @@ class FrameState(enum.Enum):
     FRAME_EXECUTING = 0
     FRAME_COMPLETED = 1
     FRAME_CLEARED = 4
+
+
+class PySendResult(enum.Enum):
+    PYGEN_RETURN = 0
+    PYGEN_ERROR = -1
+    PYGEN_NEXT = 1
 
 
 class CompileTimeInstructionCounter:
