@@ -78,7 +78,8 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
 // collapse, e.g. every element of linspace(2^40, 2^40 + 8) rounds to 2^40.
 bool linspace_fits_float(int64_t start, int64_t end, int64_t steps) {
   constexpr int64_t max_magnitude = 1 << 20;
-  constexpr int64_t max_exact_index = 1 << 24;
+  constexpr int64_t max_exact_index = 1 << std::numeric_limits<float>::digits;
+
   return std::max(start, end) < max_magnitude && std::min(start, end) > -max_magnitude && steps <= max_exact_index;
 }
 
