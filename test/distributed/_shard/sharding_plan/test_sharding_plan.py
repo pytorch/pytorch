@@ -8,7 +8,10 @@ from torch.distributed._shard import shard_module
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_plan import ShardingPlan, ShardingPlanner
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu,requires_accelerator_dist_backend
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -35,9 +38,9 @@ class ChunkAllShardingPlanner(ShardingPlanner):
     dim = 0
     devices = []
 
-    def __init__(self, chunk_dim=0, device_count=0,device_type="cuda"):
+    def __init__(self, chunk_dim=0, device_count=0, device_type="cuda"):
         self.dim = chunk_dim
-        self.devices = [f"rank:{i}/{device_type}:{i}" for i in range(device_count)] 
+        self.devices = [f"rank:{i}/{device_type}:{i}" for i in range(device_count)]
 
     def build_plan(self, module: nn.Module) -> ShardingPlan:
         named_params = module.named_parameters()
@@ -108,7 +111,9 @@ class TestShardingPlan(ShardedTensorTestBase):
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).cuda(
             self.rank
         )
-        planner = ChunkAllShardingPlanner(device_count=TEST_GPU_NUM,device_type=self.device_type)
+        planner = ChunkAllShardingPlanner(
+            device_count=TEST_GPU_NUM,device_type=self.device_type
+        )
         sharding_plan = planner.build_plan(megatron_lm)
 
         shard_module(megatron_lm, sharding_plan)
