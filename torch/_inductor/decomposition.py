@@ -520,9 +520,9 @@ def _addmm_dtype_out(
     mat1: torch.Tensor,
     mat2: torch.Tensor,
     out_dtype: torch.dtype,
+    out: torch.Tensor,
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
-    out: torch.Tensor,
 ) -> torch.Tensor:
     result = _addmm_dtype(self, mat1, mat2, out_dtype, beta, alpha)
     out.copy_(result)
