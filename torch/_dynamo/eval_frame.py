@@ -78,7 +78,7 @@ from torch._dynamo.types import (
     FrameExecStrategy,
 )
 from torch._export.utils import _compiling_state_context
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -206,6 +206,22 @@ class DynamoStance:
 
 
 _stance = DynamoStance()
+_force_eager_nested_compile = threading.local()
+
+
+@contextlib.contextmanager
+def _use_eager_on_nested_compile() -> Generator[None, None, None]:
+    """Run torch.compile wrappers eagerly inside compiler-internal tracing."""
+    prior = getattr(_force_eager_nested_compile, "depth", 0)
+    _force_eager_nested_compile.depth = prior + 1
+    try:
+        yield
+    finally:
+        _force_eager_nested_compile.depth = prior
+
+
+def _is_eager_on_nested_compile() -> bool:
+    return getattr(_force_eager_nested_compile, "depth", 0) > 0
 
 
 def _set_stance(stance: DynamoStance) -> DynamoStance:
@@ -1106,6 +1122,25 @@ class _TorchDynamoContext:
             prior = set_eval_frame(None)
             prior_error_on_nested_compile: bool | None = None
             fullgraph_count_enabled = False
+            # Fake propagation and AOT metadata collection execute user
+            # subclass code under active fake/functional modes. Nested compile
+            # must run the original function in those regions.  Still honor
+            # explicit/internal requests to compile during FX tracing: HOP export
+            # depends on its internal compile to preserve HOPs, and some tests
+            # intentionally enable force_compile_during_fx_trace to get nested
+            # subgraphs.
+            if (
+                _is_eager_on_nested_compile()
+                and not config.force_compile_during_fx_trace
+            ):
+                from torch._higher_order_ops.utils import _in_hop_compile
+
+                if not _in_hop_compile():
+                    try:
+                        return fn(*args, **kwargs)
+                    finally:
+                        _maybe_set_eval_frame(prior)
+
             if self.fullgraph:
                 prior_error_on_nested_compile = set_fullgraph_error_on_nested_compile(
                     torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code
@@ -2101,7 +2136,7 @@ def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -
     ] + list(common_constant_types)
 
     def is_supported_type(val: Any) -> bool:
-        return isinstance(val, tuple(supported_types)) or is_opaque_type(type(val))
+        return isinstance(val, tuple(supported_types)) or is_custom_class(type(val))
 
     value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
     # We only check that the outputs are not None. Inputs can be None.
