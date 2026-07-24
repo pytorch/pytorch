@@ -117,6 +117,21 @@ def register_local_reduce_fns(
     _local_reduce_finalize_fns[finalize_key] = finalize_fn
 
 
+def validate_grouped_n_contract_device(
+    group: int | None, device_capacity: tuple[int, int]
+) -> None:
+    """Validate grouped-main support consistently before and during compilation."""
+    if group is None:
+        return
+    if device_capacity[0] == 12:
+        raise NotImplementedError("grouped_n_contract is not yet supported on SM120")
+    if group > 2 and device_capacity[0] not in (10, 11):
+        raise NotImplementedError(
+            "grouped_n_contract groups larger than 2 are currently validated "
+            "only on SM100 and SM110"
+        )
+
+
 class GemmActMixin(ComposableEpiMixin):
     _epi_ops = (
         Scalar("alpha"),
@@ -781,12 +796,11 @@ def _compile_gemm_act(
         },
     }
     GemmCls = sm_to_cls[gemm_cls_name][device_capacity[0]]
+    if gemm_cls_name == "grouped_n_contract":
+        validate_grouped_n_contract_device(
+            main_output_transform_group, device_capacity
+        )
     if gemm_cls_name == "grouped_n_contract" and main_output_transform_group != 2:
-        if device_capacity[0] != 10:
-            raise NotImplementedError(
-                "grouped_n_contract groups larger than 2 are currently validated "
-                "only on SM100"
-            )
         GemmCls = {4: GemmGroupedNContract4Sm100}.get(main_output_transform_group)
         if GemmCls is None:
             raise NotImplementedError(
@@ -1163,16 +1177,7 @@ def gemm_act(
     assert device_capacity[0] in [8, 9, 10, 11, 12], (
         "Only SM8x, SM90, SM100, SM110, and SM120 are supported"
     )
-    if main_output_transform_group is not None:
-        if device_capacity[0] == 12:
-            raise NotImplementedError(
-                "grouped_n_contract is not yet supported on SM120"
-            )
-        if main_output_transform_group > 2 and device_capacity[0] != 10:
-            raise NotImplementedError(
-                "grouped_n_contract groups larger than 2 are currently validated "
-                "only on SM100"
-            )
+    validate_grouped_n_contract_device(main_output_transform_group, device_capacity)
     if rounding_mode == RoundingMode.RS:
         assert device_capacity[0] == 10, "Stochastic rounding (RoundingMode.RS) requires SM100"
 
