@@ -223,7 +223,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
         tensor = torch.tensor([self.rank]).to(device)
         output_t = torch.empty((self.world_size), dtype=tensor.dtype).to(device)
         allgather_base(output_t, tensor)
-        self.assertEqual(torch.arange(self.world_size), output_t) 
+        self.assertEqual(torch.arange(self.world_size), output_t)
 
     @requires_accelerator_dist_backend()
     def test_gather_ops(self):
