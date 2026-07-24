@@ -629,6 +629,12 @@ class ProcessGroup:
         root: int,
         timeout: timedelta | None = None,
     ) -> Work: ...
+    def gather_into_tensor(
+        self,
+        output: Tensor,
+        input: Tensor,
+        opts=...,
+    ) -> Work: ...
     @overload
     def scatter(
         self,
@@ -1109,6 +1115,38 @@ class ProcessGroupXCCL(Backend):
         self, includeCollectives: bool = False, onlyActive: bool = False
     ) -> str: ...
     def _reset_fr_recording_xccl(self) -> None: ...
+
+class ProcessGroupNCCL2(Backend):
+    class Options(Backend.Options):
+        is_high_priority_stream: bool
+        abort_process_on_timeout_or_error: bool
+
+        def __init__(self, is_high_priority_stream: bool = False): ...
+
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        options: Options,
+    ) -> None: ...
+    def get_error(self) -> ErrorType: ...
+
+class ProcessGroupNCCLLazy(Backend):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        options: ProcessGroupNCCL2.Options,
+    ) -> None: ...
+    def get_error(self) -> ErrorType: ...
+    def _num_active_channels(self) -> int: ...
+
+class FlightRecorderHook:
+    @staticmethod
+    def attach(pg: ProcessGroup) -> FlightRecorderHook: ...
+    def remove(self) -> None: ...
 
 def _set_process_group(pg: ProcessGroup) -> None: ...
 def _current_process_group() -> ProcessGroup: ...

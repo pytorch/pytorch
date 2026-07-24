@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -14,7 +15,9 @@
 #include <vector>
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAEvent.h>
 #include <ATen/record_function.h>
+#include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime.h>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
@@ -50,7 +53,7 @@ class WorkNCCL : public c10d::Work {
       ProcessGroupNCCL* comm,
       cudaStream_t stream,
       std::chrono::milliseconds timeout_ms,
-      const at::Tensor& inputTensor);
+      at::Tensor inputTensor);
   ~WorkNCCL() override;
 
   WorkNCCL(const WorkNCCL&) = delete;
@@ -78,6 +81,9 @@ class WorkNCCL : public c10d::Work {
   void setOutputs(std::vector<at::Tensor> outputs) {
     outputs_ = std::move(outputs);
   }
+  void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children) {
+    children_ = std::move(children);
+  }
 
  protected:
   void recordStart(std::string_view coll_name);
@@ -85,6 +91,7 @@ class WorkNCCL : public c10d::Work {
 
   friend class ProcessGroupNCCL;
   friend class WorkNCCLQueue;
+  friend class WindowNCCL;
 
  private:
   void setStatus(WorkStatus status) {
@@ -100,11 +107,12 @@ class WorkNCCL : public c10d::Work {
   std::vector<at::Tensor> inputTensors_;
   at::Tensor inputTensor_;
   std::vector<at::Tensor> outputs_;
+  std::vector<c10::intrusive_ptr<WorkNCCL>> children_;
 
   ProcessGroupNCCL* comm_; // non-owning; see class comment
-  cudaEvent_t start_event_;
-  cudaEvent_t end_event_;
-  cudaStream_t stream_; // not owned by this class
+  std::unique_ptr<at::cuda::CUDAEvent> start_event_;
+  std::unique_ptr<at::cuda::CUDAEvent> end_event_;
+  at::cuda::CUDAStream stream_;
 
   std::chrono::milliseconds timeout_ms_;
 
@@ -128,6 +136,7 @@ class WorkNCCLQueue {
   WorkNCCL::WorkStatus garbageCollectLocked();
   std::unordered_map<cudaStream_t, std::queue<c10::intrusive_ptr<WorkNCCL>>>
       stream_work_queues_;
+  std::queue<c10::intrusive_ptr<WorkNCCL>> completed_work_queue_;
   std::mutex work_queues_mutex_;
 };
 
