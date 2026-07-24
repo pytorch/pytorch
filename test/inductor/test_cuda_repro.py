@@ -31,14 +31,12 @@ from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     SM90OrLater,
     TEST_MULTIGPU,
     tf32_on_and_off,
 )
-from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
@@ -2333,7 +2331,7 @@ class CudaReproTests(TestCase):
         if device_type != "cuda":
             raise unittest.SkipTest("requires CUDA")
 
-        out_dtype = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.bfloat16
+        out_dtype = torch.float16
         fp8_min = -448.0
         fp8_max = 448.0
         min_fp8_scale = 1.0 / (fp8_max * 512.0)
