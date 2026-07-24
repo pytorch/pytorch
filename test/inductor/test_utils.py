@@ -1265,18 +1265,14 @@ class TestDeviceClassification(TestCase):
     # ---- get_gpu_type() ----
     def test_get_gpu_type_single_available(self):
         self._register("fakegpu", _GpuWithStream)
-        with mock.patch.object(
-            inductor_utils, "_gpu_types", return_value=["fakegpu"]
-        ):
+        with mock.patch.object(inductor_utils, "_gpu_types", return_value=["fakegpu"]):
             get_gpu_type.cache_clear()
             self.assertEqual(get_gpu_type(), "fakegpu")
 
     def test_get_gpu_type_none_available_falls_back_to_cuda(self):
         self._register("fakegpu", _GpuUnavailable)
         with (
-            mock.patch.object(
-                inductor_utils, "_gpu_types", return_value=["fakegpu"]
-            ),
+            mock.patch.object(inductor_utils, "_gpu_types", return_value=["fakegpu"]),
             mock.patch("torch.accelerator.current_accelerator", return_value=None),
         ):
             get_gpu_type.cache_clear()
