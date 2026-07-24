@@ -11,6 +11,7 @@ epilogue and physical reduction callbacks.
 
 import dataclasses
 import hashlib
+import math
 import operator
 from typing import Any
 
@@ -155,21 +156,50 @@ class FlexGemmCuteDSLOpOverrides(CuteDSLOpOverrides):
         return CuteDSLOpOverrides.to_dtype(x, dtype)
 
     @staticmethod
+    def preserve_nan(value: Any, result: Any) -> Any:
+        """Select an input NaN over a computed min, max, or clamp result."""
+        if isinstance(value, float) and math.isnan(value):
+            return CuteDSLOpOverrides.mul(result, value)
+        if isinstance(value, (int, float, bool)):
+            return result
+        return CuteDSLOpOverrides.where(
+            CuteDSLOpOverrides.ne(value, value), value, result
+        )
+
+    @staticmethod
+    def nan_propagating_minmax(a: Any, b: Any, op: str) -> Any:
+        """Apply min or max while preserving NaN from either operand."""
+        match op:
+            case "min":
+                result = CuteDSLOpOverrides.minimum(a, b)
+            case "max":
+                result = CuteDSLOpOverrides.maximum(a, b)
+            case _:
+                raise AssertionError(f"unexpected minmax op: {op}")
+        result = FlexGemmCuteDSLOpOverrides.preserve_nan(a, result)
+        return FlexGemmCuteDSLOpOverrides.preserve_nan(b, result)
+
+    @staticmethod
     def clamp(x: Any, min: Any = None, max: Any = None) -> Any:
         result = x
         if min is not None:
             result = CuteDSLOpOverrides.maximum(result, min)
         if max is not None:
             result = CuteDSLOpOverrides.minimum(result, max)
+        result = FlexGemmCuteDSLOpOverrides.preserve_nan(x, result)
+        if min is not None:
+            result = FlexGemmCuteDSLOpOverrides.preserve_nan(min, result)
+        if max is not None:
+            result = FlexGemmCuteDSLOpOverrides.preserve_nan(max, result)
         return result
 
     @staticmethod
     def clamp_min(x: Any, min: Any) -> Any:
-        return CuteDSLOpOverrides.maximum(x, min)
+        return FlexGemmCuteDSLOpOverrides.nan_propagating_minmax(x, min, "max")
 
     @staticmethod
     def clamp_max(x: Any, max: Any) -> Any:
-        return CuteDSLOpOverrides.minimum(x, max)
+        return FlexGemmCuteDSLOpOverrides.nan_propagating_minmax(x, max, "min")
 
     @staticmethod
     def convert_element_type(x: Any, dtype: torch.dtype) -> Any:
