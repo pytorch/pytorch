@@ -2044,8 +2044,8 @@ class triton:
     # That means optimized kernels such as decompose_k or persistent_tma_matmul will
     # not be called when this option is enabled.
     #
-    # Note: Native matmul does not currently support block pointers or TMA matmul.
-    # If both native_matmul and (use_block_ptr or enable_persistent_tma_matmul) are enabled,
+    # Note: Native matmul does not currently support TMA matmul.
+    # If both native_matmul and enable_persistent_tma_matmul are enabled,
     # an error will be thrown.
     native_matmul: bool = os.getenv("TORCHINDUCTOR_NATIVE_MATMUL", "0") == "1"
 
@@ -2145,9 +2145,6 @@ class triton:
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
-
-    # Generate code containing the newer tl.make_block_ptr() API for loads/store
-    use_block_ptr = False
 
     # (Experimental)
     # Generate code using the tl.make_tensor_descriptor() API for loads/store
