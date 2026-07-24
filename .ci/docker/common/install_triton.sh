@@ -30,6 +30,40 @@ fi
 # The logic here is copied from .ci/pytorch/common_utils.sh
 TRITON_PINNED_COMMIT=$(get_pinned_commit ${TRITON_TEXT_FILE})
 
+# ptxas 13.4.46 is currently available only from NVIDIA's preview package
+# repository, not the redistributable archive URL used by Triton. Seed the
+# expected cache entry so this draft pin can exercise the preview compiler.
+if [[ "${TRITON_PINNED_COMMIT}" == "ef4ab63bf41fc21e63bf3d77d11d9365837d0254" ]]; then
+  case "$(uname -m)" in
+    x86_64)
+      package_arch="amd64"
+      triton_arch="x86_64"
+      package_sha256="4664ae5f28e4eaebf8fea98eca879299a71ee9e54943a5c5a30774f18b69b44e"
+      ;;
+    aarch64|arm64)
+      package_arch="arm64"
+      triton_arch="sbsa"
+      package_sha256="88cfe8bee7b12d380a05286545462be1de9c6f303ee9bef2a045b3f06ad2fe4e"
+      ;;
+    *)
+      echo "Unsupported architecture for ptxas 13.4.46: $(uname -m)"
+      exit 1
+      ;;
+  esac
+
+  package="cuda-nvcc-13-4_13.4.46-1_${package_arch}.deb"
+  package_url="https://packages.nvidia.com/jammy/pool/${package_arch}/5B515474-7E78-11F1-8656-C51E4F4B317F/${package}"
+  extract_dir=$(mktemp -d)
+  curl --retry 3 -fsSL "${package_url}" -o "${extract_dir}/${package}"
+  echo "${package_sha256}  ${extract_dir}/${package}" | sha256sum --check
+  dpkg-deb --extract "${extract_dir}/${package}" "${extract_dir}/contents"
+
+  cache_dir="/var/lib/jenkins/.triton/nvidia/nvcc-blackwell/cuda_nvcc-linux-${triton_arch}-13.4.46-archive/bin"
+  install -D -m 755 "${extract_dir}/contents/usr/local/cuda-13.4/bin/ptxas" "${cache_dir}/ptxas"
+  chown -R jenkins:jenkins /var/lib/jenkins/.triton
+  rm -rf "${extract_dir}"
+fi
+
 if [ -n "${UBUNTU_VERSION}" ];then
     apt update
     apt-get install -y gpg-agent
