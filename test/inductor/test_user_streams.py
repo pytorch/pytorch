@@ -14,12 +14,7 @@ from types import SimpleNamespace
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.metrics
-from torch._dynamo.testing import (
-    CompileCounterWithBackend,
-    extract_graph,
-    normalize_gm,
-    remove_trailing_space,
-)
+from torch._dynamo.testing import CompileCounterWithBackend, extract_graph, normalize_gm
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.codegen.wrapper import (
     EnterCudaStreamContextLine,
@@ -1760,6 +1755,8 @@ class GraphModule(torch.nn.Module):
         per-stream passthroughs: the earlier record_event's data must survive
         the later record_event and reach the synchronize."""
 
+        import operator
+
         def fn(x, w1, w2):
             s1 = torch.cuda.Stream()
             e1 = torch.cuda.Event()
@@ -1779,74 +1776,36 @@ class GraphModule(torch.nn.Module):
         result, _, fw_graphs, _ = extract_graph(fn, x, w1, w2)
         self.assertEqual(result, expected)
 
-        # Both sums must read getitems produced by the synchronize's control_deps
-        # (control_deps_2), confirming both are ordered after the barrier. A
-        # FileCheck on the wrapper alone can pass incidentally, so assert on the
-        # AOT graph where the data dependency is explicit.
-        graph_str = fw_graphs[0].print_readable(print_output=False)
-        graph_str = remove_trailing_space(re.sub(r"File.*\n", "\n", graph_str))
-        self.assertExpectedInline(
-            graph_str,
-            """\
-class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[32, 32]", arg1_1: "f32[32, 32]", arg2_1: "f32[32, 32]"):
-        # Annotation: {'stream': 1}
-        mm: "f32[32, 32]" = torch.ops.aten.mm.default(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-
-        # No stacktrace found for following nodes
-        subgraph_record_event = self.subgraph_record_event
-        control_deps = torch.ops.higher_order.control_deps((mm,), subgraph_record_event, mm);  mm = subgraph_record_event = None
-
-        # Annotation: {'stream': 1}
-        getitem: "f32[32, 32]" = control_deps[1]
-
-        # Annotation: {'stream': 1}
-        mm_1: "f32[32, 32]" = torch.ops.aten.mm.default(getitem, arg2_1);  arg2_1 = None
-
-        # No stacktrace found for following nodes
-        subgraph_record_event_1 = self.subgraph_record_event_1
-        control_deps_1 = torch.ops.higher_order.control_deps((mm_1, control_deps, getitem), subgraph_record_event_1, mm_1, getitem);  mm_1 = subgraph_record_event_1 = None
-
-        # Annotation: {'stream': 1}
-        getitem_2: "f32[32, 32]" = control_deps_1[2]
-
-        # Annotation: {'stream': 1}
-        getitem_1: "f32[32, 32]" = control_deps_1[1]
-
-        # No stacktrace found for following nodes
-        subgraph_synchronize_stream = self.subgraph_synchronize_stream
-        control_deps_2 = torch.ops.higher_order.control_deps((control_deps, getitem, control_deps_1, getitem_1, getitem_2), subgraph_synchronize_stream, getitem_1, getitem_2);  control_deps = getitem = control_deps_1 = getitem_1 = getitem_2 = subgraph_synchronize_stream = None
-
-        # Annotation: {'stream': 1}
-        getitem_4: "f32[32, 32]" = control_deps_2[2]
-
-        # Annotation: {'stream': 1}
-        getitem_3: "f32[32, 32]" = control_deps_2[1];  control_deps_2 = None
-
-        #
-        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_4);  getitem_4 = None
-        sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_3);  getitem_3 = None
-        return (sum_1, sum_2)
-
-    class subgraph_record_event(torch.nn.Module):
-        def forward(self, dep_0: "f32[32, 32]"):
-            # Annotation: {'stream': 1}
-            record_event_default = torch.ops.streams.record_event.default(2, 1)
-            return (record_event_default, dep_0)
-
-    class subgraph_record_event_1(torch.nn.Module):
-        def forward(self, dep_0: "f32[32, 32]", dep_1: "f32[32, 32]"):
-            # Annotation: {'stream': 1}
-            record_event_default = torch.ops.streams.record_event.default(3, 1)
-            return (record_event_default, dep_0, dep_1)
-
-    class subgraph_synchronize_stream(torch.nn.Module):
-        def forward(self, dep_0: "f32[32, 32]", dep_1: "f32[32, 32]"):
-            #
-            synchronize_stream_default = torch.ops.streams.synchronize_stream.default(1)
-            return (synchronize_stream_default, dep_0, dep_1)
-""",
-        )
+        # Both consumers must read getitems produced by the synchronize's
+        # control_deps -- confirming both `a` (before the first record) and `b`
+        # are threaded through the barrier, not just the most recent one. Assert
+        # structurally (not on the printed graph, whose placeholder naming is
+        # test-order dependent).
+        graph = fw_graphs[0].graph
+        sync_cd = None
+        for n in graph.nodes:
+            if (
+                n.op == "call_function"
+                and "control_deps" in str(n.target)
+                and isinstance(n.args[1], torch.fx.Node)
+                and "synchronize_stream" in n.args[1].name
+            ):
+                sync_cd = n
+        self.assertIsNotNone(sync_cd, "no synchronize_stream control_deps node found")
+        sums = [
+            n
+            for n in graph.nodes
+            if n.op == "call_function" and n.target is torch.ops.aten.sum.default
+        ]
+        self.assertEqual(len(sums), 2)
+        for s in sums:
+            inp = s.args[0]
+            self.assertTrue(
+                inp.op == "call_function"
+                and inp.target is operator.getitem
+                and inp.args[0] is sync_cd,
+                f"sum consumer {inp} does not route through synchronize_stream barrier",
+            )
 
     def test_synchronize_event_threads_all_prior_sync_data(self):
         """synchronize_event is a CPU-side barrier like synchronize_stream/device,

@@ -538,6 +538,11 @@ def _collect_wait_stream_forward_deps(graph: torch.fx.Graph) -> dict[Node, list[
     of subsequent compute nodes on the waiting stream that are defined before
     the wait_stream. These must be threaded through the control_deps so that
     the waiting-stream work is ordered after the wait_stream operation.
+
+    Not applied to wait_event: threading arbitrary forward inputs
+    (activations/placeholders) through a wait_event's control_deps can make a
+    saved value non-recomputable and render the min-cut partitioner infeasible,
+    and independent post-wait work is observationally order-independent anyway.
     """
     result: dict[Node, list[Node]] = {}
     nodes_before: set[Node] = set()
@@ -573,6 +578,7 @@ def _collect_wait_stream_forward_deps(graph: torch.fx.Graph) -> dict[Node, list[
 def _collect_full_barrier_deps(
     stream_to_nodes: dict[int | None, list[Node]],
     stream_sync_deps: dict[int | None, list[Node]],
+    bwd: bool = False,
 ) -> list[Node]:
     """Collect all still-live cross-stream deps for a full CPU barrier
     (synchronize_stream/device/event).
@@ -582,14 +588,22 @@ def _collect_full_barrier_deps(
     barrier). Includes live compute nodes (stream_to_nodes) plus the ctrl/
     passthrough nodes accumulated by prior sync ops that already cleared
     stream_to_nodes (stream_sync_deps), deduped by identity preserving order.
+
+    ``bwd`` marks a backward barrier: its accumulated sync deps are filtered to
+    backward nodes only, so it never depends on a forward control_deps node.
+    That edge would cross the fwd/bwd boundary onto a node that is neither
+    saveable nor recomputable, making the min-cut partitioner infeasible.
+    Forward compute deps (stream_to_nodes) are kept -- backward legitimately
+    depends on forward activations.
     """
     all_deps = [n for nodes in stream_to_nodes.values() for n in nodes]
     seen = {id(n) for n in all_deps}
     for deps in stream_sync_deps.values():
         for dep in deps:
-            if id(dep) not in seen:
-                all_deps.append(dep)
-                seen.add(id(dep))
+            if id(dep) in seen or (bwd and not is_bwd_node(dep)):
+                continue
+            all_deps.append(dep)
+            seen.add(id(dep))
     return all_deps
 
 
@@ -646,7 +660,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     torch.ops.streams.synchronize_stream.default,
                 ):
                     all_stream_deps = _collect_full_barrier_deps(
-                        stream_to_nodes, stream_sync_deps
+                        stream_to_nodes, stream_sync_deps, bwd=is_bwd_node(node)
                     )
                     if all_stream_deps:
                         found_sync = True
@@ -671,6 +685,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                 # the waited_on stream: all prior work there must complete
                 # before the waiting stream proceeds.
                 if node.target is torch.ops.streams.wait_stream.default:
+                    waiting_stream: int = node.args[0]  # type: ignore[assignment]
                     waited_on_stream: int = node.args[1]  # type: ignore[assignment]
                     deps_before_sync = list(stream_to_nodes.get(waited_on_stream, ()))
                     if None in stream_to_nodes and waited_on_stream is not None:
@@ -689,7 +704,11 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                         ctrl_node_ws, passthrough_ws = _wrap_sync_node(
                             gm, node, deps_before_sync, visited
                         )
-                        stream_sync_deps.setdefault(waited_on_stream, []).extend(
+                        # Key under the WAITING stream: the wait_stream op runs on
+                        # it, so a later record/wait on the waiting stream must
+                        # chain to this wait (otherwise a bare record there floats
+                        # above it). The waited_on stream gains no work from this op.
+                        stream_sync_deps.setdefault(waiting_stream, []).extend(
                             [ctrl_node_ws, *passthrough_ws]
                         )
                     stream_to_nodes[waited_on_stream] = []
@@ -715,7 +734,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     # so fold in still-live cross-stream data accumulated by prior
                     # sync ops (which cleared stream_to_nodes).
                     all_stream_deps = _collect_full_barrier_deps(
-                        stream_to_nodes, stream_sync_deps
+                        stream_to_nodes, stream_sync_deps, bwd=is_bwd_node(node)
                     )
                     if event_index not in event_to_stream:
                         placeholders = [n for n in graph.nodes if n.op == "placeholder"]

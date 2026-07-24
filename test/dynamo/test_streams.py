@@ -1635,6 +1635,9 @@ class <lambda>(torch.nn.Module):
         self.assertIn(record2_ctrl, wait_ctrl.args[0])
         self.assertNotIn(record1_ctrl, wait_ctrl.args[0])
 
+        graph.lint()
+
+    @requires_cuda
     def test_same_stream_record_ordering(self) -> None:
         """Two record_events on one stream must be ordered relative to each other.
 
@@ -1679,6 +1682,55 @@ class <lambda>(torch.nn.Module):
         # The second record is ordered after the first (its control_deps depends
         # on the first record's control_deps node).
         self.assertIn(record1_ctrl, record2_ctrl.args[0])
+
+        graph.lint()
+
+    @requires_cuda
+    def test_wait_stream_anchors_following_record(self) -> None:
+        """A record_event on the WAITING stream after a wait_stream must chain to
+        the wait_stream (which runs on that stream), not float above it as a bare
+        node. Regression: wait_stream's control_deps was keyed under the waited-on
+        stream, so a later record on the waiting stream never found it.
+        """
+
+        def fn(x) -> torch.Tensor:
+            default = torch.cuda.current_stream()
+            side = torch.cuda.Stream()
+            e = torch.cuda.Event()
+            a = x @ x
+            with torch.cuda.stream(side):
+                side.wait_stream(default)
+                e.record()  # bare on the waiting stream without the fix
+            e.wait()
+            return a
+
+        inp = (torch.ones(4, 4, device="cuda"),)
+        (
+            _,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+
+        graph = fw_graphs[0].graph
+
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        # The record must be wrapped, not left as a bare (floatable) node in the
+        # main graph -- wrapped record_events live inside control_deps subgraphs.
+        bare_records = graph.find_nodes(
+            op="call_function", target=torch.ops.streams.record_event.default
+        )
+        self.assertEqual(
+            list(bare_records), [], "record_event on the waiting stream floated bare"
+        )
+
+        # The record's control_deps must depend on the wait_stream's control_deps.
+        ctrl_nodes = list(graph.find_nodes(op="call_function", target=control_deps))
+        record_ctrl = [n for n in ctrl_nodes if "record_event" in n.args[1].name]
+        wait_ctrl = [n for n in ctrl_nodes if "wait_stream" in n.args[1].name]
+        self.assertTrue(record_ctrl and wait_ctrl)
+        self.assertIn(wait_ctrl[0], record_ctrl[0].args[0])
 
         graph.lint()
 
