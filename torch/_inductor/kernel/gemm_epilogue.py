@@ -130,6 +130,22 @@ class GroupedReductionLayout:
     axis: int
     group_size: int
 
+    @classmethod
+    def from_output_shape(
+        cls, output_shape: Sequence[Any], gemm_shape: Sequence[Any]
+    ) -> "GroupedReductionLayout | None":
+        if len(output_shape) != 3 or len(gemm_shape) != 2:
+            return None
+        for axis, group_dim in ((0, 1), (1, 2)):
+            try:
+                group = V.graph.sizevars.optimization_hint(output_shape[group_dim])
+            except Exception:
+                continue
+            layout = cls(axis, group)
+            if layout.matches_output_shape(output_shape, gemm_shape):
+                return layout
+        return None
+
     @property
     def reduce_dims(self) -> tuple[int, ...]:
         return (-1, 2) if self.axis == 1 else (-2, 1)
