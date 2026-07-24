@@ -4576,7 +4576,9 @@ class GetSetDescriptorVariable(VariableTracker):
     def get_real_python_backed_value(self) -> types.GetSetDescriptorType:
         return self.descriptor
 
-    def _getset_descriptor_get(self, tx):
+    def _getset_descriptor_get(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
         if not self.source:
             return None
         source = AttrSource(self.source, "__get__")

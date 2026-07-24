@@ -512,31 +512,56 @@ class ConstDictVariable(VariableTracker):
     # But for all the other methods, we insert the DICT_KEYS_MATCH guard to be
     # conservative.
 
-    def dict_items(self, tx, args, kwargs):
+    def dict_items(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         self.install_dict_keys_match_guard()
         if self.source:
             tx.output.guard_on_key_order.add(self.source)
         return DictItemsVariable(self)
 
-    def dict_keys(self, tx, args, kwargs):
+    def dict_keys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         self.install_dict_keys_match_guard()
         if self.source:
             tx.output.guard_on_key_order.add(self.source)
         return DictKeysVariable(self)
 
-    def dict_values(self, tx, args, kwargs):
+    def dict_values(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         self.install_dict_keys_match_guard()
         if self.source:
             tx.output.guard_on_key_order.add(self.source)
         return DictValuesVariable(self)
 
-    def dict_copy(self, tx, args, kwargs):
+    def dict_copy(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         self.install_dict_keys_match_guard()
         return self.clone(
             items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
         )
 
-    def dict_get(self, tx, args, kwargs):
+    def dict_get(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         if len(args) not in (1, 2):
             raise_args_mismatch(tx, "get", "1 or 2 args", f"{len(args)} args")
         if args[0] not in self:
@@ -548,7 +573,12 @@ class ConstDictVariable(VariableTracker):
         # Key guarding - Nothing to do.
         return self.getitem_const(tx, args[0])
 
-    def dict_pop(self, tx, args, kwargs):
+    def dict_pop(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         if len(args) not in (1, 2):
@@ -564,7 +594,12 @@ class ConstDictVariable(VariableTracker):
         tx.output.side_effects.mutation(self)
         return self.items.pop(HashableTracker(args[0]))
 
-    def dict_popitem(self, tx, args, kwargs):
+    def dict_popitem(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         # dict.popitem() takes no args. OrderedDict.popitem(last=) is
@@ -584,13 +619,23 @@ class ConstDictVariable(VariableTracker):
         tx.output.side_effects.mutation(self)
         return variables.TupleVariable([k.vt, v])
 
-    def dict_clear(self, tx, args, kwargs):
+    def dict_clear(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         self.should_reconstruct_all = True
         tx.output.side_effects.mutation(self)
         self.items.clear()
         return ConstantVariable.create(None)
 
-    def dict_update(self, tx, args, kwargs):
+    def dict_update(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         # Mirrors CPython PyDict_Merge: if arg has keys(), iterate keys and
@@ -636,7 +681,12 @@ class ConstDictVariable(VariableTracker):
             self.items[HashableTracker(VariableTracker.build(tx, k))] = v
         return ConstantVariable.create(None)
 
-    def dict_setdefault(self, tx, args, kwargs):
+    def dict_setdefault(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         if len(args) not in (1, 2):
@@ -666,7 +716,12 @@ class ConstDictVariable(VariableTracker):
             self.items[HashableTracker(args[0])] = x
             return x
 
-    def dict_reversed(self, tx, args, kwargs):
+    def dict_reversed(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # dict.__reversed__: reverse insertion-order key iterator.
         # Not a C-level slot, so it lives in tp_methods rather than call_method.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
@@ -1082,7 +1137,12 @@ class DictViewVariable(VariableTracker):
             )
         return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
-    def dict_view_reversed(self, tx, args, kwargs):
+    def dict_view_reversed(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # dict_keys/values/items __reversed__: reverse insertion order.
         # Not a C-level slot, so it lives in tp_methods rather than call_method.
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
@@ -1574,7 +1634,12 @@ class DunderDictVariable(ConstDictVariable):
             self.items[name] = value
             return value
 
-    def dict_copy(self, tx, args, kwargs):
+    def dict_copy(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         return ConstDictVariable(
             dict(self.items), mutation_type=ValueMutationNew(), source=None
         )

@@ -4574,7 +4574,12 @@ class RemovableHandleVariable(VariableTracker):
         self.mutation_type = mutation_type
         self.idx = idx
 
-    def remove(self, tx, args, kwargs):
+    def remove(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         if self.idx != self.REMOVED:
             if self.idx is None:
                 raise AssertionError("idx must not be None for hook removal")
