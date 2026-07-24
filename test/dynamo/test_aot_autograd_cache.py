@@ -4258,10 +4258,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
         pickler = AOTAutogradCachePickler(gm)
 
-        class _V:
-            pass
-
-        v1, v2, v3 = _V(), _V(), _V()
+        v1, v2, v3 = torch.nn.Module(), torch.nn.Module(), torch.nn.Module()
 
         wvd = weakref.WeakValueDictionary({"k": v1})
         wkd = weakref.WeakKeyDictionary({v2: "val"})
@@ -4329,10 +4326,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                     return return_and_correct_aliasing(func, args, kwargs, out_wrapped)
                 return out_wrapped
 
-        class _V:
-            pass
-
-        v = _V()
+        v = torch.nn.Module()
         weak_meta = weakref.WeakValueDictionary({"k": v})
 
         gm = torch.fx.GraphModule({}, torch.fx.Graph())

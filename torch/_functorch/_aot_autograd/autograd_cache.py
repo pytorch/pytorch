@@ -707,7 +707,9 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             obj, (dict, weakref.WeakValueDictionary, weakref.WeakKeyDictionary)
         ):
             return {
-                self._stabilize_tensor_subclass_metadata(k): self._stabilize_tensor_subclass_metadata(v)
+                self._stabilize_tensor_subclass_metadata(
+                    k
+                ): self._stabilize_tensor_subclass_metadata(v)
                 for k, v in obj.items()
             }
         if isinstance(obj, weakref.WeakSet):
