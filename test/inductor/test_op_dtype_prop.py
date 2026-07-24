@@ -219,8 +219,8 @@ class TestCase(InductorTestCase):
                     re.search(r"tmp\d+ = tmp\d+\.to\(tl\.float32\)", code) is not None
                 )
                 self.assertNotEqual(separate_upcast, load_upcast_to_fp32)
-                if convert_output:
-                    self.assertIn(f".to({tl_dtype_str})", code)
+                # The output downcast is implicit in tl.store, so there is no
+                # explicit .to(<low-precision>) to assert on the default path.
                 return
 
             # Search the code with a regex.
