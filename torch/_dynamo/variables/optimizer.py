@@ -144,7 +144,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # Note: this allows us to intercept the call in call_method
@@ -153,7 +153,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         if name in ("_init_group"):
             if not self.source:
                 raise AssertionError(
-                    "OptimizerVariable requires a source for getattro_impl"
+                    "OptimizerVariable requires a source for tp_getattro_impl"
                 )
             return GetAttrVariable(
                 self,
@@ -171,7 +171,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
             self._set_capturable(tx)
 
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def graph_break_if_pending_mutation(self, tx: "InstructionTranslatorBase") -> None:
         # If there are pending mutations on a parameter (due to using closure)

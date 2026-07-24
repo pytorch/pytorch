@@ -73,7 +73,7 @@ class DistributedVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
-    def richcompare_impl(self, tx, other, op):
+    def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -128,7 +128,7 @@ class WorldMetaClassVariable(DistributedVariable):
     def python_type(self) -> type:
         return type(self.value)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "WORLD":
@@ -147,7 +147,7 @@ class WorldMetaClassVariable(DistributedVariable):
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER, source)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class BackwardHookVariable(VariableTracker):

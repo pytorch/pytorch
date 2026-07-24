@@ -385,7 +385,7 @@ class BaseBuiltinVariable(VariableTracker):
 
     Specialized subclasses (e.g. DictBuiltinVariable) set `_fn` as a class
     attribute. BuiltinVariable stores the callable on the instance as `self.fn`
-    and overrides as_python_constant / reconstruct / getattro_impl accordingly.
+    and overrides as_python_constant / reconstruct / tp_getattro_impl accordingly.
     """
 
     _fn: Any = None
@@ -448,7 +448,7 @@ class BaseBuiltinVariable(VariableTracker):
             raise AssertionError("shadowed global")
         codegen.append_output(codegen.create_load_global(name, add=True))
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # Declarative type-attribute dispatch, mirroring the consultation at the
@@ -471,7 +471,7 @@ class BaseBuiltinVariable(VariableTracker):
         # CPython meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         return hash(self.as_python_constant()), False
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -917,7 +917,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 )
 
                 # COMPARE_OP (a == b) dispatches through generic_richcompare,
-                # which implements do_richcompare via richcompare_impl slots.
+                # which implements do_richcompare via tp_richcompare_impl slots.
                 # See object_protocol.py for details.
                 dunder = _OPERATOR_TO_DUNDER[op]
 
@@ -1553,7 +1553,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             raise_type_error(tx, f"vars expected at most 1 argument, got {len(args)}")
         # vars(obj) is obj.__dict__ if __dict__ is present else TypeError
         try:
-            return args[0].getattro_impl(tx, "__dict__")
+            return args[0].tp_getattro_impl(tx, "__dict__")
         except ObservedAttributeError:
             raise_observed_exception(TypeError, tx)
 
@@ -2742,7 +2742,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             mutation_type=ValueMutationNew(),
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # Declarative type-attribute dispatch (__name__, __bases__, __base__,
@@ -3419,7 +3419,7 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         except Unsupported:
             # Replicate the constant-fold fallback from BuiltinVariable._make_handler:
             # if all args are python constants, evaluate getattr() directly rather
-            # than propagating a graph break from getattro_impl.
+            # than propagating a graph break from tp_getattro_impl.
             if not check_unspec_or_constant_args(args, kwargs):
                 raise
             try:
@@ -3707,7 +3707,9 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                 assigning_fake_val = get_fake_value(val.as_proxy().node, tx)
 
                 try:
-                    getattr_var = obj.getattro_impl(tx, name_var.as_python_constant())
+                    getattr_var = obj.tp_getattro_impl(
+                        tx, name_var.as_python_constant()
+                    )
                 except (AttributeError, ObservedAttributeError):
                     getattr_var = None
 

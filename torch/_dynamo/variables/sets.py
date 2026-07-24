@@ -157,7 +157,7 @@ class SetVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return {k.vt.as_python_constant() for k in self.set_items}
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
         if not self.items:
             return VariableTracker.build(tx, f"{self.python_type_name()}()")
@@ -295,7 +295,7 @@ class SetVariable(VariableTracker):
         # OrderedSet.
         return type(self)(list(items), mutation_type=ValueMutationNew())
 
-    def sq_contains(
+    def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2131-L2149
@@ -728,10 +728,10 @@ class SetVariable(VariableTracker):
         self.call_method(tx, "symmetric_difference_update", [other], {})
         return self
 
-    def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -853,7 +853,7 @@ class OrderedSetVariable(SetVariable):
                 items.append(key_str)
             return "OrderedSet([" + ", ".join(items) + "])"
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
         return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
@@ -944,7 +944,7 @@ class FrozensetVariable(SetVariable):
     def as_python_constant(self) -> Any:
         return frozenset({k.vt.as_python_constant() for k in self.set_items})
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
         if not self.items:
             return VariableTracker.build(tx, f"{self.python_type_name()}()")

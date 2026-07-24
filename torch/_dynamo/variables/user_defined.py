@@ -143,7 +143,7 @@ def _safe_c_slots() -> OrderedSet[object]:
     """C slot wrappers known to be safe to call at trace time.
 
     Covers tp_hash and tp_richcompare slots for C extension types.
-    Used by UDOV's hash_impl and richcompare_impl MRO walks.
+    Used by UDOV's hash_impl and tp_richcompare_impl MRO walks.
     """
     global _SAFE_C_SLOTS
     if _SAFE_C_SLOTS is None:
@@ -334,7 +334,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 pass
         return hash(self.value), True
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .constant import ConstantVariable
@@ -494,7 +494,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         """Walk type(cls).__mro__ (the metaclass chain) to find *name*."""
         return mro_lookup(type(self.value), name)
 
-    def bool_impl(
+    def nb_bool_impl(
         self,
         tx: "InstructionTranslatorBase",
     ) -> "VariableTracker":
@@ -507,7 +507,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return self.call_method(tx, "__bool__", [], {})
         return ConstantVariable.create(True)
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L2379-L2408
         metaclass = type(self.value)
         if metaclass is type or metaclass.__repr__ is type.__repr__:
@@ -518,7 +518,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             raise_type_error(tx, "'NoneType' object is not callable")
         return self.call_method(tx, "__repr__", [], {})
 
-    def str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         metaclass = type(self.value)
         if metaclass is type or metaclass.__str__ is type.__str__:
             return generic_repr(tx, self)
@@ -545,7 +545,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         source = AttrSource(self.source, name) if self.source is not None else None
@@ -893,19 +893,19 @@ class UserDefinedClassVariable(UserDefinedVariable):
             ).call_function(tx, [], {})
         raise_type_error(tx, f"object of type {self.python_type_name()} has no length")
 
-    def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.len_impl(tx)
 
-    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.len_impl(tx)
 
-    def sq_contains(
+    def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         m = self._maybe_get_baseclass_method("__contains__")
         if m:
             return self.call_method(tx, "__contains__", [item], {})
-        return super().sq_contains(tx, item)
+        return super().sq_contains_impl(tx, item)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         m = self._maybe_get_baseclass_method("__iter__")
@@ -1894,7 +1894,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
         return super().guard_as_python_constant()
 
-    def bool_impl(
+    def nb_bool_impl(
         self,
         tx: "InstructionTranslatorBase",
     ) -> "VariableTracker | None":
@@ -1930,7 +1930,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             raise_type_error(tx, err_str)
 
-    def repr_impl(
+    def tp_repr_impl(
         self,
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
@@ -1950,7 +1950,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             skip_frame=True,
         )
 
-    def str_impl(
+    def tp_str_impl(
         self,
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
@@ -2047,7 +2047,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             kwargs,
         )
 
-    def sq_contains(
+    def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9337
@@ -2773,7 +2773,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
 
             # Delegate to _base_vt for non-overridden base-class methods.
-            # Skip comparison ops: they go through richcompare_impl on the
+            # Skip comparison ops: they go through tp_richcompare_impl on the
             # UserDefined*Variable subclass, which handles _base_vt
             # unwrapping and avoids tracing tensor elements via list_cmp.
             if (
@@ -2871,7 +2871,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self
         return super().sq_inplace_concat_impl(tx, other)
 
-    def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9266
         res = self._vectorcall_method(tx, "__len__", [], {})
 
@@ -2892,7 +2892,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return pynumber_as_ssize_t(tx, res, OverflowError)
 
     # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9368
-    mp_length = sq_length
+    mp_length_impl = sq_length_impl
 
     def method_setattr_standard(
         self,
@@ -3202,7 +3202,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # If the object has an overridden getattribute method, Dynamo has
             # already tried tracing it, and encountered an AttributeError. We
             # call getattr_static only when the __getattribute__ tracing fails
-            # (check getattro_impl impl). So, it is safe here to raise the
+            # (check tp_getattro_impl impl). So, it is safe here to raise the
             # AttributeError.
             raise AttributeError
 
@@ -3321,7 +3321,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         """Dynamo implementation of CPython's PyObject_GenericGetAttr.
 
         This mirrors object.__getattribute__ and is called from:
-        - getattro_impl (for objects without a custom __getattribute__)
+        - tp_getattro_impl (for objects without a custom __getattribute__)
         - SuperVariable.call_method (when super().__getattribute__() resolves
           to object.__getattribute__)
 
@@ -3426,7 +3426,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if self._object_has_getattribute:
@@ -3468,7 +3468,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = self.get_source_by_walking_mro(tx, name)
             prop_vt = variables.PropertyVariable(type_attr, source=source)
             return prop_vt.tp_descr_get_impl(
-                tx, self, self.getattro_impl(tx, "__class__")
+                tx, self, self.tp_getattro_impl(tx, "__class__")
             )
         if isinstance(type_attr, types.MemberDescriptorType):
             if tx.output.side_effects.has_pending_mutation_of_attr(
@@ -3486,7 +3486,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return result
             md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
             return md_vt.tp_descr_get_impl(
-                tx, self, self.getattro_impl(tx, "__class__")
+                tx, self, self.tp_getattro_impl(tx, "__class__")
             )
 
         if isinstance(type_attr, types.GetSetDescriptorType):
@@ -3505,13 +3505,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return result
             gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
             return gs_vt.tp_descr_get_impl(
-                tx, self, self.getattro_impl(tx, "__class__")
+                tx, self, self.tp_getattro_impl(tx, "__class__")
             )
 
         if isinstance(type_attr, _collections._tuplegetter):
             tg_vt = variables.TupleGetterVariable(type_attr, source=source)
             return tg_vt.tp_descr_get_impl(
-                tx, self, self.getattro_impl(tx, "__class__")
+                tx, self, self.tp_getattro_impl(tx, "__class__")
             )
 
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
@@ -3560,7 +3560,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = self.get_source_by_walking_mro(tx, name)
             sm_vt = variables.StaticMethodVariable(type_attr, source=source)
             return sm_vt.tp_descr_get_impl(
-                tx, self, self.getattro_impl(tx, "__class__")
+                tx, self, self.tp_getattro_impl(tx, "__class__")
             )
         elif isinstance(type_attr, classmethod):
             # Source points to the descriptor in the class __dict__ via MRO
@@ -3570,21 +3570,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = self.get_source_by_walking_mro(tx, name)
             cm_vt = variables.ClassMethodVariable(type_attr, source=source)
             return cm_vt.tp_descr_get_impl(
-                tx, self, self.getattro_impl(tx, "__class__")
+                tx, self, self.tp_getattro_impl(tx, "__class__")
             )
         elif isinstance(type_attr, types.ClassMethodDescriptorType):
             cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
             return cmd_vt.tp_descr_get_impl(
-                tx, self, self.getattro_impl(tx, "__class__")
+                tx, self, self.tp_getattro_impl(tx, "__class__")
             )
         elif isinstance(type_attr, types.WrapperDescriptorType):
-            class_vt = self.getattro_impl(tx, "__class__")
+            class_vt = self.tp_getattro_impl(tx, "__class__")
             wd_vt = variables.WrapperDescriptorVariable(
                 type_attr, owner=class_vt, source=source
             )
             return wd_vt.tp_descr_get_impl(tx, self, class_vt)
         elif isinstance(type_attr, types.MethodDescriptorType):
-            class_vt = self.getattro_impl(tx, "__class__")
+            class_vt = self.tp_getattro_impl(tx, "__class__")
             md_vt = variables.MethodDescriptorVariable(
                 type_attr, owner=class_vt, source=source
             )
@@ -3775,7 +3775,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.ConstantVariable.create(True)
 
         try:
-            var_vt = self.getattro_impl(tx, name)
+            var_vt = self.tp_getattro_impl(tx, name)
             return VariableTracker.build(
                 tx, not isinstance(var_vt, variables.DeletedVariable)
             )
@@ -3877,7 +3877,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # (e.g. IntEnum inheriting int.__hash__).
         return hash(self.value), False
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         """MRO walk for tp_richcompare, analogous to slot_tp_richcompare.
@@ -3943,7 +3943,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return ConstantVariable.create(NotImplemented)
             unimplemented(
                 gb_type="Untraceable C tp_richcompare",
-                context=f"richcompare_impl {self} {op}",
+                context=f"tp_richcompare_impl {self} {op}",
                 explanation=f"{cls.__name__} defines a C comparison method "
                 f"that Dynamo cannot trace into.",
                 hints=[
@@ -3955,7 +3955,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
 
         if self._base_vt is not None:
-            return self._base_vt.richcompare_impl(tx, other, op)
+            return self._base_vt.tp_richcompare_impl(tx, other, op)
 
         return object_richcompare(self, tx, other, op)
 
@@ -4140,14 +4140,14 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
     Construction is handled by the generic polyfill path (tracing through
     the auto-generated __init__). Field values are retrieved dynamically
-    via getattro_impl using InstructionTranslator.current_tx().
+    via tp_getattro_impl using InstructionTranslator.current_tx().
     """
 
     def _get_field_vt(self, field_name: str) -> VariableTracker:
         from torch._dynamo.symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        return self.getattro_impl(tx, field_name)
+        return self.tp_getattro_impl(tx, field_name)
 
     def as_python_constant(self) -> object:
         from dataclasses import fields
@@ -4318,7 +4318,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             return variables.ConstantVariable.create(None)
         return super().tp_init_impl(tx, args, kwargs)
 
-    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
+    def tp_getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         if name in (
             "args",
             "__cause__",
@@ -4326,8 +4326,8 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             "__suppress_context__",
             "__traceback__",
         ):
-            return self._base_vt.getattro_impl(tx, name)  # type: ignore[missing-attribute]
-        return super().getattro_impl(tx, name)
+            return self._base_vt.tp_getattro_impl(tx, name)  # type: ignore[missing-attribute]
+        return super().tp_getattro_impl(tx, name)
 
     @property
     def __context__(self) -> "ConstantVariable":
@@ -4351,17 +4351,17 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     def debug_repr(self) -> str:
         return self.exc_vt.debug_repr()
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
         if type(self.value).__repr__ is not BaseException.__repr__:
-            return super().repr_impl(tx)
-        return self.exc_vt.repr_impl(tx)
+            return super().tp_repr_impl(tx)
+        return self.exc_vt.tp_repr_impl(tx)
 
-    def str_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # ref: BaseException_str in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L118-L129
         if type(self.value).__str__ is not BaseException.__str__:
-            return super().str_impl(tx)
-        return self.exc_vt.str_impl(tx)
+            return super().tp_str_impl(tx)
+        return self.exc_vt.tp_str_impl(tx)
 
     @python_stack.setter
     def python_stack(self, value: traceback.StackSummary) -> None:
@@ -4388,13 +4388,13 @@ class InspectVariable(UserDefinedObjectVariable):
     def is_matching_class(obj: object) -> bool:
         return obj in InspectVariable._PROPERTY_REDIRECTS
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
         if name in redirects:
-            return super().getattro_impl(tx, redirects[name])
-        return super().getattro_impl(tx, name)
+            return super().tp_getattro_impl(tx, redirects[name])
+        return super().tp_getattro_impl(tx, name)
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
@@ -4412,7 +4412,7 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
             raise AssertionError(f"Expected KeyedJaggedTensor, got {type(value)}")
         super().__init__(value, **kwargs)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if (
@@ -4421,8 +4421,8 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
             and name in ("_length_per_key", "_offset_per_key")
         ):
             with TracingContext.patch(force_unspec_int_unbacked_size_like=True):
-                return super().getattro_impl(tx, name)
-        return super().getattro_impl(tx, name)
+                return super().tp_getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 _CONSTANT_BASE_TYPES = (int, float, str)
@@ -4563,10 +4563,10 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             raise AssertionError("_base_vt must not be None in len")
         return self._base_vt.len()  # type: ignore[union-attr]
 
-    def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # Dict implements __len__ via mp_length (mapping protocol), not
         # sq_length (sequence protocol). Redirect so generic_size works.
-        return self.mp_length(tx)
+        return self.mp_length_impl(tx)
 
     def mp_subscript_impl(
         self,
@@ -4656,7 +4656,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             return f"{type(self.value).__name__}({{{contents}}})"
         return base_vt.debug_repr()
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L748-L757
         method = self._maybe_get_baseclass_method("__repr__")
         if type(self.value).__repr__ is collections.Counter.__repr__:
@@ -4684,8 +4684,8 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         if method in self._base_methods:
             if self._base_vt is None:
                 raise AssertionError("_base_vt must not be None for dict repr")
-            return self._base_vt.repr_impl(tx)
-        return super().repr_impl(tx)
+            return self._base_vt.tp_repr_impl(tx)
+        return super().tp_repr_impl(tx)
 
 
 # TODO: move to dicts.py alongside ConstDictVariable.
@@ -4777,7 +4777,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
             f"{self._base_vt.debug_repr()})"
         )
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2373-L2405
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None for defaultdict repr")
@@ -4787,14 +4787,14 @@ class DefaultDictVariable(UserDefinedDictVariable):
             f"{tracked_repr(tx, self._base_vt)})",
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self,
         tx: "InstructionTranslatorBase",
         name: str,
     ) -> VariableTracker:
         if name == "default_factory":
             return self.default_factory
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def _missing_impl(
         self,
@@ -5095,15 +5095,15 @@ class UserDefinedDequeVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None after initialization")
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # maxlen is a read-only getset on deque, not a method, so it is not
         # covered by the _base_methods call_method delegation; route it to the
         # DequeVariable which tracks maxlen on the base deque.
         if name == "maxlen" and self._base_vt is not None:
-            return self._base_vt.getattro_impl(tx, name)
-        return super().getattro_impl(tx, name)
+            return self._base_vt.tp_getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class UserDefinedTupleVariable(UserDefinedObjectVariable):
@@ -5337,7 +5337,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         items = [x.as_proxy() for x in self.items]
         return self.tuple_cls(*items)  # type: ignore[arg-type]
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         fields = namedtuple_fields(self.tuple_cls)
         items = ", ".join(
             f"{name}={tracked_repr(tx, item)}" for name, item in zip(fields, self.items)
@@ -5385,7 +5385,7 @@ class StructSequenceVariable(UserDefinedTupleVariable):
         )
         return f"{self.tuple_cls.__module__}.{self.tuple_cls.__qualname__}({items})"
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         fields = namedtuple_fields(self.tuple_cls)
         items = ", ".join(
             f"{name}={tracked_repr(tx, item)}" for name, item in zip(fields, self.items)
@@ -5436,7 +5436,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
         return super().method_setattr_standard(tx, name, value)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # A common pattern in the init code of MutableMapping objects is to
@@ -5449,12 +5449,12 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         ):
             return variables.UserMethodVariable(polyfills.mapping_get, self)
         else:
-            return super().getattro_impl(tx, name)
+            return super().tp_getattro_impl(tx, name)
 
-    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self._maybe_get_baseclass_method("__len__") in dict_methods:
             return VariableTracker.build(tx, len(self.value))  # type: ignore[bad-argument-type]
-        return super().mp_length(tx)
+        return super().mp_length_impl(tx)
 
 
 class RandomVariable(UserDefinedObjectVariable):
