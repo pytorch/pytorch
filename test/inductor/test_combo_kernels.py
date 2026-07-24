@@ -726,9 +726,8 @@ class ComboKernelTests(TestCase):
         torch.testing.assert_close(out_eager, out_compiled, atol=1e-4, rtol=1e-4)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
         if torch._inductor.config.combo_kernel_per_subkernel_blocks:
-            # Per-subkernel: signature has XBLOCK_0, XBLOCK_1
-            FileCheck().check("R0_BLOCK_0: tl.constexpr = 64").check(
-                "R0_BLOCK_1: tl.constexpr = 512"
+            FileCheck().check("R0_BLOCK: tl.constexpr = 64").check(
+                "R0_BLOCK: tl.constexpr = 512"
             ).run(code[0])
         else:
             FileCheck().check("XBLOCK : tl.constexpr").check_not(
@@ -1135,11 +1134,7 @@ class ComboKernelTests(TestCase):
         default_kvs = dict(
             re.findall(r"'(XBLOCK_\d+)':\s*(\d+)", default_match.group(1))
         )
-        body_kvs = dict(
-            re.findall(r"(XBLOCK_\d+):\s*tl\.constexpr\s*=\s*(\d+)", combined)
-        )
-        # Grid and kernel body must agree on every XBLOCK_i.
-        self.assertEqual(default_kvs, body_kvs)
+        self.assertIsNone(re.search(r"XBLOCK_\d+:\s*tl\.constexpr\s*=", combined))
         self.assertEqual(set(default_kvs), {"XBLOCK_0", "XBLOCK_1", "XBLOCK_2"})
 
     @requires_gpu_and_triton
@@ -1274,6 +1269,10 @@ class ComboKernelTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_gpu_and_triton
+    @skipIfXpu(
+        msg="dynamic_scale_rblock requires GPU-specific device properties "
+        "(major, regs_per_multiprocessor, warp_size) not available on XPU"
+    )
     @torch._inductor.config.patch(
         {
             "combo_kernel_per_subkernel_blocks": True,
@@ -1897,9 +1896,14 @@ class ComboKernelDynamicShapesTests(TestCase):
                     torch._inductor.metrics.generated_kernel_count,
                     4 if benchmark else 1,
                 )
-                FileCheck().check("R0_BLOCK_0: tl.constexpr = 32").check(
-                    "R0_BLOCK_1: tl.constexpr = 32"
-                ).run(code[0])
+                if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+                    FileCheck().check_count(
+                        "R0_BLOCK: tl.constexpr = 32", 1, exactly=True
+                    ).run(code[0])
+                else:
+                    FileCheck().check("R0_BLOCK_0: tl.constexpr = 32").check(
+                        "R0_BLOCK_1: tl.constexpr = 32"
+                    ).run(code[0])
 
 
 class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
@@ -1935,11 +1939,61 @@ class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
         fc.run(code)
 
     @requires_gpu_and_triton
+    def test_noinline_sub_kernel_body_dedupes_identical_members(self):
+        def fn(x, y):
+            return x + 1, y + 1
+
+        inps = (
+            torch.rand(8192, device=GPU_TYPE),
+            torch.rand(8192, device=GPU_TYPE),
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        code = " ".join(code)
+
+        (
+            FileCheck()
+            .check_count("@triton.jit(noinline=True)", 1, exactly=True)
+            .check("_body_0(")
+            .check("pid = tl.program_id(0)")
+            .check("pid < num_blocks_0:")
+            .check("_body_0(")
+            .check("pid < num_blocks_1:")
+            .check("_body_0(")
+            .run(code)
+        )
+
+    @requires_gpu_and_triton
+    def test_noinline_sub_kernel_body_dedupes_by_signature(self):
+        def fn(x, y):
+            return x + 1, y + 1
+
+        inps = (
+            torch.rand(8192, device=GPU_TYPE, dtype=torch.float32),
+            torch.rand(8192, device=GPU_TYPE, dtype=torch.float64),
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        code = " ".join(code)
+
+        FileCheck().check_count("@triton.jit(noinline=True)", 2, exactly=True).check(
+            "_body_0("
+        ).check("_body_1(").run(code)
+        (
+            FileCheck()
+            .check("pid = tl.program_id(0)")
+            .check("pid < num_blocks_0:")
+            .check("_body_0(")
+            .check("pid < num_blocks_1:")
+            .check("_body_1(")
+            .run(code)
+        )
+
+    @requires_gpu_and_triton
     @torch._inductor.config.patch("combo_kernels_autotune", 0)
     def test_noinline_sub_kernel_bodies_no_bench(self):
-        # No-benchmark path (combo_kernels_autotune=0 -> bake_blocks): block
-        # sizes are kernel-scope constexprs, threaded into each sub-function
-        # as constexpr call arguments.
         def fn(x, y):
             return x + 1, torch.tanh(y)
 
@@ -1956,11 +2010,12 @@ class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
             FileCheck()
             .check("@triton.jit(noinline=True)")
             .check("_body_0(")
-            .check("XBLOCK_0 : tl.constexpr")
+            .check("XBLOCK : tl.constexpr")
             .check("@triton.jit(noinline=True)")
             .check("_body_1(")
+            .check("XBLOCK : tl.constexpr")
             .check("XBLOCK_1 : tl.constexpr")
-            .check("XBLOCK_0: tl.constexpr =")
+            .check_not("XBLOCK_0: tl.constexpr =")
             .check("pid < num_blocks_0:")
             .check("_body_0(")
             .check("pid < num_blocks_1:")
