@@ -242,10 +242,20 @@ class BackwardHookVariable(VariableTracker):
     def python_type(self) -> type:
         return torch.utils.hooks.BackwardHook
 
-    def setup_input_hook(self, tx, args, kwargs):
+    def setup_input_hook(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         return self._setup_hook(tx, "setup_input_hook", *args, **kwargs)
 
-    def setup_output_hook(self, tx, args, kwargs):
+    def setup_output_hook(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         return self._setup_hook(tx, "setup_output_hook", *args, **kwargs)
 
     tp_methods = {
