@@ -20,7 +20,7 @@ class ProcessGroupNCCL;
 // One-sided window backed by NCCL 2.29+ RMA APIs (ncclPutSignal/ncclSignal/
 // ncclWaitSignal). Port of torchcomms' TorchCommWindowNCCL rebased onto
 // c10d::Window. Zero-copy: relies on the NCCL mempool hook
-// (NcclCachingAllocatorHook + ProcessGroupNCCL::register_address) to register
+// (NCCLCachingAllocatorHook + ProcessGroupNCCL::register_address) to register
 // every allocated segment; both the destination tensor (tensor_register /
 // new_window) and the source tensors (put) must be allocated from the NCCL
 // mempool -- torch.cuda.MemPool(backend.mem_allocator).

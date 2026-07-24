@@ -1,7 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 //
 // CUDA caching allocator hook for the nccl2 backend. Port of torchcomms'
-// NcclCachingAllocatorHook: a process-wide singleton that watches allocator
+// NCCLCachingAllocatorHook: a process-wide singleton that watches allocator
 // SEGMENT_ALLOC/SEGMENT_FREE trace events and forwards them to every
 // registered ProcessGroupNCCL as register_address/deregister_address, so
 // segments from the NCCL mempool are registered with each communicator
@@ -22,16 +22,16 @@ namespace c10d::nccl2 {
 
 class ProcessGroupNCCL;
 
-class NcclCachingAllocatorHook {
+class NCCLCachingAllocatorHook {
  public:
-  static NcclCachingAllocatorHook& getInstance();
+  static NCCLCachingAllocatorHook& getInstance();
 
   void regDeregMem(const c10::cuda::CUDACachingAllocator::TraceEntry& te);
   void registerComm(ProcessGroupNCCL* comm);
   void deregisterComm(ProcessGroupNCCL* comm);
 
  private:
-  NcclCachingAllocatorHook();
+  NCCLCachingAllocatorHook();
 
   // Seed registeredMemMap_ with segments that existed before the hook was
   // attached, so a comm registered later still sees them.

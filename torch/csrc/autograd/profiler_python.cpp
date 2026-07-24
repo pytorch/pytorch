@@ -1496,6 +1496,7 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
     return a->start_time_ns_ < b->start_time_ns_;
   });
+  python_tracer::clampOverrunningPythonEvents(out);
 
   PythonIDVisitor id_visitor;
   for (auto& i : out) {
