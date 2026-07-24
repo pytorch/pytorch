@@ -6934,6 +6934,34 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         _batch_norm_stats(torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last, (0, 2, 3))
         _batch_norm_stats(torch.randn(1, 96, 112, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last_3d, (0, 2, 3, 4))
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_batch_norm_gather_stats_invalid_shapes_cuda(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/189828.
+        # batch_norm_reduce_statistics_kernel takes both of its loop bounds from mean, then
+        # indexes invstd and counts with them, so an invstd that disagrees with mean used to
+        # be read out of bounds. The op must validate the shapes instead.
+        input = torch.full((1, 3, 3, 0), 1.0, dtype=torch.float32, device='cuda')
+        mean = torch.full((2, 3), 1.15215e+25, dtype=torch.float32, device='cuda')
+        invstd = torch.full((2, 0), 1.0, dtype=torch.float32, device='cuda')
+        with self.assertRaisesRegex(RuntimeError, "invstd to have the same shape as mean"):
+            torch.batch_norm_gather_stats(input, mean, invstd, None, None, float('-inf'), float('-inf'),
+                                          -9223372036854775808)
+
+        # mean must be (world_size, num_features); a 1-D mean would index past its dims
+        with self.assertRaisesRegex(RuntimeError, "expected mean to be 2-dimensional"):
+            torch.batch_norm_gather_stats(input, torch.ones(3, device='cuda'), torch.ones(3, device='cuda'),
+                                          None, None, 0.1, 1e-5, 2)
+
+        # counts is indexed up to mean.size(0), so it must have at least that many elements
+        with self.assertRaisesRegex(RuntimeError, "counts to have at least one element"):
+            torch.batch_norm_gather_stats_with_counts(
+                torch.randn(1, 3, 3, 3, device='cuda'),
+                torch.ones(2, 3, device='cuda'),
+                torch.ones(2, 3, device='cuda'),
+                None, None, 0.1, 1e-5,
+                torch.ones(1, device='cuda'),
+            )
+
     def test_flatten(self):
         tensor_input = torch.randn(2, 1, 2, 3)
 
@@ -9058,6 +9086,36 @@ class TestNNDeviceType(NNTestCase):
 
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
+
+        # Non-positive output sizes should result in an error.
+        with self.assertRaisesRegex(RuntimeError, 'must be >= 1'):
+            torch._C._nn.replication_pad2d(
+                torch.zeros(1, 1, 4, 1, device=device, dtype=dtype),
+                padding=[-2, -2, 0, 0])
+        with self.assertRaisesRegex(RuntimeError, 'must be >= 1'):
+            torch._C._nn.replication_pad2d(
+                torch.zeros(1, 1, 1, 4, device=device, dtype=dtype),
+                padding=[0, 0, -2, -2])
+        with self.assertRaisesRegex(RuntimeError, 'must be >= 1'):
+            torch._C._nn.replication_pad3d(
+                torch.zeros(1, 1, 4, 4, 1, device=device, dtype=dtype),
+                padding=[-2, -2, 0, 0, 0, 0])
+        with self.assertRaisesRegex(RuntimeError, 'must be >= 1'):
+            torch._C._nn.replication_pad3d(
+                torch.zeros(1, 1, 1, 4, 4, device=device, dtype=dtype),
+                padding=[0, 0, 0, 0, -2, -2])
+
+        # The Python meta registration (used by FakeTensor / torch.compile /
+        # device='meta') shares the same shape check; verify it is consistent
+        # with the device kernels above.
+        with self.assertRaisesRegex(RuntimeError, 'must be >= 1'):
+            torch._C._nn.replication_pad2d(
+                torch.zeros(1, 1, 4, 1, device='meta', dtype=dtype),
+                padding=[-2, -2, 0, 0])
+        with self.assertRaisesRegex(RuntimeError, 'must be >= 1'):
+            torch._C._nn.replication_pad3d(
+                torch.zeros(1, 1, 1, 4, 4, device='meta', dtype=dtype),
+                padding=[0, 0, 0, 0, -2, -2])
 
     @onlyNativeDeviceTypes
     @skipMPS  # MPS routes through a separate kernel (mps::pad_out_template) that does not validate the channel dim
