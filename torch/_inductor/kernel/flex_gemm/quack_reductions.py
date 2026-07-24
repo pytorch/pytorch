@@ -223,7 +223,7 @@ def _cute_scale_expr(
         case "mx_e8m0_scale":
             return f"mx_e8m0_scale_intrinsic({source}, {max_value!r}, {rounding!r})"
         case "nvfp4_e4m3_scale":
-            scale = f"({source} / 6.0)"
+            scale = f"({source} / {max_value!r})"
             if tensorssa:
                 return (
                     f"cute.where({scale} < 0.015625, 0.015625, "
@@ -246,8 +246,8 @@ def _cute_scale_call(
             rounding = args[2] if len(args) >= 3 else kwargs.get("rounding")
             rounding = "rceil" if rounding is None else rounding
         case "nvfp4_e4m3_scale":
-            max_value = 448.0
-            rounding = args[1] if len(args) >= 2 else kwargs.get("rounding")
+            max_value = args[1] if len(args) >= 2 else kwargs.get("max_value", 6.0)
+            rounding = args[2] if len(args) >= 3 else kwargs.get("rounding")
             rounding = "nearest" if rounding is None else rounding
         case _:
             raise AssertionError(f"unexpected scale op: {op_name}")
