@@ -6,7 +6,7 @@ install_ubuntu() {
   ARCH=$(uname -m)
   VERSION=0.16.0
   FEATURES="sccache sccache-dist"
-  if [[ "$(uname -m)" == "riscv64" ]]; then
+  if [[ "${ARCH}" == "riscv64" ]]; then
     # Rust's riscv64 arch is riscv64gc
     ARCH=riscv64gc
     # sccache-dist is not available on riscv64, so we only install sccache
