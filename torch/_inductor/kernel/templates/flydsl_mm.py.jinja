@@ -42,7 +42,7 @@ def _temporary_env(updates):
     output = {{get_output()}}
     global _gemm_executor, _gemm_param
 {% if MAT2_IS_NK %}
-    # The lowering passes the original contiguous B buffer for A @ B.T.
+    # Template generation passes an [N, K] view of the RHS backing storage.
     mat2_nk = mat2
 {% else %}
     mat2_nk = mat2.transpose(0, 1)
@@ -54,9 +54,6 @@ def _temporary_env(updates):
             output,
             mat1,
             mat2_nk,
-            GEMM_M,
-            GEMM_N,
-            GEMM_K,
             param,
             stream,
         )
@@ -92,9 +89,6 @@ def _temporary_env(updates):
         _inductor_tensor_arg(output),
         _inductor_tensor_arg(mat1),
         _inductor_tensor_arg(mat2_nk),
-        GEMM_M,
-        GEMM_N,
-        GEMM_K,
         param,
         stream,
     )
@@ -110,9 +104,6 @@ def _temporary_env(updates):
                 output,
                 mat1,
                 mat2_nk,
-                GEMM_M,
-                GEMM_N,
-                GEMM_K,
                 param,
                 stream,
             ),

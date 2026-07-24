@@ -218,7 +218,10 @@ def check_supported_striding(mat_a, mat_b) -> None:
 def get_flydsl_mm_template_kwargs(
     layout, mat1, mat2, static_shape, is_nonzero
 ) -> list[dict[str, Any]]:
-    from ..heuristics.template.flydsl import get_gemm_configs
+    from ..heuristics.template.flydsl import (
+        get_gemm_configs,
+        is_gemm_config_valid_for_shape,
+    )
 
     if not (static_shape and is_nonzero and use_flydsl_template(layout)):
         return []
@@ -259,25 +262,35 @@ def get_flydsl_mm_template_kwargs(
     if n_static % 32 != 0 or k_static % 32 != 0:
         return []
 
-    # The FlyDSL GEMM template consumes the RHS as contiguous [N, K].  The
-    # aten.mm lowering sees B.T as a [K, N] ReinterpretView, so pass the
-    # underlying B buffer and bake the guarded GEMM dimensions into the template
-    # wrapper. FlyDSL itself receives m/n/k as runtime Int32 values, so the JIT
-    # cache key remains tile-config based.
+    # The FlyDSL GEMM template consumes the RHS as row-major [N, K].  The
+    # aten.mm lowering sees B.T as a [K, N] view, so template generation creates
+    # an [N, K] view over the same storage while preserving its offset. FlyDSL
+    # reads dimensions and row strides from the runtime tensor layout, so the
+    # JIT cache key remains tile-config based.
     from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
 
+    gemm_dtype_id = (
+        GEMM_DTYPE_FP16 if dtype == torch.float16 else GEMM_DTYPE_BF16
+    )
+    # Config generation validates tile construction without a concrete shape.
+    # Filter shape-incompatible choices before they reach autotuning.
     return [
         {
             **gemm_config,
-            "GEMM_DTYPE_ID": (
-                GEMM_DTYPE_FP16 if dtype == torch.float16 else GEMM_DTYPE_BF16
-            ),
+            "GEMM_DTYPE_ID": gemm_dtype_id,
             "MAT2_IS_NK": True,
             "GEMM_M": m_static,
             "GEMM_N": n_static,
             "GEMM_K": k_static,
         }
         for gemm_config in get_gemm_configs()
+        if is_gemm_config_valid_for_shape(
+            m_static,
+            n_static,
+            k_static,
+            gemm_dtype_id,
+            gemm_config,
+        )
     ]
 
 
