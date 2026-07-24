@@ -3637,9 +3637,20 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
         b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
 
         self.assertTrue(torch.isnan(actual).all())
+        check = FileCheck().check("cutlass_math.")
+        match case:
+            case "clamp":
+                check = check.check("max").check("cutlass_math.min")
+            case "clamp_min":
+                check = check.check("max")
+            case "clamp_max":
+                check = check.check("min")
+        check.check_not("operator.ne").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
