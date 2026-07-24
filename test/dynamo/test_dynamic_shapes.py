@@ -78,7 +78,7 @@ tests = [
     test_higher_order_ops.HigherOrderOpTests,
     test_higher_order_ops.FuncTorchHigherOrderOpTests,
     test_aot_autograd.AotAutogradFallbackTests,
-    test_sdpa.TestSDPA,
+    getattr(test_sdpa, "TestSDPACUDA", test_sdpa.TestSDPACPU),
 ]
 for test in tests:
     make_dynamic_cls(test)
