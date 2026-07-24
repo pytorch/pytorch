@@ -97,8 +97,11 @@ def _cudnn_supports_d256_attention():
         return False
     cudnn_version = torch.backends.cudnn.version() or 0
     device_capability = torch.cuda.get_device_capability()
-    is_sm90_or_sm10x = device_capability == (9, 0) or device_capability[0] == 10
-    return is_sm90_or_sm10x and cudnn_version > 92200
+    is_unsupported_sm107 = device_capability == (10, 7) and cudnn_version <= 92500
+    supports_d256 = (
+        device_capability == (9, 0) or device_capability[0] == 10
+    ) and not is_unsupported_sm107
+    return supports_d256 and cudnn_version > 92200
 
 
 def _cudnn_d256_mixed_head_dim_bprop_unsupported():
@@ -3102,9 +3105,14 @@ class TestSDPACudaOnly(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_dense_d256_sm90_sm10x(self, device):
-        if not _cudnn_supports_d256_attention():
+        cudnn_version = torch.backends.cudnn.version() or 0
+        is_unsupported_sm107 = (
+            torch.cuda.get_device_capability() == (10, 7)
+            and cudnn_version <= 92500
+        )
+        if not is_unsupported_sm107 and not _cudnn_supports_d256_attention():
             self.skipTest(
-                "head_dim=256 cuDNN attention requires SM90 or SM10.x with cuDNN > 9.22.0"
+                "head_dim=256 cuDNN attention requires SM90 or supported SM10.x with cuDNN > 9.22.0"
             )
 
         dtype = torch.bfloat16
@@ -3113,8 +3121,14 @@ class TestSDPACudaOnly(NNTestCase):
         key = torch.randn(batch, num_heads, seq_len, head_dim, device=device, dtype=dtype, requires_grad=True)
         value = torch.randn(batch, num_heads, seq_len, head_dim, device=device, dtype=dtype, requires_grad=True)
 
-        with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
-            if torch._fused_sdp_choice(query, key, value) != SDPBackend.CUDNN_ATTENTION.value:
+        backends = [SDPBackend.CUDNN_ATTENTION]
+        if is_unsupported_sm107:
+            backends.extend([SDPBackend.FLASH_ATTENTION, SDPBackend.MATH])
+        with sdpa_kernel(backends=backends, set_priority=is_unsupported_sm107):
+            backend = torch._fused_sdp_choice(query, key, value)
+            if is_unsupported_sm107:
+                self.assertNotEqual(backend, SDPBackend.CUDNN_ATTENTION.value)
+            elif backend != SDPBackend.CUDNN_ATTENTION.value:
                 self.skipTest("head_dim=256 cuDNN attention requires cuDNN frontend support")
             actual = F.scaled_dot_product_attention(query, key, value)
             actual.backward(torch.randn_like(actual))
