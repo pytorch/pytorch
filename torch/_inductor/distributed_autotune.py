@@ -61,9 +61,12 @@ def get_autotune_pg() -> dist.ProcessGroup | None:
     if dist.is_available() and dist.is_initialized():
         global _AUTOTUNE_PG
         if _AUTOTUNE_PG is None:
-            _AUTOTUNE_PG = dist.distributed_c10d._new_group_with_tag(
+            autotune_pg = dist.distributed_c10d._new_group_with_tag(
                 pg_tag="pt2_distributed_autotune_pg"
             )
+            if autotune_pg == dist.GroupMember.NON_GROUP_MEMBER:
+                raise AssertionError("Autotune process group must include all ranks")
+            _AUTOTUNE_PG = autotune_pg
         return _AUTOTUNE_PG
 
     return None
@@ -203,9 +206,7 @@ def _sync(autotune_results: list[_SerializedChoice]) -> Sequence[_SerializedChoi
 
     # Perform allgather
     all_states: list[list[_SerializedChoice]] = [None] * autotune_pg.size()  # type: ignore[list-item]
-    torch.distributed.all_gather_object(
-        all_states, autotune_results, group=autotune_pg, weights_only=True
-    )
+    torch.distributed.all_gather_object(all_states, autotune_results, group=autotune_pg)
 
     node_count = sum(len(x) for x in all_states)
     # It's faster to briefly lie about the type than to unzip the results and append.
@@ -320,11 +321,6 @@ class _SerializedChoice:
         for k in parts[1:]:
             obj = getattr(obj, k)
         return obj
-
-
-# Transmitted between ranks via all_gather_object (which deserializes with
-# weights_only=True by default).
-torch.serialization.add_safe_globals([_SerializedChoice])
 
 
 def _autotune_local_nodes(
