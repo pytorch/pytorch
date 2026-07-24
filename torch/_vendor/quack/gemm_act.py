@@ -117,6 +117,21 @@ def register_local_reduce_fns(
     _local_reduce_finalize_fns[finalize_key] = finalize_fn
 
 
+def validate_grouped_n_contract_device(
+    group: int | None, device_capacity: tuple[int, int]
+) -> None:
+    """Validate grouped-main support consistently before and during compilation."""
+    if group is None:
+        return
+    if device_capacity[0] == 12:
+        raise NotImplementedError("grouped_n_contract is not yet supported on SM120")
+    if group > 2 and device_capacity[0] not in (10, 11):
+        raise NotImplementedError(
+            "grouped_n_contract groups larger than 2 are currently validated "
+            "only on SM100 and SM110"
+        )
+
+
 class GemmActMixin(ComposableEpiMixin):
     _epi_ops = (
         Scalar("alpha"),
@@ -489,6 +504,91 @@ class GemmActSm120(GemmActMixin, GemmSm120):
     pass
 
 
+def _grouped_n_contract_epi_tile(epi_tile, group):
+    if isinstance(epi_tile[1], cute.Layout):
+        return (epi_tile[0], cute.recast_layout(group, 1, epi_tile[1]))
+    return (epi_tile[0], epi_tile[1] // group)
+
+
+def _grouped_n_contract_epi_tile_fn(gemm, epi_tile):
+    return _grouped_n_contract_epi_tile(epi_tile, 2)
+
+
+def _grouped_n_contract4_epi_tile_fn(gemm, epi_tile):
+    return _grouped_n_contract_epi_tile(epi_tile, 4)
+
+
+class GemmGroupedNContractMixin(GemmActMixin):
+    grouped_n_contract_group = 2
+    _epi_ops = (
+        Scalar("alpha"),
+        Scalar("beta"),
+        Scalar("sr_seed", dtype=Int32),
+        RowVecLoad("mRowVecBroadcast"),
+        ColVecLoad("mColVecBroadcast"),
+        TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract_epi_tile_fn),
+    )
+
+    def epi_to_underlying_arguments(
+        self, args: GemmActMixin.EpilogueArguments, *, loc=None, ip=None
+    ):
+        params = super().epi_to_underlying_arguments(args, loc=loc, ip=ip)
+        self.cta_tile_shape_aux_out_mn = (
+            self.cta_tile_shape_mnk[0],
+            self.cta_tile_shape_mnk[1] // self.grouped_n_contract_group,
+        )
+        return params
+
+    @cute.jit
+    def epi_convert_aux_out(
+        self, tRS_rAuxOut, sr_seed, tidx, tile_coord_mnkl, num_prev_subtiles, epi_idx
+    ):
+        result = GemmActMixin.epi_convert_aux_out(
+            self,
+            tRS_rAuxOut,
+            sr_seed,
+            tidx,
+            tile_coord_mnkl,
+            num_prev_subtiles,
+            epi_idx,
+        )
+        if const_expr(
+            self.grouped_n_contract_group == 2
+            and self.arch in (90, 120)
+            and self.aux_out_dtype.width == 16
+        ):
+            permute_gated_Cregs_b16(result)
+        return result
+
+
+class GemmGroupedNContractSm80(GemmGroupedNContractMixin, GemmSm80):
+    pass
+
+
+class GemmGroupedNContractSm90(GemmGroupedNContractMixin, GemmSm90):
+    pass
+
+
+class GemmGroupedNContractSm100(GemmGroupedNContractMixin, GemmSm100):
+    pass
+
+
+class GemmGroupedNContractSm120(GemmGroupedNContractMixin, GemmSm120):
+    pass
+
+
+class GemmGroupedNContract4Sm100(GemmGroupedNContractMixin, GemmSm100):
+    grouped_n_contract_group = 4
+    _epi_ops = (
+        Scalar("alpha"),
+        Scalar("beta"),
+        Scalar("sr_seed", dtype=Int32),
+        RowVecLoad("mRowVecBroadcast"),
+        ColVecLoad("mColVecBroadcast"),
+        TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract4_epi_tile_fn),
+    )
+
+
 def _gated_epi_tile_fn(gemm, epi_tile):
     """Halve the N dimension of the epi_tile for gated postact."""
     if isinstance(epi_tile[1], cute.Layout):
@@ -662,6 +762,7 @@ def _compile_gemm_act(
     rowvec_dtype,
     colvec_dtype,
     colvec_ndim,
+    main_output_transform_group,
     varlen_m,
     gather_A,
     concat_layout,
@@ -686,8 +787,25 @@ def _compile_gemm_act(
             11: GemmGatedSm100,
             12: GemmGatedSm120,
         },
+        "grouped_n_contract": {
+            8: GemmGroupedNContractSm80,
+            9: GemmGroupedNContractSm90,
+            10: GemmGroupedNContractSm100,
+            11: GemmGroupedNContractSm100,
+            12: GemmGroupedNContractSm120,
+        },
     }
     GemmCls = sm_to_cls[gemm_cls_name][device_capacity[0]]
+    if gemm_cls_name == "grouped_n_contract":
+        validate_grouped_n_contract_device(
+            main_output_transform_group, device_capacity
+        )
+    if gemm_cls_name == "grouped_n_contract" and main_output_transform_group != 2:
+        GemmCls = {4: GemmGroupedNContract4Sm100}.get(main_output_transform_group)
+        if GemmCls is None:
+            raise NotImplementedError(
+                f"unsupported grouped_n_contract group={main_output_transform_group}"
+            )
     postact_dtype = postact_dtypes[0]
     postact_major = postact_majors[0]
     pa_leading = 1 if postact_major == "n" else 0
@@ -703,7 +821,11 @@ def _compile_gemm_act(
         varlen_m=varlen_m,
         gather_A=gather_A,
     )
-    pa_n = cute.sym_int() if gemm_cls_name == "gated" else n
+    pa_n = (
+        cute.sym_int()
+        if gemm_cls_name in ("gated", "grouped_n_contract")
+        else n
+    )
     pa_shape = (m, pa_n) if varlen_m else (m, pa_n, l)
     if tensor_epilogue_returns_aux:
         mAuxOut = tuple(
@@ -717,7 +839,9 @@ def _compile_gemm_act(
         )
     else:
         div_pa = div_for_dtype(postact_dtype)
-        pa_leading_dim = 1 if gemm_cls_name == "gated" else pa_leading
+        pa_leading_dim = (
+            1 if gemm_cls_name in ("gated", "grouped_n_contract") else pa_leading
+        )
         mAuxOut = fake_tensor(
             postact_dtype, pa_shape, leading_dim=pa_leading_dim, divisibility=div_pa
         )
@@ -898,6 +1022,7 @@ def gemm_act(
     local_reduce_axis: int = 1,
     local_reduce_combine_key: Optional[str] = None,
     local_reduce_finalize_key: Optional[str] = None,
+    main_output_transform_group: int | None = None,
     alpha: float | Tensor = 1.0,
     beta: float | Tensor = 1.0,
     device_capacity_override: tuple[int, int] | None = None,
@@ -948,6 +1073,22 @@ def gemm_act(
     else:
         assert activation in act_fn_map, f"Unsupported activation {activation}"
         gemm_cls_name = "act"
+    if main_output_transform_group is not None:
+        if main_output_transform_group not in (2, 4):
+            raise NotImplementedError(
+                f"unsupported grouped_n_contract group={main_output_transform_group}"
+            )
+        if main_output_transform_group == 4 and concat_layout and "B" in concat_layout:
+            raise NotImplementedError(
+                "grouped_n_contract group 4 does not yet support chunked B layout"
+            )
+        if tensor_epilogue_fn is None and tensor_epilogue_key is None:
+            raise RuntimeError("grouped_n_contract requires a generated tensor epilogue")
+        if tensor_epilogue_returns_aux or tensor_epilogue_returns_local_reduce:
+            raise NotImplementedError(
+                "grouped_n_contract does not compose with auxiliary outputs"
+            )
+        gemm_cls_name = "grouped_n_contract"
 
     if tensor_epilogue_returns_aux:
         if not isinstance(PostAct, tuple):
@@ -955,6 +1096,10 @@ def gemm_act(
         postact_tensors = PostAct
     else:
         postact_tensors = (PostAct,)
+    if main_output_transform_group is not None and any(
+        tensor.stride(-1) != 1 for tensor in postact_tensors
+    ):
+        raise NotImplementedError("grouped_n_contract requires PostAct to be n-major")
     varlen_m = cu_seqlens_m is not None
     gather_A = A_idx is not None
     if varlen_m:
@@ -1032,6 +1177,7 @@ def gemm_act(
     assert device_capacity[0] in [8, 9, 10, 11, 12], (
         "Only SM8x, SM90, SM100, SM110, and SM120 are supported"
     )
+    validate_grouped_n_contract_device(main_output_transform_group, device_capacity)
     if rounding_mode == RoundingMode.RS:
         assert device_capacity[0] == 10, "Stochastic rounding (RoundingMode.RS) requires SM100"
 
@@ -1156,6 +1302,7 @@ def gemm_act(
         torch2cute_dtype_map[rowvec_bias.dtype] if rowvec_bias is not None else None,
         torch2cute_dtype_map[colvec_bias.dtype] if colvec_bias is not None else None,
         colvec_ndim,
+        0 if main_output_transform_group is None else main_output_transform_group,
         varlen_m,
         gather_A,
         concat_layout,
