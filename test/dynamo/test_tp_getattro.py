@@ -853,39 +853,36 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
     # --- C descriptor type check (descr_check equivalent) ---
 
+
     def test_method_descriptor_incompatible_type(self):
         class Borrower:
             append = list.append
 
         def fn(x, obj):
-            try:
-                obj.append
-                return x + 1
-            except TypeError:
-                return x + 2
+            obj.append
+            return x + 1
 
         x = torch.randn(4)
         b = Borrower()
-        eager = fn(x, b).sum()
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x, b).sum()
-        self.assertEqual(eager, compiled)
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
 
     def test_wrapper_descriptor_incompatible_type(self):
         class Borrower:
             add = list.__add__
 
         def fn(x, obj):
-            try:
-                obj.add
-                return x + 1
-            except TypeError:
-                return x + 2
+            obj.add
+            return x + 1
 
         x = torch.randn(4)
         b = Borrower()
-        eager = fn(x, b).sum()
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x, b).sum()
-        self.assertEqual(eager, compiled)
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
 
     def test_member_descriptor_incompatible_type(self):
         class Alien:
@@ -895,34 +892,30 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             x = Alien.x
 
         def fn(x, obj):
-            try:
-                obj.x
-                return x + 1
-            except TypeError:
-                return x + 2
+            obj.x
+            return x + 1
 
         x = torch.randn(4)
         b = Borrower()
-        eager = fn(x, b).sum()
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x, b).sum()
-        self.assertEqual(eager, compiled)
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
 
     def test_getset_descriptor_incompatible_type(self):
         class Borrower:
             denominator = int.denominator
 
         def fn(x, obj):
-            try:
-                obj.denominator
-                return x + 1
-            except TypeError:
-                return x + 2
+            obj.denominator
+            return x + 1
 
         x = torch.randn(4)
         b = Borrower()
-        eager = fn(x, b).sum()
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x, b).sum()
-        self.assertEqual(eager, compiled)
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
 
 
     def test_method_descriptor_compatible_type(self):
