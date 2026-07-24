@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
+import sys
 
 from .setup_helpers.cmake import CMake, USE_NINJA
 from .setup_helpers.env import check_negative_env_flag, IS_64BIT, IS_WINDOWS
@@ -104,3 +105,12 @@ def build_pytorch(
             print(e.output)
             raise
     cmake.build(my_env)
+    # Stage 2 of the native-AOT build: export DSL kernels against the
+    # just-built torch and relink torch_cuda with them embedded (see
+    # tools/native_aot/build_stage2.py). Skips cleanly -- an ordinary
+    # artifacts-free build -- when the DSL stack or a supported arch is
+    # absent; NATIVE_AOT=0 disables explicitly.
+    subprocess.check_call(
+        [sys.executable, os.path.join("tools", "native_aot", "build_stage2.py")],
+        env=my_env,
+    )
