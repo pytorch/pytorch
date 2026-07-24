@@ -232,20 +232,24 @@ static PyObject* THPGenerator_philoxCudaState(
   auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
   TORCH_CHECK_NOT_IMPLEMENTED(
       gen.device().type() == at::kCUDA,
-      "_philox_cuda_state is only supported on CUDA generators, but got a "
+      "philox_cuda_state is only supported on CUDA generators, but got a "
       "generator on ",
       gen.device());
   TORCH_CHECK(
       THPUtils_checkLong(increment),
-      "_philox_cuda_state expected an int, but got ",
+      "philox_cuda_state expected an int, but got ",
       THPUtils_typename(increment));
   // Deliberately not unpack_uint64: a negative increment is never
   // meaningful, so let the OverflowError propagate.
   const uint64_t inc = THPUtils_unpackUInt64(increment);
 
-  // See Note [Acquire lock when using random generators]
-  std::scoped_lock<std::mutex> lock(gen.mutex());
-  auto [seed_t, offset_t, intragraph_t] = gen.philox_state(inc);
+  std::tuple<at::Tensor, at::Tensor, at::Tensor> state;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::scoped_lock<std::mutex> lock(gen.mutex());
+    state = gen.philox_state(inc);
+  }
+  auto& [seed_t, offset_t, intragraph_t] = state;
 
   auto ret = THPObjectPtr{PyTuple_New(3)};
   if (!ret)
@@ -339,7 +343,7 @@ static PyMethodDef THPGenerator_methods[] = {
     {"seed", THPGenerator_seed, METH_NOARGS, nullptr},
     {"initial_seed", THPGenerator_initialSeed, METH_NOARGS, nullptr},
     {"get_offset", THPGenerator_getOffset, METH_NOARGS, nullptr},
-    {"_philox_cuda_state", THPGenerator_philoxCudaState, METH_O, nullptr},
+    {"philox_cuda_state", THPGenerator_philoxCudaState, METH_O, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)

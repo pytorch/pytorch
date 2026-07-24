@@ -107,6 +107,11 @@ void CUDAGeneratorCaptureState::initialize(uint64_t seed) {
 
   rng_state_seed_extragraph_ = at::empty({1}, options);
   rng_state_offset_extragraph_ = at::empty({1}, options);
+  // Captured graphs bake in these buffers' addresses, and philox_state hands
+  // out aliases of them; make the storage non-resizable so nothing can
+  // reallocate it.
+  rng_state_seed_extragraph_.storage().unsafeGetStorageImpl()->set_resizable(false);
+  rng_state_offset_extragraph_.storage().unsafeGetStorageImpl()->set_resizable(false);
 
   // Synchronize the default stream so that any prior work completes before
   // a different stream writes to this memory.
@@ -499,13 +504,11 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
  * take a PhiloxCudaState (e.g. Python). Returns 1-element int64 tensors
  * (seed, offset, intragraph_offset); the kernel-visible values are
  * (seed, offset + intragraph_offset), with the uint64 seed and offset
- * reinterpreted as int64. During capture, seed and offset alias the
- * per-capture extragraph device state that replay_prologue refills on
- * every replay; their contents are undefined until the first replay, they
- * are only valid for that capture's lifetime, and they are returned as
- * non-resizable from_blob wrappers so a caller cannot reallocate the
- * underlying storage out from under the captured graph. Otherwise they
- * are device tensors holding the current values.
+ * reinterpreted as int64. During capture, seed and offset are aliases of
+ * the per-capture extragraph device state that replay_prologue refills on
+ * every replay; their contents are undefined until the first replay and
+ * they are only valid for that capture's lifetime. Otherwise they are
+ * device tensors holding the current values.
  *
  * See Note [Acquire lock when using random generators]
  */
@@ -521,16 +524,14 @@ CUDAGeneratorImpl::philox_state(uint64_t increment) {
     auto* capture_state = state_->get_capture_state(capture_id.value(), true);
     uint64_t offset = capture_state->offset_intragraph_;
     state_->increase(increment);
-    auto seed_t = at::from_blob(
-        capture_state->rng_state_seed_extragraph_.data_ptr(),
-        {1},
-        [](void*) {},
-        dev_opts);
-    auto off_t = at::from_blob(
-        capture_state->rng_state_offset_extragraph_.data_ptr(),
-        {1},
-        [](void*) {},
-        dev_opts);
+    // Aliases (not the tensors themselves) so callers cannot mutate the
+    // capture state's metadata; the storage itself is non-resizable (see
+    // CUDAGeneratorCaptureState::initialize). wrap_tensor_impl converts the
+    // at::TensorBase members to the at::Tensor that at::alias expects.
+    auto seed_t = at::alias(at::Tensor::wrap_tensor_impl(
+        capture_state->rng_state_seed_extragraph_.getIntrusivePtr()));
+    auto off_t = at::alias(at::Tensor::wrap_tensor_impl(
+        capture_state->rng_state_offset_extragraph_.getIntrusivePtr()));
     auto intra_t = at::full({1}, static_cast<int64_t>(offset), cpu_opts);
     return {
         seed_t.getIntrusivePtr(),
