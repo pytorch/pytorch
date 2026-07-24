@@ -1510,7 +1510,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             raise AssertionError("Expected outputs to match correct_outputs")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
-    def test_dynamo_rewrite_dist_reduce_scatter_list_uneven(self):
+    def test_dynamo_rewrite_dist_reduce_scatter_list_size_mismatch(self):
         def func(out, inp_list, *, pg):
             torch.distributed.reduce_scatter(
                 out,
@@ -1522,9 +1522,33 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         outputs = torch.empty([4, 4], device=self.device)
         compiled = torch.compile(func, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(
-            Exception, "Remapping variable size reduce_scatter is not yet supported"
+            Exception,
+            "reduce_scatter requires every input_list element to have the same size as output",
         ):
             compiled(outputs, inputs, pg=GroupMember.WORLD)
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list_scalar(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        inputs = [torch.ones([], device=self.device)]
+        outputs = torch.empty([], device=self.device)
+        correct_outputs = torch.empty([], device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(outputs, inputs, pg=GroupMember.WORLD)
+        func(correct_outputs, inputs, pg=GroupMember.WORLD)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     @parametrize(
         "pg_mode",

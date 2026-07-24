@@ -1831,7 +1831,7 @@ def reduce_scatter_inplace(
         )
     if not all(t.size() == output.size() for t in input_list):
         raise AssertionError(
-            "Remapping variable size reduce_scatter is not yet supported"
+            "reduce_scatter requires every input_list element to have the same size as output"
         )
 
     group = group or dist.group.WORLD
