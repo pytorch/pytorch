@@ -18,10 +18,6 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import torch
-from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel import (
-    VendoredDenseBlockScaledGemmEFC,
-    VendoredDenseBlockScaledGemmKernel,
-)
 
 
 log = logging.getLogger(__name__)
@@ -345,6 +341,11 @@ def _scaled_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     cheaper than the manifest. Falls back to the manifest if the provider is
     unavailable or nothing matches (e.g. a future non-block-scaled scaled dtype).
     """
+    from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel import (
+        VendoredDenseBlockScaledGemmEFC,
+        VendoredDenseBlockScaledGemmKernel,
+    )
+
     manifest = _blockscaled_manifest(cc, _scaled_operand_type_signature(args))
     if manifest.operators:
         out = manifest.filter_operators(
