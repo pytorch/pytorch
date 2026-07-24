@@ -297,6 +297,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # is no way to reflect it in the created MappingProxyVariable.
         self.ban_mutation = False
 
+    def get_value_for_setattr(self) -> object | None:
+        if self.ban_mutation:
+            return None
+        mod = getattr(self.value, "__module__", None) or ""
+        if mod == "torch" or mod.startswith(("torch.", "torch_")):
+            return None
+        return self.value
+
     def get_id_guard_type(self) -> Callable[..., Any] | None:
         if self.source:
             return GuardBuilder.CLASS_MATCH
@@ -575,15 +583,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         # Step 6: Metaclass non-data descriptor or plain attr.
         # For C-level descriptors with proper VTs, invoke tp_descr_get to
-        # produce a bound method. For everything else, defer to GetAttrVariable
-        # which routes call_function through call_method at runtime.
+        # produce a bound method. Callable fallbacks get MTV (routes
+        # call_function through call_method); non-callable get VT.build.
         if meta_attr is not NO_SUCH_SUBOBJ:
             metacls_source = TypeSource(self.source) if self.source else None
             metacls_vt = VariableTracker.build(tx, type(self.value), metacls_source)
             result = _resolve_descriptor_get(tx, meta_attr, self, metacls_vt, source)
             if result is not None:
                 return result
-            return variables.GetAttrVariable(self, name, type(meta_attr), source=source)
+            if callable(meta_attr):
+                return variables.CallMethodVariable(self, name, source=source)
+            return VariableTracker.build(tx, meta_attr, source)
 
         # __getattr__ on metaclass (not part of type_getattro proper —
         # CPython handles this via slot_tp_getattr_hook).
@@ -638,11 +648,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         resolved = type.__getattribute__(self.value, name)
         if source:
             return VariableTracker.build(tx, resolved, source)
-        from . import ConstantVariable
-
-        if ConstantVariable.is_literal(resolved):
-            return VariableTracker.build(tx, resolved)
-        return variables.GetAttrVariable(self, name, type(resolved), source=source)
+        return VariableTracker.build(tx, resolved)
 
     def resolve_cls_descriptor(
         self,
@@ -720,9 +726,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name in cmp_name_to_op_mapping and not isinstance(
             cls_attr, types.FunctionType
         ):
-            return variables.GetAttrVariable(
-                self, name, py_type=type(cls_attr), source=source
-            )
+            return variables.CallMethodVariable(self, name, source=source)
 
         # wrapperdescr_get/method_get with obj=NULL returns the
         # descriptor itself.
@@ -776,7 +780,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
             ):
                 return VariableTracker.build(tx, cls_attr, source)
-            return variables.GetAttrVariable(self, name, type(cls_attr), source=source)
+            return variables.CallMethodVariable(self, name, source=source)
 
         # Everything else: FunctionType, etc.
         return VariableTracker.build(tx, cls_attr, source)
@@ -792,9 +796,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             cls_attr
         ):
-            return variables.GetAttrVariable(self, name, source=source)
+            return variables.CallMethodVariable(self, name, source=source)
         if self.value is collections.OrderedDict:
-            return variables.GetAttrVariable(self, name, py_type=type(cls_attr))
+            return variables.CallMethodVariable(self, name)
         return VariableTracker.build(tx, cls_attr, source)
 
     def invoke_cls_descriptor_get(
@@ -1594,6 +1598,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
+        se_result = self._hasattr_check_side_effects(tx, name)
+        if se_result is not None:
+            return se_result
         if self.source:
             install_guard(
                 self.source.make_guard(
@@ -1912,23 +1919,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         source = self.source and self.get_source_by_walking_mro(tx, "__repr__")
         method_var = self.resolve_type_attr(tx, "__repr__", type_attr, source)
-        if not isinstance(method_var, variables.GetAttrVariable):
-            return method_var.call_function(tx, [], {})
-
-        try:
-            inspect.getattr_static(type(type_attr), "__get__")(
-                type_attr, self.value, type(self.value)
-            )
-        except (AttributeError, TypeError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        else:
-            unimplemented(
-                gb_type="untraceable user-defined __repr__",
-                context=f"Could not trace __repr__ override for {type(self.value).__name__}",
-                explanation="Dynamo could not safely trace this user-defined __repr__ override.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-                skip_frame=True,
-            )
+        return method_var.call_function(tx, [], {})
 
     def str_impl(
         self,
@@ -1973,23 +1964,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         source = self.source and self.get_source_by_walking_mro(tx, "__str__")
         method_var = self.resolve_type_attr(tx, "__str__", type_attr, source)
-        if not isinstance(method_var, variables.GetAttrVariable):
-            return method_var.call_function(tx, [], {})
-
-        try:
-            inspect.getattr_static(type(type_attr), "__get__")(
-                type_attr, self.value, type(self.value)
-            )
-        except (AttributeError, TypeError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        else:
-            unimplemented(
-                gb_type="untraceable user-defined __str__",
-                context=f"Could not trace __str__ override for {type(self.value).__name__}",
-                explanation="Dynamo could not safely trace this user-defined __str__ override.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-                skip_frame=True,
-            )
+        return method_var.call_function(tx, [], {})
 
     def _call_method_var_or_const_fold(
         self,
@@ -1998,7 +1973,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         direct_fn: Any,
     ) -> VariableTracker:
         if (
-            isinstance(method_var, variables.GetAttrVariable)
+            isinstance(method_var, variables.CallMethodVariable)
             and self.is_python_constant()
         ):
             return variables.ConstantVariable.create(
@@ -2951,7 +2926,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             method_var = self.resolve_type_attr(tx, "__len__", type_attr, source)
             if not isinstance(
                 method_var,
-                (variables.GetAttrVariable, variables.MethodWrapperVariable),
+                (
+                    variables.CallMethodVariable,
+                    variables.MethodWrapperVariable,
+                ),
             ):
                 return method_var.call_function(tx, [], {})
 
@@ -3407,176 +3385,59 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ],
         )
 
-    def generic_getattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        """Dynamo implementation of CPython's PyObject_GenericGetAttr.
-
-        This mirrors object.__getattribute__ and is called from:
-        - getattro_impl (for objects without a custom __getattribute__)
-        - SuperVariable.call_method (when super().__getattribute__() resolves
-          to object.__getattribute__)
-
-        The algorithm: MRO walk → data descriptor → instance __dict__ →
-        non-data descriptor / plain class attr → dynamic fallback →
-        __getattr__ → AttributeError.
-        """
-        source: Source | None = AttrSource(self.source, name) if self.source else None
-
-        if name == "__dict__":
-            if not hasattr(self.value, "__dict__"):
-                raise_observed_exception(AttributeError, tx)
-            return self.get_dict_vt(tx)
-
-        # TODO(anijain2305) - Investigate if we need specialization for more
-        # dunder attrs. inspect.getattr_static does not return correct value for
-        # them.
-        if name == "__class__":
-            cls_source: Source | None = source
-            if source is None:
-                cls_source = self.cls_source
-            else:
-                cls_source = source
-            return VariableTracker.build(tx, type(self.value), cls_source)
-
+    def lookup_type_attr(self, tx: "InstructionTranslatorBase", name: str) -> object:
         from ..mutation_guard import unpatched_nn_module_init
 
-        # ---- CPython attribute lookup algorithm ----
-        # Mirror object.__getattribute__ (PyObject_GenericGetAttr):
-        #   1. type_attr = lookup name in type(obj).__mro__
-        #   2. if type_attr is a DATA descriptor → invoke it
-        #   3. if name in obj.__dict__ → return as-is (no descriptor invocation)
-        #   4. if type_attr is a non-data descriptor → invoke it
-        #   5. if type_attr is a plain class variable → return it
-        #   6. __getattr__ fallback
-        #   7. raise AttributeError
-        #
-        # Between steps 5 and 6, we also handle objects with custom storage
-        # that aren't visible via the MRO walk or instance __dict__ (step 5b).
-        #
-        # Step 1: Single MRO walk on the type (cached).
         type_attr = self.lookup_class_mro_attr(name)
-
-        # Dynamo patches nn.Module.__init__ at import time to inject tracing
-        # hooks.  Undo that here so the unpatched original is traced instead.
         if type_attr is torch.nn.Module.__init__:
             type_attr = unpatched_nn_module_init
+        return type_attr
 
-        # Step 2: Data descriptors on the type take priority over instance dict.
-        if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
-            return self.resolve_data_descriptor(tx, name, type_attr, source)
-
-        # Step 3: Instance __dict__ — return as-is, no descriptor invocation.
-        skip_instance_dict = False
-        if tx.output.side_effects.has_pending_mutation_of_attr(
+    def dynamic_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        source: Source | None = AttrSource(self.source, name) if self.source else None
+        has_instance_mutations = tx.output.side_effects.has_pending_mutation_of_attr(
             self,
             name,
             (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
-        ):
-            result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
-            if not isinstance(result, variables.DeletedVariable):
-                return result
-            # A deleted instance-dict entry can expose a class attribute,
-            # non-data descriptor, or __getattr__; only raise if those fail.
-            skip_instance_dict = True
-        elif tx.output.side_effects.has_pending_mutation_of_attr(
+        ) or tx.output.side_effects.has_pending_mutation_of_attr(
             self, "__dict__", AttrMutationKind.GENERIC_SETATTR
-        ):
-            # obj.__dict__ = {...} replaces the lookup dict as a whole, unlike
-            # per-attribute mutations tracked by the branch above.
-            dict_vt = self.get_dict_vt(tx)
-            if dict_vt.contains(name):
-                return dict_vt.getitem(name)
-            skip_instance_dict = True
-        if (
-            not skip_instance_dict
-            and hasattr(self.value, "__dict__")
-            and name in self.value.__dict__
-        ):
-            subobj = self.value.__dict__[name]
-            source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
-            return VariableTracker.build(tx, subobj, source)
-
-        # Step 4-5: Non-data descriptor or plain class attribute.
-        if type_attr is not NO_SUCH_SUBOBJ:
-            return self.resolve_type_attr(tx, name, type_attr, source)
-
-        # Step 5b: Dynamic fallback for attributes that exist on the live
-        # object but aren't visible to the static MRO walk or instance
-        # __dict__ check above.  This covers objects with custom storage
-        # backends (e.g. threading.local uses a per-thread dict not
-        # accessible via obj.__dict__) and C extensions that store data
-        # outside the normal Python object layout.
-        #
-        # This is NOT the same as the C-level data descriptor fallback in
-        # resolve_data_descriptor (step 2): that handles descriptors found
-        # on the type MRO (like member_descriptor for __slots__), while this
-        # handles attributes that aren't on the type MRO at all.
-        #
-        # Only safe when the class doesn't override __getattribute__,
-        # otherwise we'd run arbitrary user code.
-        if not self._object_has_getattribute and not skip_instance_dict:
+        )
+        if not self._object_has_getattribute and not has_instance_mutations:
             try:
                 resolved = type(self.value).__getattribute__(self.value, name)
                 source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
                 return VariableTracker.build(tx, resolved, source)
             except AttributeError:
                 pass
-
-        # Step 6: __getattr__ fallback.
-        getattr_fn = self._check_for_getattr()
-        if isinstance(getattr_fn, types.FunctionType):
-            if (
-                getattr_fn is unpatched_nn_module_getattr
-                and isinstance(self, variables.UnspecializedNNModuleVariable)
-                and istype(self.value._parameters, dict)  # type: ignore[attr-defined]
-                and istype(self.value._buffers, dict)  # type: ignore[attr-defined]
-                and istype(self.value._modules, dict)  # type: ignore[attr-defined]
-            ):
-                out = self.manually_trace_nn_module_getattr(tx, name)
-            else:
-                new_source = None
-                if self.source:
-                    new_source = AttrSource(self.source, "__getattr__")
-                out = variables.UserMethodVariable(
-                    getattr_fn, self, source=new_source
-                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
-
-            if self.source and getattr_fn is torch.nn.Module.__getattr__:
-                if isinstance(
-                    out,
-                    (
-                        variables.UnspecializedNNModuleVariable,
-                        variables.NNModuleVariable,
-                    ),
-                ):
-                    out.set_nn_module_stack_source(  # type: ignore[attr-defined]
-                        AttrSource(self.get_nn_module_stack_source(), name)  # type: ignore[attr-defined]
-                    )
-            return out
-
-        elif getattr_fn is not None:
-            unimplemented(
-                gb_type="User-defined object with non-function __getattr__",
-                context=f"object={self.value}, name={name}, getattr_fn={getattr_fn}",
-                explanation=f"Found a non-function __getattr__ {getattr_fn} from a user-defined object {self.value} "
-                f" when attempting to getattr `{name}`",
-                hints=[
-                    "Ensure the object's __getattr__ is a function type.",
-                ],
-            )
-
-        # Step 7: AttributeError.
-        raise_observed_exception(
-            AttributeError,
-            tx,
-            args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
-            kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
-        )
+        return None
 
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .object_protocol import object_generic_getattr
+
+        # TODO(anijain2305) - Investigate if we need specialization for more
+        # dunder attrs. inspect.getattr_static does not return correct value
+        # for them.
+        #
+        # These must come before the __getattribute__ dispatch because
+        # descriptor resolution (resolve_type_attr, resolve_data_descriptor)
+        # calls self.getattro_impl(tx, "__class__") internally.  If
+        # __getattribute__ is overridden, that dispatch would re-enter the
+        # attribute lookup and recurse infinitely.
+        if name == "__dict__":
+            if not hasattr(self.value, "__dict__"):
+                raise_observed_exception(AttributeError, tx)
+            return self.get_dict_vt(tx)
+
+        if name == "__class__":
+            cls_source = (
+                AttrSource(self.source, name) if self.source else self.cls_source
+            )
+            return VariableTracker.build(tx, type(self.value), cls_source)
+
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
@@ -3595,7 +3456,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Pass through to __getattr__ if __getattribute__ fails
                 handle_observed_exception(tx)
 
-        return self.generic_getattr(tx, name)
+        return object_generic_getattr(tx, self, name)
+
+    def call_getattribute(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        from .object_protocol import object_generic_getattr
+
+        if self._object_has_getattribute:
+            getattribute_fn = inspect.getattr_static(
+                type(self.value), "__getattribute__"
+            )
+            new_source: AttrSource | None = (
+                AttrSource(self.source, "__getattribute__") if self.source else None
+            )
+            return variables.UserMethodVariable(
+                getattribute_fn,
+                self,
+                source=new_source,
+            ).call_function(tx, [VariableTracker.build(tx, name)], {})
+
+        return object_generic_getattr(tx, self, name, skip_getattr_fallback=True)
 
     def resolve_data_descriptor(
         self,
@@ -3763,7 +3644,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
             or is_cython_function(type_attr)
         ):
-            return variables.GetAttrVariable(self, name, type(type_attr), source=source)
+            return variables.CallMethodVariable(self, name, source=source)
 
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
@@ -3796,6 +3677,83 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             descriptor_var,
             source=descriptor_get_source,
         ).call_function(tx, [self, owner_var], {})
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        source: Source | None = AttrSource(self.source, name) if self.source else None
+
+        if tx.output.side_effects.has_pending_mutation_of_attr(
+            self,
+            name,
+            (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
+        ):
+            result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            if not isinstance(result, variables.DeletedVariable):
+                return result
+            return None
+
+        if tx.output.side_effects.has_pending_mutation_of_attr(
+            self, "__dict__", AttrMutationKind.GENERIC_SETATTR
+        ):
+            dict_vt = self.get_dict_vt(tx)
+            if dict_vt.contains(name):
+                return dict_vt.getitem(name)
+            return None
+
+        if hasattr(self.value, "__dict__") and name in self.value.__dict__:
+            subobj = self.value.__dict__[name]
+            source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
+            return VariableTracker.build(tx, subobj, source)
+
+        return None
+
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        getattr_fn = self._check_for_getattr()
+        if isinstance(getattr_fn, types.FunctionType):
+            if (
+                getattr_fn is unpatched_nn_module_getattr
+                and isinstance(self, variables.UnspecializedNNModuleVariable)
+                and istype(self.value._parameters, dict)  # type: ignore[attr-defined]
+                and istype(self.value._buffers, dict)  # type: ignore[attr-defined]
+                and istype(self.value._modules, dict)  # type: ignore[attr-defined]
+            ):
+                out = self.manually_trace_nn_module_getattr(tx, name)
+            else:
+                new_source = None
+                if self.source:
+                    new_source = AttrSource(self.source, "__getattr__")
+                out = variables.UserMethodVariable(
+                    getattr_fn, self, source=new_source
+                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
+
+            if self.source and getattr_fn is torch.nn.Module.__getattr__:
+                if isinstance(
+                    out,
+                    (
+                        variables.UnspecializedNNModuleVariable,
+                        variables.NNModuleVariable,
+                    ),
+                ):
+                    out.set_nn_module_stack_source(  # type: ignore[attr-defined]
+                        AttrSource(self.get_nn_module_stack_source(), name)  # type: ignore[attr-defined]
+                    )
+            return out
+
+        elif getattr_fn is not None:
+            unimplemented(
+                gb_type="User-defined object with non-function __getattr__",
+                context=f"object={self.value}, name={name}, getattr_fn={getattr_fn}",
+                explanation=f"Found a non-function __getattr__ {getattr_fn} from a user-defined object {self.value} "
+                f" when attempting to getattr `{name}`",
+                hints=[
+                    "Ensure the object's __getattr__ is a function type.",
+                ],
+            )
+
+        return None
 
     def maybe_wrap_nn_module_source_for_instance(
         self,
@@ -4528,6 +4486,15 @@ class RemovableHandleVariable(VariableTracker):
         super().__init__(**kwargs)
         self.mutation_type = mutation_type
         self.idx = idx
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "remove":
+            from .misc import CallMethodVariable
+
+            return CallMethodVariable(self, name)
+        return super().getattro_impl(tx, name)
 
     def call_method(
         self,
