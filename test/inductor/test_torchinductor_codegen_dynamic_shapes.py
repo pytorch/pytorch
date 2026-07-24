@@ -166,9 +166,7 @@ test_failures = {
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_dynamic_shapes": TestFailure(("cpu",)),
-    "test_conv3d_channels_last_use_block_ptr_False_dynamic_shapes": TestFailure(
-        ("cpu",)
-    ),
+    "test_conv3d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
     "test_expand_implicit_kwarg_dynamic_shapes": TestFailure(("cpu",)),
     "test_full_boolean_dynamic_shapes": TestFailure(("cpu",)),

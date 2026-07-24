@@ -2136,7 +2136,6 @@ class CudaReproTests(TestCase):
                 ".run(", 1, exactly=True
             ).run(code[0])
 
-    @config.patch("triton.use_block_ptr", True)
     def test_selecsls42b_misaligned_address(self):
         # https://github.com/triton-lang/triton/issues/2836
 
@@ -2313,7 +2312,6 @@ class CudaReproTests(TestCase):
         self.assertIn("reduction_hint=ReductionHint.INNER", persistent_code)
         self.assertNotIn("for roffset", persistent_code)
 
-    @parametrize("use_block_ptr", [False, True])
     @parametrize("dynamic_batch", [False, True])
     @config.patch(
         {
@@ -2324,9 +2322,7 @@ class CudaReproTests(TestCase):
             "split_reductions": False,
         }
     )
-    def test_persistent_reduction_cse_reindexed_epilogue(
-        self, use_block_ptr, dynamic_batch
-    ):
+    def test_persistent_reduction_cse_reindexed_epilogue(self, dynamic_batch):
         if device_type != "cuda":
             raise unittest.SkipTest("requires CUDA")
 
@@ -2362,25 +2358,24 @@ class CudaReproTests(TestCase):
         if dynamic_batch:
             for tensor in (x, out, scales_out):
                 torch._dynamo.mark_dynamic(tensor, 0)
-        with config.patch("triton.use_block_ptr", use_block_ptr):
-            compiled_fn = torch.compile(fn, fullgraph=True)
-            _, code = run_and_get_code(
-                compiled_fn,
-                out,
-                x,
-                scales_out,
-                scale_ub,
-            )
-            if dynamic_batch:
-                x2 = torch.randn(7, 512, device=device_type, dtype=torch.bfloat16)
-                out2 = torch.empty(7, 256, device=device_type, dtype=out_dtype)
-                scales_out2 = torch.empty(7, 2, device=device_type)
-                expected_out2 = torch.empty_like(out2)
-                expected_scales2 = torch.empty_like(scales_out2)
-                fn(expected_out2, x2, expected_scales2, scale_ub)
-                compiled_fn(out2, x2, scales_out2, scale_ub)
-                self.assertEqual(expected_out2, out2)
-                self.assertEqual(expected_scales2, scales_out2)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        _, code = run_and_get_code(
+            compiled_fn,
+            out,
+            x,
+            scales_out,
+            scale_ub,
+        )
+        if dynamic_batch:
+            x2 = torch.randn(7, 512, device=device_type, dtype=torch.bfloat16)
+            out2 = torch.empty(7, 256, device=device_type, dtype=out_dtype)
+            scales_out2 = torch.empty(7, 2, device=device_type)
+            expected_out2 = torch.empty_like(out2)
+            expected_scales2 = torch.empty_like(scales_out2)
+            fn(expected_out2, x2, expected_scales2, scale_ub)
+            compiled_fn(out2, x2, scales_out2, scale_ub)
+            self.assertEqual(expected_out2, out2)
+            self.assertEqual(expected_scales2, scales_out2)
         self.assertEqual(expected_out, out)
         self.assertEqual(expected_scales, scales_out)
 
@@ -2388,13 +2383,7 @@ class CudaReproTests(TestCase):
         self.assertIn("@triton_heuristics.persistent_reduction", code)
         self.assertEqual(1, code.count("@triton_heuristics.persistent_reduction"))
         persistent_code = code.split("@triton_heuristics.persistent_reduction", 1)[1]
-        if use_block_ptr:
-            self.assertIn("tl.make_block_ptr(in_ptr0", persistent_code)
-            self.assertEqual(
-                2, persistent_code.count("tl.load(tl.make_block_ptr(in_ptr0")
-            )
-        else:
-            self.assertEqual(2, persistent_code.count("tl.load(in_ptr0 +"))
+        self.assertEqual(2, persistent_code.count("tl.load(in_ptr0 +"))
         self.assertLessEqual(persistent_code.count("libdevice.exp"), 1)
 
     def test_scaled_dot_product_efficient_attention_backward(self):
@@ -3382,9 +3371,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             del inputs, model, compiled
             getattr(torch, device_type).empty_cache()
 
-    @config.patch(
-        {"triton.use_block_ptr": True, "triton.codegen_upcast_to_fp32": False}
-    )
+    @config.patch({"triton.codegen_upcast_to_fp32": False})
     def test_float16_reduction_with_int_output(self):
         @torch.compile
         def fn(input: torch.Tensor) -> torch.Tensor:

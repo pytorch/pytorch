@@ -5849,11 +5849,7 @@ for dtype in (torch.int32, torch.int64):
 
     @parametrize("dilation", (1, 2))
     @parametrize("dim", (subtest(2), subtest(3)))
-    @parametrize(
-        "use_block_ptr",
-        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
-    )
-    def test_low_memory_max_pool(self, dilation: int, dim: int, use_block_ptr: bool):
+    def test_low_memory_max_pool(self, dilation: int, dim: int):
         prims = torch.ops.prims
 
         def fn(x):
@@ -5880,8 +5876,7 @@ for dtype in (torch.int32, torch.int64):
             )
             return vals, indices, offsets
 
-        with config.patch({"triton.use_block_ptr": use_block_ptr}):
-            self.common(fn, (torch.randn(1, 3, *[10] * dim),))
+        self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
     def test_max_unpool2d_channels_last(self):
         # https://github.com/pytorch/pytorch/issues/187173
@@ -6585,11 +6580,7 @@ for dtype in (torch.int32, torch.int64):
         x = torch.randn(2, 4, 16)
         self.common(m, (x,), check_lowp=False)
 
-    @parametrize(
-        "use_block_ptr",
-        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
-    )
-    def test_conv3d_channels_last(self, use_block_ptr: bool):
+    def test_conv3d_channels_last(self):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv3d channels_last")
 
@@ -6597,30 +6588,29 @@ for dtype in (torch.int32, torch.int64):
             torch.nn.Conv3d(3, 3, 1, 1),
             ToTuple(),
         )
-        with config.patch({"triton.use_block_ptr": use_block_ptr}):
-            # only weight is channels_last
-            self.common(
-                m.to(memory_format=torch.channels_last_3d),
-                (torch.randn([2, 3, 16, 16, 16]),),
-            )
-            # only activation is channels_last
-            self.common(
-                m,
-                (
-                    torch.randn([2, 3, 16, 16, 16]).to(
-                        memory_format=torch.channels_last_3d
-                    ),
+        # only weight is channels_last
+        self.common(
+            m.to(memory_format=torch.channels_last_3d),
+            (torch.randn([2, 3, 16, 16, 16]),),
+        )
+        # only activation is channels_last
+        self.common(
+            m,
+            (
+                torch.randn([2, 3, 16, 16, 16]).to(
+                    memory_format=torch.channels_last_3d
                 ),
-            )
-            # activation and weight are all channels_last
-            self.common(
-                m.to(memory_format=torch.channels_last_3d),
-                (
-                    torch.randn([2, 3, 16, 16, 16]).to(
-                        memory_format=torch.channels_last_3d
-                    ),
+            ),
+        )
+        # activation and weight are all channels_last
+        self.common(
+            m.to(memory_format=torch.channels_last_3d),
+            (
+                torch.randn([2, 3, 16, 16, 16]).to(
+                    memory_format=torch.channels_last_3d
                 ),
-            )
+            ),
+        )
 
     @skip_if_gpu_halide  # slow
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
@@ -13708,13 +13698,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @parametrize(
-        "use_block_ptr",
-        [
-            subtest(True, decorators=[skip_if_not_triton]),
-        ],
-    )
-    def test_tmp_not_defined_issue1(self, use_block_ptr):
+    def test_tmp_not_defined_issue1(self):
         def forward(
             primals_3,
             primals_4,
@@ -13751,8 +13735,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.Size([1, 512, 1]), torch.float32),
         ]
         inps = [torch.randn(shape, dtype=dtype) for (shape, dtype) in inps]
-        with config.patch("triton.use_block_ptr", use_block_ptr):
-            self.common(forward, inps, atol=1e-05, rtol=2e-05)
+        self.common(forward, inps, atol=1e-05, rtol=2e-05)
 
     @unittest.skipIf(
         os.environ.get("BUILD_ENVIRONMENT", "").startswith("parallelnative"),
@@ -14782,12 +14765,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @requires_gpu()
     @parametrize("prefer_nd_tiling", (False, True))
-    @parametrize("use_block_ptr", (False, True))
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
     )
-    def test_sdpa(self, use_block_ptr: bool, prefer_nd_tiling: bool):
+    def test_sdpa(self, prefer_nd_tiling: bool):
         def foo(arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             view = torch.ops.aten.view.default(arg3_1, [23760, 128])
             arg3_1 = None
@@ -14842,7 +14824,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with config.patch(
             {
                 "triton.prefer_nd_tiling": prefer_nd_tiling,
-                "triton.use_block_ptr": use_block_ptr,
                 "triton.native_matmul": False,
             }
         ):
@@ -14853,13 +14834,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 atol=0.02,
                 rtol=1e4,
             )
-
-            # Check code for block pointers
-            foo_opt = torch.compile(foo, backend="inductor")
-            code = run_and_get_triton_code(foo_opt, *inps)
-            have_block_ptr = code.count("tl.make_block_ptr") > 0
-            if not is_halide_backend(self.device):
-                self.assertEqual(have_block_ptr, use_block_ptr)
 
     @requires_gpu()
     @unittest.skipIf(
@@ -17269,11 +17243,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
     @largeTensorTest("1GB", inductor=True)
-    @parametrize(
-        "use_block_ptr",
-        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
-    )
-    def test_large_grid(self, use_block_ptr):
+    def test_large_grid(self):
         # https://github.com/pytorch/pytorch/issues/123210
         def fn(primals_5):
             view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
@@ -17287,10 +17257,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         s0 = 16777472
         s1 = 8
 
-        with config.patch({"triton.use_block_ptr": use_block_ptr}):
-            compiled_fn = torch.compile(fn)
-            actual = compiled_fn(torch.ones(s0, s1, device=self.device))
-            self.assertTrue((actual == 1).all())
+        compiled_fn = torch.compile(fn)
+        actual = compiled_fn(torch.ones(s0, s1, device=self.device))
+        self.assertTrue((actual == 1).all())
 
     @skip_if_gpu_halide
     def test_pattern_matcher_multi_user(self):
@@ -20511,7 +20480,6 @@ if RUN_GPU:
 
         # only uncoalesced without this :)
         @config.patch("triton.coalesce_tiling_analysis", False)
-        @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
             @torch.compile
             def f(a, b):
@@ -20547,7 +20515,6 @@ if RUN_GPU:
             {
                 "triton.persistent_reductions": True,
                 "triton.multi_kernel": False,
-                "triton.use_block_ptr": False,
             }
         )
         def test_evict_first_for_persistent_reduction_last_use(self):
@@ -20586,7 +20553,6 @@ if RUN_GPU:
             {
                 "triton.persistent_reductions": True,
                 "triton.multi_kernel": False,
-                "triton.use_block_ptr": False,
             }
         )
         def test_evict_last_for_reused_persistent_reduction_load(self):
@@ -20658,40 +20624,6 @@ if RUN_GPU:
                 self.assertTrue(lines)
             finally:
                 simd_kernel_features.SIMDKernelFeatures.buffer_read_counts = orig
-
-        @config.patch("triton.use_block_ptr", True)
-        @config.patch("triton.coalesce_tiling_analysis", False)
-        def test_evict_last_non_coalesced_loads_block_ptr(self):
-            @torch.compile
-            def f(a, b):
-                return (a * b).sum(dim=-1)
-
-            N = 512
-            inps = (
-                torch.randn(N, N, N, device=GPU_TYPE).permute(2, 1, 0),
-                torch.randn(N, N, N, device=GPU_TYPE).permute(1, 2, 0),
-            )
-            code = run_and_get_triton_code(f, *inps)
-            lines = [line for line in code.split("\n") if "tl.load" in line]
-
-            if config.triton.multi_kernel:
-                # the first 2 lines are generated for the persistent reduction
-                # variant.
-                self.assertExpectedInline(
-                    "\n".join(lines),
-                    """\
-    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r0_2)), rmask, eviction_policy='evict_last', other=0.0)
-    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[262144, 512], strides=[1, 262144], block_shape=[XBLOCK, R0_BLOCK], order=[0, 1], offsets=[xoffset, roffset]), boundary_check=[1], padding_option='zero', eviction_policy='evict_first')
-        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r0_2)), rmask, eviction_policy='evict_last', other=0.0)
-        tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",
-                )
-            else:
-                self.assertExpectedInline(
-                    "\n".join(lines),
-                    """\
-        tmp0 = tl.reshape(tl.load(block_ptr0, boundary_check=[2], padding_option='zero', eviction_policy='evict_last'), [XBLOCK, R0_BLOCK])
-        tmp1 = tl.load(block_ptr1, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",
-                )
 
         # Disable index propagation, so the indirect indexing isn't optimized away
         @patch.object(config, "constant_and_index_propagation", False)

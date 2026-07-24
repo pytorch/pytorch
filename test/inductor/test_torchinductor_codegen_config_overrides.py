@@ -93,34 +93,6 @@ class CodegenInductorTest(InductorTestCase):
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
-    def test_cse_make_block_ptr_reduction(self):
-        def func(a, b):
-            tmp0 = a * b
-            tmp1 = a + b
-            c = tmp0 + tmp1
-            return c.sum(dim=0)
-
-        config_patches = {
-            "triton.use_block_ptr": True,
-            "triton.tile_reductions": True,
-            "triton.prefer_nd_tiling": True,
-            "triton.max_tiles": 3,
-            "split_reductions": False,
-        }
-        a = torch.randn((512, 4096), device=torch.device(GPU_TYPE))
-        b = torch.randn((512, 4096), device=torch.device(GPU_TYPE))
-        _, code = self.run_and_compare(
-            func,
-            a,
-            b,
-            config_patches=config_patches,
-            atol=1e-4,
-        )
-        self.count_code("= tl.make_block_ptr(in_ptr", code, 2)
-        self.count_code("= tl.load(block_ptr", code, 2)
-
-    @requires_gpu()
-    @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
     @parametrize("disable_welford_reduction", [True, False])
     def test_disable_welford_reduction(self, disable_welford_reduction: bool):
         def func(x):
